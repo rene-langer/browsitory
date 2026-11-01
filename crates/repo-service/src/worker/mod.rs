@@ -816,7 +816,7 @@ impl Worker {
             let (mut logged_busy, mut logged_unavailable) = (false, false);
             // After a command waited `LOCK_WAIT` in vain, later ones wait only `CONTENDED_WAIT`
             // until the lock is taken again, and while it keeps being found busy a run of them
-            // waits that once, not once each (`Contention`). A long holder in the other window
+            // waits that once, not once each; those that would refuse still wait (`Contention`). A long holder in the other window
             // (a pull, a hook, a pinentry dialog) costs one long wait, not one per click (the
             // queue, reads included, is behind it), while a brief hold is still waited out
             // (#175, #197).
@@ -827,7 +827,10 @@ impl Worker {
                 // operation ended, but its entry isn't recorded yet". Reads never wait.
                 let mut unrecorded = false;
                 let guard = if undo::locks_state(&command) {
-                    match state_lock.acquire(contention.wait(std::time::Instant::now())) {
+                    match state_lock.acquire(
+                        contention
+                            .wait(std::time::Instant::now(), undo::refuses_when_busy(&command)),
+                    ) {
                         state_lock::Acquire::Held(guard) => {
                             contention.held();
                             Some(guard)
@@ -1630,6 +1633,9 @@ impl Worker {
                 }
                 drop(guard);
                 held.release();
+                if unrecorded {
+                    contention.finished(std::time::Instant::now());
+                }
             }
         });
 
@@ -7038,50 +7044,91 @@ mod state_lock_tests {
 
     /// `a.txt`…`h.txt` committed and edited, a worker on it, and the lock held by "the other
     /// window"; `a.txt` and `b.txt` already staged, so the first `LOCK_WAIT` and the first
-    /// `CONTENDED_WAIT` are behind.
-    fn contended_worker() -> (TempDir, Worker, StateGuard) {
+    /// `CONTENDED_WAIT` are behind. Also how long staging six other files took before, with the
+    /// lock free (and so recorded: an upper bound for the same work unrecorded).
+    fn contended_worker() -> (TempDir, Worker, StateGuard, Duration) {
         let (dir, repo) = init_repo();
         let names = ["a", "b", "c", "d", "e", "f", "g", "h"];
-        for name in names {
+        let free = ["i", "j", "k", "l", "m", "n"];
+        for name in names.iter().chain(&free) {
             write_file(dir.path(), &format!("{name}.txt"), "x\n");
         }
         commit_all(&repo, "files");
-        for name in names {
+        for name in names.iter().chain(&free) {
             write_file(dir.path(), &format!("{name}.txt"), "edited\n");
         }
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
-        let guard = hold(&repo);
         let handle = worker.handle();
+        let start = Instant::now();
+        for name in free {
+            handle.stage_file(format!("{name}.txt")).unwrap();
+        }
+        let baseline = start.elapsed();
+        let guard = hold(&repo);
         handle.stage_file("a.txt".into()).unwrap(); // LOCK_WAIT
         handle.stage_file("b.txt".into()).unwrap(); // CONTENDED_WAIT
-        (dir, worker, guard)
+        (dir, worker, guard, baseline)
     }
 
     /// #197: while the lock keeps being found busy, a run of locked commands waits about
-    /// `CONTENDED_WAIT` once, not once per command.
+    /// `CONTENDED_WAIT` once, not once per command, however long each takes (a slow runner).
     #[test]
     fn a_burst_of_locked_commands_waits_once_while_the_lock_stays_held() {
-        let (dir, worker, _guard) = contended_worker();
+        let (dir, worker, _guard, baseline) = contended_worker();
         let handle = worker.handle();
         let start = Instant::now();
         for name in ["c", "d", "e", "f", "g", "h"] {
             handle.stage_file(format!("{name}.txt")).unwrap();
         }
         let elapsed = start.elapsed();
-        assert!(elapsed < 3 * CONTENDED_WAIT, "{elapsed:?}");
+        // Waiting once per command would take at least `6 * CONTENDED_WAIT` on top.
+        assert!(
+            elapsed < baseline + 2 * CONTENDED_WAIT,
+            "{elapsed:?} (baseline {baseline:?})"
+        );
         let repo = Repository::open(dir.path()).unwrap();
         for name in ["a", "b", "c", "d", "e", "f", "g", "h"] {
             let status = repo.status_file(Path::new(&format!("{name}.txt"))).unwrap();
             assert!(status.contains(git2::Status::INDEX_MODIFIED), "{name}");
         }
-        assert_eq!(handle.get_undo_state().unwrap(), no_undo());
+        assert_eq!(
+            handle.get_undo_state().unwrap().undo,
+            Some("Stage n.txt".into())
+        );
+    }
+
+    /// #197: inside a burst, a command that would refuse (Undo, a discard) still waits
+    /// `CONTENDED_WAIT` for the lock before it refuses.
+    #[test]
+    fn inside_a_burst_a_refusing_command_still_waits() {
+        let (dir, worker, _guard, _) = contended_worker();
+        let handle = worker.handle();
+        handle.stage_file("c.txt".into()).unwrap(); // in the burst: tries once
+        let start = Instant::now();
+        assert_eq!(
+            handle.discard_file("d.txt".into()),
+            Err(DISCARD_BUSY.to_string())
+        );
+        let elapsed = start.elapsed();
+        assert!(elapsed >= CONTENDED_WAIT, "{elapsed:?}");
+        assert!(elapsed < LOCK_WAIT, "{elapsed:?}");
+        let start = Instant::now();
+        assert!(matches!(
+            handle.undo(),
+            Err(message) if message == UNDO_BUSY
+        ));
+        assert!(start.elapsed() >= CONTENDED_WAIT, "{:?}", start.elapsed());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d.txt")).unwrap(),
+            "edited\n"
+        );
     }
 
     /// #197: after a quiet `CONTENDED_WAIT`, the next locked command waits for the lock again,
     /// so a lone click still waits out a brief hold.
     #[test]
     fn after_a_quiet_moment_a_locked_command_waits_again() {
-        let (_dir, worker, _guard) = contended_worker();
+        let (_dir, worker, _guard, _) = contended_worker();
         let handle = worker.handle();
         handle.stage_file("c.txt".into()).unwrap(); // in the burst: tries once
         std::thread::sleep(CONTENDED_WAIT + Duration::from_millis(100));
