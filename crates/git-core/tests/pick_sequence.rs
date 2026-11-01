@@ -1732,12 +1732,14 @@ fn terminal_sequence(command: &str, last: bool) -> (tempfile::TempDir, Repositor
     (dir, repo, ids)
 }
 
-/// The same paused sequence, finished by `git commit --no-edit` (git's own result).
-fn paused_twin(command: &str, last: bool) -> (tempfile::TempDir, Repository, [String; 3]) {
+/// The same paused sequence, finished by `git commit --no-edit` (git's own result). Also returns
+/// the twin's todo from before that commit (its commit ids differ from the original's).
+fn paused_twin(command: &str, last: bool) -> (tempfile::TempDir, Repository, [String; 3], String) {
     let (dir, repo, ids) = terminal_sequence(command, last);
+    let before = todo(&repo).unwrap();
     let output = git(dir.path(), &["commit", "--no-edit", "--cleanup=strip"]);
     assert!(output.status.success(), "{output:?}");
-    (dir, repo, ids)
+    (dir, repo, ids, before)
 }
 
 fn todo(repo: &Repository) -> Option<String> {
@@ -1780,8 +1782,8 @@ fn committing_a_terminal_sequence_step_keeps_its_todo() {
     assert!(!repo.path().join("sequencer").exists());
 
     // git's twin: `git commit` keeps the todo too.
-    let (twin_dir, twin, _) = paused_twin("cherry-pick", false);
-    assert_eq!(todo(&twin).as_deref(), Some(before.as_str()));
+    let (twin_dir, twin, _, twin_before) = paused_twin("cherry-pick", false);
+    assert_eq!(todo(&twin).as_deref(), Some(twin_before.as_str()));
     let output = git(twin_dir.path(), &["cherry-pick", "--continue"]);
     assert!(output.status.success(), "{output:?}");
     assert_eq!(summaries(&twin, 4), ["C", "B", "A", "main"]);
@@ -1797,7 +1799,7 @@ fn committing_the_last_step_of_a_terminal_sequence_ends_it() {
     assert!(!git_reports_a_pick(dir.path()));
     assert_eq!(summaries(&repo, 3), ["A", "B", "main"]);
 
-    let (twin_dir, twin, _) = paused_twin("cherry-pick", true);
+    let (twin_dir, twin, _, _) = paused_twin("cherry-pick", true);
     assert!(!twin.path().join("sequencer").exists());
     assert!(!git_reports_a_pick(twin_dir.path()));
 }
@@ -1818,8 +1820,8 @@ fn committing_a_terminal_revert_sequence_step_keeps_its_todo() {
     );
     assert!(!repo.path().join("sequencer").exists());
 
-    let (twin_dir, twin, _) = paused_twin("revert", false);
-    assert_eq!(todo(&twin).as_deref(), Some(before.as_str()));
+    let (twin_dir, twin, _, twin_before) = paused_twin("revert", false);
+    assert_eq!(todo(&twin).as_deref(), Some(twin_before.as_str()));
     assert!(git(twin_dir.path(), &["revert", "--continue", "--no-edit"])
         .status
         .success());
@@ -1858,10 +1860,10 @@ fn a_single_cherry_pick_keeps_a_terminal_sequences_todo() {
     assert_eq!(repo.state(), RepositoryState::Clean);
 
     // git's twin keeps it as well.
-    let (twin_dir, twin, [_, b, _]) = paused_twin("cherry-pick", false);
+    let (twin_dir, twin, [_, b, _], twin_before) = paused_twin("cherry-pick", false);
     let output = git(twin_dir.path(), &["cherry-pick", &b]);
     assert!(output.status.success(), "{output:?}");
-    assert_eq!(todo(&twin).as_deref(), Some(before.as_str()));
+    assert_eq!(todo(&twin).as_deref(), Some(twin_before.as_str()));
 }
 
 #[test]
@@ -1880,10 +1882,10 @@ fn a_single_revert_keeps_a_terminal_sequences_todo() {
     assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
     assert_eq!(repo.state(), RepositoryState::Clean);
 
-    let (twin_dir, twin, _) = paused_twin("cherry-pick", false);
+    let (twin_dir, twin, _, twin_before) = paused_twin("cherry-pick", false);
     let output = git(twin_dir.path(), &["revert", "--no-edit", "HEAD"]);
     assert!(output.status.success(), "{output:?}");
-    assert_eq!(todo(&twin).as_deref(), Some(before.as_str()));
+    assert_eq!(todo(&twin).as_deref(), Some(twin_before.as_str()));
 }
 
 #[test]
