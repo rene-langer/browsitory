@@ -44,6 +44,9 @@ pub enum CommitError {
     /// The merge was already committed but its MERGE_HEAD can't be removed (#183).
     #[error("This merge was already committed, but git's merge state can't be cleared. Check the permissions of the .git folder, then commit again.")]
     LeftoverMergeState,
+    /// The cherry-pick was already committed but its CHERRY_PICK_HEAD can't be removed (#226).
+    #[error("This cherry-pick was already committed, but git's cherry-pick state can't be cleared. Check the permissions of the .git folder, then commit again.")]
+    LeftoverPickState,
 }
 
 /// A person as typed or listed in the UI: an amend author override, or a recent author.
@@ -558,6 +561,13 @@ pub fn commit_with(
         is_merging = false;
         merge_parent_ids.clear();
     }
+    // Likewise a cherry-pick whose commit already landed (D7-A): HEAD is the pick's own commit
+    // (`pick_already_committed`). Its CHERRY_PICK_HEAD must not make the picked author the
+    // author of this unrelated commit, so the leftover is cleared first and the commit is the
+    // user's (#226, decision D3-A: no message check, since hooks may rewrite it).
+    if pick_already_committed(repo) {
+        clear_pick_leftover(repo).map_err(|_| CommitError::LeftoverPickState)?;
+    }
 
     let pick_author = if matches!(
         repo.state(),
@@ -682,6 +692,72 @@ fn merge_already_committed(
         && merge_heads.iter().all(|merge_head| {
             *merge_head == head || repo.graph_descendant_of(head, *merge_head).unwrap_or(false)
         })
+}
+
+/// A cherry-pick is in progress and HEAD is already its commit (decision D3-A): one parent,
+/// the picked commit's author (name, email and time), and exactly the pick's result on every
+/// path it changes cleanly, at least one (`pick::commit_carries_pick` with `Coverage::Exact`).
+/// The message isn't compared, since hooks may rewrite it.
+///
+/// A paused pick's HEAD is the commit the pick applies to. To be taken for the pick it would
+/// need the picked author with the same second and the pick's exact content on every path the
+/// pick changes cleanly onto HEAD's parent, so the pick could only have paused on paths that
+/// also conflict there: a look-alike commit that contrived is accepted as a risk. Not
+/// recognised (the state stays, the commit
+/// takes the picked author as before): a pick with no clean change, and a merge commit picked
+/// with a mainline (which parent was used isn't recorded). An error while checking counts as
+/// "not a leftover", so the check never blocks a commit.
+fn pick_already_committed(repo: &git2::Repository) -> bool {
+    if !matches!(
+        repo.state(),
+        git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence
+    ) {
+        return false;
+    }
+    let Some(picked) = repo
+        .find_reference("CHERRY_PICK_HEAD")
+        .ok()
+        .and_then(|r| r.peel_to_commit().ok())
+    else {
+        return false;
+    };
+    let Ok(head) = repo.head().and_then(|head| head.peel_to_commit()) else {
+        return false;
+    };
+    if head.parent_count() != 1 || picked.parent_count() != 1 {
+        return false;
+    }
+    let Ok(parent) = head.parent_id(0) else {
+        return false;
+    };
+    matches!(
+        crate::pick::commit_carries_pick(
+            repo,
+            &head,
+            parent,
+            &picked,
+            crate::pick::Coverage::Exact
+        ),
+        Ok(Some(changes)) if changes > 0
+    )
+}
+
+/// Clears a leftover pick state. A terminal `git cherry-pick A B C` (`CherryPickSequence`)
+/// keeps the rest of its todo in `.git/sequencer`, which `cleanup_state` would delete; like
+/// `git commit`, only MERGE_MSG and CHERRY_PICK_HEAD are removed then. A single pick's state
+/// is cleared with `cleanup_state`, like the merge leftover.
+fn clear_pick_leftover(repo: &git2::Repository) -> Result<(), CommitError> {
+    if repo.state() != git2::RepositoryState::CherryPickSequence {
+        repo.cleanup_state()?;
+        return Ok(());
+    }
+    for name in ["MERGE_MSG", "CHERRY_PICK_HEAD"] {
+        match std::fs::remove_file(repo.path().join(name)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// `MERGE_HEAD`'s commits, in order.
