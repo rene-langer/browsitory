@@ -910,22 +910,46 @@ pub(crate) fn commit_matches_pick(
     picked: &Commit<'_>,
     messages: &[&str],
 ) -> Result<bool, git2::Error> {
+    let message = clean_message(head.message_bytes());
+    let message_matches = messages
+        .iter()
+        .any(|expected| clean_message(expected.as_bytes()) == message);
+    Ok(message_matches
+        && commit_carries_pick(repo, head, expected_parent, picked, Coverage::Changed)?.is_some())
+}
+
+/// How `commit_carries_pick` compares a path the pick changes cleanly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Coverage {
+    /// `head` changes the path too, to anything: a step committed by hand may have been amended
+    /// (an edit stop).
+    Changed,
+    /// `head` has exactly the pick's result there (blob and mode): a commit made by the pick
+    /// itself, whose state was left behind (#226).
+    Exact,
+}
+
+/// `commit_matches_pick` without the message: `head` has the single parent `expected_parent`,
+/// the picked commit's author (name, email and time) and every change that applying `picked`
+/// onto that parent makes cleanly, compared as `coverage` says. `Some(n)` when it does, `n`
+/// being the number of those clean changes (0 when the pick changes nothing cleanly, so only
+/// the author matched). Conflicted paths are not compared.
+pub(crate) fn commit_carries_pick(
+    repo: &Repository,
+    head: &Commit<'_>,
+    expected_parent: Oid,
+    picked: &Commit<'_>,
+    coverage: Coverage,
+) -> Result<Option<usize>, git2::Error> {
     if head.parent_count() != 1 || head.parent_id(0)? != expected_parent {
-        return Ok(false);
+        return Ok(None);
     }
     let (ours, theirs) = (head.author(), picked.author());
     let same_author = ours.name_bytes() == theirs.name_bytes()
         && ours.email_bytes() == theirs.email_bytes()
         && ours.when() == theirs.when();
     if !same_author {
-        return Ok(false);
-    }
-    let message = clean_message(head.message_bytes());
-    if !messages
-        .iter()
-        .any(|expected| clean_message(expected.as_bytes()) == message)
-    {
-        return Ok(false);
+        return Ok(None);
     }
     let parent = repo.find_commit(expected_parent)?;
     let applied = repo.cherrypick_commit(picked, &parent, 0, None)?;
@@ -941,6 +965,7 @@ pub(crate) fn commit_matches_pick(
     }
     let (parent_tree, head_tree) = (parent.tree()?, head.tree()?);
     let diff = repo.diff_tree_to_index(Some(&parent_tree), Some(&applied), None)?;
+    let mut carried = 0;
     for delta in diff.deltas() {
         if delta.status() == git2::Delta::Conflicted {
             continue;
@@ -954,14 +979,24 @@ pub(crate) fn commit_matches_pick(
             let entry = |tree: &git2::Tree<'_>| {
                 tree.get_path(path)
                     .ok()
-                    .map(|entry| (entry.id(), entry.filemode()))
+                    .map(|entry| (entry.id(), entry.filemode() as u32))
             };
-            if entry(&parent_tree) == entry(&head_tree) {
-                return Ok(false);
+            let carries = match coverage {
+                Coverage::Changed => entry(&parent_tree) != entry(&head_tree),
+                Coverage::Exact => {
+                    let result = applied
+                        .get_path(path, 0)
+                        .map(|entry| (entry.id, entry.mode));
+                    entry(&head_tree) == result
+                }
+            };
+            if !carries {
+                return Ok(None);
             }
+            carried += 1;
         }
     }
-    Ok(true)
+    Ok(Some(carried))
 }
 
 /// A commit message as git's default cleanup leaves it: `#` comment lines dropped, trailing
