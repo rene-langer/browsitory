@@ -1023,7 +1023,6 @@ impl std::fmt::Display for FileInUse {
 impl std::error::Error for FileInUse {}
 
 /// Whether `error` is the [`FileInUse`] error of [`write_beneath`].
-#[cfg_attr(not(all(windows, test)), allow(dead_code))]
 pub(crate) fn is_in_use(error: &io::Error) -> bool {
     error
         .get_ref()

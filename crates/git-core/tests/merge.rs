@@ -2079,6 +2079,10 @@ fn resolving_a_conflict_in_a_file_open_in_another_program_is_refused() {
 
     let error = git_core::merge::resolve_conflict(&repo, "shared.txt", "resolved\n").unwrap_err();
 
+    assert!(
+        matches!(error, MergeError::FileInUse(ref p) if p == "shared.txt"),
+        "{error:?}"
+    );
     assert_eq!(
         error.to_string(),
         "'shared.txt' is open in another program. Close it, then try again."

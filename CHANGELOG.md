@@ -13,6 +13,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and swaps it in only when it is complete, so a failure leaves the file as it was (#239).
 - Windows: if another program keeps the file open so it can't be swapped, Browsitory now says
   "'f.txt' is open in another program. Close it, then try again." and changes nothing (#239).
+- Changed: because the file is now replaced rather than rewritten, you need permission to
+  create files in its folder (and on Windows to delete the old file). A file that is a hard
+  link gets its own copy: its other names keep the old content. If Browsitory stops in the
+  middle of a write (a crash or a power cut), a hidden `.f.txt.browsitory-….tmp` file can be
+  left next to the file; it is safe to delete (#239).
 
 ### Stash: things in the way
 

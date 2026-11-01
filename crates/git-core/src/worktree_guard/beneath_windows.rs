@@ -964,15 +964,33 @@ fn write_with(
     };
     let in_use = || file_in_use(rel);
     let (attributes, target) = classify_for_writing(&at, &in_use)?;
-    let mut temp = create_temp(&at)?;
+    let mut temp = create_temp(&at, &mut next_temp_number)?;
     let written = (|| {
         if attributes != 0 {
             keep_attributes(&temp, attributes)?;
         }
         fill(&mut temp)?;
         temp.sync_all()?;
-        rename_in_parent(&temp, at.parent_file(), &target)
-            .map_err(|error| rename_error(&at, &target, error, &in_use))
+        let mut tries = 0;
+        loop {
+            tries += 1;
+            match rename_in_parent(&temp, at.parent_file(), &target)
+                .map_err(|error| rename_error(&at, &target, error, &in_use))
+            {
+                // A program that opened the file only for a moment (a backup or sync tool)
+                // gets a short while to close it.
+                Err(error) if super::is_in_use(&error) && tries < IN_USE_TRIES => {
+                    std::thread::sleep(IN_USE_WAIT);
+                }
+                other => break other,
+            }
+        }?;
+        // An SMB server resolves the new name by path: the file must still sit in the held
+        // parent, else it went somewhere else and is deleted again below.
+        if !in_parent(&temp, at.parent_file())? {
+            return Err(redirected());
+        }
+        Ok(())
     })();
     if let Err(error) = written {
         // Gone when `temp` closes, right here.
@@ -980,6 +998,18 @@ fn write_with(
         return Err(error);
     }
     Ok(true)
+}
+
+/// How often `write` tries a file another program holds open before reporting it in use, and
+/// how long it waits in between.
+const IN_USE_TRIES: usize = 3;
+const IN_USE_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The next number for a temporary file's name, unique in this process.
+fn next_temp_number() -> usize {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 fn file_in_use(rel: &Path) -> io::Error {
@@ -996,13 +1026,16 @@ fn file_in_use(rel: &Path) -> io::Error {
 /// missing leaf. A link is deleted itself (through its own handle, never followed); a folder is
 /// an error. An existing file must be one the user may write: opened for reading and writing
 /// (by its file ID, see `reopen_same`), the handle closed at once. A read-only file is refused
-/// as such (#209) and a file another program holds without sharing writing as in use.
+/// as such (#209) and a file another program holds without sharing writing as in use (after
+/// `IN_USE_TRIES`). The rename that follows also needs to delete the old file, so a file whose
+/// ACL lets the user write but not delete it fails there with the system's access denied.
 fn classify_for_writing(
     at: &Beneath,
     in_use: &dyn Fn() -> io::Error,
 ) -> io::Result<(u32, OsString)> {
-    for _ in 0..ATTEMPTS {
-        // Classified for reading: a file the user may write but not delete stays writable.
+    let mut busy = 0;
+    for _ in 0..ATTEMPTS + IN_USE_TRIES {
+        // Classified with no access beyond attributes; the probe below asks for writing.
         match open_leaf(at, Purpose::Read)? {
             None => return Ok((0, at.leaf_name().to_os_string())),
             Some((_, Found::Link)) => {
@@ -1021,14 +1054,16 @@ fn classify_for_writing(
                 match reopen_same(at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
                     Ok(Some(_writable)) => {
                         let attributes = attribute_tag(&first)?.file_attributes;
-                        let name = final_path(&first)?
-                            .file_name()
-                            .map_or_else(|| at.leaf_name().to_os_string(), OsStr::to_os_string);
+                        let name = on_disk_name(at.leaf_name(), &final_path(&first)?);
                         return Ok((attributes & SETTABLE_ATTRIBUTES, name));
                     }
                     Ok(None) => {}
                     Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => {
-                        return Err(in_use())
+                        busy += 1;
+                        if busy >= IN_USE_TRIES {
+                            return Err(in_use());
+                        }
+                        std::thread::sleep(IN_USE_WAIT);
                     }
                     Err(error) => return Err(read_only_or(&first, error)),
                 }
@@ -1036,6 +1071,17 @@ fn classify_for_writing(
         }
     }
     Err(redirected())
+}
+
+/// The name the new file gets for `leaf`, whose file's final path is `path`: that path's last
+/// component (the spelling on disk) when it equals `leaf` ignoring case, else `leaf` itself (a
+/// short 8.3 name, or another name of a hardlinked file).
+fn on_disk_name(leaf: &OsStr, path: &Path) -> OsString {
+    let fold = |name: &OsStr| super::fold_name(name.to_string_lossy().as_bytes());
+    match path.file_name() {
+        Some(name) if fold(name) == fold(leaf) => name.to_os_string(),
+        _ => leaf.to_os_string(),
+    }
 }
 
 /// The temporary file's name for `leaf`: hidden by its leading dot as on Unix, named after it
@@ -1060,13 +1106,12 @@ const TEMP_PREFIX_UNITS: usize = 64;
 
 /// Creates a new, empty temporary file next to `at`'s leaf, in the held parent and checked to
 /// be there (deleted again through its handle when it isn't). Its handle can write, set
-/// attributes and rename or delete it.
-fn create_temp(at: &Beneath) -> io::Result<File> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
+/// attributes and rename or delete it. `next` numbers the names (`next_temp_number`; a test
+/// seam); a name that exists is skipped.
+fn create_temp(at: &Beneath, next: &mut dyn FnMut() -> usize) -> io::Result<File> {
     let parent = at.parent_file();
     for _ in 0..ATTEMPTS {
-        let name = temp_name(at.leaf_name(), NEXT.fetch_add(1, Ordering::Relaxed));
+        let name = temp_name(at.leaf_name(), next());
         let file = match nt_open(
             parent,
             &name,
@@ -1895,6 +1940,7 @@ mod tests {
             .unwrap()
             .permissions()
             .readonly());
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
     }
 
     #[test]
@@ -2044,6 +2090,102 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
         assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn writing_a_file_held_without_share_write_is_in_use() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        // Shares reading only: the probe for writing is refused before any temporary file.
+        let _holder = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&f)
+            .unwrap();
+        let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
+        assert!(crate::worktree_guard::is_in_use(&error), "{error:?}");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn create_temp_skips_names_that_exist() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        for n in 0..2 {
+            let name = temp_name(OsStr::new("f"), n);
+            std::fs::write(dir.path().join("d").join(&name), "someone else's").unwrap();
+        }
+        let Walk::Found(at) = walk(
+            dir.path(),
+            Path::new("d/f"),
+            OnLink::Refuse,
+            OnMissing::Stop,
+            &mut no_step,
+        )
+        .unwrap() else {
+            panic!("not found")
+        };
+        let mut n = 0;
+        let temp = create_temp(&at, &mut || {
+            n += 1;
+            n - 1
+        })
+        .unwrap();
+        assert_eq!(
+            final_path(&temp).unwrap().file_name().unwrap(),
+            temp_name(OsStr::new("f"), 2)
+        );
+        delete_by_handle(&temp).unwrap();
+        drop(temp);
+        for n in 0..2 {
+            let name = temp_name(OsStr::new("f"), n);
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("d").join(&name)).unwrap(),
+                "someone else's"
+            );
+        }
+        // Every name taken: an error, nothing created.
+        let error = create_temp(&at, &mut || 0).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(ERROR_ALREADY_EXISTS));
+        assert_eq!(names_in(&dir.path().join("d")).len(), 2);
+    }
+
+    #[test]
+    fn on_disk_name_takes_the_final_spelling_only_for_the_same_name() {
+        assert_eq!(
+            on_disk_name(OsStr::new("f.txt"), Path::new(r"\\?\C:\d\F.txt")),
+            "F.txt"
+        );
+        // A short 8.3 name, or another name of a hardlinked file: the leaf as given.
+        assert_eq!(
+            on_disk_name(
+                OsStr::new("LONGFI~1.TXT"),
+                Path::new(r"\\?\C:\d\longfilename.txt")
+            ),
+            "LONGFI~1.TXT"
+        );
+        assert_eq!(on_disk_name(OsStr::new("a"), Path::new(r"\\?\C:\d\b")), "a");
+    }
+
+    #[test]
+    fn writing_a_hardlink_keeps_its_name_and_the_other_name_keeps_the_old_content() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("other"), "old").unwrap();
+        std::fs::hard_link(dir.path().join("other"), dir.path().join("d").join("f")).unwrap();
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d").join("f")).unwrap(),
+            "new"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("other")).unwrap(),
+            "old"
+        );
     }
 
     #[test]

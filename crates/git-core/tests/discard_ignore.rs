@@ -737,6 +737,10 @@ fn adding_to_a_gitignore_open_in_another_program_is_refused() {
 
     let error = ignore_path(&repo, "*.log").unwrap_err();
 
+    assert!(
+        matches!(error, StageError::FileInUse(ref p) if p == ".gitignore"),
+        "{error:?}"
+    );
     assert_eq!(
         error.to_string(),
         "'.gitignore' is open in another program. Close it, then try again."

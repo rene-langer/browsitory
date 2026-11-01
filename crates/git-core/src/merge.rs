@@ -41,6 +41,10 @@ pub enum MergeError {
     /// The file to write is read-only; nothing was written (#209).
     #[error("'{0}' is read-only. Make it writable, then try again.")]
     ReadOnlyFile(String),
+    /// Windows: another program keeps the file open so it can't be replaced; nothing was
+    /// written (#239).
+    #[error("'{0}' is open in another program. Close it, then try again.")]
+    FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
 }
@@ -395,11 +399,14 @@ pub fn resolve_conflict(
 }
 
 /// `worktree_guard::write_beneath`, with a read-only file reported as
-/// [`MergeError::ReadOnlyFile`] (#209).
+/// [`MergeError::ReadOnlyFile`] (#209) and a file open in another program as
+/// [`MergeError::FileInUse`] (#239).
 fn write_resolved(workdir: &Path, path: &str, bytes: &[u8]) -> Result<bool, MergeError> {
     crate::worktree_guard::write_beneath(workdir, path, bytes).map_err(|error| {
         if crate::worktree_guard::is_read_only(&error) {
             MergeError::ReadOnlyFile(path.to_string())
+        } else if crate::worktree_guard::is_in_use(&error) {
+            MergeError::FileInUse(path.to_string())
         } else {
             MergeError::Io(error)
         }

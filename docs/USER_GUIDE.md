@@ -134,9 +134,12 @@ Linux), then try again. Choosing the side that deleted the file still deletes it
 
 **Save resolution** writes a complete new copy of the file next to it and then swaps it in. If
 the write fails partway (for example on a full disk), the file stays as it was. On Windows, if
-another program keeps the file open so it can't be swapped, Browsitory says "failed to write
-resolved file: 'f.txt' is open in another program. Close it, then try again." and changes
-nothing.
+another program keeps the file open so it can't be swapped, Browsitory says "'f.txt' is open
+in another program. Close it, then try again." and changes nothing. Because the file is
+replaced, you need permission to create files in its folder. If the file is a hard link, its
+other names keep the old content. If Browsitory stops in the middle of a write (a crash or a
+power cut), a hidden file named like `.f.txt.browsitory-1234-0.tmp` can be left next to the
+file; you can delete it.
 
 ### Staging individual lines
 
@@ -181,9 +184,8 @@ alone and reported). **Ignore file** is always offered.
 ⟨folder⟩/** appears only when the file is in a subfolder. If `.gitignore` is read-only, the
 ignore items change nothing and say "'.gitignore' is read-only. Make it writable, then try
 again." `.gitignore` is replaced whole, so a failed write leaves it as it was. On Windows, if
-another program keeps `.gitignore` open so it can't be replaced, the ignore items say "failed
-to update the working tree: '.gitignore' is open in another program. Close it, then try
-again." and change nothing.
+another program keeps `.gitignore` open so it can't be replaced, the ignore items say
+"'.gitignore' is open in another program. Close it, then try again." and change nothing.
 
 ### Signing commits
 

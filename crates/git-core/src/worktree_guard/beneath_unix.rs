@@ -322,7 +322,7 @@ fn write_with(
         }
         Some(_) => return Err(not_a_regular_file()),
     };
-    let (temp, mut file) = create_temp(parent, leaf)?;
+    let (temp, mut file) = create_temp(parent, leaf, &mut next_temp_number)?;
     let written = (|| {
         if let Some(mode) = mode {
             // SAFETY: `file` owns the descriptor of the temporary file just created.
@@ -435,13 +435,23 @@ fn temp_name(leaf: &OsStr, n: usize) -> OsString {
 /// At most this many bytes of the leaf's name go into its temporary file's name.
 const TEMP_PREFIX_BYTES: usize = 64;
 
-/// Creates a new, empty temporary file next to the leaf in `parent` (`O_EXCL`: never an
-/// existing file or link), readable and writable as the umask allows.
-fn create_temp(parent: RawFd, leaf: &OsStr) -> io::Result<(OsString, File)> {
+/// The next number for a temporary file's name, unique in this process.
+fn next_temp_number() -> usize {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Creates a new, empty temporary file next to the leaf in `parent` (`O_EXCL`: never an
+/// existing file or link), readable and writable as the umask allows. `next` numbers the names
+/// (`next_temp_number`; a test seam); a name that exists is skipped.
+fn create_temp(
+    parent: RawFd,
+    leaf: &OsStr,
+    next: &mut dyn FnMut() -> usize,
+) -> io::Result<(OsString, File)> {
     for _ in 0..ATTEMPTS {
-        let name = temp_name(leaf, NEXT.fetch_add(1, Ordering::Relaxed));
+        let name = temp_name(leaf, next());
         let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW;
         match open_at(parent, &name, flags, 0o666) {
             Ok(fd) => return Ok((name, File::from(fd))),
@@ -883,6 +893,7 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(std::fs::read(&f).unwrap(), b"inner\n");
         assert_eq!(mode(&f), 0o444);
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f"]);
     }
 
     /// A fill that writes "par" and then fails, as a full disk would.
@@ -947,6 +958,48 @@ mod tests {
         assert!(write(dir.path(), Path::new("d/g"), b"created", &mut no_step).unwrap());
         assert_eq!(std::fs::read(dir.path().join("d/g")).unwrap(), b"created");
         assert_eq!(names_in(&dir.path().join("d")), ["e", "f", "g"]);
+    }
+
+    #[test]
+    fn create_temp_skips_names_that_exist() {
+        let (dir, _outside) = tree();
+        let d = dir.path().join("d");
+        for n in 0..2 {
+            std::fs::write(d.join(temp_name(OsStr::new("f"), n)), "someone else's").unwrap();
+        }
+        let Walk::Found(at) = walk_to(
+            dir.path(),
+            "d/f",
+            OnLink::Refuse,
+            OnMissing::Stop,
+            &mut no_step,
+        ) else {
+            panic!("not found")
+        };
+        let mut n = 0;
+        let (name, _file) = create_temp(at.parent(), at.leaf(), &mut || {
+            n += 1;
+            n - 1
+        })
+        .unwrap();
+        assert_eq!(name, temp_name(OsStr::new("f"), 2));
+        for n in 0..2 {
+            let path = d.join(temp_name(OsStr::new("f"), n));
+            assert_eq!(std::fs::read(path).unwrap(), b"someone else's");
+        }
+        std::fs::remove_file(d.join(&name)).unwrap();
+        // Every name taken: an error, nothing created.
+        let error = create_temp(at.parent(), at.leaf(), &mut || 0).unwrap_err();
+        assert_eq!(errno(&error), libc::EEXIST);
+        assert_eq!(names_in(&d).len(), 4);
+    }
+
+    #[test]
+    fn temp_names_are_short_hidden_and_whole_characters() {
+        let long = "é".repeat(100);
+        let name = temp_name(OsStr::new(&long), 7).into_string().unwrap();
+        assert!(name.starts_with(&format!(".{}.browsitory-", "é".repeat(32))));
+        assert!(name.ends_with("-7.tmp"));
     }
 
     #[test]
