@@ -12,6 +12,11 @@ pub enum StashError {
     Io(#[from] std::io::Error),
     #[error("Resolve the current conflicts before applying a stash.")]
     UnresolvedConflicts,
+    /// The index has conflicts: a stash can't record them (git and libgit2 refuse, "cannot
+    /// create a tree from a not fully merged index"), and the path-limited stash would flatten
+    /// them to HEAD's entry while the merge stays in progress.
+    #[error("Resolve the current conflicts before stashing.")]
+    ConflictsBeforeStash,
     #[error("Commit or unstage your staged changes before applying a stash.")]
     StagedChanges,
     #[error("Applying this stash would overwrite local changes to the same files. Commit, stash or discard them first.")]
@@ -168,6 +173,15 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
         .as_deref()
         .map(str::trim)
         .filter(|message| !message.is_empty());
+    // Before any route: the path-limited stash (Stash file…, and Stash all when it takes that
+    // route) would record the conflicted file with its markers and put HEAD's entry back in
+    // the index, leaving the merge in progress, so the next commit would drop the other side.
+    let mut index = repo.index()?;
+    // Reload if another tool (a terminal merge) changed it since the repository was opened.
+    index.read(false)?;
+    if index.has_conflicts() {
+        return Err(StashError::ConflictsBeforeStash);
+    }
     if !opts.paths.is_empty() {
         return save_path_limited_stash(repo, opts, message);
     }
@@ -509,7 +523,8 @@ fn save_path_limited_stash(
             // unedited `d/g` of `git rm -r --cached d`) would stay removed, and Pop would then
             // refuse with `StagedChanges` (#248). Put HEAD's entry back for every reverted
             // path. (Not `reset_default`: it takes pathspecs, so a name like `[ab]` would also
-            // unstage `a` and `b`.)
+            // unstage `a` and `b`.) Only files and links: HEAD may have a folder (or a
+            // submodule) at a reverted path whose index entry was a staged file.
             index.read(true)?;
             let mut changed = false;
             for path in &checkout_paths {
@@ -517,11 +532,30 @@ fn save_path_limited_stash(
                     continue;
                 };
                 let mode = entry.filemode() as u32;
-                let current = index.get_path(std::path::Path::new(path), 0);
-                if current.is_some_and(|current| current.id == entry.id() && current.mode == mode) {
+                if !matches!(mode, 0o100644 | 0o100755 | 0o120000) {
                     continue;
                 }
-                index.add(&crate::undo::index_entry(path, entry.id(), mode))?;
+                let current = index.get_path(std::path::Path::new(path), 0);
+                if current
+                    .as_ref()
+                    .is_some_and(|current| current.id == entry.id() && current.mode == mode)
+                {
+                    continue;
+                }
+                let mut restored = crate::undo::index_entry(path, entry.id(), mode);
+                // Keep assume-unchanged and skip-worktree of an entry it replaces; drop
+                // intent-to-add (HEAD's blob is real content).
+                if let Some(current) = current {
+                    const ASSUME_VALID: u16 = 0x8000;
+                    const EXTENDED: u16 = 0x4000;
+                    const SKIP_WORKTREE: u16 = 1 << 14;
+                    restored.flags |= current.flags & ASSUME_VALID;
+                    restored.flags_extended = current.flags_extended & SKIP_WORKTREE;
+                    if restored.flags_extended != 0 {
+                        restored.flags |= EXTENDED;
+                    }
+                }
+                index.add(&restored)?;
                 changed = true;
             }
             if changed {

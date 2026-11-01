@@ -2554,3 +2554,104 @@ fn stash_all_with_a_file_removed_from_the_index_refuses_a_folder_that_replaced_a
     assert_eq!(read(dir.path(), "f"), "local\n");
     assert_eq!(read(dir.path(), "t/x"), "x\n");
 }
+
+/// A merge stopped on a conflict in `c` (status `UU c`); HEAD also has `f` = "head\n". With
+/// `remove_f`, `f` was then removed from the index (`git rm --cached f`).
+fn merge_conflict(remove_f: bool) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "c", "base\n");
+    write_file(dir.path(), "f", "head\n");
+    commit_all(&repo, "base");
+    let run = |args: &[&str]| {
+        let output = git(dir.path(), args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    run(&["checkout", "-q", "-b", "other"]);
+    write_file(dir.path(), "c", "other\n");
+    run(&["commit", "-q", "-am", "other"]);
+    run(&["checkout", "-q", "-"]);
+    write_file(dir.path(), "c", "main\n");
+    run(&["commit", "-q", "-am", "main"]);
+    assert!(!git(dir.path(), &["merge", "-q", "other"]).status.success());
+    if remove_f {
+        run(&["rm", "-q", "--cached", "f"]);
+    }
+    (dir, repo)
+}
+
+#[test]
+fn stashing_during_a_merge_conflict_is_refused() {
+    // #255 review: with a file removed from the index, Stash all took the path-limited route,
+    // which flattened the conflict to HEAD's entry and left MERGE_HEAD, so the next commit
+    // dropped the other side. git and libgit2 refuse ("cannot create a tree from a not fully
+    // merged index"); Browsitory now refuses first, on every route, Stash file… included.
+    let cases: [(bool, Vec<String>); 4] = [
+        (true, vec![]),
+        (false, vec![]),
+        (false, vec!["c".into()]),
+        (true, vec!["f".into()]),
+    ];
+    for (remove_f, paths) in cases {
+        let (dir, mut repo) = merge_conflict(remove_f);
+        let status_before = git_status(dir.path());
+        let conflicted = read(dir.path(), "c");
+
+        let error =
+            git_core::stash::save_stash(&mut repo, &with(|o| o.paths = paths.clone())).unwrap_err();
+
+        assert!(
+            matches!(error, StashError::ConflictsBeforeStash),
+            "{remove_f} {paths:?}: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "Resolve the current conflicts before stashing."
+        );
+        assert!(repo.find_reference("refs/stash").is_err());
+        assert_eq!(git_status(dir.path()), status_before);
+        assert_eq!(read(dir.path(), "c"), conflicted);
+        assert!(repo.path().join("MERGE_HEAD").exists());
+    }
+    // git refuses too.
+    let (twin, _repo) = merge_conflict(true);
+    assert!(!git(twin.path(), &["stash", "push"]).status.success());
+}
+
+#[test]
+fn stash_all_reverting_a_path_that_head_has_as_a_folder_keeps_the_index_valid() {
+    // #255 review: HEAD has `t/y`; the index has the staged file `t` instead, and `t` is gone
+    // from the worktree. With a file removed from the index (the path-limited route) the revert
+    // must not put HEAD's folder `t` into the index as an entry ("invalid entry mode").
+    let (dir, mut repo) = removed_paths(&["f", "t/y"], &["f", "t/y"], &["f"]);
+    {
+        let mut index = repo.index().unwrap();
+        let blob = repo.blob(b"staged\n").unwrap();
+        let mut entry = index.get_path(std::path::Path::new("a"), 0).unwrap();
+        entry.id = blob;
+        entry.path = b"t".to_vec();
+        entry.flags = 1;
+        index.add(&entry).unwrap();
+        index.write().unwrap();
+    }
+    std::fs::remove_dir_all(dir.path().join("t")).unwrap();
+
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    assert_eq!(in_index(&repo, "t/y").as_deref(), Some("head\n"));
+    assert_eq!(in_index(&repo, "t"), None);
+    assert_eq!(read(dir.path(), "t/y"), "head\n");
+    assert!(
+        git_core::status::status(&repo).unwrap().is_empty(),
+        "{}",
+        git_status(dir.path())
+    );
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
+    assert_eq!(read(dir.path(), "f"), "local\n");
+}

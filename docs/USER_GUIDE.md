@@ -552,6 +552,10 @@ so it also refuses what that refuses. For example, if another tracked file `t` i
 it says "Can't stash 't': it was a file and is now a directory. Commit or move its contents
 first."
 
+While a merge or another operation has left conflicts, stashing refuses and changes nothing:
+"Resolve the current conflicts before stashing." This applies to Stash all and Stash file… alike,
+as with git.
+
 When a folder replaced a tracked file (`d/x` where the file `d` was), **Stash all** with
 untracked files stashes `d/x` and the deletion of `d`, and puts the file `d` back. Browsitory
 can't apply such a stash while `d` is a tracked file, and neither can `git stash pop`. Apply and

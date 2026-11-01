@@ -171,8 +171,17 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   index only for the files it writes. A path removed from the index whose worktree file already
   matches HEAD (an unedited `git rm --cached f`, or the unedited `d/g` of `git rm -r --cached
   d`) stayed removed, so Pop refused with `StagedChanges` (#248). After the checkout it now puts
-  HEAD's entry back for every reverted path HEAD has. It does this entry by entry, not with
-  `reset_default`, which takes pathspecs (`[ab]` would also unstage `a` and `b`).
+  HEAD's entry back for every reverted path HEAD has as a file or link. HEAD may have a folder
+  or submodule at a path whose index entry was a staged file; that path is skipped. It does
+  this entry by entry, not with `reset_default`, which takes pathspecs (`[ab]` would also
+  unstage `a` and `b`). A replaced entry keeps its assume-unchanged and skip-worktree flags;
+  intent-to-add is dropped.
+- `save_stash` refuses any stash while the index has conflicts (`ConflictsBeforeStash`),
+  before choosing a route. libgit2's whole stash and git refuse too ("cannot create a tree from
+  a not fully merged index"). The path-limited stash (Stash file…, and Stash all on the hazard
+  or #247 routes) would otherwise record the file with its markers and put HEAD's entry back in
+  the index. The merge would stay in progress, so the next commit would drop the other side.
+  The index is re-read first (`read(false)`), so a conflict from a terminal merge counts.
 - Repositories and ignored files in an untracked folder. With untracked files, libgit2's reset
   (`REMOVE_UNTRACKED`) removes an untracked folder whole (`checkout_action_wd_only`);
   `wd_item_is_removable` only spares a folder that itself holds a `.git`, so `vendor/lib/.git`

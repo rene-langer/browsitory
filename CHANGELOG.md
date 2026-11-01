@@ -18,6 +18,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   wasn't edited or was one of several files in a removed folder), its removal stayed staged, so
   Pop said "Commit or unstage your staged changes before applying a stash." The stash now puts
   the file back in the index, so Pop works (#248).
+- Fixed: Stash file… on a file with merge conflicts (and Stash all in the cases above) stashed
+  the conflict markers and dropped the conflict from the index while the merge was still in
+  progress, so the next commit lost the other side. Stashing now says "Resolve the current
+  conflicts before stashing." and changes nothing, as git does (#247).
 - Known limitation: in these cases Stash all works like Stash file… on every change, so it also
   refuses a tracked file that is now a folder ("Can't stash 't': it was a file and is now a
   directory. Commit or move its contents first.") (#247).
