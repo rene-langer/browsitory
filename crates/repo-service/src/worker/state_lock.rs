@@ -37,6 +37,64 @@ pub(super) const CONTENDED_WAIT: Duration = Duration::from_secs(1);
 #[cfg(test)]
 pub(super) const CONTENDED_WAIT: Duration = Duration::from_millis(300);
 
+/// How long the next locked command waits for the lock, from how recently it was found busy
+/// (#175, #197):
+///
+/// - not contended: `LOCK_WAIT`;
+/// - the first `Busy` (a full `LOCK_WAIT` in vain) marks it contended: the next command waits
+///   `CONTENDED_WAIT`, so a brief hold right after a long one is still waited out;
+/// - every later `Busy` opens a burst window that lasts until `CONTENDED_WAIT` after the last
+///   command that ran without the lock finished (`finished`). Inside it, a command that would run
+///   unrecorded tries once (`ZERO`): a burst of clicks or queued commands behind the other
+///   window's long hold costs about one `CONTENDED_WAIT`, not one each, however long each
+///   command takes. A command that refuses when the lock is busy (Undo, Redo, discards, Reset
+///   hard) still waits `CONTENDED_WAIT`, so it doesn't refuse at once. After a quiet
+///   `CONTENDED_WAIT`, the next command waits `CONTENDED_WAIT` again;
+/// - taking the lock (`held`) resets it.
+#[derive(Debug, Default)]
+pub(super) struct Contention {
+    contended: bool,
+    quick_until: Option<Instant>,
+}
+
+impl Contention {
+    /// How long a locked command waits at `now`; `refuses`: it refuses when the lock stays busy.
+    pub fn wait(&self, now: Instant, refuses: bool) -> Duration {
+        if !self.contended {
+            LOCK_WAIT
+        } else if !refuses && self.quick_until.is_some_and(|until| now < until) {
+            Duration::ZERO
+        } else {
+            CONTENDED_WAIT
+        }
+    }
+
+    pub fn held(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn busy(&mut self, now: Instant) {
+        if self.contended {
+            self.extend(now);
+        } else {
+            self.contended = true;
+        }
+    }
+
+    /// A command that found the lock busy finished at `now`: an open window lasts until
+    /// `CONTENDED_WAIT` after it, so a slow command doesn't close it.
+    pub fn finished(&mut self, now: Instant) {
+        if self.quick_until.is_some() {
+            self.extend(now);
+        }
+    }
+
+    fn extend(&mut self, now: Instant) {
+        let until = now + CONTENDED_WAIT;
+        self.quick_until = Some(self.quick_until.map_or(until, |old| old.max(until)));
+    }
+}
+
 /// `<gitdir>/browsitory/state.lock`. `repo.path()` is per worktree, so each linked worktree has
 /// its own lock, as it has its own `undo.json`.
 pub(super) struct StateLock {
@@ -141,6 +199,77 @@ mod tests {
 
     fn is_busy(acquire: &Acquire) -> bool {
         matches!(acquire, Acquire::Busy)
+    }
+
+    #[test]
+    fn contention_waits_long_then_briefly_then_once_per_burst() {
+        let t0 = Instant::now();
+        let mut contention = Contention::default();
+        assert_eq!(contention.wait(t0, false), LOCK_WAIT);
+        assert_eq!(contention.wait(t0, true), LOCK_WAIT);
+        // The first timeout: the next command still waits, briefly.
+        contention.busy(t0);
+        assert_eq!(contention.wait(t0, false), CONTENDED_WAIT);
+        assert_eq!(contention.wait(t0 + LOCK_WAIT, false), CONTENDED_WAIT);
+        // `finished` alone opens no window.
+        contention.finished(t0);
+        assert_eq!(contention.wait(t0, false), CONTENDED_WAIT);
+        // Busy again: commands within `CONTENDED_WAIT` of it try once.
+        let t1 = t0 + CONTENDED_WAIT;
+        contention.busy(t1);
+        let soon = t1 + Duration::from_millis(10);
+        assert_eq!(contention.wait(soon, false), Duration::ZERO);
+        assert_eq!(contention.wait(t1 + CONTENDED_WAIT, false), CONTENDED_WAIT);
+        // Each busy try extends the window.
+        let t2 = t1 + CONTENDED_WAIT / 2;
+        contention.busy(t2);
+        assert_eq!(contention.wait(t1 + CONTENDED_WAIT, false), Duration::ZERO);
+        assert_eq!(contention.wait(t2 + CONTENDED_WAIT, false), CONTENDED_WAIT);
+        // Taking the lock resets it.
+        contention.held();
+        assert_eq!(contention.wait(t2, false), LOCK_WAIT);
+        contention.busy(t2);
+        assert_eq!(contention.wait(t2, false), CONTENDED_WAIT);
+    }
+
+    /// #197 review: inside a window, a command that would refuse still waits briefly.
+    #[test]
+    fn contention_lets_refusing_commands_wait_inside_a_burst() {
+        let t0 = Instant::now();
+        let mut contention = Contention::default();
+        contention.busy(t0);
+        contention.busy(t0);
+        assert_eq!(contention.wait(t0, false), Duration::ZERO);
+        assert_eq!(contention.wait(t0, true), CONTENDED_WAIT);
+    }
+
+    /// #197 review: a slow command doesn't close the window; it lasts until `CONTENDED_WAIT`
+    /// after the command finished.
+    #[test]
+    fn contention_window_runs_from_the_end_of_the_last_command() {
+        let t0 = Instant::now();
+        let mut contention = Contention::default();
+        contention.busy(t0);
+        contention.busy(t0);
+        let done = t0 + 3 * CONTENDED_WAIT;
+        contention.finished(done);
+        assert_eq!(
+            contention.wait(done + CONTENDED_WAIT / 2, false),
+            Duration::ZERO
+        );
+        assert_eq!(
+            contention.wait(done + CONTENDED_WAIT, false),
+            CONTENDED_WAIT
+        );
+        // `finished` never shortens the window.
+        let mut contention = Contention::default();
+        contention.busy(t0);
+        contention.busy(t0 + CONTENDED_WAIT);
+        contention.finished(t0);
+        assert_eq!(
+            contention.wait(t0 + CONTENDED_WAIT + CONTENDED_WAIT / 2, false),
+            Duration::ZERO
+        );
     }
 
     #[test]

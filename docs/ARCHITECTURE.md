@@ -252,9 +252,17 @@ sidecar runs each request on its own thread and is unaffected.
   to write, and skip the write while it's held (a later command repeats it). The guard is
   dropped before the held replies are released. A locked command that can't get the lock within
   `LOCK_WAIT` (10 s; a long holder such as a pull, a commit hook or a pinentry dialog in the
-  other app) logs once and runs unrecorded, and later locked commands wait only `CONTENDED_WAIT`
-  (1 s) until the lock is taken again, so the worker's queue waits long once, not once per click,
-  while a brief hold (the other app staging a file) is still waited out (#175). The commands that
+  other app) logs once and runs unrecorded, and the next locked command waits only
+  `CONTENDED_WAIT` (1 s), so the worker's queue waits long once, not once per click, while a
+  brief hold (the other app staging a file) is still waited out (#175). While the lock keeps
+  being found busy, later locked commands that would run unrecorded try once instead: each
+  `Busy` after the first opens a window of single tries that lasts until `CONTENDED_WAIT` after
+  the last unrecorded command finished (`state_lock::Contention`), so a burst of queued commands
+  costs about one `CONTENDED_WAIT`, not one each, however long each takes. Commands that would
+  refuse (`undo::refuses_when_busy`: Undo, Redo, discards, Reset hard) still wait
+  `CONTENDED_WAIT` inside the window. After a quiet `CONTENDED_WAIT` the next command waits
+  again, and taking the lock resets it (#197). The
+  commands that
   destroy work-tree content with no other way back (discard hunk, lines, file or all unstaged,
   and a hard reset) are refused instead with "Another Browsitory window is changing this
   repository's undo history. Try again in a moment, so this change can be undone."
@@ -796,12 +804,30 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   and `key=value` lines) with a `[Desktop Entry]`, `[KDE Desktop Entry]` or `[Desktop Action …]`
   group. Any other line ends the scan as "not a launcher", so a README quoting a launcher in a
   code block stays a document; a strict key file still undecided after 64 KiB counts as
-  runnable; #165). `.desktop` and `.kdelnk`
+  runnable; #165). The launcher sniff runs on Linux only (macOS and Windows have no
+  `.desktop` launchers) and not for a name whose raw extension is in `DOCUMENT_EXTENSIONS`
+  (`txt`, `md`, `json`, … each with a shared-mime-info glob already in 1.15, checked against
+  `/usr/share/mime/globs2` on Linux CI): GLib never types a named file as a launcher from its
+  contents and Qt sniffs only when no glob matches, so the glob wins before any magic. A link
+  skips it only when both its name and its target's name are documents (Qt types a link by its
+  name and its target's contents; #201). `.desktop` and `.kdelnk`
   are runnable by name. The head is read through the opened handle (`O_NONBLOCK | O_NOFOLLOW` on
   Unix, the type checked on the handle after a `symlink_metadata` pre-check, so a device node is
-  never opened), so a FIFO swapped in after a check can't block; Mark resolved reads its marker check
-  through `worktree_guard::open_beneath` and refuses a FIFO, socket or device in the conflicted
-  path, which libgit2 would block reading while staging.
+  never opened), so a FIFO swapped in after a check can't block. Mark resolved refuses a FIFO,
+  socket or device in the conflicted path, then reads the file once through
+  `worktree_guard::read_beneath` (no link followed, a FIFO never opened), checks those bytes for
+  markers and stages exactly them: a file's blob through `blob_writer` with the path as hint (the
+  same clean filters as `add_path`, also for a link kept as a file when `core.symlinks` is off),
+  a link's target as is, then `Index::remove_path` (which moves the conflict stages to REUC, as
+  `add_path` does) and `Index::add`. The entry carries the stat data (`FileStat`) of the
+  descriptor the bytes were read from, taken before reading, so status trusts it like any entry
+  `git add` wrote. With `core.filemode`/`core.symlinks` off the mode comes from stage 0, else
+  2, 3, 1, as libgit2's `index_existing_and_best`. libgit2's `add_path` would `lstat` and open
+  the path a second time, following a link and blocking on a FIFO swapped in meanwhile (#199).
+  A file or link it can't open is `MergeError::Unreadable`; before looking at a path that read
+  as absent, the folders are checked for links again. Only a folder at the path (a nested
+  repository, staged as a gitlink) still goes through `add_path`; a FIFO swapped for it in that
+  instant is a residual.
 - Work tree paths come from `WorkerHandle::workdir()` (captured at spawn), never from the raw
   repo path, which may be a subdirectory (`Repository::discover`).
 

@@ -682,7 +682,8 @@ history. If the other window keeps it busy for more than about 10 seconds (a pul
 hook, a signing prompt), Undo, Redo, discards and **Reset hard** say "Another Browsitory window
 is changing this repository's undo history. Try again in a moment…" and change nothing; other
 operations still run, but can't be undone. After that, while the other window stays busy, each
-action waits about a second for it instead of 10.
+action waits about a second for it instead of 10; a quick run of actions waits only once.
+Undo, Redo, discards and **Reset hard** still wait about a second each before they say so.
 
 Typing in a text field keeps that field's own undo. In the VSCode extension, use the toolbar
 buttons or the command palette if Ctrl/Cmd+Z is taken by VSCode.
@@ -716,7 +717,8 @@ Linux or macOS through Wine): programs and installers (`.exe`, `.msi`, …), scr
 `.py`, `.bat`, `.ps1`, …), shortcuts and launchers (`.lnk`, `.desktop`, `.app`, …), disk images
 that mount when opened (`.iso`, `.vhd`, `.dmg`, …), also when the name ends in a dot or space
 (`setup.exe.`), files with the execute bit on macOS and Linux, and files whose contents start like
-a script, program, installer or desktop launcher. Set an editor to open those.
+a script, program or installer, or, on Linux, like a desktop launcher (unless the name ends in a
+document extension such as `.txt` or `.md`). Set an editor to open those.
 
 Don't wrap an editor or terminal command in `sh -c '…'` or `cmd /c …`: Browsitory deliberately
 passes the file path as one plain argument, and a shell would read shell syntax in file names

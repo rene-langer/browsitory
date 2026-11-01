@@ -1003,11 +1003,13 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
             let Some(mut file) = open_leaf_for_reading(&at)? else {
                 return Ok(None);
             };
+            let stat = super::FileStat::of(&file.metadata()?);
             let mut bytes = Vec::new();
             file.read_to_end(&mut bytes)?;
             Ok(Some(Leaf::File {
                 bytes,
                 executable: false,
+                stat,
             }))
         }
     }

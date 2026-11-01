@@ -171,9 +171,22 @@ pub(crate) fn read_worktree_file(
     let (bytes, executable) = match crate::worktree_guard::read_beneath(workdir, rel)? {
         None => return Ok(None),
         Some(Leaf::Link(target)) => return Ok(Some((target, MODE_LINK))),
-        Some(Leaf::File { bytes, executable }) => (bytes, executable),
+        Some(Leaf::File {
+            bytes, executable, ..
+        }) => (bytes, executable),
     };
-    let mode = if !config.symlinks && previous_mode == Some(MODE_LINK) {
+    Ok(Some((bytes, file_mode(config, executable, previous_mode))))
+}
+
+/// The git mode of a regular work-tree file, as git records it: the exec bit unless
+/// `core.filemode` is off (then `previous_mode`'s), and `previous_mode`'s link mode when
+/// `core.symlinks` is off.
+pub(crate) fn file_mode(
+    config: &WorktreeConfig,
+    executable: bool,
+    previous_mode: Option<u32>,
+) -> u32 {
+    if !config.symlinks && previous_mode == Some(MODE_LINK) {
         MODE_LINK
     } else if config.filemode {
         if executable {
@@ -185,8 +198,7 @@ pub(crate) fn read_worktree_file(
         MODE_EXEC
     } else {
         MODE_FILE
-    };
-    Ok(Some((bytes, mode)))
+    }
 }
 
 pub(crate) fn index_entry(path: &str, id: Oid, mode: u32) -> IndexEntry {
