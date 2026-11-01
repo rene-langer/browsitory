@@ -736,6 +736,13 @@ Continue refuses in that case. A whole sequence is one **Undo** step; an aborted
 nothing to undo. The step **Continue** commits runs the commit hooks (see [Hooks](#hooks));
 the steps applied by themselves run none, like a single cherry-pick.
 
+**Started in a terminal.** If a `git cherry-pick A B C` (or `git revert A B`) from a terminal
+stops on a conflict, you can resolve it and commit the step from Browsitory's commit box. Like
+`git commit`, this keeps git's list of the remaining commits, so `git cherry-pick --continue`
+(or `git revert --continue`) carries on with them. The list is removed only after its last
+commit. A single cherry-pick, revert or squash merge in Browsitory keeps such a list too.
+Committing also no longer ends a `git bisect` started in a terminal, as with `git commit`.
+
 The palette also has commands to cherry-pick, revert, check out and reset to the selected commit,
 and to amend the last commit (where the commit menu offers them), plus **Continue cherry-pick** /
 **Abort cherry-pick** (or revert) while a sequence is paused.
