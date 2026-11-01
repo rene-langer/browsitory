@@ -1092,6 +1092,135 @@ mod tests {
         );
     }
 
+    /// Sets the read-only attribute, as Explorer's "Read-only" box or `attrib +R` does.
+    fn make_read_only(path: &Path) {
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+
+    #[test]
+    fn remove_deletes_a_read_only_file() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        make_read_only(&dir.path().join("d/f"));
+        assert!(remove(dir.path(), Path::new("d/f"), &mut no_step).unwrap());
+        assert!(std::fs::symlink_metadata(dir.path().join("d/f")).is_err());
+    }
+
+    #[test]
+    fn replace_replaces_a_read_only_file() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        make_read_only(&dir.path().join("d/f"));
+        replace(
+            dir.path(),
+            Path::new("d/f"),
+            Content::File {
+                bytes: b"new",
+                executable: false,
+            },
+            &mut no_step,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/f")).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn remove_and_prune_removes_a_read_only_file_and_its_folder() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        make_read_only(&dir.path().join("d/f"));
+        remove_and_prune(dir.path(), Path::new("d/f"), &mut no_step).unwrap();
+        assert!(
+            std::fs::symlink_metadata(dir.path().join("d")).is_err(),
+            "the read-only file or its folder is still there"
+        );
+    }
+
+    #[test]
+    fn a_converted_folder_never_has_its_target_opened_for_reading() {
+        const ERROR_SHARING_VIOLATION: i32 = 32;
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::fs::write(outside.path().join("f"), "OUTSIDE").unwrap();
+        // Shares nothing: any open of the target fails with a sharing violation.
+        let _exclusive = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(outside.path().join("f"))
+            .unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let mut converted = None;
+        let read = read(
+            dir.path(),
+            Path::new("d/f"),
+            &mut junction_d_when_opened(dir.path(), outside.path(), &mut converted),
+        );
+        converted
+            .expect("the walk never opened d")
+            .expect("turning the held folder into a junction");
+        assert!(
+            !matches!(&read, Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)),
+            "the junction's target was opened: {read:?}"
+        );
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn FindFirstChangeNotificationW(path: *const u16, subtree: i32, filter: u32)
+            -> *mut c_void;
+        fn WaitForSingleObject(handle: *mut c_void, milliseconds: u32) -> u32;
+        fn FindCloseChangeNotification(handle: *mut c_void) -> i32;
+    }
+
+    #[test]
+    fn a_converted_folder_never_gets_a_name_in_its_target_even_briefly() {
+        use std::os::windows::ffi::OsStrExt;
+        const FILE_NOTIFY_CHANGE_FILE_NAME: u32 = 0x1;
+        const WAIT_OBJECT_0: u32 = 0;
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let wide: Vec<u16> = outside
+            .path()
+            .as_os_str()
+            .encode_wide()
+            .chain([0])
+            .collect();
+        // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the call.
+        let watch =
+            unsafe { FindFirstChangeNotificationW(wide.as_ptr(), 0, FILE_NOTIFY_CHANGE_FILE_NAME) };
+        assert!(
+            !watch.is_null() && watch as isize != -1,
+            "{}",
+            io::Error::last_os_error()
+        );
+        let mut converted = None;
+        let written = write(
+            dir.path(),
+            Path::new("d/f"),
+            b"x",
+            &mut junction_d_when_opened(dir.path(), outside.path(), &mut converted),
+        );
+        // SAFETY: `watch` is the open change notification handle from above.
+        let signalled = unsafe { WaitForSingleObject(watch, 500) } == WAIT_OBJECT_0;
+        // SAFETY: closed exactly once, here.
+        unsafe { FindCloseChangeNotification(watch) };
+        converted
+            .expect("the walk never opened d")
+            .expect("turning the held folder into a junction");
+        assert!(written.is_err(), "the write went through: {written:?}");
+        assert!(!signalled, "a name was created in the junction's target");
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0);
+    }
+
     #[test]
     fn file_id_info_has_the_documented_layout() {
         assert_eq!(std::mem::size_of::<AttributeTagInfo>(), 8);

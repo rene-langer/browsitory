@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Windows walker
+
+- Windows: read-only files and junction-converted folders in working-tree writes (#193, #194).
+
 ### Lock and security follow-ups
 
 - Fixed: with the desktop app and the VSCode extension open on one repository, Undo, Redo,
