@@ -8,7 +8,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Stash: things in the way
 
-- (in progress) #206, #208, #211.
+- Fixed: Stash all deleted an ignored file or folder that was in the way of a file or folder it
+  put back, with or without Include untracked files. It now says "Stashing would delete the
+  ignored 'd', which is in the way of the tracked 'd/f'. Move 'd' first." and stashes nothing
+  (#208).
+- Fixed: Stash all could delete a repository nested where the branch has a file of that name,
+  including its history. It now refuses with "Stashing would delete the repository in 'd',
+  which is in the way of the tracked 'd'. Move 'd' first." (#211).
+- Fixed: applying or popping a stash whose untracked files sit in a folder that replaced a
+  tracked file reported success, left a "d~Updated upstream" file, and Pop dropped the stash.
+  It now says "This stash can't be applied here: its untracked file 'd/x' needs a folder where
+  'd' is a tracked file. Commit the deletion of 'd' first, then apply it; the stash is kept."
+  (#206).
 
 ### Windows walker
 

@@ -122,21 +122,33 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   120000: directory not empty"): the forced checkout would replace the directory and silently
   delete what the stash does not hold, such as ignored files or untracked files left out. The
   untracked-first revert order stays as a second safety net.
-- Known libgit2 stash-apply quirks, not handled: an apply can leave a `<path>~Updated upstream`
-  file next to a conflicted path, and a failed apply over a directory that replaced a symlink can
-  remove HEAD's symlink from the worktree (it is still in HEAD and recoverable with a checkout,
-  and the stash is kept).
-- Untracked files in the way (#186). Without "Include untracked files", the reset after stashing
-  (libgit2's forced reset, or the path-limited revert) deletes an untracked file that sits where
-  the restored tree has a folder, or inside a folder where it has a file, as git's `reset --hard`
-  does. The restored tree is HEAD's; with keep-index the index's too, because libgit2 and git
-  both reset to HEAD before checking the index back out. `save_stash` refuses first with
-  `StashError::UntrackedInTheWay` (Stash all checks every untracked file, the path-limited stash
-  its own tracked paths); with untracked files included the file is in the stash. Under
-  `core.ignorecase` paths compare case-insensitively (`docs` over `Docs/f`). An untracked symlink
-  is skipped there: the hazard route refuses it as `BeyondSymlink`. A file removed from the index
-  and edited (`git rm --cached d`, status `INDEX_DELETED | WT_NEW`) is not refused: like git, the
-  stash records the edit in its worktree tree, resets `d` to HEAD's and Pop brings the edit back.
+- Known libgit2 stash-apply quirk, not handled: an apply can leave a `<path>~Updated upstream`
+  file next to a conflicted path of the tracked changes. For the untracked files it is refused
+  up front (`UntrackedBelowTrackedFile`, below).
+- Entries in the way (#186, #208, #211). libgit2's whole stash resets with
+  `GIT_CHECKOUT_FORCE` (plus `REMOVE_UNTRACKED` with untracked files, stash.c
+  `reset_index_and_workdir`). Its checkout removes a non-folder where the restored tree has a
+  folder (`checkout_action_with_wd_blocker`) and a folder where it has a file
+  (`checkout_action_with_wd_dir`, removed with everything in it, a nested `.git` included),
+  ignored or not; `wd_item_is_removable`, which protects nested repositories, only applies to
+  worktree-only items. git's `reset --hard` deletes the same entries. Before a whole stash,
+  `stash::entry_in_the_way` finds the first entry the reset would delete because it sits where
+  the restored tree has a folder, where it has a file (folders only), or below a path it has as a
+  file, and `save_stash` refuses: an untracked file with `UntrackedInTheWay`, only without
+  "Include untracked files" (with them it is in the stash); an ignored file or folder with
+  `IgnoredInTheWay` and an untracked nested repository (a folder with a `.git`) with
+  `RepositoryInTheWay`, in both modes, since neither is ever stashed. Ignored folders are
+  checked whole (`recurse_ignored_dirs(false)`), so unrelated ones such as `target/` cost one
+  status entry. The restored tree is HEAD's; with keep-index the index's too: libgit2 1.9.6
+  resets once, to the index commit (stash.c l.751), but `git_checkout_tree` keeps HEAD as the
+  checkout baseline, so an entry in the way of a path HEAD has and the index deletes is still
+  removed (git's keep-index stash deletes it too). The path-limited stash checks only its own
+  tracked paths (`UntrackedInTheWay`, `FolderIsNowAFile`, `DirectoryReplacedNonDirectory`).
+  Under `core.ignorecase` paths compare case-insensitively (`docs` over `Docs/f`). An untracked
+  symlink is skipped there: the hazard route refuses it as `BeyondSymlink`. A file removed from
+  the index and edited (`git rm --cached d`, status `INDEX_DELETED | WT_NEW`) is not refused:
+  like git, the stash records the edit in its worktree tree, resets `d` to HEAD's and Pop brings
+  the edit back.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as
@@ -144,12 +156,21 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   `StashError::FileReplacedFolder` when an untracked-tree file's path is a real folder in the
   worktree and the stash recorded that swap (its base has the folder, its worktree tree doesn't);
   nothing is written, the stash is kept, and `git stash apply` handles it. A folder that appeared
-  after stashing gets `UntrackedOverFolder` ("move the folder first") instead. The mirror
-  stash (the untracked `d/x` with the file `d` deleted) is not detected; git can't pop it
-  either.
+  after stashing gets `UntrackedOverFolder` ("move the folder first") instead.
+- The mirror stash (the untracked `d/x` with the deletion of the file `d`, #206). libgit2's
+  apply merges the untracked tree against the **index** (`merge_index_and_tree(NULL,
+  repo_index, untracked_tree)`, stash.c l.1117), which still has `d` because the index must
+  equal HEAD and the stash's deletion is applied after the untracked files. The directory/file
+  conflict was checked out as `d~Updated upstream` with success, and a pop dropped the stash;
+  `git stash pop` fails on it too. `apply_stash` refuses first with
+  `StashError::UntrackedBelowTrackedFile` when an untracked-tree file has a proper prefix that is
+  a stage-0 index path (exact case, as libgit2's merge compares); nothing is written and the
+  stash is kept. This also covers a file `d` committed after the stash was made. Once the
+  deletion of `d` is committed, the stash applies.
 - libgit2's stash apply fails with "odb: cannot read object: null OID cannot exist" for a stashed
   file whose directory is a symlink in HEAD; `apply_stash` maps it to
-  `StashError::SymlinkReplacedByDirectory` (nothing is written, the stash is kept).
+  `StashError::SymlinkReplacedByDirectory` (the stash is kept). A stashed untracked file below
+  such a symlink is refused before that as `UntrackedBelowTrackedFile`.
 - `Repository::stash_pop` drops the stash even when the apply left conflicts; Browsitory applies
   and drops itself. `stash_apply` refuses whenever the index differs from HEAD
   (`ErrorCode::Uncommitted`); `stash::apply_stash` maps that and the other refusals to

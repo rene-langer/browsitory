@@ -1336,8 +1336,9 @@ fn stash_all_without_untracked_refuses_a_case_only_swap_when_ignorecase_is_on() 
 
 #[test]
 fn stash_all_with_keep_index_checks_untracked_files_against_head_and_the_index() {
-    // A staged deletion of `d/f`: the keep-index stash still resets to HEAD first, which writes
-    // `d/f` and deletes the file `d`, before checking the index out again.
+    // A staged deletion of `d/f`: libgit2's keep-index stash resets once, to the index commit,
+    // but with HEAD as the checkout baseline, so it still deletes the file `d` in the way of
+    // HEAD's `d/f` (and writes nothing in its place).
     let (dir, mut repo) = folder_replaced_by_file();
     let mut index = repo.index().unwrap();
     index.remove_path(std::path::Path::new("d/f")).unwrap();
@@ -1355,8 +1356,8 @@ fn stash_all_with_keep_index_checks_untracked_files_against_head_and_the_index()
     assert_untracked_in_the_way(&mut repo, result, "d", "d/f", &status_before);
     assert_eq!(read(dir.path(), "d"), "now a file\n");
 
-    // git deletes the file too: like libgit2, its keep-index stash resets to HEAD (writing `d/f`)
-    // before checking the index back out.
+    // git deletes the file too: its keep-index stash resets to HEAD (writing `d/f`) before
+    // checking the index back out.
     let (twin, _twin_repo) = folder_replaced_by_file();
     assert!(git(twin.path(), &["rm", "-q", "--cached", "d/f"])
         .status
