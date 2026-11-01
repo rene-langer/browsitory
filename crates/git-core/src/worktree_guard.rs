@@ -1002,6 +1002,33 @@ pub(crate) fn is_read_only(error: &io::Error) -> bool {
         .is_some_and(|source| source.is::<ReadOnlyFile>())
 }
 
+/// The error source [`write_beneath`] reports on Windows for a file another program keeps open
+/// so it can't be replaced (#239): opened without sharing delete, as some editors do.
+#[derive(Debug)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) struct FileInUse {
+    pub(crate) name: String,
+}
+
+impl std::fmt::Display for FileInUse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "'{}' is open in another program. Close it, then try again.",
+            self.name
+        )
+    }
+}
+
+impl std::error::Error for FileInUse {}
+
+/// Whether `error` is the [`FileInUse`] error of [`write_beneath`].
+pub(crate) fn is_in_use(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|source| source.is::<FileInUse>())
+}
+
 /// Whether `rel` is an existing regular file that [`write_beneath`] would refuse as read-only
 /// (#209), by the same rule, looked at through the walker without following a link and
 /// without opening the file (Unix `fstatat`; Windows the attributes of a handle with no data
@@ -1013,13 +1040,23 @@ pub(crate) fn is_read_only_beneath(workdir: &Path, rel: &str) -> bool {
         && beneath::is_read_only(workdir, Path::new(rel), &mut no_step).unwrap_or(false)
 }
 
-/// Writes `bytes` to `rel` as a regular file, first removing a symlink at `rel` (never writing
-/// through it). Returns `Ok(false)` and writes nothing when an ancestor is a symlink or `rel` is
-/// not a plain relative path. An existing file keeps its mode; a FIFO or device is an error,
-/// never written. An existing read-only file is an error for which [`is_read_only`] is true,
-/// and is left as it is (#209): on Windows the read-only attribute, on Unix a file the user owns
-/// without write permission for its owner. A file that is not writable for another reason (an
-/// ACL, another owner) keeps the system's error.
+/// Writes `bytes` to `rel` as a regular file. Returns `Ok(false)` and writes nothing when an
+/// ancestor is a symlink or `rel` is not a plain relative path.
+///
+/// The file is replaced whole (#239): the bytes go to a new temporary file in the same held
+/// folder (`.{name}.browsitory-{pid}-{n}.tmp`), which is flushed and then renamed over `rel`.
+/// On any failure the old file is left as it was and the temporary file is removed. A symlink
+/// at `rel` is replaced itself, never written through; a hardlink is replaced too, so the
+/// file's other names keep the old content. An existing file keeps its mode (Unix) or its
+/// settable attributes (Windows) and the spelling of its name on disk (a case-insensitive
+/// volume); ACLs, extended attributes and alternate data streams are not carried over. A
+/// folder, FIFO or device is an error, never opened for writing.
+///
+/// An existing read-only file is an error for which [`is_read_only`] is true, and is left as it
+/// is (#209): on Windows the read-only attribute, on Unix a file the user owns without write
+/// permission for its owner. A file that is not writable for another reason (an ACL, another
+/// owner) keeps the system's error. On Windows a file another program holds open without
+/// sharing delete can't be replaced: an error for which [`is_in_use`] is true, nothing changed.
 pub(crate) fn write_beneath(workdir: &Path, rel: &str, bytes: &[u8]) -> io::Result<bool> {
     if !plain_relative(Path::new(rel)) {
         return Ok(false);

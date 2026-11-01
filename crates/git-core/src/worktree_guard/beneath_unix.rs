@@ -296,38 +296,177 @@ pub(super) fn write(
     bytes: &[u8],
     step: StepFn<'_>,
 ) -> io::Result<bool> {
+    write_with(workdir, rel, step, &mut |file| file.write_all(bytes))
+}
+
+/// `write` with `fill` writing the content into the opened file (a test seam).
+fn write_with(
+    workdir: &Path,
+    rel: &Path,
+    step: StepFn<'_>,
+    fill: &mut dyn FnMut(&mut File) -> io::Result<()>,
+) -> io::Result<bool> {
     let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Create, step)? {
         Walk::Found(at) => at,
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
     };
-    // No O_TRUNC: only a regular file is truncated, after `fstat` says it is one. O_NONBLOCK:
-    // a FIFO without a reader fails (`ENXIO`) instead of blocking.
-    let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_NOFOLLOW | libc::O_NONBLOCK;
-    let fd = match open_at(at.parent(), at.leaf(), flags, 0o666) {
-        Ok(fd) => fd,
-        Err(error) if matches!(errno(&error), libc::ELOOP | libc::EMLINK) => {
-            // The leaf is a link: remove the link itself, then create a fresh file.
-            match unlink_at(at.parent(), at.leaf(), false) {
-                Ok(()) => {}
-                Err(error) if errno(&error) == libc::ENOENT => {}
-                Err(error) => return Err(error),
-            }
-            open_at(at.parent(), at.leaf(), flags | libc::O_EXCL, 0o666)?
+    let (parent, leaf) = (at.parent(), at.leaf());
+    // What stands at the leaf decides the mode and the name the new file gets. A link is
+    // replaced itself (`renameat` never follows it); a folder, FIFO, socket or device is never
+    // opened.
+    let (mode, target) = match stat_at(parent, leaf)? {
+        None => (None, leaf.to_os_string()),
+        Some(stat) if is_link(&stat) => (None, on_disk_name(parent, leaf)?),
+        Some(stat) if file_type(&stat) == libc::S_IFREG => {
+            (writable_mode(&at)?, on_disk_name(parent, leaf)?)
         }
-        Err(error) if errno(&error) == libc::EACCES => return Err(read_only_or(&at, error)),
-        Err(error) => return Err(error),
+        Some(_) => return Err(not_a_regular_file()),
     };
-    let mut file = File::from(fd);
-    if !file.metadata()?.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "not a regular file",
-        ));
+    let (temp, mut file) = create_temp(parent, leaf, &mut next_temp_number)?;
+    let written = (|| {
+        if let Some(mode) = mode {
+            // SAFETY: `file` owns the descriptor of the temporary file just created.
+            check(unsafe { libc::fchmod(file.as_raw_fd(), mode) })?;
+        }
+        fill(&mut file)?;
+        file.sync_all()?;
+        rename_at(parent, &temp, &target)
+    })();
+    if let Err(error) = written {
+        let _ = unlink_at(parent, &temp, false);
+        return Err(error);
     }
-    // An existing file keeps its mode, like `fs::write`.
-    file.set_len(0)?;
-    file.write_all(bytes)?;
+    // Best effort: makes the rename itself durable.
+    // SAFETY: `parent` is a directory descriptor `at` holds.
+    unsafe { libc::fsync(parent) };
     Ok(true)
+}
+
+fn not_a_regular_file() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, "not a regular file")
+}
+
+/// The mode (`& 0o7777`) of `at`'s leaf, a regular file, after checking it may be written: an
+/// open for writing that neither creates nor truncates it, never follows a link and never
+/// blocks. A file the user may not write is refused here (`read_only_or`), before anything is
+/// created. `None` when the leaf became a link or vanished meanwhile (a new file then).
+fn writable_mode(at: &Beneath) -> io::Result<Option<libc::mode_t>> {
+    let flags = libc::O_WRONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK;
+    match open_at(at.parent(), at.leaf(), flags, 0) {
+        Ok(fd) => {
+            let stat = fstat(fd.as_raw_fd())?;
+            if file_type(&stat) != libc::S_IFREG {
+                return Err(not_a_regular_file());
+            }
+            Ok(Some(stat.st_mode & 0o7777))
+        }
+        Err(error) if matches!(errno(&error), libc::ELOOP | libc::EMLINK | libc::ENOENT) => {
+            Ok(None)
+        }
+        Err(error) if errno(&error) == libc::EACCES => Err(read_only_or(at, error)),
+        Err(error) => Err(error),
+    }
+}
+
+/// How the name of a file being replaced is spelled in `parent`: `leaf` itself when an entry
+/// has exactly that name, else the single entry equal to it ignoring case (a case-insensitive
+/// volume, where `f.txt` found `F.txt`), so the rename keeps the name as it was on disk.
+fn on_disk_name(parent: RawFd, leaf: &OsStr) -> io::Result<OsString> {
+    use std::os::fd::IntoRawFd;
+    let folded = super::fold_name(leaf.as_bytes());
+    let fd = open_at(
+        parent,
+        OsStr::new("."),
+        libc::O_RDONLY | libc::O_DIRECTORY,
+        0,
+    )?
+    .into_raw_fd();
+    // SAFETY: `fd` is an open directory descriptor this function owns; `fdopendir` takes it
+    // over (and `closedir` below closes it).
+    let dir = unsafe { libc::fdopendir(fd) };
+    if dir.is_null() {
+        let error = io::Error::last_os_error();
+        // SAFETY: `fdopendir` failed, so `fd` is still ours to close.
+        unsafe { libc::close(fd) };
+        return Err(error);
+    }
+    let mut matches = Vec::new();
+    loop {
+        // SAFETY: `dir` is the open stream from `fdopendir`, used by this thread only.
+        let entry = unsafe { libc::readdir(dir) };
+        if entry.is_null() {
+            break;
+        }
+        // SAFETY: `readdir` returned a valid entry whose `d_name` is NUL-terminated and stays
+        // valid until the next `readdir`/`closedir`; the bytes are copied before either.
+        let name = unsafe { std::ffi::CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+        if name == leaf.as_bytes() {
+            matches = vec![name.to_vec()];
+            break;
+        }
+        if super::fold_name(name) == folded {
+            matches.push(name.to_vec());
+        }
+    }
+    // SAFETY: `dir` is open and not used again.
+    unsafe { libc::closedir(dir) };
+    Ok(match <[_; 1]>::try_from(matches) {
+        Ok([name]) => OsString::from(OsStr::from_bytes(&name)),
+        Err(_) => leaf.to_os_string(),
+    })
+}
+
+/// The temporary file's name for `leaf`: hidden (a leading dot), named after it and this process
+/// so a left-over one (after a crash) says where it came from. The part taken from `leaf` is
+/// kept short so the name fits where `leaf` itself fits.
+fn temp_name(leaf: &OsStr, n: usize) -> OsString {
+    let bytes = leaf.as_bytes();
+    let mut cut = bytes.len().min(TEMP_PREFIX_BYTES);
+    // Not in the middle of a UTF-8 sequence.
+    while cut < bytes.len() && cut > 0 && bytes[cut] & 0xC0 == 0x80 {
+        cut -= 1;
+    }
+    let mut name = b".".to_vec();
+    name.extend_from_slice(&bytes[..cut]);
+    name.extend_from_slice(format!(".browsitory-{}-{n}.tmp", std::process::id()).as_bytes());
+    OsString::from(OsStr::from_bytes(&name))
+}
+
+/// At most this many bytes of the leaf's name go into its temporary file's name.
+const TEMP_PREFIX_BYTES: usize = 64;
+
+/// The next number for a temporary file's name, unique in this process.
+fn next_temp_number() -> usize {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Creates a new, empty temporary file next to the leaf in `parent` (`O_EXCL`: never an
+/// existing file or link), readable and writable as the umask allows. `next` numbers the names
+/// (`next_temp_number`; a test seam); a name that exists is skipped.
+fn create_temp(
+    parent: RawFd,
+    leaf: &OsStr,
+    next: &mut dyn FnMut() -> usize,
+) -> io::Result<(OsString, File)> {
+    for _ in 0..ATTEMPTS {
+        let name = temp_name(leaf, next());
+        let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW;
+        match open_at(parent, &name, flags, 0o666) {
+            Ok(fd) => return Ok((name, File::from(fd))),
+            Err(error) if errno(&error) == libc::EEXIST => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::from_raw_os_error(libc::EEXIST))
+}
+
+/// `renameat(dir, from, dir, to)`: replaces `to` (a file or link, never followed) at once.
+fn rename_at(dir: RawFd, from: &OsStr, to: &OsStr) -> io::Result<()> {
+    let (from, to) = (cstr(from)?, cstr(to)?);
+    // SAFETY: `dir` is a held directory descriptor and both names are NUL-terminated.
+    check(unsafe { libc::renameat(dir, from.as_ptr(), dir, to.as_ptr()) })
 }
 
 /// `write`'s error for a leaf it may not open: `read_only_error` when the leaf is read-only
@@ -754,15 +893,166 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert_eq!(std::fs::read(&f).unwrap(), b"inner\n");
         assert_eq!(mode(&f), 0o444);
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f"]);
+    }
+
+    /// A fill that writes "par" and then fails, as a full disk would.
+    fn fail_halfway(file: &mut File) -> io::Result<()> {
+        file.write_all(b"par")?;
+        Err(io::Error::other("disk full"))
+    }
+
+    /// The names in `dir`, sorted.
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_failed_write_keeps_the_old_content() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, _outside) = tree();
+        let f = dir.path().join("d/f");
+        std::fs::write(&f, "old content").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let error = write_with(
+            dir.path(),
+            Path::new("d/f"),
+            &mut no_step,
+            &mut fail_halfway,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(std::fs::read(&f).unwrap(), b"old content");
+        assert_eq!(mode(&f), 0o640);
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f"]);
+    }
+
+    #[test]
+    fn a_failed_write_of_a_new_file_leaves_nothing() {
+        let (dir, _outside) = tree();
+        let error = write_with(
+            dir.path(),
+            Path::new("d/new"),
+            &mut no_step,
+            &mut fail_halfway,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f"]);
+    }
+
+    #[test]
+    fn write_keeps_the_mode_and_leaves_no_temporary_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, _outside) = tree();
+        let f = dir.path().join("d/f");
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o604)).unwrap();
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
+        assert_eq!(std::fs::read(&f).unwrap(), b"new");
+        assert_eq!(mode(&f), 0o604);
+        assert!(write(dir.path(), Path::new("d/g"), b"created", &mut no_step).unwrap());
+        assert_eq!(std::fs::read(dir.path().join("d/g")).unwrap(), b"created");
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f", "g"]);
+    }
+
+    #[test]
+    fn create_temp_skips_names_that_exist() {
+        let (dir, _outside) = tree();
+        let d = dir.path().join("d");
+        for n in 0..2 {
+            std::fs::write(d.join(temp_name(OsStr::new("f"), n)), "someone else's").unwrap();
+        }
+        let Walk::Found(at) = walk_to(
+            dir.path(),
+            "d/f",
+            OnLink::Refuse,
+            OnMissing::Stop,
+            &mut no_step,
+        ) else {
+            panic!("not found")
+        };
+        let mut n = 0;
+        let (name, _file) = create_temp(at.parent(), at.leaf(), &mut || {
+            n += 1;
+            n - 1
+        })
+        .unwrap();
+        assert_eq!(name, temp_name(OsStr::new("f"), 2));
+        for n in 0..2 {
+            let path = d.join(temp_name(OsStr::new("f"), n));
+            assert_eq!(std::fs::read(path).unwrap(), b"someone else's");
+        }
+        std::fs::remove_file(d.join(&name)).unwrap();
+        // Every name taken: an error, nothing created.
+        let error = create_temp(at.parent(), at.leaf(), &mut || 0).unwrap_err();
+        assert_eq!(errno(&error), libc::EEXIST);
+        assert_eq!(names_in(&d).len(), 4);
+    }
+
+    #[test]
+    fn temp_names_are_short_hidden_and_whole_characters() {
+        let long = "é".repeat(100);
+        let name = temp_name(OsStr::new(&long), 7).into_string().unwrap();
+        assert!(name.starts_with(&format!(".{}.browsitory-", "é".repeat(32))));
+        assert!(name.ends_with("-7.tmp"));
+    }
+
+    #[test]
+    fn write_replaces_a_hardlink_instead_of_writing_through_it() {
+        let (dir, outside) = tree();
+        std::fs::hard_link(outside.path().join("f"), dir.path().join("d/h")).unwrap();
+        assert!(write(dir.path(), Path::new("d/h"), b"new", &mut no_step).unwrap());
+        assert_eq!(std::fs::read(dir.path().join("d/h")).unwrap(), b"new");
+        assert_outside_untouched(outside.path());
+    }
+
+    #[test]
+    fn write_replaces_a_link_leaf_and_leaves_its_target() {
+        let (dir, outside) = tree();
+        let l = dir.path().join("d/l");
+        std::os::unix::fs::symlink(outside.path().join("f"), &l).unwrap();
+        assert!(write(dir.path(), Path::new("d/l"), b"new", &mut no_step).unwrap());
+        assert!(std::fs::symlink_metadata(&l).unwrap().is_file());
+        assert_eq!(std::fs::read(&l).unwrap(), b"new");
+        assert_outside_untouched(outside.path());
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f", "l"]);
+    }
+
+    #[test]
+    fn write_refuses_a_folder() {
+        let (dir, _outside) = tree();
+        let error = write(dir.path(), Path::new("d/e"), b"x", &mut no_step).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(dir.path().join("d/e").is_dir());
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f"]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn write_keeps_the_on_disk_name_case() {
+        let (dir, _outside) = tree();
+        std::fs::write(dir.path().join("d/F.txt"), "old").unwrap();
+        assert!(write(dir.path(), Path::new("d/f.txt"), b"new", &mut no_step).unwrap());
+        assert_eq!(names_in(&dir.path().join("d")), ["F.txt", "e", "f"]);
+        assert_eq!(std::fs::read(dir.path().join("d/F.txt")).unwrap(), b"new");
     }
 
     #[test]
     fn write_on_a_fifo_errors_without_blocking() {
+        use std::os::unix::fs::FileTypeExt;
         let (dir, _outside) = tree();
         mkfifo(&dir.path().join("pipe"));
         let root = dir.path().to_path_buf();
         let result = within_5s(move || write(&root, Path::new("pipe"), b"x", &mut no_step));
         assert!(result.is_err());
+        let meta = std::fs::symlink_metadata(dir.path().join("pipe")).unwrap();
+        assert!(meta.file_type().is_fifo());
+        assert_eq!(names_in(dir.path()), ["d", "pipe"]);
     }
 
     #[test]

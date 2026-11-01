@@ -1991,3 +1991,104 @@ fn taking_a_whole_side_of_a_file_without_any_permission_is_refused() {
         assert_eq!(conflict_stages(&repo, "shared.txt"), stages, "{side:?}");
     }
 }
+
+/// The names in the work tree's top folder, `.git` left out, sorted.
+fn top_level_names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != ".git")
+        .collect();
+    names.sort();
+    names
+}
+
+fn untracked_paths(repo: &git2::Repository) -> Vec<String> {
+    let mut options = git2::StatusOptions::new();
+    options.include_untracked(true).recurse_untracked_dirs(true);
+    repo.statuses(Some(&mut options))
+        .unwrap()
+        .iter()
+        .filter(|entry| entry.status().contains(git2::Status::WT_NEW))
+        .map(|entry| entry.path().unwrap().to_string())
+        .collect()
+}
+
+/// A resolved conflict replaces the file whole: no temporary file is left next to it, and an
+/// executable file stays executable (#239).
+#[test]
+fn resolving_a_conflict_leaves_no_temporary_file() {
+    let (dir, repo) = make_conflicted_repo();
+    let file = dir.path().join("shared.txt");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    git_core::merge::resolve_conflict(&repo, "shared.txt", "resolved\n").unwrap();
+
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "resolved\n");
+    assert_eq!(top_level_names(dir.path()), ["shared.txt"]);
+    assert_eq!(untracked_paths(&repo), Vec::<String>::new());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o755);
+    }
+}
+
+/// Taking theirs of an add/delete conflict over an existing file replaces it whole (#239).
+#[test]
+fn taking_a_side_of_an_add_delete_conflict_leaves_no_temporary_file() {
+    let (dir, repo) = make_delete_modify_conflict();
+    let file = dir.path().join("shared.txt");
+    std::fs::write(&file, "kept\n").unwrap();
+
+    git_core::merge::resolve_add_delete_conflict(&repo, "shared.txt", FileConflictChoice::Theirs)
+        .unwrap();
+
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "v2\n");
+    assert_eq!(top_level_names(dir.path()), ["shared.txt"]);
+    assert_eq!(untracked_paths(&repo), Vec::<String>::new());
+}
+
+/// Keeps `path` open the way some editors do: sharing read and write, not delete, so it can't
+/// be replaced (#239).
+#[cfg(windows)]
+fn hold_open_without_share_delete(path: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1 | 0x2)
+        .open(path)
+        .unwrap()
+}
+
+/// Resolving a conflict in a file another program keeps open says so and changes nothing
+/// (#239).
+#[cfg(windows)]
+#[test]
+fn resolving_a_conflict_in_a_file_open_in_another_program_is_refused() {
+    let (dir, repo) = make_conflicted_repo();
+    let file = dir.path().join("shared.txt");
+    let before = std::fs::read(&file).unwrap();
+    let stages = conflict_stages(&repo, "shared.txt");
+    let editor = hold_open_without_share_delete(&file);
+
+    let error = git_core::merge::resolve_conflict(&repo, "shared.txt", "resolved\n").unwrap_err();
+
+    assert!(
+        matches!(error, MergeError::FileInUse(ref p) if p == "shared.txt"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'shared.txt' is open in another program. Close it, then try again."
+    );
+    drop(editor);
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    assert_eq!(conflict_stages(&repo, "shared.txt"), stages);
+    assert_eq!(top_level_names(dir.path()), ["shared.txt"]);
+}

@@ -720,6 +720,41 @@ fn adding_to_a_read_only_gitignore_is_refused() {
     assert!(std::fs::metadata(&file).unwrap().permissions().readonly());
 }
 
+/// Adding a pattern to a `.gitignore` another program keeps open (sharing read and write, not
+/// delete, as some editors do) says so and changes nothing (#239).
+#[cfg(windows)]
+#[test]
+fn adding_to_a_gitignore_open_in_another_program_is_refused() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (dir, repo) = common::init_repo();
+    let file = dir.path().join(".gitignore");
+    common::write_file(dir.path(), ".gitignore", "target\n");
+    let editor = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1 | 0x2)
+        .open(&file)
+        .unwrap();
+
+    let error = ignore_path(&repo, "*.log").unwrap_err();
+
+    assert!(
+        matches!(error, StageError::FileInUse(ref p) if p == ".gitignore"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'.gitignore' is open in another program. Close it, then try again."
+    );
+    drop(editor);
+    assert_eq!(read(dir.path(), ".gitignore"), "target\n");
+    let names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != ".git")
+        .collect();
+    assert_eq!(names, [".gitignore"]);
+}
+
 /// Makes `path` read-only until dropped, so a failed assertion doesn't leave a read-only file
 /// the temp folder can't delete on Windows.
 struct ReadOnly(std::path::PathBuf);
@@ -742,4 +777,31 @@ impl Drop for ReadOnly {
             let _ = std::fs::set_permissions(&self.0, permissions);
         }
     }
+}
+
+/// Adding a pattern replaces .gitignore whole: no temporary file is left next to it (#239).
+#[test]
+fn ignoring_a_file_leaves_no_temporary_file() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), ".gitignore", "target\n");
+    common::write_file(dir.path(), "build.log", "x\n");
+    ignore_path(&repo, "*.log").unwrap();
+    assert_eq!(read(dir.path(), ".gitignore"), "target\n*.log\n");
+    let mut names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != ".git")
+        .collect();
+    names.sort();
+    assert_eq!(names, [".gitignore", "build.log"]);
+    let mut options = git2::StatusOptions::new();
+    options.include_untracked(true).recurse_untracked_dirs(true);
+    let untracked: Vec<String> = repo
+        .statuses(Some(&mut options))
+        .unwrap()
+        .iter()
+        .filter(|entry| entry.status().contains(git2::Status::WT_NEW))
+        .map(|entry| entry.path().unwrap().to_string())
+        .collect();
+    assert_eq!(untracked, [".gitignore"]);
 }

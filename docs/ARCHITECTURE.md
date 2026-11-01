@@ -813,16 +813,25 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   only where the file system has no opens by ID: FAT/exFAT, which have no links, and SMB
   shares) and accepted only with the same file ID. Leaves are opened for reading with no more
   access than attributes, so a file whose ACL denies writing still reads; acts that may delete
-  ask for `DELETE` and, where the ACL allows it, `FILE_WRITE_ATTRIBUTES` (a write classifies
-  the leaf for reading and reopens only a link to delete it, so a file the user may write but
-  not delete stays writable). A reopen by ID must also still sit in the held parent (it may
+  ask for `DELETE` and, where the ACL allows it, `FILE_WRITE_ATTRIBUTES`. A write classifies
+  the leaf for reading and probes it for writing, but its rename replaces the old file, which
+  needs `DELETE` on it (or `FILE_DELETE_CHILD` on the folder): a file whose ACL lets the user
+  write but not delete it is no longer written (#239, see below). A reopen by ID must also still sit in the held parent (it may
   have been renamed out meanwhile). An *empty* held folder can still be turned into a junction
   in place; on a local NTFS/ReFS volume a relative open below it then fails with
   `ERROR_CANT_RESOLVE_FILENAME`, reported as "a folder of the working tree changed", so
   nothing is opened, created or contacted in the junction's target. On an SMB share the
   redirector resolves a relative name by path on the server, so every component and leaf must
   also sit in the held parent (`GetFinalPathNameByHandleW` of both), and a new file is deleted
-  again through its handle if misplaced: there the race is only narrowed. Leaves are deleted
+  again through its handle if misplaced. A write's rename is resolved by path on the server
+  too, so afterwards the file's final path is compared with the work tree root's: only when it
+  positively lies outside the work tree is the file deleted through its handle and the write
+  reported as "a folder of the working tree changed". By then the name it landed on outside
+  has already been replaced, and that deletion removes it: the outside file is lost, as with
+  any write the server redirected. When a path can't be read, or the file is inside the work
+  tree (a sync tool may have moved it on at once), it is kept and the write succeeds, so the
+  user's content is never deleted on a doubt (`settle_after_rename`). There the race is only
+  narrowed. Leaves are deleted
   through their own handle (`FileDispositionInfoEx` with POSIX semantics, so the name is gone
   once our handle closes even while a scanner or indexer keeps the file open, #168, and with
   `IGNORE_READONLY_ATTRIBUTE`, so a read-only file is deleted as by std's `remove_file` and
@@ -837,6 +846,46 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   folder creation (#164, #193), and use a work tree through the admin share
   `\\localhost\C$\…` (SMB). Hand-declared `kernel32` and `ntdll` imports, no new dependency. A
   `Step` seam in both walkers makes the races deterministic in tests.
+- `write_beneath` replaces the file whole and never truncates it first (#239). It writes a new
+  temporary file `.{name}.browsitory-{pid}-{n}.tmp` (at most 64 bytes or UTF-16 units of the
+  name) in the held parent, flushes it (`sync_all`) and renames it over the name in that same
+  held folder; on any failure the temporary file is removed and the old file stays as it was.
+  Unix: `fstatat` without following decides first: a folder, FIFO, socket or device is an
+  error and is never opened; a regular file must open `O_WRONLY | O_NOFOLLOW | O_NONBLOCK`
+  (no create, no truncate; the #209 read-only check runs on `EACCES`), and its mode
+  (`& 0o7777`) is copied to the temporary file with `fchmod`. The temporary file is created
+  `O_CREAT | O_EXCL | O_NOFOLLOW` (another name on `EEXIST`), then `renameat(parent, tmp,
+  parent, name)` and a best-effort `fsync` of the parent. On a case-insensitive volume the
+  name is the existing entry's own spelling (a `readdir` of the held parent: the exact name,
+  else the single entry equal ignoring case, `fold_name`). Windows: the leaf is classified as
+  before; an existing file must reopen for reading and writing by its file ID (read-only →
+  #209), its settable attributes (`FileBasicInfo`) are copied to the temporary file, and its
+  on-disk name comes from `GetFinalPathNameByHandleW` when that equals the leaf ignoring case
+  (else the leaf as given: a short 8.3 name, or another name of a hardlinked file). The
+  temporary file is created with
+  `nt_open(FILE_CREATE)` in the held parent (checked with `in_parent`) and renamed through its
+  own handle with `NtSetInformationFile(FileRenameInformationEx, REPLACE_IF_EXISTS |
+  POSIX_SEMANTICS)` whose `RootDirectory` is the held parent, so the new name is resolved
+  against that handle, never a path; POSIX semantics replace a file a scanner or the indexer
+  keeps open with delete sharing. Where the class or flag is refused (`ERROR_INVALID_PARAMETER`,
+  `ERROR_NOT_SUPPORTED`, `ERROR_INVALID_FUNCTION`: older Windows, FAT, some shares) the
+  classic `FileRenameInformation` with `ReplaceIfExists` follows. A file another program holds
+  open without sharing delete (some editors) can't be replaced: a sharing violation, or access
+  denied while an open of it for deleting is refused as a sharing violation, becomes
+  `worktree_guard::FileInUse` (`ResourceBusy`, tested with `is_in_use`), after three tries
+  100 ms apart (a backup or sync tool that held it for a moment), as is a sharing violation
+  of the probe for writing. Nothing is changed, and the temporary file is deleted through its
+  handle. Conflict resolution and **Ignore** report it as `MergeError::FileInUse` /
+  `StageError::FileInUse`: "'f.txt' is open in another program. Close it, then try again."
+  What a replace doesn't keep: ACLs, extended attributes, alternate data streams, Windows
+  encryption (EFS) and compression of the file itself (the new file takes the folder's), the
+  owner (Unix: a group-writable file owned by someone else becomes the user's, as with git's
+  checkout), and hardlinks (the other names keep the old content). Writing now also needs
+  permission to create files in the folder, and on Windows permission to delete the old file
+  (`DELETE` on it or `FILE_DELETE_CHILD` on the folder); without it the system's access
+  denied is reported. A crash between creating and renaming the temporary file leaves
+  it behind as an untracked file. `replace_beneath` (undo/redo restores) still deletes the old
+  file before writing the new one.
 - `write_beneath` refuses an existing read-only file and leaves it as it is (#209): nothing is
   written and the read-only state is kept. Unix: an `EACCES` open of a regular file the user
   owns without owner write permission (`fstatat`, `st_uid == geteuid()`, no `S_IWUSR`). Windows:
@@ -959,8 +1008,9 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   checks) and the external diff/merge tool, which writes `MERGED` by path itself, as git's
   `mergetool` does.
 - Residual risk, hardlinks: a tracked file that is a hardlink to a file outside the repository
-  is written in place by libgit2's checkouts and by `fs::write` (the shared inode changes, so
-  the outside name sees the new content). A hardlink is indistinguishable from a regular file by
+  is written in place by libgit2's checkouts (the shared inode changes, so the outside name
+  sees the new content). Browsitory's own writes (`write_beneath`) replace the name instead,
+  so the outside name keeps its content (#239). A hardlink is indistinguishable from a regular file by
   path; it needs the user (or a local process) to have created it on the same filesystem, and
   git behaves the same way.
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes

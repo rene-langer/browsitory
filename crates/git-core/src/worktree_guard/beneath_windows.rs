@@ -19,8 +19,11 @@
 //! file created by the failed act is deleted through its handle. A link's target is read from
 //! its own handle (`FSCTL_GET_REPARSE_POINT`), never by path. Leaves are deleted through their
 //! handle (`FileDispositionInfoEx` with POSIX semantics, read-only files included, see
-//! `delete_by_handle`), never by path, and an existing file is written through a handle whose
-//! file ID matches the one classified; a read-only one is refused and left as it is (#209).
+//! `delete_by_handle`), never by path. A write never opens the existing file for writing data:
+//! it checks that the file may be written through a handle whose file ID matches the one
+//! classified (a read-only one is refused and left as it is, #209), writes a new temporary file
+//! created in the held parent, and renames that over the name through the temporary file's
+//! handle, the new name resolved against the held parent (`rename_in_parent`, #239).
 //!
 //! Each component's attributes and reparse tag come from its own handle
 //! (`GetFileInformationByHandleEx`): a name surrogate (symbolic link, junction, WSL link, …) is
@@ -369,7 +372,23 @@ extern "system" {
         ea_length: u32,
     ) -> i32;
     fn RtlNtStatusToDosError(status: i32) -> u32;
+    fn NtSetInformationFile(
+        handle: *mut c_void,
+        io_status: *mut IoStatusBlock,
+        info: *mut c_void,
+        length: u32,
+        class: i32,
+    ) -> i32;
 }
+
+/// `FILE_INFORMATION_CLASS` values (ntdll's, not kernel32's `FILE_INFO_BY_HANDLE_CLASS`).
+const FILE_RENAME_INFORMATION_CLASS: i32 = 10;
+const FILE_RENAME_INFORMATION_EX_CLASS: i32 = 65;
+/// `FILE_RENAME_INFORMATION_EX` flags.
+const FILE_RENAME_REPLACE_IF_EXISTS: u32 = 0x1;
+const FILE_RENAME_POSIX_SEMANTICS: u32 = 0x2;
+
+const ERROR_SHARING_VIOLATION: i32 = 32;
 
 /// What `NtCreateFile` relative to a held folder answers once that folder has become a reparse
 /// point (a junction or symbolic link set on it in place): the name is not resolved at all.
@@ -929,23 +948,137 @@ pub(super) fn write(
     bytes: &[u8],
     step: StepFn<'_>,
 ) -> io::Result<bool> {
+    write_with(
+        workdir,
+        rel,
+        step,
+        &mut |file| file.write_all(bytes),
+        &mut || {},
+    )
+}
+
+/// `write` with `fill` writing the content into the opened file and `on_wait` called before
+/// each wait for a file in use (test seams).
+fn write_with(
+    workdir: &Path,
+    rel: &Path,
+    step: StepFn<'_>,
+    fill: &mut dyn FnMut(&mut File) -> io::Result<()>,
+    on_wait: &mut dyn FnMut(),
+) -> io::Result<bool> {
     let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Create, step)? {
         Walk::Found(at) => at,
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
     };
-    for _ in 0..ATTEMPTS {
-        // Classified for reading: a file the user may write but not delete stays writable.
-        let mut file = match open_leaf(&at, Purpose::Read)? {
-            None => match create_leaf(&at)? {
-                Some(file) => file,
-                None => continue,
-            },
+    let in_use = || file_in_use(rel);
+    let (attributes, target) = classify_for_writing(&at, &in_use, on_wait)?;
+    let mut temp = create_temp(&at, &mut next_temp_number)?;
+    let written = (|| {
+        if attributes != 0 {
+            keep_attributes(&temp, attributes)?;
+        }
+        fill(&mut temp)?;
+        temp.sync_all()?;
+        let mut tries = 0;
+        loop {
+            tries += 1;
+            match rename_in_parent(&temp, at.parent_file(), &target)
+                .map_err(|error| rename_error(&at, &target, error, &in_use))
+            {
+                // A program that opened the file only for a moment (a backup or sync tool)
+                // gets a short while to close it.
+                Err(error) if super::is_in_use(&error) && tries < IN_USE_TRIES => {
+                    on_wait();
+                    std::thread::sleep(IN_USE_WAIT);
+                }
+                other => break other,
+            }
+        }
+    })();
+    if let Err(error) = written {
+        // Not renamed: still the temporary file. Gone when `temp` closes, right here.
+        let _ = delete_by_handle(&temp);
+        return Err(error);
+    }
+    // Renamed: from here `temp` is the user's file and is never deleted on an error.
+    settle_after_rename(&temp, final_path(&temp), final_path(&at.dirs[0]))
+}
+
+/// After a successful rename: an SMB server resolves the new name by path, so the file may have
+/// landed somewhere else. Only when its path positively lies outside the work tree (`root`) is
+/// it deleted again (through its handle) and the write reported as redirected. By then it has
+/// replaced whatever had that name outside, and the delete removes that name too: the outside
+/// file is lost, as with any write the server redirected. When either path can't be read (some file system filters,
+/// shares) or the file is inside the work tree (in the right folder, or already moved by a
+/// sync tool), it is kept and the write succeeds: deleting it could lose the user's content.
+fn settle_after_rename(
+    file: &File,
+    path: io::Result<PathBuf>,
+    root: io::Result<PathBuf>,
+) -> io::Result<bool> {
+    let (Ok(path), Ok(root)) = (path, root) else {
+        return Ok(true);
+    };
+    if is_beneath(&path, &root) {
+        return Ok(true);
+    }
+    let _ = delete_by_handle(file);
+    Err(redirected())
+}
+
+/// Whether `path` lies below `root`, both `GetFinalPathNameByHandleW` paths, ignoring case.
+fn is_beneath(path: &Path, root: &Path) -> bool {
+    let path = path.to_string_lossy().to_lowercase();
+    let root = root.to_string_lossy().to_lowercase();
+    let root = root.trim_end_matches('\\');
+    path.strip_prefix(root)
+        .is_some_and(|rest| rest.starts_with('\\') && rest.len() > 1)
+}
+
+/// How often `write` tries a file another program holds open before reporting it in use, and
+/// how long it waits in between.
+const IN_USE_TRIES: usize = 3;
+const IN_USE_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The next number for a temporary file's name, unique in this process.
+fn next_temp_number() -> usize {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+fn file_in_use(rel: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::ResourceBusy,
+        super::FileInUse {
+            name: rel.to_string_lossy().into_owned(),
+        },
+    )
+}
+
+/// What `write` replaces at `at`'s leaf: the settable attributes to keep and the name to give
+/// the new file (the existing file's own spelling, so the case on disk stays). Nothing for a
+/// missing leaf. A link is deleted itself (through its own handle, never followed); a folder is
+/// an error. An existing file must be one the user may write: opened for reading and writing
+/// (by its file ID, see `reopen_same`), the handle closed at once. A read-only file is refused
+/// as such (#209) and a file another program holds without sharing writing as in use (after
+/// `IN_USE_TRIES`). The rename that follows also needs to delete the old file, so a file whose
+/// ACL lets the user write but not delete it fails there with the system's access denied.
+fn classify_for_writing(
+    at: &Beneath,
+    in_use: &dyn Fn() -> io::Error,
+    on_wait: &mut dyn FnMut(),
+) -> io::Result<(u32, OsString)> {
+    let mut busy = 0;
+    for _ in 0..ATTEMPTS + IN_USE_TRIES {
+        // Classified with no access beyond attributes; the probe below asks for writing.
+        match open_leaf(at, Purpose::Read)? {
+            None => return Ok((0, at.leaf_name().to_os_string())),
             Some((_, Found::Link)) => {
                 // Reopened to delete it, checked to still be the link in the held parent.
-                if let Some((link, Found::Link)) = open_leaf(&at, Purpose::Delete)? {
+                if let Some((link, Found::Link)) = open_leaf(at, Purpose::Delete)? {
                     delete_by_handle(&link)?;
                 }
-                continue;
             }
             Some((_, Found::Dir)) => {
                 return Err(io::Error::new(
@@ -954,19 +1087,246 @@ pub(super) fn write(
                 ))
             }
             Some((first, Found::File { reopen })) => {
-                match reopen_same(&at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
-                    Ok(Some(file)) => file,
-                    Ok(None) => continue,
+                match reopen_same(at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
+                    Ok(Some(_writable)) => {
+                        let attributes = attribute_tag(&first)?.file_attributes;
+                        let name = on_disk_name(at.leaf_name(), &final_path(&first)?);
+                        return Ok((attributes & SETTABLE_ATTRIBUTES, name));
+                    }
+                    Ok(None) => {}
+                    Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => {
+                        busy += 1;
+                        if busy >= IN_USE_TRIES {
+                            return Err(in_use());
+                        }
+                        on_wait();
+                        std::thread::sleep(IN_USE_WAIT);
+                    }
                     Err(error) => return Err(read_only_or(&first, error)),
                 }
             }
-        };
-        // An existing file keeps its attributes, like `fs::write`.
-        file.set_len(0)?;
-        file.write_all(bytes)?;
-        return Ok(true);
+        }
     }
     Err(redirected())
+}
+
+/// The name the new file gets for `leaf`, whose file's final path is `path`: that path's last
+/// component (the spelling on disk) when it equals `leaf` ignoring case, else `leaf` itself (a
+/// short 8.3 name, or another name of a hardlinked file).
+fn on_disk_name(leaf: &OsStr, path: &Path) -> OsString {
+    let fold = |name: &OsStr| super::fold_name(name.to_string_lossy().as_bytes());
+    match path.file_name() {
+        Some(name) if fold(name) == fold(leaf) => name.to_os_string(),
+        _ => leaf.to_os_string(),
+    }
+}
+
+/// The temporary file's name for `leaf`: a leading dot as on Unix (which hides it there, not
+/// here), named after it and this process so a left-over one (after a crash) says where it came
+/// from. The part taken from `leaf` is kept short so the name fits where `leaf` itself fits.
+fn temp_name(leaf: &OsStr, n: usize) -> OsString {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let units: Vec<u16> = leaf.encode_wide().collect();
+    let mut cut = units.len().min(TEMP_PREFIX_UNITS);
+    // Not between the two halves of a surrogate pair.
+    if cut > 0 && cut < units.len() && (0xD800..0xDC00).contains(&units[cut - 1]) {
+        cut -= 1;
+    }
+    let mut name: Vec<u16> = ".".encode_utf16().collect();
+    name.extend_from_slice(&units[..cut]);
+    name.extend(format!(".browsitory-{}-{n}.tmp", std::process::id()).encode_utf16());
+    OsString::from_wide(&name)
+}
+
+/// At most this many UTF-16 units of the leaf's name go into its temporary file's name.
+const TEMP_PREFIX_UNITS: usize = 64;
+
+/// Creates a new, empty temporary file next to `at`'s leaf, in the held parent and checked to
+/// be there (deleted again through its handle when it isn't). Its handle can write, set
+/// attributes and rename or delete it. `next` numbers the names (`next_temp_number`; a test
+/// seam); a name that exists is skipped.
+fn create_temp(at: &Beneath, next: &mut dyn FnMut() -> usize) -> io::Result<File> {
+    let parent = at.parent_file();
+    for _ in 0..ATTEMPTS {
+        let name = temp_name(at.leaf_name(), next());
+        let file = match nt_open(
+            parent,
+            &name,
+            GENERIC_WRITE | DELETE,
+            FILE_SHARE_READ,
+            FILE_CREATE,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+            FILE_ATTRIBUTE_NORMAL,
+        ) {
+            Ok(file) => file,
+            Err(error)
+                if error.raw_os_error() == Some(ERROR_ALREADY_EXISTS)
+                    || error.kind() == io::ErrorKind::AlreadyExists =>
+            {
+                continue
+            }
+            Err(error) => return Err(error),
+        };
+        if !in_parent(&file, parent)? {
+            delete_by_handle(&file)?;
+            return Err(redirected());
+        }
+        return Ok(file);
+    }
+    Err(io::Error::from_raw_os_error(ERROR_ALREADY_EXISTS))
+}
+
+/// Gives the new file the replaced file's settable attributes. OneDrive's pinned/unpinned
+/// attributes only mean something in a synced folder: where they are refused, the others
+/// (read-only, hidden, system, archive, not content indexed) are set alone.
+fn keep_attributes(file: &File, attributes: u32) -> io::Result<()> {
+    const BASIC: u32 = 0x1 | 0x2 | 0x4 | 0x20 | 0x2000;
+    set_attributes(file, attributes).or_else(|_| set_attributes(file, attributes & BASIC))
+}
+
+/// `write`'s error for a rename that failed: in use when another program holds the target
+/// without sharing delete (a sharing violation, or access denied while an open of it for
+/// deleting is refused as a sharing violation); read-only when it became read-only meanwhile;
+/// else `error` itself.
+fn rename_error(
+    at: &Beneath,
+    target: &OsStr,
+    error: io::Error,
+    in_use: &dyn Fn() -> io::Error,
+) -> io::Error {
+    match error.raw_os_error() {
+        Some(ERROR_SHARING_VIOLATION) => in_use(),
+        Some(ERROR_ACCESS_DENIED) => {
+            if let Ok(Some((first, Found::File { .. }))) = open_leaf_at(at, target, Purpose::Read) {
+                if has_read_only_attribute(&first).unwrap_or(false) {
+                    return super::read_only_error();
+                }
+            }
+            let held = nt_open(
+                at.parent_file(),
+                target,
+                DELETE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                FILE_OPEN,
+                FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+                0,
+            );
+            match held {
+                Err(probe) if probe.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => in_use(),
+                _ => error,
+            }
+        }
+        _ => error,
+    }
+}
+
+/// Renames the open file `file` to `name` in the held folder `parent`, replacing whatever file
+/// or link has that name (never following it): `NtSetInformationFile` on `file`'s handle with
+/// `RootDirectory` = `parent`, so the name is resolved against the held folder, never a path.
+/// POSIX semantics (`FileRenameInformationEx`) replace a file another program keeps open with
+/// delete sharing (a scanner, the indexer); where that class or flag isn't supported (older
+/// Windows, FAT, some shares) the classic `FileRenameInformation` with `ReplaceIfExists`.
+fn rename_in_parent(file: &File, parent: &File, name: &OsStr) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = name.encode_wide().collect();
+    rename_in_parent_with(|class, flags| set_rename_info(file, parent, class, flags, &wide))
+}
+
+/// `rename_in_parent` with `set(class, flags)` as the rename call (a test seam).
+fn rename_in_parent_with(mut set: impl FnMut(i32, u32) -> io::Result<()>) -> io::Result<()> {
+    match set(
+        FILE_RENAME_INFORMATION_EX_CLASS,
+        FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS,
+    ) {
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER)
+            ) =>
+        {
+            // `ReplaceIfExists` = TRUE, the first byte of the same field.
+            set(FILE_RENAME_INFORMATION_CLASS, 1)
+        }
+        other => other,
+    }
+}
+
+/// `FILE_RENAME_INFORMATION(_EX)`'s fixed part: a `BOOLEAN ReplaceIfExists` / `ULONG Flags`
+/// union, the `RootDirectory` handle and the name's length in bytes; the name (`WCHAR`s, no
+/// terminating NUL) follows at `RENAME_NAME_OFFSET`.
+#[repr(C)]
+struct RenameInfo {
+    flags: u32,
+    root_directory: *mut c_void,
+    file_name_length: u32,
+}
+
+const RENAME_NAME_OFFSET: usize = std::mem::offset_of!(RenameInfo, file_name_length) + 4;
+
+/// A `FILE_RENAME_INFORMATION(_EX)` for `name` in `root`, in a buffer aligned for it. Its size
+/// in bytes is the buffer's, at least the structure's.
+fn rename_info(flags: u32, root: *mut c_void, name: &[u16]) -> io::Result<Vec<u64>> {
+    let name_bytes = name.len() * 2;
+    let file_name_length = u32::try_from(name_bytes)
+        .ok()
+        .filter(|&length| length > 0)
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let size = (RENAME_NAME_OFFSET + name_bytes).max(std::mem::size_of::<RenameInfo>());
+    let mut buf = vec![0u64; size.div_ceil(8)];
+    let base = buf.as_mut_ptr().cast::<u8>();
+    // SAFETY: `buf` holds at least `size` bytes, aligned for `RenameInfo` (8); the fixed part is
+    // written first, then the name after `RENAME_NAME_OFFSET`, which may overwrite the fixed
+    // part's trailing padding only, and ends within `size`.
+    unsafe {
+        base.cast::<RenameInfo>().write(RenameInfo {
+            flags,
+            root_directory: root,
+            file_name_length,
+        });
+        std::ptr::copy_nonoverlapping(
+            name.as_ptr().cast::<u8>(),
+            base.add(RENAME_NAME_OFFSET),
+            name_bytes,
+        );
+    }
+    Ok(buf)
+}
+
+fn set_rename_info(
+    file: &File,
+    parent: &File,
+    class: i32,
+    flags: u32,
+    name: &[u16],
+) -> io::Result<()> {
+    let mut info = rename_info(flags, parent.as_raw_handle(), name)?;
+    let length =
+        u32::try_from(info.len() * 8).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let mut io_status = IoStatusBlock {
+        status: 0,
+        information: 0,
+    };
+    // SAFETY: the handles belong to `file` and `parent`, which outlive the call; `info` is a
+    // `FILE_RENAME_INFORMATION(_EX)` of `length` bytes built by `rename_info`, and `io_status`
+    // is writable.
+    let status = unsafe {
+        NtSetInformationFile(
+            file.as_raw_handle(),
+            &mut io_status,
+            info.as_mut_ptr().cast(),
+            length,
+            class,
+        )
+    };
+    if status < 0 {
+        // SAFETY: a pure conversion of a status code.
+        let code = unsafe { RtlNtStatusToDosError(status) } as i32;
+        if code == ERROR_CANT_RESOLVE_FILENAME {
+            return Err(redirected());
+        }
+        return Err(io::Error::from_raw_os_error(code));
+    }
+    Ok(())
 }
 
 /// `write`'s error for a file it may not open for writing: `read_only_error` when the open was
@@ -1617,6 +1977,7 @@ mod tests {
             .unwrap()
             .permissions()
             .readonly());
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
     }
 
     #[test]
@@ -1648,6 +2009,326 @@ mod tests {
             std::fs::read_to_string(dir.path().join("d/g")).unwrap(),
             "created"
         );
+    }
+
+    /// The names in `dir`, sorted.
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// A fill that writes "par" and then fails, as a full disk would.
+    fn fail_halfway(file: &mut File) -> io::Result<()> {
+        file.write_all(b"par")?;
+        Err(io::Error::other("disk full"))
+    }
+
+    fn attributes_of(path: &Path) -> u32 {
+        use std::os::windows::fs::MetadataExt;
+        std::fs::symlink_metadata(path).unwrap().file_attributes()
+    }
+
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+
+    fn make_hidden(path: &Path) {
+        let status = std::process::Command::new("attrib")
+            .arg("+H")
+            .arg(path)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "attrib +H failed");
+        assert_ne!(attributes_of(path) & FILE_ATTRIBUTE_HIDDEN, 0);
+    }
+
+    #[test]
+    fn a_failed_write_keeps_the_old_content() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old content").unwrap();
+        make_hidden(&f);
+        let error = write_with(
+            dir.path(),
+            Path::new("d/f"),
+            &mut no_step,
+            &mut fail_halfway,
+            &mut || {},
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old content");
+        assert_ne!(attributes_of(&f) & FILE_ATTRIBUTE_HIDDEN, 0);
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn a_failed_write_of_a_new_file_leaves_nothing() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d").join("f"), "old").unwrap();
+        let error = write_with(
+            dir.path(),
+            Path::new("d/new"),
+            &mut no_step,
+            &mut fail_halfway,
+            &mut || {},
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn write_keeps_the_hidden_attribute() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        make_hidden(&f);
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert_ne!(attributes_of(&f) & FILE_ATTRIBUTE_HIDDEN, 0);
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn write_keeps_the_on_disk_name_case() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d").join("F.txt"), "old").unwrap();
+        assert!(write(dir.path(), Path::new("d/f.txt"), b"new", &mut no_step).unwrap());
+        assert_eq!(names_in(&dir.path().join("d")), ["F.txt"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d").join("F.txt")).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn writing_a_file_held_without_share_delete_is_in_use() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        // As an editor that keeps the file open, sharing read and write but not delete.
+        let _editor = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&f)
+            .unwrap();
+        let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
+        assert!(crate::worktree_guard::is_in_use(&error), "{error:?}");
+        assert_eq!(
+            error.to_string(),
+            "'d/f' is open in another program. Close it, then try again."
+        );
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn writing_a_file_held_without_share_write_is_in_use() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        // Shares reading only: the probe for writing is refused before any temporary file.
+        let _holder = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&f)
+            .unwrap();
+        let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
+        assert!(crate::worktree_guard::is_in_use(&error), "{error:?}");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    /// A written file, opened as `write` holds it after the rename (`DELETE` access).
+    fn renamed_file(dir: &Path) -> (PathBuf, File) {
+        let path = dir.join("f");
+        std::fs::write(&path, "new").unwrap();
+        let file = OpenOptions::new()
+            .access_mode(GENERIC_WRITE | DELETE)
+            .share_mode(FILE_SHARE_READ)
+            .open(&path)
+            .unwrap();
+        (path, file)
+    }
+
+    #[test]
+    fn a_failed_check_after_the_rename_keeps_the_file() {
+        let dir = TempDir::new().unwrap();
+        let (path, file) = renamed_file(dir.path());
+        let root = final_path(&open_pinned(dir.path(), 0).unwrap());
+        let unreadable = || Err(io::Error::from_raw_os_error(ERROR_NOT_SUPPORTED));
+        assert!(settle_after_rename(&file, unreadable(), root).unwrap());
+        assert!(settle_after_rename(&file, final_path(&file), unreadable()).unwrap());
+        drop(file);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
+    fn a_file_moved_elsewhere_in_the_work_tree_after_the_rename_is_kept() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let (path, file) = renamed_file(&dir.path().join("sub"));
+        let root = final_path(&open_pinned(dir.path(), 0).unwrap()).unwrap();
+        // As a sync tool may have moved it: elsewhere, but still inside the work tree.
+        let moved = root.join("other").join("f");
+        assert!(settle_after_rename(&file, Ok(moved), Ok(root)).unwrap());
+        drop(file);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
+    fn a_file_that_landed_outside_the_work_tree_is_deleted() {
+        let work_tree = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let (path, file) = renamed_file(outside.path());
+        let root = final_path(&open_pinned(work_tree.path(), 0).unwrap());
+        let error = settle_after_rename(&file, final_path(&file), root).unwrap_err();
+        assert_eq!(error.to_string(), redirected().to_string());
+        drop(file);
+        assert!(std::fs::symlink_metadata(&path).is_err(), "still there");
+    }
+
+    #[test]
+    fn is_beneath_compares_whole_components_ignoring_case() {
+        let root = Path::new(r"\\?\C:\Work");
+        assert!(is_beneath(Path::new(r"\\?\C:\work\d\f"), root));
+        assert!(is_beneath(
+            Path::new(r"\\?\C:\Work\f"),
+            Path::new(r"\\?\C:\Work\")
+        ));
+        assert!(!is_beneath(Path::new(r"\\?\C:\Work2\f"), root));
+        assert!(!is_beneath(Path::new(r"\\?\C:\Work"), root));
+        assert!(!is_beneath(Path::new(r"\\?\D:\Work\f"), root));
+    }
+
+    #[test]
+    fn a_file_held_for_a_moment_is_replaced_after_a_retry() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        // Shares reading and writing, not delete: the rename is refused while it is open.
+        let mut holder = Some(
+            OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .open(&f)
+                .unwrap(),
+        );
+        let mut waits = 0;
+        let written = write_with(
+            dir.path(),
+            Path::new("d/f"),
+            &mut no_step,
+            &mut |file| file.write_all(b"new"),
+            // The other program closes the file during the first wait.
+            &mut || {
+                waits += 1;
+                holder.take();
+            },
+        );
+        assert!(written.unwrap());
+        assert_eq!(waits, 1);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn create_temp_skips_names_that_exist() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        for n in 0..2 {
+            let name = temp_name(OsStr::new("f"), n);
+            std::fs::write(dir.path().join("d").join(&name), "someone else's").unwrap();
+        }
+        let Walk::Found(at) = walk(
+            dir.path(),
+            Path::new("d/f"),
+            OnLink::Refuse,
+            OnMissing::Stop,
+            &mut no_step,
+        )
+        .unwrap() else {
+            panic!("not found")
+        };
+        let mut n = 0;
+        let temp = create_temp(&at, &mut || {
+            n += 1;
+            n - 1
+        })
+        .unwrap();
+        assert_eq!(
+            final_path(&temp).unwrap().file_name().unwrap(),
+            temp_name(OsStr::new("f"), 2)
+        );
+        delete_by_handle(&temp).unwrap();
+        drop(temp);
+        for n in 0..2 {
+            let name = temp_name(OsStr::new("f"), n);
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join("d").join(&name)).unwrap(),
+                "someone else's"
+            );
+        }
+        // Every name taken: an error, nothing created.
+        let error = create_temp(&at, &mut || 0).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(ERROR_ALREADY_EXISTS));
+        assert_eq!(names_in(&dir.path().join("d")).len(), 2);
+    }
+
+    #[test]
+    fn on_disk_name_takes_the_final_spelling_only_for_the_same_name() {
+        assert_eq!(
+            on_disk_name(OsStr::new("f.txt"), Path::new(r"\\?\C:\d\F.txt")),
+            "F.txt"
+        );
+        // A short 8.3 name, or another name of a hardlinked file: the leaf as given.
+        assert_eq!(
+            on_disk_name(
+                OsStr::new("LONGFI~1.TXT"),
+                Path::new(r"\\?\C:\d\longfilename.txt")
+            ),
+            "LONGFI~1.TXT"
+        );
+        assert_eq!(on_disk_name(OsStr::new("a"), Path::new(r"\\?\C:\d\b")), "a");
+    }
+
+    #[test]
+    fn writing_a_hardlink_keeps_its_name_and_the_other_name_keeps_the_old_content() {
+        // Both names in one folder: the final path may report either, and the new file must
+        // still get the name written. (A hardlink whose other name is in another folder fails
+        // the walker's in-the-held-parent check, as it did before #239.)
+        let dir = TempDir::new().unwrap();
+        let d = dir.path().join("d");
+        std::fs::create_dir(&d).unwrap();
+        std::fs::write(d.join("a-other"), "old").unwrap();
+        std::fs::hard_link(d.join("a-other"), d.join("f")).unwrap();
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
+        assert_eq!(names_in(&d), ["a-other", "f"]);
+        assert_eq!(std::fs::read_to_string(d.join("f")).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(d.join("a-other")).unwrap(), "old");
+    }
+
+    #[test]
+    fn a_file_held_open_by_a_scanner_is_still_replaced() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        let _scanner = hold_open_like_a_scanner(&f);
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
     }
 
     #[test]
@@ -1934,6 +2615,104 @@ mod tests {
         assert_eq!(std::mem::size_of::<UnicodeString>(), 16);
         assert_eq!(std::mem::size_of::<ObjectAttributes>(), 48);
         assert_eq!(std::mem::size_of::<IoStatusBlock>(), 16);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn rename_info_has_the_documented_layout() {
+        // `FILE_RENAME_INFORMATION` on 64-bit: Flags at 0, RootDirectory at 8, FileNameLength
+        // at 16, FileName at 20; `sizeof` 24.
+        assert_eq!(std::mem::size_of::<RenameInfo>(), 24);
+        assert_eq!(RENAME_NAME_OFFSET, 20);
+        let root = 0x1234_5678_usize as *mut c_void;
+        let name: Vec<u16> = "f.txt".encode_utf16().collect();
+        let buf = rename_info(3, root, &name).unwrap();
+        // SAFETY: reading back the bytes of a plain `Vec<u64>`.
+        let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), buf.len() * 8) };
+        assert_eq!(bytes.len(), 32);
+        assert_eq!(&bytes[0..4], &3u32.to_ne_bytes());
+        assert_eq!(&bytes[8..16], &0x1234_5678_u64.to_ne_bytes());
+        assert_eq!(&bytes[16..20], &10u32.to_ne_bytes());
+        let written: Vec<u16> = bytes[20..30]
+            .chunks(2)
+            .map(|unit| u16::from_ne_bytes([unit[0], unit[1]]))
+            .collect();
+        assert_eq!(written, name);
+        // A one-letter name still passes the whole structure's size.
+        assert_eq!(rename_info(1, root, &[0x66]).unwrap().len() * 8, 24);
+        assert!(rename_info(1, root, &[]).is_err());
+    }
+
+    #[test]
+    fn rename_falls_back_to_the_classic_class_where_posix_renames_are_refused() {
+        for refusal in [
+            ERROR_INVALID_PARAMETER,
+            ERROR_NOT_SUPPORTED,
+            ERROR_INVALID_FUNCTION,
+        ] {
+            let mut calls = Vec::new();
+            rename_in_parent_with(|class, flags| {
+                calls.push((class, flags));
+                if class == FILE_RENAME_INFORMATION_EX_CLASS {
+                    Err(io::Error::from_raw_os_error(refusal))
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap();
+            assert_eq!(
+                calls,
+                [
+                    (FILE_RENAME_INFORMATION_EX_CLASS, 0x3),
+                    (FILE_RENAME_INFORMATION_CLASS, 1)
+                ]
+            );
+        }
+        // Any other failure is the answer.
+        let mut calls = 0;
+        let error = rename_in_parent_with(|_, _| {
+            calls += 1;
+            Err(io::Error::from_raw_os_error(ERROR_SHARING_VIOLATION))
+        })
+        .unwrap_err();
+        assert_eq!(
+            (calls, error.raw_os_error()),
+            (1, Some(ERROR_SHARING_VIOLATION))
+        );
+    }
+
+    #[test]
+    fn rename_in_parent_replaces_a_file_in_the_held_folder() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("f"), "old").unwrap();
+        let held = open_pinned(dir.path(), FILE_LIST_DIRECTORY).unwrap();
+        let mut temp = nt_open(
+            &held,
+            OsStr::new("t"),
+            GENERIC_WRITE | DELETE,
+            FILE_SHARE_READ,
+            FILE_CREATE,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+            FILE_ATTRIBUTE_NORMAL,
+        )
+        .unwrap();
+        temp.write_all(b"new").unwrap();
+        rename_in_parent(&temp, &held, OsStr::new("f")).unwrap();
+        drop(temp);
+        assert_eq!(names_in(dir.path()), ["f"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("f")).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn temp_names_are_short_hidden_and_distinct() {
+        let long: String = "x".repeat(200);
+        let name = temp_name(OsStr::new(&long), 7).into_string().unwrap();
+        assert!(name.starts_with(&format!(".{}.browsitory-", "x".repeat(64))));
+        assert!(name.ends_with("-7.tmp"));
+        assert_ne!(temp_name(OsStr::new("f"), 1), temp_name(OsStr::new("f"), 2));
     }
 
     #[test]
