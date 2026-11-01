@@ -124,6 +124,13 @@ pub enum SequenceOutcome {
         output: String,
         progress: SequenceProgress,
     },
+    /// Cancel was pressed while a step's hooks ran after its commit (D9-A): that commit (summary
+    /// `kept`) stands and the sequence stopped before `progress.current_commit`; Continue goes
+    /// on from there.
+    Stopped {
+        kept: String,
+        progress: SequenceProgress,
+    },
 }
 
 /// How finishing git's paused step went.
@@ -422,8 +429,11 @@ fn step(
         &tree,
         &[head],
     )?;
-    repo.cleanup_state()?;
+    // As git's sequencer (`try_to_commit`): `post-commit` runs while CHERRY_PICK_HEAD and
+    // MERGE_MSG are still there. The commit landed, so a state that can't be cleared is logged,
+    // not an error (D7-A): the step counts and the sequence moves on.
     crate::commit::run_post_commit(repo, hooks);
+    crate::commit::cleanup_after_commit(repo);
     Ok(StepResult::Committed(oid))
 }
 
@@ -452,7 +462,7 @@ fn revert_message(target: &Commit<'_>, mainline: Option<u32>) -> String {
 /// (`SequenceOutcome::HookFailed`), pauses the sequence on that step (git state `CherryPick`,
 /// like a single pick) and returns its state for `continue_sequence`/`abort_sequence`. A cancel
 /// during a step's `post-commit` keeps that commit and stops the sequence after it
-/// (`PickError::Hook`, state kept; Continue goes on with the next step). Merge commits are
+/// (`SequenceOutcome::Stopped`, state kept; Continue goes on with the next step). Merge commits are
 /// refused up front.
 pub fn cherry_pick_many(
     repo: &Repository,
@@ -552,17 +562,23 @@ fn run(repo: &Repository, mut state: SequenceState, hooks: &mut HookOptions<'_>)
     while state.next < state.commits.len() {
         // A Cancel during the previous step's `post-commit` (or the step Continue committed)
         // keeps that commit and stops before the next step (D9-A); Continue resumes here.
+        // Not an error: the last step's commit stands (`SequenceOutcome::Stopped`).
         if cancelled(hooks) {
-            if let Ok(head) = repo.head().and_then(|head| head.peel_to_commit()) {
-                state.expected_head = head.id().to_string();
-            }
+            let kept = match repo.head().and_then(|head| head.peel_to_commit()) {
+                Ok(head) => {
+                    state.expected_head = head.id().to_string();
+                    head.summary().ok().flatten().unwrap_or("").to_string()
+                }
+                Err(error) => return SequenceRun::stopped(error, state),
+            };
             state.stopped_on_conflict = false;
-            return SequenceRun::stopped(
-                crate::hooks::HookError::Cancelled {
-                    hook: "post-commit".to_string(),
-                },
-                state,
-            );
+            return SequenceRun {
+                outcome: Ok(SequenceOutcome::Stopped {
+                    kept,
+                    progress: state.progress(),
+                }),
+                state: Some(state),
+            };
         }
         let result = (|| {
             let head = repo.head()?.peel_to_commit()?;
@@ -651,6 +667,13 @@ pub fn continue_sequence(
     if let Err(error) = check_signing(repo) {
         return SequenceRun::stopped(error, state);
     }
+    // The previous step's commit landed but its pick state could not be cleared (D7-A): clear
+    // it now, so Continue goes on with the next step instead of refusing.
+    if is_leftover_of_committed_step(repo, &state) {
+        if let Err(error) = repo.cleanup_state() {
+            return SequenceRun::stopped(error, state);
+        }
+    }
     let resumed = match repo.state() {
         RepositoryState::CherryPick
         | RepositoryState::CherryPickSequence
@@ -671,6 +694,30 @@ pub fn continue_sequence(
         },
         Err(error) => SequenceRun::stopped(error, state),
     }
+}
+
+/// git's pick state names the step before the current one, and HEAD is where that step's commit
+/// left it: the commit landed and only its state was left behind (D7-A).
+fn is_leftover_of_committed_step(repo: &Repository, state: &SequenceState) -> bool {
+    let Some(previous) = state.next.checked_sub(1).and_then(|i| state.commits.get(i)) else {
+        return false;
+    };
+    let head_file = match repo.state() {
+        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => "CHERRY_PICK_HEAD",
+        RepositoryState::Revert | RepositoryState::RevertSequence => "REVERT_HEAD",
+        _ => return false,
+    };
+    let names_previous = repo
+        .find_reference(head_file)
+        .ok()
+        .and_then(|reference| reference.target())
+        .is_some_and(|oid| oid.to_string() == *previous);
+    let head_unmoved = repo
+        .head()
+        .ok()
+        .and_then(|head| head.target())
+        .is_some_and(|oid| oid.to_string() == state.expected_head);
+    names_previous && head_unmoved
 }
 
 /// True when git's paused pick/revert is this sequence's current step (not one started some

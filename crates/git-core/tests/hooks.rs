@@ -455,7 +455,15 @@ fn prepare_commit_msg_source_is_merge_while_finishing_a_merge() {
     common::commit_all(&repo, "second");
     let first_id = first.id();
     drop(first);
-    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{first_id}\n")).unwrap();
+    // A side commit, not HEAD's ancestor: MERGE_HEAD naming an ancestor reads as a merge that
+    // was already committed (#183).
+    let side = common::commit_tree(
+        &repo,
+        &[("a.txt", "a", 0o100644), ("c.txt", "c", 0o100644)],
+        &[first_id],
+        "side",
+    );
+    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{side}\n")).unwrap();
     assert_eq!(repo.state(), git2::RepositoryState::Merge);
     common::install_hook(
         &hooks_dir(&repo).unwrap(),
@@ -1253,4 +1261,87 @@ fn a_cleanup_failure_after_a_merge_commit_still_reports_it() {
     let head = repo.head().unwrap().peel_to_commit().unwrap();
     assert_eq!(head.id().to_string(), committed.commit_id);
     assert_eq!(head.parent_count(), 2);
+}
+
+#[test]
+fn a_merge_restarted_during_pre_merge_commit_keeps_the_new_merge_msg() {
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (_dir, mut repo, _side2) = clean_merge_with_side2();
+    let set = clean_set(&mut repo);
+    let hooks = hooks_dir(&repo).unwrap();
+    common::install_hook(
+        &hooks,
+        "pre-merge-commit",
+        "git merge --abort && git merge --no-ff --no-commit side2 >/dev/null",
+    );
+    let log = repo.path().join("hook-log");
+    common::install_hook(
+        &hooks,
+        "prepare-commit-msg",
+        &format!("echo ran >> '{}'", log.display()),
+    );
+
+    let error = commit_with(&mut repo, "Merge feature", set, HookOptions::default()).unwrap_err();
+
+    assert!(matches!(error, CommitError::MergeChanged), "{error:?}");
+    let merge_msg = std::fs::read_to_string(repo.path().join("MERGE_MSG")).unwrap();
+    assert!(
+        merge_msg.contains("side2"),
+        "the restarted merge's MERGE_MSG was replaced: {merge_msg:?}"
+    );
+    assert!(
+        !log.exists(),
+        "no message hook runs for a merge that changed"
+    );
+}
+
+/// D7-A left MERGE_HEAD behind after the merge commit landed; the next commit must not create a
+/// second merge commit: the leftover state is cleared and it commits normally (#183).
+#[test]
+fn a_commit_after_a_leftover_merge_state_is_not_a_second_merge_commit() {
+    let (dir, mut repo) = clean_merge_fixture();
+    let set = clean_set(&mut repo);
+    let Some(read_only) = common::ReadOnlyGitDir::new(&repo) else {
+        return;
+    };
+    let merge_commit = commit_with(&mut repo, "Merge feature", set, HookOptions::default());
+    drop(read_only);
+    merge_commit.unwrap();
+    assert_eq!(repo.state(), git2::RepositoryState::Merge, "leftover state");
+
+    stage(dir.path(), &repo, "after.txt", "after\n");
+    commit(&mut repo, "after the merge", HookOptions::default()).unwrap();
+
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_count(), 1, "not a second merge commit");
+    assert_eq!(head.parent(0).unwrap().parent_count(), 2);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn a_leftover_merge_state_that_cannot_be_cleared_refuses_the_commit() {
+    let (dir, mut repo) = clean_merge_fixture();
+    let set = clean_set(&mut repo);
+    let Some(read_only) = common::ReadOnlyGitDir::new(&repo) else {
+        return;
+    };
+    commit_with(&mut repo, "Merge feature", set, HookOptions::default()).unwrap();
+    let merge_commit = head_id(&repo);
+    drop(read_only);
+    stage(dir.path(), &repo, "after.txt", "after\n");
+    let Some(read_only) = common::ReadOnlyGitDir::new(&repo) else {
+        return;
+    };
+
+    let error = commit(&mut repo, "after the merge", HookOptions::default()).unwrap_err();
+    drop(read_only);
+
+    assert!(
+        matches!(error, CommitError::LeftoverMergeState),
+        "{error:?}"
+    );
+    assert_eq!(head_id(&repo), merge_commit);
 }

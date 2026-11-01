@@ -41,6 +41,9 @@ pub enum CommitError {
     /// hooks ran (#183); nothing was committed.
     #[error("The merge changed while its hooks ran. Nothing was committed; check the merge and commit again.")]
     MergeChanged,
+    /// The merge was already committed but its MERGE_HEAD can't be removed (#183).
+    #[error("This merge was already committed, but git's merge state can't be cleared. Check the permissions of the .git folder, then commit again.")]
+    LeftoverMergeState,
 }
 
 /// A person as typed or listed in the UI: an amend author override, or a recent author.
@@ -299,28 +302,57 @@ pub(crate) fn run_commit_hooks(
     message_file: MessageFile,
     options: &mut HookOptions<'_>,
 ) -> Result<HookedMessage, CommitError> {
+    let reload_index = run_pre_hook(repo, pre_hook, options)?;
+    let message = run_message_hooks(repo, message, source, message_file, options)?;
+    Ok(HookedMessage {
+        message,
+        reload_index,
+    })
+}
+
+/// The pre hook of `run_commit_hooks` alone (skipped by `no_verify`); `Ok(true)` when it ran.
+fn run_pre_hook(
+    repo: &git2::Repository,
+    pre_hook: &str,
+    options: &mut HookOptions<'_>,
+) -> Result<bool, CommitError> {
+    if options.no_verify {
+        return Ok(false);
+    }
     let index_path = repo.path().join("index");
     let env: [(&str, &OsStr); 2] = [
         ("GIT_INDEX_FILE", index_path.as_os_str()),
         ("GIT_EDITOR", OsStr::new(":")),
     ];
-    let mut reload_index = false;
-    if !options.no_verify {
-        let pre_commit = HookInvocation {
+    gate(
+        repo,
+        &HookInvocation {
             name: pre_hook,
             args: &[],
             stdin: None,
             env: &env,
-        };
-        reload_index = gate(repo, &pre_commit, options)?;
-    }
+        },
+        options,
+    )
+}
+
+/// The message hooks of `run_commit_hooks` alone: the message, possibly rewritten.
+fn run_message_hooks(
+    repo: &git2::Repository,
+    message: &str,
+    source: &str,
+    message_file: MessageFile,
+    options: &mut HookOptions<'_>,
+) -> Result<String, CommitError> {
+    let index_path = repo.path().join("index");
+    let env: [(&str, &OsStr); 2] = [
+        ("GIT_INDEX_FILE", index_path.as_os_str()),
+        ("GIT_EDITOR", OsStr::new(":")),
+    ];
     let message_hooks = installed(repo, "prepare-commit-msg")?
         || (!options.no_verify && installed(repo, "commit-msg")?);
     if !message_hooks {
-        return Ok(HookedMessage {
-            message: message.to_string(),
-            reload_index,
-        });
+        return Ok(message.to_string());
     }
     let path = message_file.path(repo);
     std::fs::write(&path, message)?;
@@ -353,10 +385,7 @@ pub(crate) fn run_commit_hooks(
     if edited.trim().is_empty() {
         return Err(CommitError::EmptyMessage);
     }
-    Ok(HookedMessage {
-        message: edited,
-        reload_index,
-    })
+    Ok(edited)
 }
 
 /// Only `prepare-commit-msg <COMMIT_EDITMSG> <source>`, as git's sequencer runs it for each
@@ -513,13 +542,22 @@ pub fn commit_with(
     // end of this function's scope, not just its last use — so it (and everything borrowed
     // alongside it) is confined to the block below, ending before `cleanup_state` needs `&mut`
     // again.
-    let is_merging = repo.state() == git2::RepositoryState::Merge;
-    let merge_parent_ids = if is_merging {
+    let mut is_merging = repo.state() == git2::RepositoryState::Merge;
+    let mut merge_parent_ids = if is_merging {
         merge_heads(repo)?
     } else {
         Vec::new()
     };
     let head_before = head_commit_id(repo);
+    // A merge whose commit already landed but whose state could not be cleared (D7-A): every
+    // MERGE_HEAD is already in HEAD's history. Committing "the merge" again would make a second
+    // merge commit, so the leftover state is cleared and this is an ordinary commit (#183).
+    if is_merging && merge_already_committed(repo, head_before, &merge_parent_ids) {
+        repo.cleanup_state()
+            .map_err(|_| CommitError::LeftoverMergeState)?;
+        is_merging = false;
+        merge_parent_ids.clear();
+    }
 
     let pick_author = if matches!(
         repo.state(),
@@ -546,14 +584,25 @@ pub fn commit_with(
         ("pre-commit", MessageFile::CommitEditmsg)
     };
     let source = message_source(repo, is_merging);
-    let hooked = run_commit_hooks(repo, message, pre_hook, source, message_file, &mut hooks)?;
     // The parents were read before the hooks, which may run for minutes: a merge aborted and
-    // restarted meanwhile must not be committed with the old merge's parents (#183).
-    if is_merging
-        && (repo.state() != git2::RepositoryState::Merge
-            || head_commit_id(repo) != head_before
-            || merge_heads(repo)? != merge_parent_ids)
-    {
+    // restarted meanwhile must not be committed with the old merge's parents (#183). Checked
+    // after the pre hook too, so a restarted merge's fresh MERGE_MSG isn't overwritten by the
+    // message file of the old one.
+    let merge_changed = |repo: &mut git2::Repository| -> Result<bool, CommitError> {
+        Ok(is_merging
+            && (repo.state() != git2::RepositoryState::Merge
+                || head_commit_id(repo) != head_before
+                || merge_heads(repo)? != merge_parent_ids))
+    };
+    let reload_index = run_pre_hook(repo, pre_hook, &mut hooks)?;
+    if merge_changed(repo)? {
+        return Err(CommitError::MergeChanged);
+    }
+    let hooked = HookedMessage {
+        message: run_message_hooks(repo, message, source, message_file, &mut hooks)?,
+        reload_index,
+    };
+    if merge_changed(repo)? {
         return Err(CommitError::MergeChanged);
     }
 
@@ -618,6 +667,21 @@ pub fn commit_with(
         commit_id: oid.to_string(),
         merge_hooks,
     })
+}
+
+/// Every one of `merge_heads` is HEAD or in HEAD's history: the merge was already committed.
+fn merge_already_committed(
+    repo: &git2::Repository,
+    head: Option<git2::Oid>,
+    merge_heads: &[git2::Oid],
+) -> bool {
+    let Some(head) = head else {
+        return false;
+    };
+    !merge_heads.is_empty()
+        && merge_heads.iter().all(|merge_head| {
+            *merge_head == head || repo.graph_descendant_of(head, *merge_head).unwrap_or(false)
+        })
 }
 
 /// `MERGE_HEAD`'s commits, in order.

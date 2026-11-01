@@ -63,6 +63,9 @@ fn persist(sequence_store: &SequenceStore, run: SequenceRun) -> Result<SequenceO
         Ok(SequenceOutcome::HookFailed { hook, .. }) => Err(format!(
             "The {hook} hook failed, and the cherry-pick or revert's progress could not be saved ({store_error}). Commit the paused step, or abort it."
         )),
+        Ok(SequenceOutcome::Stopped { kept, .. }) => Err(format!(
+            "Stopped after \"{kept}\" (its commit was kept), but the cherry-pick or revert's progress could not be saved ({store_error})."
+        )),
         Ok(_) => Err(format!(
             "The cherry-pick or revert stopped on a conflict, but its progress could not be saved ({store_error}). Resolve the conflict and commit, or abort it."
         )),

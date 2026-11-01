@@ -741,10 +741,17 @@ pub enum SequenceOutcomeDto {
         files: Vec<String>,
         progress: SequenceProgressDto,
     },
-    /// Continue's commit hook failed; the step is still paused (#133).
+    /// A commit hook failed (Continue's, #133, or a clean step's `prepare-commit-msg`, #183);
+    /// the step is paused.
     HookFailed {
         hook: String,
         output: String,
+        progress: SequenceProgressDto,
+    },
+    /// Cancel during a step's post-commit: that commit (`kept`, its summary) stands and the
+    /// sequence stopped before `progress.currentCommit` (#183, D9-A).
+    Stopped {
+        kept: String,
         progress: SequenceProgressDto,
     },
 }
@@ -766,6 +773,10 @@ impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
             } => Self::HookFailed {
                 hook,
                 output,
+                progress: progress.into(),
+            },
+            git_core::pick::SequenceOutcome::Stopped { kept, progress } => Self::Stopped {
+                kept,
                 progress: progress.into(),
             },
         }
@@ -3080,6 +3091,26 @@ mod tests {
             serde_json::to_value(dto).unwrap()["squashMessage"],
             serde_json::json!("Squashed commit of the following:\n")
         );
+    }
+
+    #[test]
+    fn sequence_outcome_stopped_serializes_the_kept_commit_and_progress() {
+        use git_core::pick::{SequenceKind, SequenceOutcome, SequenceProgress};
+        let stopped =
+            serde_json::to_value(super::SequenceOutcomeDto::from(SequenceOutcome::Stopped {
+                kept: "f one".into(),
+                progress: SequenceProgress {
+                    kind: SequenceKind::CherryPick,
+                    current_step: 2,
+                    total_steps: 3,
+                    current_commit: "c2".into(),
+                },
+            }))
+            .unwrap();
+        assert_eq!(stopped["kind"], "Stopped");
+        assert_eq!(stopped["kept"], "f one");
+        assert_eq!(stopped["progress"]["currentStep"], 2);
+        assert_eq!(stopped["progress"]["currentCommit"], "c2");
     }
 
     #[test]

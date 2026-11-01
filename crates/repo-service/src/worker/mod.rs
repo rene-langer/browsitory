@@ -2657,7 +2657,13 @@ mod tests {
         let result = handle.cherry_pick_many(vec![ids[0].clone(), ids[2].clone()], events);
         watcher.join().unwrap();
 
-        assert_eq!(result.unwrap_err(), "The post-commit hook was cancelled.");
+        assert!(
+            matches!(
+                &result,
+                Ok(git_core::pick::SequenceOutcome::Stopped { kept, .. }) if kept == "f one"
+            ),
+            "{result:?}"
+        );
         let reopened = Repository::open(dir.path()).unwrap();
         let head = reopened.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(head.summary().unwrap(), Some("f one"));

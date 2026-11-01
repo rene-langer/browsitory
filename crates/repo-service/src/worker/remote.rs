@@ -335,8 +335,10 @@ pub(super) fn pull<S: CredentialStore>(
     })();
     // git runs post-merge after a pull that fast-forwarded. It runs on the pull's own operation:
     // the transfer panel shows it (`RunningHook`), and its Cancel stops only the hook; the pull's
-    // outcome stands (#185).
+    // outcome stands (#185). A Cancel pressed earlier (during the fetch) that came too late to
+    // stop the pull is dropped first, so post-merge only honours a Cancel pressed while it runs.
     if matches!(result, Ok(PullOutcome::FastForwarded { .. })) {
+        op.clear();
         let installed = matches!(
             git_core::hooks::find_hook(repo, "post-merge"),
             Ok(git_core::hooks::HookLookup::Found(_))

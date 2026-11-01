@@ -731,3 +731,40 @@ fn a_prepare_commit_msg_that_empties_the_message_leaves_the_pick_staged() {
     );
     assert_eq!(repo.state(), git2::RepositoryState::CherryPick);
 }
+
+/// D7-A on a clean pick (#216): a post-commit hook makes `.git` read-only after the commit
+/// landed, so the pick state can't be cleared; the pick still counts as committed.
+#[cfg(unix)]
+#[test]
+fn a_cleanup_failure_after_a_clean_pick_still_counts_it() {
+    let (_dir, repo, feature_tip) = repo_with_feature_branch();
+    let before = repo.head().unwrap().target().unwrap();
+    let Some(restore) = common::ReadOnlyGitDir::restore_later(&repo) else {
+        return;
+    };
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "post-commit",
+        &format!("chmod 555 '{}'", repo.path().display()),
+    );
+
+    let outcome = cherry_pick(
+        &repo,
+        &feature_tip,
+        None,
+        git_core::hooks::HookOptions::default(),
+    );
+    drop(restore);
+
+    let Ok(PickOutcome::Committed { commit_id }) = outcome else {
+        panic!("expected Committed, got {outcome:?}")
+    };
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.id().to_string(), commit_id);
+    assert_eq!(head.parent_id(0).unwrap(), before);
+    assert_eq!(
+        repo.state(),
+        git2::RepositoryState::CherryPick,
+        "the leftover state stays for Abort"
+    );
+}

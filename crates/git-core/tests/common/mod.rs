@@ -275,6 +275,15 @@ impl ReadOnlyGitDir {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o555)).unwrap();
         Some(Self(path))
     }
+
+    /// Only puts the mode back on drop: for a test whose hook makes `.git` read-only itself.
+    pub fn restore_later(repo: &Repository) -> Option<Self> {
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("running as root; skipping");
+            return None;
+        }
+        Some(Self(repo.path().to_path_buf()))
+    }
 }
 
 #[cfg(unix)]

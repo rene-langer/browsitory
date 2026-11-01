@@ -1193,8 +1193,9 @@ fn a_pre_commit_that_empties_the_step_skips_it() {
 
 // ---- hooks on clean steps (#183) -------------------------------------------------------------
 
-/// Installs `names` as hooks logging `<name> <basename of $1> <$2>` to `<git dir>/hook-log`, so
-/// the log reads the same whether git passes the message file as an absolute or relative path.
+/// Installs `names` as hooks logging `<name> <basename of $1> <$2> <P if CHERRY_PICK_HEAD><M if
+/// MERGE_MSG>` to `<git dir>/hook-log`, so the log reads the same whether git passes the message
+/// file as an absolute or relative path, and shows the pick state each hook sees.
 #[cfg(unix)]
 fn log_hooks_by_file_name(repo: &Repository, names: &[&str]) {
     let log = repo.path().join("hook-log");
@@ -1203,7 +1204,7 @@ fn log_hooks_by_file_name(repo: &Repository, names: &[&str]) {
             &repo.path().join("hooks"),
             name,
             &format!(
-                r#"echo "{name} ${{1:+$(basename "$1")}} $2" >> '{}'"#,
+                r#"echo "{name} ${{1:+$(basename "$1")}} $2 $(test -f .git/CHERRY_PICK_HEAD && echo P)$(test -f .git/MERGE_MSG && echo M)" >> '{}'"#,
                 log.display()
             ),
         );
@@ -1216,7 +1217,11 @@ fn hook_log(repo: &Repository) -> String {
 }
 
 #[cfg(unix)]
-const CLEAN_STEP_LOG: &str = "prepare-commit-msg COMMIT_EDITMSG message\npost-commit  \n";
+const CLEAN_STEP_LOG: &str = "prepare-commit-msg COMMIT_EDITMSG message PM\npost-commit   PM\n";
+
+/// A clean revert step: git keeps MERGE_MSG but writes no CHERRY_PICK_HEAD.
+#[cfg(unix)]
+const CLEAN_REVERT_LOG: &str = "prepare-commit-msg COMMIT_EDITMSG message M\npost-commit   M\n";
 
 #[cfg(unix)]
 #[test]
@@ -1278,7 +1283,82 @@ fn clean_revert_steps_run_prepare_commit_msg_and_post_commit() {
         run.outcome,
         Ok(SequenceOutcome::Completed { applied: 2, .. })
     ));
-    assert_eq!(hook_log(&repo), CLEAN_STEP_LOG.repeat(2));
+    assert_eq!(hook_log(&repo), CLEAN_REVERT_LOG.repeat(2));
+}
+
+#[cfg(unix)]
+#[test]
+fn git_revert_runs_the_same_hooks_on_clean_steps() {
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (dir, repo, ids) = side_branch(false, true);
+    cherry_pick_many(&repo, &ids, HookOptions::default());
+    log_hooks_by_file_name(&repo, &COMMIT_HOOKS);
+
+    // `git revert A B` reverts in the order given: newest first, like `revert_many`.
+    let status = std::process::Command::new("git")
+        .args(["revert", "--no-edit", "HEAD", "HEAD~1"])
+        .current_dir(dir.path())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+
+    assert!(status.success());
+    assert_eq!(hook_log(&repo), CLEAN_REVERT_LOG.repeat(2));
+}
+
+/// D7-A on a clean step (#216): a post-commit hook makes `.git` read-only once the middle step's
+/// commit landed, so its pick state can't be cleared. The step still counts; the sequence stops
+/// on the next step (which can't write its state) with `next`/`expected_head` past the middle
+/// step, and Continue clears the leftover state and finishes.
+#[cfg(unix)]
+#[test]
+fn a_cleanup_failure_after_a_middle_step_still_counts_it() {
+    let (dir, repo, ids) = side_branch(false, true);
+    let Some(restore) = common::ReadOnlyGitDir::restore_later(&repo) else {
+        return;
+    };
+    let counter = tempfile::NamedTempFile::new().unwrap();
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "post-commit",
+        &format!(
+            "n=$(($(cat '{counter}' 2>/dev/null || echo 0) + 1)); echo $n > '{counter}'; \
+             if [ $n = 2 ]; then chmod 555 '{git_dir}'; fi",
+            counter = counter.path().display(),
+            git_dir = repo.path().display(),
+        ),
+    );
+
+    let run = cherry_pick_many(&repo, &ids, HookOptions::default());
+    drop(restore);
+
+    assert!(run.outcome.is_err(), "{:?}", run.outcome);
+    let state = run.state.unwrap();
+    assert_eq!(state.next, 2, "the middle step counts");
+    assert_eq!(state.expected_head, head(&repo));
+    assert_eq!(summaries(&repo, 2), ["side two", "side one"]);
+    assert_eq!(
+        repo.state(),
+        RepositoryState::CherryPick,
+        "the leftover state"
+    );
+
+    std::fs::remove_file(repo.path().join("hooks").join("post-commit")).unwrap();
+    let run = continue_sequence(&repo, state, HookOptions::default());
+    assert!(
+        matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })),
+        "{:?}",
+        run.outcome
+    );
+    assert_eq!(
+        summaries(&repo, 4),
+        ["side three", "side two", "side one", "main only"]
+    );
+    assert_eq!(repo.state(), RepositoryState::Clean);
+    assert!(dir.path().join("three.txt").exists());
 }
 
 #[cfg(unix)]
@@ -1369,7 +1449,7 @@ fn continue_runs_the_hooks_for_later_clean_steps() {
     assert_eq!(
         hook_log(&repo),
         format!(
-            "pre-commit  \nprepare-commit-msg COMMIT_EDITMSG merge\ncommit-msg COMMIT_EDITMSG \npost-commit  \n{CLEAN_STEP_LOG}"
+            "pre-commit   PM\nprepare-commit-msg COMMIT_EDITMSG merge PM\ncommit-msg COMMIT_EDITMSG  PM\npost-commit   \n{CLEAN_STEP_LOG}"
         )
     );
 }
@@ -1401,16 +1481,11 @@ fn cancel_during_a_steps_post_commit_keeps_it_and_stops_after_it() {
     let _ = std::fs::remove_file(&marker);
 
     assert!(started.elapsed() < std::time::Duration::from_secs(20));
-    assert!(
-        matches!(
-            run.outcome,
-            Err(PickError::Hook(
-                git_core::hooks::HookError::Cancelled { .. }
-            ))
-        ),
-        "{:?}",
-        run.outcome
-    );
+    let Ok(SequenceOutcome::Stopped { kept, progress }) = &run.outcome else {
+        panic!("expected Stopped, got {:?}", run.outcome)
+    };
+    assert_eq!(kept, "side one");
+    assert_eq!(progress.current_step, 2);
     let state = run.state.unwrap();
     assert_eq!(state.next, 1);
     assert_eq!(state.expected_head, head(&repo));
