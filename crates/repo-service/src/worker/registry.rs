@@ -26,19 +26,45 @@ use super::{Worker, WorkerHandle};
 ///
 /// Errors with the same text `Worker::spawn` gives for a path that isn't in a repository.
 pub fn repo_key(path: &Path) -> Result<String, String> {
-    discover(path).map(|(_, key)| key)
+    discover(path).map(|found| found.key)
 }
 
-/// The repository's root as discovered from `path` (not canonicalized, so no `\\?\` prefix
-/// on Windows) and its key.
-fn discover(path: &Path) -> Result<(PathBuf, String), String> {
+struct Discovered {
+    key: String,
+    /// The repository's git folder (`.git`, `.git/worktrees/<name>` for a linked worktree,
+    /// `.git/modules/<name>` for a submodule, the repository itself when bare).
+    git_dir: PathBuf,
+    /// The work tree root (the git folder when bare), not canonicalized (so no `\\?\` prefix
+    /// on Windows).
+    root: PathBuf,
+}
+
+fn discover(path: &Path) -> Result<Discovered, String> {
     let repo = git_core::repo::open(path).map_err(|e| e.to_string())?;
     let root = repo.workdir().unwrap_or_else(|| repo.path()).to_path_buf();
     let key = match std::fs::canonicalize(&root) {
         Ok(canonical) => canonical,
         Err(_) => trim_trailing_separators(&root),
     };
-    Ok((root, key.to_string_lossy().into_owned()))
+    Ok(Discovered {
+        key: key.to_string_lossy().into_owned(),
+        git_dir: repo.path().to_path_buf(),
+        root,
+    })
+}
+
+/// The path to spawn `found`'s worker from. The worker reopens its repository from that path
+/// after worktree commands, so it must name the same repository for as long as the worker
+/// lives: not `opened` (a subfolder may be deleted while another spelling still uses the
+/// worker), and not blindly the work tree root (with `core.worktree`, as in a dotfiles
+/// repository whose work tree is the home folder, the root has no `.git`, so discovering from
+/// it finds nothing or an enclosing repository). The git folder normally is the answer; each
+/// candidate is checked to discover the same key, and `opened` is the last resort.
+fn spawn_path(found: Discovered, opened: &Path) -> PathBuf {
+    [found.git_dir, found.root]
+        .into_iter()
+        .find(|candidate| discover(candidate).is_ok_and(|again| again.key == found.key))
+        .unwrap_or_else(|| opened.to_path_buf())
 }
 
 fn trim_trailing_separators(path: &Path) -> PathBuf {
@@ -55,8 +81,8 @@ struct Inner {
 }
 
 impl Inner {
-    /// Drops `key`'s worker (if any) when no spelling refers to it any more. Returns whether
-    /// `key` is now unreferenced.
+    /// Drops `key`'s worker when no spelling refers to it any more. Returns whether `key` is now
+    /// unreferenced, also when its worker was already gone (a failed respawn).
     fn drop_if_unreferenced(&mut self, key: &str) -> bool {
         if self.aliases.values().any(|k| k == key) {
             return false;
@@ -93,9 +119,8 @@ impl WorkerRegistry {
     /// AUD-2026-09-05-CONC-001) is evicted and respawned, so a repository can't stay wedged
     /// behind a dead handle.
     ///
-    /// The worker is spawned from the repository's discovered root, not from `path`: it reopens
-    /// the repository from there after worktree commands, and `path` (say a subfolder) may be
-    /// gone by then while another spelling still uses the worker.
+    /// The worker is spawned from the repository's git folder, not from `path` (see
+    /// `spawn_path`).
     pub fn open(&self, path: &str) -> Result<(String, WorkerHandle), String> {
         self.open_with(path, |_| {})
     }
@@ -109,7 +134,8 @@ impl WorkerRegistry {
         path: &str,
         mut on_drop: impl FnMut(&str),
     ) -> Result<(String, WorkerHandle), String> {
-        let (root, key) = discover(Path::new(path))?;
+        let found = discover(Path::new(path))?;
+        let key = found.key.clone();
         {
             let mut inner = self.lock();
             if let Some(worker) = inner.workers.get(&key) {
@@ -122,7 +148,7 @@ impl WorkerRegistry {
             }
         }
 
-        let worker = match Worker::spawn(root) {
+        let worker = match Worker::spawn(spawn_path(found, Path::new(path))) {
             Ok(worker) => worker,
             Err(error) => {
                 let inner = self.lock();
@@ -168,14 +194,14 @@ impl WorkerRegistry {
     }
 
     /// Forgets the spelling `path`. When no other spelling refers to its repository, drops the
-    /// worker (if it still has one) and returns the key. Calls already holding a handle finish
-    /// as usual.
+    /// worker and returns the key; it returns the key also when the worker was already gone (a
+    /// failed respawn). Calls already holding a handle finish as usual.
     pub fn close(&self, path: &str) -> Option<String> {
         self.close_with(path, |_| {})
     }
 
     /// Like `close`, but runs `on_drop` with the key while the registry is still locked, when
-    /// no spelling refers to the repository any more (see `get_with`).
+    /// no spelling refers to the repository any more, worker or not (see `get_with`).
     pub fn close_with(&self, path: &str, on_drop: impl FnOnce(&str)) -> Option<String> {
         let mut inner = self.lock();
         let key = inner.aliases.remove(path)?;
@@ -299,10 +325,16 @@ mod tests {
         let registry = WorkerRegistry::new();
 
         let (main_key, _) = registry.open(&spelling(dir.path())).unwrap();
-        let (linked_key, _) = registry.open(&spelling(&linked)).unwrap();
+        let (linked_key, handle) = registry.open(&spelling(&linked)).unwrap();
 
         assert_ne!(main_key, linked_key);
         assert_eq!(registry.len(), 2);
+        // The worker reopens the linked worktree (not the main one) after worktree commands.
+        assert_eq!(handle.prune_worktrees(), Ok(()));
+        assert_eq!(
+            std::fs::canonicalize(handle.workdir().unwrap()).unwrap(),
+            std::fs::canonicalize(&linked).unwrap()
+        );
     }
 
     #[test]
@@ -374,6 +406,66 @@ mod tests {
 
         assert_eq!(handle.prune_worktrees(), Ok(()));
         assert!(handle.get_status().is_ok());
+    }
+
+    /// `core.worktree` puts the work tree in a folder without a `.git` (a dotfiles repository
+    /// whose work tree is the home folder): the worker must not be spawned from that folder.
+    #[test]
+    fn a_repository_whose_work_tree_is_set_by_core_worktree_opens() {
+        let dir = TempDir::new().unwrap();
+        let git_home = dir.path().join("repo");
+        let work_tree = dir.path().join("home");
+        std::fs::create_dir(&work_tree).unwrap();
+        std::fs::write(work_tree.join("f.txt"), "f\n").unwrap();
+        let repo = Repository::init(&git_home).unwrap();
+        repo.config()
+            .unwrap()
+            .set_str("core.worktree", work_tree.to_str().unwrap())
+            .unwrap();
+        let registry = WorkerRegistry::new();
+
+        let (key, handle) = registry.open(&spelling(&git_home)).unwrap();
+
+        assert_eq!(key, spelling(&std::fs::canonicalize(&work_tree).unwrap()));
+        assert_eq!(
+            std::fs::canonicalize(handle.workdir().unwrap()).unwrap(),
+            std::fs::canonicalize(&work_tree).unwrap()
+        );
+        let status = handle.get_status().unwrap();
+        assert_eq!(status.len(), 1);
+        assert_eq!(status[0].path, "f.txt");
+        // Worktree commands reopen the repository from the spawn path.
+        assert_eq!(handle.prune_worktrees(), Ok(()));
+        assert_eq!(handle.get_status().unwrap().len(), 1);
+    }
+
+    /// A submodule's layout (also `git init --separate-git-dir`'s): the work tree's `.git` is a
+    /// file pointing at a git folder elsewhere, here inside an enclosing repository, and that
+    /// folder's `core.worktree` points back. The worker must open the submodule, not the
+    /// enclosing repository, also after reopening.
+    #[test]
+    fn a_submodule_style_work_tree_opens_itself_not_the_enclosing_repository() {
+        let (outer, _outer_repo) = repo_with_commit();
+        let git_folder = outer.path().join(".git").join("modules").join("inner");
+        let work_tree = outer.path().join("inner");
+        let inner = Repository::init_bare(&git_folder).unwrap();
+        {
+            let mut config = inner.config().unwrap();
+            config.set_bool("core.bare", false).unwrap();
+            config.set_str("core.worktree", "../../../inner").unwrap();
+        }
+        std::fs::create_dir(&work_tree).unwrap();
+        std::fs::write(work_tree.join(".git"), "gitdir: ../.git/modules/inner\n").unwrap();
+        std::fs::write(work_tree.join("g.txt"), "g\n").unwrap();
+        let registry = WorkerRegistry::new();
+
+        let (key, handle) = registry.open(&spelling(&work_tree)).unwrap();
+
+        assert_eq!(key, spelling(&std::fs::canonicalize(&work_tree).unwrap()));
+        assert_eq!(handle.prune_worktrees(), Ok(()));
+        let status = handle.get_status().unwrap();
+        assert_eq!(status.len(), 1);
+        assert_eq!(status[0].path, "g.txt");
     }
 
     /// A spelling that now names another repository moves to it; the old repository's worker

@@ -240,9 +240,14 @@ the registry's lock (`close_with`/`get_with`; lock order registry → gates). `o
 the other keys it leaves without a worker the same way (a spelling that now names another
 repository, a failed respawn), so no gate outlives its worker. `open` keeps the former
 `ensure_worker`'s rules: a dead worker is evicted and respawned, and the spawn runs unlocked.
-The worker is spawned from the discovered root (not the spelling, not the canonical key with
-its `\\?\` prefix on Windows), because it reopens the repository from that path after worktree
-commands, and the first opener's spelling (a subfolder) may be gone by then.
+The worker reopens its repository from its spawn path after worktree commands, so that path
+must name the same repository for the worker's lifetime (`spawn_path`). The first opener's
+spelling won't do (a subfolder may be gone by then), and neither will the work tree root: with
+`core.worktree` (a dotfiles repository whose work tree is the home folder) the root has no
+`.git`, so discovering from it finds nothing or an enclosing repository. So the worker is
+spawned from the git folder (`.git`, `.git/worktrees/<name>`, `.git/modules/<name>`, or a bare
+repository itself), then the root, whichever discovers the same key; the spelling is the last
+resort.
 Two tabs of one repository share its worker, so they share one undo history, and a new search
 in one cancels a search still running in the other (one search generation per worker).
 Everything else keeps the caller's spelling: hook and transfer events, recent repositories, open
