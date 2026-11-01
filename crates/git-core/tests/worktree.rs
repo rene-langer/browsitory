@@ -2,7 +2,8 @@ mod common;
 
 use common::{commit_all, init_repo, write_file};
 use git_core::worktree::{
-    create_worktree, list_worktrees, prune_worktrees, remove_worktree, WorktreeError,
+    create_worktree, list_worktrees, prune_worktrees, remove_worktree, roll_back_destination,
+    WorktreeError,
 };
 
 #[test]
@@ -429,4 +430,289 @@ fn a_failed_add_keeps_a_branch_it_did_not_create() {
     assert!(result.is_err());
     assert!(has_branch(&repo, "feature"));
     assert!(!dir.path().join("a").exists());
+}
+
+/// Commits HEAD's tree plus a file called `name` on a new branch `bad`, leaving HEAD alone. A
+/// name the file system can't hold makes the checkout of a worktree on `bad` fail (#245): one
+/// that's too long fails while writing it, after `file.txt` was written; on Windows a reserved
+/// name (`aux`) or a trailing dot (`a.`) is refused while the checkout is planned
+/// (`checkout_verify_paths`), before any file is written.
+fn branch_with_unwritable_name(repo: &git2::Repository, name: &str) {
+    branch_with_entries(repo, &[(name.as_bytes(), Entry::File)]);
+}
+
+enum Entry<'a> {
+    File,
+    /// A folder holding one file of this name.
+    Folder(&'a str),
+}
+
+/// Commits HEAD's tree plus `entries` on a new branch `bad`, leaving HEAD alone.
+fn branch_with_entries(repo: &git2::Repository, entries: &[(&[u8], Entry<'_>)]) {
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    let blob = repo.blob(b"unwritable").unwrap();
+    let mut builder = repo.treebuilder(Some(&head.tree().unwrap())).unwrap();
+    for (name, entry) in entries {
+        match entry {
+            Entry::File => builder.insert(name.to_vec(), blob, 0o100644).unwrap(),
+            Entry::Folder(file) => {
+                let mut folder = repo.treebuilder(None).unwrap();
+                folder.insert(*file, blob, 0o100644).unwrap();
+                builder
+                    .insert(name.to_vec(), folder.write().unwrap(), 0o040000)
+                    .unwrap()
+            }
+        };
+    }
+    let tree = repo.find_tree(builder.write().unwrap()).unwrap();
+    let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+    let commit = repo
+        .commit(None, &signature, &signature, "bad", &tree, &[&head])
+        .unwrap();
+    repo.branch("bad", &repo.find_commit(commit).unwrap(), false)
+        .unwrap();
+}
+
+/// A name longer than any file system allows for one component.
+fn too_long_name() -> String {
+    "x".repeat(300)
+}
+
+/// The add failed with [`WorktreeError::AddFailed`] and left no entry and no folder.
+fn assert_add_failed_and_nothing_left(
+    result: Result<(), WorktreeError>,
+    repo: &git2::Repository,
+    linked: &std::path::Path,
+) {
+    let Err(error @ WorktreeError::AddFailed { .. }) = result else {
+        panic!("expected AddFailed, got {result:?}");
+    };
+    let message = error.to_string();
+    assert!(
+        message.starts_with("Couldn't create the worktree: "),
+        "{message}"
+    );
+    assert!(!message.contains("git operation failed"), "{message}");
+    assert!(!message.ends_with(".."), "{message}");
+    assert!(!repo.path().join("worktrees").join("wt").exists());
+    assert!(!linked.exists());
+    assert_eq!(list_worktrees(repo).unwrap().len(), 1);
+}
+
+#[test]
+fn a_checkout_failure_is_rolled_back() {
+    let (dir, repo, _) = committed_repo();
+    branch_with_unwritable_name(&repo, &too_long_name());
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    assert_add_failed_and_nothing_left(result, &repo, &linked);
+    assert!(!has_branch(&repo, "newb"));
+    create_worktree(&repo, "wt", &linked, "good", Some("HEAD")).unwrap();
+    assert!(linked.join("file.txt").is_file());
+
+    // git removes the destination and the entry too, and keeps the branch it created.
+    let (twin, twin_repo, _) = committed_repo();
+    branch_with_unwritable_name(&twin_repo, &too_long_name());
+    let twin_linked = twin.path().join("wt");
+    let output = git(
+        twin.path(),
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "newb",
+            twin_linked.to_str().unwrap(),
+            "bad",
+        ],
+    );
+    assert!(!output.status.success(), "{output:?}");
+    assert!(!twin_linked.exists());
+    assert!(!twin_repo.path().join("worktrees").join("wt").exists());
+    assert!(has_branch(&twin_repo, "newb"));
+}
+
+#[test]
+fn a_checkout_failure_on_an_existing_branch_frees_it() {
+    let (dir, repo, _) = committed_repo();
+    branch_with_unwritable_name(&repo, &too_long_name());
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "bad", None);
+
+    assert_add_failed_and_nothing_left(result, &repo, &linked);
+    let mut bad = repo.find_branch("bad", git2::BranchType::Local).unwrap();
+    bad.delete().unwrap();
+}
+
+#[test]
+fn a_checkout_failure_in_missing_parents_removes_them() {
+    let (dir, repo, _) = committed_repo();
+    branch_with_unwritable_name(&repo, &too_long_name());
+    let linked = dir.path().join("a").join("b").join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    assert_add_failed_and_nothing_left(result, &repo, &linked);
+    assert!(!dir.path().join("a").exists());
+    assert!(!has_branch(&repo, "newb"));
+}
+
+/// The too-long name is in a folder: the folder checked out for it is removed too.
+#[test]
+fn a_checkout_failure_in_a_nested_folder_is_rolled_back() {
+    let (dir, repo, _) = committed_repo();
+    let long = too_long_name();
+    branch_with_entries(&repo, &[(b"zdir", Entry::Folder(&long))]);
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    assert_add_failed_and_nothing_left(result, &repo, &linked);
+    assert!(!has_branch(&repo, "newb"));
+    create_worktree(&repo, "wt", &linked, "good", Some("HEAD")).unwrap();
+}
+
+/// The work tree walker takes UTF-8 paths, so a checked-out file whose name isn't UTF-8 is not
+/// removed: the folder is kept and named; the entry and the new branch still go.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_checked_out_file_with_a_non_utf8_name_keeps_the_folder() {
+    let (dir, repo, _) = committed_repo();
+    let long = too_long_name();
+    // Sorted before the too-long name, so it is written before the checkout fails.
+    branch_with_entries(
+        &repo,
+        &[(b"a\x80", Entry::File), (long.as_bytes(), Entry::File)],
+    );
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    let Err(WorktreeError::AddFailedFolderLeft { ref path, .. }) = result else {
+        panic!("expected AddFailedFolderLeft, got {result:?}");
+    };
+    assert_eq!(path, &linked);
+    assert!(!linked.join("file.txt").exists());
+    assert!(!linked.join(".git").exists());
+    assert!(!repo.path().join("worktrees").join("wt").exists());
+    assert!(!has_branch(&repo, "newb"));
+}
+
+#[test]
+fn an_admin_folder_naming_another_destination_is_left_alone() {
+    let (dir, repo, _) = committed_repo();
+    branch_with_unwritable_name(&repo, &too_long_name());
+    let admin = stale_worktree_entry(&repo);
+    let elsewhere = dir.path().join("elsewhere").join(".git");
+    std::fs::write(admin.join("gitdir"), elsewhere.to_str().unwrap()).unwrap();
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    assert!(
+        matches!(result, Err(WorktreeError::AddFailed { .. })),
+        "{result:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(admin.join("marker")).unwrap(),
+        "kept"
+    );
+    assert_eq!(
+        std::fs::read_to_string(admin.join("gitdir")).unwrap(),
+        elsewhere.to_str().unwrap()
+    );
+    assert!(!linked.exists());
+    assert!(!has_branch(&repo, "newb"));
+}
+
+/// What a checkout of HEAD wrote into `folder` before it failed: the tree's files and the `.git`
+/// file pointing at the worktree entry.
+fn half_made_worktree(repo: &git2::Repository, folder: &std::path::Path) -> git2::Oid {
+    let tree = repo.head().unwrap().peel_to_tree().unwrap();
+    std::fs::create_dir(folder).unwrap();
+    write_file(folder, "file.txt", "initial");
+    std::fs::write(folder.join(".git"), "gitdir: /somewhere/worktrees/wt\n").unwrap();
+    tree.id()
+}
+
+#[test]
+fn rolling_back_removes_the_checked_out_files_and_the_folder() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "initial");
+    write_file(dir.path(), "d/e/nested.txt", "nested");
+    commit_all(&repo, "initial commit");
+    let linked = dir.path().join("wt");
+    let tree = repo.find_tree(half_made_worktree(&repo, &linked)).unwrap();
+    write_file(&linked, "d/e/nested.txt", "nested");
+
+    let error = roll_back_destination(&repo, &linked, &tree, "disk full".to_string());
+
+    assert!(
+        matches!(error, WorktreeError::AddFailed { .. }),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "Couldn't create the worktree: disk full."
+    );
+    assert!(!linked.exists());
+}
+
+#[test]
+fn a_foreign_file_in_the_new_folder_is_kept() {
+    let (dir, repo, _) = committed_repo();
+    let linked = dir.path().join("wt");
+    let tree = repo.find_tree(half_made_worktree(&repo, &linked)).unwrap();
+    write_file(&linked, "zzz-foreign", "not ours");
+
+    let error = roll_back_destination(&repo, &linked, &tree, "disk full".to_string());
+
+    let WorktreeError::AddFailedFolderLeft { ref path, .. } = error else {
+        panic!("expected AddFailedFolderLeft, got {error:?}");
+    };
+    assert_eq!(path, &linked);
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Couldn't create the worktree: disk full. Its folder '{}' couldn't be removed \
+             completely; delete it by hand.",
+            linked.display()
+        )
+    );
+    assert!(!linked.join("file.txt").exists());
+    assert!(!linked.join(".git").exists());
+    assert_eq!(
+        std::fs::read_to_string(linked.join("zzz-foreign")).unwrap(),
+        "not ours"
+    );
+}
+
+/// Adds a worktree on a new branch from `bad` (see [`branch_with_unwritable_name`]) and checks
+/// that nothing of it is left: no entry, no folder, no new branch, and the same name works again.
+#[cfg(windows)]
+fn assert_an_unwritable_name_is_rolled_back(name: &str) {
+    let (dir, repo, _) = committed_repo();
+    branch_with_unwritable_name(&repo, name);
+    let linked = dir.path().join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
+
+    assert_add_failed_and_nothing_left(result, &repo, &linked);
+    assert!(!has_branch(&repo, "newb"));
+    create_worktree(&repo, "wt", &linked, "good", Some("HEAD")).unwrap();
+    assert!(linked.join("file.txt").is_file());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_reserved_name_in_the_branch_is_rolled_back() {
+    assert_an_unwritable_name_is_rolled_back("aux");
+}
+
+#[cfg(windows)]
+#[test]
+fn a_trailing_dot_in_the_branch_is_rolled_back() {
+    assert_an_unwritable_name_is_rolled_back("a.");
 }

@@ -19,6 +19,17 @@ pub enum WorktreeError {
     Git,
     #[error("Can't create the folder '{}': {reason}", path.display())]
     CreateFolder { path: PathBuf, reason: String },
+    /// libgit2 failed to add the worktree; what it had written was removed again (#245).
+    #[error("Couldn't create the worktree: {reason}.")]
+    AddFailed { reason: String },
+    /// As [`WorktreeError::AddFailed`], but something else was in the new folder, so the folder
+    /// was kept.
+    #[error(
+        "Couldn't create the worktree: {reason}. Its folder '{}' couldn't be removed completely; \
+         delete it by hand.",
+        path.display()
+    )]
+    AddFailedFolderLeft { reason: String, path: PathBuf },
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
 }
@@ -166,27 +177,156 @@ pub fn create_worktree_with(
         };
         let mut options = git2::WorktreeAddOptions::new();
         options.reference(Some(&reference));
-        repo.worktree(name, path, Some(&options))?;
+        repo.worktree(name, path, Some(&options))
+            .map_err(|error| WorktreeError::AddFailed {
+                reason: plain_reason(&error),
+            })?;
         Ok::<(), WorktreeError>(())
     })();
-    if added.is_err() {
-        // A half-made entry (no `gitdir` file yet) blocks a retry with the same name, and its
-        // HEAD would keep the new branch from being deleted.
-        if let Some(admin) = admin.filter(|_| !admin_existed) {
-            if !admin.join("gitdir").exists() {
-                let _ = std::fs::remove_dir_all(&admin);
-            }
+    let Err(mut error) = added else {
+        return Ok(());
+    };
+    // libgit2 makes the entry and the destination (each `mkdir` exclusive), writes `.git`,
+    // `commondir` and `gitdir`, then HEAD, then checks out, and cleans up nothing when a step
+    // fails (#245). An entry made by this call whose `gitdir` names this destination (or that has
+    // no `gitdir` yet) is ours: it goes, with what the add wrote into the destination, so a
+    // retry with the same name works and the branch isn't held as checked out.
+    let ours = admin
+        .filter(|_| !admin_existed)
+        .filter(|admin| entry_names_destination(admin, path));
+    if let Some(admin) = ours {
+        if let WorktreeError::AddFailed { reason } = error {
+            error = if destination_written_by(&admin, path) {
+                roll_back_destination(repo, path, &tree, reason)
+            } else {
+                WorktreeError::AddFailed { reason }
+            };
         }
-        if created_branch {
-            if let Ok(mut new_branch) = repo.find_branch(branch, BranchType::Local) {
-                let _ = new_branch.delete();
-            }
-        }
-        // libgit2 creates the destination itself; it goes only while still empty.
-        let _ = std::fs::remove_dir(path);
-        remove_created_folders(&created);
+        let _ = std::fs::remove_dir_all(&admin);
     }
-    added
+    if created_branch {
+        if let Ok(mut new_branch) = repo.find_branch(branch, BranchType::Local) {
+            let _ = new_branch.delete();
+        }
+    }
+    // libgit2 creates the destination itself; when it isn't known to be ours, it goes only while
+    // still empty. It didn't exist when the call started, so one left behind is named.
+    error = match error {
+        WorktreeError::AddFailed { reason } => folder_left(path, reason),
+        other => {
+            let _ = std::fs::remove_dir(path);
+            other
+        }
+    };
+    remove_created_folders(&created);
+    Err(error)
+}
+
+/// libgit2's message as the reason of [`WorktreeError::AddFailed`], without a final period
+/// (the error's text adds one).
+fn plain_reason(error: &git2::Error) -> String {
+    error.message().trim().trim_end_matches('.').to_string()
+}
+
+/// The entry `admin` has no `gitdir` file yet, or its `gitdir` names `path`'s `.git`.
+fn entry_names_destination(admin: &Path, path: &Path) -> bool {
+    let gitdir = match std::fs::read_to_string(admin.join("gitdir")) {
+        Ok(gitdir) => gitdir,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+        Err(_) => return false,
+    };
+    same_path(Path::new(gitdir.trim()), &path.join(".git"))
+}
+
+/// The destination holds what libgit2 wrote for the entry `admin`: its `.git` file points at
+/// `admin`. libgit2 writes that file only into a destination it just created, so without it
+/// the folder may be someone else's and nothing in it is touched.
+fn destination_written_by(admin: &Path, path: &Path) -> bool {
+    let Ok(Some(crate::worktree_guard::Leaf::File { bytes, .. })) =
+        crate::worktree_guard::read_beneath(path, ".git")
+    else {
+        return false;
+    };
+    String::from_utf8_lossy(&bytes)
+        .trim()
+        .strip_prefix("gitdir:")
+        .is_some_and(|target| same_path(Path::new(target.trim()), admin))
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// Removes from `path` what a failed worktree add wrote there: each file, link or submodule
+/// folder of `tree` (then the folders that emptied), the tree's folders while empty, the `.git`
+/// file, and `path` itself once empty. Anything else is kept, and so is `path`, which the
+/// returned error then names.
+#[doc(hidden)]
+pub fn roll_back_destination(
+    repo: &Repository,
+    path: &Path,
+    tree: &git2::Tree<'_>,
+    reason: String,
+) -> WorktreeError {
+    let mut leaves = Vec::new();
+    let mut folders = Vec::new();
+    tree_paths(repo, tree, "", &mut leaves, &mut folders);
+    for rel in &leaves {
+        let _ = crate::worktree_guard::remove_and_prune_beneath(path, rel);
+    }
+    // A file the checkout never wrote (a name the file system refuses) stops the pass above
+    // before its folder is pruned, so the tree's folders go too: deepest first, each only while
+    // empty.
+    for rel in folders.iter().rev() {
+        let _ = crate::worktree_guard::remove_and_prune_beneath(path, rel);
+    }
+    let _ = crate::worktree_guard::remove_beneath(path, ".git");
+    folder_left(path, reason)
+}
+
+/// Collects the paths of `tree` below `prefix`: files, links and submodules on `leaves`,
+/// folders on `folders` (each before what it holds). The work tree walker takes UTF-8 paths,
+/// so an entry whose name isn't UTF-8 is skipped with what is below it; it stays in the
+/// folder, which is then kept and named.
+fn tree_paths(
+    repo: &Repository,
+    tree: &git2::Tree<'_>,
+    prefix: &str,
+    leaves: &mut Vec<String>,
+    folders: &mut Vec<String>,
+) {
+    for entry in tree.iter() {
+        let Ok(name) = std::str::from_utf8(entry.name_bytes()) else {
+            continue;
+        };
+        let rel = format!("{prefix}{name}");
+        if entry.kind() == Some(git2::ObjectType::Tree) {
+            folders.push(rel.clone());
+            if let Ok(subtree) = repo.find_tree(entry.id()) {
+                tree_paths(repo, &subtree, &format!("{rel}/"), leaves, folders);
+            }
+        } else {
+            leaves.push(rel);
+        }
+    }
+}
+
+/// [`WorktreeError::AddFailed`] once `path` is removed (or was never made), else
+/// [`WorktreeError::AddFailedFolderLeft`] naming it.
+fn folder_left(path: &Path, reason: String) -> WorktreeError {
+    match std::fs::remove_dir(path) {
+        Ok(()) => WorktreeError::AddFailed { reason },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            WorktreeError::AddFailed { reason }
+        }
+        Err(_) => WorktreeError::AddFailedFolderLeft {
+            reason,
+            path: path.to_path_buf(),
+        },
+    }
 }
 
 /// Creates the missing ancestors of `path` below its nearest existing folder, top-down, pushing
