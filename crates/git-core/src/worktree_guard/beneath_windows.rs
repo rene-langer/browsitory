@@ -26,7 +26,14 @@
 //! (`GetFileInformationByHandleEx`): a name surrogate (symbolic link, junction, WSL link, …) is
 //! refused or removed itself; another reparse point (a OneDrive placeholder) is a folder to
 //! walk through or a file reopened without the flag (so the file system filter sees the read or
-//! write), which must have the same file ID.
+//! write), which must have the same file ID. That second open is by the file ID
+//! (`FILE_OPEN_BY_FILE_ID`), so a link swapped in under the name meanwhile isn't followed; only
+//! where the file system has no opens by ID (FAT/exFAT, which have no links, and SMB shares) is
+//! it by name.
+//!
+//! Leaves are opened for reading with no more access than attributes, so a file whose ACL
+//! denies writing still reads; only acts that may delete ask for `DELETE` (and
+//! `FILE_WRITE_ATTRIBUTES` where the ACL allows it).
 //!
 //! A missing folder is created the same way, relative to the held parent (`create_dir_in`),
 //! then opened and checked like any other component. On an SMB share the relative opens and
@@ -196,9 +203,10 @@ fn file_id(file: &File) -> io::Result<FileIdInfo> {
 /// until the last handle closes.
 ///
 /// A read-only file is deleted too, as std's `remove_file` and git do (#194): with
-/// `IGNORE_READONLY_ATTRIBUTE` (Windows 10 1809+), else (1607–1803, which answer
-/// `ERROR_INVALID_PARAMETER` to the unknown flag) POSIX semantics alone, else the classic
-/// disposition, which clears the attribute first (see `delete_classic`).
+/// `IGNORE_READONLY_ATTRIBUTE` (Windows 10 1809+). 1607–1803 answer `ERROR_INVALID_PARAMETER`
+/// to that flag, so there POSIX semantics alone, which refuse a read-only file with
+/// `ERROR_ACCESS_DENIED`. On access denied, as where there are no POSIX deletes, the classic
+/// disposition follows, which clears the attribute and tries again (see `delete_classic`).
 fn delete_by_handle(file: &File) -> io::Result<()> {
     let posix = FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS;
     let mut ignoring_read_only = DispositionInfoEx {
@@ -239,13 +247,17 @@ fn delete_by_handle(file: &File) -> io::Result<()> {
 /// attribute, so a read-only file has the attribute cleared through the same handle (which needs
 /// `FILE_WRITE_ATTRIBUTES`) and is tried again; the attribute is put back if that fails too.
 fn delete_classic(file: &File) -> io::Result<()> {
-    let delete = |file| {
+    delete_classic_with(file, |file| {
         set_information(
             file,
             FILE_DISPOSITION_INFO_CLASS,
             &mut DispositionInfo { delete_file: 1 },
         )
-    };
+    })
+}
+
+/// `delete_classic` with `delete` as the disposition call (a test seam).
+fn delete_classic_with(file: &File, delete: impl Fn(&File) -> io::Result<()>) -> io::Result<()> {
     let error = match delete(file) {
         Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED) => error,
         other => return other,
@@ -260,8 +272,15 @@ fn delete_classic(file: &File) -> io::Result<()> {
     })
 }
 
-/// Sets `file`'s attributes (`FILE_ATTRIBUTE_NORMAL` for none), leaving its times alone.
+/// The attributes `FileBasicInfo` can set: read-only, hidden, system, archive, temporary,
+/// offline, not content indexed, and OneDrive's pinned/unpinned (kept so a write doesn't clear
+/// them). The rest (directory, reparse point, compressed, …) are the file system's.
+const SETTABLE_ATTRIBUTES: u32 =
+    0x1 | 0x2 | 0x4 | 0x20 | 0x100 | 0x1000 | 0x2000 | 0x8_0000 | 0x10_0000;
+
+/// Sets `file`'s settable attributes (`FILE_ATTRIBUTE_NORMAL` for none), leaving its times alone.
 fn set_attributes(file: &File, attributes: u32) -> io::Result<()> {
+    let attributes = attributes & SETTABLE_ATTRIBUTES;
     let mut info = BasicInfo {
         file_attributes: if attributes == 0 {
             FILE_ATTRIBUTE_NORMAL
@@ -327,6 +346,7 @@ const FILE_CREATE: u32 = 2;
 const FILE_DIRECTORY_FILE: u32 = 0x0000_0001;
 const FILE_SYNCHRONOUS_IO_NONALERT: u32 = 0x0000_0020;
 const FILE_NON_DIRECTORY_FILE: u32 = 0x0000_0040;
+const FILE_OPEN_BY_FILE_ID: u32 = 0x0000_2000;
 const FILE_OPEN_FOR_BACKUP_INTENT: u32 = 0x0000_4000;
 const FILE_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 
@@ -378,9 +398,65 @@ fn nt_open(
     attributes: u32,
 ) -> io::Result<File> {
     use std::os::windows::ffi::OsStrExt;
+    let mut wide: Vec<u16> = name.encode_wide().collect();
+    nt_create(
+        parent,
+        &mut wide,
+        access,
+        share,
+        disposition,
+        options,
+        attributes,
+    )
+}
+
+/// Opens the file whose `FILE_ID_INFO` file ID is `id`, on the volume of the held folder
+/// `parent` (`FILE_OPEN_BY_FILE_ID`): by identity, not by any name, so nothing swapped in under
+/// the name meanwhile (a symbolic link included) is opened or followed. The 128-bit form is tried
+/// first, then the 64-bit one NTFS uses where the upper half is zero.
+fn open_by_id(parent: &File, id: &[u8; 16], access: u32, options: u32) -> io::Result<File> {
+    let units = |bytes: &[u8]| -> Vec<u16> {
+        bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&unit| u16::from_ne_bytes(unit))
+            .collect()
+    };
+    let open = |name: &mut [u16]| {
+        nt_create(
+            parent,
+            name,
+            access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_OPEN,
+            options | FILE_OPEN_BY_FILE_ID,
+            0,
+        )
+    };
+    match open(&mut units(id)) {
+        Err(error)
+            if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER) && id[8..] == [0; 8] =>
+        {
+            open(&mut units(&id[..8]))
+        }
+        other => other,
+    }
+}
+
+/// `NtCreateFile` of `name` (a single component, or with `FILE_OPEN_BY_FILE_ID` a file ID's
+/// bytes) relative to `parent`; see [`nt_open`].
+fn nt_create(
+    parent: &File,
+    wide: &mut [u16],
+    access: u32,
+    share: u32,
+    disposition: u32,
+    options: u32,
+    attributes: u32,
+) -> io::Result<File> {
     use std::os::windows::io::FromRawHandle;
 
-    let mut wide: Vec<u16> = name.encode_wide().collect();
     let length = u16::try_from(wide.len() * 2)
         .ok()
         .filter(|&length| length > 0)
@@ -404,7 +480,7 @@ fn nt_open(
     };
     let mut handle = std::ptr::null_mut();
     // SAFETY: every pointer is to a live local of the documented layout: `handle` receives the
-    // new handle, `object` names `wide` (which outlives the call) relative to `parent`'s handle
+    // new handle, `object` names `wide` (borrowed for the call) relative to `parent`'s handle
     // (owned by `parent`, which outlives the call), `io_status` is writable. No allocation size
     // and no extended attributes (null, 0).
     let status = unsafe {
@@ -568,21 +644,41 @@ enum Found {
     },
 }
 
-/// Opens `name` in `at`'s last held folder as itself with `DELETE` (and, for a read-only file's
-/// classic delete, `FILE_WRITE_ATTRIBUTES`) access, checks it is in that folder, and classifies
-/// it. `None` when missing. Shares delete: the handle is what any later act uses, so a rename
-/// of the name meanwhile changes nothing.
-fn open_leaf_at(at: &Beneath, name: &OsStr) -> io::Result<Option<(File, Found)>> {
+/// What a leaf handle is opened for (its access beyond `FILE_READ_ATTRIBUTES | SYNCHRONIZE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Purpose {
+    /// Classifying, reading through a second handle, reading a link's target: no more access, so
+    /// a file whose ACL denies writing still reads.
+    Read,
+    /// Possibly deleting it: `DELETE`, and `FILE_WRITE_ATTRIBUTES` for a read-only file's classic
+    /// delete (dropped when the ACL denies it; that one fallback then can't clear the attribute).
+    Delete,
+}
+
+/// Opens `name` in `at`'s last held folder as itself, checks it is in that folder, and
+/// classifies it. `None` when missing. Shares delete: the handle is what any later act uses, so
+/// a rename of the name meanwhile changes nothing.
+fn open_leaf_at(at: &Beneath, name: &OsStr, purpose: Purpose) -> io::Result<Option<(File, Found)>> {
     let parent = at.parent_file();
-    let file = match nt_open(
-        parent,
-        name,
-        DELETE | FILE_WRITE_ATTRIBUTES,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        FILE_OPEN,
-        FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT,
-        0,
-    ) {
+    let open = |access| {
+        nt_open(
+            parent,
+            name,
+            access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_OPEN,
+            FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT,
+            0,
+        )
+    };
+    let opened = match purpose {
+        Purpose::Read => open(0),
+        Purpose::Delete => match open(DELETE | FILE_WRITE_ATTRIBUTES) {
+            Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED) => open(DELETE),
+            other => other,
+        },
+    };
+    let file = match opened {
         Ok(file) => file,
         Err(error) if missing(&error) => return Ok(None),
         Err(error) => return Err(error),
@@ -601,31 +697,47 @@ fn open_leaf_at(at: &Beneath, name: &OsStr) -> io::Result<Option<(File, Found)>>
     Ok(Some((file, found)))
 }
 
-fn open_leaf(at: &Beneath) -> io::Result<Option<(File, Found)>> {
-    open_leaf_at(at, at.leaf_name())
+fn open_leaf(at: &Beneath, purpose: Purpose) -> io::Result<Option<(File, Found)>> {
+    open_leaf_at(at, at.leaf_name(), purpose)
 }
 
-/// Opens `at`'s leaf a second time, normally (through the file system filter for a OneDrive
-/// file) or as itself, and checks it is the file `first` refers to.
+/// Opens the file `first` refers to a second time, normally (through the file system filter for
+/// a OneDrive file) or as itself, by its file ID (see [`open_by_id`]), so a link swapped in under
+/// its name meanwhile is never followed. Where the file system has no opens by ID (FAT/exFAT,
+/// which have no links either, and SMB shares) it is opened by its name in the held parent
+/// instead. Either way the second handle must have `first`'s file ID; `None` when it hasn't or
+/// the file is gone.
 fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Result<Option<File>> {
     let mut options = FILE_NON_DIRECTORY_FILE;
     if !reopen {
         options |= FILE_OPEN_REPARSE_POINT;
     }
-    let second = match nt_open(
-        at.parent_file(),
-        at.leaf_name(),
-        access,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        FILE_OPEN,
-        options,
-        0,
-    ) {
+    let id = file_id(first)?;
+    let opened = match open_by_id(at.parent_file(), &id.file_id, access, options) {
+        Err(error)
+            if matches!(
+                error.raw_os_error(),
+                Some(ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER)
+            ) =>
+        {
+            nt_open(
+                at.parent_file(),
+                at.leaf_name(),
+                access,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                FILE_OPEN,
+                options,
+                0,
+            )
+        }
+        other => other,
+    };
+    let second = match opened {
         Ok(file) => file,
         Err(error) if missing(&error) => return Ok(None),
         Err(error) => return Err(error),
     };
-    Ok((file_id(&second)? == file_id(first)?).then_some(second))
+    Ok((file_id(&second)? == id).then_some(second))
 }
 
 /// How often a walk retries one component that keeps changing under it before giving up.
@@ -647,12 +759,12 @@ pub(super) fn walk(
     if names.is_empty() {
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
-    let root = std::fs::canonicalize(workdir)?;
+    // The work tree as the user chose it, links on the way to it followed.
     let root_dir = OpenOptions::new()
         .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-        .open(&root)?;
+        .open(workdir)?;
     let mut at = Beneath {
         dirs: vec![root_dir],
         names,
@@ -695,7 +807,9 @@ pub(super) fn walk(
                         OnLink::Refuse => return Ok(Walk::Link),
                         OnLink::Clear => {
                             // Through its own handle, checked to be the link in the held parent.
-                            if let Some((link, Found::Link)) = open_leaf_at(&at, &name)? {
+                            if let Some((link, Found::Link)) =
+                                open_leaf_at(&at, &name, Purpose::Delete)?
+                            {
                                 delete_by_handle(&link)?;
                             }
                             step(Step::Cleared(&name));
@@ -743,7 +857,7 @@ fn unreadable(error: &io::Error) -> bool {
 /// read handle must be the file classified in the held parent. `None` for a link, a folder or
 /// anything missing.
 fn open_leaf_for_reading(at: &Beneath) -> io::Result<Option<File>> {
-    let (first, found) = match open_leaf(at) {
+    let (first, found) = match open_leaf(at, Purpose::Read) {
         Ok(Some(leaf)) => leaf,
         Ok(None) => return Ok(None),
         Err(error) if unreadable(&error) => return Ok(None),
@@ -810,7 +924,7 @@ pub(super) fn write(
         Walk::Link | Walk::NotDir | Walk::Missing => return Ok(false),
     };
     for _ in 0..ATTEMPTS {
-        let mut file = match open_leaf(&at)? {
+        let mut file = match open_leaf(&at, Purpose::Delete)? {
             None => match create_leaf(&at)? {
                 Some(file) => file,
                 None => continue,
@@ -848,7 +962,7 @@ pub(super) fn remove(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result
         Walk::Link => return Ok(false),
         Walk::Missing | Walk::NotDir => return Ok(true),
     };
-    match open_leaf(&at)? {
+    match open_leaf(&at, Purpose::Delete)? {
         None => Ok(true),
         Some((_, Found::Dir)) => Ok(false),
         Some((leaf, _)) => delete_by_handle(&leaf).map(|()| true),
@@ -860,7 +974,7 @@ pub(super) fn clear_hazard(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::
     let Walk::Found(at) = walk(workdir, rel, OnLink::Clear, OnMissing::Stop, step)? else {
         return Ok(());
     };
-    match open_leaf(&at)? {
+    match open_leaf(&at, Purpose::Delete)? {
         Some((link, Found::Link)) => delete_by_handle(&link),
         _ => Ok(()),
     }
@@ -874,7 +988,7 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
         Err(error) if unreadable(&error) => return Ok(None),
         Err(error) => return Err(error),
     };
-    let (leaf, found) = match open_leaf(&at) {
+    let (leaf, found) = match open_leaf(&at, Purpose::Read) {
         Ok(Some(leaf)) => leaf,
         Ok(None) => return Ok(None),
         Err(error) if unreadable(&error) => return Ok(None),
@@ -904,7 +1018,7 @@ pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> 
     let Walk::Found(mut at) = walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? else {
         return Ok(());
     };
-    if let Some((leaf, _)) = open_leaf(&at)? {
+    if let Some((leaf, _)) = open_leaf(&at, Purpose::Delete)? {
         delete_by_handle(&leaf)?;
     }
     // Upwards: each folder's own pinning handle is closed (a held folder can't be removed),
@@ -914,7 +1028,7 @@ pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> 
     for i in (1..at.dirs.len()).rev() {
         at.dirs.pop();
         at.names.truncate(i);
-        let Ok(Some((dir, Found::Dir))) = open_leaf(&at) else {
+        let Ok(Some((dir, Found::Dir))) = open_leaf(&at, Purpose::Delete) else {
             break;
         };
         if delete_by_handle(&dir).is_err() {
@@ -946,7 +1060,7 @@ pub(super) fn replace(
         Content::File { bytes, .. } | Content::Link(bytes) => bytes,
     };
     for _ in 0..ATTEMPTS {
-        if let Some((leaf, _)) = open_leaf(&at)? {
+        if let Some((leaf, _)) = open_leaf(&at, Purpose::Delete)? {
             // Fails for a folder that isn't empty, as `remove_dir` did. The deletion completes
             // when the handle closes, right here.
             delete_by_handle(&leaf)?;
@@ -1201,6 +1315,10 @@ mod tests {
             !matches!(read, Ok(Some(Leaf::File { ref bytes, .. })) if bytes == b"OUTSIDE"),
             "read through the junction"
         );
+        assert_eq!(
+            read.map_err(|error| error.to_string()),
+            Err(redirected().to_string())
+        );
     }
 
     #[test]
@@ -1331,7 +1449,7 @@ mod tests {
         .unwrap() else {
             panic!("not found")
         };
-        let Some((leaf, Found::Link)) = open_leaf(&at).unwrap() else {
+        let Some((leaf, Found::Link)) = open_leaf(&at, Purpose::Read).unwrap() else {
             panic!("{name} is not a link")
         };
         String::from_utf8(link_target(&leaf).unwrap()).unwrap()
@@ -1358,6 +1476,11 @@ mod tests {
             Some(Leaf::Link(read_link(&dir.path().join("j")).into_bytes()))
         );
         if !symlink_privilege(dir.path()) {
+            // CI runners may create symbolic links: there the check must not be skipped.
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "no privilege to create symbolic links on CI"
+            );
             eprintln!("SKIP: no privilege to create symbolic links");
             return;
         }
@@ -1453,6 +1576,10 @@ mod tests {
             !matches!(&read, Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION)),
             "the junction's target was opened: {read:?}"
         );
+        assert_eq!(
+            read.map_err(|error| error.to_string()),
+            Err(redirected().to_string())
+        );
     }
 
     #[link(name = "kernel32")]
@@ -1531,6 +1658,116 @@ mod tests {
         delete_classic(&file).unwrap();
         drop(file);
         assert!(std::fs::symlink_metadata(&path).is_err());
+    }
+
+    /// When the delete still fails after the read-only attribute was cleared, the attribute is
+    /// put back (the second disposition call is made to fail).
+    #[test]
+    fn delete_classic_restores_read_only_when_the_retry_fails() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("f");
+        std::fs::write(&path, "old").unwrap();
+        make_read_only(&path);
+        let file = OpenOptions::new()
+            .access_mode(DELETE | FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&path)
+            .unwrap();
+        let calls = std::cell::Cell::new(0);
+        let error = delete_classic_with(&file, |_| {
+            calls.set(calls.get() + 1);
+            Err(io::Error::from_raw_os_error(ERROR_ACCESS_DENIED))
+        })
+        .unwrap_err();
+        assert_eq!(
+            (calls.get(), error.raw_os_error()),
+            (2, Some(ERROR_ACCESS_DENIED))
+        );
+        drop(file);
+        assert!(std::fs::metadata(&path).unwrap().permissions().readonly());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "old");
+    }
+
+    #[test]
+    fn set_attributes_writes_only_settable_attributes() {
+        let dir = TempDir::new().unwrap();
+        let file = OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(dir.path())
+            .unwrap();
+        let attributes = attribute_tag(&file).unwrap().file_attributes;
+        assert_ne!(attributes & FILE_ATTRIBUTE_DIRECTORY, 0);
+        // The directory bit is passed in but not written; the folder stays a folder.
+        set_attributes(&file, attributes | FILE_ATTRIBUTE_READONLY).unwrap();
+        let set = attribute_tag(&file).unwrap().file_attributes;
+        assert_ne!(set & FILE_ATTRIBUTE_READONLY, 0);
+        assert_ne!(set & FILE_ATTRIBUTE_DIRECTORY, 0);
+        set_attributes(&file, attributes).unwrap();
+    }
+
+    /// Denies writing (data, appending, extended attributes, attributes) to everyone, as
+    /// `icacls /deny *S-1-1-0:(WD,AD,WEA,WA)` does.
+    fn deny_writing(path: &Path) {
+        let status = std::process::Command::new("icacls")
+            .arg(path)
+            .args(["/deny", "*S-1-1-0:(WD,AD,WEA,WA)"])
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "icacls failed");
+    }
+
+    #[test]
+    fn a_file_whose_acl_denies_writing_still_reads_and_is_removed() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let path = dir.path().join("d").join("f");
+        std::fs::write(&path, "inside").unwrap();
+        deny_writing(&path);
+        assert!(
+            std::fs::OpenOptions::new().write(true).open(&path).is_err(),
+            "the ACL didn't deny writing"
+        );
+        assert_eq!(
+            read(dir.path(), Path::new("d/f"), &mut no_step).unwrap(),
+            Some(Leaf::File {
+                bytes: b"inside".to_vec(),
+                executable: false,
+            })
+        );
+        // Deleting needs only `DELETE`: the open falls back to it without `FILE_WRITE_ATTRIBUTES`.
+        assert!(remove(dir.path(), Path::new("d/f"), &mut no_step).unwrap());
+        assert!(std::fs::symlink_metadata(&path).is_err());
+    }
+
+    /// A OneDrive-like file is reopened by its file ID: the result is the same file.
+    #[test]
+    fn open_by_id_opens_the_same_file() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("f"), "inside").unwrap();
+        let root = open_pinned(dir.path(), FILE_LIST_DIRECTORY).unwrap();
+        let first = nt_open(
+            &root,
+            OsStr::new("f"),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_OPEN,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+            0,
+        )
+        .unwrap();
+        let id = file_id(&first).unwrap();
+        // Renamed meanwhile: opened by identity, not by the name.
+        std::fs::rename(dir.path().join("f"), dir.path().join("g")).unwrap();
+        std::fs::write(dir.path().join("f"), "swapped").unwrap();
+        let mut second =
+            open_by_id(&root, &id.file_id, GENERIC_READ, FILE_NON_DIRECTORY_FILE).unwrap();
+        assert!(file_id(&second).unwrap() == id);
+        let mut text = String::new();
+        second.read_to_string(&mut text).unwrap();
+        assert_eq!(text, "inside");
     }
 
     #[cfg(target_pointer_width = "64")]

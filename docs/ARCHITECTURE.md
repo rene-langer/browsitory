@@ -586,8 +586,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   to a UNC share included); a link's target is read from its own handle
   (`FSCTL_GET_REPARSE_POINT`, as `read_link` would give it). Another reparse point
   (OneDrive/Cloud Files placeholder) is walked through as a folder, or as a file read and
-  written through a second, normal handle (so the file system filter sees it) accepted only
-  with the same file ID. An *empty* held folder can still be turned into a junction in place;
+  written through a second, normal handle (so the file system filter sees it), opened by its
+  file ID (`FILE_OPEN_BY_FILE_ID`, so a link swapped in under the name isn't followed; by name
+  only where the file system has no opens by ID: FAT/exFAT, which have no links, and SMB
+  shares) and accepted only with the same file ID. Leaves are opened for reading with no more
+  access than attributes, so a file whose ACL denies writing still reads; acts that may delete
+  ask for `DELETE` and, where the ACL allows it, `FILE_WRITE_ATTRIBUTES`. An *empty* held folder can still be turned into a junction in place;
   on a local NTFS/ReFS volume a relative open below it then fails with
   `ERROR_CANT_RESOLVE_FILENAME`, reported as "a folder of the working tree changed", so
   nothing is opened, created or contacted in the junction's target. On an SMB share the
@@ -597,11 +601,13 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   through their own handle (`FileDispositionInfoEx` with POSIX semantics, so the name is gone
   once our handle closes even while a scanner or indexer keeps the file open, #168, and with
   `IGNORE_READONLY_ATTRIBUTE`, so a read-only file is deleted as by std's `remove_file` and
-  git, #194). Windows 10 1607–1803 don't know that flag (`ERROR_INVALID_PARAMETER`): POSIX
-  semantics alone. Where the file system has no POSIX deletes (FAT/exFAT, some shares) it
-  falls back to `FileDispositionInfo`, as std's `remove_dir_all` does, which clears a
-  read-only attribute through the same handle first (`FileBasicInfo`; restored if the delete
-  still fails). Tests turn a held folder into a junction in place (`FSCTL_SET_REPARSE_POINT`)
+  git, #194). Windows 10 1607–1803 don't know that flag (`ERROR_INVALID_PARAMETER`), so there
+  POSIX semantics alone are tried, which refuse a read-only file with `ERROR_ACCESS_DENIED`.
+  On access denied, and where the file system has no POSIX deletes (FAT/exFAT, some shares),
+  it falls back to `FileDispositionInfo`, as std's `remove_dir_all` does; when that is denied
+  on a read-only file, the attribute is cleared through the same handle (`FileBasicInfo`,
+  settable attributes only) and the delete tried again, and the attribute is restored if it
+  still fails (not possible when the ACL denies `FILE_WRITE_ATTRIBUTES`). Tests turn a held folder into a junction in place (`FSCTL_SET_REPARSE_POINT`)
   during a write, a read and a folder creation (#164, #193). Hand-declared `kernel32` and
   `ntdll` imports, no new dependency. A `Step` seam in both walkers makes the races
   deterministic in tests.

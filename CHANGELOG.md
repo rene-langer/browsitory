@@ -11,9 +11,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed (Windows): undo, redo and discards no longer fail with "Access is denied" on read-only
   files in the working tree (#194).
 - Windows: every file and folder of a working-tree read, write or delete is opened through the
-  folder Browsitory already holds, so a folder swapped for a junction or symbolic link at that
-  moment can't make Browsitory open a file in the link's target, briefly create one there, or
-  contact a network share it points to (#193).
+  folder Browsitory already holds, so on a local drive a folder swapped for a junction or
+  symbolic link at that moment can't make Browsitory open a file in the link's target, briefly
+  create one there, or contact a network share it points to (#193).
 
 ### Test robustness
 
@@ -50,7 +50,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Applying or popping a stash whose untracked file is now a folder says "The untracked file 'd'
   in this stash would overwrite the folder 'd'; move the folder first." and keeps the stash
   (#186).
-||||||| parent of 9d088aa4 (tests: Windows walker read-only and converted-folder tests, red (#193, #194))
 
 ### Lock and security follow-ups
 
