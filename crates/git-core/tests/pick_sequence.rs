@@ -1652,3 +1652,102 @@ fn a_leftover_after_the_last_step_does_not_author_the_next_commit() {
     assert_eq!(commit.parent_id(0).unwrap().to_string(), last_step);
     assert_eq!(repo.state(), RepositoryState::Clean);
 }
+
+// --- #241: committing a step of a terminal `git cherry-pick A B C` ---
+
+/// Runs the git CLI in `dir`.
+fn git(dir: &Path, args: &[&str]) -> std::process::Output {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap()
+}
+
+/// base: f="base\n". side: A (f="A\n"), B (+b.txt), C (+c.txt). Then a commit "main" sets
+/// f="main\n": on the base branch (checked out) for a cherry-pick, on side (checked out) for a
+/// revert, so picking or reverting A conflicts and B, C apply cleanly. Returns A, B, C.
+fn terminal_sequence_repo(command: &str) -> (tempfile::TempDir, Repository, [String; 3]) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f", "base\n");
+    common::commit_all(&repo, "base");
+    let base_ref = base_branch_ref(&repo);
+    {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("side", &base, false).unwrap();
+    }
+    repo.set_head("refs/heads/side").unwrap();
+    let mut ids = Vec::new();
+    for (path, contents, message) in [
+        ("f", "A\n", "A"),
+        ("b.txt", "b\n", "B"),
+        ("c.txt", "c\n", "C"),
+    ] {
+        common::write_file(dir.path(), path, contents);
+        common::commit_all(&repo, message);
+        ids.push(head(&repo));
+    }
+    if command != "revert" {
+        repo.set_head(&base_ref).unwrap();
+        repo.checkout_head(Some(
+            git2::build::CheckoutBuilder::new()
+                .force()
+                .remove_untracked(true),
+        ))
+        .unwrap();
+    }
+    common::write_file(dir.path(), "f", "main\n");
+    common::commit_all(&repo, "main");
+    let ids: [String; 3] = ids.try_into().unwrap();
+    (dir, repo, ids)
+}
+
+/// A terminal `git <command> A B C` (`cherry-pick` or `revert`) paused on A's conflict, resolved
+/// (f="resolved\n") and staged, not yet committed. `last` runs `B A`, so A is the last step.
+fn terminal_sequence(command: &str, last: bool) -> (tempfile::TempDir, Repository, [String; 3]) {
+    let (dir, repo, ids) = terminal_sequence_repo(command);
+    let [a, b, c] = &ids;
+    let mut args = vec![command];
+    if command == "revert" {
+        args.push("--no-edit");
+    }
+    if last {
+        args.extend([b.as_str(), a.as_str()]);
+    } else {
+        args.extend([a.as_str(), b.as_str(), c.as_str()]);
+    }
+    let output = git(dir.path(), &args);
+    assert!(!output.status.success(), "the sequence must pause on A");
+    assert!(repo.path().join("sequencer").join("todo").exists());
+    common::write_file(dir.path(), "f", "resolved\n");
+    stage(&repo, "f");
+    (dir, repo, ids)
+}
+
+/// The same paused sequence, finished by `git commit --no-edit` (git's own result).
+fn paused_twin(command: &str, last: bool) -> (tempfile::TempDir, Repository, [String; 3]) {
+    let (dir, repo, ids) = terminal_sequence(command, last);
+    let output = git(dir.path(), &["commit", "--no-edit", "--cleanup=strip"]);
+    assert!(output.status.success(), "{output:?}");
+    (dir, repo, ids)
+}
+
+fn todo(repo: &Repository) -> Option<String> {
+    std::fs::read_to_string(repo.path().join("sequencer").join("todo")).ok()
+}
+
+#[test]
+fn committing_a_terminal_sequence_step_deletes_its_todo_today() {
+    let (_dir, repo, _) = terminal_sequence("cherry-pick", false);
+    let mut repo = repo;
+
+    git_core::commit::commit(&mut repo, "A\n", HookOptions::default()).unwrap();
+
+    assert!(!repo.path().join("sequencer").exists());
+
+    let (twin_dir, twin, _) = paused_twin("cherry-pick", false);
+    assert!(todo(&twin).is_some());
+    let output = git(twin_dir.path(), &["cherry-pick", "--continue"]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(summaries(&twin, 3), ["C", "B", "A"]);
+}

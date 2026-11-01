@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Terminal cherry-picks
+
+- Fixed: committing a step of a cherry-pick started in a terminal dropped its remaining commits
+  (#241).
+
 ### Stash: things in the way
 
 - Fixed: Stash all deleted an ignored file or folder that was in the way of a file or folder it
