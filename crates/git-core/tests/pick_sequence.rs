@@ -1652,3 +1652,318 @@ fn a_leftover_after_the_last_step_does_not_author_the_next_commit() {
     assert_eq!(commit.parent_id(0).unwrap().to_string(), last_step);
     assert_eq!(repo.state(), RepositoryState::Clean);
 }
+
+// --- #241: committing a step of a terminal `git cherry-pick A B C` ---
+
+/// Runs the git CLI in `dir`.
+fn git(dir: &Path, args: &[&str]) -> std::process::Output {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap()
+}
+
+/// base: f="base\n". side, by "Side Author": A (f="A\n"), B (+b.txt), C (+c.txt). Then a commit "main" sets
+/// f="main\n": on the base branch (checked out) for a cherry-pick, on side (checked out) for a
+/// revert, so picking or reverting A conflicts and B, C apply cleanly. Returns A, B, C.
+fn terminal_sequence_repo(command: &str) -> (tempfile::TempDir, Repository, [String; 3]) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f", "base\n");
+    common::commit_all(&repo, "base");
+    let base_ref = base_branch_ref(&repo);
+    {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("side", &base, false).unwrap();
+    }
+    repo.set_head("refs/heads/side").unwrap();
+    let mut ids = Vec::new();
+    repo.config()
+        .unwrap()
+        .set_str("user.name", "Side Author")
+        .unwrap();
+    for (path, contents, message) in [
+        ("f", "A\n", "A"),
+        ("b.txt", "b\n", "B"),
+        ("c.txt", "c\n", "C"),
+    ] {
+        common::write_file(dir.path(), path, contents);
+        common::commit_all(&repo, message);
+        ids.push(head(&repo));
+    }
+    repo.config()
+        .unwrap()
+        .set_str("user.name", "Test User")
+        .unwrap();
+    if command != "revert" {
+        repo.set_head(&base_ref).unwrap();
+        repo.checkout_head(Some(
+            git2::build::CheckoutBuilder::new()
+                .force()
+                .remove_untracked(true),
+        ))
+        .unwrap();
+    }
+    common::write_file(dir.path(), "f", "main\n");
+    common::commit_all(&repo, "main");
+    let ids: [String; 3] = ids.try_into().unwrap();
+    (dir, repo, ids)
+}
+
+/// A terminal `git <command> A B C` (`cherry-pick` or `revert`) paused on A's conflict, resolved
+/// (f="resolved\n") and staged, not yet committed. `last` runs `B A`, so A is the last step.
+fn terminal_sequence(command: &str, last: bool) -> (tempfile::TempDir, Repository, [String; 3]) {
+    let (dir, repo, ids) = terminal_sequence_repo(command);
+    let [a, b, c] = &ids;
+    let mut args = vec![command];
+    if command == "revert" {
+        args.push("--no-edit");
+    }
+    if last {
+        args.extend([b.as_str(), a.as_str()]);
+    } else {
+        args.extend([a.as_str(), b.as_str(), c.as_str()]);
+    }
+    let output = git(dir.path(), &args);
+    assert!(!output.status.success(), "the sequence must pause on A");
+    assert!(repo.path().join("sequencer").join("todo").exists());
+    common::write_file(dir.path(), "f", "resolved\n");
+    stage(&repo, "f");
+    (dir, repo, ids)
+}
+
+/// The same paused sequence, finished by `git commit --no-edit` (git's own result). Also returns
+/// the twin's todo from before that commit (its commit ids differ from the original's).
+fn paused_twin(command: &str, last: bool) -> (tempfile::TempDir, Repository, [String; 3], String) {
+    let (dir, repo, ids) = terminal_sequence(command, last);
+    let before = todo(&repo).unwrap();
+    let output = git(dir.path(), &["commit", "--no-edit", "--cleanup=strip"]);
+    assert!(output.status.success(), "{output:?}");
+    (dir, repo, ids, before)
+}
+
+fn todo(repo: &Repository) -> Option<String> {
+    std::fs::read_to_string(repo.path().join("sequencer").join("todo")).ok()
+}
+
+/// The paused step committed by Browsitory's Commit button, as `git commit` would: the pick's own
+/// files go, the todo stays.
+fn commit_the_step(repo: Repository, message: &str) -> Repository {
+    let mut repo = repo;
+    git_core::commit::commit(&mut repo, message, HookOptions::default()).unwrap();
+    assert!(!repo.path().join("CHERRY_PICK_HEAD").exists());
+    assert!(!repo.path().join("REVERT_HEAD").exists());
+    assert!(!repo.path().join("MERGE_MSG").exists());
+    assert_eq!(repo.state(), RepositoryState::Clean);
+    repo
+}
+
+/// Whether `git status` still reports a cherry-pick or revert in progress.
+fn git_reports_a_pick(dir: &Path) -> bool {
+    let output = git(dir, &["status"]);
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.contains("cherry-pick") || text.contains("revert")
+}
+
+#[test]
+fn committing_a_terminal_sequence_step_keeps_its_todo() {
+    let (dir, repo, _) = terminal_sequence("cherry-pick", false);
+    let before = todo(&repo).unwrap();
+
+    let repo = commit_the_step(repo, "A\n");
+
+    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
+    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head_commit.author().name().unwrap(), "Side Author");
+    assert_eq!(common::read(dir.path(), "f"), "resolved\n");
+    let output = git(dir.path(), &["cherry-pick", "--continue"]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(summaries(&repo, 4), ["C", "B", "A", "main"]);
+    assert!(!repo.path().join("sequencer").exists());
+
+    // git's twin: `git commit` keeps the todo too.
+    let (twin_dir, twin, _, twin_before) = paused_twin("cherry-pick", false);
+    assert_eq!(todo(&twin).as_deref(), Some(twin_before.as_str()));
+    let output = git(twin_dir.path(), &["cherry-pick", "--continue"]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(summaries(&twin, 4), ["C", "B", "A", "main"]);
+}
+
+#[test]
+fn committing_the_last_step_of_a_terminal_sequence_ends_it() {
+    let (dir, repo, _) = terminal_sequence("cherry-pick", true);
+
+    let repo = commit_the_step(repo, "A\n");
+
+    assert!(!repo.path().join("sequencer").exists());
+    assert!(!git_reports_a_pick(dir.path()));
+    assert_eq!(summaries(&repo, 3), ["A", "B", "main"]);
+
+    let (twin_dir, twin, _, _) = paused_twin("cherry-pick", true);
+    assert!(!twin.path().join("sequencer").exists());
+    assert!(!git_reports_a_pick(twin_dir.path()));
+}
+
+#[test]
+fn committing_a_terminal_revert_sequence_step_keeps_its_todo() {
+    let (dir, repo, _) = terminal_sequence("revert", false);
+    let before = todo(&repo).unwrap();
+
+    let repo = commit_the_step(repo, "Revert \"A\"\n");
+
+    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
+    let output = git(dir.path(), &["revert", "--continue", "--no-edit"]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        summaries(&repo, 4),
+        ["Revert \"C\"", "Revert \"B\"", "Revert \"A\"", "main"]
+    );
+    assert!(!repo.path().join("sequencer").exists());
+
+    let (twin_dir, twin, _, twin_before) = paused_twin("revert", false);
+    assert_eq!(todo(&twin).as_deref(), Some(twin_before.as_str()));
+    assert!(git(twin_dir.path(), &["revert", "--continue", "--no-edit"])
+        .status
+        .success());
+}
+
+#[test]
+fn committing_the_last_step_of_a_terminal_revert_sequence_ends_it() {
+    let (dir, repo, _) = terminal_sequence("revert", true);
+
+    let repo = commit_the_step(repo, "Revert \"A\"\n");
+
+    assert!(!repo.path().join("sequencer").exists());
+    assert!(!git_reports_a_pick(dir.path()));
+}
+
+#[test]
+fn a_single_cherry_pick_keeps_a_terminal_sequences_todo() {
+    let (_dir, repo, [_, b, _]) = terminal_sequence("cherry-pick", false);
+    let before = todo(&repo).unwrap();
+    let repo = commit_the_step(repo, "A\n");
+
+    let outcome = cherry_pick(&repo, &b, None, HookOptions::default()).unwrap();
+
+    assert!(matches!(
+        outcome,
+        git_core::pick::PickOutcome::Committed { .. }
+    ));
+    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
+    assert_eq!(repo.state(), RepositoryState::Clean);
+    // Picking it again changes nothing: refused as empty, the todo still kept.
+    assert!(matches!(
+        cherry_pick(&repo, &b, None, HookOptions::default()),
+        Err(PickError::EmptyResult)
+    ));
+    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
+    assert_eq!(repo.state(), RepositoryState::Clean);
+
+    // git's twin keeps it as well.
+    let (twin_dir, twin, [_, b, _], twin_before) = paused_twin("cherry-pick", false);
+    let output = git(twin_dir.path(), &["cherry-pick", &b]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(todo(&twin).as_deref(), Some(twin_before.as_str()));
+}
+
+#[test]
+fn a_single_revert_keeps_a_terminal_sequences_todo() {
+    let (_dir, repo, _) = terminal_sequence("cherry-pick", false);
+    let before = todo(&repo).unwrap();
+    let repo = commit_the_step(repo, "A\n");
+    let resolved = head(&repo);
+
+    let outcome = git_core::pick::revert(&repo, &resolved, None, HookOptions::default()).unwrap();
+
+    assert!(matches!(
+        outcome,
+        git_core::pick::PickOutcome::Committed { .. }
+    ));
+    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
+    assert_eq!(repo.state(), RepositoryState::Clean);
+
+    let (twin_dir, twin, _, twin_before) = paused_twin("cherry-pick", false);
+    let output = git(twin_dir.path(), &["revert", "--no-edit", "HEAD"]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(todo(&twin).as_deref(), Some(twin_before.as_str()));
+}
+
+#[test]
+fn a_squash_merge_keeps_a_terminal_sequences_todo() {
+    let (dir, repo, _) = terminal_sequence("cherry-pick", false);
+    let before = todo(&repo).unwrap();
+    let repo = commit_the_step(repo, "A\n");
+    let extra = common::commit_tree(
+        &repo,
+        &[("f", "resolved\n", 0o100644), ("e.txt", "e\n", 0o100644)],
+        &[repo.head().unwrap().target().unwrap()],
+        "extra",
+    );
+    repo.branch("extra", &repo.find_commit(extra).unwrap(), false)
+        .unwrap();
+
+    let outcome = git_core::merge::start_merge(
+        &repo,
+        "extra",
+        git_core::merge::MergeOptions {
+            squash: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(outcome, git_core::merge::MergeOutcome::Squashed);
+    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
+    assert!(repo.path().join("SQUASH_MSG").exists());
+    assert_eq!(common::read(dir.path(), "e.txt"), "e\n");
+}
+
+/// A one-line todo goes only with the commit that finishes a pick: a merge commit (state cleared,
+/// but no CHERRY_PICK_HEAD/REVERT_HEAD) keeps it, as `git commit` does (#241).
+#[test]
+fn a_commit_without_a_pick_keeps_a_one_line_todo() {
+    let setup = || {
+        let (dir, repo) = common::init_repo();
+        common::write_file(dir.path(), "f", "base\n");
+        common::commit_all(&repo, "base");
+        let base = repo.head().unwrap().target().unwrap();
+        // A side commit, not HEAD's ancestor, so the merge isn't taken for one already committed.
+        let side = common::commit_tree(
+            &repo,
+            &[("f", "base\n", 0o100644), ("s.txt", "s\n", 0o100644)],
+            &[base],
+            "side",
+        );
+        common::write_file(dir.path(), "f", "edit\n");
+        common::commit_all(&repo, "edit");
+        common::write_file(dir.path(), "s.txt", "s\n");
+        stage(&repo, "s.txt");
+        std::fs::write(repo.path().join("MERGE_HEAD"), format!("{side}\n")).unwrap();
+        let sequencer = repo.path().join("sequencer");
+        std::fs::create_dir(&sequencer).unwrap();
+        let line = format!("pick {side} side\n");
+        std::fs::write(sequencer.join("todo"), &line).unwrap();
+        assert_eq!(repo.state(), RepositoryState::Merge);
+        (dir, repo, line)
+    };
+    let (_dir, mut repo, line) = setup();
+
+    git_core::commit::commit(&mut repo, "merge\n", HookOptions::default()).unwrap();
+
+    assert_eq!(
+        repo.head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .parent_count(),
+        2
+    );
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+    assert_eq!(todo(&repo).as_deref(), Some(line.as_str()));
+
+    let (twin_dir, twin, line) = setup();
+    let output = git(twin_dir.path(), &["commit", "-m", "merge"]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(!twin.path().join("MERGE_HEAD").exists());
+    assert_eq!(todo(&twin).as_deref(), Some(line.as_str()));
+}
