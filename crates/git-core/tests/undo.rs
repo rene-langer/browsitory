@@ -1100,3 +1100,23 @@ fn undo_restore_never_writes_through_a_junction() {
     );
     assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
 }
+
+/// Windows: an undo replaces a file the user made read-only, as `git checkout` does (#194).
+#[cfg(windows)]
+#[test]
+fn undo_restores_a_read_only_file() {
+    let (dir, repo) = init_repo();
+    write(&repo, "a.txt", "one\n");
+    stage(&repo, "a.txt");
+    commit(&repo, "initial");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "a.txt", "two\n");
+    let path = dir.path().join("a.txt");
+    let mut permissions = fs::metadata(&path).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&path, permissions).unwrap();
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+
+    restore(&repo, &after, &before, "undo").unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("one\n"));
+}

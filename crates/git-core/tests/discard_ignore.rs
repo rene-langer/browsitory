@@ -672,3 +672,19 @@ fn discarding_a_file_that_is_now_a_folder_with_an_ignored_folder_names_the_folde
         "{err}"
     );
 }
+
+/// Windows: discarding an untracked file the user made read-only deletes it (#194).
+#[cfg(windows)]
+#[test]
+fn discarding_a_read_only_untracked_file_deletes_it() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "seed.txt", "s\n");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "nested/new.txt", "n\n");
+    let path = dir.path().join("nested/new.txt");
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    discard_file(&repo, "nested/new.txt").unwrap();
+    assert!(std::fs::symlink_metadata(&path).is_err());
+}
