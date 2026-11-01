@@ -11,6 +11,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed: unstaging a file whose folder a merge left conflicts in failed with "invalid entry
   mode" and could unstage other files below it; it now says "Can't unstage 'd': the merge left
   conflicts in it. Resolve them first." and changes nothing (#187).
+- Stashing a file that replaced a tracked folder now also stashes the folder's deletion and puts
+  the folder back, as git stash does, instead of refusing with "'d' is now a file" (#186).
+- Fixed: applying or popping a stash that holds a file which replaced a folder reported success
+  but left the file as "d~Stashed changes", and Pop dropped the stash. It now says "This stash
+  can't be applied here because a file replaced a folder; use git stash apply from a terminal."
+  and keeps the stash (#186).
+- Stash… with Include untracked files off refuses when an untracked file is in the way of a
+  stashed folder or file, instead of deleting it (#186).
 
 ### Lock and security follow-ups
 

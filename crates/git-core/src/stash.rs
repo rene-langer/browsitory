@@ -146,6 +146,13 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     if !opts.paths.is_empty() {
         return save_path_limited_stash(repo, opts, message);
     }
+    // The reset after stashing would delete an untracked file in the way of a tracked path
+    // (#186). The path-limited stash checks only its own paths.
+    if !opts.include_untracked {
+        if let Some((untracked, tracked)) = untracked_in_the_way(repo, opts.keep_index)? {
+            return Err(StashError::UntrackedInTheWay { untracked, tracked });
+        }
+    }
     // libgit2's stash records and resets in one call, and its forced reset writes through a
     // symlink that replaced a tracked file or folder (#114). With such a link, stash every
     // changed path through Browsitory's path-limited stash instead: a file link is stashed and
@@ -299,9 +306,19 @@ fn save_path_limited_stash(
         });
     }
     // The mirror case: `d/f` is tracked but `d` is now a file. The revert can't restore `d/f`
-    // without deleting `d`; refuse before anything is recorded.
+    // without deleting `d`; refuse before anything is recorded, unless `d` is stashed too (the
+    // user picked `d`, or everything): then the revert removes it first, as git does (#186).
     for path in &tracked {
         if let Some(parent) = crate::worktree_guard::file_in_place_of_folder(&workdir, path)? {
+            if untracked.contains(&parent) {
+                continue;
+            }
+            if !opts.include_untracked && is_untracked(repo, &parent)? {
+                return Err(StashError::UntrackedInTheWay {
+                    untracked: parent,
+                    tracked: path.clone(),
+                });
+            }
             return Err(StashError::FolderIsNowAFile {
                 path: path.clone(),
                 parent,
@@ -445,6 +462,66 @@ fn save_path_limited_stash(
     Ok(())
 }
 
+/// True when the worktree file `path` is untracked: not in the index and not ignored.
+/// (`status_file` can't tell: the path is ambiguous while the index has entries below it.)
+fn is_untracked(repo: &Repository, path: &str) -> Result<bool, StashError> {
+    let path = std::path::Path::new(path);
+    Ok(repo.index()?.get_path(path, 0).is_none() && !repo.is_path_ignored(path)?)
+}
+
+/// Before a stash without untracked files: the first untracked file the reset would delete
+/// because it is in the way of a tracked path (a file where the restored tree has a folder, or
+/// a file below a path the restored tree has as a file), with that tracked path. The restored
+/// tree is HEAD's, or the index's with `keep_index`; git's `reset --hard` deletes such files.
+fn untracked_in_the_way(
+    repo: &Repository,
+    keep_index: bool,
+) -> Result<Option<(String, String)>, StashError> {
+    let restored = if keep_index {
+        repo.index()?
+    } else {
+        let mut index = git2::Index::new()?;
+        if let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) {
+            index.read_tree(&head)?;
+        }
+        index
+    };
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false)
+        .exclude_submodules(true);
+    for entry in repo.statuses(Some(&mut options))?.iter() {
+        if entry.status() != git2::Status::WT_NEW {
+            continue;
+        }
+        let Ok(path) = entry.path() else { continue };
+        let path = path.trim_end_matches('/');
+        // A file where the restored tree has a folder: the reset checks out the folder's files.
+        let prefix = format!("{path}/");
+        if let Ok(position) = restored.find_prefix(std::path::Path::new(&prefix)) {
+            if let Some(below) = restored.get(position) {
+                if below.path.starts_with(prefix.as_bytes()) {
+                    let tracked = String::from_utf8_lossy(&below.path).into_owned();
+                    return Ok(Some((path.to_string(), tracked)));
+                }
+            }
+        }
+        // A file below a path the restored tree has as a file: the reset replaces the folder.
+        for (slash, _) in path.match_indices('/') {
+            let ancestor = &path[..slash];
+            if restored
+                .get_path(std::path::Path::new(ancestor), 0)
+                .is_some()
+            {
+                return Ok(Some((path.to_string(), ancestor.to_string())));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Blob id and mode of a worktree file, with clean filters applied (as `git add` would);
 /// `None` when the file is gone.
 fn worktree_blob(
@@ -539,6 +616,7 @@ pub fn apply_stash(
             .collect();
         crate::worktree_guard::refuse_linked_folders::<StashError>(repo, &incoming)?;
     }
+    refuse_untracked_file_over_folder(repo, index)?;
     let mut options = git2::StashApplyOptions::new();
     if restore_index {
         options.reinstantiate_index();
@@ -574,6 +652,55 @@ pub fn apply_stash(
     } else {
         Ok(StashApplyOutcome::Conflicted { files })
     }
+}
+
+/// `FileReplacedFolder` when `stash@{index}` holds an untracked file where the worktree has a
+/// real folder: libgit2 checks the untracked files out before the tracked changes (git does it
+/// the other way round), so it can't put the file back, and it would report success with the
+/// file left as `<name>~Stashed changes` (#186). Nothing is written.
+fn refuse_untracked_file_over_folder(repo: &Repository, index: usize) -> Result<(), StashError> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(());
+    };
+    let Some(id) = repo
+        .reflog("refs/stash")
+        .ok()
+        .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new()))
+    else {
+        return Ok(());
+    };
+    let Ok(untracked) = repo.find_commit(id)?.parent(2) else {
+        return Ok(());
+    };
+    let mut blocked = false;
+    untracked
+        .tree()?
+        .walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() == Some(git2::ObjectType::Tree) {
+                return git2::TreeWalkResult::Ok;
+            }
+            let Ok(name) = entry.name() else {
+                return git2::TreeWalkResult::Ok;
+            };
+            let path = workdir.join(root).join(name);
+            if std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) {
+                blocked = true;
+                return git2::TreeWalkResult::Abort;
+            }
+            git2::TreeWalkResult::Ok
+        })
+        .or_else(|error| {
+            // `Abort` surfaces as a `User` error.
+            if blocked {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        })?;
+    if blocked {
+        return Err(StashError::FileReplacedFolder);
+    }
+    Ok(())
 }
 
 /// Applies `stash@{index}` and drops it only when it applied cleanly; a conflicted apply keeps
