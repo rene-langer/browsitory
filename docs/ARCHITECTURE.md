@@ -881,14 +881,27 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   in the way, no permission) is `WorktreeError::CreateFolder`, naming that folder. When a later
   step fails, the call removes what it created: the parent folders (deepest first, only while
   empty), the destination (only while empty), `<commondir>/worktrees/<name>` when it didn't exist
-  before and has no `gitdir` file yet (libgit2 creates it before the destination and leaves it
-  behind on failure, which blocked a retry with the same name), and the branch when this call
-  created it. The original error is returned. A failure after libgit2 wrote `gitdir` (checkout,
-  HEAD) is not rolled back: the entry stays registered with the branch checked out, so a retry
-  gets `PathExists` and remove gets `Dirty`; the user deletes the folder, prunes, and deletes the
-  branch. Residual risk: another process that creates the same `worktrees/<name>` between the
+  before (libgit2 creates it before the destination and leaves it behind on failure, which
+  blocked a retry with the same name), and the branch when this call created it.
+- **A worktree add that fails after `gitdir` is rolled back too (#245).** libgit2 writes `.git`,
+  `commondir` and `gitdir`, then HEAD, then checks out, and cleans up nothing when a later step
+  fails (a full disk, a name the file system refuses such as `aux` or `a.` on Windows, a path
+  that's too long). The entry is ours when this call created it and its `gitdir` is missing or
+  names `<destination>/.git` (canonicalized); an entry naming another folder is left alone. For
+  ours, in this order: when the destination's `.git` file points at our entry (libgit2 writes it
+  only into the folder it just created), `roll_back_destination` removes each file, link and
+  submodule path of the branch's tree through `remove_and_prune_beneath` (no link followed,
+  emptied folders pruned), then `.git`, then the destination if it is empty; then the entry
+  (`remove_dir_all`), which frees the branch; then the new branch; then the parent folders. Every
+  libgit2 error of the add is `WorktreeError::AddFailed` ("Couldn't create the worktree:
+  {reason}.", `reason` = libgit2's message); when something else is left in the destination, it
+  is kept and the error is `AddFailedFolderLeft`, naming the folder. git does it differently: it
+  deletes the whole destination and keeps the `-b` branch. There is no forced remove for a
+  half-made worktree left by an older version; the user deletes the folder, prunes and deletes
+  the branch. Residual risk: another process that creates the same `worktrees/<name>` between the
   existence check and libgit2's mkdir, or an empty destination folder after it, can have that
-  folder removed by the rollback.
+  folder removed by the rollback; a process that writes a file at one of the tree's paths in the
+  new folder during the add loses that file.
 - Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or a
   refusal check: `scan`, `refuse_linked_folders`, `has_symlinked_ancestor` in stage/stash,
   `refuse_linked_path`) and libgit2's own write; libgit2 has no `openat`-style checkout. The
