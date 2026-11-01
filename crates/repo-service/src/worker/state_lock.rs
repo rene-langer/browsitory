@@ -37,6 +37,47 @@ pub(super) const CONTENDED_WAIT: Duration = Duration::from_secs(1);
 #[cfg(test)]
 pub(super) const CONTENDED_WAIT: Duration = Duration::from_millis(300);
 
+/// How long the next locked command waits for the lock, from how recently it was found busy
+/// (#175, #197):
+///
+/// - not contended: `LOCK_WAIT`;
+/// - the first `Busy` (a full `LOCK_WAIT` in vain) marks it contended: the next command waits
+///   `CONTENDED_WAIT`, so a brief hold right after a long one is still waited out;
+/// - every later `Busy` opens (or extends) a `CONTENDED_WAIT` window in which commands try once
+///   (`ZERO`): a burst of clicks or queued commands behind the other window's long hold costs
+///   about one `CONTENDED_WAIT`, not one each. After a quiet `CONTENDED_WAIT`, the next command
+///   waits `CONTENDED_WAIT` again;
+/// - taking the lock (`held`) resets it.
+#[derive(Debug, Default)]
+pub(super) struct Contention {
+    contended: bool,
+    quick_until: Option<Instant>,
+}
+
+impl Contention {
+    pub fn wait(&self, now: Instant) -> Duration {
+        if !self.contended {
+            LOCK_WAIT
+        } else if self.quick_until.is_some_and(|until| now < until) {
+            Duration::ZERO
+        } else {
+            CONTENDED_WAIT
+        }
+    }
+
+    pub fn held(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn busy(&mut self, now: Instant) {
+        if self.contended {
+            self.quick_until = Some(now + CONTENDED_WAIT);
+        } else {
+            self.contended = true;
+        }
+    }
+}
+
 /// `<gitdir>/browsitory/state.lock`. `repo.path()` is per worktree, so each linked worktree has
 /// its own lock, as it has its own `undo.json`.
 pub(super) struct StateLock {
@@ -141,6 +182,35 @@ mod tests {
 
     fn is_busy(acquire: &Acquire) -> bool {
         matches!(acquire, Acquire::Busy)
+    }
+
+    #[test]
+    fn contention_waits_long_then_briefly_then_once_per_burst() {
+        let t0 = Instant::now();
+        let mut contention = Contention::default();
+        assert_eq!(contention.wait(t0), LOCK_WAIT);
+        // The first timeout: the next command still waits, briefly.
+        contention.busy(t0);
+        assert_eq!(contention.wait(t0), CONTENDED_WAIT);
+        assert_eq!(contention.wait(t0 + LOCK_WAIT), CONTENDED_WAIT);
+        // Busy again: commands within `CONTENDED_WAIT` of it try once.
+        let t1 = t0 + CONTENDED_WAIT;
+        contention.busy(t1);
+        assert_eq!(
+            contention.wait(t1 + Duration::from_millis(10)),
+            Duration::ZERO
+        );
+        assert_eq!(contention.wait(t1 + CONTENDED_WAIT), CONTENDED_WAIT);
+        // Each busy try extends the window.
+        let t2 = t1 + CONTENDED_WAIT / 2;
+        contention.busy(t2);
+        assert_eq!(contention.wait(t1 + CONTENDED_WAIT), Duration::ZERO);
+        assert_eq!(contention.wait(t2 + CONTENDED_WAIT), CONTENDED_WAIT);
+        // Taking the lock resets it.
+        contention.held();
+        assert_eq!(contention.wait(t2), LOCK_WAIT);
+        contention.busy(t2);
+        assert_eq!(contention.wait(t2), CONTENDED_WAIT);
     }
 
     #[test]
