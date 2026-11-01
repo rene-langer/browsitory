@@ -994,9 +994,42 @@ pub(crate) enum Leaf {
     File {
         bytes: Vec<u8>,
         executable: bool,
+        /// Taken from the descriptor the bytes were read from, before reading them.
+        stat: FileStat,
     },
     /// The link's target (`/`-separated on Windows).
     Link(Vec<u8>),
+}
+
+/// A file's stat data as git's index records it (`git_index_entry__init_from_stat`), from the
+/// descriptor [`read_beneath`] read it through. On Windows, as libgit2 fills it there: the
+/// creation time as ctime, and no device, inode or owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct FileStat {
+    pub ctime: (i64, u32),
+    pub mtime: (i64, u32),
+    pub dev: u64,
+    pub ino: u64,
+    pub uid: u32,
+    pub gid: u32,
+    pub size: u64,
+}
+
+#[cfg(windows)]
+impl FileStat {
+    pub(crate) fn of(meta: &std::fs::Metadata) -> Self {
+        let since_epoch = |time: io::Result<std::time::SystemTime>| {
+            time.ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or((0, 0), |d| (d.as_secs() as i64, d.subsec_nanos()))
+        };
+        Self {
+            ctime: since_epoch(meta.created()),
+            mtime: since_epoch(meta.modified()),
+            size: meta.len(),
+            ..Self::default()
+        }
+    }
 }
 
 /// What [`replace_beneath`] writes.

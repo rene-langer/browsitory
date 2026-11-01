@@ -410,7 +410,22 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
     Ok(Some(Leaf::File {
         bytes,
         executable: opened.st_mode & 0o111 != 0,
+        stat: file_stat(&opened),
     }))
+}
+
+/// `stat`'s fields as git's index records them. The casts are no-ops on some targets.
+#[allow(clippy::unnecessary_cast)]
+fn file_stat(stat: &libc::stat) -> super::FileStat {
+    super::FileStat {
+        ctime: (stat.st_ctime as i64, stat.st_ctime_nsec as u32),
+        mtime: (stat.st_mtime as i64, stat.st_mtime_nsec as u32),
+        dev: stat.st_dev as u64,
+        ino: stat.st_ino as u64,
+        uid: stat.st_uid as u32,
+        gid: stat.st_gid as u32,
+        size: stat.st_size as u64,
+    }
 }
 
 /// See `worktree_guard::remove_and_prune_beneath`.
@@ -761,12 +776,16 @@ mod tests {
             &mut swap_on(dir.path(), "d", outside.path()),
         )
         .unwrap();
-        assert_eq!(
-            leaf,
-            Some(Leaf::File {
-                bytes: b"inner\n".to_vec(),
-                executable: false
-            })
+        assert!(
+            matches!(
+                &leaf,
+                Some(Leaf::File {
+                    bytes,
+                    executable: false,
+                    ..
+                }) if bytes == b"inner\n"
+            ),
+            "{leaf:?}"
         );
     }
 
