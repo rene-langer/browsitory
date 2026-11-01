@@ -407,24 +407,32 @@ pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
             paths.push(source);
         }
     }
-    if root.is_some() {
-        // A merge's conflict entries at or below the pair can't be reset ("invalid entry mode")
-        // and dropping them would lose a side of the conflict: refuse before changing anything.
-        if has_conflict_entries_at_or_below(&index, &unit) {
-            return Err(StageError::ConflictsBelow(unit));
-        }
-        // libgit2 can't reset a root whose index entries sit on the other side of the
-        // file/folder swap (re-adding `l` silently drops `l/a`, then "index does not contain
-        // l/a"), so the pair's entries go first and the reset only adds HEAD's back. The
-        // removals stay in memory: `reset_default` works on this same repository index and
-        // writes it once, so a failed reset leaves `.git/index` as it was.
-        let _ = index.remove_path(Path::new(&unit));
-        index.remove_dir(Path::new(&unit), 0)?;
+    // A merge's conflict entries at or below the pair can't be reset ("invalid entry mode") and
+    // dropping them would lose a side of the conflict: refuse before changing anything.
+    if root.is_some() && has_conflict_entries_at_or_below(&index, &unit) {
+        return Err(StageError::ConflictsBelow(unit));
     }
-    if let Err(error) = repo.reset_default(target, paths.iter()) {
-        // Drop the in-memory removals so the shared index object matches the file again.
-        let _ = index.read(true);
-        return Err(error.into());
+    let mut remove_and_reset = || -> Result<(), git2::Error> {
+        if root.is_some() {
+            // libgit2 can't reset a root whose index entries sit on the other side of the
+            // file/folder swap (re-adding `l` silently drops `l/a`, then "index does not contain
+            // l/a"), so the pair's entries go first and the reset only adds HEAD's back. The
+            // removals stay in memory: `reset_default` works on this same repository index and
+            // writes it once, so a failed reset leaves `.git/index` as it was.
+            let _ = index.remove_path(Path::new(&unit));
+            index.remove_dir(Path::new(&unit), 0)?;
+        }
+        repo.reset_default(target, paths.iter())
+    };
+    if let Err(error) = remove_and_reset() {
+        // Drop the in-memory removals: the repository's index object is shared (the worker keeps
+        // its Repository open), so a later write elsewhere would otherwise save them.
+        return Err(match index.read(true) {
+            Ok(()) => error.into(),
+            Err(reread) => StageError::Index(git2::Error::from_str(&format!(
+                "{error}; re-reading the index afterwards failed too: {reread}"
+            ))),
+        });
     }
     Ok(())
 }

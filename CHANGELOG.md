@@ -18,7 +18,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   can't be applied here because a file replaced a folder; use git stash apply from a terminal."
   and keeps the stash (#186).
 - Stash… with Include untracked files off refuses when an untracked file is in the way of a
-  stashed folder or file, instead of deleting it (#186).
+  stashed folder or file, instead of deleting it, also when the names differ only in case on a
+  case-insensitive drive (#186).
+- Applying or popping a stash whose untracked file is now a folder says "The untracked file 'd'
+  in this stash would overwrite the folder 'd'; move the folder first." and keeps the stash
+  (#186).
 
 ### Lock and security follow-ups
 

@@ -473,10 +473,13 @@ When a file replaced a tracked folder (`d` where `d/f` was), **Stash file…** o
 file together with the folder's deletion and puts the folder back, as `git stash push -u -- d`
 does. Browsitory can't apply such a stash while the folder is back: Apply and Pop say "This stash
 can't be applied here because a file replaced a folder; use git stash apply from a terminal."
-and keep the stash. With **Include untracked files** off, stashing would delete an untracked
-file that is in the way of a stashed folder or file, so it refuses instead ("Stashing would
-delete the untracked file 'd', which is in the way of 'd/f'. Turn on Include untracked files,
-or move 'd' first.").
+and keep the stash. If a folder was created where a stash holds an untracked file, Apply and Pop
+refuse too ("The untracked file 'd' in this stash would overwrite the folder 'd'; move the folder
+first."). With **Include untracked files** off, stashing would delete an untracked file that is
+in the way of a stashed folder or file (with **Keep staged changes** also one in the way of a
+staged one), so it refuses instead ("Stashing would delete the untracked file 'd', which is in
+the way of 'd/f'. Turn on Include untracked files, or move 'd' first."). Where names ignore case
+(`core.ignorecase`), `docs` counts as in the way of `Docs/f`.
 
 On macOS and Windows, where `D` and `d` name the same file, a commit that holds a symbolic link
 and a folder whose names differ only in case (`D` and `d/x`) can't be checked out safely:

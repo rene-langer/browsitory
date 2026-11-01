@@ -128,16 +128,23 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   and the stash is kept).
 - Untracked files in the way (#186). Without "Include untracked files", the reset after stashing
   (libgit2's forced reset, or the path-limited revert) deletes an untracked file that sits where
-  the restored tree (HEAD, or the index with keep-index) has a folder, or inside a folder where it
-  has a file, as git's `reset --hard` does. `save_stash` refuses first with
+  the restored tree has a folder, or inside a folder where it has a file, as git's `reset --hard`
+  does. The restored tree is HEAD's; with keep-index the index's too, because libgit2 and git
+  both reset to HEAD before checking the index back out. `save_stash` refuses first with
   `StashError::UntrackedInTheWay` (Stash all checks every untracked file, the path-limited stash
-  its own tracked paths); with untracked files included the file is in the stash.
+  its own tracked paths); with untracked files included the file is in the stash. Under
+  `core.ignorecase` paths compare case-insensitively (`docs` over `Docs/f`). An untracked symlink
+  is skipped there: the hazard route refuses it as `BeyondSymlink`. A file removed from the index
+  and edited (`git rm --cached d`, status `INDEX_DELETED | WT_NEW`) is not refused: like git, the
+  stash records the edit in its worktree tree, resets `d` to HEAD's and Pop brings the edit back.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as
   `d~Stashed changes` and a pop would drop the stash. `apply_stash` refuses up front with
   `StashError::FileReplacedFolder` when an untracked-tree file's path is a real folder in the
-  worktree (nothing is written, the stash is kept; `git stash apply` handles it). The mirror
+  worktree and the stash recorded that swap (its base has the folder, its worktree tree doesn't);
+  nothing is written, the stash is kept, and `git stash apply` handles it. A folder that appeared
+  after stashing gets `UntrackedOverFolder` ("move the folder first") instead. The mirror
   stash (the untracked `d/x` with the file `d` deleted) is not detected; git can't pop it
   either.
 - libgit2's stash apply fails with "odb: cannot read object: null OID cannot exist" for a stashed
@@ -697,7 +704,10 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `StashError::FolderIsNowAFile` before anything is recorded, unless the file is stashed too
   (the user picked `d`, or everything): then the revert removes it before checking `d/f` out,
   as `git stash push -u -- d` does (#186). Without untracked files it refuses with
-  `UntrackedInTheWay` instead (see "git2 API gotchas").
+  `UntrackedInTheWay` instead (see "git2 API gotchas"). This covers only the "file replaced a
+  folder" direction: a selected path whose file a folder replaced (`d/x` where HEAD has the file
+  `d`) is still refused with `DirectoryReplacedNonDirectory`, which loses nothing, although
+  `git stash push -u -- d` accepts it.
 - Conflicts below a pair (#187): when the index has conflict entries (stage 1–3) at or below the
   pair root, `unstage_file` refuses with `StageError::ConflictsBelow` before changing anything:
   libgit2's `reset_default` fails on them ("invalid entry mode"), and dropping them would

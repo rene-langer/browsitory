@@ -1310,3 +1310,185 @@ fn stash_without_untracked_still_stashes_unrelated_changes_next_to_untracked_fil
     assert_eq!(read(dir.path(), "d/new"), "untracked\n");
     assert_eq!(read(dir.path(), "e"), "untracked\n");
 }
+
+#[test]
+fn stash_all_without_untracked_refuses_a_case_only_swap_when_ignorecase_is_on() {
+    // On a case-insensitive drive `docs` is the folder `Docs`: the reset that brings `Docs/f`
+    // back would delete the untracked file.
+    let (dir, mut repo) = init_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    write_file(dir.path(), "Docs/f", "f\n");
+    commit_all(&repo, "base");
+    std::fs::remove_dir_all(dir.path().join("Docs")).unwrap();
+    write_file(dir.path(), "docs", "now a file\n");
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let result = git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false));
+
+    assert_untracked_in_the_way(&mut repo, result, "docs", "Docs/f", &status_before);
+    assert_eq!(read(dir.path(), "docs"), "now a file\n");
+}
+
+#[test]
+fn stash_all_with_keep_index_checks_untracked_files_against_head_and_the_index() {
+    // A staged deletion of `d/f`: the keep-index stash still resets to HEAD first, which writes
+    // `d/f` and deletes the file `d`, before checking the index out again.
+    let (dir, mut repo) = folder_replaced_by_file();
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("d/f")).unwrap();
+    index.write().unwrap();
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let result = git_core::stash::save_stash(
+        &mut repo,
+        &with(|o| {
+            o.include_untracked = false;
+            o.keep_index = true;
+        }),
+    );
+
+    assert_untracked_in_the_way(&mut repo, result, "d", "d/f", &status_before);
+    assert_eq!(read(dir.path(), "d"), "now a file\n");
+
+    // git deletes the file too: like libgit2, its keep-index stash resets to HEAD (writing `d/f`)
+    // before checking the index back out.
+    let (twin, _twin_repo) = folder_replaced_by_file();
+    assert!(git(twin.path(), &["rm", "-q", "--cached", "d/f"])
+        .status
+        .success());
+    assert!(git(twin.path(), &["stash", "push", "--keep-index"])
+        .status
+        .success());
+    assert!(!twin.path().join("d").is_file());
+}
+
+/// HEAD has only `a`; `n/f` is staged as new, then deleted from the worktree and replaced by the
+/// untracked file `n`.
+fn staged_folder_replaced_by_file() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a", "a\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "n/f", "staged\n");
+    stage(&repo, "n/f");
+    std::fs::remove_dir_all(dir.path().join("n")).unwrap();
+    write_file(dir.path(), "n", "now a file\n");
+    (dir, repo)
+}
+
+#[test]
+fn stash_all_with_keep_index_refuses_an_untracked_file_in_the_way_of_a_staged_folder() {
+    let (dir, mut repo) = staged_folder_replaced_by_file();
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let result = git_core::stash::save_stash(
+        &mut repo,
+        &with(|o| {
+            o.include_untracked = false;
+            o.keep_index = true;
+        }),
+    );
+
+    assert_untracked_in_the_way(&mut repo, result, "n", "n/f", &status_before);
+    assert_eq!(read(dir.path(), "n"), "now a file\n");
+}
+
+#[test]
+fn stash_all_without_keep_index_leaves_an_untracked_file_where_only_the_index_has_a_folder() {
+    let (dir, mut repo) = staged_folder_replaced_by_file();
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false)).unwrap();
+
+    assert_eq!(read(dir.path(), "n"), "now a file\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn stash_all_without_untracked_refuses_an_untracked_link_over_a_folder_as_beyond_a_link() {
+    // The link takes the hazard route, which refuses it as before (#114).
+    let out = common::outside_dir();
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "d/f", "inner\n");
+    commit_all(&repo, "initial");
+    common::replace_with_link(dir.path(), "d", out.path());
+
+    let result = git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false));
+
+    assert!(
+        matches!(result, Err(StashError::BeyondSymlink(_))),
+        "{result:?}"
+    );
+    common::assert_outside_untouched(out.path());
+    assert!(common::is_link(dir.path(), "d"));
+}
+
+#[test]
+fn applying_a_stashed_untracked_file_over_a_new_folder_names_the_folder() {
+    // Not a swap the stash recorded: the folder `d` appeared after stashing the file `d`.
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a", "a\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "d", "untracked\n");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    write_file(dir.path(), "d/x", "x\n");
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::UntrackedOverFolder(ref path) if path == "d"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "The untracked file 'd' in this stash would overwrite the folder 'd'; move the folder first."
+    );
+    assert_eq!(read(dir.path(), "d/x"), "x\n");
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+}
+
+#[test]
+fn stash_all_without_untracked_stashes_an_edit_to_a_file_removed_from_the_index() {
+    // `git rm --cached d` then an edit: status is INDEX_DELETED | WT_NEW. Like git, the stash
+    // records the edited `d` in its worktree tree and resets `d` to HEAD's content; Pop brings
+    // the edit back. Nothing is lost, so this is not refused.
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "d", "base\n");
+    commit_all(&repo, "base");
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("d")).unwrap();
+    index.write().unwrap();
+    write_file(dir.path(), "d", "edited\n");
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false)).unwrap();
+
+    assert_eq!(read(dir.path(), "d"), "base\n");
+    let stash_id = stash_commit(&mut repo, 0);
+    let stash = repo.find_commit(stash_id).unwrap();
+    let entry = stash
+        .tree()
+        .unwrap()
+        .get_path(std::path::Path::new("d"))
+        .unwrap();
+    assert_eq!(repo.find_blob(entry.id()).unwrap().content(), b"edited\n");
+    // git does the same.
+    let (twin, twin_repo) = init_repo();
+    write_file(twin.path(), "d", "base\n");
+    commit_all(&twin_repo, "base");
+    assert!(git(twin.path(), &["rm", "-q", "--cached", "d"])
+        .status
+        .success());
+    write_file(twin.path(), "d", "edited\n");
+    assert!(git(twin.path(), &["stash"]).status.success());
+    assert_eq!(read(twin.path(), "d"), "base\n");
+    let shown = git(twin.path(), &["show", "stash@{0}:d"]);
+    assert_eq!(String::from_utf8_lossy(&shown.stdout), "edited\n");
+
+    drop(stash);
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
+    assert_eq!(read(dir.path(), "d"), "edited\n");
+}

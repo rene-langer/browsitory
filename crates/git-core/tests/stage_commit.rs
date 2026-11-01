@@ -702,3 +702,39 @@ fn unstaging_a_pair_with_a_staged_file_and_conflicts_below_keeps_the_staged_file
     assert!(index.get_path(std::path::Path::new("d/g"), 0).is_some());
     assert!(index.has_conflicts());
 }
+
+#[test]
+fn a_failed_pair_unstage_leaves_no_removals_in_the_shared_index() {
+    // HEAD has the file `d`; a folder replaced it and both sides are staged. The index is locked
+    // by another program, so the reset's write fails after the pair's in-memory removals (#187).
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "base\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/x", "x\n");
+    stage_file(&repo, "d").unwrap();
+    stage_file(&repo, "d/x").unwrap();
+    let index_before = std::fs::read(repo.path().join("index")).unwrap();
+    std::fs::write(repo.path().join("index.lock"), b"").unwrap();
+
+    assert!(unstage_file(&repo, "d").is_err());
+
+    std::fs::remove_file(repo.path().join("index.lock")).unwrap();
+    assert_eq!(
+        std::fs::read(repo.path().join("index")).unwrap(),
+        index_before
+    );
+    // The repository's (shared) index object holds no leftover removal a later write would save.
+    let mut index = repo.index().unwrap();
+    assert!(index.get_path(std::path::Path::new("d/x"), 0).is_some());
+    index.write().unwrap();
+    assert_eq!(
+        std::fs::read(repo.path().join("index")).unwrap(),
+        index_before
+    );
+    // And the unstage works once the lock is gone.
+    unstage_file(&repo, "d").unwrap();
+    let index = repo.index().unwrap();
+    assert!(index.get_path(std::path::Path::new("d"), 0).is_some());
+    assert!(index.get_path(std::path::Path::new("d/x"), 0).is_none());
+}
