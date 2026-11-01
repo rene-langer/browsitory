@@ -778,11 +778,15 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   nothing is opened, created or contacted in the junction's target. On an SMB share the
   redirector resolves a relative name by path on the server, so every component and leaf must
   also sit in the held parent (`GetFinalPathNameByHandleW` of both), and a new file is deleted
-  again through its handle if misplaced; a write's temporary file must also still sit in the
-  held parent after its rename (the server resolves the new name by path too), else it is
-  deleted through its handle and the write fails as "a folder of the working tree changed".
-  There the race is only narrowed: a file the server already replaced elsewhere stays
-  replaced. Leaves are deleted
+  again through its handle if misplaced. A write's rename is resolved by path on the server
+  too, so afterwards the file's final path is compared with the work tree root's: only when it
+  positively lies outside the work tree is the file deleted through its handle and the write
+  reported as "a folder of the working tree changed". By then the name it landed on outside
+  has already been replaced, and that deletion removes it: the outside file is lost, as with
+  any write the server redirected. When a path can't be read, or the file is inside the work
+  tree (a sync tool may have moved it on at once), it is kept and the write succeeds, so the
+  user's content is never deleted on a doubt (`settle_after_rename`). There the race is only
+  narrowed. Leaves are deleted
   through their own handle (`FileDispositionInfoEx` with POSIX semantics, so the name is gone
   once our handle closes even while a scanner or indexer keeps the file open, #168, and with
   `IGNORE_READONLY_ATTRIBUTE`, so a read-only file is deleted as by std's `remove_file` and

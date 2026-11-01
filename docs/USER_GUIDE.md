@@ -138,8 +138,8 @@ another program keeps the file open so it can't be swapped, Browsitory says "'f.
 in another program. Close it, then try again." and changes nothing. Because the file is
 replaced, you need permission to create files in its folder. If the file is a hard link, its
 other names keep the old content. If Browsitory stops in the middle of a write (a crash or a
-power cut), a hidden file named like `.f.txt.browsitory-1234-0.tmp` can be left next to the
-file; you can delete it.
+power cut), a file named like `.f.txt.browsitory-1234-0.tmp` can be left next to the file
+(hidden on macOS and Linux, visible on Windows); you can delete it.
 
 ### Staging individual lines
 

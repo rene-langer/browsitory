@@ -992,7 +992,7 @@ fn write_with(
         return Err(error);
     }
     // Renamed: from here `temp` is the user's file and is never deleted on an error.
-    settle_after_rename(&temp, final_path(&temp), final_path(at.parent_file()))
+    settle_after_rename(&temp, final_path(&temp), final_path(&at.dirs[0]))
 }
 
 /// After a successful rename: an SMB server resolves the new name by path, so the file may have
@@ -1006,12 +1006,10 @@ fn settle_after_rename(
     path: io::Result<PathBuf>,
     root: io::Result<PathBuf>,
 ) -> io::Result<bool> {
-    // The check as it stood: any error, or not directly in the folder, deletes the file.
     let (Ok(path), Ok(root)) = (path, root) else {
-        let _ = delete_by_handle(file);
-        return Err(redirected());
+        return Ok(true);
     };
-    if path.parent() == Some(root.as_path()) && is_beneath(&path, &root) {
+    if is_beneath(&path, &root) {
         return Ok(true);
     }
     let _ = delete_by_handle(file);
@@ -1111,9 +1109,9 @@ fn on_disk_name(leaf: &OsStr, path: &Path) -> OsString {
     }
 }
 
-/// The temporary file's name for `leaf`: hidden by its leading dot as on Unix, named after it
-/// and this process so a left-over one (after a crash) says where it came from. The part taken
-/// from `leaf` is kept short so the name fits where `leaf` itself fits.
+/// The temporary file's name for `leaf`: a leading dot as on Unix (which hides it there, not
+/// here), named after it and this process so a left-over one (after a crash) says where it came
+/// from. The part taken from `leaf` is kept short so the name fits where `leaf` itself fits.
 fn temp_name(leaf: &OsStr, n: usize) -> OsString {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     let units: Vec<u16> = leaf.encode_wide().collect();

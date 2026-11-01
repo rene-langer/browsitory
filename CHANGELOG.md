@@ -16,8 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Changed: because the file is now replaced rather than rewritten, you need permission to
   create files in its folder (and on Windows to delete the old file). A file that is a hard
   link gets its own copy: its other names keep the old content. If Browsitory stops in the
-  middle of a write (a crash or a power cut), a hidden `.f.txt.browsitory-….tmp` file can be
-  left next to the file; it is safe to delete (#239).
+  middle of a write (a crash or a power cut), a `.f.txt.browsitory-….tmp` file (hidden on
+  macOS and Linux) can be left next to the file; it is safe to delete (#239).
 
 ### Stash: things in the way
 
