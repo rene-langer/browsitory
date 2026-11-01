@@ -260,3 +260,115 @@ fn a_case_sensitive_destination_keeps_the_repository_setting() {
     create_worktree(&repo, "evil-tree", &linked, "evil", None).unwrap();
     assert!(linked.join("d").join("x").is_file());
 }
+
+/// A committed repository with its main worktree's branch name.
+fn committed_repo() -> (tempfile::TempDir, git2::Repository, String) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "initial");
+    commit_all(&repo, "initial commit");
+    let main_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    (dir, repo, main_branch)
+}
+
+fn git(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap()
+}
+
+fn has_branch(repo: &git2::Repository, name: &str) -> bool {
+    repo.find_branch(name, git2::BranchType::Local).is_ok()
+}
+
+#[test]
+fn creates_missing_parent_folders_of_the_destination() {
+    let (dir, repo, _) = committed_repo();
+    let linked = dir.path().join("a").join("b").join("wt");
+
+    create_worktree(&repo, "wt", &linked, "x", Some("HEAD")).unwrap();
+
+    let linked = linked.canonicalize().unwrap();
+    assert!(list_worktrees(&repo)
+        .unwrap()
+        .iter()
+        .any(|worktree| worktree.path == linked));
+    assert_eq!(
+        std::fs::read_to_string(linked.join("file.txt")).unwrap(),
+        "initial"
+    );
+
+    // git does the same.
+    let (twin, _twin_repo, _) = committed_repo();
+    let twin_linked = twin.path().join("a").join("b").join("wt");
+    let output = git(
+        twin.path(),
+        &["worktree", "add", twin_linked.to_str().unwrap(), "-b", "x"],
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert!(twin_linked.join("file.txt").is_file());
+}
+
+#[test]
+fn a_failed_add_removes_the_parent_folders_it_created() {
+    let (dir, repo, main_branch) = committed_repo();
+    let linked = dir.path().join("a").join("b").join("wt");
+
+    // The main worktree's branch is already checked out, so libgit2 refuses it.
+    let result = create_worktree(&repo, "wt", &linked, &main_branch, None);
+
+    assert!(result.is_err());
+    assert!(!dir.path().join("a").exists());
+    assert!(!repo.path().join("worktrees").join("wt").exists());
+}
+
+#[test]
+fn a_file_on_the_way_is_a_clear_error() {
+    let (dir, repo, _) = committed_repo();
+    write_file(dir.path(), "a", "not a folder");
+    let linked = dir.path().join("a").join("b").join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "x", Some("HEAD"));
+
+    let Err(error @ WorktreeError::CreateFolder { .. }) = result else {
+        panic!("expected CreateFolder, got {result:?}");
+    };
+    let message = error.to_string();
+    let folder = dir.path().join("a");
+    assert!(
+        message.starts_with(&format!("Can't create the folder '{}': ", folder.display())),
+        "{message}"
+    );
+    assert!(!has_branch(&repo, "x"));
+    assert!(!repo.path().join("worktrees").join("wt").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a")).unwrap(),
+        "not a folder"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_add_leaves_no_half_made_worktree_or_new_branch() {
+    use std::os::unix::fs::PermissionsExt;
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+    let (dir, repo, _) = committed_repo();
+    let parent = dir.path().join("p");
+    std::fs::create_dir(&parent).unwrap();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let linked = parent.join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "x", Some("HEAD"));
+
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(result.is_err());
+    assert!(!repo.path().join("worktrees").join("wt").exists());
+    assert!(!has_branch(&repo, "x"));
+    assert!(!linked.exists());
+
+    create_worktree(&repo, "wt", &linked, "x", Some("HEAD")).unwrap();
+    assert!(linked.join("file.txt").is_file());
+}

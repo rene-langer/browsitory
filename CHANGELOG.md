@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Worktree add
+
+- Creating a worktree in a folder that doesn't exist yet now creates the missing folders, as git
+  worktree add does (#200).
+- Fixed: a worktree add that failed could leave a half-made worktree entry and the new branch
+  behind, so trying again with the same name failed with "git operation failed"; a failed add
+  now cleans up after itself, and a folder it can't create is named in the error (#200).
+
 ### Windows walker
 
 - Fixed (Windows): undo, redo and discards no longer fail with "Access is denied" on read-only
