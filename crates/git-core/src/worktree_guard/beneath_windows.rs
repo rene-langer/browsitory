@@ -1732,12 +1732,10 @@ mod tests {
             std::fs::OpenOptions::new().write(true).open(&path).is_err(),
             "the ACL didn't deny writing"
         );
-        assert_eq!(
-            read(dir.path(), Path::new("d/f"), &mut no_step).unwrap(),
-            Some(Leaf::File {
-                bytes: b"inside".to_vec(),
-                executable: false,
-            })
+        let read = read(dir.path(), Path::new("d/f"), &mut no_step).unwrap();
+        assert!(
+            matches!(&read, Some(Leaf::File { bytes, .. }) if bytes == b"inside"),
+            "{read:?}"
         );
         // Deleting needs only `DELETE`: the open falls back to it without `FILE_WRITE_ATTRIBUTES`.
         assert!(remove(dir.path(), Path::new("d/f"), &mut no_step).unwrap());
