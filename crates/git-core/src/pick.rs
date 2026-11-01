@@ -914,20 +914,32 @@ pub(crate) fn commit_matches_pick(
     let message_matches = messages
         .iter()
         .any(|expected| clean_message(expected.as_bytes()) == message);
-    Ok(message_matches && commit_carries_pick(repo, head, expected_parent, picked)?.is_some())
+    Ok(message_matches
+        && commit_carries_pick(repo, head, expected_parent, picked, Coverage::Changed)?.is_some())
+}
+
+/// How `commit_carries_pick` compares a path the pick changes cleanly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Coverage {
+    /// `head` changes the path too, to anything: a step committed by hand may have been amended
+    /// (an edit stop).
+    Changed,
+    /// `head` has exactly the pick's result there (blob and mode): a commit made by the pick
+    /// itself, whose state was left behind (#226).
+    Exact,
 }
 
 /// `commit_matches_pick` without the message: `head` has the single parent `expected_parent`,
 /// the picked commit's author (name, email and time) and every change that applying `picked`
-/// onto that parent makes cleanly. `Some(n)` when it does, `n` being the number of those
-/// clean changes (0 when the pick changes nothing cleanly, so only the author matched).
-/// Recognises a pick whose commit landed but whose CHERRY_PICK_HEAD was left behind (#226),
-/// even when a hook rewrote its message.
+/// onto that parent makes cleanly, compared as `coverage` says. `Some(n)` when it does, `n`
+/// being the number of those clean changes (0 when the pick changes nothing cleanly, so only
+/// the author matched). Conflicted paths are not compared.
 pub(crate) fn commit_carries_pick(
     repo: &Repository,
     head: &Commit<'_>,
     expected_parent: Oid,
     picked: &Commit<'_>,
+    coverage: Coverage,
 ) -> Result<Option<usize>, git2::Error> {
     if head.parent_count() != 1 || head.parent_id(0)? != expected_parent {
         return Ok(None);
@@ -967,9 +979,18 @@ pub(crate) fn commit_carries_pick(
             let entry = |tree: &git2::Tree<'_>| {
                 tree.get_path(path)
                     .ok()
-                    .map(|entry| (entry.id(), entry.filemode()))
+                    .map(|entry| (entry.id(), entry.filemode() as u32))
             };
-            if entry(&parent_tree) == entry(&head_tree) {
+            let carries = match coverage {
+                Coverage::Changed => entry(&parent_tree) != entry(&head_tree),
+                Coverage::Exact => {
+                    let result = applied
+                        .get_path(path, 0)
+                        .map(|entry| (entry.id, entry.mode));
+                    entry(&head_tree) == result
+                }
+            };
+            if !carries {
                 return Ok(None);
             }
             carried += 1;
