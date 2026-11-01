@@ -372,5 +372,8 @@ jobs:
         # wdio.conf.ts spawns/reaps `tauri-driver` itself around the session (the pattern from
         # the official Tauri WebdriverIO guide), so `xvfb-run` just needs to wrap the one
         # `pnpm test` command to give the whole thing (tauri-driver -> WebKitWebDriver ->
-        # tauri-app) a fake display.
-        run: xvfb-run --auto-servernum pnpm test
+        # tauri-app) a fake display. `dbus-run-session` gives it a session bus: without one,
+        # every WebDriver session start waited ~31 s on this runner (about 15 minutes per run);
+        # with one it takes under a second (measured in #182; NO_AT_BRIDGE=1,
+        # GTK_USE_PORTAL=0 and WEBKIT_DISABLE_COMPOSITING_MODE=1 made no difference).
+        run: dbus-run-session -- xvfb-run --auto-servernum pnpm test

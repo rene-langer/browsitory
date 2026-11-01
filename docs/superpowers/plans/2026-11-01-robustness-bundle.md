@@ -108,6 +108,12 @@ Reconciled with the code at 25040598 on 2026-11-01:
   `merge.spec.ts`). T5 also converts `refs-and-remotes.spec.ts`'s reverse wait (a row that
   unmounts, missing from the spec's list). `reapLeftovers` matches WebKitWebDriver only with
   `--port=4445` (tauri-driver's native port), so an unrelated WebKitWebDriver is left alone.
+- T7 (CI only, run 41288063705, job 124793342326; 3 sessions per candidate with first-flow,
+  undo and commit-search): baseline 31.6 / 30.9 / 30.9 s; `NO_AT_BRIDGE=1` 23.9 / 30.8 /
+  30.8 s; `GTK_USE_PORTAL=0` 30.8 / 18.1 / 30.8 s; `WEBKIT_DISABLE_COMPOSITING_MODE=1` 30.4 /
+  30.8 / 17.9 s; `dbus-run-session` 0.96 / 0.79 / 0.80 s. Kept: `dbus-run-session --` around
+  the CI E2E step. The full suite in that run (without it): 31/31 specs, 16:24, almost every
+  session start ~31 s. Not measured locally (a desktop session already has a bus).
 
 ---
 

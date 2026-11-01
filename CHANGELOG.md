@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed (tests): flaky desktop E2E tests: a merge test that could start the next test before the
   app's merge commit landed, stale-element failures when a row disappears during a lookup, and
   WebDriver sessions that hung after an earlier app instance was left running (#182).
+- CI: the desktop E2E suite runs with a D-Bus session bus, so each WebDriver session starts in
+  under a second instead of ~31 seconds (#182).
 
 ### Folder/file swaps
 

@@ -880,7 +880,8 @@ only `error`.
   - Harness: `wdio.conf.ts` starts `tauri-driver` in its own process group, which also holds
     WebKitWebDriver and the app; `afterSession` SIGTERMs the group, waits up to 5 s and
     SIGKILLs it, and `beforeSession` kills and logs leftovers from an earlier session and waits
-    for ports 4444 and 4445. Every session logs `[e2e] session start: N ms` (#182).
+    for ports 4444 and 4445. Every session logs `[e2e] session start: N ms` (#182). CI runs the
+    suite under `dbus-run-session`: without a session bus each session start waited ~31 s.
   - Process tests (`git-core/src/process.rs`): each check that a timeout or Cancel kills a
     hook's background process has a negative control showing the check fails without the
     process group (Unix) or job object (Windows), and the `/dev/tty` check runs the test binary
