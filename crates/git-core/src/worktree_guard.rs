@@ -1002,6 +1002,33 @@ pub(crate) fn is_read_only(error: &io::Error) -> bool {
         .is_some_and(|source| source.is::<ReadOnlyFile>())
 }
 
+/// Whether `rel` is an existing regular file that [`write_beneath`] would refuse as read-only
+/// (#209), looked at through the walker (never through a link). For acts that write a file
+/// some other way (a forced libgit2 checkout replaces it). A link, a folder, a missing file or
+/// one that can't be opened counts as not read-only.
+pub(crate) fn is_read_only_beneath(workdir: &Path, rel: &str) -> bool {
+    let Ok(Some(file)) = open_beneath(workdir, Path::new(rel)) else {
+        return false;
+    };
+    let Ok(meta) = file.metadata() else {
+        return false;
+    };
+    if !meta.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: `geteuid` has no preconditions.
+        let euid = unsafe { libc::geteuid() };
+        meta.uid() == euid && meta.mode() & 0o200 == 0
+    }
+    #[cfg(not(unix))]
+    {
+        meta.permissions().readonly()
+    }
+}
+
 /// Writes `bytes` to `rel` as a regular file, first removing a symlink at `rel` (never writing
 /// through it). Returns `Ok(false)` and writes nothing when an ancestor is a symlink or `rel` is
 /// not a plain relative path. An existing file keeps its mode; a FIFO or device is an error,

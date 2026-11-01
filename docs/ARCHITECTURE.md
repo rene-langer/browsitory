@@ -707,9 +707,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `FILE_ATTRIBUTE_READONLY`. Either way the error is `worktree_guard::read_only_error()`
   (`PermissionDenied` wrapping `ReadOnlyFile`, tested with `is_read_only`), which conflict
   resolution and **Ignore** report as `MergeError::ReadOnlyFile` / `StageError::ReadOnlyFile`
-  ("'f.txt' is read-only. Make it writable, then try again."). Any other denied write (an ACL,
-  another owner) keeps the system's error. Deletes still clear the read-only attribute
-  (#194), and `replace_beneath` replaces a read-only file (undo/redo restores, like git).
+  ("'f.txt' is read-only. Make it writable, then try again."). `resolve_whole_file` writes
+  through a forced libgit2 checkout, which would replace a read-only file, so it first asks
+  `is_read_only_beneath` (the same rule, read through the walker) and refuses before anything
+  is written. Any other denied write (an ACL, another owner) keeps the system's error. Deletes
+  still clear the read-only attribute (#194), so the side that deleted the file still deletes
+  it, and `replace_beneath` replaces a read-only file (undo/redo restores, like git).
 - A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
   a tracked link with the target's folder (a typechange) by unlinking it, never following it,
   even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").

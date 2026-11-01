@@ -1793,12 +1793,28 @@ fn resolve_whole_file_replaces_a_symlink() {
     );
 }
 
-/// Sets or clears `path`'s read-only flag (the Windows attribute; the Unix write bits).
-fn set_read_only(path: &Path, read_only: bool) {
-    let mut permissions = std::fs::metadata(path).unwrap().permissions();
-    #[allow(clippy::permissions_set_readonly_false)]
-    permissions.set_readonly(read_only);
-    std::fs::set_permissions(path, permissions).unwrap();
+/// Makes `path` read-only (the Windows attribute; the Unix write bits) until dropped, so a
+/// failed assertion doesn't leave a read-only file the temp folder can't delete on Windows.
+struct ReadOnly(std::path::PathBuf);
+
+impl ReadOnly {
+    fn new(path: &Path) -> Self {
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(path, permissions).unwrap();
+        ReadOnly(path.to_path_buf())
+    }
+}
+
+impl Drop for ReadOnly {
+    fn drop(&mut self) {
+        if let Ok(meta) = std::fs::symlink_metadata(&self.0) {
+            let mut permissions = meta.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            permissions.set_readonly(false);
+            let _ = std::fs::set_permissions(&self.0, permissions);
+        }
+    }
 }
 
 /// Whether the test runs as root, which writes read-only files on Unix.
@@ -1843,7 +1859,7 @@ fn resolving_a_conflict_in_a_read_only_file_is_refused() {
     let file = dir.path().join("shared.txt");
     let before = std::fs::read(&file).unwrap();
     let stages = conflict_stages(&repo, "shared.txt");
-    set_read_only(&file, true);
+    let _read_only = ReadOnly::new(&file);
 
     let result = git_core::merge::resolve_conflict(&repo, "shared.txt", "resolved\n");
 
@@ -1859,7 +1875,6 @@ fn resolving_a_conflict_in_a_read_only_file_is_refused() {
     assert_eq!(std::fs::read(&file).unwrap(), before);
     assert!(std::fs::metadata(&file).unwrap().permissions().readonly());
     assert_eq!(conflict_stages(&repo, "shared.txt"), stages);
-    set_read_only(&file, false);
 }
 
 /// Taking a side of an add/delete conflict over a read-only file says so and changes nothing
@@ -1873,7 +1888,7 @@ fn taking_a_side_of_an_add_delete_conflict_over_a_read_only_file_is_refused() {
     let file = dir.path().join("shared.txt");
     std::fs::write(&file, "kept\n").unwrap();
     let stages = conflict_stages(&repo, "shared.txt");
-    set_read_only(&file, true);
+    let _read_only = ReadOnly::new(&file);
 
     let result = git_core::merge::resolve_add_delete_conflict(
         &repo,
@@ -1893,5 +1908,49 @@ fn taking_a_side_of_an_add_delete_conflict_over_a_read_only_file_is_refused() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "kept\n");
     assert!(std::fs::metadata(&file).unwrap().permissions().readonly());
     assert_eq!(conflict_stages(&repo, "shared.txt"), stages);
-    set_read_only(&file, false);
+}
+
+/// Use ours / Use theirs (whole file) on a read-only file says so and changes nothing: the
+/// forced checkout would replace it (#209).
+#[test]
+fn taking_a_whole_side_of_a_read_only_file_is_refused() {
+    if runs_as_root() {
+        return;
+    }
+    for side in [ConflictSide::Ours, ConflictSide::Theirs] {
+        let (dir, repo) = make_conflicted_repo();
+        let file = dir.path().join("shared.txt");
+        let before = std::fs::read(&file).unwrap();
+        let stages = conflict_stages(&repo, "shared.txt");
+        let _read_only = ReadOnly::new(&file);
+
+        let result = git_core::merge::resolve_whole_file(&repo, "shared.txt", side);
+
+        let error = result.unwrap_err();
+        assert!(
+            matches!(error, MergeError::ReadOnlyFile(ref p) if p == "shared.txt"),
+            "{side:?}: {error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "'shared.txt' is read-only. Make it writable, then try again."
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), before, "{side:?}");
+        assert!(std::fs::metadata(&file).unwrap().permissions().readonly());
+        assert_eq!(conflict_stages(&repo, "shared.txt"), stages, "{side:?}");
+    }
+}
+
+/// A read-only file where the chosen side deleted it is still deleted, as discards and undo
+/// delete read-only files (#194).
+#[test]
+fn taking_the_deleting_side_still_deletes_a_read_only_file() {
+    let (dir, repo) = make_delete_modify_conflict();
+    let file = dir.path().join("shared.txt");
+    let _read_only = ReadOnly::new(&file);
+
+    git_core::merge::resolve_whole_file(&repo, "shared.txt", ConflictSide::Ours).unwrap();
+
+    assert!(std::fs::symlink_metadata(&file).is_err());
+    assert!(!repo.index().unwrap().has_conflicts());
 }

@@ -445,6 +445,11 @@ pub fn resolve_whole_file(
     };
     match chosen {
         Some(_) => {
+            // The forced checkout would replace a read-only file; refuse it as the other
+            // resolutions do, before anything is written (#209).
+            if crate::worktree_guard::is_read_only_beneath(workdir, path) {
+                return Err(MergeError::ReadOnlyFile(path.to_string()));
+            }
             let index = repo.index()?;
             crate::worktree_guard::prepare_forced_checkout::<MergeError, _>(
                 repo,

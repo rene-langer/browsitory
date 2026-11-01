@@ -1566,12 +1566,28 @@ mod tests {
         );
     }
 
+    /// Clears `0`'s read-only attribute when dropped, so a failed assertion doesn't leave a
+    /// temp folder that can't be deleted.
+    struct WritableAgain(PathBuf);
+
+    impl Drop for WritableAgain {
+        fn drop(&mut self) {
+            if let Ok(meta) = std::fs::symlink_metadata(&self.0) {
+                let mut permissions = meta.permissions();
+                #[allow(clippy::permissions_set_readonly_false)]
+                permissions.set_readonly(false);
+                let _ = std::fs::set_permissions(&self.0, permissions);
+            }
+        }
+    }
+
     #[test]
     fn writing_a_read_only_file_is_reported_as_read_only() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir(dir.path().join("d")).unwrap();
         std::fs::write(dir.path().join("d/f"), "old").unwrap();
         make_read_only(&dir.path().join("d/f"));
+        let _writable_again = WritableAgain(dir.path().join("d/f"));
         let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
         assert!(crate::worktree_guard::is_read_only(&error), "{error:?}");
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);

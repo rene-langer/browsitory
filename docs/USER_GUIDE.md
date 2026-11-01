@@ -122,9 +122,10 @@ A merge, cherry-pick, revert, rebase or stash pop that conflicts lists the files
   tool. If it still contains `<<<<<<<` / `>>>>>>>` conflict markers, Browsitory asks before
   staging it. A deleted file is marked resolved as deleted.
 
-If the conflicted file is read-only, **Save resolution** and the whole-file choices change
-nothing and say so: "'f.txt' is read-only. Make it writable, then try again." Clear the file's
-read-only flag (Windows) or give yourself write permission (macOS, Linux), then try again.
+If the conflicted file is read-only, **Save resolution**, **Use ours (whole file)** and **Use
+theirs (whole file)** change nothing and say so: "'f.txt' is read-only. Make it writable, then
+try again." Clear the file's read-only flag (Windows) or give yourself write permission (macOS,
+Linux), then try again. Choosing the side that deleted the file still deletes it.
 
 ### Staging individual lines
 
