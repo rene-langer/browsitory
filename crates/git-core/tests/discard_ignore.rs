@@ -743,3 +743,30 @@ impl Drop for ReadOnly {
         }
     }
 }
+
+/// Adding a pattern replaces .gitignore whole: no temporary file is left next to it (#239).
+#[test]
+fn ignoring_a_file_leaves_no_temporary_file() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), ".gitignore", "target\n");
+    common::write_file(dir.path(), "build.log", "x\n");
+    ignore_path(&repo, "*.log").unwrap();
+    assert_eq!(read(dir.path(), ".gitignore"), "target\n*.log\n");
+    let mut names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name != ".git")
+        .collect();
+    names.sort();
+    assert_eq!(names, [".gitignore", "build.log"]);
+    let mut options = git2::StatusOptions::new();
+    options.include_untracked(true).recurse_untracked_dirs(true);
+    let untracked: Vec<String> = repo
+        .statuses(Some(&mut options))
+        .unwrap()
+        .iter()
+        .filter(|entry| entry.status().contains(git2::Status::WT_NEW))
+        .map(|entry| entry.path().unwrap().to_string())
+        .collect();
+    assert_eq!(untracked, [".gitignore"]);
+}
