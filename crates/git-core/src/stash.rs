@@ -36,6 +36,16 @@ pub enum StashError {
     FolderIsNowAFile { path: String, parent: String },
     #[error("This stash can't be applied here because a directory was replaced by a symbolic link; use git stash apply from a terminal.")]
     SymlinkReplacedByDirectory,
+    /// The stash holds an untracked file where the worktree now has a folder (the stash also
+    /// holds that folder's deletion). libgit2 checks untracked files out first, so it can't
+    /// apply it: it would leave the file as `d~Stashed changes` and report success (#186).
+    #[error("This stash can't be applied here because a file replaced a folder; use git stash apply from a terminal.")]
+    FileReplacedFolder,
+    /// Stashing without untracked files resets `tracked`, which deletes the untracked file
+    /// `untracked` in its way (a file where `tracked`'s folder was, or a file inside a folder
+    /// that replaced the file `tracked`). git deletes it; Browsitory refuses (#186).
+    #[error("Stashing would delete the untracked file '{untracked}', which is in the way of '{tracked}'. Turn on Include untracked files, or move '{untracked}' first.")]
+    UntrackedInTheWay { untracked: String, tracked: String },
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
