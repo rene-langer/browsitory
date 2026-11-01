@@ -984,20 +984,47 @@ fn write_with(
                 }
                 other => break other,
             }
-        }?;
-        // An SMB server resolves the new name by path: the file must still sit in the held
-        // parent, else it went somewhere else and is deleted again below.
-        if !in_parent(&temp, at.parent_file())? {
-            return Err(redirected());
         }
-        Ok(())
     })();
     if let Err(error) = written {
-        // Gone when `temp` closes, right here.
+        // Not renamed: still the temporary file. Gone when `temp` closes, right here.
         let _ = delete_by_handle(&temp);
         return Err(error);
     }
-    Ok(true)
+    // Renamed: from here `temp` is the user's file and is never deleted on an error.
+    settle_after_rename(&temp, final_path(&temp), final_path(at.parent_file()))
+}
+
+/// After a successful rename: an SMB server resolves the new name by path, so the file may have
+/// landed somewhere else. Only when its path positively lies outside the work tree (`root`) is
+/// it deleted again (through its handle) and the write reported as redirected; the name it
+/// replaced there stays replaced. When either path can't be read (some file system filters,
+/// shares) or the file is inside the work tree (in the right folder, or already moved by a
+/// sync tool), it is kept and the write succeeds: deleting it could lose the user's content.
+fn settle_after_rename(
+    file: &File,
+    path: io::Result<PathBuf>,
+    root: io::Result<PathBuf>,
+) -> io::Result<bool> {
+    // The check as it stood: any error, or not directly in the folder, deletes the file.
+    let (Ok(path), Ok(root)) = (path, root) else {
+        let _ = delete_by_handle(file);
+        return Err(redirected());
+    };
+    if path.parent() == Some(root.as_path()) && is_beneath(&path, &root) {
+        return Ok(true);
+    }
+    let _ = delete_by_handle(file);
+    Err(redirected())
+}
+
+/// Whether `path` lies below `root`, both `GetFinalPathNameByHandleW` paths, ignoring case.
+fn is_beneath(path: &Path, root: &Path) -> bool {
+    let path = path.to_string_lossy().to_lowercase();
+    let root = root.to_string_lossy().to_lowercase();
+    let root = root.trim_end_matches('\\');
+    path.strip_prefix(root)
+        .is_some_and(|rest| rest.starts_with('\\') && rest.len() > 1)
 }
 
 /// How often `write` tries a file another program holds open before reporting it in use, and
@@ -2107,6 +2134,90 @@ mod tests {
         let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
         assert!(crate::worktree_guard::is_in_use(&error), "{error:?}");
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    /// A written file, opened as `write` holds it after the rename (`DELETE` access).
+    fn renamed_file(dir: &Path) -> (PathBuf, File) {
+        let path = dir.join("f");
+        std::fs::write(&path, "new").unwrap();
+        let file = OpenOptions::new()
+            .access_mode(GENERIC_WRITE | DELETE)
+            .share_mode(FILE_SHARE_READ)
+            .open(&path)
+            .unwrap();
+        (path, file)
+    }
+
+    #[test]
+    fn a_failed_check_after_the_rename_keeps_the_file() {
+        let dir = TempDir::new().unwrap();
+        let (path, file) = renamed_file(dir.path());
+        let root = final_path(&open_pinned(dir.path(), 0).unwrap());
+        let unreadable = || Err(io::Error::from_raw_os_error(ERROR_NOT_SUPPORTED));
+        assert!(settle_after_rename(&file, unreadable(), root).unwrap());
+        assert!(settle_after_rename(&file, final_path(&file), unreadable()).unwrap());
+        drop(file);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
+    fn a_file_moved_elsewhere_in_the_work_tree_after_the_rename_is_kept() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let (path, file) = renamed_file(&dir.path().join("sub"));
+        let root = final_path(&open_pinned(dir.path(), 0).unwrap()).unwrap();
+        // As a sync tool may have moved it: elsewhere, but still inside the work tree.
+        let moved = root.join("other").join("f");
+        assert!(settle_after_rename(&file, Ok(moved), Ok(root)).unwrap());
+        drop(file);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+    }
+
+    #[test]
+    fn a_file_that_landed_outside_the_work_tree_is_deleted() {
+        let work_tree = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let (path, file) = renamed_file(outside.path());
+        let root = final_path(&open_pinned(work_tree.path(), 0).unwrap());
+        let error = settle_after_rename(&file, final_path(&file), root).unwrap_err();
+        assert_eq!(error.to_string(), redirected().to_string());
+        drop(file);
+        assert!(std::fs::symlink_metadata(&path).is_err(), "still there");
+    }
+
+    #[test]
+    fn is_beneath_compares_whole_components_ignoring_case() {
+        let root = Path::new(r"\\?\C:\Work");
+        assert!(is_beneath(Path::new(r"\\?\C:\work\d\f"), root));
+        assert!(is_beneath(
+            Path::new(r"\\?\C:\Work\f"),
+            Path::new(r"\\?\C:\Work\")
+        ));
+        assert!(!is_beneath(Path::new(r"\\?\C:\Work2\f"), root));
+        assert!(!is_beneath(Path::new(r"\\?\C:\Work"), root));
+        assert!(!is_beneath(Path::new(r"\\?\D:\Work\f"), root));
+    }
+
+    #[test]
+    fn a_file_held_for_a_moment_is_replaced_after_a_retry() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        let holder = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&f)
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            drop(holder);
+        });
+        let written = write(dir.path(), Path::new("d/f"), b"new", &mut no_step);
+        release.join().unwrap();
+        assert!(written.unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
         assert_eq!(names_in(&dir.path().join("d")), ["f"]);
     }
 
