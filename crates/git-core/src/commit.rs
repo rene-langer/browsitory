@@ -442,12 +442,12 @@ pub(crate) fn cleanup_after_commit(repo: &git2::Repository) {
 
 /// git's cleanup after a commit (`sequencer_post_commit_cleanup` + `remove_merge_branch_state`),
 /// not libgit2's `cleanup_state`. Removes the merge's and the pick's own files (`MERGE_HEAD`,
-/// `MERGE_MODE`, `MERGE_MSG`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`). A terminal
+/// `MERGE_MODE`, `MERGE_MSG`, `AUTO_MERGE`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`). A terminal
 /// `git cherry-pick A B C` keeps the rest of its list in `.git/sequencer`: it is kept, so
 /// `git cherry-pick --continue` carries on, and removed only when the commit finished a pick and
 /// the todo has at most one line left (git's `have_finished_the_last_pick`). A missing or
-/// unreadable todo keeps the folder. `BISECT_LOG`, `rebase-*`, `AUTO_MERGE` and `SQUASH_MSG` are
-/// never touched, so a commit no longer ends a terminal `git bisect` (#241).
+/// unreadable todo keeps the folder. `BISECT_LOG`, `rebase-*` and `SQUASH_MSG` are never
+/// touched, so a commit no longer ends a terminal `git bisect` (#241).
 pub(crate) fn clear_commit_state(repo: &git2::Repository) -> std::io::Result<()> {
     let git_dir = repo.path();
     let had_pick =
@@ -456,6 +456,7 @@ pub(crate) fn clear_commit_state(repo: &git2::Repository) -> std::io::Result<()>
         "MERGE_HEAD",
         "MERGE_MODE",
         "MERGE_MSG",
+        "AUTO_MERGE",
         "CHERRY_PICK_HEAD",
         "REVERT_HEAD",
     ] {

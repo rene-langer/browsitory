@@ -460,11 +460,11 @@ across processes).
   and its empty or failed step, Continue's step and its skips, a squash `start_merge`), it uses
   `commit::clear_commit_state`, git's post-commit cleanup, not libgit2's `cleanup_state` (which
   deletes every `state_files` entry: the merge and pick files, `BISECT_LOG`, `rebase-*` and
-  `sequencer/`). It removes `MERGE_HEAD`, `MERGE_MODE`, `MERGE_MSG`, `CHERRY_PICK_HEAD` and
-  `REVERT_HEAD`, and removes `sequencer/` only when a pick was finished and its todo has at most
+  `sequencer/`). It removes `MERGE_HEAD`, `MERGE_MODE`, `MERGE_MSG`, `AUTO_MERGE`,
+  `CHERRY_PICK_HEAD` and `REVERT_HEAD` (as `git commit` does), and removes `sequencer/` only when a pick was finished and its todo has at most
   one line left (git's `have_finished_the_last_pick`), so `git cherry-pick --continue` carries on
   after a step committed in Browsitory (#241, D2-A). A missing or unreadable todo keeps the
-  folder. It never touches `BISECT_LOG`, `rebase-*`, `AUTO_MERGE` or `SQUASH_MSG`, so, as with
+  folder. It never touches `BISECT_LOG`, `rebase-*` or `SQUASH_MSG`, so, as with
   `git commit`, a commit no longer ends a `git bisect` started in a terminal. Abort
   (`merge::abort_merge`, `pick::abort_sequence`) and rebase still use `cleanup_state`.
 - `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as

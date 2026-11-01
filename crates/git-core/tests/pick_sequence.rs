@@ -1917,3 +1917,53 @@ fn a_squash_merge_keeps_a_terminal_sequences_todo() {
     assert!(repo.path().join("SQUASH_MSG").exists());
     assert_eq!(common::read(dir.path(), "e.txt"), "e\n");
 }
+
+/// A one-line todo goes only with the commit that finishes a pick: a merge commit (state cleared,
+/// but no CHERRY_PICK_HEAD/REVERT_HEAD) keeps it, as `git commit` does (#241).
+#[test]
+fn a_commit_without_a_pick_keeps_a_one_line_todo() {
+    let setup = || {
+        let (dir, repo) = common::init_repo();
+        common::write_file(dir.path(), "f", "base\n");
+        common::commit_all(&repo, "base");
+        let base = repo.head().unwrap().target().unwrap();
+        // A side commit, not HEAD's ancestor, so the merge isn't taken for one already committed.
+        let side = common::commit_tree(
+            &repo,
+            &[("f", "base\n", 0o100644), ("s.txt", "s\n", 0o100644)],
+            &[base],
+            "side",
+        );
+        common::write_file(dir.path(), "f", "edit\n");
+        common::commit_all(&repo, "edit");
+        common::write_file(dir.path(), "s.txt", "s\n");
+        stage(&repo, "s.txt");
+        std::fs::write(repo.path().join("MERGE_HEAD"), format!("{side}\n")).unwrap();
+        let sequencer = repo.path().join("sequencer");
+        std::fs::create_dir(&sequencer).unwrap();
+        let line = format!("pick {side} side\n");
+        std::fs::write(sequencer.join("todo"), &line).unwrap();
+        assert_eq!(repo.state(), RepositoryState::Merge);
+        (dir, repo, line)
+    };
+    let (_dir, mut repo, line) = setup();
+
+    git_core::commit::commit(&mut repo, "merge\n", HookOptions::default()).unwrap();
+
+    assert_eq!(
+        repo.head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .parent_count(),
+        2
+    );
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+    assert_eq!(todo(&repo).as_deref(), Some(line.as_str()));
+
+    let (twin_dir, twin, line) = setup();
+    let output = git(twin_dir.path(), &["commit", "-m", "merge"]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(!twin.path().join("MERGE_HEAD").exists());
+    assert_eq!(todo(&twin).as_deref(), Some(line.as_str()));
+}

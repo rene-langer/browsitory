@@ -280,8 +280,6 @@ fn apply(
     }
 }
 
-/// The preconditions every pick shares, in order: nothing paused, a born HEAD, nothing staged.
-/// Returns HEAD's commit.
 /// Clears a pick's own state as `git commit` does (`commit::clear_commit_state`): a terminal
 /// `git cherry-pick A B C`'s remaining todo in `.git/sequencer` is kept (#241).
 fn clear_state(repo: &Repository) -> Result<(), PickError> {
@@ -289,6 +287,8 @@ fn clear_state(repo: &Repository) -> Result<(), PickError> {
         .map_err(|error| PickError::Commit(crate::commit::CommitError::Io(error)))
 }
 
+/// The preconditions every pick shares, in order: nothing paused, a born HEAD, nothing staged.
+/// Returns HEAD's commit.
 fn check_ready(repo: &Repository) -> Result<Commit<'_>, PickError> {
     if repo.state() != RepositoryState::Clean {
         return Err(PickError::OperationInProgress);

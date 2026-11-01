@@ -508,6 +508,30 @@ fn merge_during_a_bisect() -> (tempfile::TempDir, git2::Repository) {
     (dir, repo)
 }
 
+/// `git merge` leaves `AUTO_MERGE` on a conflict; `git commit` removes it, and so does
+/// Browsitory's commit (#241).
+#[test]
+fn committing_a_merge_started_in_a_terminal_removes_auto_merge() {
+    let (_dir, mut repo) = merge_during_a_bisect();
+    assert!(repo.path().join("AUTO_MERGE").exists());
+
+    commit(&mut repo, "merge\n", HookOptions::default()).unwrap();
+
+    assert!(!repo.path().join("AUTO_MERGE").exists());
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+
+    // git's twin.
+    let (twin_dir, twin) = merge_during_a_bisect();
+    assert!(twin.path().join("AUTO_MERGE").exists());
+    let output = std::process::Command::new("git")
+        .args(["commit", "--no-edit"])
+        .current_dir(twin_dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(!twin.path().join("AUTO_MERGE").exists());
+}
+
 /// `git commit` of a merge keeps a terminal bisect going (it only removes the merge's own files);
 /// so does Browsitory's commit (#241).
 #[test]
