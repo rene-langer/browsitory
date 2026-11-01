@@ -425,10 +425,13 @@ sidecar runs each request on its own thread and is unaffected.
   counts and `next`/`expected_head` move past it, D7-A, #216). The next step then usually fails
   to write its own pick state and the sequence stops there; Continue first clears a leftover pick
   state that names the previous step while HEAD is still `expected_head`
-  (`is_leftover_of_committed_step`), then goes on. Abort of a stored sequence
-  (`abort_sequence`) rewinds to the start only while HEAD is still `expected_head`, which `run`
-  sets to each step's base before the step and to the kept commit when it stops after one, so a
-  step whose commit landed but whose state stayed behind is rewound with the rest.
+  (`is_leftover_of_committed_step`; never after a conflict stop, whose pick state is the paused
+  step), then goes on. Abort of a stored sequence (`abort_sequence`) clears such a leftover the
+  same way, then rewinds to the start only while HEAD is still `expected_head`, which `run` sets
+  to each step's base before the step and to the kept commit when it stops after one, so a step
+  whose commit landed but whose state stayed behind is rewound with the rest. `start` drops
+  repeated commit ids (keeping the first), so no two steps share an id and a pick state always
+  names exactly one step.
 
 ## Interactive rebase
 

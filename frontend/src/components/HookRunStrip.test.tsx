@@ -66,7 +66,7 @@ describe("HookRunStrip", () => {
     expect(screen.getByRole("button", { name: "Cancel post-checkout hook" })).toBeEnabled();
   });
 
-  it("moves focus to the strip when the cancelled hook ends", () => {
+  it("says the hook was cancelled and moves focus to that visible text when it ends", () => {
     const { rerender } = render(
       <HookRunStrip running={{ operationId: "switch-1", hook: "post-checkout", source: "Checkout" }} onCancel={() => {}} />,
     );
@@ -76,6 +76,34 @@ describe("HookRunStrip", () => {
 
     rerender(<HookRunStrip running={null} onCancel={() => {}} />);
 
-    expect(document.activeElement).toBe(screen.getByRole("status", { name: "Hook status" }));
+    const strip = screen.getByRole("status", { name: "Hook status" });
+    expect(strip).toHaveTextContent("The post-checkout hook was cancelled.");
+    expect(document.activeElement).toBe(strip);
+
+    // The note goes once focus moves on.
+    fireEvent.blur(strip);
+    expect(strip).toBeEmptyDOMElement();
+  });
+
+  it("drops the cancelled note when the next hook starts", () => {
+    const { rerender } = render(
+      <HookRunStrip running={{ operationId: "switch-1", hook: "post-checkout", source: "Checkout" }} onCancel={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel post-checkout hook" }));
+    rerender(<HookRunStrip running={null} onCancel={() => {}} />);
+    expect(screen.getByRole("status", { name: "Hook status" })).toHaveTextContent("The post-checkout hook was cancelled.");
+
+    rerender(<HookRunStrip running={{ operationId: "merge-2", hook: "post-merge", source: "Merge" }} onCancel={() => {}} />);
+
+    expect(screen.getByRole("status", { name: "Hook status" })).toHaveTextContent("Running post-merge hook…");
+    expect(screen.queryByText("The post-checkout hook was cancelled.")).toBeNull();
+  });
+
+  it("shows no cancelled note for a hook that ended on its own", () => {
+    const { rerender } = render(
+      <HookRunStrip running={{ operationId: "switch-1", hook: "post-checkout", source: "Checkout" }} onCancel={() => {}} />,
+    );
+    rerender(<HookRunStrip running={null} onCancel={() => {}} />);
+    expect(screen.getByRole("status", { name: "Hook status" })).toBeEmptyDOMElement();
   });
 });

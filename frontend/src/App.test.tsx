@@ -275,12 +275,13 @@ describe("App", () => {
     act(() =>
       emit?.({ repoPath: "/repos/a", operationId: "switch-1", hook: "post-checkout", phase: "Finished", source: "Checkout" }),
     );
-    expect(screen.getByRole("status", { name: "Hook status" })).toBeEmptyDOMElement();
+    expect(screen.getByRole("status", { name: "Hook status" })).toHaveTextContent("The post-checkout hook was cancelled.");
 
     act(() =>
       emit?.({ repoPath: "/repos/a", operationId: "commit-2", hook: "pre-commit", phase: "Started", source: "Commit" }),
     );
-    expect(screen.getByRole("status", { name: "Hook status" })).toBeEmptyDOMElement();
+    // A commit's hook shows in the commit box, never in the strip.
+    expect(screen.getByRole("status", { name: "Hook status" })).not.toHaveTextContent("pre-commit");
   });
 
   it("closes the active tab on Ctrl/Cmd+W", async () => {

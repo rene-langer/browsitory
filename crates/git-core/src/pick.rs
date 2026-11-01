@@ -507,7 +507,14 @@ fn start(
     if let Err(error) = check_signing(repo) {
         return SequenceRun::failed(error);
     }
-    let mut commits = ids.to_vec();
+    // A commit selected twice is applied once (its first occurrence), so no two steps share an
+    // id and git's pick state always names exactly one step.
+    let mut seen = std::collections::HashSet::new();
+    let mut commits: Vec<String> = ids
+        .iter()
+        .filter(|id| seen.insert(id.as_str()))
+        .cloned()
+        .collect();
     if kind == SequenceKind::Revert {
         commits.reverse();
     }
@@ -699,6 +706,11 @@ pub fn continue_sequence(
 /// git's pick state names the step before the current one, and HEAD is where that step's commit
 /// left it: the commit landed and only its state was left behind (D7-A).
 fn is_leftover_of_committed_step(repo: &Repository, state: &SequenceState) -> bool {
+    // A conflict stop's pick state is the paused step, never a leftover (a commit id listed
+    // twice is deduplicated by `start`, so the current and the previous step never share it).
+    if state.stopped_on_conflict {
+        return false;
+    }
     let Some(previous) = state.next.checked_sub(1).and_then(|i| state.commits.get(i)) else {
         return false;
     };
@@ -975,6 +987,10 @@ pub fn abort_sequence(
     let head_id = repo.head()?.peel_to_commit()?.id().to_string();
     if is_own_paused_step(repo, state) {
         crate::merge::abort_merge(repo)?;
+    } else if is_leftover_of_committed_step(repo, state) {
+        // The previous step's commit landed but its pick state stayed (D7-A): ours, and nothing
+        // is staged in it (the worktree and index are that commit), so clear it and rewind.
+        repo.cleanup_state()?;
     } else if repo.state() == RepositoryState::Clean
         && head_id == state.expected_head
         && fresh_index(repo)?.has_conflicts()

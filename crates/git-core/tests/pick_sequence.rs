@@ -1528,3 +1528,66 @@ fn a_cleanup_failure_after_continue_still_counts_the_step() {
     );
     assert_eq!(summaries(&repo, 1), ["side two"]);
 }
+
+/// `a_cleanup_failure_after_a_middle_step_still_counts_it`, then Abort instead of Continue: the
+/// leftover pick state of the committed middle step is ours, so Abort clears it and rewinds the
+/// whole sequence.
+#[cfg(unix)]
+#[test]
+fn abort_after_a_cleanup_failure_rewinds_the_whole_sequence() {
+    let (dir, repo, ids) = side_branch(false, true);
+    let original = head(&repo);
+    let Some(restore) = common::ReadOnlyGitDir::restore_later(&repo) else {
+        return;
+    };
+    let counter = tempfile::NamedTempFile::new().unwrap();
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "post-commit",
+        &format!(
+            "n=$(($(cat '{counter}' 2>/dev/null || echo 0) + 1)); echo $n > '{counter}'; \
+             if [ $n = 2 ]; then chmod 555 '{git_dir}'; fi",
+            counter = counter.path().display(),
+            git_dir = repo.path().display(),
+        ),
+    );
+    let run = cherry_pick_many(&repo, &ids, HookOptions::default());
+    drop(restore);
+    let state = run.state.unwrap();
+    assert_eq!(state.next, 2);
+    assert_eq!(
+        repo.state(),
+        RepositoryState::CherryPick,
+        "the leftover state"
+    );
+
+    let abort = abort_sequence(&repo, &state).unwrap();
+
+    assert!(abort.rewound);
+    assert_eq!(head(&repo), original);
+    assert_eq!(repo.state(), RepositoryState::Clean);
+    assert!(!dir.path().join("one.txt").exists());
+    assert!(!dir.path().join("two.txt").exists());
+    assert_eq!(summaries(&repo, 1), ["main only"]);
+}
+
+/// A commit selected twice is applied once, so no two steps share an id (and a leftover pick
+/// state can never be mistaken for the paused step's).
+#[test]
+fn a_commit_selected_twice_is_applied_once() {
+    let (_dir, repo, ids) = side_branch(false, true);
+    let run = cherry_pick_many(
+        &repo,
+        &[ids[0].clone(), ids[0].clone(), ids[2].clone()],
+        HookOptions::default(),
+    );
+
+    assert_eq!(
+        run.outcome.unwrap(),
+        SequenceOutcome::Completed {
+            applied: 2,
+            skipped: vec![]
+        }
+    );
+    assert_eq!(summaries(&repo, 3), ["side three", "side one", "main only"]);
+}
