@@ -1954,3 +1954,40 @@ fn taking_the_deleting_side_still_deletes_a_read_only_file() {
     assert!(std::fs::symlink_metadata(&file).is_err());
     assert!(!repo.index().unwrap().has_conflicts());
 }
+
+/// A file with no permissions at all (0o000, the user's own) is read-only for every resolution:
+/// Use ours/theirs refuses it like Save resolution does, without needing to open it (#209).
+#[cfg(unix)]
+#[test]
+fn taking_a_whole_side_of_a_file_without_any_permission_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
+    if runs_as_root() {
+        return;
+    }
+    for side in [ConflictSide::Ours, ConflictSide::Theirs] {
+        let (dir, repo) = make_conflicted_repo();
+        let file = dir.path().join("shared.txt");
+        let before = std::fs::read(&file).unwrap();
+        let stages = conflict_stages(&repo, "shared.txt");
+        let _read_only = ReadOnly::new(&file);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let whole = git_core::merge::resolve_whole_file(&repo, "shared.txt", side);
+        let saved = git_core::merge::resolve_conflict(&repo, "shared.txt", "resolved\n");
+
+        for error in [whole.unwrap_err(), saved.unwrap_err()] {
+            assert!(
+                matches!(error, MergeError::ReadOnlyFile(ref p) if p == "shared.txt"),
+                "{side:?}: {error:?}"
+            );
+        }
+        let mode = std::fs::symlink_metadata(&file)
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o7777, 0, "{side:?}");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), before, "{side:?}");
+        assert_eq!(conflict_stages(&repo, "shared.txt"), stages, "{side:?}");
+    }
+}

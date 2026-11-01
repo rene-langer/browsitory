@@ -976,9 +976,27 @@ fn read_only_or(first: &File, error: io::Error) -> io::Error {
     if error.raw_os_error() != Some(ERROR_ACCESS_DENIED) {
         return error;
     }
-    match attribute_tag(first) {
-        Ok(info) if info.file_attributes & FILE_ATTRIBUTE_READONLY != 0 => super::read_only_error(),
+    match has_read_only_attribute(first) {
+        Ok(true) => super::read_only_error(),
         _ => error,
+    }
+}
+
+fn has_read_only_attribute(file: &File) -> io::Result<bool> {
+    Ok(attribute_tag(file)?.file_attributes & FILE_ATTRIBUTE_READONLY != 0)
+}
+
+/// See `worktree_guard::is_read_only_beneath`. The leaf is classified through a handle with no
+/// access beyond its attributes, opened as itself, so an online-only OneDrive file is not
+/// downloaded and a link is not followed.
+pub(super) fn is_read_only(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<bool> {
+    let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? {
+        Walk::Found(at) => at,
+        Walk::Link | Walk::Missing | Walk::NotDir => return Ok(false),
+    };
+    match open_leaf(&at, Purpose::Read)? {
+        Some((leaf, Found::File { .. })) => has_read_only_attribute(&leaf),
+        _ => Ok(false),
     }
 }
 
@@ -1599,6 +1617,20 @@ mod tests {
             .unwrap()
             .permissions()
             .readonly());
+    }
+
+    #[test]
+    fn is_read_only_reads_the_attribute_without_opening_the_data() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        std::fs::write(dir.path().join("d/g"), "old").unwrap();
+        make_read_only(&dir.path().join("d/f"));
+        let _writable_again = WritableAgain(dir.path().join("d/f"));
+        assert!(is_read_only(dir.path(), Path::new("d/f"), &mut no_step).unwrap());
+        assert!(!is_read_only(dir.path(), Path::new("d/g"), &mut no_step).unwrap());
+        assert!(!is_read_only(dir.path(), Path::new("d/missing"), &mut no_step).unwrap());
+        assert!(!is_read_only(dir.path(), Path::new("d"), &mut no_step).unwrap());
     }
 
     #[test]

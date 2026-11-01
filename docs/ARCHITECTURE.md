@@ -709,7 +709,9 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   resolution and **Ignore** report as `MergeError::ReadOnlyFile` / `StageError::ReadOnlyFile`
   ("'f.txt' is read-only. Make it writable, then try again."). `resolve_whole_file` writes
   through a forced libgit2 checkout, which would replace a read-only file, so it first asks
-  `is_read_only_beneath` (the same rule, read through the walker) and refuses before anything
+  `is_read_only_beneath` (the same rule through the walker, without opening the file: Unix
+  `fstatat` in the held parent, so a 0o000 file counts; Windows the attributes of a no-access
+  handle, so an online-only OneDrive file isn't downloaded) and refuses before anything
   is written. Any other denied write (an ACL, another owner) keeps the system's error. Deletes
   still clear the read-only attribute (#194), so the side that deleted the file still deletes
   it, and `replace_beneath` replaces a read-only file (undo/redo restores, like git).

@@ -1003,30 +1003,14 @@ pub(crate) fn is_read_only(error: &io::Error) -> bool {
 }
 
 /// Whether `rel` is an existing regular file that [`write_beneath`] would refuse as read-only
-/// (#209), looked at through the walker (never through a link). For acts that write a file
-/// some other way (a forced libgit2 checkout replaces it). A link, a folder, a missing file or
-/// one that can't be opened counts as not read-only.
+/// (#209), by the same rule, looked at through the walker without following a link and
+/// without opening the file (Unix `fstatat`; Windows the attributes of a handle with no data
+/// access, so an online-only OneDrive file isn't downloaded). For acts that write a file some
+/// other way (a forced checkout replaces it). A link, a folder, a missing file or one the walk
+/// can't reach counts as not read-only.
 pub(crate) fn is_read_only_beneath(workdir: &Path, rel: &str) -> bool {
-    let Ok(Some(file)) = open_beneath(workdir, Path::new(rel)) else {
-        return false;
-    };
-    let Ok(meta) = file.metadata() else {
-        return false;
-    };
-    if !meta.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        // SAFETY: `geteuid` has no preconditions.
-        let euid = unsafe { libc::geteuid() };
-        meta.uid() == euid && meta.mode() & 0o200 == 0
-    }
-    #[cfg(not(unix))]
-    {
-        meta.permissions().readonly()
-    }
+    plain_relative(Path::new(rel))
+        && beneath::is_read_only(workdir, Path::new(rel), &mut no_step).unwrap_or(false)
 }
 
 /// Writes `bytes` to `rel` as a regular file, first removing a symlink at `rel` (never writing

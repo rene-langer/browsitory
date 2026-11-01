@@ -330,20 +330,32 @@ pub(super) fn write(
     Ok(true)
 }
 
-/// `write`'s error for a leaf it may not open: `read_only_error` when the leaf is a regular
-/// file the user owns without write permission for its owner (#209), else `error` itself.
+/// `write`'s error for a leaf it may not open: `read_only_error` when the leaf is read-only
+/// (`leaf_is_read_only`), else `error` itself.
 fn read_only_or(at: &Beneath, error: io::Error) -> io::Error {
+    match leaf_is_read_only(at) {
+        Ok(true) => super::read_only_error(),
+        _ => error,
+    }
+}
+
+/// Whether `at`'s leaf is a regular file the user owns without write permission for its owner
+/// (#209): `fstatat` in the held parent, never following a link, never opening the file.
+fn leaf_is_read_only(at: &Beneath) -> io::Result<bool> {
     // SAFETY: `geteuid` has no preconditions.
     let euid = unsafe { libc::geteuid() };
-    match stat_at(at.parent(), at.leaf()) {
-        Ok(Some(stat))
-            if file_type(&stat) == libc::S_IFREG
-                && stat.st_uid == euid
-                && stat.st_mode & libc::S_IWUSR == 0 =>
-        {
-            super::read_only_error()
-        }
-        _ => error,
+    Ok(stat_at(at.parent(), at.leaf())?.is_some_and(|stat| {
+        file_type(&stat) == libc::S_IFREG
+            && stat.st_uid == euid
+            && stat.st_mode & libc::S_IWUSR == 0
+    }))
+}
+
+/// See `worktree_guard::is_read_only_beneath`.
+pub(super) fn is_read_only(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<bool> {
+    match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? {
+        Walk::Found(at) => leaf_is_read_only(&at),
+        Walk::Link | Walk::Missing | Walk::NotDir => Ok(false),
     }
 }
 
