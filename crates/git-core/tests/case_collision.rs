@@ -150,7 +150,13 @@ fn merge_commit_with_a_case_collision_is_refused() {
 fn cherry_pick_of_a_commit_adding_the_collision_is_refused() {
     let fx = fixture();
     let head = diverge(&fx);
-    let error = pick::cherry_pick(&fx.repo, &fx.evil.to_string(), None).unwrap_err();
+    let error = pick::cherry_pick(
+        &fx.repo,
+        &fx.evil.to_string(),
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap_err();
     assert!(matches!(error, PickError::CaseCollision(_)));
     assert_untouched(&fx, head);
 }
@@ -467,7 +473,13 @@ fn a_head_with_a_collision_fast_forwards_to_an_unrelated_descendant() {
 fn a_head_with_a_collision_cherry_picks_an_unrelated_commit() {
     let fx = fixture();
     let side = diverged_on_pair(&fx);
-    pick::cherry_pick(&fx.repo, &side.to_string(), None).unwrap();
+    pick::cherry_pick(
+        &fx.repo,
+        &side.to_string(),
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     assert_eq!(read(&fx, "b.txt"), "b\n");
     assert_eq!(read(&fx, "c.txt"), "c\n");
 }
@@ -478,7 +490,13 @@ fn a_head_with_a_collision_reverts_an_unrelated_commit() {
     let fx = fixture();
     diverged_on_pair(&fx);
     let work = head(&fx);
-    pick::revert(&fx.repo, &work.to_string(), None).unwrap();
+    pick::revert(
+        &fx.repo,
+        &work.to_string(),
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
     assert!(!fx.dir.path().join("c.txt").exists());
     assert_eq!(read(&fx, "d/x"), "PWNED\n");
 }
@@ -586,7 +604,13 @@ fn a_cherry_pick_bringing_a_second_collision_is_refused_even_when_head_holds_one
     diverged_on_pair(&fx);
     let work = head(&fx);
     let second = with_second_pair(&fx.repo, fx.evil);
-    let error = pick::cherry_pick(&fx.repo, &second.to_string(), None).unwrap_err();
+    let error = pick::cherry_pick(
+        &fx.repo,
+        &second.to_string(),
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap_err();
     match error {
         PickError::CaseCollision(collision) => assert_eq!(collision.link, "Z"),
         other => panic!("{other:?}"),
@@ -681,7 +705,11 @@ fn sequence_abort_rewinds_to_an_original_tree_holding_a_collision() {
     let rm = without_link(&fx.repo, fx.evil);
     let conflicting = with_file(&fx.repo, fx.evil, "a.txt", "theirs\n");
 
-    let run = pick::cherry_pick_many(&fx.repo, &[rm.to_string(), conflicting.to_string()]);
+    let run = pick::cherry_pick_many(
+        &fx.repo,
+        &[rm.to_string(), conflicting.to_string()],
+        git_core::hooks::HookOptions::default(),
+    );
     assert!(
         matches!(run.outcome, Ok(pick::SequenceOutcome::Conflicted { .. })),
         "{:?}",

@@ -1,10 +1,23 @@
 use git2::{Commit, Oid, Repository, RepositoryState};
 use thiserror::Error;
 
+use crate::hooks::HookOptions;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PickOutcome {
-    Committed { commit_id: String },
-    Conflicted { files: Vec<String> },
+    Committed {
+        commit_id: String,
+    },
+    Conflicted {
+        files: Vec<String>,
+    },
+    /// `prepare-commit-msg` failed (or emptied the message, #183): nothing was committed, and the
+    /// pick stays staged and in progress (git's `CHERRY_PICK_HEAD`/`REVERT_HEAD` and `MERGE_MSG`),
+    /// for the commit box to finish or Abort to drop, as after `git cherry-pick`.
+    HookFailed {
+        hook: String,
+        output: String,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -37,8 +50,7 @@ pub enum PickError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
-    /// A hook (or the signing program) on the step Continue commits was cancelled or couldn't
-    /// be run.
+    /// A hook (or the signing program) was cancelled or couldn't be run.
     #[error("{0}")]
     Hook(#[from] crate::hooks::HookError),
     /// Committing the step Continue finishes failed otherwise (the message file, an empty
@@ -103,13 +115,20 @@ pub enum SequenceOutcome {
         files: Vec<String>,
         progress: SequenceProgress,
     },
-    /// Continue's commit hook `hook` failed (#133). Nothing was committed: the step is still
-    /// paused (git's `CHERRY_PICK_HEAD`/`REVERT_HEAD` and the resolved index are untouched) and
-    /// the returned state is unchanged, so Continue (with or without hooks) and Abort work as
-    /// before.
+    /// A commit hook failed: Continue's (#133), or `prepare-commit-msg` on a step that applied
+    /// cleanly (#183). Nothing was committed: the step is paused (git's
+    /// `CHERRY_PICK_HEAD`/`REVERT_HEAD` and the staged result are kept) and the returned state
+    /// points at it, so Continue (with or without hooks), the commit box and Abort all work.
     HookFailed {
         hook: String,
         output: String,
+        progress: SequenceProgress,
+    },
+    /// Cancel was pressed while a step's hooks ran after its commit (D9-A): that commit (summary
+    /// `kept`) stands and the sequence stopped before `progress.current_commit`; Continue goes
+    /// on from there.
+    Stopped {
+        kept: String,
         progress: SequenceProgress,
     },
 }
@@ -202,6 +221,11 @@ enum StepResult {
     /// The result equals HEAD's tree; the operation state was cleaned up, nothing committed.
     Empty,
     Conflicted(Vec<String>),
+    /// `prepare-commit-msg` failed or emptied the message; the step stays staged and paused.
+    HookFailed {
+        hook: String,
+        output: String,
+    },
 }
 
 /// Applies `commit_id` on top of HEAD. A clean result is committed immediately with the original
@@ -209,22 +233,30 @@ enum StepResult {
 /// `MERGE_MSG` written, for the existing conflict pane + `commit::commit` / `merge::abort_merge`
 /// to finish. A merge commit needs `mainline` (1-based parent number, like `git cherry-pick -m`);
 /// any other commit must not get one.
+///
+/// Hooks (#183), as `git cherry-pick` runs them for a commit it creates: `prepare-commit-msg
+/// <COMMIT_EDITMSG> message` (it may rewrite the message), the commit (signing reported and
+/// cancellable through `hooks`), then `post-commit`. No `pre-commit`/`commit-msg`. A failing
+/// `prepare-commit-msg` is `PickOutcome::HookFailed` with the pick left staged; a cancelled one
+/// is `PickError::Hook`, likewise.
 pub fn cherry_pick(
     repo: &Repository,
     commit_id: &str,
     mainline: Option<u32>,
+    hooks: HookOptions<'_>,
 ) -> Result<PickOutcome, PickError> {
-    apply(repo, commit_id, Kind::CherryPick, mainline)
+    apply(repo, commit_id, Kind::CherryPick, mainline, hooks)
 }
 
-/// Commits the inverse of `commit_id` on top of HEAD. Same conflict and `mainline` contract as
-/// `cherry_pick` (state `RepositoryState::Revert`).
+/// Commits the inverse of `commit_id` on top of HEAD. Same conflict, hook and `mainline`
+/// contract as `cherry_pick` (state `RepositoryState::Revert`).
 pub fn revert(
     repo: &Repository,
     commit_id: &str,
     mainline: Option<u32>,
+    hooks: HookOptions<'_>,
 ) -> Result<PickOutcome, PickError> {
-    apply(repo, commit_id, Kind::Revert, mainline)
+    apply(repo, commit_id, Kind::Revert, mainline, hooks)
 }
 
 fn apply(
@@ -232,17 +264,19 @@ fn apply(
     commit_id: &str,
     kind: Kind,
     mainline: Option<u32>,
+    mut hooks: HookOptions<'_>,
 ) -> Result<PickOutcome, PickError> {
     let head = check_ready(repo)?;
     let target = repo.find_commit(Oid::from_str(commit_id)?)?;
     check_mainline(&target, mainline)?;
     check_signing(repo)?;
-    match step(repo, &head, &target, kind, mainline)? {
+    match step(repo, &head, &target, kind, mainline, &mut hooks)? {
         StepResult::Committed(oid) => Ok(PickOutcome::Committed {
             commit_id: oid.to_string(),
         }),
         StepResult::Empty => Err(PickError::EmptyResult),
         StepResult::Conflicted(files) => Ok(PickOutcome::Conflicted { files }),
+        StepResult::HookFailed { hook, output } => Ok(PickOutcome::HookFailed { hook, output }),
     }
 }
 
@@ -291,14 +325,16 @@ fn check_mainline(target: &Commit<'_>, mainline: Option<u32>) -> Result<(), Pick
     }
 }
 
-/// Applies `target` on top of `head` (HEAD's commit) and commits a clean, non-empty result.
-/// Callers have run `check_ready`, `check_mainline` and `check_signing`.
+/// Applies `target` on top of `head` (HEAD's commit) and commits a clean, non-empty result
+/// through `prepare-commit-msg`, the commit and `post-commit` (see `cherry_pick`). Callers have
+/// run `check_ready`, `check_mainline` and `check_signing`.
 fn step(
     repo: &Repository,
     head: &Commit<'_>,
     target: &Commit<'_>,
     kind: Kind,
     mainline: Option<u32>,
+    hooks: &mut HookOptions<'_>,
 ) -> Result<StepResult, PickError> {
     // libgit2's default checkout strategy here is SAFE: it errors rather than overwrite a
     // modified working-tree file the pick needs to change. libgit2 may already have written
@@ -365,19 +401,39 @@ fn step(
         ),
         Kind::Revert => (committer.clone(), revert_message(target, mainline)),
     };
-    let oid = crate::signing::create_commit(
+    // git's sequencer runs only `prepare-commit-msg` before a pick's commit. On failure or
+    // cancel, git's pick state (and the staged result) stays, as after `git cherry-pick`.
+    let message = match crate::commit::run_message_hook(repo, &message, "message", hooks) {
+        Ok(message) => message,
+        Err(crate::commit::CommitError::HookFailed { hook, output }) => {
+            return Ok(StepResult::HookFailed { hook, output })
+        }
+        Err(error @ crate::commit::CommitError::EmptyMessage) => {
+            return Ok(StepResult::HookFailed {
+                hook: "prepare-commit-msg".to_string(),
+                output: error.to_string(),
+            })
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let oid = crate::commit::create_commit_reporting(
         repo,
-        Some(crate::signing::HeadUpdate {
+        hooks,
+        crate::signing::HeadUpdate {
             expected: Some(head.id()),
             reflog_operation: "commit",
-        }),
+        },
         &author,
         &committer,
         &message,
         &tree,
         &[head],
     )?;
-    repo.cleanup_state()?;
+    // As git's sequencer (`try_to_commit`): `post-commit` runs while CHERRY_PICK_HEAD and
+    // MERGE_MSG are still there. The commit landed, so a state that can't be cleared is logged,
+    // not an error (D7-A): the step counts and the sequence moves on.
+    crate::commit::run_post_commit(repo, hooks);
+    crate::commit::cleanup_after_commit(repo);
     Ok(StepResult::Committed(oid))
 }
 
@@ -400,22 +456,38 @@ fn revert_message(target: &Commit<'_>, mainline: Option<u32>) -> String {
 }
 
 /// Cherry-picks `ids_oldest_first` in that order as one sequence. Each clean step is committed
-/// with the original author and message; a step whose result is empty is skipped. A conflict
-/// stops the sequence (git state `CherryPick`, like a single pick) and returns its state for
-/// `continue_sequence`/`abort_sequence`. Merge commits are refused up front. Like
-/// `cherry_pick`, the steps applied here run no commit hooks; only the step `continue_sequence`
-/// commits after a stop does (D3-A).
-pub fn cherry_pick_many(repo: &Repository, ids_oldest_first: &[String]) -> SequenceRun {
-    start(repo, ids_oldest_first, SequenceKind::CherryPick)
+/// with the original author and message, through `prepare-commit-msg … message` and
+/// `post-commit` as `git cherry-pick A B C` runs them (#183, see `cherry_pick`); a step whose
+/// result is empty is skipped. A conflict, or a failing `prepare-commit-msg`
+/// (`SequenceOutcome::HookFailed`), pauses the sequence on that step (git state `CherryPick`,
+/// like a single pick) and returns its state for `continue_sequence`/`abort_sequence`. A cancel
+/// during a step's `post-commit` keeps that commit and stops the sequence after it
+/// (`SequenceOutcome::Stopped`, state kept; Continue goes on with the next step). Merge commits are
+/// refused up front.
+pub fn cherry_pick_many(
+    repo: &Repository,
+    ids_oldest_first: &[String],
+    hooks: HookOptions<'_>,
+) -> SequenceRun {
+    start(repo, ids_oldest_first, SequenceKind::CherryPick, hooks)
 }
 
 /// Reverts `ids_oldest_first` newest-first (like `git revert A..B`), otherwise as
 /// `cherry_pick_many`.
-pub fn revert_many(repo: &Repository, ids_oldest_first: &[String]) -> SequenceRun {
-    start(repo, ids_oldest_first, SequenceKind::Revert)
+pub fn revert_many(
+    repo: &Repository,
+    ids_oldest_first: &[String],
+    hooks: HookOptions<'_>,
+) -> SequenceRun {
+    start(repo, ids_oldest_first, SequenceKind::Revert, hooks)
 }
 
-fn start(repo: &Repository, ids: &[String], kind: SequenceKind) -> SequenceRun {
+fn start(
+    repo: &Repository,
+    ids: &[String],
+    kind: SequenceKind,
+    mut hooks: HookOptions<'_>,
+) -> SequenceRun {
     if ids.is_empty() {
         return SequenceRun::failed(PickError::NothingSelected);
     }
@@ -435,7 +507,14 @@ fn start(repo: &Repository, ids: &[String], kind: SequenceKind) -> SequenceRun {
     if let Err(error) = check_signing(repo) {
         return SequenceRun::failed(error);
     }
-    let mut commits = ids.to_vec();
+    // A commit selected twice is applied once (its first occurrence), so no two steps share an
+    // id and git's pick state always names exactly one step.
+    let mut seen = std::collections::HashSet::new();
+    let mut commits: Vec<String> = ids
+        .iter()
+        .filter(|id| seen.insert(id.as_str()))
+        .cloned()
+        .collect();
     if kind == SequenceKind::Revert {
         commits.reverse();
     }
@@ -456,6 +535,7 @@ fn start(repo: &Repository, ids: &[String], kind: SequenceKind) -> SequenceRun {
             stopped_on_conflict: false,
             original_ref,
         },
+        &mut hooks,
     )
 }
 
@@ -478,15 +558,40 @@ fn fresh_index(repo: &Repository) -> Result<git2::Index, git2::Error> {
     Ok(index)
 }
 
+/// True once the user pressed Cancel on this run's operation.
+fn cancelled(hooks: &HookOptions<'_>) -> bool {
+    hooks.cancel.is_some_and(|cancel| cancel())
+}
+
 /// Runs the steps from `state.next` on. HEAD is the base of each step (the caller made sure it
 /// is `state.expected_head` or one commit further for a step the user finished).
-fn run(repo: &Repository, mut state: SequenceState) -> SequenceRun {
+fn run(repo: &Repository, mut state: SequenceState, hooks: &mut HookOptions<'_>) -> SequenceRun {
     while state.next < state.commits.len() {
+        // A Cancel during the previous step's `post-commit` (or the step Continue committed)
+        // keeps that commit and stops before the next step (D9-A); Continue resumes here.
+        // Not an error: the last step's commit stands (`SequenceOutcome::Stopped`).
+        if cancelled(hooks) {
+            let kept = match repo.head().and_then(|head| head.peel_to_commit()) {
+                Ok(head) => {
+                    state.expected_head = head.id().to_string();
+                    head.summary().ok().flatten().unwrap_or("").to_string()
+                }
+                Err(error) => return SequenceRun::stopped(error, state),
+            };
+            state.stopped_on_conflict = false;
+            return SequenceRun {
+                outcome: Ok(SequenceOutcome::Stopped {
+                    kept,
+                    progress: state.progress(),
+                }),
+                state: Some(state),
+            };
+        }
         let result = (|| {
             let head = repo.head()?.peel_to_commit()?;
             state.expected_head = head.id().to_string();
             let target = repo.find_commit(Oid::from_str(&state.commits[state.next])?)?;
-            step(repo, &head, &target, state.kind.into(), None)
+            step(repo, &head, &target, state.kind.into(), None, hooks)
         })();
         match result {
             Ok(StepResult::Committed(_)) => state.next += 1,
@@ -504,8 +609,22 @@ fn run(repo: &Repository, mut state: SequenceState) -> SequenceRun {
                     state: Some(state),
                 };
             }
+            Ok(StepResult::HookFailed { hook, output }) => {
+                // Paused like a conflict: git's pick state and the staged step stay.
+                state.stopped_on_conflict = true;
+                return SequenceRun {
+                    outcome: Ok(SequenceOutcome::HookFailed {
+                        hook,
+                        output,
+                        progress: state.progress(),
+                    }),
+                    state: Some(state),
+                };
+            }
             Err(error) => {
-                state.stopped_on_conflict = false;
+                // A cancelled `prepare-commit-msg` leaves the step paused, as a failing one does.
+                state.stopped_on_conflict =
+                    matches!(error, PickError::Hook(_)) && repo.state() != RepositoryState::Clean;
                 let untouched = state.next == 0
                     && state.skipped.is_empty()
                     && state.expected_head == state.original_head
@@ -534,13 +653,13 @@ fn run(repo: &Repository, mut state: SequenceState) -> SequenceRun {
 /// Anything else that moved HEAD is `HeadMoved`, and an unrelated paused operation is
 /// `OperationInProgress`; both keep the state so the sequence can still be aborted.
 ///
-/// Hooks (D3-A, #133): the step Continue commits (the resolved, paused one) runs
+/// Hooks (#133, #183): the step Continue commits (the resolved, paused one) runs
 /// `git cherry-pick --continue`'s commit hooks through `hooks`: `pre-commit`,
 /// `prepare-commit-msg <file> merge`, `commit-msg`, then the commit (signing reported and
 /// cancellable as for a commit), then `post-commit`. A failing hook is
 /// `SequenceOutcome::HookFailed` and a cancelled one `PickError::Hook`, both with the state
-/// unchanged. An empty resolution is skipped without hooks, and the steps Browsitory applies by
-/// itself (before or after) run none.
+/// unchanged. An empty resolution is skipped without hooks. The later steps Continue applies by
+/// itself run `prepare-commit-msg … message` and `post-commit` like `cherry_pick_many`'s.
 pub fn continue_sequence(
     repo: &Repository,
     mut state: SequenceState,
@@ -555,6 +674,13 @@ pub fn continue_sequence(
     if let Err(error) = check_signing(repo) {
         return SequenceRun::stopped(error, state);
     }
+    // The previous step's commit landed but its pick state could not be cleared (D7-A): clear
+    // it now, so Continue goes on with the next step instead of refusing.
+    if is_leftover_of_committed_step(repo, &state) {
+        if let Err(error) = repo.cleanup_state() {
+            return SequenceRun::stopped(error, state);
+        }
+    }
     let resumed = match repo.state() {
         RepositoryState::CherryPick
         | RepositoryState::CherryPickSequence
@@ -564,7 +690,7 @@ pub fn continue_sequence(
         _ => Err(PickError::OperationInProgress),
     };
     match resumed {
-        Ok(Paused::Done) => run(repo, state),
+        Ok(Paused::Done) => run(repo, state, &mut hooks),
         Ok(Paused::HookFailed { hook, output }) => SequenceRun {
             outcome: Ok(SequenceOutcome::HookFailed {
                 hook,
@@ -575,6 +701,35 @@ pub fn continue_sequence(
         },
         Err(error) => SequenceRun::stopped(error, state),
     }
+}
+
+/// git's pick state names the step before the current one, and HEAD is where that step's commit
+/// left it: the commit landed and only its state was left behind (D7-A).
+fn is_leftover_of_committed_step(repo: &Repository, state: &SequenceState) -> bool {
+    // A conflict stop's pick state is the paused step, never a leftover (a commit id listed
+    // twice is deduplicated by `start`, so the current and the previous step never share it).
+    if state.stopped_on_conflict {
+        return false;
+    }
+    let Some(previous) = state.next.checked_sub(1).and_then(|i| state.commits.get(i)) else {
+        return false;
+    };
+    let head_file = match repo.state() {
+        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => "CHERRY_PICK_HEAD",
+        RepositoryState::Revert | RepositoryState::RevertSequence => "REVERT_HEAD",
+        _ => return false,
+    };
+    let names_previous = repo
+        .find_reference(head_file)
+        .ok()
+        .and_then(|reference| reference.target())
+        .is_some_and(|oid| oid.to_string() == *previous);
+    let head_unmoved = repo
+        .head()
+        .ok()
+        .and_then(|head| head.target())
+        .is_some_and(|oid| oid.to_string() == state.expected_head);
+    names_previous && head_unmoved
 }
 
 /// True when git's paused pick/revert is this sequence's current step (not one started some
@@ -647,8 +802,14 @@ fn finish_paused(
         ),
     };
     // `git cherry-pick --continue`'s hooks; a failure leaves everything as it was.
-    let hooked = match crate::commit::run_commit_hooks(repo, &message, "pre-commit", "merge", hooks)
-    {
+    let hooked = match crate::commit::run_commit_hooks(
+        repo,
+        &message,
+        "pre-commit",
+        "merge",
+        crate::commit::MessageFile::CommitEditmsg,
+        hooks,
+    ) {
         Ok(hooked) => hooked,
         Err(crate::commit::CommitError::HookFailed { hook, output }) => {
             return Ok(Paused::HookFailed { hook, output })
@@ -680,7 +841,8 @@ fn finish_paused(
         &tree,
         &[&head],
     )?;
-    repo.cleanup_state()?;
+    // The step landed: a leftover pick state is logged, not an error (#183).
+    crate::commit::cleanup_after_commit(repo);
     crate::commit::run_post_commit(repo, hooks);
     state.next += 1;
     Ok(Paused::Done)
@@ -825,6 +987,10 @@ pub fn abort_sequence(
     let head_id = repo.head()?.peel_to_commit()?.id().to_string();
     if is_own_paused_step(repo, state) {
         crate::merge::abort_merge(repo)?;
+    } else if is_leftover_of_committed_step(repo, state) {
+        // The previous step's commit landed but its pick state stayed (D7-A): ours, and nothing
+        // is staged in it (the worktree and index are that commit), so clear it and rewind.
+        repo.cleanup_state()?;
     } else if repo.state() == RepositoryState::Clean
         && head_id == state.expected_head
         && fresh_index(repo)?.has_conflicts()

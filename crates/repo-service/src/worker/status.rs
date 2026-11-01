@@ -313,6 +313,7 @@ pub(super) fn commit(
     let mut reporter = super::hooks::ChannelHookReporter {
         events,
         operation_id: op.id.clone(),
+        source: super::hooks::HookSource::Commit,
     };
     // Before the hooks, so `prepare-commit-msg`/`commit-msg` see them (`git commit --trailer`).
     let result = git_core::commit::append_trailers(&message, &trailers).and_then(|message| {

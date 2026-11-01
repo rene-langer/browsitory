@@ -1,7 +1,7 @@
 use super::{
-    emit_hook_events, repo_worker, trailers_from, AppState, CommitOutcomeDto, HeadInfoDto,
-    PickOutcomeDto, ResetModeDto, SequenceAbortDto, SequenceOutcomeDto, SignatureInputDto,
-    TrailerDto,
+    emit_hook_events, hook_event_channel, repo_worker, trailers_from, AppState, CommitOutcomeDto,
+    HeadInfoDto, PickOutcomeDto, ResetModeDto, SequenceAbortDto, SequenceOutcomeDto,
+    SignatureInputDto, TrailerDto,
 };
 use tauri::{AppHandle, State};
 
@@ -60,16 +60,20 @@ pub async fn list_recent_authors(
         .collect())
 }
 
+/// A clean pick's `prepare-commit-msg`/`post-commit` are reported as `hook-progress` events
+/// with `source: "Pick"` (#183).
 #[tauri::command]
 pub async fn cherry_pick(
     repo_path: String,
     commit_id: String,
     mainline: Option<u32>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PickOutcomeDto, String> {
+    let events = hook_event_channel(app, &repo_path);
     Ok(PickOutcomeDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.cherry_pick(commit_id, mainline))
+            .call(move |w| w.cherry_pick(commit_id, mainline, events))
             .await?,
     ))
 }
@@ -79,11 +83,13 @@ pub async fn revert_commit(
     repo_path: String,
     commit_id: String,
     mainline: Option<u32>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PickOutcomeDto, String> {
+    let events = hook_event_channel(app, &repo_path);
     Ok(PickOutcomeDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.revert_commit(commit_id, mainline))
+            .call(move |w| w.revert_commit(commit_id, mainline, events))
             .await?,
     ))
 }
@@ -93,11 +99,13 @@ pub async fn revert_commit(
 pub async fn cherry_pick_many(
     repo_path: String,
     commit_ids: Vec<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SequenceOutcomeDto, String> {
+    let events = hook_event_channel(app, &repo_path);
     Ok(SequenceOutcomeDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.cherry_pick_many(commit_ids))
+            .call(move |w| w.cherry_pick_many(commit_ids, events))
             .await?,
     ))
 }
@@ -107,11 +115,13 @@ pub async fn cherry_pick_many(
 pub async fn revert_many(
     repo_path: String,
     commit_ids: Vec<String>,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SequenceOutcomeDto, String> {
+    let events = hook_event_channel(app, &repo_path);
     Ok(SequenceOutcomeDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.revert_many(commit_ids))
+            .call(move |w| w.revert_many(commit_ids, events))
             .await?,
     ))
 }
@@ -158,13 +168,16 @@ pub async fn reset_to_commit(
         .await
 }
 
+/// `post-checkout` is reported as `hook-progress` events with `source: "Checkout"` (#185).
 #[tauri::command]
 pub async fn checkout_commit(
     repo_path: String,
     commit_id: String,
+    app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let events = hook_event_channel(app, &repo_path);
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.checkout_commit(commit_id))
+        .call(move |w| w.checkout_commit(commit_id, events))
         .await
 }

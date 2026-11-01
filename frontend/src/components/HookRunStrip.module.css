@@ -1,0 +1,24 @@
+/* frontend/src/components/HookRunStrip.module.css */
+
+/* "Running post-checkout hook…" with Cancel, under the operation strip (#185). */
+.strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-4);
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  flex: 0 0 auto;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+/* No hook running: the live region stays mounted (and focusable) but takes no space. */
+.idle {
+  height: 0;
+  overflow: hidden;
+  outline: none;
+}

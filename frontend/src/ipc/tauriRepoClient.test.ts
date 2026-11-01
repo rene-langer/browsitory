@@ -336,7 +336,7 @@ describe("tauriRepoClient transfer progress subscription", () => {
 
     const unsubscribe = tauriRepoClient.subscribeHookProgress(received);
     await vi.waitFor(() => expect(hookListener).toBeDefined());
-    const payload = { repoPath: "/r", operationId: "commit-1", hook: "pre-commit", phase: "Started" };
+    const payload = { repoPath: "/r", operationId: "commit-1", hook: "pre-commit", phase: "Started", source: "Commit" };
     hookListener?.({ payload });
     expect(received).toHaveBeenCalledWith(payload);
 
