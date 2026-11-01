@@ -122,12 +122,79 @@ function setupCredentialCertificate() {
 // example (https://v2.tauri.app/develop/tests/webdriver/example/webdriverio/) — tauri-driver
 // isn't a WebdriverIO "service" (no @wdio/tauri-service is used here), so this config spawns
 // and reaps it itself around each session.
+//
+// It runs in its own process group (`detached: true`), which also holds the WebKitWebDriver it
+// starts and the app that one starts (#182). tauri-driver answers SIGTERM by SIGKILLing
+// WebKitWebDriver, which then can't close an app whose session never completed; the app was
+// left running and the next session's start hung. Signalling the whole group takes all three.
 let tauriDriver: ChildProcess | undefined;
 let exiting = false;
+// When `beforeSession` handed over to WebdriverIO's session request; `before` logs the
+// difference, so a slow or hanging session start shows up in the CI log (#182).
+let sessionRequestedAt = 0;
 
-function closeTauriDriver() {
+const NATIVE_DRIVER_PORT = 4445;
+
+function signalDriverGroup(pid: number, signal: NodeJS.Signals) {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // ESRCH: the group is already gone.
+  }
+}
+
+// Synchronous last resort for the worker's exit handlers.
+function killTauriDriverNow() {
   exiting = true;
-  tauriDriver?.kill();
+  if (tauriDriver?.pid) signalDriverGroup(tauriDriver.pid, "SIGKILL");
+}
+
+// SIGTERM to the group, up to 5 s for tauri-driver to exit, then SIGKILL to the group: the app
+// and WebKitWebDriver may outlive tauri-driver itself.
+async function closeTauriDriver(): Promise<void> {
+  exiting = true;
+  const driver = tauriDriver;
+  if (!driver?.pid) return;
+  const pid = driver.pid;
+  const exited =
+    driver.exitCode !== null || driver.signalCode !== null
+      ? Promise.resolve(true)
+      : new Promise<boolean>((resolve) => driver.once("exit", () => resolve(true)));
+  signalDriverGroup(pid, "SIGTERM");
+  const inTime = await Promise.race([
+    exited,
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000)),
+  ]);
+  if (!inTime) console.warn(`[e2e] tauri-driver (pid ${pid}) ignored SIGTERM for 5 s; killing its group`);
+  signalDriverGroup(pid, "SIGKILL");
+  tauriDriver = undefined;
+}
+
+// Before a session: kill whatever an earlier session left behind (#182) — this worktree's app
+// binary, a tauri-driver, or a WebKitWebDriver still holding the native driver port — and log
+// it, so a leftover is visible instead of silently hanging the next session start.
+function reapLeftovers(driverPath: string) {
+  const uid = process.getuid?.();
+  if (uid === undefined) return;
+  // `ps`, not `pgrep -f`: the latter also matches the shell running it.
+  const listing = execFileSync("ps", ["-u", String(uid), "-o", "pid=,args="], { encoding: "utf8" });
+  for (const line of listing.split("\n")) {
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const args = match[2];
+    const leftover =
+      args.startsWith(tauriAppBinary) ||
+      args.startsWith(driverPath) ||
+      (args.includes("WebKitWebDriver") && args.includes(`--port=${NATIVE_DRIVER_PORT}`));
+    if (!leftover || pid === process.pid) continue;
+    console.warn(`[e2e] killing a leftover process from an earlier session: ${pid} ${args}`);
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
 // Poll until something is listening on 127.0.0.1:4444, rather than assuming `tauri-driver` is
@@ -169,7 +236,7 @@ function onShutdown(fn: () => void) {
   process.on("SIGTERM", cleanup);
   process.on("SIGHUP", cleanup);
 }
-onShutdown(() => closeTauriDriver());
+onShutdown(() => killTauriDriverNow());
 
 export const config: WebdriverIO.Config = {
   runner: "local",
@@ -274,9 +341,13 @@ export const config: WebdriverIO.Config = {
     // frame 0. Under Xvfb the same build renders normally. Harmless on CI (no Wayland session).
     const driverEnv: NodeJS.ProcessEnv = { ...process.env, XDG_DATA_HOME: E2E_DATA_HOME, GDK_BACKEND: "x11" };
     delete driverEnv.WAYLAND_DISPLAY;
+    reapLeftovers(driverPath);
+    exiting = false;
     tauriDriver = spawn(driverPath, [], {
       stdio: [null, process.stdout, process.stderr],
       env: driverEnv,
+      // Its own process group, see `closeTauriDriver`.
+      detached: true,
     });
     resetFixtureRepo();
     tauriDriver.on("error", (error) => {
@@ -289,7 +360,15 @@ export const config: WebdriverIO.Config = {
         process.exit(1);
       }
     });
+    // tauri-driver listens on 4444 and starts WebKitWebDriver on 4445; a session request sent
+    // before the native driver accepts can stall (#182).
     await waitForPort(4444, "127.0.0.1", 10_000);
+    await waitForPort(NATIVE_DRIVER_PORT, "127.0.0.1", 10_000);
+    sessionRequestedAt = Date.now();
+  },
+
+  before: () => {
+    console.log(`[e2e] session start: ${Date.now() - sessionRequestedAt} ms`);
   },
 
   // Each spec prepares its fixture with direct git CLI calls in a Mocha `before` hook, but
@@ -299,8 +378,8 @@ export const config: WebdriverIO.Config = {
     await browser.refresh();
   },
 
-  afterSession: () => {
-    closeTauriDriver();
+  afterSession: async () => {
+    await closeTauriDriver();
   },
 
   onComplete: async () => {
