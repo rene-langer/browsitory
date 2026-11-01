@@ -68,6 +68,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in this stash would overwrite the folder 'd'; move the folder first." and keeps the stash
   (#186).
 
+### Worker calls
+
+- Fixed (desktop app): while a hook ran for a long time, repeated refreshes could use up the
+  app's background threads, and actions in every other open repository then hung until the hook
+  ended. Actions waiting for one repository now share one background thread (#181).
+
 ### Hooks: status and parity
 
 - While post-checkout runs after you switch branches or check out a commit, or post-merge after

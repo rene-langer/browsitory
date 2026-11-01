@@ -205,6 +205,23 @@ queue. Clone and the diff/merge tool waits use `off_runtime` too. `scan_repos_in
 plain async: it involves no worker and is microseconds of work (see its comment). The VSCode
 sidecar runs each request on its own thread and is unaffected.
 
+**One blocking thread per repository (#181).** The blocking pool is capped (512 threads), and
+each queued round trip used to hold one of its threads until the serial worker replied: a long
+hook plus repeated refreshes on one repository could fill the pool, and every other
+repository's commands then queued behind it until the hook ended. So `call` first awaits the
+repository's gate (`AppState`'s per-path `tauri::async_runtime::Mutex<()>`, created by
+`repo_worker` on first use and dropped by `close_repo`) and only then takes a blocking thread.
+The guard moves into the blocking closure, so a dropped command future can't release the gate
+while its round trip still runs. The worker runs one command at a time, so waiting at the gate
+instead of in the worker's queue loses little; waiting calls are parked tasks, not threads, and
+Tokio's mutex is FIFO, so calls keep the order in which they reach the gate. Each `call` closure
+only makes round trips on its own handle and never awaits another call, so nothing can deadlock
+on the gate. What must not wait behind the worker goes through the ungated `signal()`:
+`cancel_transfer` and `cancel_search`; the search generation, which `search_commits` claims
+before it waits for the gate (`WorkerHandle::claim_search_generation`), so a cancel or a newer
+search also cancels a search still waiting there; and the stored work tree path
+(`tools::workdir_of`) behind Open in editor, Reveal and Open terminal.
+
 ## Undo stack
 
 - **Snapshots** (`git-core::undo`): HEAD, `refs/heads/*` + `refs/tags/*`, the index as a tree,

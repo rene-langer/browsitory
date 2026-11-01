@@ -53,7 +53,7 @@ No new dependency. New user-visible strings are listed per section.
   std `mpsc` reply. The worker thread is serial (`for command in rx`, `mod.rs` l. 770).
 - Tauri's runtime is tokio with the default 512 blocking threads. `tauri::async_runtime`
   re-exports `tokio::sync::Mutex` (tauri 2.11.5 `async_runtime.rs` l. 13–17).
-- Every `call` closure is one worker round trip (checked); the merge tool waits outside `call`
+- Every `call` closure only makes round trips on its own handle (checked); the merge tool waits outside `call`
   (`tools.rs` l. 104–117). `cancel_transfer`/`cancel_search` use `signal()`.
 - Frontend: `refresh()` (`useAppState.ts` l. 393) sends ~16 reads at once; window focus sends one
   `getUndoState` (`App.tsx` l. 304–309).
@@ -185,10 +185,17 @@ No new dependency. New user-visible strings are listed per section.
 - `AppState` gains `gates: Mutex<HashMap<String, Arc<tauri::async_runtime::Mutex<()>>>>`.
   `repo_worker` returns `RepoWorker { handle, gate }` (gate created on first use, removed by
   `close_repo`).
-- `call`: `let _turn = self.gate.lock().await;` then `off_runtime(..).await`. Tokio's mutex is
-  FIFO, so commands for one repository keep their order; they wait as tasks, not threads.
-- `signal()` takes no gate. The doc comment and ARCHITECTURE "Threading model" explain why one
-  thread per repository is enough (the worker is serial).
+- `call`: `Arc::clone(&self.gate).lock_owned().await`, the guard moved into the `off_runtime`
+  closure (a dropped future can't free the gate while the round trip runs). Tokio's mutex is
+  FIFO, so calls for one repository keep the order in which they reach the gate; they wait as
+  tasks, not threads. Each `call` closure only makes round trips on its own handle and never
+  awaits another call, so the gate can't deadlock.
+- `signal()` takes no gate. Outside the gate: `cancel_transfer`/`cancel_search`; the search
+  generation (`WorkerHandle::claim_search_generation` before `call`, then
+  `search_commits_claimed`), so a cancel or newer search cancels a search waiting at the gate;
+  and `workdir()` (a stored path) for Open in editor, Reveal and Open terminal. The doc comment
+  and ARCHITECTURE "Threading model" explain why one thread per repository is enough (the
+  worker is serial).
 
 ### 4. #185: post hooks reported and cancellable (D8-A)
 - `worker/hooks.rs`: `HookSource { Commit, Checkout, Merge, Pick }`; `HookEvent::{Started,

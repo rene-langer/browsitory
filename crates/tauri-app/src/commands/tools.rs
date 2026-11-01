@@ -3,6 +3,8 @@
 //! `cmd` from the user's own git config, which runs as `sh -c` exactly like git runs it). Paths
 //! from the frontend are confined to the repository's work tree by `git_core::launch`.
 
+use std::path::PathBuf;
+
 use git_core::launch::{self, EditorTarget};
 use tauri::State;
 
@@ -10,6 +12,12 @@ use super::{
     off_runtime, repo_worker, AppState, DiffSourceDto, ExternalToolSettingsDto, FileSidesDto,
     GitToolsDto, MergeToolOutcomeDto,
 };
+
+/// The repository's work tree root. A stored path, so it skips the repository's gate: Open in
+/// editor, Reveal and Open terminal answer at once even while a long hook holds it (#181).
+pub(crate) fn workdir_of(state: &AppState, repo_path: &str) -> Result<PathBuf, String> {
+    repo_worker(state, repo_path)?.signal().workdir()
+}
 
 fn tool_settings() -> Result<config::ExternalToolSettings, String> {
     config::get_external_tool_settings().map_err(|e| e.to_string())
@@ -24,9 +32,7 @@ pub async fn open_in_editor(
     line: Option<u32>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let workdir = repo_worker(&state, &repo_path)?
-        .call(move |w| w.workdir())
-        .await?;
+    let workdir = workdir_of(&state, &repo_path)?;
     let editor = tool_settings()?.editor;
     match launch::prepare_editor(&workdir, &path, line, editor.as_deref())
         .map_err(|e| e.to_string())?
@@ -48,18 +54,14 @@ pub async fn reveal_in_file_manager(
     path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let workdir = repo_worker(&state, &repo_path)?
-        .call(move |w| w.workdir())
-        .await?;
+    let workdir = workdir_of(&state, &repo_path)?;
     let target = launch::reveal_target(&workdir, path.as_deref()).map_err(|e| e.to_string())?;
     tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn open_terminal(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let workdir = repo_worker(&state, &repo_path)?
-        .call(move |w| w.workdir())
-        .await?;
+    let workdir = workdir_of(&state, &repo_path)?;
     let terminal = tool_settings()?.terminal;
     let invocation =
         launch::prepare_terminal(&workdir, terminal.as_deref()).map_err(|e| e.to_string())?;
