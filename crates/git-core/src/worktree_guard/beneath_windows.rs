@@ -1660,6 +1660,136 @@ mod tests {
         );
     }
 
+    /// The names in `dir`, sorted.
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// A fill that writes "par" and then fails, as a full disk would.
+    fn fail_halfway(file: &mut File) -> io::Result<()> {
+        file.write_all(b"par")?;
+        Err(io::Error::other("disk full"))
+    }
+
+    fn attributes_of(path: &Path) -> u32 {
+        use std::os::windows::fs::MetadataExt;
+        std::fs::symlink_metadata(path).unwrap().file_attributes()
+    }
+
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+
+    fn make_hidden(path: &Path) {
+        let status = std::process::Command::new("attrib")
+            .arg("+H")
+            .arg(path)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "attrib +H failed");
+        assert_ne!(attributes_of(path) & FILE_ATTRIBUTE_HIDDEN, 0);
+    }
+
+    #[test]
+    fn a_failed_write_keeps_the_old_content() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old content").unwrap();
+        make_hidden(&f);
+        let error = write_with(
+            dir.path(),
+            Path::new("d/f"),
+            &mut no_step,
+            &mut fail_halfway,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old content");
+        assert_ne!(attributes_of(&f) & FILE_ATTRIBUTE_HIDDEN, 0);
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn a_failed_write_of_a_new_file_leaves_nothing() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d").join("f"), "old").unwrap();
+        let error = write_with(
+            dir.path(),
+            Path::new("d/new"),
+            &mut no_step,
+            &mut fail_halfway,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn write_keeps_the_hidden_attribute() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        make_hidden(&f);
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert_ne!(attributes_of(&f) & FILE_ATTRIBUTE_HIDDEN, 0);
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn write_keeps_the_on_disk_name_case() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d").join("F.txt"), "old").unwrap();
+        assert!(write(dir.path(), Path::new("d/f.txt"), b"new", &mut no_step).unwrap());
+        assert_eq!(names_in(&dir.path().join("d")), ["F.txt"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d").join("F.txt")).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn writing_a_file_held_without_share_delete_is_in_use() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        // As an editor that keeps the file open, sharing read and write but not delete.
+        let _editor = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&f)
+            .unwrap();
+        let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
+        assert!(crate::worktree_guard::is_in_use(&error), "{error:?}");
+        assert_eq!(
+            error.to_string(),
+            "'d/f' is open in another program. Close it, then try again."
+        );
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn a_file_held_open_by_a_scanner_is_still_replaced() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        let _scanner = hold_open_like_a_scanner(&f);
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
     #[test]
     fn remove_and_prune_removes_a_read_only_file_and_its_folder() {
         let dir = TempDir::new().unwrap();
