@@ -336,9 +336,12 @@ fn a_file_on_the_way_is_a_clear_error() {
     };
     let message = error.to_string();
     let folder = dir.path().join("a");
-    assert!(
-        message.starts_with(&format!("Can't create the folder '{}': ", folder.display())),
-        "{message}"
+    assert_eq!(
+        message,
+        format!(
+            "Can't create the folder '{}': a file with that name is in the way.",
+            folder.display()
+        )
     );
     assert!(!has_branch(&repo, "x"));
     assert!(!repo.path().join("worktrees").join("wt").exists());
@@ -371,4 +374,59 @@ fn a_failed_add_leaves_no_half_made_worktree_or_new_branch() {
 
     create_worktree(&repo, "wt", &linked, "x", Some("HEAD")).unwrap();
     assert!(linked.join("file.txt").is_file());
+}
+
+#[test]
+fn a_failed_add_keeps_an_empty_parent_folder_it_did_not_create() {
+    let (dir, repo, main_branch) = committed_repo();
+    let existing = dir.path().join("p");
+    std::fs::create_dir(&existing).unwrap();
+    let linked = existing.join("q").join("wt");
+
+    // The main worktree's branch is already checked out, so libgit2 refuses it.
+    let result = create_worktree(&repo, "wt", &linked, &main_branch, None);
+
+    assert!(result.is_err());
+    assert!(existing.is_dir());
+    assert!(!existing.join("q").exists());
+}
+
+/// A stale `.git/worktrees/<name>` that libgit2 refuses to reuse.
+fn stale_worktree_entry(repo: &git2::Repository) -> std::path::PathBuf {
+    let admin = repo.path().join("worktrees").join("wt");
+    std::fs::create_dir_all(&admin).unwrap();
+    std::fs::write(admin.join("marker"), "kept").unwrap();
+    admin
+}
+
+#[test]
+fn a_failed_add_keeps_a_worktree_entry_it_did_not_create() {
+    let (dir, repo, _) = committed_repo();
+    let admin = stale_worktree_entry(&repo);
+    let linked = dir.path().join("a").join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "x", Some("HEAD"));
+
+    assert!(result.is_err());
+    assert_eq!(
+        std::fs::read_to_string(admin.join("marker")).unwrap(),
+        "kept"
+    );
+    assert!(!has_branch(&repo, "x"));
+    assert!(!dir.path().join("a").exists());
+}
+
+#[test]
+fn a_failed_add_keeps_a_branch_it_did_not_create() {
+    let (dir, repo, _) = committed_repo();
+    let head = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature", &head, false).unwrap();
+    stale_worktree_entry(&repo);
+    let linked = dir.path().join("a").join("wt");
+
+    let result = create_worktree(&repo, "wt", &linked, "feature", None);
+
+    assert!(result.is_err());
+    assert!(has_branch(&repo, "feature"));
+    assert!(!dir.path().join("a").exists());
 }

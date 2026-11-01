@@ -790,7 +790,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   empty), the destination (only while empty), `<commondir>/worktrees/<name>` when it didn't exist
   before and has no `gitdir` file yet (libgit2 creates it before the destination and leaves it
   behind on failure, which blocked a retry with the same name), and the branch when this call
-  created it. The original error is returned.
+  created it. The original error is returned. A failure after libgit2 wrote `gitdir` (checkout,
+  HEAD) is not rolled back: the entry stays registered with the branch checked out, so a retry
+  gets `PathExists` and remove gets `Dirty`; the user deletes the folder, prunes, and deletes the
+  branch. Residual risk: another process that creates the same `worktrees/<name>` between the
+  existence check and libgit2's mkdir, or an empty destination folder after it, can have that
+  folder removed by the rollback.
 - Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or a
   refusal check: `scan`, `refuse_linked_folders`, `has_symlinked_ancestor` in stage/stash,
   `refuse_linked_path`) and libgit2's own write; libgit2 has no `openat`-style checkout. The

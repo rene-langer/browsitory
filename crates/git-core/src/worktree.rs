@@ -205,10 +205,15 @@ fn create_parent_folders(path: &Path, created: &mut Vec<PathBuf>) -> Result<(), 
             Ok(()) => created.push(folder.to_path_buf()),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && folder.is_dir() => {}
             Err(error) => {
+                let reason = if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    "a file with that name is in the way.".to_string()
+                } else {
+                    error.to_string()
+                };
                 return Err(WorktreeError::CreateFolder {
                     path: folder.to_path_buf(),
-                    reason: error.to_string(),
-                })
+                    reason,
+                });
             }
         }
     }

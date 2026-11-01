@@ -11,8 +11,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Creating a worktree in a folder that doesn't exist yet now creates the missing folders, as git
   worktree add does (#200).
 - Fixed: a worktree add that failed could leave a half-made worktree entry and the new branch
-  behind, so trying again with the same name failed with "git operation failed"; a failed add
-  now cleans up after itself, and a folder it can't create is named in the error (#200).
+  behind, so trying again with the same name failed with "git operation failed". When an add
+  fails before the worktree is set up, Browsitory now removes the folders, entry and branch it
+  created, and a folder it can't create is named in the error. A failure later, while the files
+  are checked out, still leaves the worktree and branch; delete the folder, prune, and delete
+  the branch (#200).
 
 ### Cherry-pick leftovers
 
