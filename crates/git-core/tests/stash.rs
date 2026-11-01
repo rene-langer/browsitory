@@ -2282,6 +2282,14 @@ fn stash_all_keeps_an_edit_in_a_folder_removed_from_the_index() {
             assert_eq!(read(dir.path(), "u"), "u\n");
             assert_eq!(git_status(dir.path()), format!(" M a\n M {path}\n?? u\n"));
             assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+            // git records the edit too; with -u also in its untracked commit, and then its own
+            // pop fails ("could not restore untracked files"), keeping the edit and the stash.
+            let twin = removed_from_index_twin(path);
+            assert_eq!(git_stash_push_shows(twin.path(), &opts, path), "local\n");
+            assert_eq!(read(twin.path(), path), "head\n");
+            let popped = git(twin.path(), &["stash", "pop"]).status.success();
+            assert_eq!(popped, !include_untracked, "{path} {opts:?}");
+            assert_eq!(read(twin.path(), path), "local\n");
         }
     }
 }
@@ -2325,6 +2333,9 @@ fn stash_all_with_keep_index_deletes_an_edit_removed_from_the_index_and_keeps_it
 
             assert!(!dir.path().join(path).exists(), "{path} {opts:?}");
             assert_eq!(in_index(&repo, path), None);
+            let twin = removed_from_index_twin(path);
+            assert_eq!(git_stash_push_shows(twin.path(), &opts, path), "local\n");
+            assert!(!twin.path().join(path).exists());
             assert_eq!(
                 stashed(&mut repo, path),
                 [Some("local\n".into()), None, None],
