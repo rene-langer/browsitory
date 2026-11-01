@@ -1553,6 +1553,42 @@ mod tests {
     }
 
     #[test]
+    fn writing_a_read_only_file_is_reported_as_read_only() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        make_read_only(&dir.path().join("d/f"));
+        let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
+        assert!(crate::worktree_guard::is_read_only(&error), "{error:?}");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/f")).unwrap(),
+            "old"
+        );
+        assert!(std::fs::metadata(dir.path().join("d/f"))
+            .unwrap()
+            .permissions()
+            .readonly());
+    }
+
+    #[test]
+    fn writing_a_writable_file_still_works() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/f"), "old").unwrap();
+        assert!(write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/f")).unwrap(),
+            "new"
+        );
+        assert!(write(dir.path(), Path::new("d/g"), b"created", &mut no_step).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/g")).unwrap(),
+            "created"
+        );
+    }
+
+    #[test]
     fn remove_and_prune_removes_a_read_only_file_and_its_folder() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir(dir.path().join("d")).unwrap();

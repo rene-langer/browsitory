@@ -977,10 +977,38 @@ pub(crate) fn remove_beneath(workdir: &Path, rel: &str) -> io::Result<bool> {
     beneath::remove(workdir, Path::new(rel), &mut no_step)
 }
 
+/// The error source [`write_beneath`] reports for an existing file it may not write because it
+/// is read-only (#209).
+#[derive(Debug)]
+pub(crate) struct ReadOnlyFile;
+
+impl std::fmt::Display for ReadOnlyFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the file is read-only")
+    }
+}
+
+impl std::error::Error for ReadOnlyFile {}
+
+/// A `PermissionDenied` error wrapping [`ReadOnlyFile`].
+pub(crate) fn read_only_error() -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, ReadOnlyFile)
+}
+
+/// Whether `error` is [`read_only_error`]'s.
+pub(crate) fn is_read_only(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|source| source.is::<ReadOnlyFile>())
+}
+
 /// Writes `bytes` to `rel` as a regular file, first removing a symlink at `rel` (never writing
 /// through it). Returns `Ok(false)` and writes nothing when an ancestor is a symlink or `rel` is
 /// not a plain relative path. An existing file keeps its mode; a FIFO or device is an error,
-/// never written.
+/// never written. An existing read-only file is an error for which [`is_read_only`] is true,
+/// and is left as it is (#209): on Windows the read-only attribute, on Unix a file the user owns
+/// without write permission for its owner. A file that is not writable for another reason (an
+/// ACL, another owner) keeps the system's error.
 pub(crate) fn write_beneath(workdir: &Path, rel: &str, bytes: &[u8]) -> io::Result<bool> {
     if !plain_relative(Path::new(rel)) {
         return Ok(false);

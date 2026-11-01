@@ -709,6 +709,24 @@ mod tests {
     }
 
     #[test]
+    fn writing_a_read_only_file_is_reported_as_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: `geteuid` has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            eprintln!("skipped: root writes read-only files");
+            return;
+        }
+        let (dir, _outside) = tree();
+        let f = dir.path().join("d/f");
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let error = write(dir.path(), Path::new("d/f"), b"new", &mut no_step).unwrap_err();
+        assert!(super::super::is_read_only(&error), "{error:?}");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&f).unwrap(), b"inner\n");
+        assert_eq!(mode(&f), 0o444);
+    }
+
+    #[test]
     fn write_on_a_fifo_errors_without_blocking() {
         let (dir, _outside) = tree();
         mkfifo(&dir.path().join("pipe"));

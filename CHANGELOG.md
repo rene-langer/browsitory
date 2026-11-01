@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Read-only files
+
+- Work in progress (#209).
+
 ### Windows walker
 
 - Fixed (Windows): undo, redo and discards no longer fail with "Access is denied" on read-only
