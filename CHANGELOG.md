@@ -20,11 +20,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   repository and stashes the folder's other untracked files, as `git stash -u` does (#211).
 - Fixed: Stash all with Include untracked files deleted ignored files inside an untracked
   folder (for example `vendor/x.o`); it now keeps them, as `git stash -u` does (#208).
+- Fixed: Stash all overwrote an edited file that had been removed from the index and then
+  ignored (for example `.env` after `git rm --cached .env`), and Pop deleted it. It now refuses
+  with "Stashing would delete the ignored '.env', …" (#208).
 - Fixed: applying or popping a stash whose untracked files sit in a folder that replaced a
   tracked file reported success, left a "d~Updated upstream" file, and Pop dropped the stash.
   It now says "This stash can't be applied here: its untracked file 'd/x' needs a folder where
-  'd' is a tracked file. Commit the deletion of 'd' first, then apply it; the stash is kept."
-  (#206).
+  'd' is tracked. Commit the deletion of 'd' first, then apply it; the stash is kept." (#206).
 
 ### Windows walker
 

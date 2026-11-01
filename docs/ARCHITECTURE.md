@@ -157,7 +157,16 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   ignored files). `save_stash` sends such a stash (Include untracked on, an untracked repository
   or an ignored entry below a folder that the index or HEAD has no path in) through the
   path-limited stash, as it does for symlink hazards (`kept_entry_in_untracked_folder`): it
-  stashes the same files git does and deletes only those.
+  stashes the same files git does and deletes only those. An untracked folder holding only
+  ignored entries doesn't count: libgit2's iterator reports it as ignored and leaves it. Known
+  limitation: on that route the path-limited stash's own refusals apply, so a folder that
+  replaced a tracked file (which libgit2's whole stash handles) is refused as
+  `DirectoryReplacedNonDirectory` when such a folder is also present. Before, the stash
+  succeeded and deleted the nested repository or ignored files.
+- An ignored file that is also `INDEX_DELETED` (`git rm --cached .env`, then ignored, then
+  edited) is not in libgit2's stash (its worktree commit skips ignored files; git records it),
+  and the reset writes HEAD's version over it; Pop then deletes it. `entry_in_the_way` treats an
+  ignored file at a restored file's path as in the way (`IgnoredInTheWay`), in both modes.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as

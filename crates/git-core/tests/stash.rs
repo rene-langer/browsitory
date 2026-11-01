@@ -1767,7 +1767,7 @@ fn assert_untracked_below_tracked_file_refused(
     );
     assert_eq!(
         error.to_string(),
-        "This stash can't be applied here: its untracked file 'd/x' needs a folder where 'd' is a tracked file. Commit the deletion of 'd' first, then apply it; the stash is kept."
+        "This stash can't be applied here: its untracked file 'd/x' needs a folder where 'd' is tracked. Commit the deletion of 'd' first, then apply it; the stash is kept."
     );
     assert_eq!(git_core::stash::list_stashes(repo).unwrap().len(), 1);
     assert_eq!(top_level(dir), ["d"]);
@@ -1992,4 +1992,106 @@ fn stash_all_with_untracked_files_keeps_ignored_files_in_an_untracked_folder() {
         assert_eq!(read(dir.path(), "vendor/other.txt"), "other\n");
         assert_eq!(read(dir.path(), "a.txt"), "edited\n");
     }
+}
+
+/// HEAD has `.env` = "base\n" and `a.txt`; `.env` was removed from the index (`git rm --cached`),
+/// is ignored, and was edited to "local secret\n".
+fn ignored_file_removed_from_the_index() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), ".env", "base\n");
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new(".env")).unwrap();
+    index.write().unwrap();
+    write_file(dir.path(), ".git/info/exclude", ".env\n");
+    write_file(dir.path(), ".env", "local secret\n");
+    (dir, repo)
+}
+
+#[test]
+fn stash_all_refuses_to_overwrite_an_ignored_file_removed_from_the_index() {
+    // Status `INDEX_DELETED | IGNORED`: libgit2's stash doesn't record `.env`, its reset writes
+    // HEAD's `.env` over the edit, and Pop deletes it.
+    for opts in whole_stash_modes() {
+        let (dir, mut repo) = ignored_file_removed_from_the_index();
+        let status_before = git_core::status::status(&repo).unwrap();
+
+        let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                StashError::IgnoredInTheWay { ref ignored, ref tracked }
+                    if ignored == ".env" && tracked == ".env"
+            ),
+            "{opts:?}: {error:?}"
+        );
+        assert_nothing_stashed(
+            &mut repo,
+            &error,
+            "Stashing would delete the ignored '.env', which is in the way of the tracked '.env'. Move '.env' first.",
+            &status_before,
+        );
+        assert_eq!(read(dir.path(), ".env"), "local secret\n");
+    }
+    // git records the edit in the stash and its pop brings it back.
+    let (twin, _twin_repo) = ignored_file_removed_from_the_index();
+    assert!(git_stash_push(twin.path(), false));
+    assert_eq!(read(twin.path(), ".env"), "base\n");
+    assert!(git(twin.path(), &["stash", "pop"]).status.success());
+    assert_eq!(read(twin.path(), ".env"), "local secret\n");
+}
+
+/// HEAD has the file `d`, replaced by a folder with the untracked `d/x`; the new folder
+/// `newpkg/` holds the ignored `newpkg/node_modules/` and, with `source`, the untracked
+/// `newpkg/index.js`.
+fn swap_next_to_an_untracked_package(source: bool) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = file_replaced_by_folder();
+    write_file(dir.path(), ".git/info/exclude", "node_modules/\n");
+    write_file(dir.path(), "newpkg/node_modules/pkg/i.js", "dependency\n");
+    if source {
+        write_file(dir.path(), "newpkg/index.js", "source\n");
+    }
+    (dir, repo)
+}
+
+#[test]
+fn an_untracked_folder_holding_only_ignored_files_keeps_the_whole_stash() {
+    // libgit2 doesn't remove an untracked folder that holds only ignored files, so Stash all
+    // stays on libgit2's stash and handles the swap of `d`.
+    let (dir, mut repo) = swap_next_to_an_untracked_package(false);
+
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    assert_eq!(read(dir.path(), "d"), "f\n");
+    assert_eq!(
+        read(dir.path(), "newpkg/node_modules/pkg/i.js"),
+        "dependency\n"
+    );
+    let stash = stash_commit(&mut repo, 0);
+    assert_eq!(untracked_files_of(&repo, stash), ["d/x"]);
+}
+
+#[test]
+fn a_swap_next_to_ignored_files_in_an_untracked_folder_is_refused_as_on_the_path_limited_route() {
+    // Keeping `node_modules/` needs the path-limited route, which can't stash the folder that
+    // replaced the file `d`: it refuses, and nothing is written.
+    let (dir, mut repo) = swap_next_to_an_untracked_package(true);
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let error = git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::DirectoryReplacedNonDirectory { ref path, .. } if path == "d"),
+        "{error:?}"
+    );
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+    assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+    assert_eq!(read(dir.path(), "d/x"), "x\n");
+    assert_eq!(read(dir.path(), "newpkg/index.js"), "source\n");
+    assert_eq!(
+        read(dir.path(), "newpkg/node_modules/pkg/i.js"),
+        "dependency\n"
+    );
 }

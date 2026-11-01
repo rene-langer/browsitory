@@ -104,8 +104,8 @@ No source file is shared between PRs; they run in parallel. No new dependency. N
   `GIT_ITERATOR_DONT_IGNORE_CASE`); walks the stash's untracked tree; for the first file with a
   proper prefix in the set → `StashError::UntrackedBelowTrackedFile { untracked, file }`:
   "This stash can't be applied here: its untracked file '{untracked}' needs a folder where
-  '{file}' is a tracked file. Commit the deletion of '{file}' first, then apply it; the stash is
-  kept."
+  '{file}' is tracked. Commit the deletion of '{file}' first, then apply it; the stash is kept."
+  (Review: "is tracked" rather than "is a tracked file", since `file` can be a symlink.)
 - Nothing written, stash kept (Pop never reaches the drop).
 
 ### 2. #208 / #211: anything the reset would delete (D2-A)
