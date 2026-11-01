@@ -205,6 +205,17 @@ queue. Clone and the diff/merge tool waits use `off_runtime` too. `scan_repos_in
 plain async: it involves no worker and is microseconds of work (see its comment). The VSCode
 sidecar runs each request on its own thread and is unaffected.
 
+**One blocking thread per repository (#181).** The blocking pool is capped (512 threads), and
+each queued round trip used to hold one of its threads until the serial worker replied: a long
+hook plus repeated refreshes on one repository could fill the pool, and every other
+repository's commands then queued behind it until the hook ended. So `call` first awaits the
+repository's gate (`AppState`'s per-path `tauri::async_runtime::Mutex<()>`, created by
+`repo_worker` on first use and dropped by `close_repo`) and only then takes a blocking thread.
+The worker runs one command at a time anyway, so this costs no concurrency; waiting calls are
+parked tasks, not threads, and Tokio's mutex is FIFO, so they keep their order. Every `call`
+closure is a single worker round trip that never waits on another command of the same
+repository, so nothing can deadlock on the gate. `signal()` takes no gate.
+
 ## Undo stack
 
 - **Snapshots** (`git-core::undo`): HEAD, `refs/heads/*` + `refs/tags/*`, the index as a tree,
