@@ -280,6 +280,13 @@ fn apply(
     }
 }
 
+/// Clears a pick's own state as `git commit` does (`commit::clear_commit_state`): a terminal
+/// `git cherry-pick A B C`'s remaining todo in `.git/sequencer` is kept (#241).
+fn clear_state(repo: &Repository) -> Result<(), PickError> {
+    crate::commit::clear_commit_state(repo)
+        .map_err(|error| PickError::Commit(crate::commit::CommitError::Io(error)))
+}
+
 /// The preconditions every pick shares, in order: nothing paused, a born HEAD, nothing staged.
 /// Returns HEAD's commit.
 fn check_ready(repo: &Repository) -> Result<Commit<'_>, PickError> {
@@ -370,7 +377,7 @@ fn step(
         }
     };
     if let Err(error) = applied {
-        let _ = repo.cleanup_state();
+        let _ = crate::commit::clear_commit_state(repo);
         return Err(error.into());
     }
 
@@ -389,7 +396,7 @@ fn step(
 
     let tree_id = index.write_tree()?;
     if tree_id == head.tree_id() {
-        repo.cleanup_state()?;
+        clear_state(repo)?;
         return Ok(StepResult::Empty);
     }
     let tree = repo.find_tree(tree_id)?;
@@ -677,7 +684,7 @@ pub fn continue_sequence(
     // The previous step's commit landed but its pick state could not be cleared (D7-A): clear
     // it now, so Continue goes on with the next step instead of refusing.
     if is_leftover_of_committed_step(repo, &state) {
-        if let Err(error) = repo.cleanup_state() {
+        if let Err(error) = clear_state(repo) {
             return SequenceRun::stopped(error, state);
         }
     }
@@ -777,7 +784,7 @@ fn finish_paused(
     let tree_id = index.write_tree()?;
     // Before any hook: an empty resolution is skipped, as git's `--continue` would refuse it.
     if tree_id == head.tree_id() {
-        repo.cleanup_state()?;
+        clear_state(repo)?;
         state.skipped.push(current);
         state.next += 1;
         return Ok(Paused::Done);
@@ -821,7 +828,7 @@ fn finish_paused(
         // A `pre-commit` that put the step back to HEAD's tree emptied it: skip it like an empty
         // resolution rather than commit nothing.
         if index.write_tree()? == head.tree_id() {
-            repo.cleanup_state()?;
+            clear_state(repo)?;
             state.skipped.push(current);
             state.next += 1;
             return Ok(Paused::Done);

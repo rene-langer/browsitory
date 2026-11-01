@@ -476,6 +476,93 @@ fn prepare_commit_msg_source_is_merge_while_finishing_a_merge() {
     assert_eq!(head_message(&repo), "merge\n[merge]\n");
 }
 
+/// A conflicted `git merge feature`, started in a terminal during a `git bisect start`, then
+/// resolved and staged. Returns the repository, not yet committed.
+fn merge_during_a_bisect() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "base\n");
+    common::commit_all(&repo, "base");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("feature", &base, false).unwrap();
+    let base_id = base.id();
+    drop(base);
+    let feature = common::commit_tree(&repo, &[("a.txt", "feature\n", 0o100644)], &[base_id], "f");
+    repo.find_reference("refs/heads/feature")
+        .unwrap()
+        .set_target(feature, "test")
+        .unwrap();
+    common::write_file(dir.path(), "a.txt", "main\n");
+    common::commit_all(&repo, "main");
+    let run = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir.path())
+            .output()
+            .unwrap()
+    };
+    assert!(run(&["bisect", "start"]).status.success());
+    assert!(repo.path().join("BISECT_LOG").exists());
+    assert!(!run(&["merge", "feature"]).status.success());
+    stage(dir.path(), &repo, "a.txt", "resolved\n");
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+    (dir, repo)
+}
+
+/// `git merge` leaves `AUTO_MERGE` on a conflict; `git commit` removes it, and so does
+/// Browsitory's commit (#241).
+#[test]
+fn committing_a_merge_started_in_a_terminal_removes_auto_merge() {
+    let (_dir, mut repo) = merge_during_a_bisect();
+    assert!(repo.path().join("AUTO_MERGE").exists());
+
+    commit(&mut repo, "merge\n", HookOptions::default()).unwrap();
+
+    assert!(!repo.path().join("AUTO_MERGE").exists());
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+
+    // git's twin.
+    let (twin_dir, twin) = merge_during_a_bisect();
+    assert!(twin.path().join("AUTO_MERGE").exists());
+    let output = std::process::Command::new("git")
+        .args(["commit", "--no-edit"])
+        .current_dir(twin_dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(!twin.path().join("AUTO_MERGE").exists());
+}
+
+/// `git commit` of a merge keeps a terminal bisect going (it only removes the merge's own files);
+/// so does Browsitory's commit (#241).
+#[test]
+fn committing_a_merge_during_a_bisect_keeps_the_bisect() {
+    let (_dir, mut repo) = merge_during_a_bisect();
+
+    commit(&mut repo, "merge\n", HookOptions::default()).unwrap();
+
+    assert_eq!(
+        repo.head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .parent_count(),
+        2
+    );
+    assert!(repo.path().join("BISECT_LOG").exists());
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+    assert!(!repo.path().join("MERGE_MSG").exists());
+
+    // git's twin.
+    let (twin_dir, twin) = merge_during_a_bisect();
+    let output = std::process::Command::new("git")
+        .args(["commit", "--no-edit"])
+        .current_dir(twin_dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(twin.path().join("BISECT_LOG").exists());
+}
+
 // ---- pre-push ------------------------------------------------------------------------------
 
 use git_core::remote::{

@@ -433,10 +433,55 @@ pub(crate) fn run_message_hook(
 /// returned: the commit counts, the caller still runs the post hooks, and the leftover state
 /// stays visible (Abort clears it harmlessly) instead of inviting a second commit (#183).
 pub(crate) fn cleanup_after_commit(repo: &git2::Repository) {
-    if let Err(error) = repo.cleanup_state() {
+    if let Err(error) = clear_commit_state(repo) {
         eprintln!(
             "browsitory: the commit was created, but git's merge/cherry-pick state could not be cleared: {error}"
         );
+    }
+}
+
+/// git's cleanup after a commit (`sequencer_post_commit_cleanup` + `remove_merge_branch_state`),
+/// not libgit2's `cleanup_state`. Removes the merge's and the pick's own files (`MERGE_HEAD`,
+/// `MERGE_MODE`, `MERGE_MSG`, `AUTO_MERGE`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`). A terminal
+/// `git cherry-pick A B C` keeps the rest of its list in `.git/sequencer`: it is kept, so
+/// `git cherry-pick --continue` carries on, and removed only when the commit finished a pick and
+/// the todo has at most one line left (git's `have_finished_the_last_pick`). A missing or
+/// unreadable todo keeps the folder. `BISECT_LOG`, `rebase-*` and `SQUASH_MSG` are never
+/// touched, so a commit no longer ends a terminal `git bisect` (#241).
+pub(crate) fn clear_commit_state(repo: &git2::Repository) -> std::io::Result<()> {
+    let git_dir = repo.path();
+    let had_pick =
+        git_dir.join("CHERRY_PICK_HEAD").exists() || git_dir.join("REVERT_HEAD").exists();
+    for name in [
+        "MERGE_HEAD",
+        "MERGE_MODE",
+        "MERGE_MSG",
+        "AUTO_MERGE",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+    ] {
+        match std::fs::remove_file(git_dir.join(name)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
+    }
+    let sequencer = git_dir.join("sequencer");
+    if had_pick {
+        if let Ok(todo) = std::fs::read(sequencer.join("todo")) {
+            if is_last_pick(&todo) {
+                std::fs::remove_dir_all(&sequencer)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// git's `have_finished_the_last_pick`: the todo holds at most one line (no newline, or nothing
+/// after the first one).
+fn is_last_pick(todo: &[u8]) -> bool {
+    match todo.iter().position(|&byte| byte == b'\n') {
+        None => true,
+        Some(end) => todo[end + 1..].is_empty(),
     }
 }
 
@@ -543,7 +588,7 @@ pub fn commit_with(
     // below takes an immutable borrow that could outlive it. `git2::Tree` (bound below) has a
     // `Drop` impl, which under NLL's drop-check extends its immutable borrow of `repo` to the
     // end of this function's scope, not just its last use — so it (and everything borrowed
-    // alongside it) is confined to the block below, ending before `cleanup_state` needs `&mut`
+    // alongside it) is confined to the block below, ending before `mergehead_foreach` could need `&mut`
     // again.
     let mut is_merging = repo.state() == git2::RepositoryState::Merge;
     let mut merge_parent_ids = if is_merging {
@@ -556,8 +601,7 @@ pub fn commit_with(
     // MERGE_HEAD is already in HEAD's history. Committing "the merge" again would make a second
     // merge commit, so the leftover state is cleared and this is an ordinary commit (#183).
     if is_merging && merge_already_committed(repo, head_before, &merge_parent_ids) {
-        repo.cleanup_state()
-            .map_err(|_| CommitError::LeftoverMergeState)?;
+        clear_commit_state(repo).map_err(|_| CommitError::LeftoverMergeState)?;
         is_merging = false;
         merge_parent_ids.clear();
     }
@@ -566,7 +610,8 @@ pub fn commit_with(
     // author of this unrelated commit, so the leftover is cleared first and the commit is the
     // user's (#226, decision D3-A: no message check, since hooks may rewrite it).
     if pick_already_committed(repo) {
-        clear_pick_leftover(repo).map_err(|_| CommitError::LeftoverPickState)?;
+        // A terminal `git cherry-pick A B C` keeps the rest of its todo (#241).
+        clear_commit_state(repo).map_err(|_| CommitError::LeftoverPickState)?;
     }
 
     let pick_author = if matches!(
@@ -740,24 +785,6 @@ fn pick_already_committed(repo: &git2::Repository) -> bool {
         ),
         Ok(Some(changes)) if changes > 0
     )
-}
-
-/// Clears a leftover pick state. A terminal `git cherry-pick A B C` (`CherryPickSequence`)
-/// keeps the rest of its todo in `.git/sequencer`, which `cleanup_state` would delete; like
-/// `git commit`, only MERGE_MSG and CHERRY_PICK_HEAD are removed then. A single pick's state
-/// is cleared with `cleanup_state`, like the merge leftover.
-fn clear_pick_leftover(repo: &git2::Repository) -> Result<(), CommitError> {
-    if repo.state() != git2::RepositoryState::CherryPickSequence {
-        repo.cleanup_state()?;
-        return Ok(());
-    }
-    for name in ["MERGE_MSG", "CHERRY_PICK_HEAD"] {
-        match std::fs::remove_file(repo.path().join(name)) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
-            _ => {}
-        }
-    }
-    Ok(())
 }
 
 /// `MERGE_HEAD`'s commits, in order.
