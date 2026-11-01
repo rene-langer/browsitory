@@ -146,9 +146,23 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   tracked paths (`UntrackedInTheWay`, `FolderIsNowAFile`, `DirectoryReplacedNonDirectory`).
   Under `core.ignorecase` paths compare case-insensitively (`docs` over `Docs/f`). An untracked
   symlink is skipped there: the hazard route refuses it as `BeyondSymlink`. A file removed from
-  the index and edited (`git rm --cached d`, status `INDEX_DELETED | WT_NEW`) is not refused:
-  like git, the stash records the edit in its worktree tree, resets `d` to HEAD's and Pop brings
-  the edit back.
+  the index and edited (`git rm --cached d`, status `INDEX_DELETED | WT_NEW`) is not refused.
+- A file removed from the index but not ignored (`git rm -r --cached d`, then edited). libgit2
+  1.9.6 builds the stash's worktree tree from an index-to-worktree diff without
+  `RECURSE_UNTRACKED_DIRS` (stash.c l.391). For `d/f` it reports `d/` untracked and `d/f`
+  deleted, and `stash_delta_merge` (l.360) only joins the two for the same path, so the edit
+  was lost: Pop deleted `d/f`, and with keep-index the reset deleted it at once. With untracked
+  files `build_untracked_tree` (l.292) does recurse, so the edit landed in the untracked commit
+  (a top-level `f` in both trees), and the apply merged it against HEAD's version: conflict
+  markers and `WouldOverwrite`. `save_stash` therefore sends a whole stash with any such
+  non-folder (`edit_removed_from_index`) through the path-limited stash. That records it once,
+  as a tracked change: the edit in the worktree tree, the index commit without it, never in the
+  untracked commit. Then it reverts it to HEAD in index and worktree (with keep-index the index
+  has no entry, so the file is deleted, as with git). Pop brings the edit back; with "Restore
+  staged changes" the removal from the index too (`git stash pop --index`). Deliberate
+  difference: git's `stash -u` records the edit in both trees and its own pop then fails;
+  Browsitory's stash pops in both. Known limitation: the path-limited stash's own refusals
+  apply on this route (`DirectoryReplacedNonDirectory` when such a swap is also present).
 - Repositories and ignored files in an untracked folder. With untracked files, libgit2's reset
   (`REMOVE_UNTRACKED`) removes an untracked folder whole (`checkout_action_wd_only`);
   `wd_item_is_removable` only spares a folder that itself holds a `.git`, so `vendor/lib/.git`

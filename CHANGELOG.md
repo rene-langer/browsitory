@@ -8,7 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Stash: edits removed from the index
 
-- Fixed: Stash all lost edits to files removed from the index (#247).
+- Fixed: Stash all lost your edits to files in a folder you had removed from the index
+  (`git rm -r --cached d`, without ignoring it). Without Include untracked files Pop deleted
+  them, with Keep staged changes they were deleted at once, and with Include untracked files
+  Pop wrote conflict markers and said it would overwrite local changes (also for a single file
+  removed this way). The edits are now stashed and Pop brings them back; with Restore staged
+  changes the removal from the index comes back too (#247).
 
 ### Stash: things in the way
 
