@@ -149,14 +149,15 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   the index and edited (`git rm --cached d`, status `INDEX_DELETED | WT_NEW`) is not refused:
   like git, the stash records the edit in its worktree tree, resets `d` to HEAD's and Pop brings
   the edit back.
-- Repositories nested in an untracked folder. With untracked files, libgit2's reset
+- Repositories and ignored files in an untracked folder. With untracked files, libgit2's reset
   (`REMOVE_UNTRACKED`) removes an untracked folder whole (`checkout_action_wd_only`);
   `wd_item_is_removable` only spares a folder that itself holds a `.git`, so `vendor/lib/.git`
-  below the untracked `vendor/` was deleted with its history. git's `stash -u` keeps it (`git
-  clean -d` skips nested repositories). `save_stash` sends such a stash (Include untracked on, an
-  untracked repository below a folder that the index or HEAD has no path in) through the
-  path-limited stash, as it does for symlink hazards: it stashes the same files git does and
-  deletes only those.
+  below the untracked `vendor/` was deleted with its history, and so were ignored files such as
+  `vendor/x.o`. git's `stash -u` keeps both (`git clean -d` skips nested repositories and
+  ignored files). `save_stash` sends such a stash (Include untracked on, an untracked repository
+  or an ignored entry below a folder that the index or HEAD has no path in) through the
+  path-limited stash, as it does for symlink hazards (`kept_entry_in_untracked_folder`): it
+  stashes the same files git does and deletes only those.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as

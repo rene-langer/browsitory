@@ -191,10 +191,10 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     // symlink that replaced a tracked file or folder (#114). With such a link, stash every
     // changed path through Browsitory's path-limited stash instead: a file link is stashed and
     // then replaced by the file, a folder link is refused (`BeyondSymlink`).
-    // The same route keeps a repository nested in an untracked folder, which libgit2's reset
-    // with untracked files would delete (see `nested_repository_in_untracked_folder`).
+    // The same route keeps a nested repository or ignored files in an untracked folder, which
+    // libgit2's reset with untracked files would delete (see `kept_entry_in_untracked_folder`).
     if crate::worktree_guard::has_hazard(repo)?
-        || (opts.include_untracked && nested_repository_in_untracked_folder(repo)?)
+        || (opts.include_untracked && kept_entry_in_untracked_folder(repo)?)
     {
         let paths = changed_paths(repo, opts.include_untracked)?;
         if paths.is_empty() {
@@ -507,14 +507,15 @@ fn is_untracked(repo: &Repository, path: &str) -> Result<bool, StashError> {
     Ok(repo.index()?.get_path(path, 0).is_none() && !repo.is_path_ignored(path)?)
 }
 
-/// True when an untracked repository (a folder with a `.git`) sits below an untracked folder:
-/// a proper ancestor folder with no path in the index or in HEAD. libgit2's reset after a stash
-/// with untracked files (`GIT_CHECKOUT_REMOVE_UNTRACKED`) removes such an ancestor whole,
-/// nested repository and history included: `wd_item_is_removable` (checkout.c) only protects a
-/// folder that itself holds a `.git`. git's `stash -u` keeps it (`git clean -d` skips nested
-/// repositories). Such a stash takes the path-limited route, which deletes only the untracked
-/// files it stashed.
-fn nested_repository_in_untracked_folder(repo: &Repository) -> Result<bool, StashError> {
+/// True when an untracked repository (a folder with a `.git`) or an ignored file or folder sits
+/// below an untracked folder: a proper ancestor folder with no path in the index or in HEAD.
+/// libgit2's reset after a stash with untracked files (`GIT_CHECKOUT_REMOVE_UNTRACKED`) removes
+/// such an ancestor whole (`checkout_action_wd_only`), nested repository, history and ignored
+/// files included: `wd_item_is_removable` (checkout.c) only protects a folder that itself holds
+/// a `.git`. git's `stash -u` keeps them (`git clean -d` skips nested repositories and ignored
+/// files). Such a stash takes the path-limited route, which deletes only the untracked files it
+/// stashed.
+fn kept_entry_in_untracked_folder(repo: &Repository) -> Result<bool, StashError> {
     let Some(workdir) = repo.workdir() else {
         return Ok(false);
     };
@@ -522,21 +523,26 @@ fn nested_repository_in_untracked_folder(repo: &Repository) -> Result<bool, Stas
     options
         .include_untracked(true)
         .recurse_untracked_dirs(true)
-        .include_ignored(false)
+        .include_ignored(true)
+        .recurse_ignored_dirs(false)
         .exclude_submodules(true);
-    let mut repositories = Vec::new();
+    let mut kept = Vec::new();
     for entry in repo.statuses(Some(&mut options))?.iter() {
-        if entry.status() != git2::Status::WT_NEW {
+        let Ok(raw) = entry.path() else { continue };
+        let path = raw.trim_end_matches('/');
+        if !path.contains('/') {
             continue;
         }
-        let Ok(path) = entry.path() else { continue };
-        if let Some(path) = path.strip_suffix('/') {
-            if path.contains('/') && workdir.join(path).join(".git").exists() {
-                repositories.push(path.to_string());
-            }
+        let is_kept = match entry.status() {
+            git2::Status::IGNORED => true,
+            git2::Status::WT_NEW => raw.ends_with('/') && workdir.join(path).join(".git").exists(),
+            _ => false,
+        };
+        if is_kept {
+            kept.push(path.to_string());
         }
     }
-    if repositories.is_empty() {
+    if kept.is_empty() {
         return Ok(false);
     }
     // The folders holding a path of the index, and of HEAD. A folder missing from either counts
@@ -568,7 +574,7 @@ fn nested_repository_in_untracked_folder(repo: &Repository) -> Result<bool, Stas
         })?;
     }
     let in_head = folders_of(&mut head_paths.into_iter());
-    Ok(repositories.iter().any(|path| {
+    Ok(kept.iter().any(|path| {
         path.match_indices('/').any(|(slash, _)| {
             let folder = &path[..slash];
             !in_index.contains(folder) || !in_head.contains(folder)
@@ -597,8 +603,8 @@ enum Kind {
 /// way of a restored path, with that path. libgit2's forced checkout (`GIT_CHECKOUT_FORCE`)
 /// removes a non-folder where the restored tree has a folder (`checkout_action_with_wd_blocker`)
 /// and a folder where it has a file (`checkout_action_with_wd_dir`, removed with everything in
-/// it, a nested `.git` included), ignored or not; `GIT_CHECKOUT_REMOVE_UNTRACKED` only removes
-/// what the stash holds and leaves nested repositories alone. So in the way are:
+/// it, a nested `.git` included), ignored or not. (`GIT_CHECKOUT_REMOVE_UNTRACKED` removing a
+/// whole untracked folder is left to `kept_entry_in_untracked_folder`.) So in the way are:
 ///
 /// - an ignored file or folder, or an untracked nested repository, in either mode;
 /// - an untracked file only when `include_untracked` is off (otherwise it is in the stash).

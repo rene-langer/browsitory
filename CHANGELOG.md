@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed: Stash all with Include untracked files deleted a repository inside an untracked folder
   (for example `vendor/lib` in a new `vendor/` folder), including its history. It now keeps the
   repository and stashes the folder's other untracked files, as `git stash -u` does (#211).
+- Fixed: Stash all with Include untracked files deleted ignored files inside an untracked
+  folder (for example `vendor/x.o`); it now keeps them, as `git stash -u` does (#208).
 - Fixed: applying or popping a stash whose untracked files sit in a folder that replaced a
   tracked file reported success, left a "d~Updated upstream" file, and Pop dropped the stash.
   It now says "This stash can't be applied here: its untracked file 'd/x' needs a folder where

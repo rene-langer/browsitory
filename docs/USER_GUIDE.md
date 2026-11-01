@@ -515,7 +515,8 @@ the ignored 'd', which is in the way of the tracked 'd/f'. Move 'd' first." or "
 delete the repository in 'd', which is in the way of the tracked 'd'. Move 'd' first." Ignored
 files and repositories elsewhere don't matter. A repository inside an untracked folder
 (`vendor/lib` in a new `vendor/`) stays where it is, with its history, as with
-`git stash -u`: **Stash all** sets aside the folder's other untracked files only.
+`git stash -u`: **Stash all** sets aside the folder's other untracked files only. Ignored files
+in an untracked folder stay too.
 
 When a folder replaced a tracked file (`d/x` where the file `d` was), **Stash all** with
 untracked files stashes `d/x` and the deletion of `d`, and puts the file `d` back. Browsitory

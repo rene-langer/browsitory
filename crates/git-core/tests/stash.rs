@@ -1938,3 +1938,58 @@ fn stash_all_with_untracked_files_keeps_a_repository_nested_in_an_untracked_fold
         }
     }
 }
+
+/// HEAD has `a.txt` (edited in the worktree) and ignores `*.o` and `build/`; the untracked folder
+/// `vendor/` holds the untracked `vendor/other.txt`, the ignored `vendor/x.o` and the ignored
+/// folder `vendor/build/`.
+fn ignored_in_untracked_folder() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    write_file(dir.path(), ".gitignore", "*.o\nbuild/\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "vendor/other.txt", "other\n");
+    write_file(dir.path(), "vendor/x.o", "object\n");
+    write_file(dir.path(), "vendor/build/out", "built\n");
+    write_file(dir.path(), "a.txt", "edited\n");
+    (dir, repo)
+}
+
+#[test]
+fn stash_all_with_untracked_files_keeps_ignored_files_in_an_untracked_folder() {
+    // libgit2's REMOVE_UNTRACKED removes the untracked `vendor/` whole, ignored files
+    // included. git's `stash -u` keeps them.
+    for keep_index in [false, true] {
+        let (dir, mut repo) = ignored_in_untracked_folder();
+
+        git_core::stash::save_stash(&mut repo, &with(|o| o.keep_index = keep_index)).unwrap();
+
+        assert_eq!(read(dir.path(), "vendor/x.o"), "object\n", "{keep_index}");
+        assert_eq!(read(dir.path(), "vendor/build/out"), "built\n");
+        assert!(!dir.path().join("vendor/other.txt").exists());
+        assert_eq!(read(dir.path(), "a.txt"), "a\n");
+
+        // The stash holds what git's does, and git keeps the ignored files too.
+        let stash = stash_commit(&mut repo, 0);
+        assert_eq!(untracked_files_of(&repo, stash), ["vendor/other.txt"]);
+        let (twin, twin_repo) = ignored_in_untracked_folder();
+        let mut args = vec!["stash", "push", "-u"];
+        if keep_index {
+            args.push("--keep-index");
+        }
+        assert!(git(twin.path(), &args).status.success());
+        assert_eq!(read(twin.path(), "vendor/x.o"), "object\n");
+        assert_eq!(read(twin.path(), "vendor/build/out"), "built\n");
+        let twin_stash = twin_repo.refname_to_id("refs/stash").unwrap();
+        assert_eq!(
+            untracked_files_of(&twin_repo, twin_stash),
+            ["vendor/other.txt"]
+        );
+
+        assert_eq!(
+            git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+            StashApplyOutcome::Applied
+        );
+        assert_eq!(read(dir.path(), "vendor/other.txt"), "other\n");
+        assert_eq!(read(dir.path(), "a.txt"), "edited\n");
+    }
+}
