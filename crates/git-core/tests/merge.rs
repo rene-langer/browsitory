@@ -349,6 +349,176 @@ fn mark_resolved_rejects_a_path_without_a_conflict() {
     assert_eq!(err.to_string(), "no conflict found for path 'other.txt'");
 }
 
+/// Mode and content of `path`'s stage-0 index entry.
+fn staged(repo: &git2::Repository, path: &str) -> (u32, Vec<u8>) {
+    let entry = repo
+        .index()
+        .unwrap()
+        .get_path(std::path::Path::new(path), 0)
+        .expect("a stage-0 entry");
+    (
+        entry.mode,
+        repo.find_blob(entry.id).unwrap().content().to_vec(),
+    )
+}
+
+/// #199: the content is rewritten (with conflict markers) after the check; what was checked is
+/// what gets staged, not the new content read a second time by path.
+#[test]
+fn mark_resolved_stages_the_content_it_checked() {
+    let (dir, repo) = make_conflicted_repo();
+    write_file(dir.path(), "shared.txt", "resolved\n");
+    let root = dir.path().to_path_buf();
+    let outcome =
+        git_core::merge::mark_resolved_with_pause(&repo, "shared.txt", false, &mut || {
+            std::fs::write(root.join("shared.txt"), "<<<<<<< x\nours\n").unwrap();
+        })
+        .unwrap();
+    assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
+    assert!(!repo.index().unwrap().has_conflicts());
+    assert_eq!(staged(&repo, "shared.txt"), (0o100644, b"resolved\n".to_vec()));
+}
+
+/// #199: a FIFO swapped in after the check is never opened for reading, so the worker can't
+/// hang on it.
+#[cfg(unix)]
+#[test]
+fn mark_resolved_does_not_block_on_a_fifo_swapped_in_after_the_check() {
+    let (dir, repo) = make_conflicted_repo();
+    write_file(dir.path(), "shared.txt", "resolved\n");
+    let fifo = dir.path().join("shared.txt");
+    let path = dir.path().to_path_buf();
+    drop(repo);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let swap = fifo.clone();
+    std::thread::spawn(move || {
+        let repo = git2::Repository::open(&path).unwrap();
+        let result = git_core::merge::mark_resolved_with_pause(&repo, "shared.txt", false, &mut || {
+            std::fs::remove_file(&swap).unwrap();
+            let c_path = std::ffi::CString::new(swap.to_str().unwrap()).unwrap();
+            // SAFETY: a valid NUL-terminated path.
+            assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
+        });
+        let _ = tx.send(result.map_err(|error| error.to_string()));
+    });
+    let finished = rx.recv_timeout(std::time::Duration::from_secs(5));
+    if finished.is_err() {
+        // Unblock the stuck reader so the test process can exit.
+        let _ = std::fs::OpenOptions::new().write(true).open(&fifo);
+    }
+    assert_eq!(
+        finished,
+        Ok(Ok(git_core::merge::MarkResolvedOutcome::Resolved)),
+        "mark_resolved blocked on a FIFO swapped in after the check"
+    );
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert_eq!(staged(&repo, "shared.txt"), (0o100644, b"resolved\n".to_vec()));
+}
+
+/// #199: a link swapped in after the check isn't staged in place of the file that was checked.
+#[cfg(unix)]
+#[test]
+fn mark_resolved_does_not_stage_a_link_swapped_in_after_the_check() {
+    let outside = common::outside_dir();
+    let (dir, repo) = make_conflicted_repo();
+    write_file(dir.path(), "shared.txt", "resolved\n");
+    let file = dir.path().join("shared.txt");
+    let target = outside.path().join("f");
+    let outcome =
+        git_core::merge::mark_resolved_with_pause(&repo, "shared.txt", false, &mut || {
+            std::fs::remove_file(&file).unwrap();
+            std::os::unix::fs::symlink(&target, &file).unwrap();
+        })
+        .unwrap();
+    assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
+    assert_eq!(staged(&repo, "shared.txt"), (0o100644, b"resolved\n".to_vec()));
+}
+
+/// Staging what was read keeps `git add`'s clean filters (here `core.autocrlf`).
+#[test]
+fn mark_resolved_applies_the_clean_filter() {
+    let (dir, repo) = make_conflicted_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.autocrlf", true)
+        .unwrap();
+    write_file(dir.path(), "shared.txt", "a\r\nb\r\n");
+    let repo = { drop(repo); git2::Repository::open(dir.path()).unwrap() };
+    let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
+    assert_eq!(staged(&repo, "shared.txt").1, b"a\nb\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn mark_resolved_keeps_the_exec_bit() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, repo) = make_conflicted_repo();
+    repo.config().unwrap().set_bool("core.filemode", true).unwrap();
+    write_file(dir.path(), "shared.txt", "resolved\n");
+    std::fs::set_permissions(
+        dir.path().join("shared.txt"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    let repo = { drop(repo); git2::Repository::open(dir.path()).unwrap() };
+    git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(staged(&repo, "shared.txt").0, 0o100755);
+}
+
+/// With `core.filemode=false` the exec bit on disk is ignored and "ours"' mode kept, as git does.
+#[cfg(unix)]
+#[test]
+fn mark_resolved_keeps_ours_mode_without_filemode() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, repo) = init_repo();
+    repo.config().unwrap().set_bool("core.filemode", true).unwrap();
+    let file = dir.path().join("shared.txt");
+    write_file(dir.path(), "shared.txt", "base\n");
+    commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "shared.txt", "feature\n");
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "shared.txt", "main\n");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    repo.config().unwrap().set_bool("core.filemode", false).unwrap();
+    write_file(dir.path(), "shared.txt", "resolved\n");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let repo = { drop(repo); git2::Repository::open(dir.path()).unwrap() };
+    git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(staged(&repo, "shared.txt"), (0o100755, b"resolved\n".to_vec()));
+}
+
+/// Like `git add`, Mark resolved keeps the conflict as resolve-undo data (`git checkout -m`).
+#[test]
+fn mark_resolved_records_resolve_undo() {
+    let (dir, repo) = make_conflicted_repo();
+    write_file(dir.path(), "shared.txt", "resolved\n");
+    git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    let index = std::fs::read(repo.path().join("index")).unwrap();
+    assert!(index.windows(4).any(|window| window == b"REUC"));
+}
+
+/// A conflicted file the user replaced with a link is staged as that link, as `git add` does.
+#[cfg(unix)]
+#[test]
+fn mark_resolved_stages_a_link_as_a_link() {
+    let (dir, repo) = make_conflicted_repo();
+    let file = dir.path().join("shared.txt");
+    std::fs::remove_file(&file).unwrap();
+    std::os::unix::fs::symlink("elsewhere.txt", &file).unwrap();
+    let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
+    assert_eq!(staged(&repo, "shared.txt"), (0o120000, b"elsewhere.txt".to_vec()));
+}
+
 #[test]
 fn abort_merge_restores_the_pre_merge_working_tree_and_clears_conflicts() {
     let (dir, repo) = make_conflicted_repo();
@@ -1210,6 +1380,50 @@ fn conflict_resolution_never_writes_through_a_symlinked_folder() {
         git_core::merge::mark_resolved(&repo, "sub/shared.txt", true),
         Err(MergeError::SymlinkedFolder(_))
     ));
+    assert_eq!(
+        std::fs::read_to_string(outside.path().join("shared.txt")).unwrap(),
+        "outside\n"
+    );
+    assert!(repo.index().unwrap().has_conflicts());
+}
+
+/// Windows: `sub/shared.txt` conflicts; then `sub` is replaced by a junction to a folder
+/// outside the repository. Mark resolved refuses it like a symlinked folder (#199).
+#[cfg(windows)]
+#[test]
+fn mark_resolved_refuses_a_path_below_a_junction() {
+    let outside = tempfile::TempDir::new().unwrap();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "sub/shared.txt", "base\n");
+    commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "sub/shared.txt", "feature\n");
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "sub/shared.txt", "main\n");
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    std::fs::remove_dir_all(dir.path().join("sub")).unwrap();
+    std::fs::write(outside.path().join("shared.txt"), "outside\n").unwrap();
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(dir.path().join("sub"))
+        .arg(outside.path())
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    for force in [false, true] {
+        assert!(matches!(
+            git_core::merge::mark_resolved(&repo, "sub/shared.txt", force),
+            Err(MergeError::SymlinkedFolder(_))
+        ));
+    }
     assert_eq!(
         std::fs::read_to_string(outside.path().join("shared.txt")).unwrap(),
         "outside\n"

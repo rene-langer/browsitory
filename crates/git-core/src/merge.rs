@@ -472,6 +472,18 @@ pub fn mark_resolved(
     path: &str,
     force: bool,
 ) -> Result<MarkResolvedOutcome, MergeError> {
+    mark_resolved_with_pause(repo, path, force, &mut || {})
+}
+
+/// `mark_resolved` with a test seam: `after_check` runs between the checks and the staging, so a
+/// test can swap the file in that instant (#199).
+#[doc(hidden)]
+pub fn mark_resolved_with_pause(
+    repo: &Repository,
+    path: &str,
+    force: bool,
+    after_check: &mut dyn FnMut(),
+) -> Result<MarkResolvedOutcome, MergeError> {
     if !crate::launch::is_safe_relative(path) {
         return Err(MergeError::NoConflict(path.to_string()));
     }
@@ -499,6 +511,7 @@ pub fn mark_resolved(
             }
         }
     }
+    after_check();
     let mut index = repo.index()?;
     if meta.is_some() {
         index.add_path(Path::new(path))?;

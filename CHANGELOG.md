@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security follow-ups
+
+- Fixed: Mark resolved stages exactly the content it checked for conflict markers (#199).
+
 ### Test robustness
 
 - Fixed (tests): the Unix tests for stopping a hook or a signing program now check that a
