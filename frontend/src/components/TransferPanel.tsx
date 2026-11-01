@@ -32,8 +32,9 @@ export function TransferPanel({
   return (
     <Panel title="Transferring" ariaLive="polite" ariaLabel="Transfer progress">
       {progress.phase === "RunningHook" ? (
-        // Only pushes run a hook mid-transfer, and only `pre-push`; nothing is transferred yet.
-        <p>{runningHookLabel("pre-push")}</p>
+        // A push's `pre-push` (nothing transferred yet), or a pull's `post-merge` after it
+        // fast-forwarded (#185).
+        <p>{runningHookLabel(progress.operation === "Pull" ? "post-merge" : "pre-push")}</p>
       ) : (
         <>
           <p>{progress.phase}</p>

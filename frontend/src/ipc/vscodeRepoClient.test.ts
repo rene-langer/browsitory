@@ -878,7 +878,7 @@ describe("vscodeRepoClient", () => {
   it("delivers hookProgress notifications to subscribed listeners and stops after unsubscribe", () => {
     const received: unknown[] = [];
     const unsubscribe = vscodeRepoClient.subscribeHookProgress((event) => received.push(event));
-    const event = { repoPath: "/r", operationId: "commit-1", hook: "pre-commit", phase: "Started" };
+    const event = { repoPath: "/r", operationId: "commit-1", hook: "pre-commit", phase: "Started", source: "Commit" };
 
     notify("hookProgress", event);
     expect(received).toEqual([event]);

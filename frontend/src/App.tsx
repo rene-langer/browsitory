@@ -22,6 +22,7 @@ import { RepoTabs } from "./components/RepoTabs";
 import { repoPanelId, repoTabId } from "./components/repoTabIds";
 import { ReleaseNotesModal, type ReleaseNotesEntry } from "./components/ReleaseNotesModal";
 import { OperationStatusStrip } from "./components/OperationStatusStrip";
+import { HookRunStrip } from "./components/HookRunStrip";
 import { ToastRegion } from "./components/primitives/ToastRegion";
 import { useToasts, type ToastAction } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
@@ -195,7 +196,9 @@ function RepoWorkspace({
   // closing the dialog. Falls back to the failed message when the box is empty.
   const retryWithCurrentMessage = useCallback(
     async (retry: HookRetry) => {
-      if (retry.kind === "push" || retry.kind === "continueSequence") return retryWithoutHooks(retry);
+      if (retry.kind === "push" || retry.kind === "continueSequence" || retry.kind === "pick") {
+        return retryWithoutHooks(retry);
+      }
       // In amend mode the box shows HEAD's message and the commit draft is stashed: a commit
       // retry takes the stashed draft, an amend retry only the amend-mode text.
       const draft = getCommitDraft(repoPath);
@@ -554,6 +557,7 @@ function RepoWorkspace({
         onContinueSequence={continueSequence}
         onAbortSequence={abortSequence}
       />
+      <HookRunStrip running={appState.state.hookRun} onCancel={() => void appState.cancelHookRun()} />
       {externalTools.error !== null && (
         <div className={styles.errorLayer}>
           <InlineError message={externalTools.error} onDismiss={externalTools.dismissError} />
@@ -585,7 +589,8 @@ function RepoWorkspace({
               dismissError();
               runContinueSequence(true);
             }
-            else void announce(retrySuccessLabel(retry), retryWithCurrentMessage)(retry);
+            // A pick's failure offers no retry (`retryLabel` is null), so this never runs for it.
+            else if (retry.kind !== "pick") void announce(retrySuccessLabel(retry), retryWithCurrentMessage)(retry);
           }}
           onClose={appState.closeHookFailure}
         />
@@ -1094,7 +1099,9 @@ function RepoWorkspace({
                   commitHooks={{
                     skip: appState.state.skipHooks,
                     onToggleSkip: appState.setSkipHooks,
-                    running: appState.state.hookRun,
+                    // Only a commit's, amend's or Continue's hooks; the others show in the
+                    // "Hook status" strip (#185).
+                    running: appState.state.hookRun?.source === "Commit" ? appState.state.hookRun : null,
                     onCancel: () => void appState.cancelHookRun(),
                   }}
                   clearCommitMessage={appState.state.clearCommitMessage}

@@ -25,6 +25,7 @@ import type {
   RemoteInfo,
   ReflogEntry,
   HeadInfo,
+  HookSource,
   RepoClient,
   ResetMode,
   StashEntry,
@@ -128,9 +129,10 @@ export interface AppState {
   amendMode: boolean;
   // CommitBox "Skip hooks" (`--no-verify`) for the next commit/amend; reset after one lands.
   skipHooks: boolean;
-  // The commit/amend hook running right now (from `subscribeHookProgress`), for its status line
-  // and Cancel button. Pushes show their `pre-push` through `transfer` instead.
-  hookRun: { operationId: string; hook: string } | null;
+  // The hook running right now (from `subscribeHookProgress`), for its status line and Cancel
+  // button: a `Commit` source's in the commit box and sequence panel, the others in the "Hook
+  // status" strip (#185). Pushes and pulls show theirs through `transfer` instead.
+  hookRun: { operationId: string; hook: string; source: HookSource } | null;
   // The last failed gate hook: its output, and the request to retry without hooks.
   hookFailure: HookFailure | null;
   // One-shot request for CommitBox to clear its message, carrying the committed text (a commit
@@ -677,6 +679,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         return amendCommit(retry.message, true, retry.options);
       }
       if (retry.kind === "continueSequence") return (await continueSequence(true)) !== null;
+      // A pick's `prepare-commit-msg` can't be skipped; the dialog offers no retry for it.
+      if (retry.kind === "pick") return false;
       const push = retry.push;
       if (push.operation === "PushBranch") await pushCurrentBranch(push.remoteName, true);
       else if (push.operation === "ForcePushBranch") await forcePushCurrentBranch(push.remoteName, true);

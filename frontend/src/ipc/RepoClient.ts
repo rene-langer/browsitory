@@ -201,17 +201,32 @@ export type UndoOutcome =
   | { kind: "Nothing" }
   | { kind: "RepositoryChanged"; label: string }
   | { kind: "OperationInProgress" };
-export type PickOutcome = { kind: "Committed"; commitId: string } | { kind: "Conflicted"; files: string[] };
+/**
+ * A single cherry-pick/revert. `HookFailed`: its `prepare-commit-msg` failed (#183); nothing was
+ * committed and the pick stays staged and in progress, for the commit box or Abort.
+ */
+export type PickOutcome =
+  | { kind: "Committed"; commitId: string }
+  | { kind: "Conflicted"; files: string[] }
+  | { kind: "HookFailed"; hook: string; output: string };
 /** A commit/amend result: a failing gate hook resolves `HookFailed` with the hook's output. */
 export type CommitOutcome =
   | { kind: "Committed"; commitId: string }
   | { kind: "HookFailed"; hook: string; output: string };
-/** A commit/amend hook starting or finishing; `operationId` is accepted by `cancelTransfer`. */
+/**
+ * The kind of command a hook runs for (#185): `Commit` (commit, amend, a sequence's Continue)
+ * shows in the commit box and sequence panel; the others (`post-checkout` after a switch or
+ * checkout, `post-merge` after a fast-forward or squash, a cherry-pick's or revert's hooks) in
+ * the "Hook status" strip.
+ */
+export type HookSource = "Commit" | "Checkout" | "Merge" | "Pick";
+/** A hook starting or finishing; `operationId` is accepted by `cancelTransfer`. */
 export interface HookProgress {
   repoPath: string;
   operationId: string;
   hook: string;
   phase: "Started" | "Finished";
+  source: HookSource;
 }
 export type ResetMode = "soft" | "mixed" | "hard";
 
@@ -276,7 +291,10 @@ export function toCloneError(raw: unknown): CloneError {
 export interface TransferProgress {
   operationId: string;
   operation: TransferOperation;
-  /** `RunningHook`: a `pre-push` hook is running; no transfer progress yet. */
+  /**
+   * `RunningHook`: a push's `pre-push` hook is running (no transfer progress yet), or a pull's
+   * `post-merge` after it fast-forwarded (#185).
+   */
   phase: "Starting" | "Receiving" | "Updating" | "RunningHook" | "RemoteFailed" | "Completed" | "Failed";
   errorKind: TransferErrorKind | null;
   current: number;

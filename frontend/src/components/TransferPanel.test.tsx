@@ -28,6 +28,30 @@ describe("TransferPanel", () => {
     expect(onCancel).toHaveBeenCalledWith("push-1");
   });
 
+  it("names a pull's post-merge hook, with Cancel (#185)", () => {
+    const onCancel = vi.fn();
+    render(
+      <TransferPanel
+        progress={{
+          operationId: "pull-1",
+          operation: "Pull",
+          phase: "RunningHook",
+          errorKind: null,
+          current: 0,
+          total: 0,
+          receivedBytes: 0,
+          message: null,
+          hookOutput: null,
+        }}
+        onCancel={onCancel}
+      />,
+    );
+
+    expect(screen.getByText("Running post-merge hook…")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancel).toHaveBeenCalledWith("pull-1");
+  });
+
   it("calls onCancel with the in-flight operation id when Cancel is clicked", () => {
     const onCancel = vi.fn();
     render(

@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import type { AmendOptions, PickOutcome, RepoClient, ResetMode, SequenceAbort, SequenceOutcome } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
-import { hookFailedMessage } from "../lib/hookFailure";
+import { hookFailedMessage, type HookRetry } from "../lib/hookFailure";
 
 const NO_AMEND_OPTIONS: AmendOptions = { author: null, trailers: [] };
 
@@ -51,23 +51,46 @@ export function useHistoryActions(
     },
     [runMutation],
   );
+  // A pick's own hooks (#183): a failing `prepare-commit-msg` opens the hook dialog (output only:
+  // that hook can't be skipped) and resolves `null` with the error banner, like a failed commit.
+  // The pick stays staged and in progress: the operation strip and the commit box finish it.
+  // `retry`: a single pick has nothing to retry; a sequence pauses for Continue.
+  const runPick = useCallback(
+    async <T extends PickOutcome | SequenceOutcome>(call: () => Promise<T>, retry: HookRetry): Promise<T | null> => {
+      const outcome = await withOutcome(async () => {
+        const outcome = await call();
+        if (outcome.kind === "HookFailed") {
+          setState((prev) => ({
+            ...prev,
+            hookFailure: { hook: outcome.hook, output: outcome.output, retry, dialogOpen: true },
+          }));
+          throw new Error(hookFailedMessage(outcome.hook));
+        }
+        return outcome;
+      });
+      setState((prev) => ({ ...prev, hookRun: null }));
+      return outcome;
+    },
+    [withOutcome, setState],
+  );
   const cherryPick = useCallback(
     (commitId: string, mainline?: number | null) =>
-      withOutcome(() => client.cherryPick(repoPath, commitId, mainline ?? null)),
-    [client, withOutcome, repoPath],
+      runPick(() => client.cherryPick(repoPath, commitId, mainline ?? null), { kind: "pick" }),
+    [client, runPick, repoPath],
   );
   const revertCommit = useCallback(
     (commitId: string, mainline?: number | null) =>
-      withOutcome(() => client.revertCommit(repoPath, commitId, mainline ?? null)),
-    [client, withOutcome, repoPath],
+      runPick(() => client.revertCommit(repoPath, commitId, mainline ?? null), { kind: "pick" }),
+    [client, runPick, repoPath],
   );
   const cherryPickMany = useCallback(
-    (commitIds: string[]) => withOutcome(() => client.cherryPickMany(repoPath, commitIds)),
-    [client, withOutcome, repoPath],
+    (commitIds: string[]) =>
+      runPick(() => client.cherryPickMany(repoPath, commitIds), { kind: "continueSequence" }),
+    [client, runPick, repoPath],
   );
   const revertMany = useCallback(
-    (commitIds: string[]) => withOutcome(() => client.revertMany(repoPath, commitIds)),
-    [client, withOutcome, repoPath],
+    (commitIds: string[]) => runPick(() => client.revertMany(repoPath, commitIds), { kind: "continueSequence" }),
+    [client, runPick, repoPath],
   );
   const continueSequence = useCallback(
     async (noVerify = false) => {
