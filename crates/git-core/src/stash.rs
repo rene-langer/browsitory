@@ -50,6 +50,22 @@ pub enum StashError {
     /// that replaced the file `tracked`). git deletes it; Browsitory refuses (#186).
     #[error("Stashing would delete the untracked file '{untracked}', which is in the way of '{tracked}'. Turn on Include untracked files, or move '{untracked}' first.")]
     UntrackedInTheWay { untracked: String, tracked: String },
+    /// Stash all resets `tracked`, which deletes the ignored file or folder `ignored` in its
+    /// way, with or without untracked files (ignored files are never stashed). git deletes it;
+    /// Browsitory refuses (#208).
+    #[error("Stashing would delete the ignored '{ignored}', which is in the way of the tracked '{tracked}'. Move '{ignored}' first.")]
+    IgnoredInTheWay { ignored: String, tracked: String },
+    /// Stash all resets `tracked`, which deletes the untracked repository in `path` (its
+    /// history included), with or without untracked files (a nested repository is never
+    /// stashed). git deletes it; Browsitory refuses (#211).
+    #[error("Stashing would delete the repository in '{path}', which is in the way of the tracked '{tracked}'. Move '{path}' first.")]
+    RepositoryInTheWay { path: String, tracked: String },
+    /// The stash holds the untracked file `untracked` below the path `file`, which the index
+    /// has as a file (the stash also holds the file's deletion, or the file was committed
+    /// later). libgit2 merges the untracked files against the index, so it would leave
+    /// `<file>~Updated upstream` and report success (#206).
+    #[error("This stash can't be applied here: its untracked file '{untracked}' needs a folder where '{file}' is a tracked file. Commit the deletion of '{file}' first, then apply it; the stash is kept.")]
+    UntrackedBelowTrackedFile { untracked: String, file: String },
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
@@ -150,12 +166,26 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     if !opts.paths.is_empty() {
         return save_path_limited_stash(repo, opts, message);
     }
-    // The reset after stashing would delete an untracked file in the way of a tracked path
-    // (#186). The path-limited stash checks only its own paths.
-    if !opts.include_untracked {
-        if let Some((untracked, tracked)) = untracked_in_the_way(repo, opts.keep_index)? {
-            return Err(StashError::UntrackedInTheWay { untracked, tracked });
-        }
+    // The reset after stashing would delete an untracked file (#186), an ignored file or folder
+    // (#208) or a nested repository (#211) in the way of a tracked path. The path-limited stash
+    // checks only its own paths.
+    if let Some(InTheWay {
+        path,
+        tracked,
+        kind,
+    }) = entry_in_the_way(repo, opts.keep_index, opts.include_untracked)?
+    {
+        return Err(match kind {
+            Kind::Untracked => StashError::UntrackedInTheWay {
+                untracked: path,
+                tracked,
+            },
+            Kind::Ignored => StashError::IgnoredInTheWay {
+                ignored: path,
+                tracked,
+            },
+            Kind::Repository => StashError::RepositoryInTheWay { path, tracked },
+        });
     }
     // libgit2's stash records and resets in one call, and its forced reset writes through a
     // symlink that replaced a tracked file or folder (#114). With such a link, stash every
@@ -473,17 +503,43 @@ fn is_untracked(repo: &Repository, path: &str) -> Result<bool, StashError> {
     Ok(repo.index()?.get_path(path, 0).is_none() && !repo.is_path_ignored(path)?)
 }
 
-/// Before a stash without untracked files: the first untracked file the reset would delete
-/// because it is in the way of a tracked path (a file where the restored tree has a folder, or
-/// a file below a path the restored tree has as a file), with that tracked path. The restored
-/// tree is HEAD's; with `keep_index` the index's too, because libgit2 (like git) still resets to
-/// HEAD before checking the index back out. With `core.ignorecase` paths compare
-/// case-insensitively (`docs` is in the way of `Docs/f` on such a drive). Untracked symlinks are
-/// left to the hazard route (`BeyondSymlink`).
-fn untracked_in_the_way(
+/// What `entry_in_the_way` found: the worktree entry `path` the reset would delete, the
+/// restored path `tracked` it is in the way of, and what kind of entry it is.
+struct InTheWay {
+    path: String,
+    tracked: String,
+    kind: Kind,
+}
+
+enum Kind {
+    /// An untracked file (only reported when untracked files are left out of the stash).
+    Untracked,
+    /// An ignored file or folder: never stashed.
+    Ignored,
+    /// An untracked folder holding a `.git`: never stashed.
+    Repository,
+}
+
+/// Before a whole stash: the first worktree entry the reset would delete because it is in the
+/// way of a restored path, with that path. libgit2's forced checkout (`GIT_CHECKOUT_FORCE`)
+/// removes a non-folder where the restored tree has a folder (`checkout_action_with_wd_blocker`)
+/// and a folder where it has a file (`checkout_action_with_wd_dir`, removed with everything in
+/// it, a nested `.git` included), ignored or not; `GIT_CHECKOUT_REMOVE_UNTRACKED` only removes
+/// what the stash holds and leaves nested repositories alone. So in the way are:
+///
+/// - an ignored file or folder, or an untracked nested repository, in either mode;
+/// - an untracked file only when `include_untracked` is off (otherwise it is in the stash).
+///
+/// The restored tree is HEAD's; with `keep_index` the index's too: libgit2 resets once to the
+/// index commit, but with HEAD as the checkout baseline, so it still removes what is in the way
+/// of a path HEAD has and the index deletes (git does too). With `core.ignorecase` paths
+/// compare case-insensitively (`docs` is in the way of `Docs/f` on such a drive). Untracked
+/// symlinks are left to the hazard route (`BeyondSymlink`).
+fn entry_in_the_way(
     repo: &Repository,
     keep_index: bool,
-) -> Result<Option<(String, String)>, StashError> {
+    include_untracked: bool,
+) -> Result<Option<InTheWay>, StashError> {
     let ignore_case = repo.config()?.get_bool("core.ignorecase").unwrap_or(false);
     let fold = |path: &str| {
         if ignore_case {
@@ -526,29 +582,58 @@ fn untracked_in_the_way(
     options
         .include_untracked(true)
         .recurse_untracked_dirs(true)
-        .include_ignored(false)
+        .include_ignored(true)
+        .recurse_ignored_dirs(false)
         .exclude_submodules(true);
     for entry in repo.statuses(Some(&mut options))?.iter() {
-        if entry.status() != git2::Status::WT_NEW {
+        let status = entry.status();
+        if status != git2::Status::WT_NEW && status != git2::Status::IGNORED {
             continue;
         }
-        let Ok(path) = entry.path() else { continue };
-        let path = path.trim_end_matches('/');
-        if workdir.as_ref().is_some_and(|workdir| {
-            std::fs::symlink_metadata(workdir.join(path)).is_ok_and(|meta| meta.is_symlink())
-        }) {
+        let Ok(raw) = entry.path() else { continue };
+        // Untracked folders are only reported whole when they hold a repository (empty ones
+        // aren't reported); ignored ones whenever the folder is ignored as a whole.
+        let is_dir = raw.ends_with('/');
+        let path = raw.trim_end_matches('/');
+        let kind = if status == git2::Status::IGNORED {
+            Kind::Ignored
+        } else if is_dir
+            && workdir
+                .as_ref()
+                .is_some_and(|workdir| workdir.join(path).join(".git").exists())
+        {
+            Kind::Repository
+        } else if include_untracked {
             continue;
-        }
-        let folded = fold(path);
-        // A file where the restored tree has a folder: the reset checks out the folder's files.
-        if let Some(tracked) = folders.get(&folded) {
-            return Ok(Some((path.to_string(), tracked.clone())));
-        }
-        // A file below a path the restored tree has as a file: the reset replaces the folder.
-        for (slash, _) in folded.match_indices('/') {
-            if let Some(tracked) = files.get(&folded[..slash]) {
-                return Ok(Some((path.to_string(), tracked.clone())));
+        } else {
+            if workdir.as_ref().is_some_and(|workdir| {
+                std::fs::symlink_metadata(workdir.join(path)).is_ok_and(|meta| meta.is_symlink())
+            }) {
+                continue;
             }
+            Kind::Untracked
+        };
+        let folded = fold(path);
+        let in_the_way_of = if is_dir {
+            // A folder where the restored tree has a file: the reset replaces the folder.
+            files.get(&folded)
+        } else {
+            // A file where the restored tree has a folder: the reset checks out its files.
+            folders.get(&folded)
+        }
+        .or_else(|| {
+            // Anything below a path the restored tree has as a file: the reset replaces the
+            // folder that holds it.
+            folded
+                .match_indices('/')
+                .find_map(|(slash, _)| files.get(&folded[..slash]))
+        });
+        if let Some(tracked) = in_the_way_of {
+            return Ok(Some(InTheWay {
+                path: path.to_string(),
+                tracked: tracked.clone(),
+                kind,
+            }));
         }
     }
     Ok(None)
