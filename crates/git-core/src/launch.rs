@@ -1168,6 +1168,52 @@ mod tests {
         }
     }
 
+    /// #201: every `DOCUMENT_EXTENSIONS` entry has a shared-mime-info glob, and none of its types
+    /// is a launcher, so the desktop types such a name by its glob. Skipped without the
+    /// database, except on CI.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn document_extensions_have_a_shared_mime_info_glob() {
+        let globs = match std::fs::read_to_string("/usr/share/mime/globs2") {
+            Ok(globs) => globs,
+            Err(error) => {
+                assert!(
+                    std::env::var_os("CI").is_none(),
+                    "CI needs shared-mime-info's /usr/share/mime/globs2: {error}"
+                );
+                eprintln!("SKIP: no /usr/share/mime/globs2 ({error})");
+                return;
+            }
+        };
+        // `weight:type:glob[:flags]`.
+        let entries: Vec<(&str, String)> = globs
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| {
+                let mut fields = line.split(':');
+                let _weight = fields.next()?;
+                let mime = fields.next()?;
+                let glob = fields.next()?;
+                Some((mime, glob.to_ascii_lowercase()))
+            })
+            .collect();
+        let mut failures = Vec::new();
+        for extension in DOCUMENT_EXTENSIONS {
+            let glob = format!("*.{extension}");
+            let types: Vec<&str> = entries
+                .iter()
+                .filter(|(_, pattern)| *pattern == glob)
+                .map(|(mime, _)| *mime)
+                .collect();
+            if types.is_empty() {
+                failures.push(format!("{glob}: no glob"));
+            } else if types.contains(&"application/x-desktop") {
+                failures.push(format!("{glob}: typed as a launcher"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:?}");
+    }
+
     /// #201: the `[Desktop Entry]` sniff is Linux's; macOS and Windows have no such launchers.
     #[test]
     fn linux_launchers_are_not_sniffed_on_macos_or_windows() {
