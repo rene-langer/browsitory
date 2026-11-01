@@ -1,4 +1,5 @@
 import { expect } from "@wdio/globals";
+import { waitUntilGoneInPage } from "../support/dom";
 import { ForgeFixtureClient } from "../support/forgeFixtureServer";
 import { expandSidebarSection } from "../support/sidebar";
 
@@ -172,10 +173,10 @@ describe("Browsitory pull requests", () => {
     });
 
     await (await section.$("button=Forget token")).click();
-    await browser.waitUntil(
-      async () => !(await section.$("li*=Add pull request support").isExisting()),
-      { timeout: 10000, timeoutMsg: "expected the stale pull-request list to be hidden after forgetting the token" },
-    );
+    // Expected: the stale pull-request list is hidden after forgetting the token.
+    await waitUntilGoneInPage("section[aria-label='GitHub: acme/widget (gh-origin)'] li", "Add pull request support", {
+      contains: true,
+    });
   });
 
   it("warns about app passwords and lists/creates a Bitbucket pull request using the saved token", async () => {

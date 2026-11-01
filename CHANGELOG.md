@@ -8,14 +8,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Test robustness
 
-- Fixed (tests): the Unix tests for stopping a hook now check that a background process the hook
-  started can't finish its work after a timeout or Cancel; control tests (also for the Windows
-  job object) show the checks fail without the process group or job (#179).
+- Fixed (tests): the Unix tests for stopping a hook or a signing program now check that a
+  background process it started can't finish its work after a timeout or Cancel; control tests
+  (also for the Windows job object) show the checks fail without the process group or job
+  (#179).
 - Fixed (tests): the /dev/tty check now runs under a real terminal, so it also proves something
   on CI (#179).
 - Fixed (tests): flaky desktop E2E tests: a merge test that could start the next test before the
-  app's merge commit landed, stale-element failures when a row disappears during a lookup, and
-  WebDriver sessions that hung after an earlier app instance was left running (#182).
+  app's merge commit landed, and stale-element failures when a row disappears during a lookup
+  (#182).
+- E2E harness: tauri-driver, WebKitWebDriver and the app run in one process group that is
+  stopped as a whole after each session; leftovers of an aborted earlier session are reaped,
+  a driver port held by another process fails with a clear message, and each session logs how
+  long it took to start (#182).
 - CI: the desktop E2E suite runs with a D-Bus session bus, so each WebDriver session starts in
   under a second instead of ~31 seconds (#182).
 

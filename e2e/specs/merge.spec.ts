@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { waitUntilGoneInPage } from "../support/dom";
+import { waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
 import { waitForMergeCommit } from "../support/git";
 import { expandSidebarSection } from "../support/sidebar";
 
@@ -29,6 +29,15 @@ async function confirmMergeDialog(branch: string) {
   const allow = await $(`${dialog} input[type="radio"][value="Allow"]`);
   await browser.execute((el) => (el as HTMLElement).click(), allow);
   await browser.execute((el) => (el as HTMLElement).click(), confirmMerge);
+}
+
+/**
+ * The UI side of a landed merge commit: its subject shows as a row in the commit graph. (No
+ * `li*=<subject>` selector: the subject quotes the branch name.)
+ */
+async function expectMergeCommitInGraph() {
+  const subject = execFileSync("git", ["log", "-1", "--format=%s"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+  await waitUntilInPage("li", subject, { contains: true });
 }
 
 describe("Browsitory merge with conflict resolution", () => {
@@ -113,6 +122,7 @@ describe("Browsitory merge with conflict resolution", () => {
 
     // Not a `li*=<branch>` row: the sidebar's branch row matches before the commit lands (#182).
     await waitForMergeCommit(E2E_REPO_PATH);
+    await expectMergeCommitInGraph();
 
     const parentsLine = execFileSync("git", ["rev-list", "--parents", "-n", "1", "HEAD"], {
       cwd: E2E_REPO_PATH,
@@ -198,6 +208,7 @@ describe("Browsitory merge with conflict resolution", () => {
 
     // Not a `li*=<branch>` row: the sidebar's branch row matches before the commit lands (#182).
     await waitForMergeCommit(E2E_REPO_PATH);
+    await expectMergeCommitInGraph();
 
     const parentsLine = execFileSync("git", ["rev-list", "--parents", "-n", "1", "HEAD"], {
       cwd: E2E_REPO_PATH,
