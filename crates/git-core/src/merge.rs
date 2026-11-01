@@ -38,6 +38,9 @@ pub enum MergeError {
     Unreadable(String),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
+    /// The file to write is read-only; nothing was written (#209).
+    #[error("'{0}' is read-only. Make it writable, then try again.")]
+    ReadOnlyFile(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
 }
@@ -381,7 +384,7 @@ pub fn resolve_conflict(
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     ensure_inside_workdir(workdir, path)?;
     // Never through a symlink that replaced the file (#114).
-    if !crate::worktree_guard::write_beneath(workdir, path, resolved_content.as_bytes())? {
+    if !write_resolved(workdir, path, resolved_content.as_bytes())? {
         return Err(MergeError::SymlinkedFolder(path.to_string()));
     }
 
@@ -389,6 +392,18 @@ pub fn resolve_conflict(
     index.add_path(Path::new(path))?;
     index.write()?;
     Ok(())
+}
+
+/// `worktree_guard::write_beneath`, with a read-only file reported as
+/// [`MergeError::ReadOnlyFile`] (#209).
+fn write_resolved(workdir: &Path, path: &str, bytes: &[u8]) -> Result<bool, MergeError> {
+    crate::worktree_guard::write_beneath(workdir, path, bytes).map_err(|error| {
+        if crate::worktree_guard::is_read_only(&error) {
+            MergeError::ReadOnlyFile(path.to_string())
+        } else {
+            MergeError::Io(error)
+        }
+    })
 }
 
 /// Which side of a conflict to keep for a whole file, like `git checkout --ours/--theirs`.
@@ -742,7 +757,7 @@ pub fn resolve_add_delete_conflict(
     match entry {
         Some(entry) => {
             let blob = repo.find_blob(entry.id)?;
-            if !crate::worktree_guard::write_beneath(workdir, path, blob.content())? {
+            if !write_resolved(workdir, path, blob.content())? {
                 return Err(MergeError::SymlinkedFolder(path.to_string()));
             }
             index.add_path(Path::new(path))?;
