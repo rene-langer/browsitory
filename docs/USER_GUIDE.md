@@ -297,7 +297,10 @@ If a commit was created but git's merge or cherry-pick state could not be cleare
 without changing the commit. A multi-commit cherry-pick or revert counts that step too: it
 stops on the next step if that one can't be applied either, and **Continue** clears the
 leftover state and goes on. The next commit after a leftover merge state clears it first, so it
-doesn't become a second merge commit.
+doesn't become a second merge commit. The next commit after a leftover cherry-pick state also
+clears it first, so you are the commit's author, not the author of the picked commit. If the
+state still can't be cleared, the commit is refused until you fix the permissions of the `.git`
+folder.
 
 ## Browsing history and diffs
 
