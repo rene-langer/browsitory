@@ -126,8 +126,8 @@ shared-mime-info (pulled in by the GTK dev packages).
 
 `mark_resolved` after the existing checks:
 
-1. `previous_mode` = the stage-0 entry's mode, else stage 2 ("ours"), as libgit2's
-   `index_merge_mode`.
+1. `previous_mode` = the stage-0 entry's mode, else stage 2 ("ours"), 3 ("theirs"), 1 (base),
+   as libgit2's `index_existing_and_best` (corrected in review, see below).
 2. `undo::read_worktree_file(workdir, path, &undo::worktree_config(repo)?, previous_mode)?`:
    - `Some((bytes, mode))`:
      - unless `force` or `mode == MODE_LINK`, `has_conflict_markers(&bytes)` →
@@ -144,7 +144,9 @@ shared-mime-info (pulled in by the GTK dev packages).
        for a FIFO in that instant is a documented residual);
      - anything else (FIFO, socket, device, a regular file `read_beneath` refused because a
        folder became a link) → `NotAFile`.
-3. Zeroed stat data (as undo's entries): status re-hashes the file once.
+3. ~~Zeroed stat data: status re-hashes the file once.~~ Wrong, see "Review follow-ups": with
+   zeroed stat data status re-hashes the file on every refresh, so the entry carries the stat
+   data of the descriptor the bytes were read from.
 
 `UndoError` maps to `MergeError` as `stash::undo_error` does. `pub fn mark_resolved` delegates
 to `#[doc(hidden)] pub fn mark_resolved_with_pause(repo, path, force, after_check: &mut dyn
@@ -156,8 +158,9 @@ later.
 - `const DOCUMENT_EXTENSIONS: &[&str]`: long-standing shared-mime-info globs whose types aren't
   `application/x-desktop`:
 
-  `txt md markdown rst org tex log csv tsv json yaml yml toml xml html htm xhtml svg css diff
-  patch c h cpp hpp rs go java pdf rtf odt docx ipynb srt vtt`
+  `txt md markdown rst tex log csv tsv json yaml yml xml html htm xhtml svg css diff patch c h
+  cpp hpp rs go java pdf rtf odt docx ipynb srt vtt` (`org` and `toml` dropped in review, see
+  below)
 
 - `fn names_a_document(path) -> bool`: the raw `Path::extension()`, ASCII-lowercased, in the
   list. Not `lower_extension`: Linux keeps trailing dots, so `notes.txt.` matches no glob.
@@ -186,7 +189,9 @@ impl Contention {
 
 - The first Busy (after `LOCK_WAIT`) sets `contended` only, so the next command still waits
   `CONTENDED_WAIT`: a brief hold is still waited out right after a long one.
-- Every later Busy opens or extends a `CONTENDED_WAIT` window in which locked commands try once.
+- Every later Busy opens or extends a `CONTENDED_WAIT` window in which locked commands try once
+  (revised in review, see below: refusing commands still wait, and the window runs from the end
+  of the last unrecorded command).
 - `Unavailable` changes nothing.
 - `mod.rs` l. 815–860 swaps the `bool` for it. Comments are updated.
 
@@ -386,14 +391,52 @@ Real temp-dir repositories, never a mocked `Repository`.
 
 ## Risks
 
-- **D1-A**: the index entry has zeroed stat data (status re-hashes once); a folder at the
-  conflicted path still goes through `add_path` (documented residual).
+- **D1-A**: a folder at the conflicted path still goes through `add_path` (documented
+  residual). The whole file is read into memory (a follow-up issue).
 - **D3-A**: on an old shared-mime-info lacking a listed glob, KDE may type a listed file as a
   launcher (KIO asks before running it unless executable, and the exec bit is refused anyway).
-- **D4-A**: Undo or a discard inside a burst window refuses without waiting.
+- **D4-A**: ~~Undo or a discard inside a burst window refuses without waiting.~~ Revised in
+  review: they still wait `CONTENDED_WAIT`.
 - **Part W** is unverifiable locally. The `NtCreateFile` option mapping and reparse-buffer
   parsing are confirmed by CI only. `FILE_WRITE_ATTRIBUTES` on leaf handles could fail under
   an unusual ACL that grants `DELETE` but not write-attributes.
+
+## Review follow-ups (PR #205)
+
+An independent review of PR 1 asked for these changes, made on the same branch:
+
+1. **Mode fallback (#199).** With `core.filemode`/`core.symlinks` off, the mode now comes from
+   stage 0, else 2, 3, 1, as libgit2's `index_existing_and_best` (not 0, then 2, then
+   `MODE_FILE`). A deleted-by-us conflict whose "theirs" is `100755` (or a link) keeps that mode.
+2. **Stat data (#199).** An entry with zeroed stat data is re-hashed by status on every refresh,
+   not once: nothing in the crates updates the index after a status. `Leaf::File` now carries a
+   `FileStat` taken from the descriptor the bytes were read from (before reading), and the entry
+   records it (ctime, mtime, dev, ino, uid, gid, size, truncated to 32 bits as git does). On
+   Windows it is what the handle gives, as libgit2 fills it there: the creation time as ctime, the
+   last write time as mtime, the size, and zero device, inode and owner.
+3. **Refusing commands inside a burst (#197).** A command that refuses when the lock stays busy
+   (Undo, Redo, discards, Reset hard: `undo::refuses_when_busy`) waits `CONTENDED_WAIT` even
+   inside a window, so it doesn't refuse at once; only commands that would run unrecorded try
+   once. The window now lasts until `CONTENDED_WAIT` after the last unrecorded command finished
+   (`Contention::finished`), so a slow command (a slow CI runner) doesn't close it. The burst test
+   compares against a baseline of the same work with the lock free.
+4. **Recent globs (#201).** `DOCUMENT_EXTENSIONS` keeps only extensions whose glob is already in
+   shared-mime-info 1.15 (Ubuntu 20.04), checked against that release's
+   `freedesktop.org.xml.in`. `org` (`text/org`) and `toml` (`application/toml`) are newer and
+   were dropped: on a desktop with an older database such a name matches no glob, so Qt (KDE)
+   would sniff its contents and could type it as a launcher. `ipynb`, `rs` and `vtt` were
+   checked and are in 1.15, so they stay.
+5. **`Unreadable` (#199).** A file or link Mark resolved can't open (no permission, delete
+   pending on Windows, swapped for a link at that moment) gets "'x' can't be read safely; check
+   its permissions and try again." instead of the FIFO/socket/device message.
+6. **Narrower race (#199).** When the read finds nothing, `ensure_inside_workdir` runs again
+   before the path is looked at with `symlink_metadata`.
+7. **Links kept as files (#199).** With `core.symlinks` off, a file standing for a link is
+   hashed through the clean filters, as git does; a real link's target is stored as is.
+8. CHANGELOG wording.
+
+Filed separately by the coordinator: reading the whole file into memory for large binaries, and
+the folder (gitlink) path still going through `add_path`.
 
 ## Unrelated findings (not fixed here)
 

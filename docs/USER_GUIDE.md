@@ -683,6 +683,7 @@ hook, a signing prompt), Undo, Redo, discards and **Reset hard** say "Another Br
 is changing this repository's undo history. Try again in a moment…" and change nothing; other
 operations still run, but can't be undone. After that, while the other window stays busy, each
 action waits about a second for it instead of 10; a quick run of actions waits only once.
+Undo, Redo, discards and **Reset hard** still wait about a second each before they say so.
 
 Typing in a text field keeps that field's own undo. In the VSCode extension, use the toolbar
 buttons or the command palette if Ctrl/Cmd+Z is taken by VSCode.
