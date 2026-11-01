@@ -625,7 +625,21 @@ across processes).
   clears it harmlessly (worktree and index equal the new HEAD). A later commit that finds such a
   leftover merge (every `MERGE_HEAD` already in HEAD's history) clears it first and commits as an
   ordinary single-parent commit, so no second merge commit is made; if it still can't be cleared,
-  `CommitError::LeftoverMergeState` refuses the commit.
+  `CommitError::LeftoverMergeState` refuses the commit. A leftover cherry-pick is handled the
+  same way (#226, D3-A): when HEAD is the pick's own commit (`pick::commit_carries_pick` with
+  `Coverage::Exact`: one parent, the picked commit's author with its time, and exactly the
+  pick's result on every path it changes cleanly onto HEAD's parent, at least one; the message
+  isn't compared, since `prepare-commit-msg` may have rewritten it), the commit clears the
+  leftover first and is authored by the user, not by the picked commit's author. A single
+  pick's state is cleared with `cleanup_state`; a terminal sequence (`CherryPickSequence`) only
+  loses `CHERRY_PICK_HEAD` and `MERGE_MSG`, so `.git/sequencer` and the rest of its todo stay,
+  as after `git commit`. If it can't be cleared, `CommitError::LeftoverPickState` refuses the
+  commit. A paused pick's HEAD is the commit the pick applies to; it matches only if it has the
+  picked author to the second and the pick's exact content on every cleanly changed path (a
+  look-alike commit; accepted as a risk). Not recognised, so the commit takes the picked author
+  as before: a pick with no clean change, a merge commit picked with a mainline (the parent used
+  isn't recorded), and any error while checking (it never blocks a commit). A leftover
+  `REVERT_HEAD` is not handled (the author is the user either way, #232).
 - A pull drops its cancel flag (`TransferOp::clear`) before `post-merge`, so a Cancel pressed
   during the fetch that came too late to stop the pull doesn't kill the hook at once; only a
   Cancel pressed while `post-merge` runs stops it.

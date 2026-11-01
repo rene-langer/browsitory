@@ -1591,3 +1591,64 @@ fn a_commit_selected_twice_is_applied_once() {
     );
     assert_eq!(summaries(&repo, 3), ["side three", "side one", "main only"]);
 }
+
+/// #226: the last step's pick state can't be cleared (a `post-commit` hook makes `.git`
+/// read-only on that step, D7-A). The sequence completes; the next commit is the user's, not the
+/// last picked commit's author's, and clears the leftover.
+#[cfg(unix)]
+#[test]
+fn a_leftover_after_the_last_step_does_not_author_the_next_commit() {
+    let (dir, repo, mut ids) = side_branch(false, false);
+    let base_ref = base_branch_ref(&repo);
+    repo.set_head("refs/heads/side").unwrap();
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .unwrap();
+    common::write_file(dir.path(), "four.txt", "4\n");
+    commit_as_someone_else(&repo, "side four");
+    ids.push(head(&repo));
+    repo.set_head(&base_ref).unwrap();
+    repo.checkout_head(Some(
+        git2::build::CheckoutBuilder::new()
+            .force()
+            .remove_untracked(true),
+    ))
+    .unwrap();
+
+    let Some(restore) = common::ReadOnlyGitDir::restore_later(&repo) else {
+        return;
+    };
+    let counter = tempfile::TempDir::new().unwrap();
+    let count = counter.path().join("count");
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "post-commit",
+        &format!(
+            "echo x >> '{}'; [ \"$(wc -l < '{}')\" -eq 4 ] && chmod 555 '{}'; exit 0",
+            count.display(),
+            count.display(),
+            repo.path().display()
+        ),
+    );
+    let run = cherry_pick_many(&repo, &ids, HookOptions::default());
+    drop(restore);
+    assert_eq!(
+        run.outcome.unwrap(),
+        SequenceOutcome::Completed {
+            applied: 4,
+            skipped: vec![]
+        }
+    );
+    let last_step = head(&repo);
+    assert_eq!(repo.state(), RepositoryState::CherryPick, "leftover");
+
+    std::fs::remove_dir_all(repo.path().join("hooks")).unwrap();
+    common::write_file(dir.path(), "after.txt", "after\n");
+    stage(&repo, "after.txt");
+    let mut repo = repo;
+    git_core::commit::commit(&mut repo, "after the sequence", HookOptions::default()).unwrap();
+
+    let commit = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(commit.author().name().unwrap(), "Test User");
+    assert_eq!(commit.parent_id(0).unwrap().to_string(), last_step);
+    assert_eq!(repo.state(), RepositoryState::Clean);
+}

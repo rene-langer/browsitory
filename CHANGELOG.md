@@ -15,6 +15,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   also share the undo history, and a new search in one stops a search still running in the
   other (#223).
 
+### Cherry-pick leftovers
+
+- Fixed: when git's cherry-pick state couldn't be cleared after a cherry-pick was committed,
+  your next commit was authored as the picked commit's author. Browsitory now recognises the
+  leftover, clears it and commits as you; if it can't be cleared, the commit is refused with
+  "This cherry-pick was already committed, but git's cherry-pick state can't be cleared. Check
+  the permissions of the .git folder, then commit again." (#226).
+
 ### Windows walker
 
 - Fixed (Windows): undo, redo and discards no longer fail with "Access is denied" on read-only
