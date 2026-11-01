@@ -993,13 +993,15 @@ fn popping_a_file_stashed_from_a_directory_that_replaced_a_symlink_is_a_clear_er
 
     let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
 
+    // The untracked `l/f` needs a folder where the index has the symlink `l` (#206): refused
+    // before libgit2 runs (its apply failed with "null OID", `SymlinkReplacedByDirectory`).
     assert!(
-        matches!(error, StashError::SymlinkReplacedByDirectory),
+        matches!(
+            error,
+            StashError::UntrackedBelowTrackedFile { ref untracked, ref file }
+                if untracked == "l/f" && file == "l"
+        ),
         "{error:?}"
-    );
-    assert_eq!(
-        error.to_string(),
-        "This stash can't be applied here because a directory was replaced by a symbolic link; use git stash apply from a terminal."
     );
     assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
     assert_eq!(
@@ -1745,23 +1747,87 @@ fn a_nested_repository_elsewhere_does_not_block_a_stash() {
     }
 }
 
+/// libgit2 merges a stash's untracked files against the index, so an untracked `d/x` where the
+/// index has the file `d` was left as `d~Updated upstream`, reported as applied, and Pop dropped
+/// the stash (#206). Browsitory refuses and writes nothing.
+fn assert_untracked_below_tracked_file_refused(
+    repo: &mut git2::Repository,
+    dir: &std::path::Path,
+    error: StashError,
+    d: &str,
+) {
+    assert!(
+        matches!(
+            error,
+            StashError::UntrackedBelowTrackedFile { ref untracked, ref file }
+                if untracked == "d/x" && file == "d"
+        ),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "This stash can't be applied here: its untracked file 'd/x' needs a folder where 'd' is a tracked file. Commit the deletion of 'd' first, then apply it; the stash is kept."
+    );
+    assert_eq!(git_core::stash::list_stashes(repo).unwrap().len(), 1);
+    assert_eq!(top_level(dir), ["d"]);
+    assert_eq!(read(dir, "d"), d);
+    assert!(git_core::status::status(repo).unwrap().is_empty());
+}
+
 #[test]
-fn popping_a_stash_whose_folder_replaced_a_file_leaves_a_side_file_today() {
+fn applying_or_popping_a_stash_whose_folder_replaced_a_tracked_file_is_refused() {
     let (dir, mut repo) = file_replaced_by_folder();
     git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
     assert_eq!(top_level(dir.path()), ["d"]);
+
+    for restore_index in [false, true] {
+        let error = git_core::stash::apply_stash(&mut repo, 0, None, restore_index).unwrap_err();
+        assert_untracked_below_tracked_file_refused(&mut repo, dir.path(), error, "f\n");
+        let error = git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap_err();
+        assert_untracked_below_tracked_file_refused(&mut repo, dir.path(), error, "f\n");
+    }
+
+    // git can't pop it either.
+    let (twin, _twin_repo) = file_replaced_by_folder();
+    assert!(git_stash_push(twin.path(), true));
+    assert!(!git(twin.path(), &["stash", "pop"]).status.success());
+}
+
+#[test]
+fn a_stashed_untracked_folder_below_a_file_committed_later_is_refused() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a", "a\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "d/x", "x\n");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    std::fs::remove_file(dir.path().join("a")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("a")).unwrap();
+    index.write().unwrap();
+    write_file(dir.path(), "d", "later\n");
+    commit_all(&repo, "add the file d");
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert_untracked_below_tracked_file_refused(&mut repo, dir.path(), error, "later\n");
+}
+
+#[test]
+fn the_refused_stash_applies_after_the_deletion_is_committed() {
+    let (dir, mut repo) = file_replaced_by_folder();
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("d")).unwrap();
+    index.write().unwrap();
+    commit_all(&repo, "delete d");
 
     assert_eq!(
         git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
         StashApplyOutcome::Applied
     );
 
-    assert_eq!(top_level(dir.path()), ["d", "d~Updated upstream"]);
+    assert_eq!(top_level(dir.path()), ["d"]);
+    assert_eq!(read(dir.path(), "d/x"), "x\n");
     assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
-
-    // git can't pop it either.
-    let (twin, _twin_repo) = file_replaced_by_folder();
-    assert!(git_stash_push(twin.path(), true));
-    let popped = git(twin.path(), &["stash", "pop"]);
-    assert!(!popped.status.success());
 }

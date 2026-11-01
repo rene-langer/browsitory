@@ -734,6 +734,7 @@ pub fn apply_stash(
         crate::worktree_guard::refuse_linked_folders::<StashError>(repo, &incoming)?;
     }
     refuse_untracked_file_over_folder(repo, index)?;
+    refuse_untracked_below_tracked_file(repo, index)?;
     let mut options = git2::StashApplyOptions::new();
     if restore_index {
         options.reinstantiate_index();
@@ -829,6 +830,66 @@ fn refuse_untracked_file_over_folder(repo: &Repository, index: usize) -> Result<
         Err(StashError::FileReplacedFolder)
     } else {
         Err(StashError::UntrackedOverFolder(path))
+    }
+}
+
+/// Refuses when `stash@{index}` holds an untracked file below a path the repository index has
+/// as a file (`UntrackedBelowTrackedFile`); nothing is written and the stash is kept. libgit2
+/// merges the untracked tree against the index (`merge_index_and_tree(NULL, repo_index,
+/// untracked_tree)`, stash.c), so `d/x` over the indexed file `d` is a directory/file conflict
+/// it checks out as `d~Updated upstream` while reporting success, and a pop would drop the
+/// stash (#206). Typically the stash itself recorded the swap (the untracked `d/x` with the
+/// file `d` deleted); the deletion is applied only after the untracked files. Paths compare
+/// exactly, as libgit2's merge does.
+fn refuse_untracked_below_tracked_file(repo: &Repository, index: usize) -> Result<(), StashError> {
+    let Some(id) = repo
+        .reflog("refs/stash")
+        .ok()
+        .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new()))
+    else {
+        return Ok(());
+    };
+    let Ok(untracked) = repo.find_commit(id)?.parent(2) else {
+        return Ok(());
+    };
+    let files: std::collections::HashSet<String> = repo
+        .index()?
+        .iter()
+        .filter(|entry| (entry.flags >> 12) & 0x3 == 0)
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .collect();
+    let mut blocked = None;
+    untracked
+        .tree()?
+        .walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() == Some(git2::ObjectType::Tree) {
+                return git2::TreeWalkResult::Ok;
+            }
+            let Ok(name) = entry.name() else {
+                return git2::TreeWalkResult::Ok;
+            };
+            let path = format!("{root}{name}");
+            if let Some(file) = path
+                .match_indices('/')
+                .map(|(slash, _)| &path[..slash])
+                .find(|prefix| files.contains(*prefix))
+            {
+                blocked = Some((path.clone(), file.to_string()));
+                return git2::TreeWalkResult::Abort;
+            }
+            git2::TreeWalkResult::Ok
+        })
+        .or_else(|error| {
+            // `Abort` surfaces as a `User` error.
+            if blocked.is_some() {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        })?;
+    match blocked {
+        Some((untracked, file)) => Err(StashError::UntrackedBelowTrackedFile { untracked, file }),
+        None => Ok(()),
     }
 }
 
