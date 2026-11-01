@@ -869,6 +869,29 @@ only `error`.
   actually-supported E2E path.) Both `e2e/package.json` and `frontend/package.json` pin
   `packageManager: "pnpm@9.15.9"` — a contributor running a different pnpm major without
   Corepack honoring this pin can break `e2e/`'s frozen-lockfile install.
+  - Elements that unmount: waiting for a row, menu or dialog to disappear, or clicking one that
+    may re-render, goes through `e2e/support/dom.ts` (`waitUntilGoneInPage`, `clickInPage`),
+    which query and act inside one `browser.execute` (`waitUntilInPage` for the opposite wait).
+    WebdriverIO's own `waitForExist({ reverse: true })` looks the element up and inspects it in
+    separate round trips; once React unmounted it, WebKitWebDriver failed with a stale-element
+    error on every retry until the wait timed out (#182), so retrying doesn't help.
+    `waitForDisplayed({ reverse: true })` on an element that stays mounted is fine. After a
+    commit made through the UI, wait on the repository (`e2e/support/git.ts`), not on a row
+    whose text may already match something else.
+  - Harness hardening (#182): `wdio.conf.ts` starts `tauri-driver` in its own process group,
+    which also holds WebKitWebDriver and the app, and records the group id in
+    `target/e2e-tauri-driver.pgid`. `afterSession` SIGTERMs the group, waits up to 5 s and
+    SIGKILLs it. `beforeSession` reaps (and logs) only what an aborted earlier session of this
+    worktree left: that recorded group, this worktree's app binary running under WebDriver
+    automation without its WebKitWebDriver, or a WebKitWebDriver on port 4445 without its
+    tauri-driver (Linux, via `/proc`). A driver port still held by anything else fails the
+    session with "port … is in use by another process" rather than being killed. It then waits
+    for ports 4444 and 4445, and every session logs `[e2e] session start: N ms`. CI runs the
+    suite under `dbus-run-session`: without a session bus each session start waited ~31 s.
+  - Process tests (`git-core/src/process.rs`): each check that a timeout or Cancel kills a
+    hook's background process has a negative control showing the check fails without the
+    process group (Unix) or job object (Windows), and the `/dev/tty` check runs the test binary
+    again under a pty it creates, so it discriminates without a terminal on CI (#179).
 - E2E for the VSCode extension (`extension/e2e/`, a standalone pnpm package, sibling to but not
   a workspace member of `extension/`): `@vscode/test-electron` launches a real Extension
   Development Host against the unpacked dev-mode extension and drives `vscode.*` commands

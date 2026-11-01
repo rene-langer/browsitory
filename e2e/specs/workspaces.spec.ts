@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { expect } from "@wdio/globals";
+import { waitUntilGoneInPage } from "../support/dom";
 
 const E2E_WORKSPACE_ROOT = path.join(os.tmpdir(), "browsitory-e2e-workspace-root");
 const E2E_WORKSPACE_REPO_A = path.join(E2E_WORKSPACE_ROOT, "repo-a");
@@ -75,12 +76,9 @@ describe("Browsitory multi-repo workspaces", function () {
     const closeGroupButton = await $('button[aria-label="Close E2E Workspace"]');
     await browser.execute((el) => (el as HTMLElement).click(), closeGroupButton);
 
-    await browser.waitUntil(
-      async () => !(await $(`button[title="${E2E_WORKSPACE_REPO_A}"]`).isExisting()),
-      { timeout: 10000, timeoutMsg: "expected both workspace member tabs to close" },
-    );
-    expect(await $(`button[title="${E2E_WORKSPACE_REPO_A}"]`).isExisting()).toBe(false);
-    expect(await $(`button[title="${E2E_WORKSPACE_REPO_B}"]`).isExisting()).toBe(false);
+    // Expected: both workspace member tabs close.
+    await waitUntilGoneInPage(`button[title="${E2E_WORKSPACE_REPO_A}"]`);
+    await waitUntilGoneInPage(`button[title="${E2E_WORKSPACE_REPO_B}"]`);
     expect(await (await $$('[role="tab"]')).length).toBe(1);
   });
 
@@ -143,9 +141,7 @@ describe("Browsitory multi-repo workspaces", function () {
     await confirmDialog.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Delete workspace'));
 
-    await browser.waitUntil(
-      async () => !(await $('span*=E2E Workspace').isExisting()),
-      { timeout: 10000, timeoutMsg: "expected the workspace to be removed from the list" },
-    );
+    // Expected: the workspace is removed from the list.
+    await waitUntilGoneInPage("span", "E2E Workspace", { contains: true });
   });
 });

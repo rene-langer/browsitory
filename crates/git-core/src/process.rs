@@ -1158,17 +1158,141 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn timeout_kills_a_process_whose_grandchild_holds_the_pipe() {
+        let timeout = Duration::from_millis(500);
+        let started = Instant::now();
         let captured = run_captured(
             sh("sleep 30 & echo started; sleep 30"),
             None,
             &|| false,
-            Duration::from_millis(500),
+            timeout,
             1024,
         )
         .unwrap();
         assert!(captured.timed_out);
         assert!(!captured.success);
         assert_eq!(captured.output, "started\n");
+        // The output is the same if `killpg` missed the grandchild; only the time tells: a
+        // surviving `sleep 30` holds the pipe open for the whole `DRAIN_GRACE` (#179), so the
+        // call can't return before `timeout + DRAIN_GRACE`.
+        assert!(
+            started.elapsed() < timeout + DRAIN_GRACE,
+            "waited for the pipe: the grandchild survived ({:?})",
+            started.elapsed()
+        );
+    }
+
+    /// A hook's background job that redirects its output (so it doesn't hold the pipe), says it
+    /// started (`$MARKER.started`) and does its work two seconds later (`$MARKER`): a timeout or
+    /// cancel must kill it too (#179). A non-interactive `sh` has no job control, so the job
+    /// stays in the hook's process group, which `kill_tree` kills with `killpg`. The foreground
+    /// command sleeps `foreground` seconds.
+    #[cfg(unix)]
+    fn grandchild_script(foreground: u32) -> String {
+        format!(
+            r#"(: > "$MARKER.started"; sleep 2; echo alive > "$MARKER") >/dev/null 2>&1 & sleep {foreground}"#
+        )
+    }
+
+    /// When a marker test stops the hook: late enough for its background job to have started.
+    #[cfg(unix)]
+    const MARKER_STOP: Duration = Duration::from_millis(500);
+
+    /// How long to wait, after the hook was stopped, for a background job that survived to write
+    /// its marker (due about two seconds after it started).
+    #[cfg(unix)]
+    const MARKER_WAIT: Duration = Duration::from_secs(3);
+
+    #[cfg(unix)]
+    fn unix_marker() -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let marker = dir.path().join("alive");
+        (dir, marker)
+    }
+
+    /// `$MARKER.started`: without it, a test whose background job never ran would pass.
+    #[cfg(unix)]
+    fn started_marker(marker: &std::path::Path) -> std::path::PathBuf {
+        let mut name = marker.as_os_str().to_owned();
+        name.push(".started");
+        std::path::PathBuf::from(name)
+    }
+
+    /// The marker test's verdict, after the hook was stopped.
+    #[cfg(unix)]
+    fn assert_background_job_was_killed(marker: &std::path::Path) {
+        assert!(
+            started_marker(marker).exists(),
+            "the background job never started, so this test proves nothing"
+        );
+        std::thread::sleep(MARKER_WAIT);
+        assert!(!marker.exists(), "the background process survived");
+    }
+
+    /// `sh -c script` with `MARKER` pointing at `marker`.
+    #[cfg(unix)]
+    fn sh_with_marker(script: &str, marker: &std::path::Path) -> Command {
+        let mut command = sh(script);
+        command.env("MARKER", marker);
+        command
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_kills_a_hooks_background_grandchild_on_unix() {
+        let (_dir, marker) = unix_marker();
+        let captured = run_captured(
+            sh_with_marker(&grandchild_script(30), &marker),
+            None,
+            &|| false,
+            MARKER_STOP,
+            1024,
+        )
+        .unwrap();
+        assert!(captured.timed_out);
+        assert_background_job_was_killed(&marker);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_kills_a_hooks_background_grandchild_on_unix() {
+        let (_dir, marker) = unix_marker();
+        let cancel_at = Instant::now() + MARKER_STOP;
+        let result = run_captured(
+            sh_with_marker(&grandchild_script(30), &marker),
+            None,
+            &|| Instant::now() >= cancel_at,
+            Duration::from_secs(60),
+            1024,
+        );
+        assert!(matches!(result, Err(RunError::Cancelled)));
+        assert_background_job_was_killed(&marker);
+    }
+
+    /// The control for the marker tests above (#179, D2-A): the same hook started without its
+    /// own process group (no `detach`), so `killpg` finds no group and only `sh` is killed. Its
+    /// background job then survives and writes the marker, which shows the marker tests can
+    /// fail. The survivor exits right after writing the marker, and the orphaned foreground
+    /// `sleep 5` a few seconds later.
+    #[cfg(unix)]
+    #[test]
+    fn without_its_own_group_a_background_grandchild_survives() {
+        let (_dir, marker) = unix_marker();
+        let mut command = sh_with_marker(&grandchild_script(5), &marker);
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let mut child = spawn_retrying(&mut command).unwrap();
+        let (_, timed_out) = wait_bounded(&mut child, &|| false, MARKER_STOP, None).unwrap();
+        assert!(timed_out);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            marker.exists(),
+            "the background process died without a process group kill: the marker tests prove nothing"
+        );
     }
 
     #[cfg(unix)]
@@ -1238,7 +1362,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn split_times_out_and_kills_the_group() {
-        let started = Instant::now();
         let captured = run_captured_split(
             sh("sleep 30 & echo started; sleep 30"),
             None,
@@ -1251,7 +1374,46 @@ mod tests {
         assert!(captured.timed_out);
         assert!(!captured.success);
         assert_eq!(captured.stdout, b"started\n");
-        assert!(started.elapsed() < Duration::from_secs(10));
+        // A surviving grandchild would hold the pipes past `DRAIN_GRACE`, so they wouldn't have
+        // reached end-of-file (#179).
+        assert!(
+            captured.drained,
+            "the grandchild survived and held the pipes"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn split_timeout_kills_a_background_grandchild() {
+        let (_dir, marker) = unix_marker();
+        let captured = run_captured_split(
+            sh_with_marker(&grandchild_script(30), &marker),
+            None,
+            &|| false,
+            MARKER_STOP,
+            1024,
+            1024,
+        )
+        .unwrap();
+        assert!(captured.timed_out);
+        assert_background_job_was_killed(&marker);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn split_cancel_kills_a_background_grandchild() {
+        let (_dir, marker) = unix_marker();
+        let cancel_at = Instant::now() + MARKER_STOP;
+        let result = run_captured_split(
+            sh_with_marker(&grandchild_script(30), &marker),
+            None,
+            &|| Instant::now() >= cancel_at,
+            Duration::from_secs(60),
+            1024,
+            1024,
+        );
+        assert!(matches!(result, Err(RunError::Cancelled)));
+        assert_background_job_was_killed(&marker);
     }
 
     #[cfg(unix)]
@@ -1348,15 +1510,20 @@ mod tests {
         assert_leads_its_own_session_without_a_terminal(&String::from_utf8_lossy(&captured.stdout));
     }
 
-    /// Only discriminates when the test runner has a controlling terminal (run it locally from
-    /// one): without one, `/dev/tty` fails either way. With one, a program in a background
-    /// process group of that terminal's session would be stopped by `SIGTTIN` instead.
+    #[cfg(unix)]
+    const TTY_PROBE: &str = "if (: < /dev/tty) 2>/dev/null; then echo tty; else echo none; fi";
+
+    /// Only discriminates when the test runner has a controlling terminal: without one (CI),
+    /// `/dev/tty` fails either way. With one, a program in a background process group of that
+    /// terminal's session would be stopped by `SIGTTIN` instead.
+    /// `a_program_opening_dev_tty_fails_at_once_under_a_terminal` runs the same check under a
+    /// terminal it creates, so it discriminates everywhere (#179).
     #[cfg(unix)]
     #[test]
     fn a_program_opening_dev_tty_fails_at_once() {
         let started = Instant::now();
         let captured = run_captured(
-            sh("if (: < /dev/tty) 2>/dev/null; then echo tty; else echo none; fi"),
+            sh(TTY_PROBE),
             None,
             &|| false,
             Duration::from_secs(30),
@@ -1365,6 +1532,162 @@ mod tests {
         .unwrap();
         assert_eq!(captured.output, "none\n");
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// The inner half of `a_program_opening_dev_tty_fails_at_once_under_a_terminal`, which runs
+    /// this test binary again with only this test, in a new session whose controlling terminal
+    /// is a pty. Does nothing when run any other way.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "run by a_program_opening_dev_tty_fails_at_once_under_a_terminal"]
+    fn tty_probe_inner() {
+        if std::env::var_os("BROWSITORY_TTY_PROBE").is_none() {
+            return;
+        }
+        assert!(
+            std::fs::File::open("/dev/tty").is_ok(),
+            "the probe has no controlling terminal, so it proves nothing"
+        );
+        let started = Instant::now();
+        let captured = run_captured(
+            sh(TTY_PROBE),
+            None,
+            &|| false,
+            Duration::from_secs(30),
+            1024,
+        )
+        .unwrap();
+        assert_eq!(captured.output, "none\n", "the hook could open /dev/tty");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// #179 (D1-A): `/dev/tty` with a real controlling terminal, also on CI. Creates a pty, starts
+    /// `tty_probe_inner` in a new session with the pty as its controlling terminal, and checks
+    /// that it passed: a hook started from there can't open `/dev/tty`.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_opening_dev_tty_fails_at_once_under_a_terminal() {
+        use std::ffi::{CStr, OsStr};
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::process::CommandExt;
+
+        // Close-on-exec, so programs started by other tests running in parallel don't inherit
+        // the master (Linux takes the flag at open; elsewhere `fcntl` sets it right after).
+        #[cfg(target_os = "linux")]
+        const MASTER_FLAGS: libc::c_int = libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC;
+        #[cfg(not(target_os = "linux"))]
+        const MASTER_FLAGS: libc::c_int = libc::O_RDWR | libc::O_NOCTTY;
+
+        // SAFETY: plain libc calls on a descriptor owned here. Linux uses the reentrant
+        // `ptsname_r`; elsewhere `ptsname`'s static buffer is copied at once (no other test
+        // calls it).
+        let (master, slave_name) = unsafe {
+            let fd = libc::posix_openpt(MASTER_FLAGS);
+            assert!(fd >= 0, "posix_openpt: {}", std::io::Error::last_os_error());
+            let master = OwnedFd::from_raw_fd(fd);
+            assert_ne!(
+                libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC),
+                -1,
+                "{}",
+                std::io::Error::last_os_error()
+            );
+            assert_eq!(libc::grantpt(fd), 0, "{}", std::io::Error::last_os_error());
+            assert_eq!(libc::unlockpt(fd), 0, "{}", std::io::Error::last_os_error());
+            #[cfg(target_os = "linux")]
+            let name = {
+                let mut buffer = [0 as libc::c_char; 128];
+                let result = libc::ptsname_r(fd, buffer.as_mut_ptr(), buffer.len());
+                assert_eq!(
+                    result,
+                    0,
+                    "ptsname_r: {}",
+                    std::io::Error::from_raw_os_error(result)
+                );
+                OsStr::from_bytes(CStr::from_ptr(buffer.as_ptr()).to_bytes()).to_owned()
+            };
+            #[cfg(not(target_os = "linux"))]
+            let name = {
+                let name = libc::ptsname(fd);
+                assert!(!name.is_null(), "{}", std::io::Error::last_os_error());
+                OsStr::from_bytes(CStr::from_ptr(name).to_bytes()).to_owned()
+            };
+            (master, name)
+        };
+        let slave = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NOCTTY)
+            .open(&slave_name)
+            .unwrap();
+
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "process::tests::tty_probe_inner",
+                "--ignored",
+                "--nocapture",
+                "--color",
+                "never",
+            ])
+            .env("BROWSITORY_TTY_PROBE", "1")
+            .stdin(Stdio::from(slave.try_clone().unwrap()))
+            .stdout(Stdio::from(slave.try_clone().unwrap()))
+            .stderr(Stdio::from(slave));
+        // SAFETY: `setsid` and `ioctl` are async-signal-safe; stdio is already the pty slave.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+        // Our copies of the slave must close, or reading the master never ends.
+        drop(command);
+
+        let (output_tx, output_rx) = mpsc::channel();
+        let mut master = std::fs::File::from(master);
+        std::thread::spawn(move || {
+            let mut output = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                match master.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(read) => output.extend_from_slice(&chunk[..read]),
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    // Linux: EIO once every slave descriptor is closed.
+                    Err(_) => break,
+                }
+            }
+            let _ = output_tx.send(output);
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("the probe under a terminal didn't finish within 30 s");
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        };
+        let output = output_rx
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap_or_default();
+        let output = String::from_utf8_lossy(&output);
+        assert!(status.success(), "the probe failed: {output}");
+        // An exact filter that matched nothing would also succeed.
+        assert!(
+            output.contains("1 passed"),
+            "the probe didn't run: {output}"
+        );
     }
 
     /// Git for Windows' `sh.exe` running `script`, with `MARKER` pointing at `marker`.
@@ -1423,6 +1746,43 @@ mod tests {
         assert!(matches!(result, Err(RunError::Cancelled)));
         std::thread::sleep(Duration::from_secs(6));
         assert!(!marker.exists(), "the hook's background process survived");
+    }
+
+    /// The control for the job tests above (#179, D2-A): the same hook started without a job
+    /// (`detach` only, as before #122), so a timeout kills only `sh.exe`. Its background job then
+    /// survives and writes the marker, which shows those tests can fail. It then writes
+    /// `$MARKER.done`, once it has closed the marker, and the test waits for that, so the temp
+    /// dir's cleanup doesn't race a file still open. The orphaned foreground `sleep 5` exits a few
+    /// seconds later by itself.
+    #[cfg(windows)]
+    #[test]
+    fn without_a_job_a_background_grandchild_survives_on_windows() {
+        let (_dir, marker) = marker_path();
+        let done = marker.with_extension("done");
+        let Some(mut command) = windows_sh(
+            r#"(sleep 3; echo alive > "$MARKER"; : > "$MARKER.done") >/dev/null 2>&1 & sleep 5"#,
+            &marker,
+        ) else {
+            eprintln!("no sh.exe found; skipping");
+            return;
+        };
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        detach(&mut command);
+        let mut child = spawn_retrying(&mut command).unwrap();
+        let (_, timed_out) =
+            wait_bounded(&mut child, &|| false, Duration::from_millis(500), None).unwrap();
+        assert!(timed_out);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(
+            marker.exists() && done.exists(),
+            "the background process died without a job: the job tests prove nothing"
+        );
     }
 
     #[cfg(windows)]
