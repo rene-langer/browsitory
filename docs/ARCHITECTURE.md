@@ -831,6 +831,20 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   checked, then checked out). `tests/case_insensitive_links.rs` re-runs every operation on a
   case-insensitive file system in CI (self-skipping elsewhere) and asserts nothing outside the
   repository changes; its raw libgit2 rows are a canary for a libgit2 upgrade.
+- **Worktree add creates missing parents and rolls back (#200).** libgit2's `git_worktree_add`
+  creates only the last folder of the destination, so `create_worktree` first creates the
+  missing parent folders, top-down, as `git worktree add` does. A folder it can't create (a file
+  in the way, no permission) is `WorktreeError::CreateFolder`, naming that folder. When a later
+  step fails, the call removes what it created: the parent folders (deepest first, only while
+  empty), the destination (only while empty), `<commondir>/worktrees/<name>` when it didn't exist
+  before and has no `gitdir` file yet (libgit2 creates it before the destination and leaves it
+  behind on failure, which blocked a retry with the same name), and the branch when this call
+  created it. The original error is returned. A failure after libgit2 wrote `gitdir` (checkout,
+  HEAD) is not rolled back: the entry stays registered with the branch checked out, so a retry
+  gets `PathExists` and remove gets `Dirty`; the user deletes the folder, prunes, and deletes the
+  branch. Residual risk: another process that creates the same `worktrees/<name>` between the
+  existence check and libgit2's mkdir, or an empty destination folder after it, can have that
+  folder removed by the rollback.
 - Residual risk: a concurrent local process can swap a link in between `clear_hazards` (or a
   refusal check: `scan`, `refuse_linked_folders`, `has_symlinked_ancestor` in stage/stash,
   `refuse_linked_path`) and libgit2's own write; libgit2 has no `openat`-style checkout. The

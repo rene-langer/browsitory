@@ -562,8 +562,15 @@ commit.
 ## Worktrees and submodules
 
 **Worktrees** creates and removes linked worktrees, and opens one directly
-in Browsitory. **Submodules** initializes and updates submodules, including
-recursively.
+in Browsitory. If the worktree's folder is inside folders that don't exist
+yet, Browsitory creates them, as `git worktree add` does. If creating the
+worktree fails before the worktree is set up (for example, a folder can't be
+created), Browsitory removes what it created (folders, the new branch), so
+you can fix the problem and try again with the same name. If it fails later,
+while the files are checked out (for example, the disk is full), the
+worktree and its branch stay: delete the worktree's folder by hand, click
+**Prune worktrees**, then delete the branch if you don't need it.
+**Submodules** initializes and updates submodules, including recursively.
 
 ## Reflog
 
