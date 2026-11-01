@@ -11,6 +11,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed (tests): the Unix tests for stopping a hook now check that a background process the hook
   started can't finish its work after a timeout or Cancel; control tests (also for the Windows
   job object) show the checks fail without the process group or job (#179).
+- Fixed (tests): the /dev/tty check now runs under a real terminal, so it also proves something
+  on CI (#179).
 
 ### Folder/file swaps
 

@@ -1493,15 +1493,20 @@ mod tests {
         assert_leads_its_own_session_without_a_terminal(&String::from_utf8_lossy(&captured.stdout));
     }
 
-    /// Only discriminates when the test runner has a controlling terminal (run it locally from
-    /// one): without one, `/dev/tty` fails either way. With one, a program in a background
-    /// process group of that terminal's session would be stopped by `SIGTTIN` instead.
+    #[cfg(unix)]
+    const TTY_PROBE: &str = "if (: < /dev/tty) 2>/dev/null; then echo tty; else echo none; fi";
+
+    /// Only discriminates when the test runner has a controlling terminal: without one (CI),
+    /// `/dev/tty` fails either way. With one, a program in a background process group of that
+    /// terminal's session would be stopped by `SIGTTIN` instead.
+    /// `a_program_opening_dev_tty_fails_at_once_under_a_terminal` runs the same check under a
+    /// terminal it creates, so it discriminates everywhere (#179).
     #[cfg(unix)]
     #[test]
     fn a_program_opening_dev_tty_fails_at_once() {
         let started = Instant::now();
         let captured = run_captured(
-            sh("if (: < /dev/tty) 2>/dev/null; then echo tty; else echo none; fi"),
+            sh(TTY_PROBE),
             None,
             &|| false,
             Duration::from_secs(30),
@@ -1510,6 +1515,133 @@ mod tests {
         .unwrap();
         assert_eq!(captured.output, "none\n");
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// The inner half of `a_program_opening_dev_tty_fails_at_once_under_a_terminal`, which runs
+    /// this test binary again with only this test, in a new session whose controlling terminal
+    /// is a pty. Does nothing when run any other way.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "run by a_program_opening_dev_tty_fails_at_once_under_a_terminal"]
+    fn tty_probe_inner() {
+        if std::env::var_os("BROWSITORY_TTY_PROBE").is_none() {
+            return;
+        }
+        assert!(
+            std::fs::File::open("/dev/tty").is_ok(),
+            "the probe has no controlling terminal, so it proves nothing"
+        );
+        let started = Instant::now();
+        let captured = run_captured(
+            sh(TTY_PROBE),
+            None,
+            &|| false,
+            Duration::from_secs(30),
+            1024,
+        )
+        .unwrap();
+        assert_eq!(captured.output, "none\n", "the hook could open /dev/tty");
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// #179 (D1-A): `/dev/tty` with a real controlling terminal, also on CI. Creates a pty, starts
+    /// `tty_probe_inner` in a new session with the pty as its controlling terminal, and checks
+    /// that it passed: a hook started from there can't open `/dev/tty`.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_opening_dev_tty_fails_at_once_under_a_terminal() {
+        use std::ffi::{CStr, OsStr};
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::process::CommandExt;
+
+        // SAFETY: plain libc calls on a descriptor owned here; `ptsname`'s static buffer is
+        // copied at once (no other test calls it).
+        let (master, slave_name) = unsafe {
+            let fd = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+            assert!(fd >= 0, "posix_openpt: {}", std::io::Error::last_os_error());
+            let master = OwnedFd::from_raw_fd(fd);
+            assert_eq!(libc::grantpt(fd), 0, "{}", std::io::Error::last_os_error());
+            assert_eq!(libc::unlockpt(fd), 0, "{}", std::io::Error::last_os_error());
+            let name = libc::ptsname(fd);
+            assert!(!name.is_null(), "{}", std::io::Error::last_os_error());
+            let name = OsStr::from_bytes(CStr::from_ptr(name).to_bytes()).to_owned();
+            (master, name)
+        };
+        let slave = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_NOCTTY)
+            .open(&slave_name)
+            .unwrap();
+
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "process::tests::tty_probe_inner",
+                "--ignored",
+                "--nocapture",
+                "--color",
+                "never",
+            ])
+            .env("BROWSITORY_TTY_PROBE", "1")
+            .stdin(Stdio::from(slave.try_clone().unwrap()))
+            .stdout(Stdio::from(slave.try_clone().unwrap()))
+            .stderr(Stdio::from(slave));
+        // SAFETY: `setsid` and `ioctl` are async-signal-safe; stdio is already the pty slave.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
+        // Our copies of the slave must close, or reading the master never ends.
+        drop(command);
+
+        let (output_tx, output_rx) = mpsc::channel();
+        let mut master = std::fs::File::from(master);
+        std::thread::spawn(move || {
+            let mut output = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                match master.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(read) => output.extend_from_slice(&chunk[..read]),
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    // Linux: EIO once every slave descriptor is closed.
+                    Err(_) => break,
+                }
+            }
+            let _ = output_tx.send(output);
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("the probe under a terminal didn't finish within 30 s");
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        };
+        let output = output_rx
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap_or_default();
+        let output = String::from_utf8_lossy(&output);
+        assert!(status.success(), "the probe failed: {output}");
+        // An exact filter that matched nothing would also succeed.
+        assert!(
+            output.contains("1 passed"),
+            "the probe didn't run: {output}"
+        );
     }
 
     /// Git for Windows' `sh.exe` running `script`, with `MARKER` pointing at `marker`.
