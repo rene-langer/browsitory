@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security follow-ups
+
+- Fixed: Mark resolved stages exactly the content it checked for conflict markers, read without
+  following a symbolic link or waiting on a named pipe; a file swapped at that moment can no
+  longer hang it or get other content staged (#199).
+- Fixed: Open in editor (no editor configured) no longer refuses a document such as notes.txt or
+  README.md that quotes a "[Desktop Entry]" launcher near its start. On Linux, files whose
+  extension marks them as a document are not checked for launcher contents, as the Linux
+  desktops do; macOS and Windows no longer check file contents for Linux launchers (.desktop
+  and .kdelnk files are still refused by name everywhere) (#201).
+- Fixed: while the other window keeps the undo history busy, a quick run of actions (for
+  example staging files one by one) waits about a second once, not a second per action. Undo,
+  Redo, discards and Reset hard still wait about a second each before they refuse (#197).
+- Mark resolved keeps the mode git would keep for a file deleted on the current branch, and says
+  "'x' can't be read safely; check its permissions and try again." for a file it can't open
+  instead of calling it a FIFO, socket or device (#199).
+
 ### Test robustness
 
 - Fixed (tests): the Unix tests for stopping a hook or a signing program now check that a

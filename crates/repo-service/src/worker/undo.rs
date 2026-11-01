@@ -145,6 +145,24 @@ pub(super) fn locks_state(command: &Command) -> bool {
 /// must not run); `false` for every other command, which runs unrecorded instead (D6-A). Branch,
 /// tag and reflog changes stay recoverable from the reflog; switches, merges, picks and pulls
 /// refuse to overwrite local changes.
+/// Whether `reply_busy` refuses `command` (instead of running it unrecorded) when the lock
+/// stays busy; such a command waits for the lock even inside a burst (#197).
+pub(super) fn refuses_when_busy(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Undo { .. }
+            | Command::Redo { .. }
+            | Command::DiscardHunk { .. }
+            | Command::DiscardLines { .. }
+            | Command::DiscardFile { .. }
+            | Command::DiscardAllUnstaged { .. }
+            | Command::ResetToCommit {
+                mode: ResetMode::Hard,
+                ..
+            }
+    )
+}
+
 pub(super) fn reply_busy(command: &mut Command) -> bool {
     match command {
         Command::Undo { reply } | Command::Redo { reply } => {

@@ -327,12 +327,36 @@ fn has_magic(head: &[u8]) -> bool {
     MAGICS.iter().any(|magic| head.starts_with(magic))
 }
 
+/// Extensions shared-mime-info has a long-standing glob for (all already in 1.15, the version in
+/// Ubuntu 20.04), none of them typed `application/x-desktop`. A name ending in one is typed by
+/// that glob before any magic: GLib never types a named file as a launcher from its contents,
+/// and Qt sniffs only when no glob matches the name. So such a file isn't sniffed for
+/// `[Desktop Entry]` (#201). Newer globs (`.org`, `.toml`) are left out: on an older desktop
+/// such a name matches no glob, so Qt sniffs it. Lower case;
+/// `document_extensions_have_a_shared_mime_info_glob` checks the list on Linux CI.
+const DOCUMENT_EXTENSIONS: &[&str] = &[
+    "txt", "md", "markdown", "rst", "tex", "log", "csv", "tsv", "json", "yaml", "yml", "xml",
+    "html", "htm", "xhtml", "svg", "css", "diff", "patch", "c", "h", "cpp", "hpp", "rs", "go",
+    "java", "pdf", "rtf", "odt", "docx", "ipynb", "srt", "vtt",
+];
+
+/// Whether `path`'s name ends in a document extension. The raw extension, not
+/// `lower_extension`: Linux keeps trailing dots and spaces, so `notes.txt.` matches no glob.
+fn names_a_document(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            DOCUMENT_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+        })
+}
+
 /// How much of a file the `[Desktop Entry]` sniff reads at most before it gives up and counts
 /// the file as runnable.
 const DESKTOP_SNIFF_LIMIT: u64 = 64 * 1024;
 
 /// Whether `head` is a freedesktop launcher (`application/x-desktop`) (#165): one of
-/// shared-mime-info's x-desktop magics, or a strict key file with a desktop group.
+/// shared-mime-info's x-desktop magics, or a strict key file with a desktop group. Only asked on
+/// Linux, for a name without a document extension (`file_may_run`, #201).
 ///
 /// - The magics (after a UTF-8 BOM): `[Desktop Entry]` starting within the first 33 bytes
 ///   (offset 0:32); `[Desktop Action`, `[KDE Desktop Entry]`, `# Config File` and
@@ -537,31 +561,40 @@ pub fn terminal_invocation(
 
 /// Whether opening `file` with the OS default app could run it: its name, its execute bit, its
 /// first bytes, and for a symlink the same checks on the file it points to.
+///
+/// The `[Desktop Entry]` sniff runs on Linux only (macOS and Windows have no such launchers),
+/// and not for a name with a document extension (`DOCUMENT_EXTENSIONS`): the desktops type a file
+/// by its name's glob before its contents (#201). A link is typed by its own name and its
+/// target's contents (Qt), so it skips the sniff only when both names are documents.
 fn file_may_run(file: &Path, os: Os) -> bool {
-    let check =
-        |path: &Path| {
-            may_execute(path, os, has_exec_bit(path))
-                || read_head(path, 1024).is_some_and(|(head, complete)| {
-                    let magic = has_magic(&head)
-                        && !(head.starts_with(OLE_MAGIC)
-                            && OLE_DOCUMENTS.contains(&lower_extension(path).as_str()));
-                    magic
-                        || match is_desktop_entry(&head, complete) {
+    let check = |path: &Path, sniff_desktop: bool| {
+        may_execute(path, os, has_exec_bit(path))
+            || read_head(path, 1024).is_some_and(|(head, complete)| {
+                let magic = has_magic(&head)
+                    && !(head.starts_with(OLE_MAGIC)
+                        && OLE_DOCUMENTS.contains(&lower_extension(path).as_str()));
+                magic
+                    || (sniff_desktop
+                        && match is_desktop_entry(&head, complete) {
                             Some(launcher) => launcher,
                             // Only blank lines and comments so far: read on, and count a file
                             // still undecided at the limit as runnable.
                             None => read_head(path, DESKTOP_SNIFF_LIMIT).is_none_or(
                                 |(head, complete)| is_desktop_entry(&head, complete) != Some(false),
                             ),
-                        }
-                })
-        };
-    if check(file) {
+                        })
+            })
+    };
+    let linux = os == Os::Linux;
+    if check(file, linux && !names_a_document(file)) {
         return true;
     }
     match std::fs::symlink_metadata(file) {
         Ok(meta) if meta.file_type().is_symlink() => match std::fs::canonicalize(file) {
-            Ok(target) => check(&target),
+            Ok(target) => check(
+                &target,
+                linux && !(names_a_document(file) && names_a_document(&target)),
+            ),
             // A dangling or unreadable link: refuse rather than guess.
             Err(_) => true,
         },
@@ -1109,6 +1142,8 @@ mod tests {
         ));
     }
 
+    /// Linux only: macOS and Windows have no `.desktop` launchers (#201).
+    #[cfg(target_os = "linux")]
     #[test]
     fn an_extensionless_desktop_entry_is_refused() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -1117,6 +1152,122 @@ mod tests {
             prepare_editor(dir.path(), "LAUNCH", None, None),
             Err(OpenError::MayExecute(_))
         ));
+    }
+
+    /// #201: a name with a document extension is typed by its glob before any magic, as GLib
+    /// and Qt do, so a document quoting a launcher near its start still opens on Linux.
+    #[test]
+    fn a_document_quoting_a_launcher_near_its_start_opens_on_linux() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let notes = dir.path().join("notes.txt");
+        std::fs::write(&notes, "Some notes\n[Desktop Entry]\nExec=x\n").unwrap();
+        let readme = dir.path().join("README.md");
+        std::fs::write(&readme, "[Desktop Entry]\nExec=x\n").unwrap();
+        let upper = dir.path().join("CHANGES.TXT");
+        std::fs::write(&upper, "[Desktop Entry]\nExec=x\n").unwrap();
+        for path in [&notes, &readme, &upper] {
+            assert!(!file_may_run(path, Os::Linux), "{path:?}");
+        }
+    }
+
+    /// #201: every `DOCUMENT_EXTENSIONS` entry has a shared-mime-info glob, and none of its types
+    /// is a launcher, so the desktop types such a name by its glob. Skipped without the
+    /// database, except on CI.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn document_extensions_have_a_shared_mime_info_glob() {
+        let globs = match std::fs::read_to_string("/usr/share/mime/globs2") {
+            Ok(globs) => globs,
+            Err(error) => {
+                assert!(
+                    std::env::var_os("CI").is_none(),
+                    "CI needs shared-mime-info's /usr/share/mime/globs2: {error}"
+                );
+                eprintln!("SKIP: no /usr/share/mime/globs2 ({error})");
+                return;
+            }
+        };
+        // `weight:type:glob[:flags]`.
+        let entries: Vec<(&str, String)> = globs
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(|line| {
+                let mut fields = line.split(':');
+                let _weight = fields.next()?;
+                let mime = fields.next()?;
+                let glob = fields.next()?;
+                Some((mime, glob.to_ascii_lowercase()))
+            })
+            .collect();
+        let mut failures = Vec::new();
+        for extension in DOCUMENT_EXTENSIONS {
+            let glob = format!("*.{extension}");
+            let types: Vec<&str> = entries
+                .iter()
+                .filter(|(_, pattern)| *pattern == glob)
+                .map(|(mime, _)| *mime)
+                .collect();
+            if types.is_empty() {
+                failures.push(format!("{glob}: no glob"));
+            } else if types.contains(&"application/x-desktop") {
+                failures.push(format!("{glob}: typed as a launcher"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:?}");
+    }
+
+    /// #201: the `[Desktop Entry]` sniff is Linux's; macOS and Windows have no such launchers.
+    #[test]
+    fn linux_launchers_are_not_sniffed_on_macos_or_windows() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let launch = dir.path().join("LAUNCH");
+        std::fs::write(&launch, "[Desktop Entry]\nExec=x\n").unwrap();
+        assert!(file_may_run(&launch, Os::Linux));
+        assert!(!file_may_run(&launch, Os::MacOs));
+        assert!(!file_may_run(&launch, Os::Windows));
+    }
+
+    /// What still counts as runnable after #201: an unknown extension or a trailing dot (no
+    /// glob matches, so Qt sniffs), `.desktop`/`.kdelnk` by name, and a script by its `#!`.
+    #[test]
+    fn launchers_without_a_document_name_are_still_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let write = |name: &str, text: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, text).unwrap();
+            path
+        };
+        let desktop = "[Desktop Entry]\nExec=x\n";
+        // `.org` and `.toml` are left out of `DOCUMENT_EXTENSIONS` (their globs are recent).
+        for name in ["x.foo", "notes.txt.", "LAUNCH", "notes.org", "Cargo.toml"] {
+            assert!(file_may_run(&write(name, desktop), Os::Linux), "{name}");
+        }
+        let script = write("run.txt", "#!/bin/sh\nx\n");
+        for os in [Os::Linux, Os::MacOs, Os::Windows] {
+            assert!(file_may_run(&write("x.desktop", "text\n"), os), "{os:?}");
+            assert!(file_may_run(&write("x.kdelnk", "text\n"), os), "{os:?}");
+            assert!(file_may_run(&script, os), "{os:?}");
+        }
+    }
+
+    /// #201: a link is typed by its own name and its target's content (Qt), so both names must
+    /// be documents to skip the sniff.
+    #[cfg(unix)]
+    #[test]
+    fn a_links_name_and_targets_name_both_count() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let desktop = "[Desktop Entry]\nExec=x\n";
+        for target in ["LAUNCH", "notes.txt", "b.txt"] {
+            std::fs::write(dir.path().join(target), desktop).unwrap();
+        }
+        let link = |name: &str, target: &str| {
+            let path = dir.path().join(name);
+            std::os::unix::fs::symlink(target, &path).unwrap();
+            path
+        };
+        assert!(file_may_run(&link("doc.txt", "LAUNCH"), Os::Linux));
+        assert!(file_may_run(&link("LINK", "notes.txt"), Os::Linux));
+        assert!(!file_may_run(&link("a.md", "b.txt"), Os::Linux));
     }
 
     #[cfg(unix)]
