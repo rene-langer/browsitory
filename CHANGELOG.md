@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Windows walker
+
+- Fixed (Windows): undo, redo and discards no longer fail with "Access is denied" on read-only
+  files in the working tree (#194).
+- Windows: every file and folder of a working-tree read, write or delete is opened through the
+  folder Browsitory already holds, so on a local drive a folder swapped for a junction or
+  symbolic link at that moment can't make Browsitory open a file in the link's target, briefly
+  create one there, or contact a network share it points to (#193).
+
 ### Security follow-ups
 
 - Fixed: Mark resolved stages exactly the content it checked for conflict markers, read without
