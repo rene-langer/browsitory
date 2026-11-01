@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Stash: things in the way
+
+- Fixed: Stash all deleted an ignored file or folder that was in the way of a file or folder it
+  put back, with or without Include untracked files. It now says "Stashing would delete the
+  ignored 'd', which is in the way of the tracked 'd/f'. Move 'd' first." and stashes nothing
+  (#208).
+- Fixed: Stash all could delete a repository nested where the branch has a file of that name,
+  including its history. It now refuses with "Stashing would delete the repository in 'd',
+  which is in the way of the tracked 'd'. Move 'd' first." (#211).
+- Fixed: Stash all with Include untracked files deleted a repository inside an untracked folder
+  (for example `vendor/lib` in a new `vendor/` folder), including its history. It now keeps the
+  repository and stashes the folder's other untracked files, as `git stash -u` does (#211).
+- Fixed: Stash all with Include untracked files deleted ignored files inside an untracked
+  folder (for example `vendor/x.o`); it now keeps them, as `git stash -u` does (#208).
+- Fixed: Stash all overwrote an edited file that had been removed from the index and then
+  ignored (for example `.env` after `git rm --cached .env`, or a whole `build/` folder after
+  `git rm -r --cached build`), and Pop deleted it or was refused. It now says "Stashing would
+  overwrite the ignored '.env' with its committed version. Commit the removal of '.env' first,
+  or move it." and stashes nothing (#208).
+- Fixed: applying or popping a stash whose untracked files sit in a folder that replaced a
+  tracked file reported success, left a "d~Updated upstream" file, and Pop dropped the stash.
+  It now says "This stash can't be applied here: its untracked file 'd/x' needs a folder where
+  'd' is tracked. Commit the deletion of 'd' first, then apply it; the stash is kept." (#206).
+
 ### Worktree add
 
 - Creating a worktree in a folder that doesn't exist yet now creates the missing folders, as git

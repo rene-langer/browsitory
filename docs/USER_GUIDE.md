@@ -523,6 +523,31 @@ staged one), so it refuses instead ("Stashing would delete the untracked file 'd
 the way of 'd/f'. Turn on Include untracked files, or move 'd' first."). Where names ignore case
 (`core.ignorecase`), `docs` counts as in the way of `Docs/f`.
 
+Ignored files and repositories nested in the worktree are never stashed. If one is in the way of
+a file or folder that stashing puts back, **Stash all** would delete it, as git does. So it
+refuses, with or without **Include untracked files**, and stashes nothing: "Stashing would delete
+the ignored 'd', which is in the way of the tracked 'd/f'. Move 'd' first." or "Stashing would
+delete the repository in 'd', which is in the way of the tracked 'd'. Move 'd' first." Ignored
+files and repositories elsewhere don't matter. A repository inside an untracked folder
+(`vendor/lib` in a new `vendor/`) stays where it is, with its history, as with
+`git stash -u`: **Stash all** sets aside the folder's other untracked files only. Ignored files
+in an untracked folder stay too. In that case Stash all works like **Stash file…** on every
+change, so it also refuses what that refuses. For example, a folder that replaced a tracked file
+gets "Can't stash 'd': it was a file and is now a directory. Commit or move its contents first."
+A file or folder you removed from the index and then ignored (`.env` after
+`git rm --cached .env`, or `build/` after `git rm -r --cached build`) isn't stashed, and
+stashing would overwrite it with the committed version. So **Stash all** refuses: "Stashing would
+overwrite the ignored '.env' with its committed version. Commit the removal of '.env' first, or
+move it."
+
+When a folder replaced a tracked file (`d/x` where the file `d` was), **Stash all** with
+untracked files stashes `d/x` and the deletion of `d`, and puts the file `d` back. Browsitory
+can't apply such a stash while `d` is a tracked file, and neither can `git stash pop`. Apply and
+Pop say "This stash can't be applied here: its untracked file 'd/x' needs a folder where 'd' is
+tracked. Commit the deletion of 'd' first, then apply it; the stash is kept." The same
+applies when a file `d` was committed after the stash was made. Once the deletion of `d` is
+committed, the stash applies.
+
 On macOS and Windows, where `D` and `d` name the same file, a commit that holds a symbolic link
 and a folder whose names differ only in case (`D` and `d/x`) can't be checked out safely:
 switching to it, merging, pulling, cherry-picking, rebasing, applying a stash, resetting,
