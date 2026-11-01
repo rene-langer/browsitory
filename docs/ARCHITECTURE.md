@@ -209,8 +209,9 @@ sidecar runs each request on its own thread and is unaffected.
 each queued round trip used to hold one of its threads until the serial worker replied: a long
 hook plus repeated refreshes on one repository could fill the pool, and every other
 repository's commands then queued behind it until the hook ended. So `call` first awaits the
-repository's gate (`AppState`'s per-path `tauri::async_runtime::Mutex<()>`, created by
-`repo_worker` on first use and dropped by `close_repo`) and only then takes a blocking thread.
+repository's gate (`AppState`'s per-repository `tauri::async_runtime::Mutex<()>`, keyed by
+the registry's repository key, created by `repo_worker` on first use and dropped by
+`close_repo` with the worker) and only then takes a blocking thread.
 The guard moves into the blocking closure, so a dropped command future can't release the gate
 while its round trip still runs. The worker runs one command at a time, so waiting at the gate
 instead of in the worker's queue loses little; waiting calls are parked tasks, not threads, and
@@ -221,6 +222,28 @@ on the gate. What must not wait behind the worker goes through the ungated `sign
 before it waits for the gate (`WorkerHandle::claim_search_generation`), so a cancel or a newer
 search also cancels a search still waiting there; and the stored work tree path
 (`tools::workdir_of`) behind Open in editor, Reveal and Open terminal.
+
+**One worker per repository, whatever the spelling (#223).** Commands name a repository by the
+path string the frontend sent, and one repository has many spellings: a trailing slash, a
+subfolder, `..`, a symbolic link, another letter case on Windows and macOS. A worktree's Open
+button, for example, opens the main worktree under `list_worktrees`' path, which can differ
+from the tab's. Keyed by that raw string, each spelling got its own worker (and gate), so two
+commands against one repository could run at the same time. `WorkerRegistry`
+(`crates/repo-service/src/worker/registry.rs`), shared by `AppState` and the sidecar's `Repos`,
+keys workers by `repo_key`: the discovered work tree root (the git folder for a bare
+repository), canonicalized, with trailing separators trimmed if that fails. A linked worktree
+has its own root and so its own worker. `open` always recomputes the key and records the
+spelling as an alias; `get` only reads the aliases (no file system access per command), so a
+spelling that was never opened is "repo not open". `close` forgets one alias and drops the
+worker only when no alias still names its key; the Tauri app then drops the gate too, under
+the registry's lock (`close_with`/`get_with`; lock order registry → gates). `open` keeps the
+former `ensure_worker`'s rules: a dead worker is evicted and respawned, and the spawn runs
+unlocked.
+Everything else keeps the caller's spelling: hook and transfer events, recent repositories, open
+tabs and per-repository settings, so two spellings still make two tabs. A repository renamed
+while open keeps its alias until it is closed. The registry is per process: two VSCode windows
+run two sidecars, so one repository still gets one worker per window (only the undo lock works
+across processes).
 
 ## Undo stack
 
