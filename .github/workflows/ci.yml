@@ -367,6 +367,23 @@ jobs:
       - name: Typecheck e2e specs
         working-directory: e2e
         run: pnpm typecheck
+      - name: "TEMPORARY (#182 T7): session start under candidate environments"
+        working-directory: e2e
+        continue-on-error: true
+        run: |
+          specs="--spec specs/first-flow.spec.ts --spec specs/undo.spec.ts --spec specs/commit-search.spec.ts"
+          for candidate in BASELINE=1 NO_AT_BRIDGE=1 GTK_USE_PORTAL=0 WEBKIT_DISABLE_COMPOSITING_MODE=1; do
+            echo "=== T7 candidate: $candidate"
+            env "$candidate" xvfb-run --auto-servernum pnpm exec wdio run wdio.conf.ts $specs 2>&1 \
+              | grep -E '\[e2e\]|passing|failing|Spec Files' || true
+          done
+          if command -v dbus-run-session >/dev/null; then
+            echo "=== T7 candidate: dbus-run-session"
+            dbus-run-session -- xvfb-run --auto-servernum pnpm exec wdio run wdio.conf.ts $specs 2>&1 \
+              | grep -E '\[e2e\]|passing|failing|Spec Files' || true
+          else
+            echo "=== T7 candidate: dbus-run-session not installed"
+          fi
       - name: Run E2E suite
         working-directory: e2e
         # wdio.conf.ts spawns/reaps `tauri-driver` itself around the session (the pattern from
