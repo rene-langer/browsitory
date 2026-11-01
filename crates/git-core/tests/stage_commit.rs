@@ -615,3 +615,90 @@ fn staging_a_conflicted_file_now_a_folder_resolves_it_as_deleted() {
     assert!(!index.has_conflicts());
     assert!(index.get_path(std::path::Path::new("d"), 0).is_none());
 }
+
+/// An index entry for `path` at `stage` (0–3) holding `content`.
+fn index_entry_at(
+    repo: &git2::Repository,
+    path: &str,
+    stage: u16,
+    content: &str,
+) -> git2::IndexEntry {
+    git2::IndexEntry {
+        ctime: git2::IndexTime::new(0, 0),
+        mtime: git2::IndexTime::new(0, 0),
+        dev: 0,
+        ino: 0,
+        mode: 0o100644,
+        uid: 0,
+        gid: 0,
+        file_size: content.len() as u32,
+        id: repo.blob(content.as_bytes()).unwrap(),
+        flags: (path.len() as u16 & 0x0fff) | (stage << 12),
+        flags_extended: 0,
+        path: path.as_bytes().to_vec(),
+    }
+}
+
+/// HEAD has the file `d`; a merge left the index with `d` gone and conflict entries for `d/f`
+/// (stages 1–3), plus `d/g` at stage 0 when `staged_sibling` (#187).
+fn conflicts_below_a_committed_file(staged_sibling: bool) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "d", "base\n");
+    common::commit_all(&repo, "base");
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("d")).unwrap();
+    for (stage, content) in [(1, "base f\n"), (2, "ours f\n"), (3, "theirs f\n")] {
+        index
+            .add(&index_entry_at(&repo, "d/f", stage, content))
+            .unwrap();
+    }
+    if staged_sibling {
+        index.add(&index_entry_at(&repo, "d/g", 0, "g\n")).unwrap();
+    }
+    index.write().unwrap();
+    std::fs::remove_file(dir.path().join("d")).unwrap();
+    write_file(dir.path(), "d/f", "<<<<<<< ours\n");
+    if staged_sibling {
+        write_file(dir.path(), "d/g", "g\n");
+    }
+    (dir, repo)
+}
+
+fn assert_refused_with_conflicts_below(repo: &git2::Repository, path: &str, index_before: &[u8]) {
+    let error = unstage_file(repo, path).unwrap_err();
+    assert!(
+        matches!(error, git_core::stage::StageError::ConflictsBelow(ref unit) if unit == "d"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "Can't unstage 'd': the merge left conflicts in it. Resolve them first."
+    );
+    assert_eq!(
+        std::fs::read(repo.path().join("index")).unwrap(),
+        index_before,
+        "unstaging {path} changed the index"
+    );
+}
+
+#[test]
+fn unstaging_a_file_with_only_conflict_entries_below_it_is_refused() {
+    let (_dir, repo) = conflicts_below_a_committed_file(false);
+    let index_before = std::fs::read(repo.path().join("index")).unwrap();
+
+    assert_refused_with_conflicts_below(&repo, "d", &index_before);
+    assert_refused_with_conflicts_below(&repo, "d/f", &index_before);
+}
+
+#[test]
+fn unstaging_a_pair_with_a_staged_file_and_conflicts_below_keeps_the_staged_file() {
+    let (_dir, repo) = conflicts_below_a_committed_file(true);
+    let index_before = std::fs::read(repo.path().join("index")).unwrap();
+
+    assert_refused_with_conflicts_below(&repo, "d", &index_before);
+    assert_refused_with_conflicts_below(&repo, "d/g", &index_before);
+
+    let index = repo.index().unwrap();
+    assert!(index.get_path(std::path::Path::new("d/g"), 0).is_some());
+    assert!(index.has_conflicts());
+}

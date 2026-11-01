@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Folder/file swaps
+
+- Fixed: unstaging a file whose folder a merge left conflicts in failed with "invalid entry
+  mode" and could unstage other files below it; it now says "Can't unstage 'd': the merge left
+  conflicts in it. Resolve them first." and changes nothing (#187).
+
 ### Lock and security follow-ups
 
 - Fixed: with the desktop app and the VSCode extension open on one repository, Undo, Redo,

@@ -50,6 +50,10 @@ pub enum StageError {
         failed: Vec<String>,
         message: String,
     },
+    /// Unstaging the folder/file pair rooted at the path would rewrite conflict entries a merge
+    /// left at or below it; libgit2 can't reset those, and dropping them loses a side (#187).
+    #[error("Can't unstage '{0}': the merge left conflicts in it. Resolve them first.")]
+    ConflictsBelow(String),
     #[error("failed to update the working tree: {0}")]
     Io(#[from] std::io::Error),
     #[error("failed to read status: {0}")]
@@ -404,15 +408,34 @@ pub fn unstage_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         }
     }
     if root.is_some() {
+        // A merge's conflict entries at or below the pair can't be reset ("invalid entry mode")
+        // and dropping them would lose a side of the conflict: refuse before changing anything.
+        if has_conflict_entries_at_or_below(&index, &unit) {
+            return Err(StageError::ConflictsBelow(unit));
+        }
         // libgit2 can't reset a root whose index entries sit on the other side of the
         // file/folder swap (re-adding `l` silently drops `l/a`, then "index does not contain
-        // l/a"), so the pair's entries go first and the reset only adds HEAD's back.
+        // l/a"), so the pair's entries go first and the reset only adds HEAD's back. The
+        // removals stay in memory: `reset_default` works on this same repository index and
+        // writes it once, so a failed reset leaves `.git/index` as it was.
         let _ = index.remove_path(Path::new(&unit));
         index.remove_dir(Path::new(&unit), 0)?;
-        index.write()?;
     }
-    repo.reset_default(target, paths.iter())?;
+    if let Err(error) = repo.reset_default(target, paths.iter()) {
+        // Drop the in-memory removals so the shared index object matches the file again.
+        let _ = index.read(true);
+        return Err(error.into());
+    }
     Ok(())
+}
+
+/// True when the index has a conflict entry (stage 1–3) at `path` or below the folder `path`.
+fn has_conflict_entries_at_or_below(index: &git2::Index, path: &str) -> bool {
+    let below = format!("{path}/");
+    index.iter().any(|entry| {
+        (entry.flags >> 12) & 0x3 != 0
+            && (entry.path == path.as_bytes() || entry.path.starts_with(below.as_bytes()))
+    })
 }
 
 /// The root of the folder/link pair `path` belongs to, if any: the outermost of `path`'s proper
