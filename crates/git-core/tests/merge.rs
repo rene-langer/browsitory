@@ -376,7 +376,10 @@ fn mark_resolved_stages_the_content_it_checked() {
         .unwrap();
     assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
     assert!(!repo.index().unwrap().has_conflicts());
-    assert_eq!(staged(&repo, "shared.txt"), (0o100644, b"resolved\n".to_vec()));
+    assert_eq!(
+        staged(&repo, "shared.txt"),
+        (0o100644, b"resolved\n".to_vec())
+    );
 }
 
 /// #199: a FIFO swapped in after the check is never opened for reading, so the worker can't
@@ -393,12 +396,13 @@ fn mark_resolved_does_not_block_on_a_fifo_swapped_in_after_the_check() {
     let swap = fifo.clone();
     std::thread::spawn(move || {
         let repo = git2::Repository::open(&path).unwrap();
-        let result = git_core::merge::mark_resolved_with_pause(&repo, "shared.txt", false, &mut || {
-            std::fs::remove_file(&swap).unwrap();
-            let c_path = std::ffi::CString::new(swap.to_str().unwrap()).unwrap();
-            // SAFETY: a valid NUL-terminated path.
-            assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
-        });
+        let result =
+            git_core::merge::mark_resolved_with_pause(&repo, "shared.txt", false, &mut || {
+                std::fs::remove_file(&swap).unwrap();
+                let c_path = std::ffi::CString::new(swap.to_str().unwrap()).unwrap();
+                // SAFETY: a valid NUL-terminated path.
+                assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
+            });
         let _ = tx.send(result.map_err(|error| error.to_string()));
     });
     let finished = rx.recv_timeout(std::time::Duration::from_secs(5));
@@ -412,7 +416,10 @@ fn mark_resolved_does_not_block_on_a_fifo_swapped_in_after_the_check() {
         "mark_resolved blocked on a FIFO swapped in after the check"
     );
     let repo = git2::Repository::open(dir.path()).unwrap();
-    assert_eq!(staged(&repo, "shared.txt"), (0o100644, b"resolved\n".to_vec()));
+    assert_eq!(
+        staged(&repo, "shared.txt"),
+        (0o100644, b"resolved\n".to_vec())
+    );
 }
 
 /// #199: a link swapped in after the check isn't staged in place of the file that was checked.
@@ -431,7 +438,10 @@ fn mark_resolved_does_not_stage_a_link_swapped_in_after_the_check() {
         })
         .unwrap();
     assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
-    assert_eq!(staged(&repo, "shared.txt"), (0o100644, b"resolved\n".to_vec()));
+    assert_eq!(
+        staged(&repo, "shared.txt"),
+        (0o100644, b"resolved\n".to_vec())
+    );
 }
 
 /// Staging what was read keeps `git add`'s clean filters (here `core.autocrlf`).
@@ -443,7 +453,10 @@ fn mark_resolved_applies_the_clean_filter() {
         .set_bool("core.autocrlf", true)
         .unwrap();
     write_file(dir.path(), "shared.txt", "a\r\nb\r\n");
-    let repo = { drop(repo); git2::Repository::open(dir.path()).unwrap() };
+    let repo = {
+        drop(repo);
+        git2::Repository::open(dir.path()).unwrap()
+    };
     let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
     assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
     assert_eq!(staged(&repo, "shared.txt").1, b"a\nb\n");
@@ -454,14 +467,20 @@ fn mark_resolved_applies_the_clean_filter() {
 fn mark_resolved_keeps_the_exec_bit() {
     use std::os::unix::fs::PermissionsExt;
     let (dir, repo) = make_conflicted_repo();
-    repo.config().unwrap().set_bool("core.filemode", true).unwrap();
+    repo.config()
+        .unwrap()
+        .set_bool("core.filemode", true)
+        .unwrap();
     write_file(dir.path(), "shared.txt", "resolved\n");
     std::fs::set_permissions(
         dir.path().join("shared.txt"),
         std::fs::Permissions::from_mode(0o755),
     )
     .unwrap();
-    let repo = { drop(repo); git2::Repository::open(dir.path()).unwrap() };
+    let repo = {
+        drop(repo);
+        git2::Repository::open(dir.path()).unwrap()
+    };
     git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
     assert_eq!(staged(&repo, "shared.txt").0, 0o100755);
 }
@@ -472,7 +491,10 @@ fn mark_resolved_keeps_the_exec_bit() {
 fn mark_resolved_keeps_ours_mode_without_filemode() {
     use std::os::unix::fs::PermissionsExt;
     let (dir, repo) = init_repo();
-    repo.config().unwrap().set_bool("core.filemode", true).unwrap();
+    repo.config()
+        .unwrap()
+        .set_bool("core.filemode", true)
+        .unwrap();
     let file = dir.path().join("shared.txt");
     write_file(dir.path(), "shared.txt", "base\n");
     commit_all(&repo, "base");
@@ -488,12 +510,21 @@ fn mark_resolved_keeps_ours_mode_without_filemode() {
     commit_all(&repo, "main");
     git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
         .unwrap();
-    repo.config().unwrap().set_bool("core.filemode", false).unwrap();
+    repo.config()
+        .unwrap()
+        .set_bool("core.filemode", false)
+        .unwrap();
     write_file(dir.path(), "shared.txt", "resolved\n");
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
-    let repo = { drop(repo); git2::Repository::open(dir.path()).unwrap() };
+    let repo = {
+        drop(repo);
+        git2::Repository::open(dir.path()).unwrap()
+    };
     git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
-    assert_eq!(staged(&repo, "shared.txt"), (0o100755, b"resolved\n".to_vec()));
+    assert_eq!(
+        staged(&repo, "shared.txt"),
+        (0o100755, b"resolved\n".to_vec())
+    );
 }
 
 /// Like `git add`, Mark resolved keeps the conflict as resolve-undo data (`git checkout -m`).
@@ -504,6 +535,11 @@ fn mark_resolved_records_resolve_undo() {
     git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
     let index = std::fs::read(repo.path().join("index")).unwrap();
     assert!(index.windows(4).any(|window| window == b"REUC"));
+    // The entry's zeroed stat data only makes status re-hash the file: no work tree change.
+    let status = repo
+        .status_file(std::path::Path::new("shared.txt"))
+        .unwrap();
+    assert_eq!(status, git2::Status::INDEX_MODIFIED);
 }
 
 /// A conflicted file the user replaced with a link is staged as that link, as `git add` does.
@@ -516,7 +552,10 @@ fn mark_resolved_stages_a_link_as_a_link() {
     std::os::unix::fs::symlink("elsewhere.txt", &file).unwrap();
     let outcome = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
     assert_eq!(outcome, git_core::merge::MarkResolvedOutcome::Resolved);
-    assert_eq!(staged(&repo, "shared.txt"), (0o120000, b"elsewhere.txt".to_vec()));
+    assert_eq!(
+        staged(&repo, "shared.txt"),
+        (0o120000, b"elsewhere.txt".to_vec())
+    );
 }
 
 #[test]

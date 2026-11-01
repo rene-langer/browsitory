@@ -475,8 +475,19 @@ pub fn mark_resolved(
     mark_resolved_with_pause(repo, path, force, &mut || {})
 }
 
-/// `mark_resolved` with a test seam: `after_check` runs between the checks and the staging, so a
-/// test can swap the file in that instant (#199).
+/// `mark_resolved` with a test seam: `after_check` runs between the marker check and the
+/// staging, so a test can swap the file in that instant (#199).
+///
+/// The file is read once, through `undo::read_worktree_file` (no link followed at any
+/// component, a FIFO never opened for reading), and exactly those bytes are checked and staged.
+/// `Index::add_path` isn't used for a file or link: libgit2 would `lstat` and open the path a
+/// second time, following a link and blocking on a FIFO swapped in meanwhile, and stage content
+/// that was never checked (#199). The blob goes through `blob_writer` with the path as hint, so
+/// the same clean filters (`core.autocrlf`, `.gitattributes`) apply as with `add_path`;
+/// `remove_path` moves the conflict stages to resolve-undo (REUC), as `add_path` does. The new
+/// entry has zeroed stat data, so status re-hashes the file once. A folder at the path (a nested
+/// repository, staged as a gitlink) still goes through `add_path`: a FIFO swapped for it in that
+/// instant is a residual.
 #[doc(hidden)]
 pub fn mark_resolved_with_pause(
     repo: &Repository,
@@ -491,35 +502,71 @@ pub fn mark_resolved_with_pause(
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     ensure_inside_workdir(workdir, path)?;
     let full = workdir.join(path);
-    let meta = std::fs::symlink_metadata(&full).ok();
-    // A FIFO, socket or device would block libgit2's read of it while staging (git refuses to
-    // add one too). A swap between this check and the staging is a residual (#165).
-    if let Some(kind) = meta.as_ref().map(std::fs::Metadata::file_type) {
+    // A FIFO, socket or device: git refuses to add one too (#165).
+    if let Ok(meta) = std::fs::symlink_metadata(&full) {
+        let kind = meta.file_type();
         if !kind.is_file() && !kind.is_symlink() && !kind.is_dir() {
             return Err(MergeError::NotAFile(path.to_string()));
         }
     }
-    if !force && meta.as_ref().is_some_and(|meta| meta.is_file()) {
-        // Read through the opened handle (#165): no link is followed and a FIFO swapped in
-        // after the check above isn't opened for reading. `None` (no longer a regular file)
-        // skips the check, as for a non-file.
-        if let Some(mut file) = crate::worktree_guard::open_beneath(workdir, Path::new(path))? {
-            let mut content = Vec::new();
-            std::io::Read::read_to_end(&mut file, &mut content)?;
-            if has_conflict_markers(&content) {
+    let mut index = repo.index()?;
+    // The mode git would keep when `core.filemode`/`core.symlinks` is off: the stage-0 entry's,
+    // else "ours"', as libgit2's `index_merge_mode`.
+    let previous_mode = index
+        .get_path(Path::new(path), 0)
+        .or_else(|| index.get_path(Path::new(path), 2))
+        .map(|entry| entry.mode);
+    let config = crate::undo::worktree_config(repo).map_err(undo_error)?;
+    match crate::undo::read_worktree_file(workdir, path, &config, previous_mode)? {
+        Some((bytes, mode)) => {
+            if !force && mode != crate::undo::MODE_LINK && has_conflict_markers(&bytes) {
                 return Ok(MarkResolvedOutcome::MarkersRemain);
+            }
+            after_check();
+            let id = staged_blob(repo, path, &bytes, mode)?;
+            index.remove_path(Path::new(path))?;
+            index.add(&crate::undo::index_entry(path, id, mode))?;
+        }
+        None => {
+            after_check();
+            match std::fs::symlink_metadata(&full) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    index.remove_path(Path::new(path))?;
+                }
+                Err(error) => return Err(error.into()),
+                Ok(meta) if meta.is_dir() => index.add_path(Path::new(path))?,
+                // A FIFO, socket or device, or a file `read_beneath` refused because a folder
+                // on its path became a link.
+                Ok(_) => return Err(MergeError::NotAFile(path.to_string())),
             }
         }
     }
-    after_check();
-    let mut index = repo.index()?;
-    if meta.is_some() {
-        index.add_path(Path::new(path))?;
-    } else {
-        index.remove_path(Path::new(path))?;
-    }
     index.write()?;
     Ok(MarkResolvedOutcome::Resolved)
+}
+
+/// The blob `git add` would store for `bytes` read from `path`: a link's target as is, a file's
+/// content through the clean filters configured for `path`.
+fn staged_blob(
+    repo: &Repository,
+    path: &str,
+    bytes: &[u8],
+    mode: u32,
+) -> Result<git2::Oid, MergeError> {
+    if mode == crate::undo::MODE_LINK {
+        return Ok(repo.blob(bytes)?);
+    }
+    let mut writer = repo.blob_writer(Some(Path::new(path)))?;
+    std::io::Write::write_all(&mut writer, bytes)?;
+    Ok(writer.commit()?)
+}
+
+fn undo_error(error: crate::undo::UndoError) -> MergeError {
+    match error {
+        crate::undo::UndoError::Git(error) => MergeError::Git(error),
+        crate::undo::UndoError::Io(error) => MergeError::Io(error),
+        other => MergeError::Git(git2::Error::from_str(&other.to_string())),
+    }
 }
 
 /// A line starting with `<<<<<<<` or `>>>>>>>` followed by a space or the line end. `=======`
