@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { clickInPage, waitUntilGoneInPage } from "../support/dom";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "line-fixture.txt";
@@ -45,17 +46,17 @@ describe("Browsitory line staging and discard", () => {
   });
 
   it("discards an untracked file through the file menu", async () => {
-    const actions = await $(`button[aria-label="Actions for ${UNTRACKED}"]`);
-    await actions.waitForExist({ timeout: 10000 });
-    await browser.execute((el) => (el as HTMLElement).click(), actions);
-    await browser.execute((el) => (el as HTMLElement).click(), await $("button=Discard changes…"));
-    await browser.execute((el) => (el as HTMLElement).click(), await $("button=Delete file"));
+    // Menu items mount and unmount as the menu and dialog open and close; look them up and
+    // click them inside the page, so none can go stale between the two (#182).
+    await clickInPage(`button[aria-label="Actions for ${UNTRACKED}"]`);
+    await clickInPage("button", "Discard changes…");
+    await clickInPage("button", "Delete file");
     await browser.waitUntil(() => !fs.existsSync(path.join(E2E_REPO_PATH, UNTRACKED)), {
       timeout: 10000,
       timeoutMsg: "expected the untracked file to be deleted",
     });
-    // waitForExist({ reverse: true }) re-queries until the row is gone; `not.toBeExisting()`
-    // can hit a stale element when the row unmounts mid-lookup (#145).
-    await $(`span=${UNTRACKED} (New)`).waitForExist({ reverse: true, timeout: 10000 });
+    // Even waitForExist({ reverse: true }) hit a stale element when the row unmounted
+    // mid-lookup (#145, #182); poll inside the page instead.
+    await waitUntilGoneInPage("span", `${UNTRACKED} (New)`);
   });
 });

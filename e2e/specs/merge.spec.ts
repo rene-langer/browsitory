@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { waitUntilGoneInPage } from "../support/dom";
+import { waitForMergeCommit } from "../support/git";
 import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -109,8 +111,8 @@ describe("Browsitory merge with conflict resolution", () => {
     await commitButton.waitForEnabled({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
-    const mergeCommitEntry = await $("li*=e2e-merge-feature");
-    await mergeCommitEntry.waitForExist({ timeout: 10000 });
+    // Not a `li*=<branch>` row: the sidebar's branch row matches before the commit lands (#182).
+    await waitForMergeCommit(E2E_REPO_PATH);
 
     const parentsLine = execFileSync("git", ["rev-list", "--parents", "-n", "1", "HEAD"], {
       cwd: E2E_REPO_PATH,
@@ -194,8 +196,8 @@ describe("Browsitory merge with conflict resolution", () => {
     await commitButton.waitForEnabled({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
-    const mergeCommitEntry = await $("li*=e2e-merge-adddelete-feature");
-    await mergeCommitEntry.waitForExist({ timeout: 10000 });
+    // Not a `li*=<branch>` row: the sidebar's branch row matches before the commit lands (#182).
+    await waitForMergeCommit(E2E_REPO_PATH);
 
     const parentsLine = execFileSync("git", ["rev-list", "--parents", "-n", "1", "HEAD"], {
       cwd: E2E_REPO_PATH,
@@ -269,10 +271,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await abortMergeButton.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), abortMergeButton);
 
-    await browser.waitUntil(
-      async () => !(await $("button=Abort merge").isExisting()),
-      { timeout: 10000 },
-    );
+    await waitUntilGoneInPage("button", "Abort merge");
 
     const headAfterAbort = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: E2E_REPO_PATH,
@@ -286,6 +285,6 @@ describe("Browsitory merge with conflict resolution", () => {
 
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git", "MERGE_HEAD"))).toBe(false);
 
-    await $("span*=abort.txt (Conflicted)").waitForExist({ reverse: true, timeout: 10000 });
+    await waitUntilGoneInPage("span", "abort.txt (Conflicted)", { contains: true });
   });
 });

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { waitUntilGoneInPage } from "../support/dom";
 import { expandSidebarSection } from "../support/sidebar";
 
 // Owns everything it touches: the remote `publish-origin`, the local branch `e2e-publish` and
@@ -137,10 +138,7 @@ describe("Browsitory refs and remotes", () => {
       timeoutMsg: "expected the remote branch and its tracking ref to be deleted",
     });
     // The open remote folder reloads after the refresh, so the row disappears in place.
-    await $(`//button[@aria-label="Show ${REMOTE}/${BRANCH} in graph"]`).waitForExist({
-      reverse: true,
-      timeout: 10000,
-    });
+    await waitUntilGoneInPage(`button[aria-label="Show ${REMOTE}/${BRANCH} in graph"]`);
     // The local branch stays, still configured to track the now-gone remote branch.
     expect(localHas(`refs/heads/${BRANCH}`)).toBe(true);
   });

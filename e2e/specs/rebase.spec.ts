@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { waitUntilGoneInPage } from "../support/dom";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
@@ -118,7 +119,7 @@ describe("Browsitory interactive rebase", () => {
 
     await browser.waitUntil(async () => (await $("li*=e2e: combined rebase commit")).isExisting(), { timeout: 10000 });
     const commitGraphAfter = await $("li*=e2e: combined rebase commit");
-    await $("li*=rebase commit b (to drop)").waitForExist({ reverse: true, timeout: 10000 });
+    await waitUntilGoneInPage("li", "rebase commit b (to drop)", { contains: true });
   });
 
   // Sets up a rebase that pauses on a real conflict: `onto` introduces a file, one commit edits
@@ -193,13 +194,10 @@ describe("Browsitory interactive rebase", () => {
     await continueButton.waitForEnabled({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), continueButton);
 
-    await browser.waitUntil(
-      async () => !(await $("h2*=Rebase in progress").isExisting()),
-      { timeout: 10000 },
-    );
+    await waitUntilGoneInPage("h2", "Rebase in progress", { contains: true });
     const landedEntry = await $("li*=e2e: conflict-resume conflicting change");
     await landedEntry.waitForExist({ timeout: 10000 });
-    await $("li*=e2e: conflict-resume change on top").waitForExist({ reverse: true, timeout: 10000 });
+    await waitUntilGoneInPage("li", "e2e: conflict-resume change on top", { contains: true });
 
     const headMessage = execFileSync("git", ["log", "-1", "--format=%s"], {
       cwd: E2E_REPO_PATH,
@@ -263,10 +261,7 @@ describe("Browsitory interactive rebase", () => {
     const abortButton = await $("button=Abort rebase");
     await abortButton.click();
 
-    await browser.waitUntil(
-      async () => !(await $("h2*=Rebase in progress").isExisting()),
-      { timeout: 10000 },
-    );
+    await waitUntilGoneInPage("h2", "Rebase in progress", { contains: true });
 
     const headAfterAbort = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: E2E_REPO_PATH,
@@ -333,7 +328,7 @@ describe("Browsitory interactive rebase", () => {
       expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git/browsitory/rebase.json"))).toBe(false);
 
       await (await $("button=Cancel")).click();
-      await $("button=Start rebase").waitForExist({ reverse: true, timeout: 10000 });
+      await waitUntilGoneInPage("button", "Start rebase");
     } finally {
       execFileSync("git", ["checkout", "--", "dirty-tracked.txt"], { cwd: E2E_REPO_PATH });
     }
@@ -375,11 +370,8 @@ describe("Browsitory interactive rebase", () => {
 
     await $("button=Start rebase").click();
 
-    await browser.waitUntil(
-      async () => !(await $("li*=e2e: multi 1 (drop)").isExisting()),
-      { timeout: 10000 },
-    );
-    await $("li*=e2e: multi 3 (drop)").waitForExist({ reverse: true, timeout: 10000 });
+    await waitUntilGoneInPage("li", "e2e: multi 1 (drop)", { contains: true });
+    await waitUntilGoneInPage("li", "e2e: multi 3 (drop)", { contains: true });
     await expect($("li*=e2e: multi 2 (keep)")).toBeExisting();
     await expect($("li*=e2e: multi 4 (keep)")).toBeExisting();
   });

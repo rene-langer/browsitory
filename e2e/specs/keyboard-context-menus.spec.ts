@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { waitUntilGoneInPage } from "../support/dom";
 import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -65,7 +66,7 @@ describe("Browsitory keyboard context menus", () => {
     expect(await browser.execute(() => document.activeElement?.textContent)).not.toBe("Rename");
 
     await browser.keys(["Escape"]);
-    await menu.waitForExist({ reverse: true, timeout: 10000 });
+    await waitUntilGoneInPage("[role='menu']");
     expect(await browser.execute((el) => document.activeElement === (el as Element), row)).toBe(true);
   });
 
@@ -83,7 +84,7 @@ describe("Browsitory keyboard context menus", () => {
     expect(await browser.execute(() => document.activeElement?.getAttribute("role"))).toBe("menuitem");
 
     await browser.keys(["Escape"]);
-    await menu.waitForExist({ reverse: true, timeout: 10000 });
+    await waitUntilGoneInPage("[role='menu']");
     expect(await browser.execute((el) => document.activeElement === (el as Element), header)).toBe(true);
   });
 
@@ -92,6 +93,6 @@ describe("Browsitory keyboard context menus", () => {
     const dialog = await $(`dialog[aria-label='Edit ${REMOTE_NAME}']`);
     await dialog.waitForExist({ timeout: 10000 });
     await browser.keys(["Escape"]);
-    await dialog.waitForExist({ reverse: true, timeout: 10000 });
+    await waitUntilGoneInPage(`dialog[aria-label='Edit ${REMOTE_NAME}']`);
   });
 });
