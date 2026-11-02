@@ -20,6 +20,9 @@ pub enum CommitError {
     NothingToAmend,
     #[error("Finish or abort the current merge/cherry-pick/revert/rebase first.")]
     OperationInProgress,
+    /// A `git rebase` or `git am` started in a terminal isn't finished (#263).
+    #[error(transparent)]
+    TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
     #[error("{0}")]
     Sign(#[from] crate::signing::SignError),
     #[error("{0}")]
@@ -619,7 +622,7 @@ pub fn commit_with(
     // end of this function's scope, not just its last use — so it (and everything borrowed
     // alongside it) is confined to the block below, ending before `mergehead_foreach` could need `&mut`
     // again.
-    let mut is_merging = repo.state() == git2::RepositoryState::Merge;
+    let mut is_merging = merging_now(repo);
     let mut merge_parent_ids = if is_merging {
         merge_heads(repo)?
     } else {
@@ -643,10 +646,7 @@ pub fn commit_with(
         clear_commit_state(repo).map_err(|_| CommitError::LeftoverPickState)?;
     }
 
-    let pick_author = if matches!(
-        repo.state(),
-        git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence
-    ) {
+    let pick_author = if picking_now(repo) {
         repo.find_reference("CHERRY_PICK_HEAD")
             .ok()
             .and_then(|r| r.peel_to_commit().ok())
@@ -674,7 +674,7 @@ pub fn commit_with(
     // message file of the old one.
     let merge_changed = |repo: &mut git2::Repository| -> Result<bool, CommitError> {
         Ok(is_merging
-            && (repo.state() != git2::RepositoryState::Merge
+            && (!merging_now(repo)
                 || head_commit_id(repo) != head_before
                 || merge_heads(repo)? != merge_parent_ids))
     };
@@ -726,13 +726,7 @@ pub fn commit_with(
     // Cherry-pick/revert leave CHERRY_PICK_HEAD/REVERT_HEAD + MERGE_MSG behind on conflict; the
     // commit that lands the resolved result is single-parent (HEAD only — they are not merges),
     // but the state files must still be cleared or `repo.state()` stays non-Clean.
-    let finishes_pick = matches!(
-        repo.state(),
-        git2::RepositoryState::CherryPick
-            | git2::RepositoryState::CherryPickSequence
-            | git2::RepositoryState::Revert
-            | git2::RepositoryState::RevertSequence
-    );
+    let finishes_pick = picking_now(repo) || reverting_now(repo);
     // The commit landed: nothing after this point fails it (#183).
     if is_merging || finishes_pick {
         cleanup_after_commit(repo);
@@ -751,6 +745,35 @@ pub fn commit_with(
         commit_id: oid.to_string(),
         merge_hooks,
     })
+}
+
+/// A merge is paused for the commit to conclude: libgit2's `Merge` state, or the MERGE_HEAD git
+/// writes for a merge step of a terminal `rebase --rebase-merges`, which libgit2 reports as the
+/// rebase. `git commit` makes the merge commit in both (#263 review).
+fn merging_now(repo: &git2::Repository) -> bool {
+    repo.state() == git2::RepositoryState::Merge
+        || (crate::repo::terminal_rebase(repo).is_some() && repo.path().join("MERGE_HEAD").exists())
+}
+
+/// A cherry-pick is paused for the commit to conclude: libgit2's `CherryPick` states, or the
+/// CHERRY_PICK_HEAD of a terminal rebase's step (an empty pick during `rebase -i`). `git commit`
+/// keeps the picked commit's author in both (#263 review).
+fn picking_now(repo: &git2::Repository) -> bool {
+    matches!(
+        repo.state(),
+        git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence
+    ) || (crate::repo::terminal_rebase(repo).is_some()
+        && repo.path().join("CHERRY_PICK_HEAD").exists())
+}
+
+/// A revert is paused for the commit to conclude: libgit2's `Revert` states, or a REVERT_HEAD
+/// left by a `git revert` started during a terminal rebase, which libgit2 reports as the rebase.
+/// `git commit` clears it in both (#263 review).
+fn reverting_now(repo: &git2::Repository) -> bool {
+    matches!(
+        repo.state(),
+        git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence
+    ) || (crate::repo::terminal_rebase(repo).is_some() && repo.path().join("REVERT_HEAD").exists())
 }
 
 /// Every one of `merge_heads` is HEAD or in HEAD's history: the merge was already committed.
@@ -818,12 +841,20 @@ fn pick_already_committed(repo: &git2::Repository) -> bool {
 
 /// `MERGE_HEAD`'s commits, in order.
 fn merge_heads(repo: &mut git2::Repository) -> Result<Vec<git2::Oid>, git2::Error> {
-    let mut heads = Vec::new();
-    repo.mergehead_foreach(|oid| {
-        heads.push(*oid);
-        true
-    })?;
-    Ok(heads)
+    // A terminal `rebase --rebase-merges` writes MERGE_HEAD without a final newline, which
+    // libgit2's `mergehead_foreach` rejects ("no EOL"); git reads it either way (#263 review).
+    let path = repo.path().join("MERGE_HEAD");
+    if std::fs::symlink_metadata(&path).is_err() {
+        let mut heads = Vec::new();
+        repo.mergehead_foreach(|oid| {
+            heads.push(*oid);
+            true
+        })?;
+        return Ok(heads);
+    }
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| git2::Error::from_str(&format!("can't read MERGE_HEAD: {error}")))?;
+    text.split_whitespace().map(git2::Oid::from_str).collect()
 }
 
 fn head_commit_id(repo: &git2::Repository) -> Option<git2::Oid> {
@@ -894,6 +925,7 @@ pub fn amend_head(
         Some(author) => Some(valid_author(author).ok_or(CommitError::InvalidAuthor)?),
         None => None,
     };
+    crate::repo::check_no_terminal_rebase(repo)?;
     if !crate::repo::no_operation(repo) {
         return Err(CommitError::OperationInProgress);
     }

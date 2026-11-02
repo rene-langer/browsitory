@@ -527,6 +527,7 @@ describe("tauriRepoClient rebase wiring", () => {
         rewinds: true,
         commitsToRemove: 1,
       },
+      terminalRebase: { kind: "Rebase", branch: "topic", onto: "def", currentStep: 2, totalSteps: 3 },
     };
     vi.mocked(invoke).mockResolvedValue(head);
     await expect(tauriRepoClient.getHeadInfo("/r")).resolves.toEqual(head);

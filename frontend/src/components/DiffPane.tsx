@@ -524,7 +524,7 @@ export interface CommitHooksControls {
   onCancel: () => void;
 }
 
-const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null };
+const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
 const noop = () => {};
 const noAmend = async () => false;
 
@@ -1229,7 +1229,9 @@ function UncommittedDiffPane({
         <SplitButton
           label="Stash"
           onClick={onSaveStash}
-          disabled={status.length === 0 || rebaseProgress !== null || headInfo.sequence !== null}
+          disabled={
+            status.length === 0 || rebaseProgress !== null || headInfo.sequence !== null || headInfo.terminalRebase !== null
+          }
           menuLabel="More stash options"
           items={[
             { label: "Stash all", onSelect: () => onSaveStash() },
@@ -1279,7 +1281,9 @@ function UncommittedDiffPane({
             }
             // A pending squash merge pre-fills the message too, but there is no merge to abort.
             initialMessage={mergeMessage ?? headInfo.squashMessage ?? undefined}
-            showAbort={mergeMessage !== null}
+            // A terminal rebase's step writes MERGE_MSG (and a merge step MERGE_HEAD) too; only the
+            // terminal ends it (#263).
+            showAbort={mergeMessage !== null && headInfo.terminalRebase === null}
             initialDraft={initialCommitDraft}
             onDraftChange={onCommitDraftChange}
             focusMessage={focusCommitMessage}
@@ -1303,6 +1307,7 @@ function UncommittedDiffPane({
                 headInfo.headId !== null &&
                 headInfo.operation === null &&
                 headInfo.sequence === null &&
+                headInfo.terminalRebase === null &&
                 mergeMessage === null,
               on: amendMode,
               headMessage,

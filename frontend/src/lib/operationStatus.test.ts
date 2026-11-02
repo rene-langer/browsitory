@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RebaseInfo, TerminalSequence } from "../ipc/RepoClient";
+import type { RebaseInfo, TerminalRebase, TerminalSequence } from "../ipc/RepoClient";
 import {
   abortToast,
   conflictReason,
@@ -10,6 +10,9 @@ import {
   sequenceLabel,
   sequenceToast,
   terminalAbortConfirm,
+  terminalRebaseLabel,
+  terminalRebaseReason,
+  terminalRebaseText,
   terminalSequenceLabel,
   terminalSequenceText,
 } from "./operationStatus";
@@ -95,6 +98,41 @@ describe("rebase status text", () => {
     expect(rebaseAbortToast({ restored: false }, null)).toBe(
       "Stopped the rebase. HEAD had moved, so it was left where it is.",
     );
+  });
+
+  describe("a rebase or git am started in a terminal (#263)", () => {
+    const rebase = (overrides: Partial<TerminalRebase> = {}): TerminalRebase => ({
+      kind: "Rebase",
+      branch: "topic",
+      onto: "1a2b3c4d5e6f",
+      currentStep: 2,
+      totalSteps: 3,
+      ...overrides,
+    });
+
+    it("terminalRebaseLabel names the branch and the step when known", () => {
+      expect(terminalRebaseLabel(rebase())).toBe("Rebasing topic, step 2 of 3 (started in a terminal)");
+      expect(terminalRebaseLabel(rebase({ branch: "", currentStep: 0, totalSteps: 0 }))).toBe(
+        "Rebasing (started in a terminal)",
+      );
+      expect(terminalRebaseLabel(rebase({ kind: "Am", branch: "", onto: "", currentStep: 1 }))).toBe(
+        "Applying patches, 1 of 3 (started in a terminal)",
+      );
+    });
+
+    it("terminalRebaseText says to go on in the terminal", () => {
+      expect(terminalRebaseText(rebase(), 0)).toBe(
+        "Continue or abort it there with git rebase --continue or git rebase --abort.",
+      );
+      expect(terminalRebaseText(rebase(), 1)).toBe(
+        "Resolve 1 conflict, then run git rebase --continue in the terminal.",
+      );
+      expect(terminalRebaseText(rebase({ kind: "Am" }), 2)).toBe(
+        "Resolve 2 conflicts, then run git am --continue in the terminal.",
+      );
+      expect(terminalRebaseReason(rebase())).toBe("A rebase started in a terminal is in progress.");
+      expect(terminalRebaseReason(rebase({ kind: "Am" }))).toBe("A git am started in a terminal is in progress.");
+    });
   });
 
   describe("a sequence started in a terminal (#258, #253)", () => {

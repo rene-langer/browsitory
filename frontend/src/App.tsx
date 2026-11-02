@@ -64,6 +64,7 @@ import {
   rebaseAbortToast,
   sequenceToast,
   terminalAbortConfirm,
+  terminalRebaseReason,
 } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
@@ -279,7 +280,8 @@ function RepoWorkspace({
     appState.state.transfer !== null ||
     appState.state.mergeMessage !== null ||
     appState.state.rebaseProgress !== null ||
-    appState.state.headInfo.sequence !== null;
+    appState.state.headInfo.sequence !== null ||
+    appState.state.headInfo.terminalRebase !== null;
 
   const { undo: undoStep, redo: redoStep, refreshUndoState } = appState;
   const { pending, transfer } = appState.state;
@@ -388,6 +390,8 @@ function RepoWorkspace({
         ? appState.state.headInfo.sequence.kind === "CherryPick"
           ? "A cherry-pick is in progress."
           : "A revert is in progress."
+      : appState.state.headInfo.terminalRebase !== null
+        ? terminalRebaseReason(appState.state.headInfo.terminalRebase)
       : appState.state.mergeMessage !== null
         ? appState.state.headInfo.operation === "CherryPick"
           ? "A cherry-pick is in progress."
@@ -604,6 +608,7 @@ function RepoWorkspace({
         sequence={appState.state.headInfo.sequence}
         bisect={appState.state.headInfo.bisect}
         terminalSequence={terminalSequence}
+        terminalRebase={appState.state.headInfo.terminalRebase}
         onAbortTerminalSequence={abortTerminalSequence}
         pending={appState.state.pending}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}

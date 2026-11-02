@@ -34,6 +34,12 @@ pub enum RebaseError {
     /// steps (#258, D5-A).
     #[error("{}", crate::pick::terminal_sequence_refusal(*.0))]
     TerminalSequence(crate::pick::SequenceKind),
+    /// A `git rebase` or `git am` started in a terminal isn't finished (#263).
+    #[error(transparent)]
+    TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
+    /// `start_rebase` while git has a merge, cherry-pick or revert paused (#265).
+    #[error("{}", paused_operation_message(*.0))]
+    OperationPaused(crate::repo::OperationKind),
     /// `branch` is the short name.
     #[error("{branch} moved since the rebase started. Abort the rebase and start again.")]
     BranchMoved { branch: String },
@@ -43,6 +49,16 @@ pub enum RebaseError {
     /// the branch with force, so it only starts from a clean tracked tree, as `git rebase` does.
     #[error("{}", local_changes_message(paths))]
     LocalChanges { paths: Vec<String> },
+}
+
+/// The refusal copy for [`RebaseError::OperationPaused`] (#265).
+fn paused_operation_message(kind: crate::repo::OperationKind) -> String {
+    let noun = match kind {
+        crate::repo::OperationKind::Merge => "merge",
+        crate::repo::OperationKind::CherryPick => "cherry-pick",
+        crate::repo::OperationKind::Revert => "revert",
+    };
+    format!("A {noun} is in progress. Commit or abort it before starting a rebase.")
 }
 
 /// The refusal copy for [`RebaseError::LocalChanges`] (decision D2-A): the first path, and how
@@ -336,10 +352,16 @@ pub fn start_rebase(
     onto: &str,
     plan: Vec<RebasePlanEntry>,
 ) -> Result<(RebaseState, RebaseStepResult), RebaseError> {
-    validate_plan(repo, &plan)?;
-    // A terminal cherry-pick or revert list goes on after the rebase, on top of whatever it
-    // left; refuse rather than mix them (#258, D5-A).
+    // Any operation in progress first, named (#265): a terminal rebase or `git am` (#263), a
+    // paused merge, cherry-pick or revert, then a terminal cherry-pick or revert list, which
+    // goes on after the rebase, on top of whatever it left (#258, D5-A). A terminal bisect is
+    // no operation in progress (#250).
+    crate::repo::check_no_terminal_rebase(repo)?;
+    if let Some(kind) = crate::repo::paused_operation(repo) {
+        return Err(RebaseError::OperationPaused(kind));
+    }
     crate::pick::check_no_terminal_sequence(repo).map_err(RebaseError::TerminalSequence)?;
+    validate_plan(repo, &plan)?;
 
     // `Reference::name()` returns `Ok("HEAD")` for a detached HEAD — it only errors on a
     // non-UTF-8 name — so it can't be used to detect "not on a branch". Check explicitly instead;
@@ -469,6 +491,8 @@ fn resume_kind(repo: &Repository, state: &RebaseState) -> Result<Resume, RebaseE
     if state.cursor > state.plan.len() {
         return Err(RebaseError::NotRebasing);
     }
+    // A terminal rebase or `git am` is git's own operation in progress (#263).
+    crate::repo::check_no_terminal_rebase(repo)?;
     use git2::RepositoryState::{Bisect, CherryPick, CherryPickSequence, Clean};
     if state.cursor == state.plan.len() {
         // Every step landed and `finish` failed (the branch moved or was deleted): retry it.

@@ -1,10 +1,19 @@
-import type { BisectInfo, OperationKind, RebaseInfo, SequenceProgress, TerminalSequence } from "../ipc/RepoClient";
+import type {
+  BisectInfo,
+  OperationKind,
+  RebaseInfo,
+  SequenceProgress,
+  TerminalRebase,
+  TerminalSequence,
+} from "../ipc/RepoClient";
 import {
   bisectLabel,
   conflictReason,
   rebaseInterruption,
   sequenceLabel,
   sequenceNoun,
+  terminalRebaseLabel,
+  terminalRebaseText,
   terminalSequenceLabel,
   terminalSequenceText,
 } from "../lib/operationStatus";
@@ -19,6 +28,8 @@ import styles from "./OperationStatusStrip.module.css";
  * A `git cherry-pick A B C` started in a terminal shows too (#258): paused between steps with
  * Abort only (it is continued in the terminal); paused on a step as the step's strip, labelled as
  * started in a terminal. Its Abort ends the whole sequence (`onAbortTerminalSequence`, #253).
+ * A `git rebase` or `git am` started in a terminal shows as such, never as the merge its
+ * `MERGE_MSG` suggests, with no buttons: it is continued or aborted in the terminal (#263).
  * When none of these is shown, a `git bisect` started in a terminal shows as information only:
  * it blocks nothing, and it is ended in the terminal (#250).
  */
@@ -30,6 +41,7 @@ export function OperationStatusStrip({
   sequence = null,
   bisect = null,
   terminalSequence = null,
+  terminalRebase = null,
   conflictCount,
   pending = false,
   onAbortMerge,
@@ -48,6 +60,8 @@ export function OperationStatusStrip({
   bisect?: BisectInfo | null;
   /** A cherry-pick/revert started in a terminal (`HeadInfo.terminalSequence`). */
   terminalSequence?: TerminalSequence | null;
+  /** A rebase or `git am` started in a terminal (`HeadInfo.terminalRebase`). */
+  terminalRebase?: TerminalRebase | null;
   conflictCount: number;
   /** An action is running: Continue/Abort are disabled so a second click can't double-submit. */
   pending?: boolean;
@@ -93,6 +107,14 @@ export function OperationStatusStrip({
         >
           Abort rebase
         </button>
+      </div>
+    );
+  }
+  if (terminalRebase !== null) {
+    return (
+      <div role="status" aria-label="Operation status" className={styles.strip}>
+        <strong>{terminalRebaseLabel(terminalRebase)}</strong>
+        <span>{terminalRebaseText(terminalRebase, conflictCount)}</span>
       </div>
     );
   }

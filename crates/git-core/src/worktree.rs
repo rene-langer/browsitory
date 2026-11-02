@@ -32,6 +32,9 @@ pub enum WorktreeError {
     AddFailedFolderLeft { reason: String, path: PathBuf },
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// The branch is being rebased in a terminal, in this or another worktree (#263).
+    #[error(transparent)]
+    BeingRebased(#[from] crate::repo::BranchBeingRebased),
 }
 
 impl From<git2::Error> for WorktreeError {
@@ -116,6 +119,7 @@ pub fn create_worktree_with(
     start_point: Option<&str>,
     probe: impl FnOnce(&Path) -> std::io::Result<bool>,
 ) -> Result<(), WorktreeError> {
+    crate::repo::check_branch_not_rebased(repo, branch)?;
     match std::fs::symlink_metadata(path) {
         Ok(_) => return Err(WorktreeError::PathExists),
         // A file where a parent folder should be is named when the parents are created.

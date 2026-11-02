@@ -97,7 +97,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
@@ -238,7 +238,7 @@ describe("DiffPane", () => {
       const onCommitMessageFocused = vi.fn();
       renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), status, {
         amendMode: true,
-        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null },
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
         focusCommitMessage: true,
         onCommitMessageFocused,
       });
@@ -824,12 +824,34 @@ describe("DiffPane", () => {
           headPushed: false,
           operation: null,
           squashMessage: "Squashed commit of the following:\n",
-          commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null,
+          commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null,
         },
       });
 
       expect(screen.getByPlaceholderText("Commit message")).toHaveValue("Squashed commit of the following:\n");
       expect(screen.queryByRole("button", { name: "Abort merge" })).toBeNull();
+    });
+
+    it("offers no Abort merge, amend or Stash during a rebase started in a terminal (#263)", () => {
+      // git wrote MERGE_MSG for the rebase's step; committing it stays possible, as with git commit.
+      renderUncommitted(fakeClient({}), status, {
+        mergeMessage: "M\n",
+        headInfo: {
+          headId: "abc",
+          detachedAt: "abc",
+          headPushed: false,
+          operation: null,
+          squashMessage: null,
+          commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null,
+          terminalRebase: { kind: "Rebase", branch: "topic", onto: "o", currentStep: 3, totalSteps: 3 },
+        },
+      });
+
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(screen.getByPlaceholderText("Commit message")).toHaveValue("M\n");
+      expect(within(dock).queryByRole("button", { name: "Abort merge" })).toBeNull();
+      expect(within(dock).queryByText(/amend/i)).toBeNull();
+      expect(within(dock).getByRole("button", { name: "Stash" })).toBeDisabled();
     });
 
     it("keeps the rebase actions in a pinned commit-actions group so they never scroll away with long diffs", () => {
@@ -847,7 +869,7 @@ describe("DiffPane", () => {
         headInfo: {
           headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null,
           rebase: { branch: "topic", onto: "o", currentStep: 1, totalSteps: 3, health: { kind: "Diverged", reason: "BranchMoved" } },
-          bisect: null, terminalSequence: null,
+          bisect: null, terminalSequence: null, terminalRebase: null,
         },
         onRebaseAbort,
       });
@@ -861,7 +883,7 @@ describe("DiffPane", () => {
 
     it("names the pre-hook the merge commit will run in the Skip hooks tooltip", () => {
       const commitHooks = { skip: false, onToggleSkip: () => {}, running: null, onCancel: () => {} };
-      const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "Merge" as const, squashMessage: null, commitHooks: ["pre-merge-commit"], sequence: null, rebase: null, bisect: null, terminalSequence: null };
+      const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "Merge" as const, squashMessage: null, commitHooks: ["pre-merge-commit"], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
       const { unmount } = renderUncommitted(fakeClient({}), status, { headInfo, commitHooks });
       expect(screen.getByText("Skip hooks").closest("label")).toHaveAttribute(
         "title",
@@ -880,7 +902,7 @@ describe("DiffPane", () => {
       const onSequenceContinue = vi.fn();
       const onSequenceAbort = vi.fn();
       const sequence = { kind: "CherryPick" as const, currentStep: 2, totalSteps: 5, currentCommit: "c" };
-      const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null };
+      const headInfo = { headId: "abc", detachedAt: null, headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
       const { unmount } = renderUncommitted(
         fakeClient({ getConflictHunks: async () => [] }),
         [...status, { path: "c.txt", oldPath: null, staged: false, kind: "Conflicted" }],
@@ -899,7 +921,7 @@ describe("DiffPane", () => {
 
       // Stopped by an error: nothing conflicted, so Continue (a retry) is enabled.
       renderUncommitted(fakeClient({}), status, {
-        headInfo: { ...headInfo, operation: null, sequence: { ...sequence, kind: "Revert" }, rebase: null, bisect: null, terminalSequence: null },
+        headInfo: { ...headInfo, operation: null, sequence: { ...sequence, kind: "Revert" }, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
         onSequenceContinue,
         onSequenceAbort,
       });
@@ -912,7 +934,7 @@ describe("DiffPane", () => {
     it("disables the sequence's Continue and Abort while an action is pending", () => {
       const sequence = { kind: "Revert" as const, currentStep: 1, totalSteps: 2, currentCommit: "c" };
       renderUncommitted(fakeClient({}), status, {
-        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null },
+        headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
         sequencePending: true,
       });
       const dock = screen.getByRole("group", { name: "Commit actions" });
@@ -2262,7 +2284,7 @@ describe("DiffPane commit message settings", () => {
 });
 
 describe("DiffPane co-authors and amend author", () => {
-  const headInfo = { headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null };
+  const headInfo = { headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
   const head = {
     id: "h1",
     shortId: "h1",

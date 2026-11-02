@@ -15,6 +15,9 @@ pub enum BranchError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// The branch is being rebased in a terminal, in this or another worktree (#263).
+    #[error(transparent)]
+    BeingRebased(#[from] crate::repo::BranchBeingRebased),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +79,10 @@ pub fn create_branch(repo: &Repository, name: &str, start_point: &str) -> Result
 }
 
 pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
+    // HEAD is detached during a rebase, so the check below doesn't see a branch another
+    // worktree is rebasing; git refuses it ("already used by worktree"), since a commit made on
+    // it here is lost when that rebase is aborted or finished (#263).
+    crate::repo::check_branch_not_rebased_elsewhere(repo, name)?;
     let branch_ref = format!("refs/heads/{name}");
     let current_workdir = repo.workdir().and_then(|path| path.canonicalize().ok());
     let checked_out_elsewhere = crate::worktree::list_worktrees(repo)?
@@ -117,12 +124,14 @@ pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchE
 }
 
 pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Result<(), BranchError> {
+    crate::repo::check_branch_not_rebased(repo, old_name)?;
     let mut branch = repo.find_branch(old_name, BranchType::Local)?;
     branch.rename(new_name, false)?;
     Ok(())
 }
 
 pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), BranchError> {
+    crate::repo::check_branch_not_rebased(repo, name)?;
     let mut branch = repo.find_branch(name, BranchType::Local)?;
     if !force {
         let branch_oid = branch.get().peel_to_commit()?.id();

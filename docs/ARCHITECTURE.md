@@ -247,6 +247,11 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   tree, `clear_operation_files`); a soft reset still uses `git_reset`, which cleans nothing.
 - `cleanup_state` does not remove `SQUASH_MSG` and neither does `clear_operation_files`;
   `merge::clear_squash_message` does, after a commit, an abort, a reset or an undo.
+- During a terminal `git rebase` or `git am` libgit2 reports `RebaseMerge`/`RebaseInteractive`/
+  `Rebase`/`ApplyMailbox`/`ApplyMailboxOrRebase`, whatever else is paused (it checks the rebase
+  folders first), so `HeadInfo.operation` is `None` even while git's `MERGE_MSG` for a
+  conflicted step exists. `repo::terminal_rebase` reads git's folders itself (see "Terminal
+  rebases").
 - `repo.state()` checks the rebase folders, then `MERGE_HEAD`, `REVERT_HEAD` (+
   `sequencer/todo` → `RevertSequence`), `CHERRY_PICK_HEAD` (+ todo → `CherryPickSequence`), and
   only then `BISECT_LOG` → `Bisect`. So a bisect is hidden by any other paused operation, and a
@@ -373,9 +378,17 @@ across processes).
   operation it belongs to (`worker::gate::OperationProbe::marker`): `rebase <branch ref>
   <original tip> <onto>`, `sequence <kind> <original HEAD> <first commit> <count>`, `merge
   <HEAD> <MERGE_HEAD…> @<mtime>`, `cherry-pick <HEAD> <CHERRY_PICK_HEAD> @<mtime>`, `revert
-  <HEAD> <REVERT_HEAD> @<mtime>`, or `git <state> <HEAD>`, each constant for the operation's
-  whole life (the stored rebase and sequence come first because their `CHERRY_PICK_HEAD` changes
-  per step). A terminal `git bisect` alone (libgit2's `Bisect`) has no marker, as `Clean`
+  <HEAD> <REVERT_HEAD> @<mtime>`, `terminal <Rebase|Am> <branch> <onto> <orig-head>@<mtime>` for
+  a terminal `git rebase` or `git am` (#264), else `git <state> <HEAD>`, each constant for the
+  operation's whole life (the stored rebase and sequence come first because their
+  `CHERRY_PICK_HEAD` changes per step). A terminal rebase moves HEAD at every step, so its marker
+  is built from its own files instead: branch and onto as `repo::terminal_rebase` reads them,
+  `orig-head`, and the mtime of a file git writes once when the rebase starts and never during
+  it (`rebase-merge/orig-head`, `rebase-apply/last`; `git am` writes no `orig-head`, `onto` or
+  `head-name`, so its marker is the kind and that mtime). A pending entry so survives the rebase's
+  steps, and is still dropped when the rebase ends outside the app or is aborted and started
+  again (a new mtime). Nothing in the app ends a terminal rebase (every command that could is
+  refused), so such an entry is always dropped in the end, never recorded. A terminal `git bisect` alone (libgit2's `Bisect`) has no marker, as `Clean`
   (#250): commands are recorded and Undo/Redo run during it (`undo::restore` checks
   `repo::no_operation`), and its marker no longer changes with every `git bisect good/bad`.
   `@<mtime>` is the state file's modification time in nanoseconds (omitted when it
@@ -530,7 +543,12 @@ across processes).
   after `git reset --merge` (#249): it keeps `BISECT_LOG` and `rebase-*`, and keeps
   `sequencer/` for `git cherry-pick --continue` unless the aborted step was the list's last
   pick. It re-reads the index first (the worker's long-lived handle may predate a terminal
-  merge). `pick::abort_sequence`'s leftover case and the rebase use `clear_operation_files`,
+  merge). During a terminal rebase or `git am` it always refuses (`MergeError::TerminalRebase`,
+  changing nothing): the conflicts and `MERGE_MSG` are the rebase's step, and so are the
+  `MERGE_HEAD` git writes for a `--rebase-merges` merge step and the `CHERRY_PICK_HEAD` of an
+  empty pick (`rebase -i`). Aborting those would make `git rebase --continue` drop the merged
+  side branch. A merge started by hand during the rebase looks the same, so it is ended with
+  `git merge --abort` in the terminal (#263). `pick::abort_sequence`'s leftover case and the rebase use `clear_operation_files`,
   which never touches `sequencer/`. A state file Abort can't remove is
   `MergeError::StateFiles` ("Couldn't remove git's merge state: …").
 - **Terminal sequences** (#258, #253). `pick::terminal_sequence` reads git's files itself,
@@ -664,8 +682,12 @@ across processes).
 ## Interactive rebase
 
 - `git-core::rebase` is Browsitory's own state machine; it does not use libgit2's `git2::Rebase`
-  or write git's `.git/rebase-merge`. `start_rebase` first refuses a cherry-pick or revert
-  started in a terminal and paused between steps (`RebaseError::TerminalSequence`, #258), then
+  or write git's `.git/rebase-merge`. `start_rebase` first refuses any operation in progress,
+  naming it (#265): a terminal rebase or `git am` (`RebaseError::TerminalRebase`, #263), a
+  paused merge, cherry-pick or revert (`RebaseError::OperationPaused`: "A merge is in progress.
+  Commit or abort it before starting a rebase."; a merge resolved to HEAD's side used to get
+  through), a cherry-pick or revert started in a terminal and paused between steps
+  (`RebaseError::TerminalSequence`, #258); a terminal bisect is none (#250). Then the plan, then
   tracked local changes
   (`RebaseError::LocalChanges`, #170: any staged change, or an unstaged change to a tracked file,
   including a skip-worktree file whose content (after git's filters) differs from the index,
@@ -682,6 +704,40 @@ across processes).
   the conflicted index); an error stop (a step refused, e.g. a local edit in the way) is `Clean`.
   `git status` suggests `git cherry-pick --continue/--abort`; `git rebase --continue` says no
   rebase is in progress.
+- **Terminal rebases** (#263). `repo::terminal_rebase` reports a `git rebase` or `git am` run
+  in a terminal and not finished, per worktree: `rebase-merge/` is always a rebase,
+  `rebase-apply/` is `git am` when it holds `applying` and a rebase otherwise (git's
+  `wt_status_check_rebase`). It reads the branch (`head-name`, short name, empty when detached),
+  `onto`, and the step (`msgnum`/`end`, or `next`/`last`); `git am` has no branch or onto.
+  `head_info` reports it as `HeadInfo.terminal_rebase`. Browsitory's own rebase never writes
+  these folders, so it is never taken for one.
+  - Refusals: `repo::check_no_terminal_rebase` returns `TerminalRebaseInProgress` ("A rebase
+    started in a terminal isn't finished. Continue it there with git rebase --continue, or abort
+    it with git rebase --abort."; "A git am …" for `git am`), carried transparently by
+    `PickError`, `RebaseError`, `ResetError`, `CommitError` and `MergeError`. It is checked by
+    every pick and revert (`check_ready`), `continue_sequence`, `abort_terminal_sequence`,
+    `start_rebase`, `rebase_continue`, `reset_to`, `amend_head`, Abort merge (see
+    `abort_merge`) and `start_merge` while git's `MERGE_HEAD` exists (a `--rebase-merges` merge
+    step). These all refused before as "an operation in progress" without naming it,
+    except Abort merge, which reset the rebase's conflicted step and removed its `MERGE_MSG`
+    (since #249 it no longer deleted `rebase-merge/`, so `git rebase --abort` still worked).
+    Commit, staging and conflict resolution stay allowed, as `git commit` and `git add` are.
+  - Commit behaves like `git commit` at the rebase's step (`commit::merging_now`,
+    `picking_now`): with git's `MERGE_HEAD` (a merge step) it makes the merge commit with
+    `MERGE_HEAD` as second parent and clears the merge's files, so `git rebase --continue` keeps
+    the side branch; with `CHERRY_PICK_HEAD` (an empty pick) it keeps the picked commit's author
+    and clears the pick's files. The resulting state files and rebased history are twinned with
+    the git CLI. git writes that `MERGE_HEAD` without a final newline, which libgit2's
+    `mergehead_foreach` rejects, so `commit::merge_heads` reads the file itself.
+  - The rebased branch (`head-name` in any worktree's `rebase-merge/` or `rebase-apply/`) can't
+    be deleted, renamed or checked out in a new worktree (`repo::BranchBeingRebased`, "topic is
+    being rebased by a rebase started in a terminal. …"), from this or any other worktree, nor
+    switched to from another worktree (`check_branch_not_rebased_elsewhere`), as git refuses.
+    Undo counts it as checked out in that worktree, so it doesn't move HEAD onto it. HEAD is detached during the rebase, so libgit2's own checked-out checks don't
+    see it.
+  - No in-app Abort: `git rebase --abort` also restores an autostash, `--update-refs` branches
+    and the apply backend's state, which Browsitory can't do exactly; the strip says to continue
+    or abort in the terminal.
 - `RebaseState` is plain public data (`plan`, `cursor`, `original_branch_ref`, `original_tip`,
   `onto`, `group_start_parent`, `expected_head`, `stop: Conflict | Edit | Error`). `Conflict`/
   `Edit` mean the step at `cursor` is applied to the index; `Error` means it isn't.

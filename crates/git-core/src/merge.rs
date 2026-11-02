@@ -59,6 +59,10 @@ pub enum MergeError {
     /// files (`commit::clear_operation_files`).
     #[error("Couldn't remove git's merge state: {0}")]
     StateFiles(std::io::Error),
+    /// Abort during a `git rebase` or `git am` started in a terminal: the paused step is the
+    /// rebase's, which only the terminal ends (#263). Nothing was changed.
+    #[error(transparent)]
+    TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
 }
 
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
@@ -140,6 +144,11 @@ pub fn start_merge(
     target: &str,
     opts: MergeOptions,
 ) -> Result<MergeOutcome, MergeError> {
+    // A merge step of a terminal `rebase --rebase-merges` (MERGE_HEAD while libgit2 reports the
+    // rebase) is the rebase's: a second merge on top would be committed as part of it (#263).
+    if repo.path().join("MERGE_HEAD").exists() {
+        crate::repo::check_no_terminal_rebase(repo)?;
+    }
     if is_merging(repo) || repo.index()?.has_conflicts() {
         return Err(MergeError::AlreadyMerging);
     }
@@ -708,6 +717,13 @@ impl OperationReset {
 /// work-tree file is the user's resolution of the step, which Abort discards, as git does.
 pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, MergeError> {
     use git2::RepositoryState::{CherryPick, CherryPickSequence, Merge, Revert, RevertSequence};
+    // During a terminal rebase or `git am` the paused step is the rebase's, always: its
+    // conflicts and MERGE_MSG, and also the MERGE_HEAD git writes for a `--rebase-merges` merge
+    // step and the CHERRY_PICK_HEAD of an empty pick (`rebase -i`). Resetting it would make
+    // `git rebase --continue` go on as if the step were resolved to nothing, dropping a merged
+    // side branch. A merge started by hand during the rebase can't be told apart from the
+    // rebase's own merge step, so Abort refuses that too; `git merge --abort` ends it (#263).
+    crate::repo::check_no_terminal_rebase(repo)?;
     // The worker keeps one handle per repository, whose index may predate a merge or pick run
     // in a terminal: read the one on disk, or Abort would leave that operation's conflicts.
     repo.index()?.read(false)?;

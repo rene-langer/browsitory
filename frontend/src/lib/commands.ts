@@ -377,7 +377,9 @@ export function buildCommands(
       keywords: ["abort", "cancel", "cherry", "pick", "revert", "sequence"],
       run: () => void appState.abortSequence(),
     });
-  } else if (state.mergeMessage !== null) {
+  } else if (state.mergeMessage !== null && state.headInfo.terminalRebase === null) {
+    // A terminal rebase's conflicted step writes MERGE_MSG too; it is aborted in the terminal
+    // (#263).
     commands.push({
       id: "merge-abort",
       label: "Abort merge",

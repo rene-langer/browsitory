@@ -4011,6 +4011,61 @@ mod tests {
         assert!(repo.path().join("sequencer").join("todo").exists());
     }
 
+    /// A `git rebase` started in a terminal and stopped on a conflict (#263): head info reports
+    /// it (not as a merge), and Abort merge, a new rebase and reset refuse, naming it, with the
+    /// repository unchanged.
+    #[test]
+    fn a_terminal_rebase_is_reported_and_refused() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let base_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        let main_tip = repo.head().unwrap().target().unwrap();
+        let git = |args: &[&str]| test_support::git(dir.path(), args);
+        assert!(git(&["checkout", "-q", "feature"]).status.success());
+        assert!(!git(&["rebase", &base_branch]).status.success());
+        let stopped_at = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        let info = handle.get_head_info().unwrap();
+        assert_eq!(
+            info.terminal_rebase,
+            Some(git_core::repo::TerminalRebase {
+                kind: git_core::repo::TerminalRebaseKind::Rebase,
+                branch: "feature".into(),
+                onto: main_tip.to_string(),
+                current_step: 2,
+                total_steps: 3,
+            })
+        );
+        assert_eq!(info.operation, None);
+
+        let refusal = "A rebase started in a terminal isn't finished. Continue it there with git \
+                       rebase --continue, or abort it with git rebase --abort.";
+        assert_eq!(handle.abort_merge().unwrap_err(), refusal);
+        let plan = vec![git_core::rebase::RebasePlanEntry {
+            commit_id: ids[0].clone(),
+            action: git_core::rebase::RebaseAction::Pick,
+            combined_message: None,
+        }];
+        assert_eq!(
+            handle.start_rebase(main_tip.to_string(), plan).unwrap_err(),
+            refusal
+        );
+        assert_eq!(
+            handle
+                .reset_to_commit(main_tip.to_string(), git_core::reset::ResetMode::Hard)
+                .unwrap_err(),
+            refusal
+        );
+
+        assert_eq!(repo.head().unwrap().target().unwrap(), stopped_at);
+        assert!(repo.path().join("rebase-merge").is_dir());
+        assert!(repo.path().join("MERGE_MSG").exists());
+        assert!(std::fs::read_to_string(dir.path().join("a.txt"))
+            .unwrap()
+            .contains("<<<<<<<"));
+    }
+
     #[test]
     fn abort_sequence_prefers_the_stored_sequence() {
         let (dir, repo, ids) = side_commits_with_a_conflict();

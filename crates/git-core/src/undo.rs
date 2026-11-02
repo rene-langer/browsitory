@@ -402,6 +402,13 @@ fn branches_checked_out_elsewhere(repo: &Repository) -> Result<BTreeSet<String>,
             branches.insert(name);
         }
     }
+    // A branch a terminal rebase is rebasing in another worktree counts as checked out there,
+    // as for git; its HEAD is detached meanwhile (#263).
+    for (git_dir, name) in crate::repo::rebased_branches(repo) {
+        if fs::canonicalize(&git_dir).is_ok_and(|path| path != this) {
+            branches.insert(name);
+        }
+    }
     Ok(branches)
 }
 

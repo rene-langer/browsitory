@@ -181,6 +181,31 @@ impl OperationProbe<'_> {
                 .and_then(|mtime| mtime.duration_since(std::time::UNIX_EPOCH).ok())
                 .map_or_else(String::new, |since| format!(" @{}", since.as_nanos()))
         };
+        // A terminal `git rebase` or `git am` (#263) moves HEAD at every step, so its marker is
+        // what names the operation in git's files instead (#264): the kind, branch, start and
+        // onto, and the mtime of a file git writes once when the operation starts
+        // (`rebase-merge/orig-head`, `rebase-apply/last`), which tells it from the same rebase
+        // aborted and started again. A merge, pick or revert started during it counts as the
+        // rebase (libgit2 reports the rebase's state then too).
+        if let Some(rebase) = git_core::repo::terminal_rebase(repo) {
+            let (folder, identity) = if repo.path().join("rebase-merge").is_dir() {
+                ("rebase-merge", "orig-head")
+            } else {
+                ("rebase-apply", "last")
+            };
+            // `git am` writes no `rebase-apply/orig-head` (nor `onto`/`head-name`): its marker
+            // is the kind and `last`'s mtime alone.
+            let started_from = std::fs::read_to_string(repo.path().join(folder).join("orig-head"))
+                .map(|text| text.trim().to_string())
+                .unwrap_or_default();
+            return Some(format!(
+                "terminal {:?} {} {} {started_from}{}",
+                rebase.kind,
+                rebase.branch,
+                rebase.onto,
+                written(&format!("{folder}/{identity}"))
+            ));
+        }
         match repo.state() {
             // A terminal `git bisect` alone is nothing in progress, as for git-core (#250).
             // libgit2 reports `Bisect` only when nothing else is paused.
@@ -472,6 +497,121 @@ mod tests {
             .unwrap()
             .set_modified(mtime)
             .unwrap();
+    }
+
+    /// A terminal `git rebase` keeps one marker through all its steps, though HEAD moves at each
+    /// (#264); aborted and started again, or finished, it no longer matches.
+    #[test]
+    fn a_terminal_rebase_keeps_its_marker_through_its_steps() {
+        let (_dir, repo) = init();
+        commit(&repo, "f", "base\n", "base");
+        let base = repo.head().unwrap().target().unwrap();
+        repo.branch("topic", &repo.find_commit(base).unwrap(), false)
+            .unwrap();
+        commit(&repo, "f", "main\n", "main");
+        let main_branch = repo.head().unwrap().shorthand().unwrap().to_string();
+        assert!(git(&repo, &["checkout", "-q", "topic"]).status.success());
+        commit(&repo, "f", "topic 1\n", "t1");
+        commit(&repo, "f", "topic 2\n", "t2");
+        let (rebase_store, sequence_store) = (RebaseStore::open(&repo), SequenceStore::open(&repo));
+        let workdir = repo.workdir().unwrap().to_path_buf();
+        let resolve = || {
+            std::fs::write(workdir.join("f"), "resolved\n").unwrap();
+            assert!(git(&repo, &["add", "f"]).status.success());
+        };
+
+        assert!(!git(&repo, &["rebase", &main_branch]).status.success());
+        let first = marker(&repo, &rebase_store, &sequence_store).unwrap();
+        assert!(first.starts_with("terminal Rebase topic "), "{first}");
+        let first_head = repo.head().unwrap().target();
+        resolve();
+        let output = git(&repo, &["-c", "core.editor=true", "rebase", "--continue"]);
+        assert!(!output.status.success(), "t2 must conflict too: {output:?}");
+        assert_ne!(repo.head().unwrap().target(), first_head);
+        assert_eq!(
+            marker(&repo, &rebase_store, &sequence_store),
+            Some(first.clone())
+        );
+
+        // Aborted and started again: the same branch, start and onto, a new rebase.
+        let started = std::fs::metadata(repo.path().join("rebase-merge/orig-head"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert!(git(&repo, &["rebase", "--abort"]).status.success());
+        assert!(!git(&repo, &["rebase", &main_branch]).status.success());
+        set_mtime(
+            &repo,
+            "rebase-merge/orig-head",
+            started + std::time::Duration::from_secs(2),
+        );
+        let again = marker(&repo, &rebase_store, &sequence_store).unwrap();
+        assert!(again.starts_with("terminal Rebase topic "), "{again}");
+        assert_ne!(again, first);
+
+        // Finished: nothing in progress.
+        resolve();
+        assert!(
+            !git(&repo, &["-c", "core.editor=true", "rebase", "--continue"])
+                .status
+                .success()
+        );
+        resolve();
+        assert!(
+            git(&repo, &["-c", "core.editor=true", "rebase", "--continue"])
+                .status
+                .success()
+        );
+        assert_eq!(marker(&repo, &rebase_store, &sequence_store), None);
+    }
+
+    /// `git am`'s marker is likewise its own, the same through its patches (#264).
+    #[test]
+    fn a_terminal_am_keeps_its_marker_through_its_patches() {
+        let (dir, repo) = init();
+        commit(&repo, "f", "base\n", "base");
+        let base = repo.head().unwrap().target().unwrap();
+        commit(&repo, "f", "one\n", "one");
+        commit(&repo, "f", "two\n", "two");
+        let patches = tempfile::TempDir::new().unwrap();
+        let output = git(
+            &repo,
+            &[
+                "format-patch",
+                "-q",
+                "-2",
+                "-o",
+                patches.path().to_str().unwrap(),
+            ],
+        );
+        assert!(output.status.success(), "{output:?}");
+        assert!(git(&repo, &["reset", "-q", "--hard", &base.to_string()])
+            .status
+            .success());
+        std::fs::write(dir.path().join("f"), "other\n").unwrap();
+        assert!(git(&repo, &["commit", "-qam", "other"]).status.success());
+        let mut files: Vec<String> = std::fs::read_dir(patches.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path().to_str().unwrap().to_string())
+            .collect();
+        files.sort();
+        let mut args = vec!["am", "-3"];
+        args.extend(files.iter().map(String::as_str));
+        let (rebase_store, sequence_store) = (RebaseStore::open(&repo), SequenceStore::open(&repo));
+
+        assert!(!git(&repo, &args).status.success());
+        let first = marker(&repo, &rebase_store, &sequence_store).unwrap();
+        assert!(first.starts_with("terminal Am "), "{first}");
+        std::fs::write(dir.path().join("f"), "resolved\n").unwrap();
+        assert!(git(&repo, &["add", "f"]).status.success());
+        let head = repo.head().unwrap().target();
+        let output = git(&repo, &["am", "--continue"]);
+        assert!(
+            !output.status.success(),
+            "patch two must conflict: {output:?}"
+        );
+        assert_ne!(repo.head().unwrap().target(), head);
+        assert_eq!(marker(&repo, &rebase_store, &sequence_store), Some(first));
     }
 
     #[test]
