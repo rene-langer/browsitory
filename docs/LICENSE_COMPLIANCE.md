@@ -1,7 +1,7 @@
 # License compliance
 
 Browsitory is MIT-licensed. Every dependency below was verified permissive (MIT, Apache-2.0,
-ISC, BSD, MIT-0, Unicode-3.0) except the one documented exception. Verified with `cargo info <crate>` (Rust)
+ISC, BSD, MIT-0, Unicode-3.0, Zlib) except the one documented exception. Verified with `cargo info <crate>` (Rust)
 and `npm info <package> license` (JS) on 2026-08-12, against the direct dependencies declared
 in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, `e2e/package.json`,
 and `extension/e2e/package.json` (not the full transitive tree); dependencies added later carry
@@ -131,6 +131,18 @@ redistribution with the copyright and permission notice kept. It is on the allow
 2026-10-31 (#166). Crates carrying it: `unicode-normalization` (direct, above) and the
 transitive `icu_*` crates (`icu_normalizer`, `icu_properties`, `icu_collections`, …) that
 `url` pulls in through `idna`.
+
+## Zlib
+
+Zlib (the zlib/libpng license, OSI-approved) is a short permissive license: it allows use,
+modification and redistribution, including in binaries, with no copyleft and no notice
+requirement for binary distribution; altered source must be marked as altered and the notice
+kept in source distributions. It is on the allowed list since 2026-11-02 (user decision, Renovate
+lockfile maintenance #279). Crates carrying it only: the transitive `zlib-rs` (0.6.8, verified with
+`cargo info zlib-rs` on 2026-11-02), which `flate2` 1.1.10 uses as its default Rust backend
+(`flate2` itself is MIT OR Apache-2.0); `flate2` comes in through Tauri's updater and zip
+handling. Other crates offer Zlib as one option among MIT/Apache-2.0 (`tinyvec`,
+`miniz_oxide`).
 
 ## Process
 
