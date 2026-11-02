@@ -103,6 +103,27 @@ Semantic versioning. Pushing a `release/MAJOR.MINOR.PATCH` tag (no `v` prefix) t
 Release. The workflow stamps the version into `crates/tauri-app/tauri.conf.json` at build time.
 `cargo test --workspace` and the frontend test suite must pass on the tagged commit first.
 
+### Publishing the extension
+
+The same tag builds one `.vsix` per platform (`build-vsix-release`, version stamped from the
+tag), attaches them to the draft release, and publishes them to two registries:
+
+- **Visual Studio Marketplace** (`publish-vsix-marketplace`): GitHub OIDC into Microsoft Entra
+  ID, no stored token. Runs in the GitHub environment `marketplace`; secrets `AZURE_CLIENT_ID`
+  and `AZURE_TENANT_ID` (an Entra app registration with a federated credential for
+  `repo:rene-langer/browsitory:environment:marketplace`, added as a Contributor member of the
+  Marketplace publisher `browsitory`). `azure/login`, then `vsce publish --azure-credential`.
+- **Open VSX** (`publish-vsix-open-vsx`): secret `OVSX_PAT`, a token for the Open VSX namespace
+  `browsitory`. `ovsx` runs via `npx` only (EPL-2.0, build-only tool; see
+  `docs/LICENSE_COMPLIANCE.md`).
+
+Each job skips with a notice while its secret (`AZURE_CLIENT_ID` / `OVSX_PAT`) is empty, and
+uses `--skip-duplicate`, so re-running a release is safe. **Pre-release switch:**
+`VSIX_PRE_RELEASE` at the top of `release.yml` (`"true"` now). Set it to `"false"` to package
+and publish stable releases; both packaging and publishing read it, because `vsce publish
+--pre-release` refuses a package that wasn't packaged as a pre-release. A stable version must be
+higher than every pre-release version already published.
+
 ## License policy
 
 Permissive dependencies only (MIT, Apache-2.0, ISC, BSD, MIT-0, Unicode-3.0, Zlib), with one deliberate exception

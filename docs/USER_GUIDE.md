@@ -2,6 +2,26 @@
 
 A tour of Browsitory's UI and the day-to-day Git workflows it covers.
 
+## Installing the VSCode extension
+
+Browsitory also runs as a VSCode extension, with the same UI in an editor tab. It needs VSCode
+1.134 or newer on Linux x64, macOS (Intel or Apple silicon) or Windows x64. It doesn't run in
+vscode.dev or Codespaces in the browser.
+
+- **Visual Studio Marketplace** (VSCode): open the Extensions view, search for "Browsitory",
+  and pick **Install Pre-Release Version**. Or run
+  `code --install-extension browsitory.browsitory --pre-release`.
+- **Open VSX** (VSCodium, Cursor, Gitpod and other editors that use it): search for
+  "Browsitory" in the editor's Extensions view, or see
+  <https://open-vsx.org/extension/browsitory/browsitory>.
+- **From a `.vsix` file**: each [GitHub release](https://github.com/rene-langer/browsitory/releases)
+  has one package per platform. Download the one for your platform and run
+  `code --install-extension browsitory-<version>-<platform>.vsix` (or use **Extensions: Install
+  from VSIX…**). A `.vsix` install doesn't update itself.
+
+The extension is a pre-release for now, so the Marketplace and Open VSX only offer it as one.
+Then run **Browsitory: Open** from the Command Palette and pick a repository folder.
+
 ## Opening a repository
 
 On launch, Browsitory shows a repo picker: pick a folder, or reopen one of your

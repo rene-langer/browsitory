@@ -11,6 +11,13 @@ on:
 permissions:
   contents: write
 
+env:
+  # The VSCode extension's release channel. "true" packages and publishes every release tag as
+  # a pre-release on the Visual Studio Marketplace and Open VSX; set it to "false" to publish
+  # stable releases. (`vsce publish --pre-release` refuses a package that wasn't also packaged
+  # with `--pre-release`, so build-vsix-release and both publish jobs read it.)
+  VSIX_PRE_RELEASE: "true"
+
 jobs:
   # Fast sanity gate before spending 3 platforms' worth of build time. Full cross-platform
   # test/clippy coverage already ran in ci.yml when this commit landed on main; this just
@@ -170,6 +177,7 @@ jobs:
           pnpm --dir extension run package:vsix -- --target ${{ matrix.vsix_target }}
           --sidecar target/${{ matrix.rust_target }}/release/vscode-sidecar${{ matrix.sidecar_suffix }}
           --out artifacts/browsitory-${{ steps.release-version.outputs.version }}-${{ matrix.vsix_target }}.vsix
+          ${{ env.VSIX_PRE_RELEASE == 'true' && '--pre-release' || '' }}
       - uses: actions/upload-artifact@v7
         with:
           name: browsitory-vsix-${{ matrix.vsix_target }}
@@ -189,3 +197,119 @@ jobs:
           tag_name: ${{ github.ref_name }}
           draft: true
           files: release-vsix/*.vsix
+
+  # Publishes the four platform packages to the Visual Studio Marketplace. Signs in with
+  # Microsoft Entra ID through GitHub OIDC (no long-lived token): the `marketplace` environment's
+  # federated credential lets azure/login sign in as the Entra app, and `vsce --azure-credential`
+  # uses that az CLI session. Skips with a notice while AZURE_CLIENT_ID is unset, so releases keep
+  # working before the publisher is set up. --skip-duplicate makes a re-run after a partial publish
+  # safe. VSIX_PRE_RELEASE (top of this file) picks the channel.
+  publish-vsix-marketplace:
+    needs: build-vsix-release
+    if: startsWith(github.ref, 'refs/tags/release/')
+    runs-on: ubuntu-latest
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Only gates the steps; deliberately not named AZURE_CLIENT_ID so it can't steer vsce's
+      # credential chain.
+      MARKETPLACE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+    steps:
+      - name: Skip notice
+        if: env.MARKETPLACE_CLIENT_ID == ''
+        run: echo "::notice::AZURE_CLIENT_ID is not set; skipping the Visual Studio Marketplace."
+      - uses: actions/checkout@v7
+        if: env.MARKETPLACE_CLIENT_ID != ''
+      - uses: pnpm/action-setup@v6
+        if: env.MARKETPLACE_CLIENT_ID != ''
+        with:
+          version: 11
+      - uses: actions/setup-node@v7
+        if: env.MARKETPLACE_CLIENT_ID != ''
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: extension/pnpm-lock.yaml
+      - uses: actions/download-artifact@v7
+        if: env.MARKETPLACE_CLIENT_ID != ''
+        with:
+          pattern: browsitory-vsix-*
+          merge-multiple: true
+          path: release-vsix
+      - name: Check all four platform packages are present
+        if: env.MARKETPLACE_CLIENT_ID != ''
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(release-vsix/*.vsix)
+          if [ "${#packages[@]}" -ne 4 ]; then
+            echo "::error::expected 4 .vsix packages, found ${#packages[@]}: ${packages[*]}"
+            exit 1
+          fi
+      - uses: azure/login@v3
+        if: env.MARKETPLACE_CLIENT_ID != ''
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+      # vsce is extension/'s pinned dev dependency (exact version, lockfile), the same one that
+      # packaged the .vsix files; --azure-credential needs vsce 2.26.1 or newer.
+      - run: pnpm --dir extension install --frozen-lockfile
+        if: env.MARKETPLACE_CLIENT_ID != ''
+      - name: Check the Entra app may publish as browsitory
+        if: env.MARKETPLACE_CLIENT_ID != ''
+        run: pnpm --dir extension exec vsce verify-pat browsitory --azure-credential
+      - name: Publish to the Visual Studio Marketplace
+        if: env.MARKETPLACE_CLIENT_ID != ''
+        shell: bash
+        run: |
+          flags=(--azure-credential --skip-duplicate)
+          if [ "$VSIX_PRE_RELEASE" = "true" ]; then flags+=(--pre-release); fi
+          for vsix in "$GITHUB_WORKSPACE"/release-vsix/*.vsix; do
+            pnpm --dir extension exec vsce publish "${flags[@]}" --packagePath "$vsix"
+          done
+
+  # Publishes the same four packages to Open VSX (VSCodium, Cursor, Gitpod, ...). Skips with a
+  # notice while OVSX_PAT is unset. No id-token permission, so ovsx can't fall back to OIDC
+  # trusted publishing; it reads the token from OVSX_PAT.
+  publish-vsix-open-vsx:
+    needs: build-vsix-release
+    if: startsWith(github.ref, 'refs/tags/release/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - name: Skip notice
+        if: env.OVSX_PAT == ''
+        run: echo "::notice::OVSX_PAT is not set; skipping Open VSX."
+      - uses: actions/setup-node@v7
+        if: env.OVSX_PAT != ''
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v7
+        if: env.OVSX_PAT != ''
+        with:
+          pattern: browsitory-vsix-*
+          merge-multiple: true
+          path: release-vsix
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(release-vsix/*.vsix)
+          if [ "${#packages[@]}" -ne 4 ]; then
+            echo "::error::expected 4 .vsix packages, found ${#packages[@]}: ${packages[*]}"
+            exit 1
+          fi
+          # ovsx (EPL-2.0) runs here only as a build-time CI tool, pinned to an exact version;
+          # it is not a dependency and is not shipped (docs/LICENSE_COMPLIANCE.md).
+          flags=(--skip-duplicate)
+          if [ "$VSIX_PRE_RELEASE" = "true" ]; then flags+=(--pre-release); fi
+          for vsix in "${packages[@]}"; do
+            npx --yes ovsx@1.3.0 publish "${flags[@]}" --packagePath "$vsix"
+          done
