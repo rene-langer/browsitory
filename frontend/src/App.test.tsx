@@ -1302,7 +1302,7 @@ describe("App", () => {
         fireEvent.click(within(strip).getByRole("button", { name: "Abort cherry-pick" }));
         let dialog = await screen.findByRole("dialog", { name: "Abort the whole cherry-pick?" });
         expect(dialog).toHaveTextContent(
-          'This also removes the 2 commits it made and puts the branch back at 1a2b3c4 "X". Changes you haven\'t committed stay.',
+          'This also removes the 2 commits it made and puts the branch back at 1a2b3c4 "X". Uncommitted changes stay.',
         );
         fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
         await waitFor(() => expect(screen.queryByRole("dialog", { name: "Abort the whole cherry-pick?" })).toBeNull());
@@ -1313,7 +1313,13 @@ describe("App", () => {
         fireEvent.click(within(dialog).getByRole("button", { name: "Abort cherry-pick" }));
         expect(await screen.findByText("Aborted cherry-pick")).toBeInTheDocument();
         expect(abortSequence).toHaveBeenCalledTimes(1);
-        expect(abortSequence).toHaveBeenCalledWith("/repos/a");
+        // What the dialog showed goes along, so a sequence that moved on meanwhile is refused.
+        expect(abortSequence).toHaveBeenCalledWith("/repos/a", {
+          headId: "c2",
+          startedAt: "1a2b3c4d5e6f7a8b",
+          rewinds: true,
+          commitsToRemove: 2,
+        });
         expect(abortMerge).not.toHaveBeenCalled();
       });
 
@@ -1329,7 +1335,14 @@ describe("App", () => {
         );
         const strip = await screen.findByRole("status", { name: "Operation status" });
         fireEvent.click(within(strip).getByRole("button", { name: "Abort revert" }));
-        await waitFor(() => expect(abortSequence).toHaveBeenCalledWith("/repos/a"));
+        await waitFor(() =>
+          expect(abortSequence).toHaveBeenCalledWith("/repos/a", {
+            headId: "c2",
+            startedAt: "1a2b3c4d5e6f7a8b",
+            rewinds: false,
+            commitsToRemove: 0,
+          }),
+        );
         expect(screen.queryByRole("dialog")).toBeNull();
         expect(await screen.findByText("Stopped the revert. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
       });

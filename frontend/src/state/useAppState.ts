@@ -6,6 +6,7 @@ import type {
   ConflictSide,
   PickOutcome,
   SequenceAbort,
+  ConfirmedAbort,
   RebaseAbort,
   SequenceOutcome,
   CreatePullRequest,
@@ -286,7 +287,7 @@ export interface UseAppStateResult {
   cherryPickMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
   revertMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
   continueSequence(noVerify?: boolean): Promise<SequenceOutcome | null>;
-  abortSequence(): Promise<SequenceAbort | null>;
+  abortSequence(confirmed?: ConfirmedAbort): Promise<SequenceAbort | null>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
   amendCommit(message: string, noVerify: boolean, options?: AmendOptions): Promise<boolean>;

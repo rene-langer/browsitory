@@ -99,12 +99,21 @@ export function terminalAbortConfirm(sequence: TerminalSequence): {
   confirmLabel: string;
 } {
   const noun = sequenceNoun(sequence.kind);
+  // The backend counts up to 1001 (more than 1000).
   const commits =
-    sequence.commitsToRemove === 1 ? "the commit it made" : `the ${sequence.commitsToRemove} commits it made`;
+    sequence.commitsToRemove === 1
+      ? "the commit it made"
+      : sequence.commitsToRemove > 1000
+        ? "more than 1000 commits it made"
+        : `the ${sequence.commitsToRemove} commits it made`;
   const at = `${sequence.startedAt.slice(0, 7)} "${sequence.startedAtSummary}"`;
+  // Abort refuses rather than overwrite other uncommitted changes (#281 review).
+  const kept = sequence.pausedOnConflict
+    ? "The paused step's changes and conflict resolutions are discarded; other uncommitted changes stay."
+    : "Uncommitted changes stay.";
   return {
     title: `Abort the whole ${noun}?`,
-    body: `This also removes ${commits} and puts the branch back at ${at}. Changes you haven't committed stay.`,
+    body: `This also removes ${commits} and puts the branch back at ${at}. ${kept}`,
     confirmLabel: `Abort ${noun}`,
   };
 }

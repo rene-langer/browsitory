@@ -182,6 +182,16 @@ export interface TerminalSequence {
   rewinds: boolean;
   commitsToRemove: number;
 }
+/**
+ * What the user confirmed before aborting a terminal sequence: `HeadInfo.headId` and the
+ * `terminalSequence` fields shown (#281 review).
+ */
+export interface ConfirmedAbort {
+  headId: string;
+  startedAt: string;
+  rewinds: boolean;
+  commitsToRemove: number;
+}
 /** `startedFrom` is what `git bisect reset` returns to: a branch name, or a commit id. */
 export interface BisectInfo {
   startedFrom: string;
@@ -785,9 +795,10 @@ export interface RepoClient {
   /**
    * Aborts the stored sequence; without one, a terminal `git cherry-pick A B C` (see
    * `HeadInfo.terminalSequence`) like `git cherry-pick --abort` (#253). Confirm first when it
-   * `rewinds`: its commits are removed.
+   * `rewinds`: its commits are removed. A terminal sequence is aborted only with `confirmed`
+   * (what the user saw); if it no longer matches, the call rejects and nothing changes.
    */
-  abortSequence(repoPath: string): Promise<SequenceAbort>;
+  abortSequence(repoPath: string, confirmed?: ConfirmedAbort | null): Promise<SequenceAbort>;
   resetToCommit(repoPath: string, commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(repoPath: string, commitId: string): Promise<void>;
   /** Resolves with the transfer operation id; progress arrives via `subscribeTransferProgress`. */

@@ -781,14 +781,27 @@ it so that Abort always knows which commits belong to the list. Merge, commit, a
 checkout and stash still work, and they keep the list.
 
 **Abort cherry-pick** (or **Abort revert**) in the bar, the commit box or the palette works
-like `git cherry-pick --abort`. It aborts the paused step, keeping unrelated edits. If HEAD is
-still where the list left it, it also removes the commits the list made and puts the branch
-back where the list started. It asks first: "Abort the whole cherry-pick? This also removes the
-2 commits it made and puts the branch back at 1a2b3c4 "X". Changes you haven't committed stay."
-If you moved HEAD since (for example by committing a step yourself), HEAD stays where it is, as
-with git, and the toast says so. Either way the list ends. If a file you changed is in the way,
-Abort says so and changes nothing more: the step is aborted, the list is kept, and you can try
-again after you commit or discard that change. Abort can't be undone with **Undo**, but the
+like `git cherry-pick --abort`. It discards the paused step's changes and your conflict
+resolutions, and keeps other edits. If HEAD is still where the list left it, it also removes
+the commits the list made and puts the branch back where the list started. It asks first:
+"Abort the whole cherry-pick? This also removes the 2 commits it made and puts the branch back
+at 1a2b3c4 "X". The paused step's changes and conflict resolutions are discarded; other
+uncommitted changes stay." If more than 1000 commits would go, it says "more than 1000". If
+you moved HEAD since (for example by committing a step yourself), HEAD stays where it is, as
+with git, and the toast says so. Either way the list ends.
+
+Like git, Abort checks everything first and changes nothing when it would lose work:
+
+- a file you changed (or an untracked file) is where putting the branch back would write:
+  "Abort can't put the branch back: 'f' has changes it would overwrite. …";
+- a file of the paused step that you staged and then changed again: "Abort would discard
+  your changes to 'f'. …" (Abort merge says the same in that case);
+- the list changed since you confirmed (the terminal went on): "The cherry-pick in the
+  terminal changed since you looked. Check it again, then abort.";
+- git's own files for the list are damaged: Abort says which one, and that `git cherry-pick
+  --quit` in a terminal ends the list without moving HEAD.
+
+Save or discard the change and try again. Abort can't be undone with **Undo**, but the
 removed commits are still in the reflog. **Abort** of a merge started during such a list
 removes only the merge, as git does.
 

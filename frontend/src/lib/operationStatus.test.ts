@@ -127,11 +127,20 @@ describe("rebase status text", () => {
     it("terminalAbortConfirm for several commits, one commit and a revert", () => {
       expect(terminalAbortConfirm(sequence())).toEqual({
         title: "Abort the whole cherry-pick?",
-        body: 'This also removes the 2 commits it made and puts the branch back at 1a2b3c4 "X". Changes you haven\'t committed stay.',
+        body: 'This also removes the 2 commits it made and puts the branch back at 1a2b3c4 "X". Uncommitted changes stay.',
         confirmLabel: "Abort cherry-pick",
       });
       expect(terminalAbortConfirm(sequence({ commitsToRemove: 1 })).body).toBe(
-        'This also removes the commit it made and puts the branch back at 1a2b3c4 "X". Changes you haven\'t committed stay.',
+        'This also removes the commit it made and puts the branch back at 1a2b3c4 "X". Uncommitted changes stay.',
+      );
+      // A paused step's own changes and resolutions go (#281 review).
+      expect(terminalAbortConfirm(sequence({ pausedOnConflict: true })).body).toBe(
+        'This also removes the 2 commits it made and puts the branch back at 1a2b3c4 "X". ' +
+          "The paused step's changes and conflict resolutions are discarded; other uncommitted changes stay.",
+      );
+      // The backend stops counting past 1000.
+      expect(terminalAbortConfirm(sequence({ commitsToRemove: 1001 })).body).toContain(
+        "removes more than 1000 commits it made",
       );
       const revert = terminalAbortConfirm(sequence({ kind: "Revert" }));
       expect(revert.title).toBe("Abort the whole revert?");

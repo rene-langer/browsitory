@@ -2901,7 +2901,7 @@ fn abort_refuses_when_the_sequence_changed_since_it_was_confirmed() {
         Err(PickError::TerminalSequenceChanged(_))
     ));
     assert_eq!(whole_state(dir.path(), &repo), before);
-    assert_eq!(abort_now(&repo).unwrap().rewound, true);
+    assert!(abort_now(&repo).unwrap().rewound);
 }
 
 /// MEDIUM 4: damaged sequencer files, compared with `git cherry-pick --abort`. `refused` cases

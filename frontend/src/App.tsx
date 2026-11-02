@@ -44,7 +44,7 @@ import { PushBranchDialog } from "./components/PushBranchDialog";
 import { StashDialog } from "./components/StashDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import { RemoteDialogs } from "./components/RemoteDialogs";
-import type { RepoClient, TerminalSequence, Trailer } from "./ipc/RepoClient";
+import type { ConfirmedAbort, RepoClient, TerminalSequence, Trailer } from "./ipc/RepoClient";
 import { coAuthorTrailers, parsePerson } from "./lib/people";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands, type AppCommands } from "./lib/commands";
@@ -248,7 +248,10 @@ function RepoWorkspace({
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null);
   const [currentFile, setCurrentFile] = useState<string | null>(null);
   // Abort of a terminal cherry-pick that removes its commits waits for this confirmation (#253).
-  const [terminalAbortRequest, setTerminalAbortRequest] = useState<TerminalSequence | null>(null);
+  const [terminalAbortRequest, setTerminalAbortRequest] = useState<{
+    sequence: TerminalSequence;
+    headId: string | null;
+  } | null>(null);
   const diffSettings = useDiffSettingsContext();
   // Below this width the sidebar auto-collapses so the graph and diff panes both stay usable.
   const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW_BREAKPOINT);
@@ -491,17 +494,30 @@ function RepoWorkspace({
   // --abort` through `abortSequence` (#253). When it would remove the commits the sequence made,
   // it asks first.
   const terminalSequence = appState.state.headInfo.terminalSequence;
+  // The abort carries what the user saw, so a sequence that moved on meanwhile (the terminal
+  // went on, or this view was out of date) is refused instead of removing other commits.
+  const headId = appState.state.headInfo.headId;
   const runTerminalAbort = useCallback(
-    (sequence: TerminalSequence) => {
-      void runPickAction(abortStoredSequence, (abort) => abortToast(sequence.kind, abort));
+    (sequence: TerminalSequence, confirmedHeadId: string | null) => {
+      const confirmed: ConfirmedAbort = {
+        headId: confirmedHeadId ?? "",
+        startedAt: sequence.startedAt,
+        rewinds: sequence.rewinds,
+        commitsToRemove: sequence.commitsToRemove,
+      };
+      void runPickAction(
+        () => abortStoredSequence(confirmed),
+        (abort) => abortToast(sequence.kind, abort),
+      );
     },
     [abortStoredSequence, runPickAction],
   );
   const abortTerminalSequence = useCallback(() => {
     if (terminalSequence === null) return;
-    if (terminalSequence.rewinds && terminalSequence.commitsToRemove > 0) setTerminalAbortRequest(terminalSequence);
-    else runTerminalAbort(terminalSequence);
-  }, [runTerminalAbort, terminalSequence]);
+    if (terminalSequence.rewinds && terminalSequence.commitsToRemove > 0)
+      setTerminalAbortRequest({ sequence: terminalSequence, headId });
+    else runTerminalAbort(terminalSequence, headId);
+  }, [headId, runTerminalAbort, terminalSequence]);
   // A stored sequence first (its file must never outlive it), then a terminal sequence's paused
   // step (a merge paused during one is a plain merge), then the merge or single pick.
   const isTerminalStep = terminalSequence !== null && appState.state.headInfo.operation !== "Merge";
@@ -651,20 +667,20 @@ function RepoWorkspace({
       )}
       {active && terminalAbortRequest !== null && (
         <ConfirmDialog
-          ariaLabel={terminalAbortConfirm(terminalAbortRequest).title}
+          ariaLabel={terminalAbortConfirm(terminalAbortRequest.sequence).title}
           message={
             <>
               <p>
-                <strong>{terminalAbortConfirm(terminalAbortRequest).title}</strong>
+                <strong>{terminalAbortConfirm(terminalAbortRequest.sequence).title}</strong>
               </p>
-              <p>{terminalAbortConfirm(terminalAbortRequest).body}</p>
+              <p>{terminalAbortConfirm(terminalAbortRequest.sequence).body}</p>
             </>
           }
-          confirmLabel={terminalAbortConfirm(terminalAbortRequest).confirmLabel}
+          confirmLabel={terminalAbortConfirm(terminalAbortRequest.sequence).confirmLabel}
           onConfirm={() => {
-            const sequence = terminalAbortRequest;
+            const request = terminalAbortRequest;
             setTerminalAbortRequest(null);
-            runTerminalAbort(sequence);
+            runTerminalAbort(request.sequence, request.headId);
           }}
           onCancel={() => setTerminalAbortRequest(null)}
         />

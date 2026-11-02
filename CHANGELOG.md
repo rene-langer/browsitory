@@ -26,6 +26,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   terminal ended the list but left the commits it had made. It now works like git cherry-pick
   --abort: after asking, it removes the commits it made and puts the branch back where it
   started. If HEAD moved since, it leaves HEAD and only ends the cherry-pick (#253).
+- Like git, this Abort checks everything first and changes nothing when it would lose work: a
+  changed or untracked file where putting the branch back would write (it names the file), a
+  list that changed in the terminal since you confirmed, or damaged git files for the list
+  (#253).
+- Fixed: Abort merge (and Abort cherry-pick or revert) discarded a file you had staged and then
+  changed again, losing both versions. It now refuses, as git merge --abort does: "Abort would
+  discard your changes to 'f'. …". This also applies to a staged file replaced by a symlink.
 
 ### Dependencies
 

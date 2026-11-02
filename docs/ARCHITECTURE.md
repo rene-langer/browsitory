@@ -548,24 +548,42 @@ across processes).
     git allows a single pick and a rebase there; refusing them keeps every paused pick in the
     repository the terminal's own step, so Abort can't mistake one for it. Merge, commit,
     amend, reset, checkout, stash and undo stay allowed and keep the list (#249).
-  - Abort (D7-A): `pick::abort_terminal_sequence` is `git cherry-pick --abort`: a paused step
-    (or its conflicts) is reset like `abort_merge` but always keeping `sequencer/`
-    (`merge::abort_step_keeping_list`); when `rewinds`, `rewind_to(started_at)` (shared with
-    `abort_sequence`: refuse linked folders, SAFE `checkout_tree`, move the branch or detached
-    HEAD, reflog `reset: moving to <id>`, which is git's `reset --merge`); then `sequencer/` is
-    removed. A SAFE refusal (a local edit or untracked file in the way) returns the error with
-    the list kept and the step already aborted (git would leave the step paused), so Abort can
-    be retried. Another operation paused there (a merge) is `OperationInProgress`. Aborting
-    only the step and keeping the list is not offered: `git cherry-pick --continue` would then
-    take the aborted step as done and silently skip it.
+  - Abort (D7-A): `pick::abort_terminal_sequence(repo, confirmed)` is `git cherry-pick
+    --abort`. Like git it checks everything before writing anything, so a refusal leaves the
+    paused step, its conflicts, the resolution in the work tree and the list byte-identical:
+    another operation paused there (a merge) is `OperationInProgress`; damaged sequencer files
+    (`TerminalSequence::damage`, in git's order: `head` missing or not a full id,
+    `abort-safety` present but unparsable, the start commit missing when it would rewind) are
+    `SequencerDamaged` (git refuses these too; the message points at `git cherry-pick --quit`;
+    a missing `abort-safety` is "not safe", as git: no rewind, list removed); `confirmed`
+    (`ConfirmedAbort`: HEAD, start, `rewinds`, `commits_to_remove` as the UI showed them) must
+    still match, else `TerminalSequenceChanged`; the step's reset is planned by
+    `merge::plan_operation_reset` (below); and a rewind is checked by `check_rewind`: the
+    linked-folder guard, then every path that differs between HEAD and the start must be
+    unchanged in the index and work tree (`status_file` empty; an untracked or ignored file in
+    the way counts), except the step's own touched paths, which its reset puts back first;
+    else `RewindBlocked(path)`. Only then: the step is reset keeping `sequencer/`
+    (`merge::abort_step_keeping_list`), `rewind_to(started_at)` (shared with `abort_sequence`:
+    SAFE `checkout_tree`, move the branch, or for a detached HEAD `reference("HEAD", …)` so the
+    reflog says `reset: moving to <id>` as git's `reset --merge`), and `sequencer/` is removed.
+    `commits_to_remove` counts up to `COMMITS_TO_REMOVE_CAP` + 1 (the UI says "more than
+    1000"). Aborting only the step and keeping the list is not offered: `git cherry-pick
+    --continue` would then take the aborted step as done and silently skip it.
+  - `merge::plan_operation_reset` (used by `abort_merge` too) refuses, before writing, a touched
+    path that is not a conflict and whose work-tree file differs from its staged version
+    (a later edit, a type change such as a symlink, or an untracked file where the operation
+    staged a deletion): `MergeError::WouldDiscard`, git's "Entry '…' not uptodate. Cannot
+    merge." A conflicted path's work-tree file is the step's resolution and is discarded, as
+    with git.
   - Routing: the worker's `AbortSequence` aborts the stored sequence if there is one, else the
     terminal one. `AbortMerge` without a stored sequence refuses a terminal sequence's step or
     list ("This cherry-pick was started in a terminal. Try Abort again to see what it will
     undo.", nothing changed); a merge paused during it is aborted as usual. git-core's
     `merge::abort_merge` itself keeps `git reset --merge`'s behaviour. The frontend sends every
-    Abort of a terminal sequence (strip, commit box, palette) to `abortSequence`, after a
-    confirmation when it `rewinds` and removes commits. Not undoable; the commits stay in the
-    reflog.
+    Abort of a terminal sequence (strip, commit box, palette) to `abortSequence` with
+    `confirmed` (HEAD id and the fields shown), after a confirmation when it `rewinds` and
+    removes commits; the worker refuses a terminal abort without one. Not undoable; the commits
+    stay in the reflog.
 - `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as
   `<gitdir>/browsitory/sequence.json` (per worktree, versioned, temp file + `sync_all` + rename,
   like `undo.json`), written only when a sequence stops and deleted when it completes or is

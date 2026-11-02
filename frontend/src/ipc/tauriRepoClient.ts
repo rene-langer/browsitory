@@ -61,6 +61,7 @@ import type {
   HeadInfo,
   PickOutcome,
   SequenceAbort,
+  ConfirmedAbort,
   RebaseAbort,
   SequenceOutcome,
   ConflictSide,
@@ -363,7 +364,8 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<SequenceOutcome>("revert_many", { repoPath, commitIds }),
   continueSequence: (repoPath: string, noVerify?: boolean) =>
     loggedInvoke<SequenceOutcome>("continue_sequence", { repoPath, noVerify: noVerify ?? false }),
-  abortSequence: (repoPath: string) => loggedInvoke<SequenceAbort>("abort_sequence", { repoPath }),
+  abortSequence: (repoPath: string, confirmed?: ConfirmedAbort | null) =>
+    loggedInvoke<SequenceAbort>("abort_sequence", { repoPath, confirmed: confirmed ?? null }),
   resolveWholeFile: (repoPath: string, path: string, side: ConflictSide) =>
     loggedInvoke<void>("resolve_whole_file", { repoPath, path, side }),
   resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>
