@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Terminal bisect
+
+- Fixed: Abort (of a merge, cherry-pick, revert or several-commit cherry-pick) and the end of a
+  rebase ended a git bisect started in a terminal. They now remove only their own state, as git
+  does, so the bisect goes on. They no longer delete a terminal rebase's state, nor the rest of
+  a terminal `git cherry-pick A B C` (only aborting its last step ends it, as with git). Reset
+  (mixed or hard) keeps them too (#249).
+- Fixed: Abort of a merge or cherry-pick started in a terminal after Browsitory last refreshed
+  could leave the conflicted files with their markers. Abort now reads the index from disk
+  first.
+- Fixed: during a git bisect started in a terminal, cherry-pick, revert, reset, amend, Undo and
+  Redo said "Finish or abort the current merge/cherry-pick/revert/rebase first." and a rebase
+  showed as interrupted. They now work as with git (#250).
+- Added: a bar shows a bisect started in a terminal: "Bisecting (started from main). Use git
+  bisect good, bad or reset in a terminal." (#250).
+- If Abort can't remove one of git's merge state files, it now says "Couldn't remove git's merge
+  state: …" instead of "failed to write resolved file: …" (#249).
+
 ### Safe undo restores
 
 - Fixed: if Undo or Redo failed while writing a file back (for example a full disk), the file

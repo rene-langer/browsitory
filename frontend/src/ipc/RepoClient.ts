@@ -156,6 +156,16 @@ export interface HeadInfo {
   sequence: SequenceProgress | null;
   /** A paused interactive rebase (stored, so it survives a restart). */
   rebase: RebaseInfo | null;
+  /**
+   * A `git bisect` started in a terminal. Nothing is blocked during it (git allows picks,
+   * rebases, reset and commits while bisecting); independent of `operation`, so a merge paused
+   * during a bisect has both.
+   */
+  bisect: BisectInfo | null;
+}
+/** `startedFrom` is what `git bisect reset` returns to: a branch name, or a commit id. */
+export interface BisectInfo {
+  startedFrom: string;
 }
 /** What changed outside Browsitory while a rebase was paused; the rebase can only be aborted. */
 export type RebaseDivergence = "HeadMoved" | "BranchMoved" | "BranchMissing" | "OtherOperation";

@@ -66,6 +66,28 @@ pub struct HeadInfo {
     /// A paused interactive rebase. Filled by `repo-service` from its stored rebase state, like
     /// `sequence`; `git-core` always reports `None`.
     pub rebase: Option<RebaseInfo>,
+    /// A `git bisect` started in a terminal. Independent of `operation`: a merge paused during a
+    /// bisect has both.
+    pub bisect: Option<BisectInfo>,
+}
+
+/// A `git bisect` in progress (`BISECT_LOG` exists in this worktree's git folder).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BisectInfo {
+    /// What `git bisect reset` returns to (`BISECT_START`): a branch name, or a commit id when
+    /// the bisect started on a detached HEAD. Empty if the file is missing.
+    pub started_from: String,
+}
+
+/// The bisect started in a terminal, if any.
+fn bisect_info(repo: &git2::Repository) -> Option<BisectInfo> {
+    if !repo.path().join("BISECT_LOG").exists() {
+        return None;
+    }
+    let started_from = std::fs::read_to_string(repo.path().join("BISECT_START"))
+        .map(|text| text.trim().to_string())
+        .unwrap_or_default();
+    Some(BisectInfo { started_from })
 }
 
 /// A paused interactive rebase as the UI shows it.
@@ -95,6 +117,20 @@ impl RebaseInfo {
             health,
         }
     }
+}
+
+/// True when git has no merge, cherry-pick, revert or rebase paused. A `git bisect` started in
+/// a terminal (libgit2's `Bisect` state) counts as nothing in progress, as it does for git: it
+/// allows picks, reverts, rebases, reset, amend and commits while bisecting (#250).
+///
+/// libgit2 reports `Bisect` only when nothing else is paused (it checks the rebase folders,
+/// `MERGE_HEAD`, `REVERT_HEAD` and `CHERRY_PICK_HEAD` first), so a merge or pick paused during a
+/// bisect still counts as in progress.
+pub(crate) fn no_operation(repo: &git2::Repository) -> bool {
+    matches!(
+        repo.state(),
+        git2::RepositoryState::Clean | git2::RepositoryState::Bisect
+    )
 }
 
 /// Snapshot of what HEAD is and which single-commit operation (if any) is paused on it. A
@@ -127,6 +163,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 commit_hooks,
                 sequence: None,
                 rebase: None,
+                bisect: bisect_info(repo),
             });
         }
         Err(error) => return Err(error.into()),
@@ -144,6 +181,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         commit_hooks,
         sequence: None,
         rebase: None,
+        bisect: bisect_info(repo),
     })
 }
 

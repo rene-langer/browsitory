@@ -8,7 +8,7 @@ use std::path::Path;
 
 use git2::{
     ErrorCode, Index, IndexEntry, IndexEntryExtendedFlag, IndexTime, ObjectType, Oid, Repository,
-    RepositoryState, Status, StatusOptions, TreeWalkMode, TreeWalkResult,
+    Status, StatusOptions, TreeWalkMode, TreeWalkResult,
 };
 use thiserror::Error;
 
@@ -228,7 +228,7 @@ pub fn restore(
     target: &RepoSnapshot,
     reflog_message: &str,
 ) -> Result<(), UndoError> {
-    if repo.state() != RepositoryState::Clean {
+    if !crate::repo::no_operation(repo) {
         return Err(UndoError::OperationInProgress);
     }
 

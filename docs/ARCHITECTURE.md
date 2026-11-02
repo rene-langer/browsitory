@@ -234,8 +234,28 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   and drops itself. `stash_apply` refuses whenever the index differs from HEAD
   (`ErrorCode::Uncommitted`); `stash::apply_stash` maps that and the other refusals to
   user-facing `StashError` variants.
-- `cleanup_state` does not remove `SQUASH_MSG`; `merge::clear_squash_message` does, after a
-  commit, an abort, a reset or an undo.
+- `cleanup_state` (`git_repository_state_cleanup`) deletes every `state_files` entry:
+  `MERGE_HEAD`, `MERGE_MODE`, `MERGE_MSG`, `REVERT_HEAD`, `CHERRY_PICK_HEAD`, `BISECT_LOG`,
+  `rebase-merge/`, `rebase-apply/` and `sequencer/`. The last four belong to a `git bisect`,
+  `git rebase` or `git cherry-pick A B C` running in a terminal, so `git-core/src` never calls
+  it (#249; the test `no_cleanup_state_in_git_core_src` in `tests/bisect.rs` keeps it that way).
+  An operation's own files are removed by `commit::clear_operation_files` (`MERGE_HEAD`,
+  `MERGE_MODE`, `MERGE_MSG`, `AUTO_MERGE`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`; missing files are
+  fine, every file is tried, the first error is returned). libgit2's mixed and hard `git_reset`
+  also end with `cleanup_state`, so `reset::reset_to` does those two itself (forced checkout for
+  hard, move HEAD with git's "reset: moving to <id>" reflog message, index from the target
+  tree, `clear_operation_files`); a soft reset still uses `git_reset`, which cleans nothing.
+- `cleanup_state` does not remove `SQUASH_MSG` and neither does `clear_operation_files`;
+  `merge::clear_squash_message` does, after a commit, an abort, a reset or an undo.
+- `repo.state()` checks the rebase folders, then `MERGE_HEAD`, `REVERT_HEAD` (+
+  `sequencer/todo` → `RevertSequence`), `CHERRY_PICK_HEAD` (+ todo → `CherryPickSequence`), and
+  only then `BISECT_LOG` → `Bisect`. So a bisect is hidden by any other paused operation, and a
+  terminal sequence paused between steps (`sequencer/todo` without a pick head) is `Clean`.
+  `repo::no_operation` (`Clean | Bisect`) is the "nothing in progress" check everywhere: git
+  allows picks, reverts, rebases, reset, amend and commits during a bisect (#250). A merge or
+  pick paused during a bisect still reads as that operation. `repo::head_info` reports the
+  bisect separately (`HeadInfo.bisect`, from `BISECT_LOG` and `BISECT_START` in `repo.path()`,
+  so per worktree).
 - `git_merge` ignores the merge analysis: called when a fast-forward is possible it still writes
   `MERGE_HEAD`, which is what `FastForward::Never` relies on.
 
@@ -354,7 +374,10 @@ across processes).
   <HEAD> <MERGE_HEAD…> @<mtime>`, `cherry-pick <HEAD> <CHERRY_PICK_HEAD> @<mtime>`, `revert
   <HEAD> <REVERT_HEAD> @<mtime>`, or `git <state> <HEAD>`, each constant for the operation's
   whole life (the stored rebase and sequence come first because their `CHERRY_PICK_HEAD` changes
-  per step). `@<mtime>` is the state file's modification time in nanoseconds (omitted when it
+  per step). A terminal `git bisect` alone (libgit2's `Bisect`) has no marker, as `Clean`
+  (#250): commands are recorded and Undo/Redo run during it (`undo::restore` checks
+  `repo::no_operation`), and its marker no longer changes with every `git bisect good/bad`.
+  `@<mtime>` is the state file's modification time in nanoseconds (omitted when it
   can't be read): git writes `MERGE_HEAD`/`CHERRY_PICK_HEAD`/`REVERT_HEAD` once per operation and
   nothing rewrites them during the pause, so a merge or pick aborted outside the app and started
   again with the same heads gets a new marker, and both processes stat the same file (#172). On
@@ -501,8 +524,14 @@ across processes).
   one line left (git's `have_finished_the_last_pick`), so `git cherry-pick --continue` carries on
   after a step committed in Browsitory (#241, D2-A). A missing or unreadable todo keeps the
   folder. It never touches `BISECT_LOG`, `rebase-*` or `SQUASH_MSG`, so, as with
-  `git commit`, a commit no longer ends a `git bisect` started in a terminal. Abort
-  (`merge::abort_merge`, `pick::abort_sequence`) and rebase still use `cleanup_state`.
+  `git commit`, a commit no longer ends a `git bisect` started in a terminal.
+  `merge::abort_merge` uses the same `clear_commit_state`, like git's `remove_branch_state`
+  after `git reset --merge` (#249): it keeps `BISECT_LOG` and `rebase-*`, and keeps
+  `sequencer/` for `git cherry-pick --continue` unless the aborted step was the list's last
+  pick. It re-reads the index first (the worker's long-lived handle may predate a terminal
+  merge). `pick::abort_sequence`'s leftover case and the rebase use `clear_operation_files`,
+  which never touches `sequencer/`. A state file Abort can't remove is
+  `MergeError::StateFiles` ("Couldn't remove git's merge state: …").
 - `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as
   `<gitdir>/browsitory/sequence.json` (per worktree, versioned, temp file + `sync_all` + rename,
   like `undo.json`), written only when a sequence stops and deleted when it completes or is
@@ -616,6 +645,12 @@ across processes).
   git has an operation other than this rebase's own pick paused (`OtherOperation`); HEAD isn't
   detached at `expected_head` and isn't the step committed by hand (`HeadMoved`). Otherwise
   `Paused`. A diverged rebase stays stored and visible ("interrupted"); only Abort is offered.
+  A `git bisect` started in a terminal is not another operation: every state check of the
+  rebase (`resume_kind`, `rebase_health`, `is_step_committed_by_hand`, `abort_rebase`) uses
+  `repo::no_operation`, so a rebase run during a bisect pauses, continues and aborts as without
+  one. Landing a step, `finish` and Abort clear only the pick's own files
+  (`commit::clear_operation_files`), so the bisect, and a terminal rebase's or cherry-pick's
+  state, survive (#249, #250).
 - **Continue** (`rebase_continue`):
 
   | Situation | Action |

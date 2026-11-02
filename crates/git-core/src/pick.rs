@@ -290,7 +290,7 @@ fn clear_state(repo: &Repository) -> Result<(), PickError> {
 /// The preconditions every pick shares, in order: nothing paused, a born HEAD, nothing staged.
 /// Returns HEAD's commit.
 fn check_ready(repo: &Repository) -> Result<Commit<'_>, PickError> {
-    if repo.state() != RepositoryState::Clean {
+    if !crate::repo::no_operation(repo) {
         return Err(PickError::OperationInProgress);
     }
     let head = match repo.head() {
@@ -631,11 +631,11 @@ fn run(repo: &Repository, mut state: SequenceState, hooks: &mut HookOptions<'_>)
             Err(error) => {
                 // A cancelled `prepare-commit-msg` leaves the step paused, as a failing one does.
                 state.stopped_on_conflict =
-                    matches!(error, PickError::Hook(_)) && repo.state() != RepositoryState::Clean;
+                    matches!(error, PickError::Hook(_)) && !crate::repo::no_operation(repo);
                 let untouched = state.next == 0
                     && state.skipped.is_empty()
                     && state.expected_head == state.original_head
-                    && repo.state() == RepositoryState::Clean;
+                    && crate::repo::no_operation(repo);
                 return if untouched {
                     SequenceRun::failed(error)
                 } else {
@@ -693,7 +693,10 @@ pub fn continue_sequence(
         | RepositoryState::CherryPickSequence
         | RepositoryState::Revert
         | RepositoryState::RevertSequence => finish_paused(repo, &mut state, &mut hooks),
-        RepositoryState::Clean => resume_clean(repo, &mut state).map(|()| Paused::Done),
+        // A terminal bisect is no operation in progress (#250).
+        RepositoryState::Clean | RepositoryState::Bisect => {
+            resume_clean(repo, &mut state).map(|()| Paused::Done)
+        }
         _ => Err(PickError::OperationInProgress),
     };
     match resumed {
@@ -1032,8 +1035,10 @@ pub fn abort_sequence(
     } else if is_leftover_of_committed_step(repo, state) {
         // The previous step's commit landed but its pick state stayed (D7-A): ours, and nothing
         // is staged in it (the worktree and index are that commit), so clear it and rewind.
-        repo.cleanup_state()?;
-    } else if repo.state() == RepositoryState::Clean
+        // Only the pick's own files: a terminal bisect or cherry-pick list goes on (#249).
+        crate::commit::clear_operation_files(repo)
+            .map_err(|error| PickError::Commit(crate::commit::CommitError::Io(error)))?;
+    } else if crate::repo::no_operation(repo)
         && head_id == state.expected_head
         && fresh_index(repo)?.has_conflicts()
     {
@@ -1041,8 +1046,9 @@ pub fn abort_sequence(
         // still ours to clean up, like `git cherry-pick --abort` would have.
         crate::merge::abort_merge(repo)?;
     }
-    if repo.state() != RepositoryState::Clean {
-        // Someone else's operation is paused here; don't pull HEAD from under it.
+    if !crate::repo::no_operation(repo) {
+        // Someone else's operation is paused here; don't pull HEAD from under it. A terminal
+        // bisect isn't one: git's `cherry-pick --abort` rewinds during a bisect too (#250).
         return Ok(SequenceAbort {
             rewound: head_id == state.original_head,
         });
