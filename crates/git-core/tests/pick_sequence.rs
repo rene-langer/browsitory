@@ -2109,13 +2109,16 @@ fn sequencer_file(repo: &Repository, name: &str) -> String {
         .to_string()
 }
 
+/// libgit2 calls a sequence between steps `Clean`; `head_info` reports it anyway, as `git
+/// status` does (#258).
 #[test]
-fn a_paused_terminal_sequence_is_invisible_today() {
+fn a_terminal_sequence_between_steps_is_reported() {
     for command in ["cherry-pick", "revert"] {
         let (dir, repo, _) = between_steps(command);
         assert_eq!(repo.state(), RepositoryState::Clean, "{command}");
         let info = git_core::repo::head_info(&repo).unwrap();
         assert_eq!(info.operation, None, "{command}");
+        assert!(info.terminal_sequence.is_some(), "{command}");
         assert!(git_reports_a_pick(dir.path()), "{command}");
     }
 }
@@ -2160,7 +2163,126 @@ fn aborting_a_terminal_sequence_step_keeps_head_today() {
 fn an_error_stop_leaves_abort_safety_at_head() {
     for command in ["cherry-pick", "revert"] {
         let (_dir, repo, _) = stopped_on_an_error(command);
-        assert_eq!(sequencer_file(&repo, "abort-safety"), head(&repo), "{command}");
+        assert_eq!(
+            sequencer_file(&repo, "abort-safety"),
+            head(&repo),
+            "{command}"
+        );
         assert_ne!(sequencer_file(&repo, "head"), head(&repo), "{command}");
     }
+}
+
+// --- #258: detecting a terminal sequence ---
+
+fn detect(repo: &Repository) -> Option<git_core::pick::TerminalSequence> {
+    git_core::pick::terminal_sequence(repo)
+}
+
+fn summary_of(repo: &Repository, id: &str) -> String {
+    let commit = repo.find_commit(Oid::from_str(id).unwrap()).unwrap();
+    commit.summary().unwrap().unwrap().to_string()
+}
+
+#[test]
+fn terminal_sequence_between_steps() {
+    for (command, kind) in [
+        ("cherry-pick", SequenceKind::CherryPick),
+        ("revert", SequenceKind::Revert),
+    ] {
+        let (_dir, repo, _) = between_steps(command);
+        let original = sequencer_file(&repo, "head");
+        let found = detect(&repo).expect(command);
+        assert_eq!(
+            found,
+            git_core::pick::TerminalSequence {
+                kind,
+                paused_on_conflict: false,
+                started_at: original.clone(),
+                started_at_summary: "main".to_string(),
+                rewinds: false,
+                commits_to_remove: 0,
+            },
+            "{command}"
+        );
+        let info = git_core::repo::head_info(&repo).unwrap();
+        assert_eq!(info.terminal_sequence, Some(found), "{command}");
+    }
+}
+
+#[test]
+fn terminal_sequence_after_an_error_stop() {
+    for (command, kind) in [
+        ("cherry-pick", SequenceKind::CherryPick),
+        ("revert", SequenceKind::Revert),
+    ] {
+        let (_dir, repo, _) = stopped_on_an_error(command);
+        let found = detect(&repo).expect(command);
+        assert_eq!(found.kind, kind);
+        assert!(!found.paused_on_conflict, "{command}");
+        assert!(found.rewinds, "{command}");
+        assert_eq!(found.commits_to_remove, 1, "{command}");
+        assert_eq!(found.started_at, sequencer_file(&repo, "head"));
+        assert_eq!(
+            found.started_at_summary,
+            summary_of(&repo, &found.started_at)
+        );
+    }
+}
+
+#[test]
+fn terminal_sequence_paused_on_a_later_step() {
+    for (command, kind) in [
+        ("cherry-pick", SequenceKind::CherryPick),
+        ("revert", SequenceKind::Revert),
+    ] {
+        let (_dir, repo, _) = paused_on_a_later_step(command);
+        let found = detect(&repo).expect(command);
+        assert_eq!(found.kind, kind);
+        assert!(found.paused_on_conflict, "{command}");
+        assert!(found.rewinds, "{command}");
+        assert_eq!(found.commits_to_remove, 1, "{command}");
+    }
+}
+
+#[test]
+fn terminal_sequence_paused_on_its_first_step_has_nothing_to_rewind() {
+    let (_dir, repo, _) = paused_unresolved("cherry-pick", false);
+    let found = detect(&repo).unwrap();
+    assert!(found.paused_on_conflict);
+    assert!(!found.rewinds);
+    assert_eq!(found.commits_to_remove, 0);
+    assert_eq!(found.started_at, head(&repo));
+}
+
+#[test]
+fn terminal_sequence_kind_comes_from_the_todo() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f", "base\n");
+    common::commit_all(&repo, "base");
+    let id = head(&repo);
+    let sequencer = repo.path().join("sequencer");
+    std::fs::create_dir(&sequencer).unwrap();
+    std::fs::write(sequencer.join("head"), format!("{id}\n")).unwrap();
+    for (todo, kind) in [
+        (format!("# comment\n\np {id} x\n"), SequenceKind::CherryPick),
+        (format!("pick {id} x\n"), SequenceKind::CherryPick),
+        (format!("r {id} x\n"), SequenceKind::Revert),
+        (format!("revert {id} x\n"), SequenceKind::Revert),
+        (String::new(), SequenceKind::CherryPick),
+    ] {
+        std::fs::write(sequencer.join("todo"), &todo).unwrap();
+        assert_eq!(detect(&repo).unwrap().kind, kind, "{todo:?}");
+    }
+    // A missing abort-safety never rewinds, as git's `rollback_is_safe`.
+    assert!(!detect(&repo).unwrap().rewinds);
+}
+
+#[test]
+fn no_sequencer_folder_is_no_terminal_sequence() {
+    let (_dir, repo, _) = terminal_sequence_repo("cherry-pick");
+    assert_eq!(detect(&repo), None);
+    assert_eq!(
+        git_core::repo::head_info(&repo).unwrap().terminal_sequence,
+        None
+    );
 }

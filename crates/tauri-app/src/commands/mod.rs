@@ -3470,6 +3470,7 @@ mod tests {
             sequence: None,
             rebase: None,
             bisect: None,
+            terminal_sequence: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
@@ -3485,6 +3486,7 @@ mod tests {
             sequence: None,
             rebase: None,
             bisect: None,
+            terminal_sequence: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap()["squashMessage"],
@@ -3586,6 +3588,7 @@ mod tests {
                 sequence,
                 rebase: None,
                 bisect: None,
+                terminal_sequence: None,
             }))
             .unwrap()
         };
@@ -3948,6 +3951,7 @@ mod tests {
                 health,
             }),
             bisect: None,
+            terminal_sequence: None,
         }))
         .unwrap()
     }

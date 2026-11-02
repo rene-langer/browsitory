@@ -148,6 +148,89 @@ pub struct SequenceAbort {
     pub rewound: bool,
 }
 
+/// A `git cherry-pick A B C` / `git revert A B` started in a terminal that hasn't finished: git's
+/// `.git/sequencer/todo` exists (#258). libgit2 reports it only while a step is paused
+/// (`CherryPickSequence`/`RevertSequence`); between steps (a step committed by hand, or a stop
+/// on an error) its state is `Clean`, so this reads git's files itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalSequence {
+    pub kind: SequenceKind,
+    /// A step is paused (`CHERRY_PICK_HEAD`/`REVERT_HEAD` exists); otherwise the sequence is
+    /// between steps.
+    pub paused_on_conflict: bool,
+    /// Where the sequence started (`sequencer/head`); empty if unreadable.
+    pub started_at: String,
+    /// `started_at`'s summary, empty if it can't be read.
+    pub started_at_summary: String,
+    /// Abort goes back to `started_at`, as `git cherry-pick --abort` does: HEAD is still where
+    /// the sequence last left it (`sequencer/abort-safety`) and differs from `started_at`.
+    pub rewinds: bool,
+    /// The commits that rewind removes (HEAD's commits not in `started_at`, at most 1000); 0
+    /// unless `rewinds`.
+    pub commits_to_remove: usize,
+}
+
+/// The terminal sequence in this repository's git folder (per worktree), if any.
+pub fn terminal_sequence(repo: &Repository) -> Option<TerminalSequence> {
+    let sequencer = repo.path().join("sequencer");
+    let todo = std::fs::read(sequencer.join("todo")).ok()?;
+    let has = |name: &str| repo.path().join(name).exists();
+    // git's `sequencer_get_last_command`: the todo's first command names the operation.
+    let first = String::from_utf8_lossy(&todo)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'))
+        .and_then(|line| line.split_whitespace().next().map(str::to_string));
+    let kind = match first.as_deref() {
+        Some("pick" | "p") => SequenceKind::CherryPick,
+        Some("revert" | "r") => SequenceKind::Revert,
+        _ if has("REVERT_HEAD") => SequenceKind::Revert,
+        _ => SequenceKind::CherryPick,
+    };
+    let read = |name: &str| {
+        std::fs::read_to_string(sequencer.join(name))
+            .map(|text| text.trim().to_string())
+            .unwrap_or_default()
+    };
+    let started_at = read("head");
+    let started = Oid::from_str(&started_at)
+        .ok()
+        .and_then(|oid| repo.find_commit(oid).ok());
+    let started_at_summary = started
+        .as_ref()
+        .and_then(|commit| commit.summary().ok().flatten().map(str::to_string))
+        .unwrap_or_default();
+    let head = repo.head().ok().and_then(|head| head.target());
+    let abort_safety = Oid::from_str(&read("abort-safety")).ok();
+    let rewinds = match (&started, head) {
+        (Some(started), Some(head)) => abort_safety == Some(head) && started.id() != head,
+        _ => false,
+    };
+    let commits_to_remove = match (&started, head) {
+        (Some(started), Some(head)) if rewinds => count_commits(repo, head, started.id()),
+        _ => 0,
+    };
+    Some(TerminalSequence {
+        kind,
+        paused_on_conflict: has("CHERRY_PICK_HEAD") || has("REVERT_HEAD"),
+        started_at,
+        started_at_summary,
+        rewinds,
+        commits_to_remove,
+    })
+}
+
+/// The commits reachable from `head` but not from `base`, at most 1000.
+fn count_commits(repo: &Repository, head: Oid, base: Oid) -> usize {
+    let Ok(mut walk) = repo.revwalk() else {
+        return 0;
+    };
+    if walk.push(head).is_err() || walk.hide(base).is_err() {
+        return 0;
+    }
+    walk.take(1000).filter(Result::is_ok).count()
+}
+
 /// A stopped sequence, enough to continue or abort it later. `git-core` never stores it;
 /// `repo-service` persists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
