@@ -1804,15 +1804,23 @@ fn abort_merge_restores_a_conflicted_path_replaced_by_a_symlink() {
 
 #[test]
 #[cfg(unix)]
-fn abort_merge_restores_a_merged_path_replaced_by_a_symlink() {
+fn abort_merge_refuses_a_merged_path_replaced_by_a_symlink() {
+    // A merged (staged) path changed again in the work tree is a change Abort would lose, so
+    // it refuses, as `git merge --abort` does ("not uptodate", #281 review), and writes
+    // nothing, through the link or otherwise.
     let out = common::outside_dir();
     let (dir, repo) = stopped_merge_with_clean_paths();
     common::replace_with_link(dir.path(), "tc", &out.path().join("target.txt"));
 
-    git_core::merge::abort_merge(&repo).unwrap();
+    let error = git_core::merge::abort_merge(&repo).unwrap_err();
 
+    assert!(
+        matches!(&error, git_core::merge::MergeError::WouldDiscard(path) if path == "tc"),
+        "{error:?}"
+    );
     common::assert_outside_untouched(out.path());
-    assert_eq!(common::read(dir.path(), "tc"), "plain\n");
+    assert!(common::is_link(dir.path(), "tc"));
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
 }
 
 #[test]

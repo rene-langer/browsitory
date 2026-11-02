@@ -1715,10 +1715,28 @@ fn a_terminal_sequence_round_trips_through_the_sidecar() {
         })
     );
 
-    let aborted = sidecar.call(
+    // Without what the user confirmed, nothing is aborted (#281 review).
+    let refused = sidecar.call(
         3,
         "abort_sequence",
         serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        refused["error"]["message"],
+        "The cherry-pick in the terminal changed since you looked. Check it again, then abort."
+    );
+    let aborted = sidecar.call(
+        5,
+        "abort_sequence",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "confirmed": {
+                "headId": step.to_string(),
+                "startedAt": started.to_string(),
+                "rewinds": true,
+                "commitsToRemove": 1
+            }
+        }),
     );
     assert_eq!(aborted["result"], serde_json::json!({ "rewound": true }));
     let after = sidecar.call(

@@ -2376,6 +2376,7 @@ fn terminal_sequence_between_steps() {
                 started_at_summary: "main".to_string(),
                 rewinds: false,
                 commits_to_remove: 0,
+                damage: None,
             },
             "{command}"
         );
@@ -2536,7 +2537,7 @@ fn abort_rewinds_a_terminal_sequence_paused_on_a_later_step() {
             aborted(dir.path(), &repo, &started_at)
         };
         let ours = run(&|_, repo| {
-            let abort = abort_terminal_sequence(repo).unwrap();
+            let abort = abort_now(repo).unwrap();
             abort.rewound
         });
         let theirs = run(&|dir, _| git_abort(dir, command).status.success());
@@ -2558,7 +2559,7 @@ fn abort_rewinds_after_an_error_stop() {
             assert!(abort(dir.path(), &repo), "{command}");
             aborted(dir.path(), &repo, &started_at)
         };
-        let ours = run(&|_, repo| abort_terminal_sequence(repo).unwrap().rewound);
+        let ours = run(&|_, repo| abort_now(repo).unwrap().rewound);
         let theirs = run(&|dir, _| git_abort(dir, command).status.success());
 
         assert_eq!(ours, theirs, "{command}");
@@ -2579,7 +2580,7 @@ fn abort_between_steps_after_a_manual_commit_keeps_head() {
         let before = head(&repo);
         let worktree = files(dir.path());
 
-        let abort = abort_terminal_sequence(&repo).unwrap();
+        let abort = abort_now(&repo).unwrap();
 
         assert!(!abort.rewound, "{command}");
         assert_eq!(head(&repo), before);
@@ -2608,51 +2609,12 @@ fn abort_on_the_first_step_only_undoes_the_step() {
             assert!(abort(dir.path(), &repo), "{command}");
             aborted(dir.path(), &repo, &started_at)
         };
-        let ours = run(&|_, repo| abort_terminal_sequence(repo).unwrap().rewound);
+        let ours = run(&|_, repo| abort_now(repo).unwrap().rewound);
         let theirs = run(&|dir, _| git_abort(dir, command).status.success());
 
         assert_eq!(ours, theirs, "{command}");
         assert!(ours.2 && !ours.4, "{command}");
     }
-}
-
-/// A local edit to a file a landed step changed blocks the rewind, as `git cherry-pick --abort`
-/// refuses ("Entry 'b.txt' not uptodate"). git then leaves the step paused; Browsitory has
-/// already aborted the step, and keeps the list so Abort can be retried.
-#[test]
-fn abort_of_a_terminal_sequence_refuses_to_overwrite_a_local_edit() {
-    let (dir, repo, _) = paused_on_a_later_step("cherry-pick");
-    let started_at = sequencer_file(&repo, "head");
-    let after_b = head(&repo);
-    common::write_file(dir.path(), "b.txt", "edited\n");
-
-    assert!(abort_terminal_sequence(&repo).is_err());
-
-    assert_eq!(head(&repo), after_b);
-    assert_eq!(common::read(dir.path(), "b.txt"), "edited\n");
-    assert!(!repo.path().join("CHERRY_PICK_HEAD").exists());
-    let now = detect(&repo).expect("the list is kept");
-    assert!(!now.paused_on_conflict);
-    assert!(now.rewinds);
-    assert_eq!(now.commits_to_remove, 1);
-
-    common::write_file(dir.path(), "b.txt", "b\n");
-    let abort = abort_terminal_sequence(&repo).unwrap();
-    assert!(abort.rewound);
-    assert_eq!(head(&repo), started_at);
-    assert!(!dir.path().join("b.txt").exists());
-    assert_eq!(detect(&repo), None);
-
-    // git's twin refuses too, and leaves the step paused.
-    let (twin_dir, twin, _) = paused_on_a_later_step("cherry-pick");
-    let twin_after_b = head(&twin);
-    common::write_file(twin_dir.path(), "b.txt", "edited\n");
-    let output = git_abort(twin_dir.path(), "cherry-pick");
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("not uptodate"));
-    assert_eq!(head(&twin), twin_after_b);
-    assert!(twin.path().join("CHERRY_PICK_HEAD").exists());
-    assert!(twin.path().join("sequencer").exists());
 }
 
 #[test]
@@ -2670,7 +2632,7 @@ fn abort_keeps_a_terminal_bisect() {
         assert_eq!(std::fs::read(repo.path().join("BISECT_LOG")).unwrap(), log);
         aborted(dir.path(), &repo, &started_at)
     };
-    let ours = run(&|_, repo| abort_terminal_sequence(repo).unwrap().rewound);
+    let ours = run(&|_, repo| abort_now(repo).unwrap().rewound);
     let theirs = run(&|dir, _| git_abort(dir, "cherry-pick").status.success());
     assert_eq!(ours, theirs);
     assert!(ours.2 && !ours.4);
@@ -2680,7 +2642,7 @@ fn abort_keeps_a_terminal_bisect() {
 fn abort_without_a_terminal_sequence_is_refused() {
     let (_dir, repo, _) = terminal_sequence_repo("cherry-pick");
     assert!(matches!(
-        abort_terminal_sequence(&repo),
+        abort_now(&repo),
         Err(PickError::NoTerminalSequence)
     ));
 }
@@ -2703,30 +2665,377 @@ fn abort_of_a_terminal_sequence_refuses_a_paused_merge() {
     assert_eq!(repo.state(), RepositoryState::Merge);
 
     assert!(matches!(
-        abort_terminal_sequence(&repo),
+        abort_now(&repo),
         Err(PickError::OperationInProgress)
     ));
     assert_eq!(repo.state(), RepositoryState::Merge);
     assert!(detect(&repo).is_some());
 }
 
-/// Paused on the list's last step, a refused rewind still keeps the list (aborting only that
-/// step would end it, as `abort_merge` does), so Abort can be retried.
+// --- #281 review: Abort refuses up front and changes nothing, as git does ---
+
+/// Aborts with a confirmation of the sequence as it is now (what the UI just showed).
+fn abort_now(repo: &Repository) -> Result<git_core::pick::SequenceAbort, PickError> {
+    let confirmed = git_core::pick::ConfirmedAbort::now(repo).unwrap_or_default();
+    abort_terminal_sequence(repo, &confirmed)
+}
+
+/// Everything an Abort that refuses must leave alone: HEAD, the index, git's state files, the
+/// todo and the work tree.
+#[allow(clippy::type_complexity)]
+fn whole_state(
+    dir: &Path,
+    repo: &Repository,
+) -> (String, Vec<u8>, Vec<Option<Vec<u8>>>, Vec<(String, String)>) {
+    let state_files = [
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "MERGE_HEAD",
+        "MERGE_MSG",
+        "sequencer/todo",
+        "sequencer/head",
+        "sequencer/abort-safety",
+    ]
+    .iter()
+    .map(|name| std::fs::read(repo.path().join(name)).ok())
+    .collect();
+    (
+        head(repo),
+        std::fs::read(repo.path().join("index")).unwrap(),
+        state_files,
+        files(dir),
+    )
+}
+
+/// HIGH 1: a local edit to a file a landed step changed blocks the rewind. git refuses before
+/// changing anything ("Entry 'b.txt' not uptodate"), so the paused step, its conflict and the
+/// resolution in the work tree all stay; so does Browsitory, naming the file.
 #[test]
-fn a_refused_rewind_on_the_last_step_keeps_the_list() {
-    let (dir, repo, [a, b, _]) = terminal_sequence_repo("cherry-pick");
-    let output = git(dir.path(), &["cherry-pick", &b, &a]);
-    assert!(!output.status.success());
-    drop(repo);
-    let repo = reopen(dir.path());
+fn a_refused_rewind_changes_nothing() {
+    let setup = || {
+        let (dir, repo, ids) = paused_on_a_later_step("cherry-pick");
+        common::write_file(dir.path(), "b.txt", "edited\n");
+        // A resolution of the paused step's conflict, not staged yet.
+        common::write_file(dir.path(), "f", "resolved\n");
+        (dir, repo, ids)
+    };
+    let (dir, repo, _) = setup();
     let started_at = sequencer_file(&repo, "head");
-    common::write_file(dir.path(), "b.txt", "edited\n");
+    let before = whole_state(dir.path(), &repo);
 
-    assert!(abort_terminal_sequence(&repo).is_err());
-    assert!(detect(&repo).is_some_and(|sequence| sequence.rewinds));
+    let error = abort_now(&repo).unwrap_err();
 
+    assert!(
+        matches!(&error, PickError::RewindBlocked(path) if path == "b.txt"),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("'b.txt'"), "{error}");
+    assert_eq!(whole_state(dir.path(), &repo), before);
+    assert!(fresh(&repo).index().unwrap().has_conflicts());
+
+    // Once the edit is gone, Abort works.
     common::write_file(dir.path(), "b.txt", "b\n");
-    assert!(abort_terminal_sequence(&repo).unwrap().rewound);
+    assert!(abort_now(&repo).unwrap().rewound);
     assert_eq!(head(&repo), started_at);
     assert_eq!(detect(&repo), None);
+
+    // git's twin refuses and changes nothing too.
+    let (twin_dir, twin, _) = setup();
+    let twin_before = whole_state(twin_dir.path(), &twin);
+    let output = git_abort(twin_dir.path(), "cherry-pick");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not uptodate"));
+    assert_eq!(whole_state(twin_dir.path(), &twin), twin_before);
+}
+
+/// HIGH 1 with an untracked file in the rewind's way, on the list's last step: `git revert B A`
+/// removed b.txt (B's revert) and paused on A; putting B's commit back needs b.txt.
+#[test]
+fn a_rewind_blocked_by_an_untracked_file_changes_nothing() {
+    let (dir, repo, [a, b, _]) = terminal_sequence_repo("revert");
+    let output = git(dir.path(), &["revert", "--no-edit", &b, &a]);
+    assert!(!output.status.success(), "must pause on A");
+    drop(repo);
+    let repo = reopen(dir.path());
+    // The revert of B removed b.txt; an untracked b.txt is in the way of putting it back.
+    common::write_file(dir.path(), "b.txt", "mine\n");
+    let before = whole_state(dir.path(), &repo);
+
+    let error = abort_now(&repo).unwrap_err();
+
+    assert!(
+        matches!(&error, PickError::RewindBlocked(path) if path == "b.txt"),
+        "{error:?}"
+    );
+    assert_eq!(whole_state(dir.path(), &repo), before);
+
+    let (twin_dir, twin, [a, b, _]) = terminal_sequence_repo("revert");
+    assert!(!git(twin_dir.path(), &["revert", "--no-edit", &b, &a])
+        .status
+        .success());
+    common::write_file(twin_dir.path(), "b.txt", "mine\n");
+    let twin_before = whole_state(twin_dir.path(), &twin);
+    let output = git_abort(twin_dir.path(), "revert");
+    assert!(!output.status.success(), "{output:?}");
+    assert_eq!(whole_state(twin_dir.path(), &twin), twin_before);
+}
+
+/// HIGH 2: a file staged and then edited again during the pause would lose both versions;
+/// git's `--abort` (`reset --merge`) refuses ("not uptodate") and keeps `MM x.txt`.
+#[test]
+fn abort_refuses_to_lose_a_partly_staged_file() {
+    let setup = || {
+        let (dir, repo, ids) = paused_on_a_later_step("cherry-pick");
+        common::write_file(dir.path(), "x.txt", "staged\n");
+        assert!(git(dir.path(), &["add", "x.txt"]).status.success());
+        common::write_file(dir.path(), "x.txt", "wt\n");
+        (dir, repo, ids)
+    };
+    let (dir, repo, _) = setup();
+    let repo = fresh(&repo);
+    let before = whole_state(dir.path(), &repo);
+
+    let error = abort_now(&repo).unwrap_err();
+
+    assert!(error.to_string().contains("'x.txt'"), "{error}");
+    assert_eq!(whole_state(dir.path(), &repo), before);
+    assert_eq!(porcelain(dir.path(), "x.txt"), "MM x.txt");
+
+    let (twin_dir, twin, _) = setup();
+    let twin_before = whole_state(twin_dir.path(), &twin);
+    let output = git_abort(twin_dir.path(), "cherry-pick");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not uptodate"));
+    assert_eq!(whole_state(twin_dir.path(), &twin), twin_before);
+    assert_eq!(porcelain(twin_dir.path(), "x.txt"), "MM x.txt");
+}
+
+/// HIGH 2 in a plain Abort merge: `git merge --abort` refuses, and so does `abort_merge`.
+#[test]
+fn abort_merge_refuses_to_lose_a_partly_staged_file() {
+    let setup = || {
+        let (dir, repo, _) = terminal_sequence_repo("cherry-pick");
+        common::write_file(dir.path(), "u", "base\n");
+        common::commit_all(&repo, "u");
+        assert!(!git(dir.path(), &["merge", "side"]).status.success());
+        common::write_file(dir.path(), "u", "staged\n");
+        assert!(git(dir.path(), &["add", "u"]).status.success());
+        common::write_file(dir.path(), "u", "wt\n");
+        let repo = reopen(dir.path());
+        (dir, repo)
+    };
+    let (dir, repo) = setup();
+    let before = whole_state(dir.path(), &repo);
+
+    let error = git_core::merge::abort_merge(&repo).unwrap_err();
+
+    assert!(
+        matches!(&error, git_core::merge::MergeError::WouldDiscard(path) if path == "u"),
+        "{error:?}"
+    );
+    assert_eq!(whole_state(dir.path(), &repo), before);
+    assert_eq!(porcelain(dir.path(), "u"), "MM u");
+
+    let (twin_dir, twin) = setup();
+    let twin_before = whole_state(twin_dir.path(), &twin);
+    let output = git(twin_dir.path(), &["merge", "--abort"]);
+    assert!(!output.status.success());
+    assert_eq!(whole_state(twin_dir.path(), &twin), twin_before);
+    assert_eq!(porcelain(twin_dir.path(), "u"), "MM u");
+}
+
+/// A staged change with no further edit is still reset, as `git merge --abort` does.
+#[test]
+fn abort_merge_still_resets_a_staged_file() {
+    let run = |abort: &dyn Fn(&Path, &Repository) -> bool| {
+        let (dir, repo, _) = terminal_sequence_repo("cherry-pick");
+        common::write_file(dir.path(), "u", "base\n");
+        common::commit_all(&repo, "u");
+        assert!(!git(dir.path(), &["merge", "side"]).status.success());
+        common::write_file(dir.path(), "u", "staged\n");
+        assert!(git(dir.path(), &["add", "u"]).status.success());
+        let repo = reopen(dir.path());
+        assert!(abort(dir.path(), &repo));
+        (files(dir.path()), porcelain(dir.path(), "u"))
+    };
+    let ours = run(&|_, repo| git_core::merge::abort_merge(repo).is_ok());
+    let theirs = run(&|dir, _| git(dir, &["merge", "--abort"]).status.success());
+    assert_eq!(ours, theirs);
+}
+
+/// MEDIUM 3: Abort refuses when the sequence is no longer what was confirmed.
+#[test]
+fn abort_refuses_when_the_sequence_changed_since_it_was_confirmed() {
+    let (dir, repo, _) = stopped_on_an_error("cherry-pick");
+    let confirmed = git_core::pick::ConfirmedAbort::now(&repo).unwrap();
+    assert!(confirmed.rewinds);
+    assert_eq!(confirmed.commits_to_remove, 1);
+    // The terminal makes progress meanwhile: one more commit, and git moves abort-safety.
+    common::write_file(dir.path(), "n.txt", "n\n");
+    assert!(git(dir.path(), &["add", "n.txt"]).status.success());
+    assert!(git(dir.path(), &["commit", "-m", "n"]).status.success());
+    let now = head(&repo);
+    std::fs::write(
+        repo.path().join("sequencer").join("abort-safety"),
+        format!("{now}\n"),
+    )
+    .unwrap();
+    let before = whole_state(dir.path(), &repo);
+
+    let error = abort_terminal_sequence(&repo, &confirmed).unwrap_err();
+
+    assert!(
+        matches!(error, PickError::TerminalSequenceChanged(_)),
+        "{error:?}"
+    );
+    assert_eq!(whole_state(dir.path(), &repo), before);
+
+    // A confirmation that said "no rewind" doesn't allow one either.
+    let stale = git_core::pick::ConfirmedAbort {
+        rewinds: false,
+        commits_to_remove: 0,
+        ..git_core::pick::ConfirmedAbort::now(&repo).unwrap()
+    };
+    assert!(matches!(
+        abort_terminal_sequence(&repo, &stale),
+        Err(PickError::TerminalSequenceChanged(_))
+    ));
+    assert_eq!(whole_state(dir.path(), &repo), before);
+    assert_eq!(abort_now(&repo).unwrap().rewound, true);
+}
+
+/// MEDIUM 4: damaged sequencer files, compared with `git cherry-pick --abort`. `refused` cases
+/// change nothing for either; a missing abort-safety ends the list without rewinding.
+#[test]
+fn abort_handles_damaged_sequencer_files_like_git() {
+    type Damage = fn(&Repository);
+    let cases: [(&str, Damage, bool, &str); 5] = [
+        (
+            "empty abort-safety",
+            |repo| std::fs::write(repo.path().join("sequencer/abort-safety"), "").unwrap(),
+            true,
+            "could not parse",
+        ),
+        (
+            "missing head",
+            |repo| std::fs::remove_file(repo.path().join("sequencer/head")).unwrap(),
+            true,
+            "no cherry-pick or revert in progress",
+        ),
+        (
+            "corrupt head",
+            |repo| std::fs::write(repo.path().join("sequencer/head"), "zzz\n").unwrap(),
+            true,
+            "is corrupt",
+        ),
+        (
+            "unknown start commit",
+            |repo| {
+                std::fs::write(
+                    repo.path().join("sequencer/head"),
+                    "1234567890123456789012345678901234567890\n",
+                )
+                .unwrap()
+            },
+            true,
+            "",
+        ),
+        (
+            "missing abort-safety",
+            |repo| std::fs::remove_file(repo.path().join("sequencer/abort-safety")).unwrap(),
+            false,
+            "Not rewinding",
+        ),
+    ];
+    for (name, damage, refused, git_says) in cases {
+        let (dir, repo, _) = stopped_on_an_error("cherry-pick");
+        damage(&repo);
+        let before = whole_state(dir.path(), &repo);
+        let found = detect(&repo).unwrap();
+        assert!(!found.rewinds, "{name}");
+        let result = abort_now(&repo);
+        if refused {
+            let error = result.unwrap_err();
+            assert!(
+                matches!(error, PickError::SequencerDamaged(_)),
+                "{name}: {error:?}"
+            );
+            assert!(
+                error.to_string().contains("git cherry-pick --quit"),
+                "{name}: {error}"
+            );
+            assert_eq!(whole_state(dir.path(), &repo), before, "{name}");
+        } else {
+            assert!(!result.unwrap().rewound, "{name}");
+            assert_eq!(head(&repo), before.0, "{name}");
+            assert!(!repo.path().join("sequencer").exists(), "{name}");
+        }
+
+        let (twin_dir, twin, _) = stopped_on_an_error("cherry-pick");
+        damage(&twin);
+        let twin_before = whole_state(twin_dir.path(), &twin);
+        let output = git_abort(twin_dir.path(), "cherry-pick");
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert!(stderr.contains(git_says), "{name}: {stderr}");
+        if refused {
+            assert!(!output.status.success(), "{name}");
+            assert_eq!(whole_state(twin_dir.path(), &twin), twin_before, "{name}");
+        } else {
+            assert!(output.status.success(), "{name}");
+            assert_eq!(head(&twin), twin_before.0, "{name}");
+            assert!(!twin.path().join("sequencer").exists(), "{name}");
+        }
+    }
+}
+
+/// LOW 5: a rewind on a detached HEAD logs git's "reset: moving to <id>".
+#[test]
+fn a_rewind_on_a_detached_head_logs_like_git() {
+    let run = |abort: &dyn Fn(&Path, &Repository) -> bool| {
+        let (dir, repo, [a, b, c]) = terminal_sequence_repo("cherry-pick");
+        let tip = head(&repo);
+        assert!(git(dir.path(), &["checkout", "--detach", &tip])
+            .status
+            .success());
+        assert!(!git(dir.path(), &["cherry-pick", &b, &a, &c])
+            .status
+            .success());
+        let repo = reopen(dir.path());
+        let started_at = sequencer_file(&repo, "head");
+        assert!(abort(dir.path(), &repo));
+        let repo = reopen(dir.path());
+        assert!(repo.head_detached().unwrap());
+        assert_eq!(head(&repo), started_at);
+        let reflog = repo.reflog("HEAD").unwrap();
+        let message = reflog
+            .get(0)
+            .unwrap()
+            .message()
+            .unwrap()
+            .unwrap_or_default()
+            .to_string();
+        assert_eq!(message, format!("reset: moving to {started_at}"));
+        message.replace(&started_at, "<id>")
+    };
+    let ours = run(&|_, repo| abort_now(repo).unwrap().rewound);
+    let theirs = run(&|dir, _| git_abort(dir, "cherry-pick").status.success());
+    assert_eq!(ours, theirs);
+}
+
+/// `commits_to_remove` stops counting past 1000: 1001 means "more than 1000".
+#[test]
+fn commits_to_remove_is_capped() {
+    assert_eq!(git_core::pick::COMMITS_TO_REMOVE_CAP, 1000);
+}
+
+fn fresh(repo: &Repository) -> Repository {
+    Repository::open(repo.path()).unwrap()
+}
+
+/// `git status --porcelain` for one path, e.g. "MM x.txt".
+fn porcelain(dir: &Path, path: &str) -> String {
+    let output = git(dir, &["status", "--porcelain=v1", "--", path]);
+    String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string()
 }

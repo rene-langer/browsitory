@@ -64,6 +64,28 @@ pub enum PickError {
     /// Abort found no terminal sequence (`.git/sequencer/todo`) to abort.
     #[error("No cherry-pick or revert is in progress.")]
     NoTerminalSequence,
+    /// Abort of a terminal sequence: it changed since the user confirmed it (the terminal went
+    /// on, or the view was out of date). Nothing was changed.
+    #[error("{}", terminal_sequence_changed(*.0))]
+    TerminalSequenceChanged(SequenceKind),
+    /// Abort of a terminal sequence: git's sequencer files can't be read. Nothing was changed.
+    #[error("{0}")]
+    SequencerDamaged(String),
+    /// Abort of a terminal sequence: putting the branch back would overwrite this path's local
+    /// change or an untracked file. Nothing was changed.
+    #[error(
+        "Abort can't put the branch back: '{0}' has changes it would overwrite. Save them \
+         elsewhere or discard them, then try again."
+    )]
+    RewindBlocked(String),
+}
+
+fn terminal_sequence_changed(kind: SequenceKind) -> String {
+    let noun = match kind {
+        SequenceKind::CherryPick => "cherry-pick",
+        SequenceKind::Revert => "revert",
+    };
+    format!("The {noun} in the terminal changed since you looked. Check it again, then abort.")
 }
 
 /// Why an operation is refused while a terminal sequence of `kind` is paused (#258).
@@ -186,16 +208,76 @@ pub struct TerminalSequence {
     /// A step is paused (`CHERRY_PICK_HEAD`/`REVERT_HEAD` exists); otherwise the sequence is
     /// between steps.
     pub paused_on_conflict: bool,
-    /// Where the sequence started (`sequencer/head`); empty if unreadable.
+    /// Where the sequence started (`sequencer/head`); empty if missing or unreadable.
     pub started_at: String,
     /// `started_at`'s summary, empty if it can't be read.
     pub started_at_summary: String,
     /// Abort goes back to `started_at`, as `git cherry-pick --abort` does: HEAD is still where
     /// the sequence last left it (`sequencer/abort-safety`) and differs from `started_at`.
+    /// Never with `damage`.
     pub rewinds: bool,
-    /// The commits that rewind removes (HEAD's commits not in `started_at`, at most 1000); 0
-    /// unless `rewinds`.
+    /// The commits that rewind removes (HEAD's commits not in `started_at`); 0 unless
+    /// `rewinds`. Counting stops past `COMMITS_TO_REMOVE_CAP`: a larger value means "more".
     pub commits_to_remove: usize,
+    /// A sequencer file git's `--abort` can't read either; Abort refuses then.
+    pub damage: Option<SequencerDamage>,
+}
+
+/// `TerminalSequence::commits_to_remove` counts up to this and one more.
+pub const COMMITS_TO_REMOVE_CAP: usize = 1000;
+
+/// What makes git's `cherry-pick --abort` refuse a terminal sequence (git 2.53's
+/// `sequencer_rollback` and `rollback_is_safe`), checked in git's order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SequencerDamage {
+    /// `sequencer/head` is missing (git: "no cherry-pick or revert in progress").
+    MissingHead,
+    /// `sequencer/head` isn't a full commit id (git: "… HEAD file … is corrupt").
+    CorruptHead,
+    /// `sequencer/abort-safety` exists but isn't a commit id (git: "could not parse").
+    CorruptAbortSafety,
+    /// The rewind's target (`sequencer/head`) is not in the repository; only when Abort would
+    /// rewind (git's `reset --merge` to it fails).
+    MissingStart,
+}
+
+/// What the user confirmed before Abort of a terminal sequence (what the UI showed). Abort
+/// refuses when the sequence no longer matches it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfirmedAbort {
+    /// HEAD's full id (empty when unborn).
+    pub head_id: String,
+    pub started_at: String,
+    pub rewinds: bool,
+    pub commits_to_remove: usize,
+}
+
+impl ConfirmedAbort {
+    /// The confirmation for the terminal sequence as it is now, if any.
+    pub fn now(repo: &Repository) -> Option<Self> {
+        terminal_sequence(repo).map(|sequence| Self::of(repo, &sequence))
+    }
+
+    fn of(repo: &Repository, sequence: &TerminalSequence) -> Self {
+        Self {
+            head_id: repo
+                .head()
+                .ok()
+                .and_then(|head| head.target())
+                .map(|oid| oid.to_string())
+                .unwrap_or_default(),
+            started_at: sequence.started_at.clone(),
+            rewinds: sequence.rewinds,
+            commits_to_remove: sequence.commits_to_remove,
+        }
+    }
+}
+
+/// A full hexadecimal commit id (git's `parse_oid_hex`; libgit2's `Oid::from_str` also takes
+/// an abbreviated one).
+fn full_oid(text: &str) -> Option<Oid> {
+    let full = matches!(text.len(), 40 | 64) && text.bytes().all(|byte| byte.is_ascii_hexdigit());
+    full.then(|| Oid::from_str(text).ok()).flatten()
 }
 
 /// The terminal sequence in this repository's git folder (per worktree), if any.
@@ -215,40 +297,60 @@ pub fn terminal_sequence(repo: &Repository) -> Option<TerminalSequence> {
         _ if has("REVERT_HEAD") => SequenceKind::Revert,
         _ => SequenceKind::CherryPick,
     };
-    let read = |name: &str| {
-        std::fs::read_to_string(sequencer.join(name))
-            .map(|text| text.trim().to_string())
-            .unwrap_or_default()
+    let mut damage = None;
+    // git reads `head`'s first line and wants exactly a commit id there.
+    let started = match std::fs::read_to_string(sequencer.join("head")) {
+        Err(_) => {
+            damage = Some(SequencerDamage::MissingHead);
+            None
+        }
+        Ok(text) => {
+            let parsed = full_oid(text.split('\n').next().unwrap_or(""));
+            if parsed.is_none() {
+                damage = Some(SequencerDamage::CorruptHead);
+            }
+            parsed
+        }
     };
-    let started_at = read("head");
-    let started = Oid::from_str(&started_at)
-        .ok()
-        .and_then(|oid| repo.find_commit(oid).ok());
-    let started_at_summary = started
-        .as_ref()
-        .and_then(|commit| commit.summary().ok().flatten().map(str::to_string))
-        .unwrap_or_default();
     let head = repo.head().ok().and_then(|head| head.target());
-    let abort_safety = Oid::from_str(&read("abort-safety")).ok();
-    let rewinds = match (&started, head) {
-        (Some(started), Some(head)) => abort_safety == Some(head) && started.id() != head,
-        _ => false,
+    // git's `rollback_is_safe`: a missing abort-safety means "not safe", an unreadable one is
+    // an error.
+    let abort_safety = match std::fs::read_to_string(sequencer.join("abort-safety")) {
+        Err(_) => None,
+        Ok(text) => {
+            let parsed = text.trim().get(..40).and_then(full_oid);
+            if parsed.is_none() && damage.is_none() {
+                damage = Some(SequencerDamage::CorruptAbortSafety);
+            }
+            parsed
+        }
     };
-    let commits_to_remove = match (&started, head) {
-        (Some(started), Some(head)) if rewinds => count_commits(repo, head, started.id()),
+    let started_commit = started.and_then(|oid| repo.find_commit(oid).ok());
+    let safe = head.is_some() && abort_safety == head;
+    if damage.is_none() && safe && started.is_some() && started_commit.is_none() {
+        damage = Some(SequencerDamage::MissingStart);
+    }
+    let rewinds = damage.is_none() && safe && started.is_some_and(|start| Some(start) != head);
+    let commits_to_remove = match (started, head) {
+        (Some(started), Some(head)) if rewinds => count_commits(repo, head, started),
         _ => 0,
     };
     Some(TerminalSequence {
         kind,
         paused_on_conflict: has("CHERRY_PICK_HEAD") || has("REVERT_HEAD"),
-        started_at,
-        started_at_summary,
+        started_at: started.map(|oid| oid.to_string()).unwrap_or_default(),
+        started_at_summary: started_commit
+            .as_ref()
+            .and_then(|commit| commit.summary().ok().flatten().map(str::to_string))
+            .unwrap_or_default(),
         rewinds,
         commits_to_remove,
+        damage,
     })
 }
 
-/// The commits reachable from `head` but not from `base`, at most 1000.
+/// The commits reachable from `head` but not from `base`, counting up to one past
+/// `COMMITS_TO_REMOVE_CAP`.
 fn count_commits(repo: &Repository, head: Oid, base: Oid) -> usize {
     let Ok(mut walk) = repo.revwalk() else {
         return 0;
@@ -256,7 +358,9 @@ fn count_commits(repo: &Repository, head: Oid, base: Oid) -> usize {
     if walk.push(head).is_err() || walk.hide(base).is_err() {
         return 0;
     }
-    walk.take(1000).filter(Result::is_ok).count()
+    walk.take(COMMITS_TO_REMOVE_CAP + 1)
+        .filter(Result::is_ok)
+        .count()
 }
 
 /// A stopped sequence, enough to continue or abort it later. `git-core` never stores it;
@@ -1207,7 +1311,8 @@ fn rewind_to(repo: &Repository, original: &Commit<'_>, reflog: &str) -> Result<(
     )?;
     repo.checkout_tree(original.as_object(), None)?;
     if repo.head_detached()? {
-        repo.set_head_detached(original.id())?;
+        // With the reflog message, unlike `set_head_detached` ("checkout: moving from …").
+        repo.reference("HEAD", original.id(), true, reflog)?;
     } else {
         repo.head()?.set_target(original.id(), reflog)?;
     }
@@ -1215,9 +1320,19 @@ fn rewind_to(repo: &Repository, original: &Commit<'_>, reflog: &str) -> Result<(
 }
 
 /// Ends a terminal `git cherry-pick A B C` / `git revert A B` (`.git/sequencer`) like
-/// `git cherry-pick --abort` (#253, D7-A):
+/// `git cherry-pick --abort` (#253, D7-A). Every check runs before anything is written, so a
+/// refusal changes nothing, as with git:
 ///
-/// 1. a paused step (or its conflicts) is aborted like `merge::abort_merge`, keeping unrelated
+/// - `confirmed` must still describe the sequence (HEAD, start, whether and how far it
+///   rewinds), else `TerminalSequenceChanged`: the user confirmed something else;
+/// - git's sequencer files must be readable (`SequencerDamaged`, git refuses these too);
+/// - a paused step's touched paths must not hold work-tree changes on top of staged ones
+///   (`merge::plan_operation_reset`, git's "not uptodate");
+/// - a rewind must not overwrite a local change or an untracked file (`RewindBlocked`).
+///
+/// Then:
+///
+/// 1. a paused step (or its conflicts) is reset like `merge::abort_merge`, keeping unrelated
 ///    edits;
 /// 2. when HEAD is still where the sequence last left it (`sequencer/abort-safety`), HEAD goes
 ///    back to where it started (`sequencer/head`), removing the commits the sequence made, as
@@ -1225,11 +1340,12 @@ fn rewind_to(repo: &Repository, original: &Commit<'_>, reflog: &str) -> Result<(
 ///    "You seem to have moved HEAD. Not rewinding");
 /// 3. the list is removed.
 ///
-/// A local edit in the way of the rewind is an error that leaves the list, so Abort can be
-/// retried: the step is aborted by then (git would leave it paused), the sequence is between
-/// steps. `rewound` is true when HEAD ends where the sequence started. Another operation paused
-/// here (a merge started during the sequence) is `OperationInProgress`, nothing changed.
-pub fn abort_terminal_sequence(repo: &Repository) -> Result<SequenceAbort, PickError> {
+/// `rewound` is true when HEAD ends where the sequence started. Another operation paused here
+/// (a merge started during the sequence) is `OperationInProgress`, nothing changed.
+pub fn abort_terminal_sequence(
+    repo: &Repository,
+    confirmed: &ConfirmedAbort,
+) -> Result<SequenceAbort, PickError> {
     let sequence = terminal_sequence(repo).ok_or(PickError::NoTerminalSequence)?;
     let ours = matches!(
         repo.state(),
@@ -1243,13 +1359,34 @@ pub fn abort_terminal_sequence(repo: &Repository) -> Result<SequenceAbort, PickE
     if !ours {
         return Err(PickError::OperationInProgress);
     }
-    if sequence.paused_on_conflict || fresh_index(repo)?.has_conflicts() {
-        crate::merge::abort_step_keeping_list(repo)?;
+    if let Some(damage) = sequence.damage {
+        return Err(PickError::SequencerDamaged(damage_message(
+            sequence.kind,
+            damage,
+            &sequence.started_at,
+        )));
     }
-    // HEAD hasn't moved, but read it again after the step's abort, as git decides afterwards.
-    let sequence = terminal_sequence(repo).ok_or(PickError::NoTerminalSequence)?;
-    if sequence.rewinds {
+    if ConfirmedAbort::of(repo, &sequence) != *confirmed {
+        return Err(PickError::TerminalSequenceChanged(sequence.kind));
+    }
+    let step = if sequence.paused_on_conflict || fresh_index(repo)?.has_conflicts() {
+        Some(crate::merge::plan_operation_reset(repo)?)
+    } else {
+        None
+    };
+    let original = if sequence.rewinds {
         let original = repo.find_commit(Oid::from_str(&sequence.started_at)?)?;
+        let reset = step.as_ref().map(|step| step.paths()).unwrap_or_default();
+        check_rewind(repo, &original, reset)?;
+        Some(original)
+    } else {
+        None
+    };
+    // Nothing written before this point.
+    if let Some(step) = step {
+        crate::merge::abort_step_keeping_list(repo, step)?;
+    }
+    if let Some(original) = original {
         rewind_to(
             repo,
             &original,
@@ -1266,4 +1403,73 @@ pub fn abort_terminal_sequence(repo: &Repository) -> Result<SequenceAbort, PickE
     Ok(SequenceAbort {
         rewound: head.is_some_and(|head| head.to_string() == sequence.started_at),
     })
+}
+
+/// Whether the rewind from HEAD to `original` can run without losing anything, checked before
+/// anything is written (git's `reset --merge` refuses the same cases up front): no linked
+/// folder on the way, and every path that differs between the two commits is unchanged in
+/// the index and the work tree (no staged or unstaged change, no untracked or ignored file in
+/// the way). `reset` are the paused step's paths, which its abort puts back to HEAD first.
+fn check_rewind(
+    repo: &Repository,
+    original: &Commit<'_>,
+    reset: &[Vec<u8>],
+) -> Result<(), PickError> {
+    let tree = original.tree()?;
+    crate::worktree_guard::refuse_linked_folders_known::<PickError>(
+        repo,
+        &[crate::worktree_guard::Incoming::Checkout(&tree)],
+        Some(&tree),
+    )?;
+    let head_tree = repo.head()?.peel_to_tree()?;
+    let diff = repo.diff_tree_to_tree(Some(&head_tree), Some(&tree), None)?;
+    for delta in diff.deltas() {
+        for file in [delta.old_file(), delta.new_file()] {
+            let (Some(path), Some(bytes)) = (file.path(), file.path_bytes()) else {
+                continue;
+            };
+            if reset.iter().any(|reset| reset.as_slice() == bytes) {
+                continue;
+            }
+            let blocked = match repo.status_file(path) {
+                Ok(status) => !status.is_empty(),
+                // Nowhere: in neither HEAD, the index nor the work tree.
+                Err(error) => error.code() != git2::ErrorCode::NotFound,
+            };
+            if blocked {
+                return Err(PickError::RewindBlocked(
+                    path.to_string_lossy().into_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Why Abort refuses a damaged terminal sequence, with git's way out (`--quit` ends it without
+/// moving HEAD).
+fn damage_message(kind: SequenceKind, damage: SequencerDamage, started_at: &str) -> String {
+    let noun = match kind {
+        SequenceKind::CherryPick => "cherry-pick",
+        SequenceKind::Revert => "revert",
+    };
+    let what = match damage {
+        SequencerDamage::MissingHead => {
+            format!("git's record of where this {noun} started (.git/sequencer/head) is missing")
+        }
+        SequencerDamage::CorruptHead => {
+            format!("git's record of where this {noun} started (.git/sequencer/head) is damaged")
+        }
+        SequencerDamage::CorruptAbortSafety => format!(
+            "git's record of where this {noun} left HEAD (.git/sequencer/abort-safety) is damaged"
+        ),
+        SequencerDamage::MissingStart => format!(
+            "the commit this {noun} started from ({}) is missing",
+            started_at.get(..7).unwrap_or(started_at)
+        ),
+    };
+    format!(
+        "Can't abort: {what}. Run git {noun} --quit in a terminal to end it and keep HEAD where \
+         it is."
+    )
 }

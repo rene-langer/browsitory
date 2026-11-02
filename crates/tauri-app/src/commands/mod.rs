@@ -639,6 +639,29 @@ pub struct HeadInfoDto {
     pub terminal_sequence: Option<TerminalSequenceDto>,
 }
 
+/// What the user confirmed before aborting a terminal cherry-pick (`RepoClient.abortSequence`'s
+/// `confirmed`): `{ "headId", "startedAt", "rewinds", "commitsToRemove" }`, as last shown by
+/// `HeadInfo.terminalSequence` (#281 review).
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmedAbortDto {
+    pub head_id: String,
+    pub started_at: String,
+    pub rewinds: bool,
+    pub commits_to_remove: usize,
+}
+
+impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
+    fn from(dto: ConfirmedAbortDto) -> Self {
+        Self {
+            head_id: dto.head_id,
+            started_at: dto.started_at,
+            rewinds: dto.rewinds,
+            commits_to_remove: dto.commits_to_remove,
+        }
+    }
+}
+
 /// `{ "kind": "CherryPick" | "Revert", "pausedOnConflict", "startedAt", "startedAtSummary",
 /// "rewinds", "commitsToRemove" }`.
 #[derive(Serialize)]
@@ -3990,6 +4013,26 @@ mod tests {
     }
 
     #[test]
+    fn confirmed_abort_dto_deserializes_camel_case() {
+        let dto: super::ConfirmedAbortDto = serde_json::from_value(serde_json::json!({
+            "headId": "h",
+            "startedAt": "s",
+            "rewinds": true,
+            "commitsToRemove": 2
+        }))
+        .unwrap();
+        assert_eq!(
+            git_core::pick::ConfirmedAbort::from(dto),
+            git_core::pick::ConfirmedAbort {
+                head_id: "h".into(),
+                started_at: "s".into(),
+                rewinds: true,
+                commits_to_remove: 2,
+            }
+        );
+    }
+
+    #[test]
     fn head_info_dto_serializes_a_terminal_sequence() {
         let head = |terminal_sequence| {
             serde_json::to_value(HeadInfoDto::from(git_core::repo::HeadInfo {
@@ -4013,6 +4056,7 @@ mod tests {
             started_at_summary: "X".into(),
             rewinds: true,
             commits_to_remove: 1,
+            damage: None,
         }));
         assert_eq!(
             paused["terminalSequence"],
