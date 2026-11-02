@@ -58,6 +58,10 @@ pub enum UndoError {
     Git(#[from] git2::Error),
     #[error("io error: {0}")]
     Io(#[from] io::Error),
+    /// Windows: another program keeps a file to restore open so it can't be replaced; that
+    /// file was left as it was (#251).
+    #[error("'{0}' is open in another program. Close it, then try again.")]
+    FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
 }
@@ -650,8 +654,9 @@ fn remove_existing(workdir: &Path, rel: &str) -> io::Result<()> {
     crate::worktree_guard::remove_and_prune_beneath(workdir, rel)
 }
 
-/// Writes the blob as `rel`, replacing what is there. A symlink that replaced a directory on the
-/// way is removed first (never written through, #114), through held folders (#149).
+/// Writes the blob as `rel`, replacing what is there whole (#251). A symlink that replaced a
+/// directory on the way is removed first (never written through, #114), through held folders
+/// (#149). A file another program holds open is [`UndoError::FileInUse`].
 fn write_worktree_file(
     repo: &Repository,
     workdir: &Path,
@@ -669,6 +674,11 @@ fn write_worktree_file(
             executable: mode == MODE_EXEC,
         }
     };
-    crate::worktree_guard::replace_beneath(workdir, rel, content)?;
-    Ok(())
+    crate::worktree_guard::replace_beneath(workdir, rel, content).map_err(|error| {
+        if crate::worktree_guard::is_in_use(&error) {
+            UndoError::FileInUse(rel.to_string())
+        } else {
+            UndoError::Io(error)
+        }
+    })
 }

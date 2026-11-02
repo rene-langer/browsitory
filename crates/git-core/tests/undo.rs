@@ -1120,3 +1120,86 @@ fn undo_restores_a_read_only_file() {
     restore(&repo, &after, &before, "undo").unwrap();
     assert_eq!(read(&repo, "a.txt").as_deref(), Some("one\n"));
 }
+
+/// The names in the work tree's root folder, sorted.
+fn names_in(repo: &Repository) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(repo.workdir().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+/// An undo replaces each file whole (#251): the restored files have the recorded content and
+/// exec bit, and no temporary file is left next to them.
+#[test]
+fn undo_restores_leave_no_temporary_file() {
+    let (_dir, repo) = seeded();
+    #[cfg_attr(not(unix), allow(unused_variables))]
+    let script = repo.workdir().unwrap().join("run.sh");
+    write(&repo, "run.sh", "#!/bin/sh\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    stage(&repo, "run.sh");
+    commit(&repo, "script");
+    write(&repo, "a.txt", "precious edit\n");
+    write(&repo, "run.sh", "#!/bin/sh\necho edited\n");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_head(Some(&mut checkout)).unwrap();
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("one\n"));
+
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("precious edit\n"));
+    assert_eq!(
+        read(&repo, "run.sh").as_deref(),
+        Some("#!/bin/sh\necho edited\n")
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_ne!(
+            fs::metadata(&script).unwrap().permissions().mode() & 0o111,
+            0
+        );
+    }
+    assert_eq!(names_in(&repo), [".git", "a.txt", "run.sh"]);
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), before);
+}
+
+/// Windows: an undo that would replace a file another program keeps open without sharing
+/// delete says so and leaves the file as it is (#251).
+#[cfg(windows)]
+#[test]
+fn undo_of_a_file_held_open_says_so() {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    let (dir, repo) = init_repo();
+    write(&repo, "f.txt", "one\n");
+    stage(&repo, "f.txt");
+    commit(&repo, "initial");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "f.txt", "two\n");
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    // As an editor that keeps the file open, sharing read and write but not delete.
+    let _editor = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .open(dir.path().join("f.txt"))
+        .unwrap();
+
+    let error = restore(&repo, &after, &before, "undo").unwrap_err();
+    assert!(matches!(error, UndoError::FileInUse(_)), "{error:?}");
+    assert_eq!(
+        error.to_string(),
+        "'f.txt' is open in another program. Close it, then try again."
+    );
+    assert_eq!(read(&repo, "f.txt").as_deref(), Some("two\n"));
+}
