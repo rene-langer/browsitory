@@ -136,3 +136,71 @@ fn a_branch_nobody_has_checked_out_is_restored() {
 
     assert_eq!(target(&f.repo, "refs/heads/spare"), Some(f.first));
 }
+
+/// A locked worktree whose folder is gone (an unmounted drive) still has its branch: git reads
+/// each worktree's HEAD in the repository's `worktrees/` folder and refuses, and so does Restore.
+#[test]
+fn a_branch_checked_out_in_a_locked_worktree_whose_folder_is_gone_isnt_restored() {
+    let Fixture {
+        dir,
+        repo,
+        _elsewhere: elsewhere,
+        linked_path,
+        linked,
+        first,
+        second,
+    } = fixture();
+    drop(linked);
+    git_ok(
+        dir.path(),
+        &["worktree", "lock", linked_path.to_str().unwrap()],
+    );
+    std::fs::rename(&linked_path, elsewhere.path().join("unmounted")).unwrap();
+    let first = first.to_string();
+    let twin = git(dir.path(), &["branch", "-f", "topic", &first]);
+    assert!(!twin.status.success(), "{twin:?}");
+
+    let error = restore_reflog_entry(&repo, "refs/heads/topic", &first).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "branch 'topic' is checked out in another worktree"
+    );
+    assert_eq!(target(&repo, "refs/heads/topic"), Some(second));
+}
+
+const OPERATION_REFUSAL: &str =
+    "Finish or abort the current merge/cherry-pick/revert/rebase first.";
+
+/// Restoring this worktree's HEAD (by `HEAD` or by its branch's name) during a paused merge is
+/// refused as Reset refuses it: it would change the merge's first parent.
+#[test]
+fn this_worktrees_head_isnt_restored_during_a_merge() {
+    let (dir, repo) = common::init_repo();
+    repo.set_head("refs/heads/main").unwrap();
+    common::write_file(dir.path(), "f", "base\n");
+    common::commit_all(&repo, "base");
+    let base = repo.head().unwrap().target().unwrap();
+    git_ok(dir.path(), &["branch", "side"]);
+    common::write_file(dir.path(), "f", "main\n");
+    common::commit_all(&repo, "main");
+    let main = repo.head().unwrap().target().unwrap();
+    git_ok(dir.path(), &["checkout", "-q", "side"]);
+    common::write_file(dir.path(), "f", "side\n");
+    git_ok(dir.path(), &["commit", "-qam", "side"]);
+    git_ok(dir.path(), &["checkout", "-q", "main"]);
+    assert!(!git(dir.path(), &["merge", "side"]).status.success());
+    let repo = Repository::open(dir.path()).unwrap();
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+    let base = base.to_string();
+
+    for reference in ["HEAD", "refs/heads/main"] {
+        assert_eq!(
+            restore_reflog_entry(&repo, reference, &base)
+                .unwrap_err()
+                .to_string(),
+            OPERATION_REFUSAL
+        );
+    }
+    assert_eq!(target(&repo, "refs/heads/main"), Some(main));
+}

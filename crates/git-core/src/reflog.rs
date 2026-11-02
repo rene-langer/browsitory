@@ -17,6 +17,16 @@ pub enum ReflogError {
     /// A terminal rebase in this or another worktree is rebasing the branch (#287).
     #[error(transparent)]
     BeingRebased(#[from] crate::repo::BranchBeingRebased),
+    /// Restoring this worktree's HEAD while a merge, cherry-pick, revert or rebase is paused,
+    /// refused as Reset refuses it (#287).
+    #[error("Finish or abort the current merge/cherry-pick/revert/rebase first.")]
+    OperationInProgress,
+    /// A terminal rebase or `git am` is paused in this worktree and HEAD would move (#287).
+    #[error(transparent)]
+    TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
+    /// The reference moved after it was read (another program, or another window).
+    #[error("{0} changed while it was being restored. Refresh and try again.")]
+    ReferenceMoved(String),
     #[error("git operation failed: {0}")]
     Git(#[from] git2::Error),
 }
@@ -101,24 +111,50 @@ pub fn restore_reflog_entry(
         return Err(ReflogError::TargetNotInReflog);
     }
 
-    let mut selected = selected_reference(repo, reference)?;
-    if let Some(branch) = selected
-        .name()
-        .ok()
-        .filter(|name| name.starts_with("refs/heads/"))
-    {
-        check_branch_movable(repo, branch)?;
+    let selected = selected_reference(repo, reference)?;
+    let name = selected.name()?.to_string();
+    let head_target = repo
+        .find_reference("HEAD")?
+        .symbolic_target()?
+        .map(str::to_string);
+    if name == "HEAD" || head_target.as_deref() == Some(name.as_str()) {
+        check_head_movable(repo)?;
     }
-    selected.set_target(target, RESTORE_REFLOG_MESSAGE)?;
+    if let Some(short) = name.strip_prefix("refs/heads/") {
+        check_branch_movable(repo, &name, short)?;
+    }
+    let Some(current) = selected.target() else {
+        return Err(ReflogError::InvalidReference);
+    };
+    // Compare-and-swap: a ref moved since it was read here (by another program or window) is
+    // left alone.
+    repo.reference_matching(&name, target, true, current, RESTORE_REFLOG_MESSAGE)
+        .map_err(|error| match error.code() {
+            git2::ErrorCode::Modified => {
+                ReflogError::ReferenceMoved(name.trim_start_matches("refs/heads/").to_string())
+            }
+            _ => error.into(),
+        })?;
     Ok(())
 }
 
-/// Refuses to move `branch` (full name) under a worktree that has it: checked out in another
-/// worktree, or being rebased by a terminal rebase in any worktree (#287), as `git branch -f`
-/// refuses. The branch checked out in this worktree is still moved: that is what restoring an
-/// entry of HEAD's reflog does (the work tree and index stay, like `git reset --soft`).
-fn check_branch_movable(repo: &Repository, branch: &str) -> Result<(), ReflogError> {
-    let short = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+/// Restoring this worktree's HEAD (detached, or the branch it is on) moves only the ref: the
+/// work tree and index stay. That is refused while an operation is paused, as Reset refuses it
+/// (#287): a paused terminal rebase would build on the restored commit and drop the steps it
+/// already replayed, and a paused merge would get a different first parent.
+fn check_head_movable(repo: &Repository) -> Result<(), ReflogError> {
+    crate::repo::check_no_terminal_rebase(repo)?;
+    if !crate::repo::no_operation(repo) {
+        return Err(ReflogError::OperationInProgress);
+    }
+    Ok(())
+}
+
+/// Refuses to move `branch` (full name; `short` without `refs/heads/`) under a worktree that
+/// has it: checked out in another worktree, or being rebased by a terminal rebase in any
+/// worktree (#287), as `git branch -f` refuses. The branch checked out in this worktree is
+/// still moved: that is what restoring an entry of HEAD's reflog does.
+fn check_branch_movable(repo: &Repository, branch: &str, short: &str) -> Result<(), ReflogError> {
     crate::repo::check_branch_not_rebased(repo, short)?;
     if crate::repo::branches_checked_out_elsewhere(repo)?.contains(branch) {
         return Err(ReflogError::CheckedOutInAnotherWorktree(short.to_string()));

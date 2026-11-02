@@ -167,16 +167,7 @@ pub(crate) fn check_branch_not_rebased_elsewhere(
 pub(crate) fn rebased_branches(
     repo: &git2::Repository,
 ) -> impl Iterator<Item = (std::path::PathBuf, String)> {
-    let common = repo.commondir().to_path_buf();
-    let mut git_dirs = vec![common.clone()];
-    if let Ok(entries) = std::fs::read_dir(common.join("worktrees")) {
-        git_dirs.extend(
-            entries
-                .filter_map(|entry| entry.ok())
-                .map(|entry| entry.path()),
-        );
-    }
-    git_dirs.into_iter().flat_map(|dir| {
+    worktree_git_dirs(repo).into_iter().flat_map(|dir| {
         ["rebase-merge", "rebase-apply"]
             .into_iter()
             .filter_map(|folder| std::fs::read_to_string(dir.join(folder).join("head-name")).ok())
@@ -187,42 +178,51 @@ pub(crate) fn rebased_branches(
     })
 }
 
-/// Full names of the branches every other worktree of this repository has checked out (main
-/// and linked; prunable or unopenable ones skipped), and of the branches a terminal rebase is
-/// rebasing in another worktree: git counts those as checked out there, though HEAD is detached
-/// meanwhile (#263).
+/// The git folder of every worktree of the repository: the main one (the common folder) and
+/// each linked one (`worktrees/<name>`), whether or not its work tree still exists.
+fn worktree_git_dirs(repo: &git2::Repository) -> Vec<std::path::PathBuf> {
+    let common = repo.commondir().to_path_buf();
+    let mut git_dirs = vec![common.clone()];
+    if let Ok(entries) = std::fs::read_dir(common.join("worktrees")) {
+        git_dirs.extend(
+            entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.is_dir()),
+        );
+    }
+    git_dirs
+}
+
+/// Full names of the branches every other worktree of this repository has checked out, and of
+/// the branches a terminal rebase is rebasing in another worktree: git counts those as checked
+/// out there, though HEAD is detached meanwhile (#263).
+///
+/// Like git's `find_shared_symref`, each worktree's `HEAD` is read from its git folder, so a
+/// worktree whose folder is gone (a locked one on an unmounted drive, or one not pruned yet)
+/// still counts (#287). Only a bare main repository has no branch checked out.
 pub(crate) fn branches_checked_out_elsewhere(
     repo: &git2::Repository,
 ) -> Result<std::collections::BTreeSet<String>, git2::Error> {
     use std::fs::canonicalize;
     let this =
         canonicalize(repo.path()).map_err(|error| git2::Error::from_str(&error.to_string()))?;
-    let main = git2::Repository::open(repo.commondir())?;
-    let mut others = Vec::new();
-    for name in main.worktrees()?.iter().flatten().flatten() {
-        let Ok(worktree) = main.find_worktree(name) else {
-            continue;
-        };
-        if worktree.is_prunable(None).unwrap_or(true) {
-            continue;
-        }
-        if let Ok(linked) = git2::Repository::open_from_worktree(&worktree) {
-            others.push(linked);
-        }
-    }
-    if !main.is_bare() {
-        others.push(main);
-    }
+    let common = repo.commondir().to_path_buf();
+    let main_is_bare = git2::Repository::open(&common)?.is_bare();
     let mut branches = std::collections::BTreeSet::new();
-    for other in others {
-        if canonicalize(other.path()).is_ok_and(|path| path == this) {
+    for git_dir in worktree_git_dirs(repo) {
+        if (git_dir == common && main_is_bare)
+            || canonicalize(&git_dir).is_ok_and(|path| path == this)
+        {
             continue;
         }
-        let Ok(head) = other.find_reference("HEAD") else {
+        let Ok(head) = std::fs::read_to_string(git_dir.join("HEAD")) else {
             continue;
         };
-        if let Ok(Some(name)) = head.symbolic_target() {
-            branches.insert(name.to_string());
+        if let Some(name) = head.strip_prefix("ref:").map(str::trim) {
+            if name.starts_with("refs/heads/") {
+                branches.insert(name.to_string());
+            }
         }
     }
     for (git_dir, name) in rebased_branches(repo) {

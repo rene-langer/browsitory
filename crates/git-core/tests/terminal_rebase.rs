@@ -853,3 +853,18 @@ fn reflog_restore_refuses_the_branch_being_rebased() {
         Some(ids.topic)
     );
 }
+
+/// #287 review: restoring the detached HEAD of a paused terminal rebase is refused as Reset
+/// refuses it: `git rebase --continue` would build on the restored commit and drop the steps
+/// already replayed.
+#[test]
+fn reflog_restore_refuses_head_during_a_terminal_rebase() {
+    let (_dir, repo, ids) = terminal_rebase();
+    let head = repo.head().unwrap().target();
+
+    let error =
+        git_core::reflog::restore_reflog_entry(&repo, "HEAD", &ids.topic.to_string()).unwrap_err();
+
+    assert_eq!(error.to_string(), REBASE_REFUSAL);
+    assert_eq!(repo.head().unwrap().target(), head);
+}

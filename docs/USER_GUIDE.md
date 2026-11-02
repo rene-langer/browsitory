@@ -656,7 +656,10 @@ rebase. Restore moves only the branch: your files and staged changes stay as the
 Like `git branch -f`, Restore refuses a branch that another worktree has checked out
 ("branch 'topic' is checked out in another worktree"), and a branch that a rebase started in a
 terminal is rebasing, in any worktree. Restore it from that worktree, or finish or abort the
-rebase first.
+rebase first. Like Reset, Restore doesn't move this worktree's HEAD or current branch while a
+merge, cherry-pick, revert or rebase is paused ("Finish or abort the current
+merge/cherry-pick/revert/rebase first."; for a rebase started in a terminal, it says to
+continue or abort it there).
 
 ## Rebase
 
