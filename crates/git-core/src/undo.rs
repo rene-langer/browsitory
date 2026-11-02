@@ -58,6 +58,10 @@ pub enum UndoError {
     Git(#[from] git2::Error),
     #[error("io error: {0}")]
     Io(#[from] io::Error),
+    /// Windows: another program keeps a file to restore open so it can't be replaced; that
+    /// file was left as it was (#251).
+    #[error("'{0}' is open in another program. Close it, then try again.")]
+    FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
 }
@@ -265,7 +269,11 @@ pub fn restore(
     if index_differs {
         let mut index = repo.index()?;
         index.read(false)?;
-        if index.has_conflicts() || index.write_tree()?.to_string() != expected.index_tree {
+        // Already the target's: a restore that stopped after writing the index (in the checkout
+        // from it) is being tried again (#251). The work tree is still checked below.
+        let current = index.write_tree()?.to_string();
+        if index.has_conflicts() || (current != expected.index_tree && current != target.index_tree)
+        {
             return Err(UndoError::RepositoryChanged);
         }
         // Rewriting the index from a tree would silently drop these per-entry flags.
@@ -475,7 +483,10 @@ impl WorktreeChange {
                     Ok::<_, git2::Error>((Oid::hash_object(ObjectType::Blob, bytes)?, *mode))
                 })
                 .transpose()?;
-            if current != expected && !clean_against_index(repo, &index, path, expected) {
+            if current != expected
+                && !clean_against_index(repo, &index, path, expected)
+                && !self.already_restored(workdir, path, &config)?
+            {
                 // Ignored files are not snapshotted: absent from the tree but present on disk
                 // is fine as long as the file is ignored and the target would not change it.
                 let ignored_untouched = expected.is_none()
@@ -497,6 +508,42 @@ impl WorktreeChange {
             }
         }
         Ok(())
+    }
+
+    /// Whether `path` already is what the target wants there (content, mode and kind, or
+    /// nothing at all): a restore that stopped part-way (a full disk, a file open in another
+    /// program) wrote it, and trying again finishes the restore instead of calling that a change
+    /// since the operation (#251). Writing it again changes nothing.
+    fn already_restored(
+        &self,
+        workdir: &Path,
+        path: &str,
+        config: &WorktreeConfig,
+    ) -> Result<bool, UndoError> {
+        let Some(&(id, mode)) = self.to.get(path) else {
+            // Gone, or the folder the target's files below it need (written there already).
+            return Ok(match fs::symlink_metadata(workdir.join(path)) {
+                Err(_) => true,
+                Ok(meta) => meta.is_dir() && self.has_target_files_below(path),
+            });
+        };
+        Ok(
+            match read_worktree_file(workdir, path, config, Some(mode))? {
+                Some((bytes, disk_mode)) => {
+                    disk_mode == mode && Oid::hash_object(ObjectType::Blob, &bytes)? == id
+                }
+                None => false,
+            },
+        )
+    }
+
+    /// Whether the target has files below `path` (which then is, or becomes, their folder).
+    fn has_target_files_below(&self, path: &str) -> bool {
+        let below = format!("{path}/");
+        self.to
+            .range(below.clone()..)
+            .next()
+            .is_some_and(|(name, _)| name.starts_with(&below))
     }
 
     fn verify_directory_is_removable(&self, workdir: &Path, dir: &Path) -> Result<(), UndoError> {
@@ -545,6 +592,13 @@ impl WorktreeChange {
             if !self.tracked.contains(path)
                 && repo.is_path_ignored(path)?
                 && fs::symlink_metadata(&full).is_ok()
+            {
+                continue;
+            }
+            // Already the folder of the target's files below it: a restore that stopped after
+            // writing them is being tried again (#251).
+            if fs::symlink_metadata(&full).is_ok_and(|meta| meta.is_dir())
+                && self.has_target_files_below(path)
             {
                 continue;
             }
@@ -650,8 +704,9 @@ fn remove_existing(workdir: &Path, rel: &str) -> io::Result<()> {
     crate::worktree_guard::remove_and_prune_beneath(workdir, rel)
 }
 
-/// Writes the blob as `rel`, replacing what is there. A symlink that replaced a directory on the
-/// way is removed first (never written through, #114), through held folders (#149).
+/// Writes the blob as `rel`, replacing what is there whole (#251). A symlink that replaced a
+/// directory on the way is removed first (never written through, #114), through held folders
+/// (#149). A file another program holds open is [`UndoError::FileInUse`].
 fn write_worktree_file(
     repo: &Repository,
     workdir: &Path,
@@ -669,6 +724,11 @@ fn write_worktree_file(
             executable: mode == MODE_EXEC,
         }
     };
-    crate::worktree_guard::replace_beneath(workdir, rel, content)?;
-    Ok(())
+    crate::worktree_guard::replace_beneath(workdir, rel, content).map_err(|error| {
+        if crate::worktree_guard::is_in_use(&error) {
+            UndoError::FileInUse(rel.to_string())
+        } else {
+            UndoError::Io(error)
+        }
+    })
 }

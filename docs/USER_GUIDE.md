@@ -788,6 +788,12 @@ Undo refuses, instead of overwriting, when the repository changed since the oper
 when it would delete, move or switch to a branch that is checked out in another worktree; the
 reflog stays available for those cases.
 
+Undo and Redo write each restored file next to the old one and swap it in only when it is
+complete. If writing fails (for example a full disk), that file stays as it was. Files restored
+before the failure keep their restored content. Fix the problem and run Undo or Redo again: it
+finishes the restore. If you changed a file in the meantime, it refuses as usual. On Windows, a file another program keeps open can't be swapped: Undo and
+Redo then say "'f.txt' is open in another program. Close it, then try again."
+
 With the desktop app and the VSCode extension open on the same repository, they share one undo
 history. If the other window keeps it busy for more than about 10 seconds (a pull, a commit
 hook, a signing prompt), Undo, Redo, discards and **Reset hard** say "Another Browsitory window
