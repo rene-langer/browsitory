@@ -387,6 +387,8 @@ const FILE_RENAME_INFORMATION_EX_CLASS: i32 = 65;
 /// `FILE_RENAME_INFORMATION_EX` flags.
 const FILE_RENAME_REPLACE_IF_EXISTS: u32 = 0x1;
 const FILE_RENAME_POSIX_SEMANTICS: u32 = 0x2;
+/// Replaces a read-only file too (Windows 10 1809+; refused as an invalid parameter before).
+const FILE_RENAME_IGNORE_READONLY_ATTRIBUTE: u32 = 0x40;
 
 const ERROR_SHARING_VIOLATION: i32 = 32;
 
@@ -912,35 +914,6 @@ pub(super) fn open_file(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Res
     }
 }
 
-/// Creates `at`'s leaf as a new empty file in the held parent, checked to be there (deleted
-/// again through its handle when it isn't). `None` when something already stands there.
-fn create_leaf(at: &Beneath) -> io::Result<Option<File>> {
-    let parent = at.parent_file();
-    let file = match nt_open(
-        parent,
-        at.leaf_name(),
-        GENERIC_READ | GENERIC_WRITE | DELETE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        FILE_CREATE,
-        FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
-        FILE_ATTRIBUTE_NORMAL,
-    ) {
-        Ok(file) => file,
-        Err(error)
-            if error.raw_os_error() == Some(ERROR_ALREADY_EXISTS)
-                || error.kind() == io::ErrorKind::AlreadyExists =>
-        {
-            return Ok(None)
-        }
-        Err(error) => return Err(error),
-    };
-    if !in_parent(&file, parent)? {
-        delete_by_handle(&file)?;
-        return Err(redirected());
-    }
-    Ok(Some(file))
-}
-
 /// See `worktree_guard::write_beneath`.
 pub(super) fn write(
     workdir: &Path,
@@ -972,18 +945,44 @@ fn write_with(
     };
     let in_use = || file_in_use(rel);
     let (attributes, target) = classify_for_writing(&at, &in_use, on_wait)?;
-    let mut temp = create_temp(&at, &mut next_temp_number)?;
+    swap_in(
+        &at,
+        &target,
+        0,
+        &in_use,
+        &mut |temp| {
+            if attributes != 0 {
+                keep_attributes(temp, attributes)?;
+            }
+            fill(temp)
+        },
+        on_wait,
+    )
+}
+
+/// Puts a new file named `target` in `at`'s held parent, replacing whatever file or link has
+/// that name (never following it) at once: `make` fills a new temporary file next to it
+/// (`create_temp`), which is flushed and renamed over `target` (`rename_in_parent` with
+/// `rename_flags`). A target another program holds without sharing delete is tried again after
+/// a short wait (`on_wait` is called before each), then reported as `in_use`. On any failure
+/// before the rename the temporary file is deleted and `target` is left as it was.
+fn swap_in(
+    at: &Beneath,
+    target: &OsStr,
+    rename_flags: u32,
+    in_use: &dyn Fn() -> io::Error,
+    make: &mut dyn FnMut(&mut File) -> io::Result<()>,
+    on_wait: &mut dyn FnMut(),
+) -> io::Result<bool> {
+    let mut temp = create_temp(at, &mut next_temp_number)?;
     let written = (|| {
-        if attributes != 0 {
-            keep_attributes(&temp, attributes)?;
-        }
-        fill(&mut temp)?;
+        make(&mut temp)?;
         temp.sync_all()?;
         let mut tries = 0;
         loop {
             tries += 1;
-            match rename_in_parent(&temp, at.parent_file(), &target)
-                .map_err(|error| rename_error(&at, &target, error, &in_use))
+            match rename_in_parent(&temp, at.parent_file(), target, rename_flags)
+                .map_err(|error| rename_error(at, target, error, in_use))
             {
                 // A program that opened the file only for a moment (a backup or sync tool)
                 // gets a short while to close it.
@@ -1226,29 +1225,81 @@ fn rename_error(
 /// POSIX semantics (`FileRenameInformationEx`) replace a file another program keeps open with
 /// delete sharing (a scanner, the indexer); where that class or flag isn't supported (older
 /// Windows, FAT, some shares) the classic `FileRenameInformation` with `ReplaceIfExists`.
-fn rename_in_parent(file: &File, parent: &File, name: &OsStr) -> io::Result<()> {
+///
+/// `extra_flags` go with the POSIX rename: `FILE_RENAME_IGNORE_READONLY_ATTRIBUTE` (restores,
+/// Windows 10 1809+) replaces a read-only file too; `write` passes none, so a read-only file is
+/// refused (#209). With that flag, the classic rename (which has no such flag) that is denied
+/// clears the target's read-only attribute and tries once more, putting the attribute back if
+/// that fails too.
+fn rename_in_parent(file: &File, parent: &File, name: &OsStr, extra_flags: u32) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     let wide: Vec<u16> = name.encode_wide().collect();
-    rename_in_parent_with(|class, flags| set_rename_info(file, parent, class, flags, &wide))
+    rename_in_parent_with(
+        extra_flags,
+        |class, flags| set_rename_info(file, parent, class, flags, &wide),
+        &mut |read_only| set_read_only_in(parent, name, read_only),
+    )
 }
 
-/// `rename_in_parent` with `set(class, flags)` as the rename call (a test seam).
-fn rename_in_parent_with(mut set: impl FnMut(i32, u32) -> io::Result<()>) -> io::Result<()> {
+/// `rename_in_parent` with `set(class, flags)` as the rename call and `set_read_only(on)` setting
+/// or clearing the target's read-only attribute (whether it changed) (test seams).
+fn rename_in_parent_with(
+    extra_flags: u32,
+    mut set: impl FnMut(i32, u32) -> io::Result<()>,
+    set_read_only: &mut dyn FnMut(bool) -> io::Result<bool>,
+) -> io::Result<()> {
     match set(
         FILE_RENAME_INFORMATION_EX_CLASS,
-        FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS,
+        FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS | extra_flags,
     ) {
         Err(error)
             if matches!(
                 error.raw_os_error(),
                 Some(ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED | ERROR_INVALID_PARAMETER)
-            ) =>
-        {
-            // `ReplaceIfExists` = TRUE, the first byte of the same field.
-            set(FILE_RENAME_INFORMATION_CLASS, 1)
-        }
-        other => other,
+            ) => {}
+        other => return other,
     }
+    // `ReplaceIfExists` = TRUE, the first byte of the same field.
+    let classic = set(FILE_RENAME_INFORMATION_CLASS, 1);
+    let error = match classic {
+        Err(error)
+            if extra_flags & FILE_RENAME_IGNORE_READONLY_ATTRIBUTE != 0
+                && error.raw_os_error() == Some(ERROR_ACCESS_DENIED) =>
+        {
+            error
+        }
+        other => return other,
+    };
+    match set_read_only(false) {
+        Ok(true) => set(FILE_RENAME_INFORMATION_CLASS, 1).inspect_err(|_| {
+            let _ = set_read_only(true);
+        }),
+        _ => Err(error),
+    }
+}
+
+/// Sets (`on`) or clears the read-only attribute of the file `name` in the held folder `parent`,
+/// opened as itself; whether it changed. `false` for a missing name or anything but a file.
+fn set_read_only_in(parent: &File, name: &OsStr, on: bool) -> io::Result<bool> {
+    let file = match nt_open(
+        parent,
+        name,
+        FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        FILE_OPEN,
+        FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+        0,
+    ) {
+        Ok(file) => file,
+        Err(error) if missing(&error) => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    let attributes = attribute_tag(&file)?.file_attributes;
+    if (attributes & FILE_ATTRIBUTE_READONLY != 0) == on {
+        return Ok(false);
+    }
+    set_attributes(&file, attributes ^ FILE_ATTRIBUTE_READONLY)?;
+    Ok(true)
 }
 
 /// `FILE_RENAME_INFORMATION(_EX)`'s fixed part: a `BOOLEAN ReplaceIfExists` / `ULONG Flags`
@@ -1471,7 +1522,7 @@ fn replace_with(
     content: Content<'_>,
     step: StepFn<'_>,
     fill: &mut dyn FnMut(&mut File, &[u8]) -> io::Result<()>,
-    #[allow(unused_variables)] on_wait: &mut dyn FnMut(),
+    on_wait: &mut dyn FnMut(),
 ) -> io::Result<()> {
     let at = match walk(workdir, rel, OnLink::Clear, OnMissing::Create, step)? {
         Walk::Found(at) => at,
@@ -1486,15 +1537,41 @@ fn replace_with(
     let bytes = match content {
         Content::File { bytes, .. } | Content::Link(bytes) => bytes,
     };
+    let target = classify_for_replacing(&at)?;
+    // Nothing of the old file is kept (D1-A): the new file has the normal attributes, and a
+    // read-only file is replaced too.
+    swap_in(
+        &at,
+        &target,
+        FILE_RENAME_IGNORE_READONLY_ATTRIBUTE,
+        &|| file_in_use(rel),
+        &mut |file| fill(file, bytes),
+        on_wait,
+    )
+    .map(|_| ())
+}
+
+/// The name `replace` gives the new file at `at`'s leaf: the existing file's own spelling (so
+/// the case on disk stays), or the leaf as given when nothing is there. A link or a folder is
+/// deleted first, through its own handle checked to be in the held parent (a folder only when
+/// it is empty, else the error). The file itself is not opened for writing: the rename replaces
+/// it, and reports one another program holds without sharing delete.
+fn classify_for_replacing(at: &Beneath) -> io::Result<OsString> {
     for _ in 0..ATTEMPTS {
-        if let Some((leaf, _)) = open_leaf(&at, Purpose::Delete)? {
-            // Fails for a folder that isn't empty, as `remove_dir` did. The deletion completes
-            // when the handle closes, right here.
-            delete_by_handle(&leaf)?;
-            drop(leaf);
-        }
-        if let Some(mut file) = create_leaf(&at)? {
-            return fill(&mut file, bytes);
+        match open_leaf(at, Purpose::Read)? {
+            None => return Ok(at.leaf_name().to_os_string()),
+            Some((first, Found::File { .. })) => {
+                return Ok(match final_path(&first) {
+                    Ok(path) => on_disk_name(at.leaf_name(), &path),
+                    Err(_) => at.leaf_name().to_os_string(),
+                })
+            }
+            Some((_, Found::Link | Found::Dir)) => {
+                // Reopened to delete it; the deletion completes when the handle closes, here.
+                if let Some((leaf, Found::Link | Found::Dir)) = open_leaf(at, Purpose::Delete)? {
+                    delete_by_handle(&leaf)?;
+                }
+            }
         }
     }
     Err(redirected())
@@ -2820,14 +2897,18 @@ mod tests {
             ERROR_INVALID_FUNCTION,
         ] {
             let mut calls = Vec::new();
-            rename_in_parent_with(|class, flags| {
-                calls.push((class, flags));
-                if class == FILE_RENAME_INFORMATION_EX_CLASS {
-                    Err(io::Error::from_raw_os_error(refusal))
-                } else {
-                    Ok(())
-                }
-            })
+            rename_in_parent_with(
+                0,
+                |class, flags| {
+                    calls.push((class, flags));
+                    if class == FILE_RENAME_INFORMATION_EX_CLASS {
+                        Err(io::Error::from_raw_os_error(refusal))
+                    } else {
+                        Ok(())
+                    }
+                },
+                &mut |_| unreachable!(),
+            )
             .unwrap();
             assert_eq!(
                 calls,
@@ -2839,15 +2920,157 @@ mod tests {
         }
         // Any other failure is the answer.
         let mut calls = 0;
-        let error = rename_in_parent_with(|_, _| {
-            calls += 1;
-            Err(io::Error::from_raw_os_error(ERROR_SHARING_VIOLATION))
-        })
+        let error = rename_in_parent_with(
+            0,
+            |_, _| {
+                calls += 1;
+                Err(io::Error::from_raw_os_error(ERROR_SHARING_VIOLATION))
+            },
+            &mut |_| unreachable!(),
+        )
         .unwrap_err();
         assert_eq!(
             (calls, error.raw_os_error()),
             (1, Some(ERROR_SHARING_VIOLATION))
         );
+        // Without the read-only flag (a write), a denied classic rename is the answer.
+        let error = rename_in_parent_with(
+            0,
+            |class, _| {
+                Err(io::Error::from_raw_os_error(
+                    if class == FILE_RENAME_INFORMATION_EX_CLASS {
+                        ERROR_INVALID_PARAMETER
+                    } else {
+                        ERROR_ACCESS_DENIED
+                    },
+                ))
+            },
+            &mut |_| unreachable!(),
+        )
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(ERROR_ACCESS_DENIED));
+    }
+
+    /// A temporary file "t" holding "new" in `dir`, and `dir` held, as `swap_in` has them.
+    fn temp_in(dir: &Path) -> (File, File) {
+        let held = open_pinned(dir, FILE_LIST_DIRECTORY).unwrap();
+        let mut temp = nt_open(
+            &held,
+            OsStr::new("t"),
+            GENERIC_WRITE | DELETE,
+            FILE_SHARE_READ,
+            FILE_CREATE,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+            FILE_ATTRIBUTE_NORMAL,
+        )
+        .unwrap();
+        temp.write_all(b"new").unwrap();
+        (held, temp)
+    }
+
+    #[test]
+    fn restore_of_a_read_only_file_through_the_classic_rename() {
+        let dir = TempDir::new().unwrap();
+        let f = dir.path().join("f");
+        std::fs::write(&f, "old").unwrap();
+        make_read_only(&f);
+        let _writable_again = WritableAgain(f.clone());
+        let (held, temp) = temp_in(dir.path());
+        let wide: Vec<u16> = "f".encode_utf16().collect();
+        let mut classic = 0;
+        // As where POSIX renames are refused: the classic rename, denied for the read-only
+        // file, is tried again once its attribute is cleared.
+        rename_in_parent_with(
+            FILE_RENAME_IGNORE_READONLY_ATTRIBUTE,
+            |class, flags| {
+                if class == FILE_RENAME_INFORMATION_EX_CLASS {
+                    assert_eq!(flags, 0x43);
+                    return Err(io::Error::from_raw_os_error(ERROR_INVALID_PARAMETER));
+                }
+                classic += 1;
+                set_rename_info(&temp, &held, class, flags, &wide)
+            },
+            &mut |on| set_read_only_in(&held, OsStr::new("f"), on),
+        )
+        .unwrap();
+        drop(temp);
+        assert_eq!(classic, 2);
+        assert_eq!(names_in(dir.path()), ["f"]);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert!(!std::fs::metadata(&f).unwrap().permissions().readonly());
+    }
+
+    #[test]
+    fn a_failed_classic_restore_puts_the_read_only_attribute_back() {
+        let dir = TempDir::new().unwrap();
+        let f = dir.path().join("f");
+        std::fs::write(&f, "old").unwrap();
+        make_read_only(&f);
+        let _writable_again = WritableAgain(f.clone());
+        let (held, temp) = temp_in(dir.path());
+        let mut calls = Vec::new();
+        let error = rename_in_parent_with(
+            FILE_RENAME_IGNORE_READONLY_ATTRIBUTE,
+            |class, _| {
+                calls.push(class);
+                Err(io::Error::from_raw_os_error(
+                    if class == FILE_RENAME_INFORMATION_EX_CLASS {
+                        ERROR_INVALID_PARAMETER
+                    } else {
+                        ERROR_ACCESS_DENIED
+                    },
+                ))
+            },
+            &mut |on| set_read_only_in(&held, OsStr::new("f"), on),
+        )
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(ERROR_ACCESS_DENIED));
+        assert_eq!(
+            calls,
+            [
+                FILE_RENAME_INFORMATION_EX_CLASS,
+                FILE_RENAME_INFORMATION_CLASS,
+                FILE_RENAME_INFORMATION_CLASS
+            ]
+        );
+        delete_by_handle(&temp).unwrap();
+        drop(temp);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
+        assert!(std::fs::metadata(&f).unwrap().permissions().readonly());
+        assert_eq!(names_in(dir.path()), ["f"]);
+    }
+
+    #[test]
+    fn restore_replaces_a_read_only_file_and_resets_its_attribute() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        make_read_only(&f);
+        let _writable_again = WritableAgain(f.clone());
+        replace(dir.path(), Path::new("d/f"), new_content(), &mut no_step).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new content");
+        assert!(!std::fs::metadata(&f).unwrap().permissions().readonly());
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn restore_replaces_an_empty_folder_and_refuses_a_full_one() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("d").join("e")).unwrap();
+        replace(dir.path(), Path::new("d/e"), new_content(), &mut no_step).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d").join("e")).unwrap(),
+            "new content"
+        );
+        std::fs::create_dir(dir.path().join("d").join("full")).unwrap();
+        std::fs::write(dir.path().join("d").join("full").join("keep"), "k").unwrap();
+        assert!(replace(dir.path(), Path::new("d/full"), new_content(), &mut no_step).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d").join("full").join("keep")).unwrap(),
+            "k"
+        );
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "full"]);
     }
 
     #[test]
@@ -2866,7 +3089,7 @@ mod tests {
         )
         .unwrap();
         temp.write_all(b"new").unwrap();
-        rename_in_parent(&temp, &held, OsStr::new("f")).unwrap();
+        rename_in_parent(&temp, &held, OsStr::new("f"), 0).unwrap();
         drop(temp);
         assert_eq!(names_in(dir.path()), ["f"]);
         assert_eq!(
