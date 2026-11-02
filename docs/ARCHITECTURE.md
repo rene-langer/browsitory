@@ -790,8 +790,8 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `.gitignore` append, `clear_hazards`, `open_beneath` (image preview), and for undo/redo and the
   path-limited stash `read_beneath` (snapshots and checks; never below a symlinked folder, never
   a FIFO), `replace_beneath` (restore writes, each file replaced whole; a symlinked folder on
-  the way is removed and recreated, never written through) and `remove_and_prune_beneath` (deletions and the folders
-  they empty). `undo.rs` keeps only its mode logic.
+  the way is removed and recreated, never written through) and `remove_and_prune_beneath`
+  (deletions and the folders they empty). `undo.rs` keeps only its mode logic.
 - Those functions walk the path one component at a time and hold every folder on the way, so a
   folder swapped for a link at any moment can't redirect them. Unix
   (`worktree_guard/beneath_unix.rs`): `openat` with `O_NOFOLLOW | O_DIRECTORY` from the previous
@@ -894,16 +894,21 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   write, a restore keeps nothing of the old file (D1-A): the mode comes from the restored entry
   (Unix: the umask's, exec bits set or cleared), Windows attributes are reset, and a read-only
   file is replaced (Windows: `FILE_RENAME_FLAG_IGNORE_READONLY_ATTRIBUTE` on the POSIX rename;
-  where only the classic rename works, a denied rename clears the target's read-only attribute
-  and tries once more, putting it back if that fails). It keeps the spelling of the name on
+  where that flag is refused (1709–1803) the POSIX rename without it, and where POSIX renames
+  are refused the classic one; such a rename that is denied clears the target's read-only
+  attribute and tries once more, putting it back if that fails). Like the classic delete's
+  (#194), that clear acts on the file, so a hardlinked file's other names lose the attribute
+  too, and keep it lost once the rename replaced this name. It keeps the spelling of the name on
   disk. Unix: a link is made under a temporary name with `symlinkat` and renamed over the
   target; a FIFO, socket or device is replaced by the rename without being opened; an empty
   folder is removed first (`AT_REMOVEDIR`), a full one is an error. Windows: a link or an empty
-  folder is deleted through its handle first; the file is not probed for writing, so a file
-  held without sharing delete fails the rename and, after the retry, is
-  `UndoError::FileInUse` ("'f.txt' is open in another program. Close it, then try again.").
-  Atomic per file only: a restore of several files that fails part-way keeps the files already
-  restored.
+  folder is deleted through its handle only once the new file is complete, just before the
+  rename; the file is not probed for writing, so a file held without sharing delete (read-only
+  or not) fails the rename and, after the retry, is `UndoError::FileInUse` ("'f.txt' is open in
+  another program. Close it, then try again."). Atomic per file only: a restore of several
+  files that fails part-way keeps the files already restored. Trying again finishes it:
+  `WorktreeChange::verify` counts a file already at its target (content, mode and kind, or
+  absent when the target deletes it) as unchanged, not as "changed since the operation".
 - `write_beneath` refuses an existing read-only file and leaves it as it is (#209): nothing is
   written and the read-only state is kept. Unix: an `EACCES` open of a regular file the user
   owns without owner write permission (`fstatat`, `st_uid == geteuid()`, no `S_IWUSR`). Windows:

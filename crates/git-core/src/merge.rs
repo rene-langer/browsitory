@@ -632,7 +632,6 @@ fn undo_error(error: crate::undo::UndoError) -> MergeError {
     match error {
         crate::undo::UndoError::Git(error) => MergeError::Git(error),
         crate::undo::UndoError::Io(error) => MergeError::Io(error),
-        crate::undo::UndoError::FileInUse(path) => MergeError::FileInUse(path),
         other => MergeError::Git(git2::Error::from_str(&other.to_string())),
     }
 }

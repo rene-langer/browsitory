@@ -479,7 +479,10 @@ impl WorktreeChange {
                     Ok::<_, git2::Error>((Oid::hash_object(ObjectType::Blob, bytes)?, *mode))
                 })
                 .transpose()?;
-            if current != expected && !clean_against_index(repo, &index, path, expected) {
+            if current != expected
+                && !clean_against_index(repo, &index, path, expected)
+                && !self.already_restored(workdir, path, &config)?
+            {
                 // Ignored files are not snapshotted: absent from the tree but present on disk
                 // is fine as long as the file is ignored and the target would not change it.
                 let ignored_untouched = expected.is_none()
@@ -501,6 +504,29 @@ impl WorktreeChange {
             }
         }
         Ok(())
+    }
+
+    /// Whether `path` already is what the target wants there (content, mode and kind, or
+    /// nothing at all): a restore that stopped part-way (a full disk, a file open in another
+    /// program) wrote it, and trying again finishes the restore instead of calling that a change
+    /// since the operation (#251). Writing it again changes nothing.
+    fn already_restored(
+        &self,
+        workdir: &Path,
+        path: &str,
+        config: &WorktreeConfig,
+    ) -> Result<bool, UndoError> {
+        let Some(&(id, mode)) = self.to.get(path) else {
+            return Ok(fs::symlink_metadata(workdir.join(path)).is_err());
+        };
+        Ok(
+            match read_worktree_file(workdir, path, config, Some(mode))? {
+                Some((bytes, disk_mode)) => {
+                    disk_mode == mode && Oid::hash_object(ObjectType::Blob, &bytes)? == id
+                }
+                None => false,
+            },
+        )
     }
 
     fn verify_directory_is_removable(&self, workdir: &Path, dir: &Path) -> Result<(), UndoError> {

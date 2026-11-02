@@ -1131,8 +1131,10 @@ fn names_in(repo: &Repository) -> Vec<String> {
     names
 }
 
-/// An undo replaces each file whole (#251): the restored files have the recorded content and
-/// exec bit, and no temporary file is left next to them.
+/// A regression guard for the temporary file + rename restores (#251), not a proof of them (it
+/// passed before too): the restored files have the recorded content and exec bit, and no
+/// temporary file is left next to them. The walker's tests prove a failed restore keeps the
+/// old file.
 #[test]
 fn undo_restores_leave_no_temporary_file() {
     let (_dir, repo) = seeded();
@@ -1173,6 +1175,54 @@ fn undo_restores_leave_no_temporary_file() {
     assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), before);
 }
 
+/// Sets `dir`'s permission bits (Unix).
+#[cfg(unix)]
+fn chmod(dir: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(dir, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+/// A restore that stopped part-way (here: `d/` refused new files after `a.txt` was written)
+/// is finished by trying again, in both directions: files already at the target don't count
+/// as changed since the operation (#251).
+#[cfg(unix)]
+#[test]
+fn trying_again_finishes_a_restore_that_stopped_part_way() {
+    // SAFETY: `geteuid` has no preconditions.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root writes into read-only folders");
+        return;
+    }
+    let (_dir, repo) = seeded();
+    write(&repo, "d/f.txt", "one\n");
+    stage(&repo, "d/f.txt");
+    commit(&repo, "second");
+    let d = repo.workdir().unwrap().join("d");
+    write(&repo, "a.txt", "edited a\n");
+    write(&repo, "d/f.txt", "edited f\n");
+    let edited = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "a.txt", "discarded a\n");
+    write(&repo, "d/f.txt", "discarded f\n");
+    let discarded = capture(&repo, SnapshotScope::Full).unwrap();
+
+    for (from, to, a, f) in [
+        (&discarded, &edited, "edited a\n", "edited f\n"),
+        (&edited, &discarded, "discarded a\n", "discarded f\n"),
+    ] {
+        chmod(&d, 0o555);
+        let stopped = restore(&repo, from, to, "browsitory: undo test");
+        chmod(&d, 0o755);
+        assert!(matches!(stopped, Err(UndoError::Io(_))), "{stopped:?}");
+        assert_eq!(read(&repo, "a.txt").as_deref(), Some(a));
+        assert_ne!(read(&repo, "d/f.txt").as_deref(), Some(f));
+
+        restore(&repo, from, to, "browsitory: undo test").unwrap();
+        assert_eq!(read(&repo, "a.txt").as_deref(), Some(a));
+        assert_eq!(read(&repo, "d/f.txt").as_deref(), Some(f));
+        assert_eq!(&capture(&repo, SnapshotScope::Full).unwrap(), to);
+    }
+}
+
 /// Windows: an undo that would replace a file another program keeps open without sharing
 /// delete says so and leaves the file as it is (#251).
 #[cfg(windows)]
@@ -1182,17 +1232,21 @@ fn undo_of_a_file_held_open_says_so() {
     const FILE_SHARE_READ: u32 = 0x1;
     const FILE_SHARE_WRITE: u32 = 0x2;
     let (dir, repo) = init_repo();
+    write(&repo, "a.txt", "one\n");
     write(&repo, "f.txt", "one\n");
+    stage(&repo, "a.txt");
     stage(&repo, "f.txt");
     commit(&repo, "initial");
-    // An unstaged edit, then discarded: undoing the discard writes bytes the index doesn't
+    // Unstaged edits, then discarded: undoing the discard writes bytes the index doesn't
     // have, through the walker (content the index has goes through libgit2's checkout).
+    write(&repo, "a.txt", "two\n");
     write(&repo, "f.txt", "two\n");
     let before = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "a.txt", "one\n");
     write(&repo, "f.txt", "one\n");
     let after = capture(&repo, SnapshotScope::Full).unwrap();
     // As an editor that keeps the file open, sharing read and write but not delete.
-    let _editor = fs::OpenOptions::new()
+    let editor = fs::OpenOptions::new()
         .read(true)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .open(dir.path().join("f.txt"))
@@ -1204,5 +1258,14 @@ fn undo_of_a_file_held_open_says_so() {
         error.to_string(),
         "'f.txt' is open in another program. Close it, then try again."
     );
+    // `a.txt` comes first and was restored; `f.txt` is as it was.
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("two\n"));
     assert_eq!(read(&repo, "f.txt").as_deref(), Some("one\n"));
+
+    // Closed, then tried again, as the message says: the undo finishes.
+    drop(editor);
+    restore(&repo, &after, &before, "undo").unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("two\n"));
+    assert_eq!(read(&repo, "f.txt").as_deref(), Some("two\n"));
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), before);
 }
