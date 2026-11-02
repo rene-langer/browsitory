@@ -1147,15 +1147,19 @@ pub(crate) fn remove_and_prune_beneath(workdir: &Path, rel: &str) -> io::Result<
 ///
 /// A file is replaced whole (#251), as by [`write_beneath`]: the new file (or, on Unix, link)
 /// is made under a temporary name in the same held folder (`.{name}.browsitory-{pid}-{n}.tmp`)
-/// and renamed over `rel` only once it is complete, so on any failure the old file or link is
-/// left as it was and the temporary entry is removed. Unlike [`write_beneath`], nothing of the
-/// old file is kept: the new file's mode comes from `content` (Unix: the umask's, with the exec
-/// bits set or cleared), Windows attributes are reset and a read-only file is replaced too. An
-/// existing file keeps the spelling of its name on disk. An empty folder is removed first; one
-/// that isn't empty is an error. On Windows a link is deleted before the new file is made, and a
-/// file another program holds open without sharing delete is an error for which [`is_in_use`]
-/// is true, after a short retry, nothing changed. Atomic per file only: a restore of several
-/// files that fails part-way keeps the files already restored.
+/// and renamed over `rel` only once it is complete, so a failure while making it leaves the old
+/// file or link as it was and removes the temporary entry. Unlike [`write_beneath`], nothing of
+/// the old file is kept: the new file's mode comes from `content` (Unix: the umask's, with the
+/// exec bits set or cleared), Windows attributes are reset and a read-only file is replaced too.
+/// An existing file keeps the spelling of its name on disk. A folder that isn't empty is an
+/// error. An empty folder (Unix, Windows) or a link (Windows), which a rename can't replace
+/// there, is deleted: on Unix the empty folder before the new file is made, on Windows either
+/// one only once the new file is complete, just before the rename (a failure of that rename
+/// then leaves neither). On Windows a file another program holds open without sharing delete
+/// is an error for which [`is_in_use`] is true, after a short retry, nothing changed; a
+/// read-only one too. Atomic per file only: a restore of several files that fails part-way
+/// keeps the files already restored; restoring again finishes it (`undo::restore` counts a
+/// file already at its target as unchanged).
 pub(crate) fn replace_beneath(workdir: &Path, rel: &str, content: Content<'_>) -> io::Result<()> {
     if !plain_relative(Path::new(rel)) {
         return Err(io::Error::new(

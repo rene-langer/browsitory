@@ -651,18 +651,25 @@ pub(super) fn replace(
     content: Content<'_>,
     step: StepFn<'_>,
 ) -> io::Result<()> {
-    replace_with(workdir, rel, content, step, &mut |file, bytes| {
-        file.write_all(bytes)
-    })
+    replace_with(
+        workdir,
+        rel,
+        content,
+        step,
+        &mut |file, bytes| file.write_all(bytes),
+        &mut || Ok(()),
+    )
 }
 
-/// `replace` with `fill` writing a file's bytes into the opened file (a test seam).
+/// `replace` with `fill` writing a file's bytes into the opened file and `before_rename` called
+/// once the new file or link is complete under its temporary name (test seams).
 fn replace_with(
     workdir: &Path,
     rel: &Path,
     content: Content<'_>,
     step: StepFn<'_>,
     fill: &mut dyn FnMut(&mut File, &[u8]) -> io::Result<()>,
+    before_rename: &mut dyn FnMut() -> io::Result<()>,
 ) -> io::Result<()> {
     let at = match walk(workdir, rel, OnLink::Clear, OnMissing::Create, step)? {
         Walk::Found(at) => at,
@@ -692,7 +699,7 @@ fn replace_with(
     match content {
         Content::Link(link_target) => {
             let temp = symlink_temp(parent, leaf, link_target)?;
-            swap_in(&at, &temp, &target, || Ok(()))
+            swap_in(&at, &temp, &target, before_rename)
         }
         // The mode comes from the restored entry alone (the umask's, plus or minus the exec
         // bits), never from the file it replaces.
@@ -707,7 +714,8 @@ fn replace_with(
                 // SAFETY: `file` owns the descriptor of the temporary file just created.
                 check(unsafe { libc::fchmod(file.as_raw_fd(), wanted) })?;
             }
-            fill(file, bytes)
+            fill(file, bytes)?;
+            before_rename()
         }),
     }
 }
@@ -1323,6 +1331,7 @@ mod tests {
             new_content(),
             &mut no_step,
             &mut fail_after_new,
+            &mut || Ok(()),
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "disk full");
@@ -1340,6 +1349,7 @@ mod tests {
             new_content(),
             &mut no_step,
             &mut fail_after_new,
+            &mut || Ok(()),
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "disk full");
@@ -1357,6 +1367,7 @@ mod tests {
             new_content(),
             &mut no_step,
             &mut fail_after_new,
+            &mut || Ok(()),
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "disk full");
@@ -1366,30 +1377,27 @@ mod tests {
 
     #[test]
     fn a_failed_link_restore_keeps_the_old_file() {
-        use std::os::unix::fs::PermissionsExt;
-        // SAFETY: `geteuid` has no preconditions.
-        if unsafe { libc::geteuid() } == 0 {
-            eprintln!("skipped: root writes into read-only folders");
-            return;
-        }
         let (dir, _outside) = tree();
         let d = dir.path().join("d");
-        let held = d.clone();
-        // The folder turns read-only once the walk holds it: nothing can be created in it.
-        let error = replace(
+        let seen = d.clone();
+        // Fails once the new link exists under its temporary name, with the old file still
+        // there: it is replaced by the rename only, never deleted first.
+        let error = replace_with(
             dir.path(),
             Path::new("d/f"),
             Content::Link(b"e"),
-            &mut |step| {
-                if step == Step::Opened(OsStr::new("d")) {
-                    std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o555))
-                        .unwrap();
-                }
+            &mut no_step,
+            &mut |_, _| unreachable!("a link has no bytes to fill"),
+            &mut || {
+                let names = names_in(&seen);
+                assert_eq!(names.len(), 3, "{names:?}");
+                assert!(names.iter().any(|n| n.starts_with(".f.browsitory-")));
+                assert_eq!(std::fs::read(seen.join("f")).unwrap(), b"inner\n");
+                Err(io::Error::other("rename refused"))
             },
         )
         .unwrap_err();
-        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied, "{error:?}");
+        assert_eq!(error.to_string(), "rename refused");
         assert!(std::fs::symlink_metadata(d.join("f")).unwrap().is_file());
         assert_eq!(std::fs::read(d.join("f")).unwrap(), b"inner\n");
         assert_eq!(names_in(&d), ["e", "f"]);
