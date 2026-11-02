@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Dependencies
+
+- Updated the frontend's JavaScript dependencies (React 19.3, Vite 8.3, jsdom 30.1 and others).
+  Fixed: the add-remote form's "Push URL (optional)" section could reopen right after a
+  successful add instead of collapsing (#276).
+
 ### Terminal bisect
 
 - Fixed: Abort (of a merge, cherry-pick, revert or several-commit cherry-pick) and the end of a
