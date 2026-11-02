@@ -46,7 +46,7 @@ pub use ctor as __ctor;
 #[macro_export]
 macro_rules! hermetic_git {
     () => {
-        #[$crate::__ctor::ctor(crate_path = $crate::__ctor)]
+        #[$crate::__ctor::ctor(unsafe, crate_path = $crate::__ctor)]
         fn __browsitory_hermetic_git() {
             $crate::install();
         }
