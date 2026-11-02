@@ -13,6 +13,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   app. A root CA your system trusts (for example a company proxy's) now works there too. TLS
   still uses rustls with the ring crypto library.
 
+### Internal: ctor 1.0
+
+- Changed: the test-only `ctor` dependency is now 1.0 (the version Tauri already uses); the hermetic-git test guard's
+  constructor is marked `unsafe`, as ctor 0.13+ requires.
+
 ### Terminal rebases
 
 - Fixed: a `git rebase` started in a terminal and paused on a conflict showed as "Merging" with
