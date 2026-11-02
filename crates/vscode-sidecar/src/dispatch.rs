@@ -2579,6 +2579,33 @@ struct HeadInfoDto {
     rebase: Option<RebaseInfoDto>,
     bisect: Option<BisectDto>,
     terminal_sequence: Option<TerminalSequenceDto>,
+    terminal_rebase: Option<TerminalRebaseDto>,
+}
+
+/// Same wire shape as the Tauri app's `TerminalRebaseDto` (#263).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalRebaseDto {
+    kind: &'static str,
+    branch: String,
+    onto: String,
+    current_step: usize,
+    total_steps: usize,
+}
+
+impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
+    fn from(rebase: git_core::repo::TerminalRebase) -> Self {
+        Self {
+            kind: match rebase.kind {
+                git_core::repo::TerminalRebaseKind::Rebase => "Rebase",
+                git_core::repo::TerminalRebaseKind::Am => "Am",
+            },
+            branch: rebase.branch,
+            onto: rebase.onto,
+            current_step: rebase.current_step,
+            total_steps: rebase.total_steps,
+        }
+    }
 }
 
 /// Same wire shape as the Tauri app's `ConfirmedAbortDto`: what the user confirmed before aborting a terminal cherry-pick (`RepoClient.abortSequence`'s
@@ -2669,6 +2696,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
                 started_from: bisect.started_from,
             }),
             terminal_sequence: info.terminal_sequence.map(TerminalSequenceDto::from),
+            terminal_rebase: info.terminal_rebase.map(TerminalRebaseDto::from),
         }
     }
 }

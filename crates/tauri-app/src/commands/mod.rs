@@ -637,6 +637,35 @@ pub struct HeadInfoDto {
     /// A `git cherry-pick A B C` / `git revert A B` started in a terminal and not finished, or
     /// `null` (#258).
     pub terminal_sequence: Option<TerminalSequenceDto>,
+    /// A `git rebase` or `git am` started in a terminal and not finished, or `null` (#263).
+    pub terminal_rebase: Option<TerminalRebaseDto>,
+}
+
+/// `{ "kind": "Rebase" | "Am", "branch", "onto", "currentStep", "totalSteps" }`: `branch` and
+/// `onto` empty when unknown (always for `git am`), the steps 0 when unknown.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalRebaseDto {
+    pub kind: &'static str,
+    pub branch: String,
+    pub onto: String,
+    pub current_step: usize,
+    pub total_steps: usize,
+}
+
+impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
+    fn from(rebase: git_core::repo::TerminalRebase) -> Self {
+        Self {
+            kind: match rebase.kind {
+                git_core::repo::TerminalRebaseKind::Rebase => "Rebase",
+                git_core::repo::TerminalRebaseKind::Am => "Am",
+            },
+            branch: rebase.branch,
+            onto: rebase.onto,
+            current_step: rebase.current_step,
+            total_steps: rebase.total_steps,
+        }
+    }
 }
 
 /// What the user confirmed before aborting a terminal cherry-pick (`RepoClient.abortSequence`'s
@@ -720,6 +749,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
                 started_from: bisect.started_from,
             }),
             terminal_sequence: info.terminal_sequence.map(TerminalSequenceDto::from),
+            terminal_rebase: info.terminal_rebase.map(TerminalRebaseDto::from),
         }
     }
 }
@@ -3529,10 +3559,11 @@ mod tests {
             rebase: None,
             bisect: None,
             terminal_sequence: None,
+            terminal_rebase: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
-            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null, "rebase": null, "bisect": null, "terminalSequence": null})
+            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null, "rebase": null, "bisect": null, "terminalSequence": null, "terminalRebase": null})
         );
         let dto = HeadInfoDto::from(git_core::repo::HeadInfo {
             head_id: Some("abc".into()),
@@ -3545,6 +3576,7 @@ mod tests {
             rebase: None,
             bisect: None,
             terminal_sequence: None,
+            terminal_rebase: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap()["squashMessage"],
@@ -3647,6 +3679,7 @@ mod tests {
                 rebase: None,
                 bisect: None,
                 terminal_sequence: None,
+                terminal_rebase: None,
             }))
             .unwrap()
         };
@@ -4010,6 +4043,7 @@ mod tests {
             }),
             bisect: None,
             terminal_sequence: None,
+            terminal_rebase: None,
         }))
         .unwrap()
     }
@@ -4050,6 +4084,7 @@ mod tests {
                 rebase: None,
                 bisect: None,
                 terminal_sequence,
+                terminal_rebase: None,
             }))
             .unwrap()
         };
@@ -4079,6 +4114,54 @@ mod tests {
     }
 
     #[test]
+    fn head_info_dto_serializes_a_terminal_rebase() {
+        let head = |terminal_rebase| {
+            serde_json::to_value(HeadInfoDto::from(git_core::repo::HeadInfo {
+                head_id: None,
+                detached_at: None,
+                head_pushed: false,
+                operation: None,
+                squash_message: None,
+                commit_hooks: vec![],
+                sequence: None,
+                rebase: None,
+                bisect: None,
+                terminal_sequence: None,
+                terminal_rebase,
+            }))
+            .unwrap()
+        };
+        let rebasing = head(Some(git_core::repo::TerminalRebase {
+            kind: git_core::repo::TerminalRebaseKind::Rebase,
+            branch: "topic".into(),
+            onto: "abc".into(),
+            current_step: 2,
+            total_steps: 3,
+        }));
+        assert_eq!(
+            rebasing["terminalRebase"],
+            serde_json::json!({
+                "kind": "Rebase",
+                "branch": "topic",
+                "onto": "abc",
+                "currentStep": 2,
+                "totalSteps": 3
+            })
+        );
+        let am = head(Some(git_core::repo::TerminalRebase {
+            kind: git_core::repo::TerminalRebaseKind::Am,
+            branch: String::new(),
+            onto: String::new(),
+            current_step: 1,
+            total_steps: 2,
+        }));
+        assert_eq!(am["terminalRebase"]["kind"], "Am");
+        let none = head(None);
+        assert!(none.as_object().unwrap().contains_key("terminalRebase"));
+        assert_eq!(none["terminalRebase"], serde_json::Value::Null);
+    }
+
+    #[test]
     fn head_info_dto_serializes_a_bisect() {
         let head = |bisect| {
             serde_json::to_value(HeadInfoDto::from(git_core::repo::HeadInfo {
@@ -4092,6 +4175,7 @@ mod tests {
                 rebase: None,
                 bisect,
                 terminal_sequence: None,
+                terminal_rebase: None,
             }))
             .unwrap()
         };

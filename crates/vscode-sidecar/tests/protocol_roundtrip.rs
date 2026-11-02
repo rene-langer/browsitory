@@ -1675,6 +1675,64 @@ fn get_head_info_reports_a_terminal_bisect() {
     assert_eq!(during["result"]["operation"], serde_json::Value::Null);
 }
 
+/// A `git rebase` started in a terminal reaches the extension as `terminalRebase`, and Abort
+/// merge refuses it, naming it (#263).
+#[test]
+fn a_terminal_rebase_round_trips_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    repo.set_head("refs/heads/main").unwrap();
+    write_file(dir.path(), "file.txt", "base");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("topic", &base, false).unwrap();
+    drop(base);
+    write_file(dir.path(), "file.txt", "main");
+    commit_all(&repo, "main");
+    let main = repo.head().unwrap().target().unwrap();
+    drop(repo);
+    let git = |args: &[&str]| {
+        let output = test_support::git_command(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        output.status.success()
+    };
+    assert!(git(&["checkout", "-q", "topic"]));
+    write_file(dir.path(), "file.txt", "topic");
+    assert!(git(&["commit", "-qam", "topic"]));
+    assert!(
+        !git(&["rebase", "main"]),
+        "the rebase must stop on a conflict"
+    );
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let info = sidecar.call(
+        2,
+        "get_head_info",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        info["result"]["terminalRebase"],
+        serde_json::json!({
+            "kind": "Rebase",
+            "branch": "topic",
+            "onto": main.to_string(),
+            "currentStep": 1,
+            "totalSteps": 1
+        })
+    );
+    assert_eq!(info["result"]["operation"], serde_json::Value::Null);
+    let refused = sidecar.call(3, "abort_merge", serde_json::json!({"repoPath": repo_path}));
+    assert_eq!(
+        refused["error"]["message"],
+        "A rebase started in a terminal isn't finished. Continue it there with git rebase \
+         --continue, or abort it with git rebase --abort."
+    );
+    assert!(dir.path().join(".git").join("rebase-merge").is_dir());
+}
+
 /// A `git cherry-pick A B` started in a terminal and stopped between steps reaches the extension
 /// as `terminalSequence`, and `abort_sequence` aborts it like `git cherry-pick --abort` (#258,
 /// #253).
