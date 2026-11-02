@@ -502,9 +502,14 @@ fn abort_merge_merged_path_leaf_never_writes_through() {
     let f = fx();
     f.stopped_merge();
     f.link_leaf();
-    git_core::merge::abort_merge(&f.repo).unwrap();
+    // The link replaced a merged (staged) file: a work-tree change Abort would lose, so it
+    // refuses like `git merge --abort` (#281 review), writing nothing.
+    let result = git_core::merge::abort_merge(&f.repo);
     f.untouched();
-    assert_eq!(common::read(f.path(), "tc"), "plain\n");
+    assert!(
+        matches!(&result, Err(git_core::merge::MergeError::WouldDiscard(path)) if path == "tc"),
+        "{result:?}"
+    );
 }
 
 #[test]

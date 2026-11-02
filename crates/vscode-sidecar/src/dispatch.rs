@@ -2578,6 +2578,68 @@ struct HeadInfoDto {
     sequence: Option<SequenceProgressDto>,
     rebase: Option<RebaseInfoDto>,
     bisect: Option<BisectDto>,
+    terminal_sequence: Option<TerminalSequenceDto>,
+}
+
+/// Same wire shape as the Tauri app's `ConfirmedAbortDto`: what the user confirmed before aborting a terminal cherry-pick (`RepoClient.abortSequence`'s
+/// `confirmed`): `{ "headId", "startedAt", "rewinds", "commitsToRemove", "pausedOnConflict" }`, as last shown by
+/// `HeadInfo.terminalSequence` (#281 review).
+#[derive(Deserialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ConfirmedAbortDto {
+    head_id: String,
+    started_at: String,
+    rewinds: bool,
+    commits_to_remove: usize,
+    paused_on_conflict: bool,
+}
+
+impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
+    fn from(dto: ConfirmedAbortDto) -> Self {
+        Self {
+            head_id: dto.head_id,
+            started_at: dto.started_at,
+            rewinds: dto.rewinds,
+            commits_to_remove: dto.commits_to_remove,
+            paused_on_conflict: dto.paused_on_conflict,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AbortSequenceParams {
+    repo_path: String,
+    #[serde(default)]
+    confirmed: Option<ConfirmedAbortDto>,
+}
+
+/// Same wire shape as the Tauri app's `TerminalSequenceDto` (#258).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalSequenceDto {
+    kind: &'static str,
+    paused_on_conflict: bool,
+    started_at: String,
+    started_at_summary: String,
+    rewinds: bool,
+    commits_to_remove: usize,
+}
+
+impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
+    fn from(sequence: git_core::pick::TerminalSequence) -> Self {
+        Self {
+            kind: match sequence.kind {
+                git_core::pick::SequenceKind::CherryPick => "CherryPick",
+                git_core::pick::SequenceKind::Revert => "Revert",
+            },
+            paused_on_conflict: sequence.paused_on_conflict,
+            started_at: sequence.started_at,
+            started_at_summary: sequence.started_at_summary,
+            rewinds: sequence.rewinds,
+            commits_to_remove: sequence.commits_to_remove,
+        }
+    }
 }
 
 /// Same wire shape as the Tauri app's `BisectDto`: `{ "startedFrom": "main" }`.
@@ -2606,6 +2668,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             bisect: info.bisect.map(|bisect| BisectDto {
                 started_from: bisect.started_from,
             }),
+            terminal_sequence: info.terminal_sequence.map(TerminalSequenceDto::from),
         }
     }
 }
@@ -3035,9 +3098,10 @@ fn continue_sequence<W: std::io::Write + Send + 'static>(
 }
 
 fn abort_sequence(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
+    let params: AbortSequenceParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let abort = worker_handle(repos, &params.repo_path)?.abort_sequence()?;
+    let confirmed = params.confirmed.map(git_core::pick::ConfirmedAbort::from);
+    let abort = worker_handle(repos, &params.repo_path)?.abort_sequence(confirmed)?;
     serde_json::to_value(SequenceAbortDto {
         rewound: abort.rewound,
     })

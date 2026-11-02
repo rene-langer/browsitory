@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { AmendOptions, PickOutcome, RepoClient, ResetMode, SequenceAbort, SequenceOutcome } from "../ipc/RepoClient";
+import type { AmendOptions, ConfirmedAbort, PickOutcome, RepoClient, ResetMode, SequenceAbort, SequenceOutcome } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
 import { hookFailedMessage, type HookRetry } from "../lib/hookFailure";
@@ -22,7 +22,8 @@ export interface HistoryActions {
    * dialog ("Continue without hooks") and resolves `null`, like a failed commit.
    */
   continueSequence(noVerify?: boolean): Promise<SequenceOutcome | null>;
-  abortSequence(): Promise<SequenceAbort | null>;
+  /** `confirmed`: for a terminal sequence, what the user confirmed (see `RepoClient`). */
+  abortSequence(confirmed?: ConfirmedAbort): Promise<SequenceAbort | null>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
   // Resolves `true` once amended; see `StagingActions.commit`.
@@ -124,7 +125,10 @@ export function useHistoryActions(
     [client, runRepoChanging, repoPath, setState],
   );
   const abortSequence = useCallback(
-    () => withOutcome(() => client.abortSequence(repoPath)),
+    (confirmed?: ConfirmedAbort) =>
+      withOutcome(() =>
+        confirmed === undefined ? client.abortSequence(repoPath) : client.abortSequence(repoPath, confirmed),
+      ),
     [client, withOutcome, repoPath],
   );
   const resetToCommit = useCallback(

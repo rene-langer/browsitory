@@ -6,6 +6,7 @@ import type {
   ConflictSide,
   PickOutcome,
   SequenceAbort,
+  ConfirmedAbort,
   RebaseAbort,
   SequenceOutcome,
   CreatePullRequest,
@@ -286,7 +287,7 @@ export interface UseAppStateResult {
   cherryPickMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
   revertMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
   continueSequence(noVerify?: boolean): Promise<SequenceOutcome | null>;
-  abortSequence(): Promise<SequenceAbort | null>;
+  abortSequence(confirmed?: ConfirmedAbort): Promise<SequenceAbort | null>;
   resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(commitId: string): Promise<void>;
   amendCommit(message: string, noVerify: boolean, options?: AmendOptions): Promise<boolean>;
@@ -350,7 +351,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     remoteDialog: null,
     stashes: [],
     mergeMessage: null,
-    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null },
+    headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null },
     forcePushOffer: null,
     forcePushConfirm: null,
     fetchPrune: readFetchPrune(repoPath),

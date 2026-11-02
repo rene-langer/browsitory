@@ -30,6 +30,10 @@ pub enum RebaseError {
     OperationInProgress,
     #[error(transparent)]
     Merge(#[from] crate::merge::MergeError),
+    /// A `git cherry-pick A B C` / `git revert A B` started in a terminal is paused between
+    /// steps (#258, D5-A).
+    #[error("{}", crate::pick::terminal_sequence_refusal(*.0))]
+    TerminalSequence(crate::pick::SequenceKind),
     /// `branch` is the short name.
     #[error("{branch} moved since the rebase started. Abort the rebase and start again.")]
     BranchMoved { branch: String },
@@ -333,6 +337,9 @@ pub fn start_rebase(
     plan: Vec<RebasePlanEntry>,
 ) -> Result<(RebaseState, RebaseStepResult), RebaseError> {
     validate_plan(repo, &plan)?;
+    // A terminal cherry-pick or revert list goes on after the rebase, on top of whatever it
+    // left; refuse rather than mix them (#258, D5-A).
+    crate::pick::check_no_terminal_sequence(repo).map_err(RebaseError::TerminalSequence)?;
 
     // `Reference::name()` returns `Ok("HEAD")` for a detached HEAD — it only errors on a
     // non-UTF-8 name — so it can't be used to detect "not on a branch". Check explicitly instead;

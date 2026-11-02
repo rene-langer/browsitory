@@ -47,6 +47,14 @@ pub enum MergeError {
     FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Abort would reset a path the operation touched (staged) whose work-tree file was changed
+    /// again since: both versions would be lost. git's `reset --merge` refuses the same way
+    /// ("Entry '…' not uptodate"); nothing was changed.
+    #[error(
+        "Abort would discard your changes to '{0}'. Save them elsewhere or discard them, then \
+         try again."
+    )]
+    WouldDiscard(String),
     /// Abort reset the files but couldn't remove one of git's merge/cherry-pick/revert state
     /// files (`commit::clear_operation_files`).
     #[error("Couldn't remove git's merge state: {0}")]
@@ -657,6 +665,48 @@ pub(crate) fn has_conflict_markers(content: &[u8]) -> bool {
 }
 
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
+    let reset = plan_operation_reset(repo)?;
+    apply_operation_reset(repo, reset)?;
+    // Only the operation's own files, as git's `remove_branch_state` after `git reset --merge`:
+    // a terminal bisect, rebase or cherry-pick list goes on, except that aborting the list's
+    // last pick ends the list (git's `have_finished_the_last_pick`, #249).
+    crate::commit::clear_commit_state(repo).map_err(MergeError::StateFiles)?;
+    clear_squash_message(repo)?;
+    Ok(())
+}
+
+/// Aborts the paused step of a terminal `git cherry-pick A B C` like `abort_merge`, but always
+/// keeps the list (`.git/sequencer`), also after its last pick: the caller
+/// (`pick::abort_terminal_sequence`) removes it once the rest of the abort has worked (#253).
+pub(crate) fn abort_step_keeping_list(
+    repo: &Repository,
+    reset: OperationReset,
+) -> Result<(), MergeError> {
+    apply_operation_reset(repo, reset)?;
+    crate::commit::clear_operation_files(repo).map_err(MergeError::StateFiles)?;
+    clear_squash_message(repo)?;
+    Ok(())
+}
+
+/// What Abort resets: the paths the paused operation touched (staged changes and conflicts).
+/// Made by `plan_operation_reset`, which has checked that resetting them loses nothing git's
+/// `reset --merge` would keep; applied by `apply_operation_reset`.
+pub(crate) struct OperationReset {
+    touched: Vec<Vec<u8>>,
+}
+
+impl OperationReset {
+    /// The paths the reset puts back to HEAD (index and work tree).
+    pub(crate) fn paths(&self) -> &[Vec<u8>] {
+        &self.touched
+    }
+}
+
+/// The checks of `abort_merge`, before anything is written: an operation (or its conflicts)
+/// is there, and no touched path outside the conflicts has work-tree changes on top of its
+/// staged version (`MergeError::WouldDiscard`, like git's "not uptodate"). A conflicted path's
+/// work-tree file is the user's resolution of the step, which Abort discards, as git does.
+pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, MergeError> {
     use git2::RepositoryState::{CherryPick, CherryPickSequence, Merge, Revert, RevertSequence};
     // The worker keeps one handle per repository, whose index may predate a merge or pick run
     // in a terminal: read the one on disk, or Abort would leave that operation's conflicts.
@@ -674,7 +724,7 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
     // Like `git merge --abort` (reset --merge): only restore paths the operation touched, so
     // unrelated unstaged edits survive.
     let mut touched: Vec<Vec<u8>> = Vec::new();
-    let mut index = repo.index()?;
+    let index = repo.index()?;
     for delta in repo
         .diff_tree_to_index(Some(&head_tree), Some(&index), None)?
         .deltas()
@@ -692,7 +742,50 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
     }
     touched.sort();
     touched.dedup();
+    let conflicted: std::collections::HashSet<Vec<u8>> = index
+        .conflicts()?
+        .filter_map(|c| c.ok())
+        .flat_map(|c| [c.ancestor, c.our, c.their])
+        .flatten()
+        .map(|entry| entry.path)
+        .collect();
+    let checked: Vec<&Vec<u8>> = touched
+        .iter()
+        .filter(|path| !conflicted.contains(*path))
+        .collect();
+    if !checked.is_empty() {
+        let mut options = git2::DiffOptions::new();
+        options
+            .include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .disable_pathspec_match(true);
+        for path in &checked {
+            options.pathspec(path.as_slice());
+        }
+        let diff = repo.diff_index_to_workdir(Some(&index), Some(&mut options))?;
+        for delta in diff.deltas() {
+            // A deleted file has nothing to lose; a conflict is the step's own.
+            if matches!(
+                delta.status(),
+                git2::Delta::Deleted | git2::Delta::Conflicted
+            ) {
+                continue;
+            }
+            if let Some(path) = delta.new_file().path().or(delta.old_file().path()) {
+                return Err(MergeError::WouldDiscard(
+                    path.to_string_lossy().into_owned(),
+                ));
+            }
+        }
+    }
+    Ok(OperationReset { touched })
+}
 
+/// `abort_merge` up to the state files: the planned paths back to HEAD.
+fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(), MergeError> {
+    let touched = reset.touched;
+    let head_tree = repo.head()?.peel_to_commit()?.tree()?;
+    let mut index = repo.index()?;
     index.read_tree(&head_tree)?;
     index.write()?;
 
@@ -724,11 +817,6 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
         }
         repo.checkout_head(Some(&mut checkout))?;
     }
-    // Only the operation's own files, as git's `remove_branch_state` after `git reset --merge`:
-    // a terminal bisect, rebase or cherry-pick list goes on, except that aborting the list's
-    // last pick ends the list (git's `have_finished_the_last_pick`, #249).
-    crate::commit::clear_commit_state(repo).map_err(MergeError::StateFiles)?;
-    clear_squash_message(repo)?;
     Ok(())
 }
 

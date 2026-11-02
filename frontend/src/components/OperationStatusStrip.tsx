@@ -1,5 +1,13 @@
-import type { BisectInfo, OperationKind, RebaseInfo, SequenceProgress } from "../ipc/RepoClient";
-import { bisectLabel, conflictReason, rebaseInterruption, sequenceLabel, sequenceNoun } from "../lib/operationStatus";
+import type { BisectInfo, OperationKind, RebaseInfo, SequenceProgress, TerminalSequence } from "../ipc/RepoClient";
+import {
+  bisectLabel,
+  conflictReason,
+  rebaseInterruption,
+  sequenceLabel,
+  sequenceNoun,
+  terminalSequenceLabel,
+  terminalSequenceText,
+} from "../lib/operationStatus";
 import styles from "./OperationStatusStrip.module.css";
 
 /**
@@ -8,6 +16,9 @@ import styles from "./OperationStatusStrip.module.css";
  * cherry-pick/revert shows its step and Continue, also when it stopped on an error rather than a
  * conflict (then git itself has nothing in progress). A stored rebase that no longer matches the
  * repository (changed outside Browsitory while paused) shows as interrupted, with Abort only.
+ * A `git cherry-pick A B C` started in a terminal shows too (#258): paused between steps with
+ * Abort only (it is continued in the terminal); paused on a step as the step's strip, labelled as
+ * started in a terminal. Its Abort ends the whole sequence (`onAbortTerminalSequence`, #253).
  * When none of these is shown, a `git bisect` started in a terminal shows as information only:
  * it blocks nothing, and it is ended in the terminal (#250).
  */
@@ -18,12 +29,14 @@ export function OperationStatusStrip({
   rebase = null,
   sequence = null,
   bisect = null,
+  terminalSequence = null,
   conflictCount,
   pending = false,
   onAbortMerge,
   onAbortRebase,
   onContinueSequence,
   onAbortSequence,
+  onAbortTerminalSequence,
 }: {
   merging: boolean;
   operation: OperationKind | null;
@@ -33,6 +46,8 @@ export function OperationStatusStrip({
   sequence?: SequenceProgress | null;
   /** A `git bisect` started in a terminal (`HeadInfo.bisect`). */
   bisect?: BisectInfo | null;
+  /** A cherry-pick/revert started in a terminal (`HeadInfo.terminalSequence`). */
+  terminalSequence?: TerminalSequence | null;
   conflictCount: number;
   /** An action is running: Continue/Abort are disabled so a second click can't double-submit. */
   pending?: boolean;
@@ -40,6 +55,7 @@ export function OperationStatusStrip({
   onAbortRebase: () => void;
   onContinueSequence?: () => void;
   onAbortSequence?: () => void;
+  onAbortTerminalSequence?: () => void;
 }) {
   const reason = conflictReason(conflictCount);
   if (sequence !== null) {
@@ -80,6 +96,23 @@ export function OperationStatusStrip({
       </div>
     );
   }
+  if (!merging && rebaseProgress === null && terminalSequence !== null) {
+    const noun = sequenceNoun(terminalSequence.kind);
+    return (
+      <div role="status" aria-label="Operation status" className={styles.strip}>
+        <strong>{terminalSequenceLabel(terminalSequence)}</strong>
+        <span>
+          {terminalSequence.pausedOnConflict
+            ? (reason ?? "No conflicts remaining")
+            : terminalSequenceText(terminalSequence.kind)}
+        </span>
+        <span className={styles.spacer} />
+        <button type="button" disabled={pending} onClick={onAbortTerminalSequence}>
+          Abort {noun}
+        </button>
+      </div>
+    );
+  }
   if (!merging && rebaseProgress === null) {
     if (bisect === null) return null;
     return (
@@ -93,16 +126,23 @@ export function OperationStatusStrip({
     operation === "CherryPick" ? "Cherry-picking" : operation === "Revert" ? "Reverting" : "Merging";
   const abortLabel =
     operation === "CherryPick" ? "Abort cherry-pick" : operation === "Revert" ? "Abort revert" : "Abort merge";
+  // A terminal sequence's paused step: its Abort ends the whole sequence, as git's `--abort`.
+  const terminalStep = terminalSequence !== null && (operation === "CherryPick" || operation === "Revert");
   const label =
     rebaseProgress !== null
       ? `Rebasing, step ${rebaseProgress.currentStep} of ${rebaseProgress.totalSteps}`
-      : mergeLabel;
+      : terminalStep
+        ? terminalSequenceLabel({ ...terminalSequence, pausedOnConflict: true })
+        : mergeLabel;
   return (
     <div role="status" aria-label="Operation status" className={styles.strip}>
       <strong>{label}</strong>
       <span>{reason ?? "No conflicts remaining"}</span>
       <span className={styles.spacer} />
-      <button type="button" onClick={rebaseProgress !== null ? onAbortRebase : onAbortMerge}>
+      <button
+        type="button"
+        onClick={rebaseProgress !== null ? onAbortRebase : terminalStep ? onAbortTerminalSequence : onAbortMerge}
+      >
         {rebaseProgress !== null ? "Abort rebase" : abortLabel}
       </button>
     </div>

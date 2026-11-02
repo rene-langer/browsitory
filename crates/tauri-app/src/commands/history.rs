@@ -1,7 +1,7 @@
 use super::{
     emit_hook_events, hook_event_channel, repo_worker, trailers_from, AppState, CommitOutcomeDto,
-    HeadInfoDto, PickOutcomeDto, ResetModeDto, SequenceAbortDto, SequenceOutcomeDto,
-    SignatureInputDto, TrailerDto,
+    ConfirmedAbortDto, HeadInfoDto, PickOutcomeDto, ResetModeDto, SequenceAbortDto,
+    SequenceOutcomeDto, SignatureInputDto, TrailerDto,
 };
 use tauri::{AppHandle, State};
 
@@ -147,11 +147,13 @@ pub async fn continue_sequence(
 #[tauri::command]
 pub async fn abort_sequence(
     repo_path: String,
+    confirmed: Option<ConfirmedAbortDto>,
     state: State<'_, AppState>,
 ) -> Result<SequenceAbortDto, String> {
+    let confirmed = confirmed.map(git_core::pick::ConfirmedAbort::from);
     Ok(SequenceAbortDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.abort_sequence())
+            .call(move |w| w.abort_sequence(confirmed))
             .await?,
     ))
 }

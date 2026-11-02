@@ -157,12 +157,49 @@ fn abort_stored(
     Ok(abort)
 }
 
+/// Abort cherry-pick/revert: the stored sequence if there is one, else a `git cherry-pick A B C`
+/// started in a terminal, like `git cherry-pick --abort` (#253).
+///
+/// A terminal sequence is aborted only as `confirmed` (what the UI showed and the user
+/// confirmed): without one, or when it no longer matches, nothing changes and the reply asks
+/// to look again (#281 review).
 pub(super) fn abort_sequence(
     repo: &git2::Repository,
     sequence_store: &SequenceStore,
+    confirmed: Option<git_core::pick::ConfirmedAbort>,
     reply: Sender<Result<SequenceAbort, String>>,
 ) {
-    let _ = reply.send(abort_stored(repo, sequence_store));
+    let terminal = match sequence_store.load(repo) {
+        Some(_) => None,
+        None => git_core::pick::terminal_sequence(repo),
+    };
+    let result = match (terminal, confirmed) {
+        (Some(_), Some(confirmed)) => git_core::pick::abort_terminal_sequence(repo, &confirmed)
+            .map_err(|error| error.to_string()),
+        (Some(sequence), None) => {
+            Err(git_core::pick::PickError::TerminalSequenceChanged(sequence.kind).to_string())
+        }
+        (None, _) => abort_stored(repo, sequence_store),
+    };
+    let _ = reply.send(result);
+}
+
+/// Why `AbortMerge` (no stored sequence) refuses: a terminal sequence's own step or list, which
+/// only `AbortSequence` ends. The UI always sends that for one, so only a view that predates the
+/// sequence gets here; nothing is changed. A merge paused during the sequence is aborted as
+/// usual (`None`).
+pub(super) fn abort_merge_refusal(repo: &git2::Repository) -> Option<String> {
+    let sequence = git_core::pick::terminal_sequence(repo)?;
+    if repo.state() == git2::RepositoryState::Merge {
+        return None;
+    }
+    let noun = match sequence.kind {
+        SequenceKind::CherryPick => "cherry-pick",
+        SequenceKind::Revert => "revert",
+    };
+    Some(format!(
+        "This {noun} was started in a terminal. Try Abort again to see what it will undo."
+    ))
 }
 
 /// `AbortMerge` while a sequence is stored: abort the whole sequence.
@@ -389,8 +426,13 @@ impl WorkerHandle {
             reply,
         })
     }
-    pub fn abort_sequence(&self) -> Result<SequenceAbort, String> {
-        round_trip(self, |reply| Command::AbortSequence { reply })
+    /// `confirmed`: for a terminal sequence, what the user confirmed (see
+    /// `history::abort_sequence`); `None` for a stored one.
+    pub fn abort_sequence(
+        &self,
+        confirmed: Option<git_core::pick::ConfirmedAbort>,
+    ) -> Result<SequenceAbort, String> {
+        round_trip(self, |reply| Command::AbortSequence { confirmed, reply })
     }
     pub fn reset_to_commit(&self, commit_id: String, mode: ResetMode) -> Result<(), String> {
         round_trip(self, |reply| Command::ResetToCommit {

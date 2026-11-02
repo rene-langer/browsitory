@@ -44,7 +44,7 @@ import { PushBranchDialog } from "./components/PushBranchDialog";
 import { StashDialog } from "./components/StashDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import { RemoteDialogs } from "./components/RemoteDialogs";
-import type { RepoClient, Trailer } from "./ipc/RepoClient";
+import type { ConfirmedAbort, RepoClient, TerminalSequence, Trailer } from "./ipc/RepoClient";
 import { coAuthorTrailers, parsePerson } from "./lib/people";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import { buildCommands, type AppCommands } from "./lib/commands";
@@ -57,7 +57,14 @@ import { repoNameOf } from "./lib/repoName";
 import { applyTheme, loadStoredTheme, persistTheme, resolveTheme, type Theme } from "./lib/theme";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
-import { abortToast, pickToast, rebaseAbortSwitchTarget, rebaseAbortToast, sequenceToast } from "./lib/operationStatus";
+import {
+  abortToast,
+  pickToast,
+  rebaseAbortSwitchTarget,
+  rebaseAbortToast,
+  sequenceToast,
+  terminalAbortConfirm,
+} from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import type { SelectedRow } from "./state/useAppState";
@@ -240,6 +247,11 @@ function RepoWorkspace({
   // Discard confirmations live here (not in DiffPane) so the palette can open the same dialogs.
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null);
   const [currentFile, setCurrentFile] = useState<string | null>(null);
+  // Abort of a terminal cherry-pick that removes its commits waits for this confirmation (#253).
+  const [terminalAbortRequest, setTerminalAbortRequest] = useState<{
+    sequence: TerminalSequence;
+    headId: string | null;
+  } | null>(null);
   const diffSettings = useDiffSettingsContext();
   // Below this width the sidebar auto-collapses so the graph and diff panes both stay usable.
   const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW_BREAKPOINT);
@@ -478,10 +490,50 @@ function RepoWorkspace({
     );
     return abort;
   }, [abortStoredRebase, announce, dismissError, pushToast, storedRebase, switchToBranch]);
+  // A `git cherry-pick A B C` started in a terminal (#258): Abort works like `git cherry-pick
+  // --abort` through `abortSequence` (#253). When it would remove the commits the sequence made,
+  // it asks first.
+  const terminalSequence = appState.state.headInfo.terminalSequence;
+  // The abort carries what the user saw, so a sequence that moved on meanwhile (the terminal
+  // went on, or this view was out of date) is refused instead of removing other commits.
+  const headId = appState.state.headInfo.headId;
+  const runTerminalAbort = useCallback(
+    (sequence: TerminalSequence, confirmedHeadId: string | null) => {
+      const confirmed: ConfirmedAbort = {
+        headId: confirmedHeadId ?? "",
+        startedAt: sequence.startedAt,
+        rewinds: sequence.rewinds,
+        commitsToRemove: sequence.commitsToRemove,
+        pausedOnConflict: sequence.pausedOnConflict,
+      };
+      void runPickAction(
+        () => abortStoredSequence(confirmed),
+        (abort) => abortToast(sequence.kind, abort),
+      );
+    },
+    [abortStoredSequence, runPickAction],
+  );
+  const abortTerminalSequence = useCallback(() => {
+    if (terminalSequence === null) return;
+    if (terminalSequence.rewinds && terminalSequence.commitsToRemove > 0)
+      setTerminalAbortRequest({ sequence: terminalSequence, headId });
+    else runTerminalAbort(terminalSequence, headId);
+  }, [headId, runTerminalAbort, terminalSequence]);
+  // A stored sequence first (its file must never outlive it), then a terminal sequence's paused
+  // step (a merge paused during one is a plain merge), then the merge or single pick.
+  const isTerminalStep = terminalSequence !== null && appState.state.headInfo.operation !== "Merge";
   const abortMergeOrSequence = useCallback(() => {
     if (sequenceKind !== null) abortSequence();
+    else if (isTerminalStep) abortTerminalSequence();
     else void abortMerge();
-  }, [abortSequence, abortMerge, sequenceKind]);
+  }, [abortSequence, abortMerge, abortTerminalSequence, isTerminalStep, sequenceKind]);
+  // The palette's Abort entries take the same routes.
+  const paletteAbortSequence = useCallback(async () => {
+    if (sequenceKind !== null) return abortStoredSequence();
+    abortTerminalSequence();
+    return null;
+  }, [abortStoredSequence, abortTerminalSequence, sequenceKind]);
+  const paletteAbortMerge = useCallback(async () => abortMergeOrSequence(), [abortMergeOrSequence]);
   const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
   // The branch `force_push_current_branch` overwrites on `remoteName`: what push.default resolves
   // for the upstream's remote, else the current branch's own name.
@@ -551,6 +603,8 @@ function RepoWorkspace({
         rebase={appState.state.headInfo.rebase}
         sequence={appState.state.headInfo.sequence}
         bisect={appState.state.headInfo.bisect}
+        terminalSequence={terminalSequence}
+        onAbortTerminalSequence={abortTerminalSequence}
         pending={appState.state.pending}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
         onAbortMerge={abortMergeOrSequence}
@@ -610,6 +664,26 @@ function RepoWorkspace({
             void announce("Force pushed", appState.forcePushCurrentBranch)(appState.state.forcePushConfirm!.remoteName)
           }
           onCancel={appState.cancelForcePush}
+        />
+      )}
+      {active && terminalAbortRequest !== null && (
+        <ConfirmDialog
+          ariaLabel={terminalAbortConfirm(terminalAbortRequest.sequence).title}
+          message={
+            <>
+              <p>
+                <strong>{terminalAbortConfirm(terminalAbortRequest.sequence).title}</strong>
+              </p>
+              <p>{terminalAbortConfirm(terminalAbortRequest.sequence).body}</p>
+            </>
+          }
+          confirmLabel={terminalAbortConfirm(terminalAbortRequest.sequence).confirmLabel}
+          onConfirm={() => {
+            const request = terminalAbortRequest;
+            setTerminalAbortRequest(null);
+            runTerminalAbort(request.sequence, request.headId);
+          }}
+          onCancel={() => setTerminalAbortRequest(null)}
         />
       )}
       {active && mergeDialogBranch !== null && (
@@ -697,7 +771,7 @@ function RepoWorkspace({
         <Overlay onClose={() => setPaletteOpen(false)}>
           <CommandPalette
             commands={buildCommands(
-              { ...appState, abortRebase },
+              { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
               onOpenRepoTab,
               openRepos.filter((repo) => repo.path !== repoPath),
               onSwitchRepoTab,

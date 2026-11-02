@@ -586,6 +586,9 @@ pub(crate) enum Command {
         reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
     },
     AbortSequence {
+        /// For a terminal sequence: what the user confirmed (#281 review); a stored sequence
+        /// ignores it.
+        confirmed: Option<git_core::pick::ConfirmedAbort>,
         reply: Sender<Result<git_core::pick::SequenceAbort, String>>,
     },
     ResetToCommit {
@@ -1336,6 +1339,9 @@ impl Worker {
                         // A stale UI's Abort during a sequence must not strand sequence.json.
                         if sequence_store.load(&repo).is_some() {
                             history::abort_sequence_for_merge(&repo, &sequence_store, reply)
+                        } else if let Some(refusal) = history::abort_merge_refusal(&repo) {
+                            // A terminal sequence: only AbortSequence ends it (#253).
+                            let _ = reply.send(Err(refusal));
                         } else {
                             merge::abort(&repo, reply)
                         }
@@ -1464,8 +1470,8 @@ impl Worker {
                         }
                         let _ = reply.send(result);
                     }
-                    Command::AbortSequence { reply } => {
-                        history::abort_sequence(&repo, &sequence_store, reply)
+                    Command::AbortSequence { confirmed, reply } => {
+                        history::abort_sequence(&repo, &sequence_store, confirmed, reply)
                     }
                     Command::ResetToCommit {
                         commit_id,
@@ -3852,7 +3858,7 @@ mod tests {
         assert!(!sequence_file(&repo).exists());
         handle.cherry_pick_many(ids, no_events()).unwrap();
         assert_eq!(
-            handle.abort_sequence().unwrap(),
+            handle.abort_sequence(None).unwrap(),
             git_core::pick::SequenceAbort { rewound: true }
         );
         assert_eq!(repo.head().unwrap().target().unwrap(), original);
@@ -3872,7 +3878,7 @@ mod tests {
                 .unwrap_err(),
             none
         );
-        assert_eq!(handle.abort_sequence().unwrap_err(), none);
+        assert_eq!(handle.abort_sequence(None).unwrap_err(), none);
     }
 
     #[test]
@@ -3887,6 +3893,122 @@ mod tests {
         assert!(!sequence_file(&repo).exists());
         assert_eq!(repo.state(), git2::RepositoryState::Clean);
         assert_eq!(repo.head().unwrap().target().unwrap(), original);
+    }
+
+    /// A terminal `git cherry-pick` list as git leaves it after a stop between steps: one step
+    /// committed (`b.txt`) on top of where it started, `abort-safety` at that commit, the next
+    /// step in the todo (#258). Returns where it started and the step's commit.
+    fn terminal_sequence_between_steps(
+        dir: &std::path::Path,
+        repo: &Repository,
+        next: &str,
+    ) -> (git2::Oid, git2::Oid) {
+        let started = repo.head().unwrap().target().unwrap();
+        write_file(dir, "b.txt", "b\n");
+        commit_all(repo, "f one");
+        let step = repo.head().unwrap().target().unwrap();
+        let sequencer = repo.path().join("sequencer");
+        std::fs::create_dir(&sequencer).unwrap();
+        std::fs::write(sequencer.join("todo"), format!("pick {next} f three\n")).unwrap();
+        std::fs::write(sequencer.join("head"), format!("{started}\n")).unwrap();
+        std::fs::write(sequencer.join("abort-safety"), format!("{step}\n")).unwrap();
+        (started, step)
+    }
+
+    #[test]
+    fn abort_sequence_aborts_a_terminal_sequence_when_none_is_stored() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let (started, _) = terminal_sequence_between_steps(dir.path(), &repo, &ids[2]);
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let info = handle.get_head_info().unwrap().terminal_sequence.unwrap();
+        assert!(info.rewinds);
+        assert_eq!(info.commits_to_remove, 1);
+        let confirmed = git_core::pick::ConfirmedAbort::now(&repo).unwrap();
+
+        assert_eq!(
+            handle.abort_sequence(Some(confirmed)).unwrap(),
+            git_core::pick::SequenceAbort { rewound: true }
+        );
+
+        assert_eq!(repo.head().unwrap().target().unwrap(), started);
+        assert!(!dir.path().join("b.txt").exists());
+        assert!(!repo.path().join("sequencer").exists());
+        assert_eq!(handle.get_head_info().unwrap().terminal_sequence, None);
+        assert_eq!(
+            handle.abort_sequence(None).unwrap_err(),
+            "No cherry-pick or revert is in progress."
+        );
+    }
+
+    /// A terminal sequence is aborted only as confirmed: without a confirmation, or with one
+    /// that no longer matches (the terminal went on), nothing changes (#281 review).
+    #[test]
+    fn abort_sequence_refuses_an_unconfirmed_or_outdated_terminal_abort() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let (_, step) = terminal_sequence_between_steps(dir.path(), &repo, &ids[2]);
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let changed =
+            "The cherry-pick in the terminal changed since you looked. Check it again, then abort.";
+
+        assert_eq!(handle.abort_sequence(None).unwrap_err(), changed);
+        let outdated = git_core::pick::ConfirmedAbort {
+            commits_to_remove: 0,
+            rewinds: false,
+            ..git_core::pick::ConfirmedAbort::now(&repo).unwrap()
+        };
+        assert_eq!(handle.abort_sequence(Some(outdated)).unwrap_err(), changed);
+
+        assert_eq!(repo.head().unwrap().target().unwrap(), step);
+        assert!(repo.path().join("sequencer").join("todo").exists());
+    }
+
+    /// The UI routes a terminal sequence's Abort through `abortSequence`; an `AbortMerge` that
+    /// reaches one comes from a view that predates it, and changes nothing (#253).
+    #[test]
+    fn abort_merge_refuses_a_terminal_sequence() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let (_, step) = terminal_sequence_between_steps(dir.path(), &repo, &ids[2]);
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        assert_eq!(
+            handle.abort_merge().unwrap_err(),
+            "This cherry-pick was started in a terminal. Try Abort again to see what it will undo."
+        );
+
+        assert_eq!(repo.head().unwrap().target().unwrap(), step);
+        assert!(repo.path().join("sequencer").join("todo").exists());
+    }
+
+    #[test]
+    fn abort_sequence_prefers_the_stored_sequence() {
+        let (dir, repo, ids) = side_commits_with_a_conflict();
+        let original = repo.head().unwrap().target().unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        assert!(matches!(
+            handle.cherry_pick_many(ids.clone(), no_events()).unwrap(),
+            git_core::pick::SequenceOutcome::Conflicted { .. }
+        ));
+        // A terminal list appears meanwhile (two lines, so aborting a step keeps it).
+        let sequencer = repo.path().join("sequencer");
+        std::fs::create_dir(&sequencer).unwrap();
+        let todo = format!("pick {} x\npick {} y\n", ids[0], ids[2]);
+        std::fs::write(sequencer.join("todo"), &todo).unwrap();
+
+        assert_eq!(
+            handle.abort_sequence(None).unwrap(),
+            git_core::pick::SequenceAbort { rewound: true }
+        );
+
+        assert_eq!(repo.head().unwrap().target().unwrap(), original);
+        assert!(!sequence_file(&repo).exists());
+        assert_eq!(
+            std::fs::read_to_string(sequencer.join("todo")).unwrap(),
+            todo
+        );
     }
 
     /// A cherry-pick sequence of `side_commits_with_a_conflict` stopped on its conflict (#171).
@@ -3916,7 +4038,7 @@ mod tests {
         );
         assert!(repo.find_branch(&branch, git2::BranchType::Local).is_ok());
         assert_eq!(
-            handle.abort_sequence().unwrap(),
+            handle.abort_sequence(None).unwrap(),
             git_core::pick::SequenceAbort { rewound: true }
         );
     }
@@ -7306,6 +7428,7 @@ mod state_lock_tests {
         }));
         let (tx, _rx) = mpsc::channel();
         assert!(super::undo::locks_state(&Command::AbortSequence {
+            confirmed: None,
             reply: tx
         }));
         let (tx, _rx) = mpsc::channel();

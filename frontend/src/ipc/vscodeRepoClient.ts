@@ -54,6 +54,7 @@ import type {
   HeadInfo,
   PickOutcome,
   SequenceAbort,
+  ConfirmedAbort,
   RebaseAbort,
   SequenceOutcome,
   ConflictSide,
@@ -443,7 +444,8 @@ export const vscodeRepoClient: RepoClient = {
   revertMany: (repoPath: string, commitIds: string[]) => call<SequenceOutcome>("revert_many", { repoPath, commitIds }),
   continueSequence: (repoPath: string, noVerify?: boolean) =>
     call<SequenceOutcome>("continue_sequence", { repoPath, noVerify: noVerify ?? false }),
-  abortSequence: (repoPath: string) => call<SequenceAbort>("abort_sequence", { repoPath }),
+  abortSequence: (repoPath: string, confirmed?: ConfirmedAbort | null) =>
+    call<SequenceAbort>("abort_sequence", { repoPath, confirmed: confirmed ?? null }),
   resolveWholeFile: (repoPath: string, path: string, side: ConflictSide) =>
     call<void>("resolve_whole_file", { repoPath, path, side }),
   resetToCommit: (repoPath: string, commitId: string, mode: ResetMode) =>

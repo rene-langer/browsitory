@@ -69,6 +69,9 @@ pub struct HeadInfo {
     /// A `git bisect` started in a terminal. Independent of `operation`: a merge paused during a
     /// bisect has both.
     pub bisect: Option<BisectInfo>,
+    /// A `git cherry-pick A B C` / `git revert A B` started in a terminal and not finished
+    /// (`.git/sequencer/todo`), paused on a step or between steps (#258).
+    pub terminal_sequence: Option<crate::pick::TerminalSequence>,
 }
 
 /// A `git bisect` in progress (`BISECT_LOG` exists in this worktree's git folder).
@@ -164,6 +167,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 sequence: None,
                 rebase: None,
                 bisect: bisect_info(repo),
+                terminal_sequence: crate::pick::terminal_sequence(repo),
             });
         }
         Err(error) => return Err(error.into()),
@@ -182,6 +186,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         sequence: None,
         rebase: None,
         bisect: bisect_info(repo),
+        terminal_sequence: crate::pick::terminal_sequence(repo),
     })
 }
 

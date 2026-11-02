@@ -250,7 +250,8 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
 - `repo.state()` checks the rebase folders, then `MERGE_HEAD`, `REVERT_HEAD` (+
   `sequencer/todo` → `RevertSequence`), `CHERRY_PICK_HEAD` (+ todo → `CherryPickSequence`), and
   only then `BISECT_LOG` → `Bisect`. So a bisect is hidden by any other paused operation, and a
-  terminal sequence paused between steps (`sequencer/todo` without a pick head) is `Clean`.
+  terminal sequence paused between steps (`sequencer/todo` without a pick head) is `Clean`
+  (`pick::terminal_sequence` reads the sequencer files instead, see "Cherry-pick sequences").
   `repo::no_operation` (`Clean | Bisect`) is the "nothing in progress" check everywhere: git
   allows picks, reverts, rebases, reset, amend and commits during a bisect (#250). A merge or
   pick paused during a bisect still reads as that operation. `repo::head_info` reports the
@@ -532,6 +533,60 @@ across processes).
   merge). `pick::abort_sequence`'s leftover case and the rebase use `clear_operation_files`,
   which never touches `sequencer/`. A state file Abort can't remove is
   `MergeError::StateFiles` ("Couldn't remove git's merge state: …").
+- **Terminal sequences** (#258, #253). `pick::terminal_sequence` reads git's files itself,
+  since libgit2 calls a sequence between steps `Clean`: `Some` while `sequencer/todo` exists
+  (per worktree). `kind` comes from the todo's first command (`pick`/`p`, `revert`/`r`, as
+  `git status`), else `REVERT_HEAD`; `paused_on_conflict` = a pick head exists; `started_at` =
+  `sequencer/head`; `rewinds` = HEAD equals `sequencer/abort-safety` and differs from
+  `started_at` (git's `rollback_is_safe`; a manual `git commit` doesn't update `abort-safety`,
+  so a step committed by hand turns rewinding off); `commits_to_remove` counts
+  `started_at..HEAD` (capped at 1000). `head_info` reports it as `HeadInfo.terminal_sequence`.
+  - Refusals (D5-A): while one is paused between steps, `check_ready` (every single and
+    several-commit cherry-pick/revert), `continue_sequence` (before any step) and
+    `rebase::start_rebase` refuse with `PickError::TerminalSequence` /
+    `RebaseError::TerminalSequence` ("A cherry-pick started in a terminal isn't finished. …").
+    git allows a single pick and a rebase there; refusing them keeps every paused pick in the
+    repository the terminal's own step, so Abort can't mistake one for it. Merge, commit,
+    amend, reset, checkout, stash and undo stay allowed and keep the list (#249).
+  - Abort (D7-A): `pick::abort_terminal_sequence(repo, confirmed)` is `git cherry-pick
+    --abort`. Like git it checks everything before writing anything, so a refusal leaves the
+    paused step, its conflicts, the resolution in the work tree and the list byte-identical:
+    another operation paused there (a merge) is `OperationInProgress`; damaged sequencer files
+    (`TerminalSequence::damage`, in git's order: `head` missing or not a full id,
+    `abort-safety` present but unparsable, the start commit missing when it would rewind) are
+    `SequencerDamaged` (git refuses these too; the message points at `git cherry-pick --quit`;
+    a missing `abort-safety` is "not safe", as git: no rewind, list removed); `confirmed`
+    (`ConfirmedAbort`: HEAD, start, `rewinds`, `commits_to_remove` and `paused_on_conflict` as
+    the UI showed them, so a step that paused after a between-steps confirmation isn't
+    discarded without the dialog's warning) must still match, else `TerminalSequenceChanged`;
+    the step's reset is planned by `merge::plan_operation_reset` (below); and a rewind is
+    checked by `check_rewind`: the linked-folder guard, then every path that differs between
+    HEAD and the start must be unchanged in the index and work tree (`status_file` empty; an
+    untracked or ignored file in the way counts), except the step's own touched paths, which
+    its reset puts back first; else `RewindBlocked(path)`. A path that is a folder in the work
+    tree and in HEAD (a step replaced file `d` with `d/x`; `status_file` errors on a folder)
+    blocks only if a status scan of the folder finds a changed, untracked or ignored entry. Only then: the step is reset keeping `sequencer/`
+    (`merge::abort_step_keeping_list`), `rewind_to(started_at)` (shared with `abort_sequence`:
+    SAFE `checkout_tree`, move the branch, or for a detached HEAD `reference("HEAD", …)` so the
+    reflog says `reset: moving to <id>` as git's `reset --merge`), and `sequencer/` is removed.
+    `commits_to_remove` counts up to `COMMITS_TO_REMOVE_CAP` + 1 (the UI says "more than
+    1000"). Aborting only the step and keeping the list is not offered: `git cherry-pick
+    --continue` would then take the aborted step as done and silently skip it.
+  - `merge::plan_operation_reset` (used by `abort_merge` too) refuses, before writing, a touched
+    path that is not a conflict and whose work-tree file differs from its staged version
+    (a later edit, a type change such as a symlink, or an untracked file where the operation
+    staged a deletion): `MergeError::WouldDiscard`, git's "Entry '…' not uptodate. Cannot
+    merge." A conflicted path's work-tree file is the step's resolution and is discarded, as
+    with git.
+  - Routing: the worker's `AbortSequence` aborts the stored sequence if there is one, else the
+    terminal one. `AbortMerge` without a stored sequence refuses a terminal sequence's step or
+    list ("This cherry-pick was started in a terminal. Try Abort again to see what it will
+    undo.", nothing changed); a merge paused during it is aborted as usual. git-core's
+    `merge::abort_merge` itself keeps `git reset --merge`'s behaviour. The frontend sends every
+    Abort of a terminal sequence (strip, commit box, palette) to `abortSequence` with
+    `confirmed` (HEAD id and the fields shown), after a confirmation when it `rewinds` and
+    removes commits; the worker refuses a terminal abort without one. Not undoable; the commits
+    stay in the reflog.
 - `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as
   `<gitdir>/browsitory/sequence.json` (per worktree, versioned, temp file + `sync_all` + rename,
   like `undo.json`), written only when a sequence stops and deleted when it completes or is
@@ -609,7 +664,9 @@ across processes).
 ## Interactive rebase
 
 - `git-core::rebase` is Browsitory's own state machine; it does not use libgit2's `git2::Rebase`
-  or write git's `.git/rebase-merge`. `start_rebase` first refuses tracked local changes
+  or write git's `.git/rebase-merge`. `start_rebase` first refuses a cherry-pick or revert
+  started in a terminal and paused between steps (`RebaseError::TerminalSequence`, #258), then
+  tracked local changes
   (`RebaseError::LocalChanges`, #170: any staged change, or an unstaged change to a tracked file,
   including a skip-worktree file whose content (after git's filters) differs from the index,
   which libgit2's status hides; untracked and ignored files, submodules and a sparse checkout's

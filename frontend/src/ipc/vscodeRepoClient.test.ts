@@ -19,7 +19,7 @@ const DIVERGED_HEAD: HeadInfo = {
     totalSteps: 3,
     health: { kind: "Diverged", reason: "HeadMoved" },
   },
-  bisect: null,
+  bisect: null, terminalSequence: null,
 };
 
 describe("vscodeRepoClient", () => {
@@ -146,7 +146,13 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.revertMany("/r", ["a"]), "revert_many", { repoPath: "/r", commitIds: ["a"] }, { kind: "Completed", applied: 1, skipped: [] }],
       [() => vscodeRepoClient.continueSequence("/r"), "continue_sequence", { repoPath: "/r", noVerify: false }, { kind: "Completed", applied: 1, skipped: [] }],
       [() => vscodeRepoClient.continueSequence("/r", true), "continue_sequence", { repoPath: "/r", noVerify: true }, { kind: "Completed", applied: 1, skipped: [] }],
-      [() => vscodeRepoClient.abortSequence("/r"), "abort_sequence", { repoPath: "/r" }, { rewound: false }],
+      [() => vscodeRepoClient.abortSequence("/r"), "abort_sequence", { repoPath: "/r", confirmed: null }, { rewound: false }],
+      [
+        () => vscodeRepoClient.abortSequence("/r", { headId: "h", startedAt: "s", rewinds: true, commitsToRemove: 2, pausedOnConflict: false }),
+        "abort_sequence",
+        { repoPath: "/r", confirmed: { headId: "h", startedAt: "s", rewinds: true, commitsToRemove: 2, pausedOnConflict: false } },
+        { rewound: true },
+      ],
       [() => vscodeRepoClient.abortRebase("/r"), "abort_rebase", { repoPath: "/r" }, ABORTED_REBASE],
       [() => vscodeRepoClient.getHeadInfo("/r"), "get_head_info", { repoPath: "/r" }, DIVERGED_HEAD],
       [() => vscodeRepoClient.resolveWholeFile("/r", "a.txt", "Theirs"), "resolve_whole_file", { repoPath: "/r", path: "a.txt", side: "Theirs" }, null],

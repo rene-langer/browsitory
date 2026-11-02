@@ -162,6 +162,37 @@ export interface HeadInfo {
    * during a bisect has both.
    */
   bisect: BisectInfo | null;
+  /**
+   * A `git cherry-pick A B C` / `git revert A B` started in a terminal and not finished (#258):
+   * paused on a step's conflict (`operation` is then set too) or between steps. Cherry-pick,
+   * revert and rebase are refused until it ends; `abortSequence` aborts it.
+   */
+  terminalSequence: TerminalSequence | null;
+}
+/**
+ * A terminal sequence. `startedAt` is where it started (full id, `startedAtSummary` its summary).
+ * `rewinds`: Abort puts the branch back at `startedAt`, removing `commitsToRemove` commits (as
+ * `git cherry-pick --abort`); otherwise HEAD moved since and Abort leaves it.
+ */
+export interface TerminalSequence {
+  kind: SequenceKind;
+  pausedOnConflict: boolean;
+  startedAt: string;
+  startedAtSummary: string;
+  rewinds: boolean;
+  commitsToRemove: number;
+}
+/**
+ * What the user confirmed before aborting a terminal sequence: `HeadInfo.headId` and the
+ * `terminalSequence` fields shown (#281 review).
+ */
+export interface ConfirmedAbort {
+  headId: string;
+  startedAt: string;
+  rewinds: boolean;
+  commitsToRemove: number;
+  /** A step was paused on a conflict: the dialog warned that its changes and resolutions go. */
+  pausedOnConflict: boolean;
 }
 /** `startedFrom` is what `git bisect reset` returns to: a branch name, or a commit id. */
 export interface BisectInfo {
@@ -763,7 +794,13 @@ export interface RepoClient {
    * `subscribeHookProgress`.
    */
   continueSequence(repoPath: string, noVerify?: boolean): Promise<SequenceOutcome>;
-  abortSequence(repoPath: string): Promise<SequenceAbort>;
+  /**
+   * Aborts the stored sequence; without one, a terminal `git cherry-pick A B C` (see
+   * `HeadInfo.terminalSequence`) like `git cherry-pick --abort` (#253). Confirm first when it
+   * `rewinds`: its commits are removed. A terminal sequence is aborted only with `confirmed`
+   * (what the user saw); if it no longer matches, the call rejects and nothing changes.
+   */
+  abortSequence(repoPath: string, confirmed?: ConfirmedAbort | null): Promise<SequenceAbort>;
   resetToCommit(repoPath: string, commitId: string, mode: ResetMode): Promise<void>;
   checkoutCommit(repoPath: string, commitId: string): Promise<void>;
   /** Resolves with the transfer operation id; progress arrives via `subscribeTransferProgress`. */

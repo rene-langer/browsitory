@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import type { CommitOutcome, HookProgress, RepoClient, SequenceOutcome } from "./ipc/RepoClient";
+import type { CommitOutcome, HookProgress, OperationKind, RepoClient, SequenceOutcome, TerminalSequence } from "./ipc/RepoClient";
 import { publishTransportStatus } from "./ipc/transportStatus";
 
 function unused(): never {
@@ -118,7 +118,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -536,7 +536,7 @@ describe("App", () => {
       getHeadInfo: async () => ({
         headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null,
         rebase: { branch: "main", onto: "o1", currentStep: 1, totalSteps: 3, health: { kind: "Paused" as const } },
-        bisect: null,
+        bisect: null, terminalSequence: null,
       }),
     });
 
@@ -730,7 +730,7 @@ describe("App", () => {
         commitHooks: ["pre-commit"],
         sequence,
         rebase: null,
-        bisect: null,
+        bisect: null, terminalSequence: null,
       }),
       continueSequence,
     });
@@ -931,7 +931,7 @@ describe("App", () => {
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
-      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null, bisect: null }),
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
       getCommitMessage: async () => "HEAD's message",
       commit,
     });
@@ -971,7 +971,7 @@ describe("App", () => {
         { name: "Ada", email: "ada@x.org" },
         { name: "Bob", email: "bob@x.org" },
       ],
-      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null, rebase: null, bisect: null }),
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
       getCommitMessage: async () => "HEAD's message",
       amendCommit,
     });
@@ -1143,7 +1143,7 @@ describe("App", () => {
         getCommitFiles: async () => [],
         getCommitMessage: async () => "two",
         getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
-        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null }),
+        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
         ...overrides,
       });
     }
@@ -1197,7 +1197,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: { startedFrom: "main" } }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: { startedFrom: "main" }, terminalSequence: null }),
             cherryPick,
           })}
         />,
@@ -1226,7 +1226,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: stored, rebase: null, bisect: null }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: stored, rebase: null, bisect: null, terminalSequence: null }),
             continueSequence,
           })}
         />,
@@ -1251,7 +1251,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null }),
             abortSequence,
             abortMerge,
           })}
@@ -1264,13 +1264,140 @@ describe("App", () => {
       expect(await screen.findByText("Stopped the revert. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
     });
 
+    describe("a sequence started in a terminal (#258, #253)", () => {
+      const terminal = (overrides: Partial<TerminalSequence> = {}): TerminalSequence => ({
+        kind: "CherryPick",
+        pausedOnConflict: false,
+        startedAt: "1a2b3c4d5e6f7a8b",
+        startedAtSummary: "X",
+        rewinds: true,
+        commitsToRemove: 2,
+        ...overrides,
+      });
+      const headWith = (terminalSequence: TerminalSequence | null, operation: OperationKind | null = null) => ({
+        headId: "c2",
+        detachedAt: null,
+        headPushed: false,
+        operation,
+        squashMessage: null,
+        commitHooks: [],
+        sequence: null,
+        rebase: null,
+        bisect: null,
+        terminalSequence,
+      });
+
+      it("asks before Abort removes the commits it made, and Cancel aborts nothing", async () => {
+        let current: TerminalSequence | null = terminal();
+        const abortSequence = vi.fn(async () => {
+          current = null;
+          return { rewound: true };
+        });
+        const abortMerge = vi.fn(async () => {});
+        render(<App client={pickClient({ getHeadInfo: async () => headWith(current), abortSequence, abortMerge })} />);
+
+        const strip = await screen.findByRole("status", { name: "Operation status" });
+        expect(strip).toHaveTextContent("Cherry-pick paused in a terminal");
+        expect(strip).toHaveTextContent("Run git cherry-pick --continue there to apply the remaining commits.");
+        fireEvent.click(within(strip).getByRole("button", { name: "Abort cherry-pick" }));
+        let dialog = await screen.findByRole("dialog", { name: "Abort the whole cherry-pick?" });
+        expect(dialog).toHaveTextContent(
+          'This also removes the 2 commits it made and puts the branch back at 1a2b3c4 "X". Uncommitted changes stay.',
+        );
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Abort the whole cherry-pick?" })).toBeNull());
+        expect(abortSequence).not.toHaveBeenCalled();
+
+        fireEvent.click(within(strip).getByRole("button", { name: "Abort cherry-pick" }));
+        dialog = await screen.findByRole("dialog", { name: "Abort the whole cherry-pick?" });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Abort cherry-pick" }));
+        expect(await screen.findByText("Aborted cherry-pick")).toBeInTheDocument();
+        expect(abortSequence).toHaveBeenCalledTimes(1);
+        // What the dialog showed goes along, so a sequence that moved on meanwhile is refused.
+        expect(abortSequence).toHaveBeenCalledWith("/repos/a", {
+          headId: "c2",
+          startedAt: "1a2b3c4d5e6f7a8b",
+          rewinds: true,
+          commitsToRemove: 2,
+          pausedOnConflict: false,
+        });
+        expect(abortMerge).not.toHaveBeenCalled();
+      });
+
+      it("aborts with no dialog when nothing is removed", async () => {
+        const abortSequence = vi.fn(async () => ({ rewound: false }));
+        render(
+          <App
+            client={pickClient({
+              getHeadInfo: async () => headWith(terminal({ kind: "Revert", rewinds: false, commitsToRemove: 0 })),
+              abortSequence,
+            })}
+          />,
+        );
+        const strip = await screen.findByRole("status", { name: "Operation status" });
+        fireEvent.click(within(strip).getByRole("button", { name: "Abort revert" }));
+        await waitFor(() =>
+          expect(abortSequence).toHaveBeenCalledWith("/repos/a", {
+            headId: "c2",
+            startedAt: "1a2b3c4d5e6f7a8b",
+            rewinds: false,
+            commitsToRemove: 0,
+            pausedOnConflict: false,
+          }),
+        );
+        expect(screen.queryByRole("dialog")).toBeNull();
+        expect(await screen.findByText("Stopped the revert. HEAD had moved, so it was left where it is.")).toBeInTheDocument();
+      });
+
+      it("the commit box's Abort cherry-pick on a paused step takes the same path", async () => {
+        const abortSequence = vi.fn(async () => ({ rewound: true }));
+        const abortMerge = vi.fn(async () => {});
+        render(
+          <App
+            client={pickClient({
+              getStatus: async () => [{ path: "f", oldPath: null, staged: true, kind: "Modified" }],
+              getCommitGraph: async () => [],
+              getMergeMessage: async () => "A",
+              getHeadInfo: async () => headWith(terminal({ pausedOnConflict: true, commitsToRemove: 1 }), "CherryPick"),
+              abortSequence,
+              abortMerge,
+            })}
+          />,
+        );
+        const strip = await screen.findByRole("status", { name: "Operation status" });
+        expect(strip).toHaveTextContent("Cherry-picking (started in a terminal)");
+        const buttons = await screen.findAllByRole("button", { name: "Abort cherry-pick" });
+        const commitBoxAbort = buttons.find((button) => !strip.contains(button));
+        expect(commitBoxAbort).toBeDefined();
+        fireEvent.click(commitBoxAbort!);
+        const dialog = await screen.findByRole("dialog", { name: "Abort the whole cherry-pick?" });
+        expect(dialog).toHaveTextContent("This also removes the commit it made");
+        fireEvent.click(within(dialog).getByRole("button", { name: "Abort cherry-pick" }));
+        await waitFor(() => expect(abortSequence).toHaveBeenCalledTimes(1));
+        expect(abortSequence).toHaveBeenCalledWith("/repos/a", expect.objectContaining({ pausedOnConflict: true }));
+        expect(abortMerge).not.toHaveBeenCalled();
+      });
+
+      it("shows a cherry-pick's refusal while the terminal sequence is paused", async () => {
+        const refusal =
+          "A cherry-pick started in a terminal isn't finished. Continue it there with git cherry-pick --continue, or abort it first.";
+        const cherryPick = vi.fn<RepoClient["cherryPick"]>().mockRejectedValue(refusal);
+        render(<App client={pickClient({ getHeadInfo: async () => headWith(terminal()), cherryPick })} />);
+
+        fireEvent.contextMenu((await screen.findByText(/c1 one/)).closest("li")!);
+        fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
+        await waitFor(() => expect(cherryPick).toHaveBeenCalled());
+        expect(await screen.findByText(refusal)).toBeInTheDocument();
+      });
+    });
+
     it("toasts \"Stopped the rebase. HEAD had moved…\" when abort did not restore", async () => {
       const rebase = { branch: "main", onto: "c1", currentStep: 1, totalSteps: 2, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
       const abortRebase = vi.fn(async () => ({ restored: false }));
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null }),
             abortRebase,
           })}
         />,
@@ -1289,7 +1416,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null }),
             abortRebase,
             switchBranch,
           })}
@@ -1309,7 +1436,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c1", detachedAt: "c1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null }),
+            getHeadInfo: async () => ({ headId: "c1", detachedAt: "c1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null }),
             getMergeMessage: async () => "two",
             abortRebase,
           })}

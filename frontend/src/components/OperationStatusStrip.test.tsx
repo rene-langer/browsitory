@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { RebaseInfo } from "../ipc/RepoClient";
+import type { RebaseInfo, TerminalSequence } from "../ipc/RepoClient";
 import { OperationStatusStrip } from "./OperationStatusStrip";
 
 const noop = () => {};
@@ -250,6 +250,120 @@ describe("OperationStatusStrip", () => {
       expect(strip).not.toHaveTextContent("Bisecting");
       fireEvent.click(within(strip).getByRole("button", { name: "Abort merge" }));
       expect(onAbortMerge).toHaveBeenCalled();
+    });
+  });
+
+  describe("a sequence started in a terminal (#258, #253)", () => {
+    const terminal = (overrides: Partial<TerminalSequence> = {}): TerminalSequence => ({
+      kind: "CherryPick",
+      pausedOnConflict: false,
+      startedAt: "abc",
+      startedAtSummary: "X",
+      rewinds: true,
+      commitsToRemove: 1,
+      ...overrides,
+    });
+
+    it("between steps: label, text and Abort", () => {
+      const onAbortTerminalSequence = vi.fn();
+      render(
+        <OperationStatusStrip
+          merging={false}
+          operation={null}
+          rebaseProgress={null}
+          terminalSequence={terminal()}
+          bisect={{ startedFrom: "main" }}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+          onAbortTerminalSequence={onAbortTerminalSequence}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(within(strip).getByText("Cherry-pick paused in a terminal")).toBeInTheDocument();
+      expect(strip).toHaveTextContent("Run git cherry-pick --continue there to apply the remaining commits.");
+      expect(within(strip).queryByRole("button", { name: "Continue" })).toBeNull();
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort cherry-pick" }));
+      expect(onAbortTerminalSequence).toHaveBeenCalledTimes(1);
+    });
+
+    it("a revert between steps says revert", () => {
+      render(
+        <OperationStatusStrip
+          merging={false}
+          operation={null}
+          rebaseProgress={null}
+          terminalSequence={terminal({ kind: "Revert" })}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+          onAbortTerminalSequence={noop}
+        />,
+      );
+      expect(screen.getByText("Revert paused in a terminal")).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent("Run git revert --continue there");
+      expect(screen.getByRole("button", { name: "Abort revert" })).toBeInTheDocument();
+    });
+
+    it("paused on a conflict: the step's strip, its Abort ends the whole sequence", () => {
+      const onAbortMerge = vi.fn();
+      const onAbortTerminalSequence = vi.fn();
+      render(
+        <OperationStatusStrip
+          merging
+          operation="CherryPick"
+          rebaseProgress={null}
+          terminalSequence={terminal({ pausedOnConflict: true })}
+          conflictCount={1}
+          onAbortMerge={onAbortMerge}
+          onAbortRebase={noop}
+          onAbortTerminalSequence={onAbortTerminalSequence}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(within(strip).getByText("Cherry-picking (started in a terminal)")).toBeInTheDocument();
+      expect(strip).toHaveTextContent("Resolve 1 conflict to continue");
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort cherry-pick" }));
+      expect(onAbortTerminalSequence).toHaveBeenCalledTimes(1);
+      expect(onAbortMerge).not.toHaveBeenCalled();
+    });
+
+    it("a merge during a terminal sequence shows the merge", () => {
+      const onAbortMerge = vi.fn();
+      render(
+        <OperationStatusStrip
+          merging
+          operation="Merge"
+          rebaseProgress={null}
+          terminalSequence={terminal()}
+          conflictCount={1}
+          onAbortMerge={onAbortMerge}
+          onAbortRebase={noop}
+          onAbortTerminalSequence={noop}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(strip).toHaveTextContent("Merging");
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort merge" }));
+      expect(onAbortMerge).toHaveBeenCalled();
+    });
+
+    it("a stored sequence still wins", () => {
+      render(
+        <OperationStatusStrip
+          merging
+          operation="CherryPick"
+          rebaseProgress={null}
+          sequence={{ kind: "CherryPick", currentStep: 2, totalSteps: 3, currentCommit: "c" }}
+          terminalSequence={terminal({ pausedOnConflict: true })}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+          onAbortTerminalSequence={noop}
+        />,
+      );
+      expect(screen.getByText("Cherry-picking 2/3")).toBeInTheDocument();
+      expect(screen.queryByText(/started in a terminal/)).toBeNull();
     });
   });
 });

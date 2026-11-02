@@ -453,7 +453,10 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("continue_sequence", { repoPath: "/r", noVerify: true });
     vi.mocked(invoke).mockResolvedValue({ rewound: true });
     await expect(tauriRepoClient.abortSequence("/r")).resolves.toEqual({ rewound: true });
-    expect(invoke).toHaveBeenLastCalledWith("abort_sequence", { repoPath: "/r" });
+    expect(invoke).toHaveBeenLastCalledWith("abort_sequence", { repoPath: "/r", confirmed: null });
+    const confirmed = { headId: "h", startedAt: "s", rewinds: true, commitsToRemove: 2, pausedOnConflict: false };
+    await tauriRepoClient.abortSequence("/r", confirmed);
+    expect(invoke).toHaveBeenLastCalledWith("abort_sequence", { repoPath: "/r", confirmed });
 
     vi.mocked(invoke).mockResolvedValue(null);
     await tauriRepoClient.resolveWholeFile("/r", "a.txt", "Ours");
@@ -516,6 +519,14 @@ describe("tauriRepoClient rebase wiring", () => {
         health: { kind: "Diverged", reason: "BranchMissing" },
       },
       bisect: { startedFrom: "main" },
+      terminalSequence: {
+        kind: "CherryPick",
+        pausedOnConflict: false,
+        startedAt: "abc",
+        startedAtSummary: "X",
+        rewinds: true,
+        commitsToRemove: 1,
+      },
     };
     vi.mocked(invoke).mockResolvedValue(head);
     await expect(tauriRepoClient.getHeadInfo("/r")).resolves.toEqual(head);
