@@ -556,13 +556,16 @@ across processes).
     `abort-safety` present but unparsable, the start commit missing when it would rewind) are
     `SequencerDamaged` (git refuses these too; the message points at `git cherry-pick --quit`;
     a missing `abort-safety` is "not safe", as git: no rewind, list removed); `confirmed`
-    (`ConfirmedAbort`: HEAD, start, `rewinds`, `commits_to_remove` as the UI showed them) must
-    still match, else `TerminalSequenceChanged`; the step's reset is planned by
-    `merge::plan_operation_reset` (below); and a rewind is checked by `check_rewind`: the
-    linked-folder guard, then every path that differs between HEAD and the start must be
-    unchanged in the index and work tree (`status_file` empty; an untracked or ignored file in
-    the way counts), except the step's own touched paths, which its reset puts back first;
-    else `RewindBlocked(path)`. Only then: the step is reset keeping `sequencer/`
+    (`ConfirmedAbort`: HEAD, start, `rewinds`, `commits_to_remove` and `paused_on_conflict` as
+    the UI showed them, so a step that paused after a between-steps confirmation isn't
+    discarded without the dialog's warning) must still match, else `TerminalSequenceChanged`;
+    the step's reset is planned by `merge::plan_operation_reset` (below); and a rewind is
+    checked by `check_rewind`: the linked-folder guard, then every path that differs between
+    HEAD and the start must be unchanged in the index and work tree (`status_file` empty; an
+    untracked or ignored file in the way counts), except the step's own touched paths, which
+    its reset puts back first; else `RewindBlocked(path)`. A path that is a folder in the work
+    tree and in HEAD (a step replaced file `d` with `d/x`; `status_file` errors on a folder)
+    blocks only if a status scan of the folder finds a changed, untracked or ignored entry. Only then: the step is reset keeping `sequencer/`
     (`merge::abort_step_keeping_list`), `rewind_to(started_at)` (shared with `abort_sequence`:
     SAFE `checkout_tree`, move the branch, or for a detached HEAD `reference("HEAD", …)` so the
     reflog says `reset: moving to <id>` as git's `reset --merge`), and `sequencer/` is removed.

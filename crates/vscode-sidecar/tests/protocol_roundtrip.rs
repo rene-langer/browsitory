@@ -1734,7 +1734,8 @@ fn a_terminal_sequence_round_trips_through_the_sidecar() {
                 "headId": step.to_string(),
                 "startedAt": started.to_string(),
                 "rewinds": true,
-                "commitsToRemove": 1
+                "commitsToRemove": 1,
+                "pausedOnConflict": false
             }
         }),
     );

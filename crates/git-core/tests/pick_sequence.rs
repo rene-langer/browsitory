@@ -2469,15 +2469,27 @@ use git_core::pick::abort_terminal_sequence;
 
 /// The work tree's files and contents, sorted (`.git` left out).
 fn files(dir: &Path) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let entry = entry.unwrap();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name == ".git" {
-            continue;
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let name = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if name == ".git" {
+                continue;
+            }
+            if entry.file_type().unwrap().is_dir() {
+                walk(root, &path, out);
+            } else {
+                out.push((name, std::fs::read_to_string(&path).unwrap()));
+            }
         }
-        out.push((name, std::fs::read_to_string(entry.path()).unwrap()));
     }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
     out.sort();
     out
 }
@@ -3038,4 +3050,101 @@ fn porcelain(dir: &Path, path: &str) -> String {
     String::from_utf8_lossy(&output.stdout)
         .trim_end()
         .to_string()
+}
+
+// --- #281 review, round 2 ---
+
+/// A confirmation made between steps doesn't cover a step that paused on a conflict since (the
+/// terminal's `--continue` stopped on the next step): its resolutions would go without the
+/// dialog's warning, so Abort refuses and changes nothing.
+#[test]
+fn abort_refuses_a_step_paused_since_it_was_confirmed() {
+    let (dir, repo, [_, b, _]) = stopped_on_an_error("cherry-pick");
+    let confirmed = git_core::pick::ConfirmedAbort::now(&repo).unwrap();
+    assert!(!confirmed.paused_on_conflict);
+    // The next step is now paused (HEAD, start and the rewind are the same as confirmed).
+    std::fs::write(repo.path().join("CHERRY_PICK_HEAD"), format!("{b}\n")).unwrap();
+    assert!(detect(&repo).unwrap().paused_on_conflict);
+    let before = whole_state(dir.path(), &repo);
+
+    let error = abort_terminal_sequence(&repo, &confirmed).unwrap_err();
+
+    assert!(
+        matches!(error, PickError::TerminalSequenceChanged(_)),
+        "{error:?}"
+    );
+    assert_eq!(whole_state(dir.path(), &repo), before);
+}
+
+/// base: f="base\n" and a file `d`. side: A (f="A\n"), S (replaces `d` by a folder with
+/// `d/x`). main: f="main\n". `git cherry-pick S A` applies S and pauses on A's conflict.
+fn file_replaced_by_a_folder() -> (tempfile::TempDir, Repository) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f", "base\n");
+    common::write_file(dir.path(), "d", "d\n");
+    common::commit_all(&repo, "base");
+    let base_ref = base_branch_ref(&repo);
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    repo.branch("side", &base, false).unwrap();
+    assert!(git(dir.path(), &["checkout", "-q", "side"])
+        .status
+        .success());
+    common::write_file(dir.path(), "f", "A\n");
+    assert!(git(dir.path(), &["commit", "-qam", "A"]).status.success());
+    let a = head(&repo);
+    assert!(git(dir.path(), &["rm", "-q", "d"]).status.success());
+    common::write_file(dir.path(), "d/x", "x\n");
+    assert!(git(dir.path(), &["add", "d/x"]).status.success());
+    assert!(git(dir.path(), &["commit", "-qm", "S"]).status.success());
+    let s = head(&repo);
+    let short = base_ref.trim_start_matches("refs/heads/");
+    assert!(git(dir.path(), &["checkout", "-q", short]).status.success());
+    common::write_file(dir.path(), "f", "main\n");
+    assert!(git(dir.path(), &["commit", "-qam", "main"])
+        .status
+        .success());
+    assert!(!git(dir.path(), &["cherry-pick", &s, &a]).status.success());
+    assert!(dir.path().join("d").join("x").exists());
+    let repo = reopen(dir.path());
+    (dir, repo)
+}
+
+/// The rewind turns the folder `d` back into a file. In a clean work tree that is fine, as
+/// with `git cherry-pick --abort` (`status_file("d")` errors on a folder: not a refusal).
+#[test]
+fn a_rewind_turns_a_folder_back_into_a_file_like_git() {
+    let run = |abort: &dyn Fn(&Path, &Repository) -> bool| {
+        let (dir, repo) = file_replaced_by_a_folder();
+        let started_at = sequencer_file(&repo, "head");
+        assert!(abort(dir.path(), &repo));
+        aborted(dir.path(), &repo, &started_at)
+    };
+    let ours = run(&|_, repo| abort_now(repo).unwrap().rewound);
+    let theirs = run(&|dir, _| git_abort(dir, "cherry-pick").status.success());
+    assert_eq!(ours, theirs);
+    assert!(ours.2 && !ours.4);
+    assert!(ours.0.contains(&("d".into(), "d\n".into())));
+}
+
+/// An untracked file inside the folder still blocks the rewind, and nothing changes.
+#[test]
+fn an_untracked_file_in_a_folder_the_rewind_removes_blocks_it() {
+    let (dir, repo) = file_replaced_by_a_folder();
+    common::write_file(dir.path(), "d/mine.txt", "mine\n");
+    let before = whole_state(dir.path(), &repo);
+
+    let error = abort_now(&repo).unwrap_err();
+
+    assert!(
+        matches!(&error, PickError::RewindBlocked(path) if path == "d"),
+        "{error:?}"
+    );
+    assert_eq!(whole_state(dir.path(), &repo), before);
+
+    let (twin_dir, twin) = file_replaced_by_a_folder();
+    common::write_file(twin_dir.path(), "d/mine.txt", "mine\n");
+    let twin_before = whole_state(twin_dir.path(), &twin);
+    let output = git_abort(twin_dir.path(), "cherry-pick");
+    assert!(!output.status.success(), "{output:?}");
+    assert_eq!(whole_state(twin_dir.path(), &twin), twin_before);
 }

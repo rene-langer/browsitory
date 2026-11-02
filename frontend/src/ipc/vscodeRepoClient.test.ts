@@ -148,9 +148,9 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.continueSequence("/r", true), "continue_sequence", { repoPath: "/r", noVerify: true }, { kind: "Completed", applied: 1, skipped: [] }],
       [() => vscodeRepoClient.abortSequence("/r"), "abort_sequence", { repoPath: "/r", confirmed: null }, { rewound: false }],
       [
-        () => vscodeRepoClient.abortSequence("/r", { headId: "h", startedAt: "s", rewinds: true, commitsToRemove: 2 }),
+        () => vscodeRepoClient.abortSequence("/r", { headId: "h", startedAt: "s", rewinds: true, commitsToRemove: 2, pausedOnConflict: false }),
         "abort_sequence",
-        { repoPath: "/r", confirmed: { headId: "h", startedAt: "s", rewinds: true, commitsToRemove: 2 } },
+        { repoPath: "/r", confirmed: { headId: "h", startedAt: "s", rewinds: true, commitsToRemove: 2, pausedOnConflict: false } },
         { rewound: true },
       ],
       [() => vscodeRepoClient.abortRebase("/r"), "abort_rebase", { repoPath: "/r" }, ABORTED_REBASE],

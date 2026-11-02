@@ -454,7 +454,7 @@ describe("tauriRepoClient transfer progress subscription", () => {
     vi.mocked(invoke).mockResolvedValue({ rewound: true });
     await expect(tauriRepoClient.abortSequence("/r")).resolves.toEqual({ rewound: true });
     expect(invoke).toHaveBeenLastCalledWith("abort_sequence", { repoPath: "/r", confirmed: null });
-    const confirmed = { headId: "h", startedAt: "s", rewinds: true, commitsToRemove: 2 };
+    const confirmed = { headId: "h", startedAt: "s", rewinds: true, commitsToRemove: 2, pausedOnConflict: false };
     await tauriRepoClient.abortSequence("/r", confirmed);
     expect(invoke).toHaveBeenLastCalledWith("abort_sequence", { repoPath: "/r", confirmed });
 

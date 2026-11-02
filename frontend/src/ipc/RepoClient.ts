@@ -191,6 +191,8 @@ export interface ConfirmedAbort {
   startedAt: string;
   rewinds: boolean;
   commitsToRemove: number;
+  /** A step was paused on a conflict: the dialog warned that its changes and resolutions go. */
+  pausedOnConflict: boolean;
 }
 /** `startedFrom` is what `git bisect reset` returns to: a branch name, or a commit id. */
 export interface BisectInfo {

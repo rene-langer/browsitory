@@ -1319,6 +1319,7 @@ describe("App", () => {
           startedAt: "1a2b3c4d5e6f7a8b",
           rewinds: true,
           commitsToRemove: 2,
+          pausedOnConflict: false,
         });
         expect(abortMerge).not.toHaveBeenCalled();
       });
@@ -1341,6 +1342,7 @@ describe("App", () => {
             startedAt: "1a2b3c4d5e6f7a8b",
             rewinds: false,
             commitsToRemove: 0,
+            pausedOnConflict: false,
           }),
         );
         expect(screen.queryByRole("dialog")).toBeNull();
@@ -1372,6 +1374,7 @@ describe("App", () => {
         expect(dialog).toHaveTextContent("This also removes the commit it made");
         fireEvent.click(within(dialog).getByRole("button", { name: "Abort cherry-pick" }));
         await waitFor(() => expect(abortSequence).toHaveBeenCalledTimes(1));
+        expect(abortSequence).toHaveBeenCalledWith("/repos/a", expect.objectContaining({ pausedOnConflict: true }));
         expect(abortMerge).not.toHaveBeenCalled();
       });
 

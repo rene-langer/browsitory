@@ -250,6 +250,9 @@ pub struct ConfirmedAbort {
     pub started_at: String,
     pub rewinds: bool,
     pub commits_to_remove: usize,
+    /// A step was paused on a conflict: the dialog then warned that its changes and
+    /// resolutions go.
+    pub paused_on_conflict: bool,
 }
 
 impl ConfirmedAbort {
@@ -269,6 +272,7 @@ impl ConfirmedAbort {
             started_at: sequence.started_at.clone(),
             rewinds: sequence.rewinds,
             commits_to_remove: sequence.commits_to_remove,
+            paused_on_conflict: sequence.paused_on_conflict,
         }
     }
 }
@@ -1434,7 +1438,11 @@ fn check_rewind(
             let blocked = match repo.status_file(path) {
                 Ok(status) => !status.is_empty(),
                 // Nowhere: in neither HEAD, the index nor the work tree.
-                Err(error) => error.code() != git2::ErrorCode::NotFound,
+                Err(error) if error.code() == git2::ErrorCode::NotFound => false,
+                // A folder (`status_file` errors on one): a file the steps replaced by a
+                // folder that HEAD tracks. Only something in it that the rewind would lose
+                // blocks it.
+                Err(_) => !is_clean_tracked_folder(repo, &head_tree, path)?,
             };
             if blocked {
                 return Err(PickError::RewindBlocked(
@@ -1444,6 +1452,37 @@ fn check_rewind(
         }
     }
     Ok(())
+}
+
+/// `path` is a folder in the work tree, HEAD has a folder there too, and nothing in it is
+/// changed, staged, untracked or ignored: removing it loses nothing.
+fn is_clean_tracked_folder(
+    repo: &Repository,
+    head_tree: &git2::Tree<'_>,
+    path: &std::path::Path,
+) -> Result<bool, PickError> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(false);
+    };
+    let is_folder = std::fs::symlink_metadata(workdir.join(path)).is_ok_and(|meta| meta.is_dir());
+    let tracked_folder = head_tree
+        .get_path(path)
+        .is_ok_and(|entry| entry.kind() == Some(git2::ObjectType::Tree));
+    if !is_folder || !tracked_folder {
+        return Ok(false);
+    }
+    let prefix = format!("{}/", path.to_string_lossy().replace('\\', "/"));
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(true)
+        .recurse_ignored_dirs(true)
+        .pathspec(&prefix);
+    let statuses = repo.statuses(Some(&mut options))?;
+    Ok(statuses.iter().all(|entry| {
+        !entry.path_bytes().starts_with(prefix.as_bytes()) || entry.status().is_empty()
+    }))
 }
 
 /// Why Abort refuses a damaged terminal sequence, with git's way out (`--quit` ends it without

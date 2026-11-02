@@ -504,6 +504,7 @@ function RepoWorkspace({
         startedAt: sequence.startedAt,
         rewinds: sequence.rewinds,
         commitsToRemove: sequence.commitsToRemove,
+        pausedOnConflict: sequence.pausedOnConflict,
       };
       void runPickAction(
         () => abortStoredSequence(confirmed),

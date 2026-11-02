@@ -2582,7 +2582,7 @@ struct HeadInfoDto {
 }
 
 /// Same wire shape as the Tauri app's `ConfirmedAbortDto`: what the user confirmed before aborting a terminal cherry-pick (`RepoClient.abortSequence`'s
-/// `confirmed`): `{ "headId", "startedAt", "rewinds", "commitsToRemove" }`, as last shown by
+/// `confirmed`): `{ "headId", "startedAt", "rewinds", "commitsToRemove", "pausedOnConflict" }`, as last shown by
 /// `HeadInfo.terminalSequence` (#281 review).
 #[derive(Deserialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -2591,6 +2591,7 @@ struct ConfirmedAbortDto {
     started_at: String,
     rewinds: bool,
     commits_to_remove: usize,
+    paused_on_conflict: bool,
 }
 
 impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
@@ -2600,6 +2601,7 @@ impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
             started_at: dto.started_at,
             rewinds: dto.rewinds,
             commits_to_remove: dto.commits_to_remove,
+            paused_on_conflict: dto.paused_on_conflict,
         }
     }
 }

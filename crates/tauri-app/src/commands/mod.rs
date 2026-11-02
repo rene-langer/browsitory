@@ -640,7 +640,7 @@ pub struct HeadInfoDto {
 }
 
 /// What the user confirmed before aborting a terminal cherry-pick (`RepoClient.abortSequence`'s
-/// `confirmed`): `{ "headId", "startedAt", "rewinds", "commitsToRemove" }`, as last shown by
+/// `confirmed`): `{ "headId", "startedAt", "rewinds", "commitsToRemove", "pausedOnConflict" }`, as last shown by
 /// `HeadInfo.terminalSequence` (#281 review).
 #[derive(Deserialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -649,6 +649,7 @@ pub struct ConfirmedAbortDto {
     pub started_at: String,
     pub rewinds: bool,
     pub commits_to_remove: usize,
+    pub paused_on_conflict: bool,
 }
 
 impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
@@ -658,6 +659,7 @@ impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
             started_at: dto.started_at,
             rewinds: dto.rewinds,
             commits_to_remove: dto.commits_to_remove,
+            paused_on_conflict: dto.paused_on_conflict,
         }
     }
 }
@@ -4018,7 +4020,8 @@ mod tests {
             "headId": "h",
             "startedAt": "s",
             "rewinds": true,
-            "commitsToRemove": 2
+            "commitsToRemove": 2,
+            "pausedOnConflict": true
         }))
         .unwrap();
         assert_eq!(
@@ -4028,6 +4031,7 @@ mod tests {
                 started_at: "s".into(),
                 rewinds: true,
                 commits_to_remove: 2,
+                paused_on_conflict: true,
             }
         );
     }
