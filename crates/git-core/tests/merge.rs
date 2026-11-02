@@ -818,28 +818,31 @@ fn abort_merge_reads_an_index_changed_behind_the_handle() {
     assert!(!index.has_conflicts());
 }
 
-/// Abort removes only the merge's own files (#249): a terminal rebase's folder stays, as
-/// `git merge --abort` keeps it. A merge paused during a terminal rebase (it has its own
-/// MERGE_HEAD) is still aborted, as git does; the rebase's own step is not (#263,
-/// `tests/terminal_rebase.rs`).
+/// A terminal rebase's folder is never removed by Abort (#249). During a terminal rebase even a
+/// MERGE_HEAD is the rebase's (a `--rebase-merges` merge step), so Abort refuses and changes
+/// nothing (#263 review, `tests/terminal_rebase.rs`).
 #[test]
-fn aborting_a_merge_keeps_a_terminal_rebase_dir() {
+fn aborting_a_merge_during_a_terminal_rebase_refuses_and_keeps_its_dir() {
     let (dir, repo) = make_conflicted_repo();
     let rebase_dir = repo.path().join("rebase-merge");
     std::fs::create_dir(&rebase_dir).unwrap();
     std::fs::write(rebase_dir.join("head-name"), "refs/heads/topic\n").unwrap();
+    let conflicted = std::fs::read_to_string(dir.path().join("shared.txt")).unwrap();
 
-    git_core::merge::abort_merge(&repo).unwrap();
+    let error = git_core::merge::abort_merge(&repo).unwrap_err();
 
+    assert!(error
+        .to_string()
+        .starts_with("A rebase started in a terminal"));
     assert_eq!(
         std::fs::read_to_string(rebase_dir.join("head-name")).unwrap(),
         "refs/heads/topic\n"
     );
-    assert!(!repo.path().join("MERGE_HEAD").exists());
-    assert!(!repo.index().unwrap().has_conflicts());
+    assert!(repo.path().join("MERGE_HEAD").exists());
+    assert!(repo.index().unwrap().has_conflicts());
     assert_eq!(
         std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
-        "line one\nmain two\nline three\n"
+        conflicted
     );
 }
 

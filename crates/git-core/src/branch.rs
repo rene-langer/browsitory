@@ -15,6 +15,9 @@ pub enum BranchError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// The branch is being rebased in a terminal, in this or another worktree (#263).
+    #[error(transparent)]
+    BeingRebased(#[from] crate::repo::BranchBeingRebased),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,12 +120,14 @@ pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchE
 }
 
 pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Result<(), BranchError> {
+    crate::repo::check_branch_not_rebased(repo, old_name)?;
     let mut branch = repo.find_branch(old_name, BranchType::Local)?;
     branch.rename(new_name, false)?;
     Ok(())
 }
 
 pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), BranchError> {
+    crate::repo::check_branch_not_rebased(repo, name)?;
     let mut branch = repo.find_branch(name, BranchType::Local)?;
     if !force {
         let branch_oid = branch.get().peel_to_commit()?.id();

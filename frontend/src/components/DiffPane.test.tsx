@@ -832,6 +832,28 @@ describe("DiffPane", () => {
       expect(screen.queryByRole("button", { name: "Abort merge" })).toBeNull();
     });
 
+    it("offers no Abort merge, amend or Stash during a rebase started in a terminal (#263)", () => {
+      // git wrote MERGE_MSG for the rebase's step; committing it stays possible, as with git commit.
+      renderUncommitted(fakeClient({}), status, {
+        mergeMessage: "M\n",
+        headInfo: {
+          headId: "abc",
+          detachedAt: "abc",
+          headPushed: false,
+          operation: null,
+          squashMessage: null,
+          commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null,
+          terminalRebase: { kind: "Rebase", branch: "topic", onto: "o", currentStep: 3, totalSteps: 3 },
+        },
+      });
+
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(screen.getByPlaceholderText("Commit message")).toHaveValue("M\n");
+      expect(within(dock).queryByRole("button", { name: "Abort merge" })).toBeNull();
+      expect(within(dock).queryByText(/amend/i)).toBeNull();
+      expect(within(dock).getByRole("button", { name: "Stash" })).toBeDisabled();
+    });
+
     it("keeps the rebase actions in a pinned commit-actions group so they never scroll away with long diffs", () => {
       renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 

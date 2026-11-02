@@ -193,6 +193,8 @@ impl OperationProbe<'_> {
             } else {
                 ("rebase-apply", "last")
             };
+            // `git am` writes no `rebase-apply/orig-head` (nor `onto`/`head-name`): its marker
+            // is the kind and `last`'s mtime alone.
             let started_from = std::fs::read_to_string(repo.path().join(folder).join("orig-head"))
                 .map(|text| text.trim().to_string())
                 .unwrap_or_default();

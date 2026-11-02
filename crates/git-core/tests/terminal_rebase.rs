@@ -354,37 +354,341 @@ fn picks_reset_and_amend_name_a_terminal_rebase() {
     assert!(repo.path().join("rebase-merge").is_dir());
 }
 
-/// A merge started during a terminal rebase (stopped by a failing `exec`) has its own
-/// MERGE_HEAD: Abort merge aborts it as `git merge --abort` does, and the rebase goes on.
+/// main: base (f, g = "base"), then "main change" (f = "m"). topic from base: A (g = "topic"),
+/// merged with side (S: g = "side") as M (g = "merged"). `git rebase --rebase-merges main` on
+/// topic replays S and A, then the merge, which stops on its conflict in g. git writes the
+/// merge step's own MERGE_HEAD (S rebased), MERGE_MODE and MERGE_MSG.
+fn rebase_merges_stop() -> (TempDir, Repository) {
+    let (dir, repo) = common::init_repo();
+    repo.set_head("refs/heads/main").unwrap();
+    let path = dir.path();
+    common::write_file(path, "f", "base\n");
+    common::write_file(path, "g", "base\n");
+    git_ok(path, &["add", "."]);
+    git_ok(path, &["commit", "-qm", "base"]);
+    git_ok(path, &["checkout", "-qb", "side"]);
+    common::write_file(path, "g", "side\n");
+    git_ok(path, &["commit", "-qam", "S"]);
+    git_ok(path, &["checkout", "-q", "main"]);
+    git_ok(path, &["checkout", "-qb", "topic"]);
+    common::write_file(path, "g", "topic\n");
+    git_ok(path, &["commit", "-qam", "A"]);
+    assert!(!git(path, &["merge", "side"]).status.success());
+    common::write_file(path, "g", "merged\n");
+    git_ok(path, &["add", "g"]);
+    git_ok(path, &["commit", "-qm", "M"]);
+    git_ok(path, &["checkout", "-q", "main"]);
+    common::write_file(path, "f", "m\n");
+    git_ok(path, &["commit", "-qam", "main change"]);
+    git_ok(path, &["checkout", "-q", "topic"]);
+    let output = git(path, &["rebase", "--rebase-merges", "main"]);
+    assert!(
+        !output.status.success(),
+        "the merge step must conflict: {output:?}"
+    );
+    let repo = reopen(&repo);
+    assert!(repo.path().join("rebase-merge").is_dir());
+    assert!(repo.path().join("MERGE_HEAD").exists());
+    (dir, repo)
+}
+
+/// t2 from base: "same" (f = "main\n" by another author), which main already has. `git rebase
+/// -i --reapply-cherry-picks main` stops on it, now empty, with git's CHERRY_PICK_HEAD and
+/// MERGE_MSG.
+fn empty_pick_stop() -> (TempDir, Repository) {
+    let (dir, repo, _ids) = fixture();
+    let path = dir.path();
+    git_ok(path, &["checkout", "-q", "main"]);
+    git_ok(path, &["checkout", "-qb", "t2", "main~1"]);
+    common::write_file(path, "f", "main\n");
+    git_ok(
+        path,
+        &[
+            "-c",
+            "user.name=Other Author",
+            "-c",
+            "user.email=other@example.com",
+            "commit",
+            "-qam",
+            "same",
+        ],
+    );
+    let output = test_support::git_command(path)
+        .env("GIT_SEQUENCE_EDITOR", "true")
+        .args(["rebase", "-i", "--reapply-cherry-picks", "main"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "the pick must stop: {output:?}");
+    let repo = reopen(&repo);
+    assert!(repo.path().join("rebase-merge").is_dir());
+    assert!(repo.path().join("CHERRY_PICK_HEAD").exists());
+    (dir, repo)
+}
+
+/// The files of a paused operation in the git folder, and the rebase's own folder, by name.
+fn state_files(repo: &Repository) -> (Vec<String>, Vec<String>) {
+    let names = |dir: &Path| {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    };
+    let operation = names(repo.path())
+        .into_iter()
+        .filter(|name| {
+            [
+                "MERGE_HEAD",
+                "MERGE_MODE",
+                "MERGE_MSG",
+                "AUTO_MERGE",
+                "CHERRY_PICK_HEAD",
+                "REVERT_HEAD",
+                "REBASE_HEAD",
+            ]
+            .contains(&name.as_str())
+        })
+        .collect();
+    (operation, names(&repo.path().join("rebase-merge")))
+}
+
+/// #263 review: git writes MERGE_HEAD for a `--rebase-merges` merge step and CHERRY_PICK_HEAD
+/// for an empty pick; both are the rebase's own step. Abort merge refuses them and changes
+/// nothing (aborting the merge step would make `git rebase --continue` drop the side branch).
 #[test]
-fn abort_merge_aborts_a_merge_paused_during_a_terminal_rebase() {
+fn abort_merge_refuses_the_rebases_own_merge_or_pick_step() {
+    for (dir, repo) in [rebase_merges_stop(), empty_pick_stop()] {
+        let before = state_files(&repo);
+        let head = repo.head().unwrap().target();
+
+        let error = git_core::merge::abort_merge(&repo).unwrap_err();
+
+        assert_eq!(error.to_string(), REBASE_REFUSAL);
+        assert_eq!(state_files(&repo), before);
+        assert_eq!(repo.head().unwrap().target(), head);
+        drop(dir);
+    }
+    let (_dir, repo) = rebase_merges_stop();
+    assert!(reopen(&repo).index().unwrap().has_conflicts());
+}
+
+/// A merge started by hand during a terminal rebase can't be told from the rebase's own merge
+/// step (both are just MERGE_HEAD), so Abort merge refuses it too; `git merge --abort` in the
+/// terminal ends it.
+#[test]
+fn abort_merge_refuses_a_merge_started_during_a_terminal_rebase() {
     let (dir, repo, ids) = fixture();
     let output = git(
         dir.path(),
         &["rebase", "-f", "-x", "false", &ids.t1.to_string()],
     );
     assert!(!output.status.success(), "the exec must stop: {output:?}");
-    let stopped_at = reopen(&repo).head().unwrap().target().unwrap();
     let output = git(dir.path(), &["merge", "main"]);
     assert!(
         !output.status.success(),
         "the merge must conflict: {output:?}"
     );
     let repo = reopen(&repo);
+    let before = state_files(&repo);
+
+    let error = git_core::merge::abort_merge(&repo).unwrap_err();
+
+    assert_eq!(error.to_string(), REBASE_REFUSAL);
+    assert_eq!(state_files(&repo), before);
+    assert!(reopen(&repo).index().unwrap().has_conflicts());
+}
+
+/// Starting a merge during the rebase's merge step is refused, naming the rebase.
+#[test]
+fn start_merge_refuses_during_a_terminal_rebases_merge_step() {
+    let (dir, repo) = rebase_merges_stop();
+    // Resolved, so nothing is conflicted any more.
+    common::write_file(dir.path(), "g", "merged\n");
+    git_ok(dir.path(), &["add", "g"]);
+    let repo = reopen(&repo);
+
+    let error =
+        git_core::merge::start_merge(&repo, "side", git_core::merge::MergeOptions::default())
+            .unwrap_err();
+
+    assert_eq!(error.to_string(), REBASE_REFUSAL);
     assert!(repo.path().join("MERGE_HEAD").exists());
-    let rebase = terminal_rebase_info(&repo).unwrap();
-    assert_eq!(rebase.kind, TerminalRebaseKind::Rebase);
-    assert_eq!(rebase.branch, "topic");
+}
 
-    git_core::merge::abort_merge(&repo).unwrap();
+/// What `rebase --continue` made of topic: the tip's parent count, its tree, and the summaries
+/// of its parents.
+fn rebased_topic(repo: &Repository) -> (usize, Oid, Vec<String>) {
+    let tip = repo
+        .find_reference("refs/heads/topic")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap();
+    let parents = tip
+        .parents()
+        .map(|parent| {
+            parent
+                .summary()
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    (tip.parent_count(), tip.tree_id(), parents)
+}
 
-    assert!(!repo.path().join("MERGE_HEAD").exists());
-    assert!(!reopen(&repo).index().unwrap().has_conflicts());
+/// #263 review: committing the resolved merge step in Browsitory does what `git commit` does
+/// there: a merge commit with MERGE_HEAD as second parent, the merge's state cleared, so
+/// `git rebase --continue` keeps the side branch. Twinned with the git CLI.
+#[test]
+fn committing_a_terminal_rebases_merge_step_makes_the_merge_like_git_commit() {
+    let (ours_dir, ours) = rebase_merges_stop();
+    let (twin_dir, twin) = rebase_merges_stop();
+    for dir in [ours_dir.path(), twin_dir.path()] {
+        common::write_file(dir, "g", "merged\n");
+        git_ok(dir, &["add", "g"]);
+    }
+    let message = std::fs::read_to_string(ours.path().join("MERGE_MSG")).unwrap();
+    let mut ours = reopen(&ours);
+
+    git_core::commit::commit_with(
+        &mut ours,
+        &message,
+        git_core::commit::CommitHookSet::Commit,
+        HookOptions::default(),
+    )
+    .unwrap();
+    git_ok(twin_dir.path(), &["commit", "--no-edit"]);
+
+    let head = ours.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(head.parent_count(), 2);
+    let twin = reopen(&twin);
     assert_eq!(
-        std::fs::read_to_string(dir.path().join("f")).unwrap(),
-        "topic\n"
+        twin.head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .parent_count(),
+        2
     );
-    assert_eq!(repo.head().unwrap().target(), Some(stopped_at));
-    assert!(repo.path().join("rebase-merge").is_dir());
-    assert_eq!(terminal_rebase_info(&repo), Some(rebase));
+    assert_eq!(state_files(&ours), state_files(&twin));
+
+    for dir in [ours_dir.path(), twin_dir.path()] {
+        let output = git(dir, &["-c", "core.editor=true", "rebase", "--continue"]);
+        assert!(output.status.success(), "{output:?}");
+    }
+    let ours_topic = rebased_topic(&reopen(&ours));
+    assert_eq!(ours_topic.0, 2, "the side branch is kept");
+    assert_eq!(ours_topic.2, vec!["A".to_string(), "S".to_string()]);
+    assert_eq!(ours_topic, rebased_topic(&reopen(&twin)));
+}
+
+/// #263 review: committing at an empty pick's stop keeps the picked commit's author, as
+/// `git commit` does with CHERRY_PICK_HEAD, and clears the pick's state like it. Twinned.
+#[test]
+fn committing_a_terminal_rebases_empty_pick_keeps_its_author_like_git_commit() {
+    let (ours_dir, ours) = empty_pick_stop();
+    let (twin_dir, twin) = empty_pick_stop();
+    let author = |commit: &git2::Commit<'_>| {
+        let author = commit.author();
+        (
+            author.name().unwrap().to_string(),
+            author.email().unwrap().to_string(),
+            author.when().seconds(),
+        )
+    };
+    let picked = |repo: &Repository| {
+        author(
+            &repo
+                .find_reference("CHERRY_PICK_HEAD")
+                .unwrap()
+                .peel_to_commit()
+                .unwrap(),
+        )
+    };
+    let (ours_picked, twin_picked) = (picked(&ours), picked(&twin));
+    let message = std::fs::read_to_string(ours.path().join("MERGE_MSG")).unwrap();
+    let mut ours = reopen(&ours);
+
+    git_core::commit::commit_with(
+        &mut ours,
+        &message,
+        git_core::commit::CommitHookSet::Commit,
+        HookOptions::default(),
+    )
+    .unwrap();
+    git_ok(twin_dir.path(), &["commit", "--allow-empty", "--no-edit"]);
+
+    let twin = reopen(&twin);
+    let head_author = |repo: &Repository| author(&repo.head().unwrap().peel_to_commit().unwrap());
+    assert_eq!(twin_picked.0, "Other Author");
+    assert_eq!(
+        head_author(&twin),
+        twin_picked,
+        "git keeps the picked author"
+    );
+    assert_eq!(head_author(&ours), ours_picked);
+    assert_eq!(state_files(&ours), state_files(&twin));
+    drop((ours_dir, twin_dir));
+}
+
+/// #263 review: git won't delete, rename or add a worktree for a branch being rebased, from any
+/// worktree of the repository. Browsitory refuses too (HEAD is detached, so libgit2's own
+/// checked-out check doesn't see it), naming the rebase.
+#[test]
+fn the_branch_being_rebased_cant_be_deleted_renamed_or_checked_out_in_a_new_worktree() {
+    let (dir, repo, ids) = terminal_rebase();
+    let elsewhere = TempDir::new().unwrap();
+    let linked_path = elsewhere.path().join("linked");
+    git_ok(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            linked_path.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let linked = Repository::open(&linked_path).unwrap();
+    let refusal = "topic is being rebased by a rebase started in a terminal. Continue it there \
+                   with git rebase --continue, or abort it with git rebase --abort.";
+    assert!(!git(dir.path(), &["branch", "-D", "topic"]).status.success());
+    assert!(!git(&linked_path, &["branch", "-D", "topic"])
+        .status
+        .success());
+
+    for (i, handle) in [&repo, &linked].into_iter().enumerate() {
+        assert_eq!(
+            git_core::branch::delete_branch(handle, "topic", true)
+                .unwrap_err()
+                .to_string(),
+            refusal
+        );
+        assert_eq!(
+            git_core::branch::rename_branch(handle, "topic", "renamed")
+                .unwrap_err()
+                .to_string(),
+            refusal
+        );
+        let path = elsewhere.path().join(format!("new{i}"));
+        assert_eq!(
+            git_core::worktree::create_worktree(handle, &format!("new{i}"), &path, "topic", None)
+                .unwrap_err()
+                .to_string(),
+            refusal
+        );
+        assert!(!path.exists());
+    }
+    let topic = repo.find_reference("refs/heads/topic").unwrap();
+    assert_eq!(topic.target(), Some(ids.topic));
+    // Other branches stay manageable.
+    repo.branch("spare", &repo.find_commit(ids.main).unwrap(), false)
+        .unwrap();
+    git_core::branch::rename_branch(&repo, "spare", "spare2").unwrap();
+    git_core::branch::delete_branch(&linked, "spare2", true).unwrap();
 }

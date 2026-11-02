@@ -706,11 +706,15 @@ the bar says **Rebasing topic, step 2 of 3 (started in a terminal)** (or **Apply
 of 3 …**) with "Continue or abort it there with git rebase --continue or git rebase --abort."
 On a conflict it says "Resolve 1 conflict, then run git rebase --continue in the terminal."
 It has no buttons: you continue or abort the rebase in the terminal. You can resolve the
-conflicts, stage and commit in Browsitory meanwhile. Cherry-pick, revert, a new rebase, reset,
-amend and Abort merge say "A rebase started in a terminal isn't finished. Continue it there
-with git rebase --continue, or abort it with git rebase --abort.", and the sidebar's branch,
-tag and worktree actions are disabled. A merge you start in the terminal during the rebase is
-still yours to abort, as with `git merge --abort`.
+conflicts, stage and commit in Browsitory meanwhile. A commit works as `git commit` does: at a
+merge step of `git rebase --rebase-merges` it makes the merge commit, and at an empty pick it
+keeps the original author. Cherry-pick, revert, merge, a new rebase, reset, amend and Abort
+merge say "A rebase started in a terminal isn't finished. Continue it there with git rebase
+--continue, or abort it with git rebase --abort." Abort merge refuses even a merge started by
+hand during the rebase, since Browsitory can't tell it from the rebase's own merge step; use
+`git merge --abort` in the terminal. Stash, amend and the sidebar's branch, tag and worktree
+actions are disabled. As with git, the branch being rebased can't be deleted, renamed or
+checked out in a new worktree, also from another worktree's window.
 
 **Interrupted rebase.** If the repository changed outside Browsitory while a rebase was paused, the
 strip shows **Rebase of ⟨branch⟩ interrupted** with the reason: HEAD was moved (for example

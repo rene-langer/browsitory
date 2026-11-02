@@ -13,8 +13,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   2 of 3 (started in a terminal)" with what to run there, and has no buttons; `git am` shows as
   "Applying patches". Abort merge, cherry-pick, revert, a new rebase, reset and amend now say
   "A rebase started in a terminal isn't finished. Continue it there with git rebase --continue,
-  or abort it with git rebase --abort." and change nothing. A merge started during the rebase
-  can still be aborted, as with git (#263).
+  or abort it with git rebase --abort." and change nothing. Abort merge refuses the merge step of
+  a git rebase --rebase-merges too (aborting it dropped the merged side branch), and so a merge
+  started by hand during the rebase; use git merge --abort there (#263).
+- Fixed: committing in Browsitory during a terminal rebase now works like git commit. At a merge
+  step of git rebase --rebase-merges it makes the merge commit (it made a plain commit, so git
+  rebase --continue lost the side branch); at an empty pick it keeps the original author (#263).
+- Fixed: the branch being rebased in a terminal could be deleted, renamed or checked out in a new
+  worktree, also from another worktree's window. This is now refused, as git refuses it. Stash
+  and amend are disabled during the rebase (#263).
 - Fixed: starting a rebase during a paused merge, cherry-pick or revert now refuses up front
   and names it ("A merge is in progress. Commit or abort it before starting a rebase."). A
   merge whose conflicts were resolved to the current side used to get through, and during a

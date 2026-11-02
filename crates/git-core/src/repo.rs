@@ -122,6 +122,45 @@ fn terminal_rebase_refusal(kind: TerminalRebaseKind) -> String {
     )
 }
 
+/// The refusal to delete, rename or check out in a new worktree a branch that a terminal rebase
+/// (in this or any other worktree of the repository) is rebasing, as git refuses it (#263).
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "{0} is being rebased by a rebase started in a terminal. Continue it there with git rebase \
+     --continue, or abort it with git rebase --abort."
+)]
+pub struct BranchBeingRebased(pub String);
+
+/// `Err` when `branch` (short name) is the branch of a terminal rebase in any worktree of the
+/// repository: its git folder's `rebase-merge/head-name` or `rebase-apply/head-name` names it
+/// (git's `wt_status_check_rebase` for every worktree, as `branch -D` checks). HEAD is detached
+/// during the rebase, so libgit2's "checked out" checks don't see it.
+pub(crate) fn check_branch_not_rebased(
+    repo: &git2::Repository,
+    branch: &str,
+) -> Result<(), BranchBeingRebased> {
+    let full = format!("refs/heads/{branch}");
+    let common = repo.commondir().to_path_buf();
+    let mut git_dirs = vec![common.clone()];
+    if let Ok(entries) = std::fs::read_dir(common.join("worktrees")) {
+        git_dirs.extend(
+            entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path()),
+        );
+    }
+    let rebased = git_dirs.iter().any(|dir| {
+        ["rebase-merge", "rebase-apply"].iter().any(|folder| {
+            std::fs::read_to_string(dir.join(folder).join("head-name"))
+                .is_ok_and(|name| name.trim() == full)
+        })
+    });
+    if rebased {
+        return Err(BranchBeingRebased(branch.to_string()));
+    }
+    Ok(())
+}
+
 /// `Err` while a terminal rebase or `git am` is in progress.
 pub(crate) fn check_no_terminal_rebase(
     repo: &git2::Repository,
