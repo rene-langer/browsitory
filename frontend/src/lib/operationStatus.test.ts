@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RebaseInfo } from "../ipc/RepoClient";
+import type { RebaseInfo, TerminalSequence } from "../ipc/RepoClient";
 import {
   abortToast,
   conflictReason,
@@ -9,6 +9,9 @@ import {
   rebaseDivergenceText,
   sequenceLabel,
   sequenceToast,
+  terminalAbortConfirm,
+  terminalSequenceLabel,
+  terminalSequenceText,
 } from "./operationStatus";
 
 describe("operationStatus", () => {
@@ -92,5 +95,47 @@ describe("rebase status text", () => {
     expect(rebaseAbortToast({ restored: false }, null)).toBe(
       "Stopped the rebase. HEAD had moved, so it was left where it is.",
     );
+  });
+
+  describe("a sequence started in a terminal (#258, #253)", () => {
+    const sequence = (overrides: Partial<TerminalSequence> = {}): TerminalSequence => ({
+      kind: "CherryPick",
+      pausedOnConflict: false,
+      startedAt: "1a2b3c4d5e6f",
+      startedAtSummary: "X",
+      rewinds: true,
+      commitsToRemove: 2,
+      ...overrides,
+    });
+
+    it("terminalSequenceLabel between steps and paused on a conflict", () => {
+      expect(terminalSequenceLabel(sequence())).toBe("Cherry-pick paused in a terminal");
+      expect(terminalSequenceLabel(sequence({ kind: "Revert" }))).toBe("Revert paused in a terminal");
+      expect(terminalSequenceLabel(sequence({ pausedOnConflict: true }))).toBe("Cherry-picking (started in a terminal)");
+      expect(terminalSequenceLabel(sequence({ kind: "Revert", pausedOnConflict: true }))).toBe(
+        "Reverting (started in a terminal)",
+      );
+    });
+
+    it("terminalSequenceText names the command that continues it", () => {
+      expect(terminalSequenceText("CherryPick")).toBe(
+        "Run git cherry-pick --continue there to apply the remaining commits.",
+      );
+      expect(terminalSequenceText("Revert")).toBe("Run git revert --continue there to apply the remaining commits.");
+    });
+
+    it("terminalAbortConfirm for several commits, one commit and a revert", () => {
+      expect(terminalAbortConfirm(sequence())).toEqual({
+        title: "Abort the whole cherry-pick?",
+        body: 'This also removes the 2 commits it made and puts the branch back at 1a2b3c4 "X". Changes you haven\'t committed stay.',
+        confirmLabel: "Abort cherry-pick",
+      });
+      expect(terminalAbortConfirm(sequence({ commitsToRemove: 1 })).body).toBe(
+        'This also removes the commit it made and puts the branch back at 1a2b3c4 "X". Changes you haven\'t committed stay.',
+      );
+      const revert = terminalAbortConfirm(sequence({ kind: "Revert" }));
+      expect(revert.title).toBe("Abort the whole revert?");
+      expect(revert.confirmLabel).toBe("Abort revert");
+    });
   });
 });

@@ -1676,6 +1676,60 @@ fn get_head_info_reports_a_terminal_bisect() {
     assert_eq!(during["result"]["operation"], serde_json::Value::Null);
 }
 
+/// A `git cherry-pick A B` started in a terminal and stopped between steps reaches the extension
+/// as `terminalSequence`, and `abort_sequence` aborts it like `git cherry-pick --abort` (#258,
+/// #253).
+#[test]
+fn a_terminal_sequence_round_trips_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first commit");
+    let started = repo.head().unwrap().target().unwrap();
+    write_file(dir.path(), "step.txt", "step");
+    commit_all(&repo, "step");
+    let step = repo.head().unwrap().target().unwrap();
+    let sequencer = repo.path().join("sequencer");
+    std::fs::create_dir(&sequencer).unwrap();
+    std::fs::write(sequencer.join("todo"), format!("pick {step} next\n")).unwrap();
+    std::fs::write(sequencer.join("head"), format!("{started}\n")).unwrap();
+    std::fs::write(sequencer.join("abort-safety"), format!("{step}\n")).unwrap();
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let info = sidecar.call(
+        2,
+        "get_head_info",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        info["result"]["terminalSequence"],
+        serde_json::json!({
+            "kind": "CherryPick",
+            "pausedOnConflict": false,
+            "startedAt": started.to_string(),
+            "startedAtSummary": "first commit",
+            "rewinds": true,
+            "commitsToRemove": 1
+        })
+    );
+
+    let aborted = sidecar.call(
+        3,
+        "abort_sequence",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(aborted["result"], serde_json::json!({ "rewound": true }));
+    let after = sidecar.call(
+        4,
+        "get_head_info",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(after["result"]["terminalSequence"], serde_json::Value::Null);
+    assert_eq!(after["result"]["headId"], started.to_string());
+}
+
 #[test]
 fn rebase_lifecycle_round_trips_through_the_sidecar() {
     let (dir, repo) = init_repo();

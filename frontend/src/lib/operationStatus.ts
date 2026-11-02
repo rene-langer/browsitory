@@ -8,6 +8,7 @@ import type {
   SequenceKind,
   SequenceOutcome,
   SequenceProgress,
+  TerminalSequence,
 } from "../ipc/RepoClient";
 
 /** Visible reason a merge/rebase step is blocked, or `undefined` when nothing blocks it. */
@@ -68,6 +69,44 @@ export function sequenceToast(kind: SequenceKind, outcome: SequenceOutcome): str
 export function abortToast(kind: SequenceKind, abort: SequenceAbort): string {
   const noun = sequenceNoun(kind);
   return abort.rewound ? `Aborted ${noun}` : `Stopped the ${noun}. HEAD had moved, so it was left where it is.`;
+}
+
+/**
+ * The strip label of a cherry-pick/revert started in a terminal (#258): "Cherry-pick paused in a
+ * terminal" between steps, "Cherry-picking (started in a terminal)" while a step is paused on a
+ * conflict.
+ */
+export function terminalSequenceLabel(sequence: TerminalSequence): string {
+  if (sequence.pausedOnConflict) {
+    const verb = sequence.kind === "CherryPick" ? "Cherry-picking" : "Reverting";
+    return `${verb} (started in a terminal)`;
+  }
+  return `${sequence.kind === "CherryPick" ? "Cherry-pick" : "Revert"} paused in a terminal`;
+}
+
+/** What to do with a terminal sequence paused between steps. */
+export function terminalSequenceText(kind: SequenceKind): string {
+  return `Run git ${sequenceNoun(kind)} --continue there to apply the remaining commits.`;
+}
+
+/**
+ * The confirmation before Abort removes the commits a terminal sequence made (#253, D7-A), like
+ * `git cherry-pick --abort`.
+ */
+export function terminalAbortConfirm(sequence: TerminalSequence): {
+  title: string;
+  body: string;
+  confirmLabel: string;
+} {
+  const noun = sequenceNoun(sequence.kind);
+  const commits =
+    sequence.commitsToRemove === 1 ? "the commit it made" : `the ${sequence.commitsToRemove} commits it made`;
+  const at = `${sequence.startedAt.slice(0, 7)} "${sequence.startedAtSummary}"`;
+  return {
+    title: `Abort the whole ${noun}?`,
+    body: `This also removes ${commits} and puts the branch back at ${at}. Changes you haven't committed stay.`,
+    confirmLabel: `Abort ${noun}`,
+  };
 }
 
 /** Why a stored rebase can only be aborted: what changed outside Browsitory while it was paused. */

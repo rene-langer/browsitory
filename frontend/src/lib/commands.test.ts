@@ -60,7 +60,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       fetchPrune: null,
       pushDialog: null,
       deleteRemoteBranchDialog: null,
-      headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null },
+      headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null },
       amendMode: false,
       skipHooks: false,
       hookRun: null,
@@ -203,7 +203,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
 describe("buildCommands", () => {
   it("offers to toggle skip hooks only when commit hooks are installed, even while busy", () => {
     const withHooks = makeAppState({
-      headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null, bisect: null },
+      headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null, bisect: null, terminalSequence: null },
       skipHooks: false,
       pending: true,
     });
@@ -215,7 +215,7 @@ describe("buildCommands", () => {
     expect(withHooks.setSkipHooks).toHaveBeenCalledWith(true);
 
     const on = makeAppState({
-      headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null, rebase: null, bisect: null },
+      headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null, rebase: null, bisect: null, terminalSequence: null },
       skipHooks: true,
     });
     const toggleOff = buildCommands(on).find((c) => c.id === "toggle-skip-hooks");
@@ -247,7 +247,7 @@ describe("buildCommands", () => {
     expect(labels({ remotes: [] })).not.toContain("Delete remote branch…");
     const detached = labels({
       branches: [],
-      headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null },
+      headInfo: { headId: "abc", detachedAt: "abc1234", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null },
     });
     expect(detached).not.toContain("Push branch to…");
     expect(detached).toContain("Fetch all remotes");
@@ -441,6 +441,42 @@ describe("buildCommands", () => {
 
     const withMerge = buildCommands(makeAppState({ mergeMessage: "Merge branch" }));
     expect(withMerge.some((c) => c.id === "merge-abort")).toBe(true);
+  });
+
+  it("offers Abort (no Continue) for a cherry-pick started in a terminal (#258, #253)", () => {
+    const base = makeAppState().state.headInfo;
+    const terminalSequence = {
+      kind: "Revert" as const,
+      pausedOnConflict: false,
+      startedAt: "abc",
+      startedAtSummary: "X",
+      rewinds: true,
+      commitsToRemove: 1,
+    };
+    const appState = makeAppState({ headInfo: { ...base, terminalSequence } });
+    const commands = buildCommands(appState);
+    const abort = commands.find((c) => c.id === "abort-sequence");
+    expect(abort?.label).toBe("Abort revert");
+    expect(commands.some((c) => c.id === "continue-sequence")).toBe(false);
+    abort?.run();
+    expect(appState.abortSequence).toHaveBeenCalled();
+
+    // Its paused step: the same Abort, not "Abort merge" (which would end only the step).
+    const paused = buildCommands(
+      makeAppState({
+        headInfo: { ...base, operation: "Revert", terminalSequence: { ...terminalSequence, pausedOnConflict: true } },
+        mergeMessage: "Revert",
+      }),
+    );
+    expect(paused.find((c) => c.id === "abort-sequence")?.label).toBe("Abort revert");
+    expect(paused.some((c) => c.id === "merge-abort")).toBe(false);
+
+    // A merge started during it is a plain merge.
+    const merging = buildCommands(
+      makeAppState({ headInfo: { ...base, operation: "Merge", terminalSequence }, mergeMessage: "Merge" }),
+    );
+    expect(merging.some((c) => c.id === "merge-abort")).toBe(true);
+    expect(merging.some((c) => c.id === "abort-sequence")).toBe(false);
   });
 
   it("offers Continue/Abort for a stopped cherry-pick or revert sequence, and hides other operations", () => {
@@ -948,7 +984,7 @@ describe("history commands", () => {
   const historyState: Partial<AppState> = {
     selectedRow: { commitId: "c2" },
     commits: [graphCommit("c1", ["c2"]), graphCommit("c2", [])],
-    headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null },
+    headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null },
   };
 
   it("offers the history commands when a commit is selected and nothing is running", () => {
@@ -966,7 +1002,7 @@ describe("history commands", () => {
       makeAppState({
         ...historyState,
         selectedRow: { commitId: "c1" },
-        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null },
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null },
       }),
     ).map((c) => c.id);
     expect(ids).not.toContain("cherry-pick-selected");
@@ -989,7 +1025,7 @@ describe("history commands", () => {
       makeAppState({
         ...historyState,
         branches: [{ name: "main", isCurrent: false }],
-        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null },
+        headInfo: { headId: "c1", detachedAt: "c1", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null },
       }),
     ).map((c) => c.id);
     expect(ids).not.toContain("reset-selected");

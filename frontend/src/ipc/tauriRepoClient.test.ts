@@ -516,6 +516,14 @@ describe("tauriRepoClient rebase wiring", () => {
         health: { kind: "Diverged", reason: "BranchMissing" },
       },
       bisect: { startedFrom: "main" },
+      terminalSequence: {
+        kind: "CherryPick",
+        pausedOnConflict: false,
+        startedAt: "abc",
+        startedAtSummary: "X",
+        rewinds: true,
+        commitsToRemove: 1,
+      },
     };
     vi.mocked(invoke).mockResolvedValue(head);
     await expect(tauriRepoClient.getHeadInfo("/r")).resolves.toEqual(head);

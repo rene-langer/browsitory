@@ -2578,6 +2578,35 @@ struct HeadInfoDto {
     sequence: Option<SequenceProgressDto>,
     rebase: Option<RebaseInfoDto>,
     bisect: Option<BisectDto>,
+    terminal_sequence: Option<TerminalSequenceDto>,
+}
+
+/// Same wire shape as the Tauri app's `TerminalSequenceDto` (#258).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalSequenceDto {
+    kind: &'static str,
+    paused_on_conflict: bool,
+    started_at: String,
+    started_at_summary: String,
+    rewinds: bool,
+    commits_to_remove: usize,
+}
+
+impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
+    fn from(sequence: git_core::pick::TerminalSequence) -> Self {
+        Self {
+            kind: match sequence.kind {
+                git_core::pick::SequenceKind::CherryPick => "CherryPick",
+                git_core::pick::SequenceKind::Revert => "Revert",
+            },
+            paused_on_conflict: sequence.paused_on_conflict,
+            started_at: sequence.started_at,
+            started_at_summary: sequence.started_at_summary,
+            rewinds: sequence.rewinds,
+            commits_to_remove: sequence.commits_to_remove,
+        }
+    }
 }
 
 /// Same wire shape as the Tauri app's `BisectDto`: `{ "startedFrom": "main" }`.
@@ -2606,6 +2635,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             bisect: info.bisect.map(|bisect| BisectDto {
                 started_from: bisect.started_from,
             }),
+            terminal_sequence: info.terminal_sequence.map(TerminalSequenceDto::from),
         }
     }
 }

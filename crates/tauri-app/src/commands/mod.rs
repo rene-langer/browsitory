@@ -634,6 +634,38 @@ pub struct HeadInfoDto {
     pub rebase: Option<RebaseInfoDto>,
     /// A `git bisect` started in a terminal: `{ "startedFrom": "main" }`, or `null`.
     pub bisect: Option<BisectDto>,
+    /// A `git cherry-pick A B C` / `git revert A B` started in a terminal and not finished, or
+    /// `null` (#258).
+    pub terminal_sequence: Option<TerminalSequenceDto>,
+}
+
+/// `{ "kind": "CherryPick" | "Revert", "pausedOnConflict", "startedAt", "startedAtSummary",
+/// "rewinds", "commitsToRemove" }`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSequenceDto {
+    pub kind: &'static str,
+    pub paused_on_conflict: bool,
+    pub started_at: String,
+    pub started_at_summary: String,
+    pub rewinds: bool,
+    pub commits_to_remove: usize,
+}
+
+impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
+    fn from(sequence: git_core::pick::TerminalSequence) -> Self {
+        Self {
+            kind: match sequence.kind {
+                git_core::pick::SequenceKind::CherryPick => "CherryPick",
+                git_core::pick::SequenceKind::Revert => "Revert",
+            },
+            paused_on_conflict: sequence.paused_on_conflict,
+            started_at: sequence.started_at,
+            started_at_summary: sequence.started_at_summary,
+            rewinds: sequence.rewinds,
+            commits_to_remove: sequence.commits_to_remove,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -662,6 +694,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             bisect: info.bisect.map(|bisect| BisectDto {
                 started_from: bisect.started_from,
             }),
+            terminal_sequence: info.terminal_sequence.map(TerminalSequenceDto::from),
         }
     }
 }
@@ -3474,7 +3507,7 @@ mod tests {
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
-            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null, "rebase": null, "bisect": null})
+            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null, "rebase": null, "bisect": null, "terminalSequence": null})
         );
         let dto = HeadInfoDto::from(git_core::repo::HeadInfo {
             head_id: Some("abc".into()),
@@ -3954,6 +3987,47 @@ mod tests {
             terminal_sequence: None,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn head_info_dto_serializes_a_terminal_sequence() {
+        let head = |terminal_sequence| {
+            serde_json::to_value(HeadInfoDto::from(git_core::repo::HeadInfo {
+                head_id: None,
+                detached_at: None,
+                head_pushed: false,
+                operation: None,
+                squash_message: None,
+                commit_hooks: vec![],
+                sequence: None,
+                rebase: None,
+                bisect: None,
+                terminal_sequence,
+            }))
+            .unwrap()
+        };
+        let paused = head(Some(git_core::pick::TerminalSequence {
+            kind: git_core::pick::SequenceKind::CherryPick,
+            paused_on_conflict: false,
+            started_at: "abc".into(),
+            started_at_summary: "X".into(),
+            rewinds: true,
+            commits_to_remove: 1,
+        }));
+        assert_eq!(
+            paused["terminalSequence"],
+            serde_json::json!({
+                "kind": "CherryPick",
+                "pausedOnConflict": false,
+                "startedAt": "abc",
+                "startedAtSummary": "X",
+                "rewinds": true,
+                "commitsToRemove": 1
+            })
+        );
+        let none = head(None);
+        assert!(none.as_object().unwrap().contains_key("terminalSequence"));
+        assert_eq!(none["terminalSequence"], serde_json::Value::Null);
     }
 
     #[test]

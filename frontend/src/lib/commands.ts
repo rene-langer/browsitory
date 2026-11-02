@@ -367,6 +367,16 @@ export function buildCommands(
       keywords: ["abort", "cancel", "cherry", "pick", "revert", "sequence"],
       run: () => void appState.abortSequence(),
     });
+  } else if (state.headInfo.terminalSequence !== null && state.headInfo.operation !== "Merge") {
+    // A cherry-pick started in a terminal (#258): Abort ends it like `git cherry-pick --abort`
+    // (#253); it is continued in the terminal.
+    const noun = state.headInfo.terminalSequence.kind === "CherryPick" ? "cherry-pick" : "revert";
+    commands.push({
+      id: "abort-sequence",
+      label: `Abort ${noun}`,
+      keywords: ["abort", "cancel", "cherry", "pick", "revert", "sequence"],
+      run: () => void appState.abortSequence(),
+    });
   } else if (state.mergeMessage !== null) {
     commands.push({
       id: "merge-abort",
