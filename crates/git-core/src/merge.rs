@@ -47,6 +47,10 @@ pub enum MergeError {
     FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Abort reset the files but couldn't remove one of git's merge/cherry-pick/revert state
+    /// files (`commit::clear_operation_files`).
+    #[error("Couldn't remove git's merge state: {0}")]
+    StateFiles(std::io::Error),
 }
 
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
@@ -255,8 +259,8 @@ pub fn squash_message(repo: &Repository) -> Option<String> {
     std::fs::read_to_string(repo.path().join("SQUASH_MSG")).ok()
 }
 
-/// Removes `SQUASH_MSG` once it no longer applies (commit, abort, reset, undo); `cleanup_state`
-/// leaves it behind. A missing file is fine.
+/// Removes `SQUASH_MSG` once it no longer applies (commit, abort, reset, undo);
+/// `commit::clear_operation_files` leaves it behind. A missing file is fine.
 pub(crate) fn clear_squash_message(repo: &Repository) -> std::io::Result<()> {
     match std::fs::remove_file(repo.path().join("SQUASH_MSG")) {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
@@ -717,7 +721,9 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
         }
         repo.checkout_head(Some(&mut checkout))?;
     }
-    repo.cleanup_state()?;
+    // Only the operation's own files: a terminal bisect, rebase or cherry-pick list goes on, as
+    // with `git merge --abort` (#249).
+    crate::commit::clear_operation_files(repo).map_err(MergeError::StateFiles)?;
     clear_squash_message(repo)?;
     Ok(())
 }

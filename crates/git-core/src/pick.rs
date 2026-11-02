@@ -1032,7 +1032,9 @@ pub fn abort_sequence(
     } else if is_leftover_of_committed_step(repo, state) {
         // The previous step's commit landed but its pick state stayed (D7-A): ours, and nothing
         // is staged in it (the worktree and index are that commit), so clear it and rewind.
-        repo.cleanup_state()?;
+        // Only the pick's own files: a terminal bisect or cherry-pick list goes on (#249).
+        crate::commit::clear_operation_files(repo)
+            .map_err(|error| PickError::Commit(crate::commit::CommitError::Io(error)))?;
     } else if repo.state() == RepositoryState::Clean
         && head_id == state.expected_head
         && fresh_index(repo)?.has_conflicts()

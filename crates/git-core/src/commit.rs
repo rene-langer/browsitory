@@ -452,19 +452,7 @@ pub(crate) fn clear_commit_state(repo: &git2::Repository) -> std::io::Result<()>
     let git_dir = repo.path();
     let had_pick =
         git_dir.join("CHERRY_PICK_HEAD").exists() || git_dir.join("REVERT_HEAD").exists();
-    for name in [
-        "MERGE_HEAD",
-        "MERGE_MODE",
-        "MERGE_MSG",
-        "AUTO_MERGE",
-        "CHERRY_PICK_HEAD",
-        "REVERT_HEAD",
-    ] {
-        match std::fs::remove_file(git_dir.join(name)) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
-            _ => {}
-        }
-    }
+    clear_operation_files(repo)?;
     let sequencer = git_dir.join("sequencer");
     if had_pick {
         if let Ok(todo) = std::fs::read(sequencer.join("todo")) {
@@ -474,6 +462,45 @@ pub(crate) fn clear_commit_state(repo: &git2::Repository) -> std::io::Result<()>
         }
     }
     Ok(())
+}
+
+/// The files of a paused merge, cherry-pick or revert, as git keeps them in the repository's
+/// git folder (per worktree).
+const OPERATION_FILES: [&str; 6] = [
+    "MERGE_HEAD",
+    "MERGE_MODE",
+    "MERGE_MSG",
+    "AUTO_MERGE",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+];
+
+/// Ends a paused merge, cherry-pick or revert by removing only its own files: `MERGE_HEAD`,
+/// `MERGE_MODE`, `MERGE_MSG`, `AUTO_MERGE`, `CHERRY_PICK_HEAD` and `REVERT_HEAD`, in
+/// `repo.path()` (so per worktree). Use it instead of libgit2's `cleanup_state` (#249), which
+/// also deletes the state of operations that run in a terminal and that Browsitory doesn't own:
+///
+/// - `BISECT_LOG` (ending a `git bisect`);
+/// - `rebase-merge/` and `rebase-apply/` (a `git rebase`);
+/// - `sequencer/` (the rest of a `git cherry-pick A B C` / `git revert A B` list).
+///
+/// None of these is touched here, nor `SQUASH_MSG` (`merge::clear_squash_message` handles it).
+/// It touches neither HEAD, the index nor the work tree: callers reset those first.
+///
+/// A missing file is fine. Every file is tried even when one can't be removed, so as much of
+/// the operation as possible is gone; the first error is returned.
+pub(crate) fn clear_operation_files(repo: &git2::Repository) -> std::io::Result<()> {
+    let git_dir = repo.path();
+    let mut first_error = None;
+    for name in OPERATION_FILES {
+        match std::fs::remove_file(git_dir.join(name)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                first_error.get_or_insert(error);
+            }
+            _ => {}
+        }
+    }
+    first_error.map_or(Ok(()), Err)
 }
 
 /// git's `have_finished_the_last_pick`: the todo holds at most one line (no newline, or nothing

@@ -50,7 +50,10 @@ fn bisect_repo(detached: bool) -> (TempDir, Repository, Ids) {
         .unwrap();
     let clean = common::commit_tree(
         &repo,
-        &[("f", "base\n", 0o100644), ("clean.txt", "clean\n", 0o100644)],
+        &[
+            ("f", "base\n", 0o100644),
+            ("clean.txt", "clean\n", 0o100644),
+        ],
         &[base],
         "clean",
     );
@@ -68,6 +71,8 @@ fn bisect_repo(detached: bool) -> (TempDir, Repository, Ids) {
         git_ok(dir.path(), &["bisect", "good", &base.to_string()]);
         assert!(repo.head_detached().unwrap());
     }
+    // A fresh handle: the git CLI rewrote the index this one has loaded.
+    let repo = reopen(&repo);
     assert!(repo.path().join("BISECT_LOG").exists());
     assert_eq!(repo.state(), RepositoryState::Bisect);
     (
@@ -79,6 +84,12 @@ fn bisect_repo(detached: bool) -> (TempDir, Repository, Ids) {
             clean,
         },
     )
+}
+
+/// A new handle on `repo`, as the app opens one per command: the git CLI changed the index
+/// behind the old handle's back.
+fn reopen(repo: &Repository) -> Repository {
+    Repository::open(repo.workdir().unwrap()).unwrap()
 }
 
 fn bisect_log(repo: &Repository) -> Option<Vec<u8>> {
@@ -117,12 +128,8 @@ fn cherry_pick_and_revert_during_a_bisect_are_refused_today() {
     let (_dir, repo, ids) = bisect_repo(true);
     let before = bisect_log(&repo);
 
-    let picked = git_core::pick::cherry_pick(
-        &repo,
-        &ids.clean.to_string(),
-        None,
-        HookOptions::default(),
-    );
+    let picked =
+        git_core::pick::cherry_pick(&repo, &ids.clean.to_string(), None, HookOptions::default());
     assert!(matches!(picked, Err(PickError::OperationInProgress)));
     let reverted = git_core::pick::revert(&repo, &head(&repo), None, HookOptions::default());
     assert!(matches!(reverted, Err(PickError::OperationInProgress)));
@@ -137,7 +144,10 @@ fn cherry_pick_and_revert_during_a_bisect_are_refused_today() {
     // git's twin runs both and keeps the bisect.
     let (twin_dir, twin, twin_ids) = bisect_repo(true);
     let twin_before = bisect_log(&twin);
-    git_ok(twin_dir.path(), &["cherry-pick", &twin_ids.clean.to_string()]);
+    git_ok(
+        twin_dir.path(),
+        &["cherry-pick", &twin_ids.clean.to_string()],
+    );
     git_ok(twin_dir.path(), &["revert", "--no-edit", "HEAD"]);
     assert_eq!(bisect_log(&twin), twin_before);
 }
@@ -154,8 +164,7 @@ fn reset_and_amend_during_a_bisect_are_refused_today() {
         reset,
         Err(git_core::reset::ResetError::OperationInProgress)
     ));
-    let amended =
-        git_core::commit::amend_head(&repo, "amended\n", None, HookOptions::default());
+    let amended = git_core::commit::amend_head(&repo, "amended\n", None, HookOptions::default());
     assert!(matches!(
         amended,
         Err(git_core::commit::CommitError::OperationInProgress)
@@ -177,16 +186,25 @@ fn undo_restore_during_a_bisect_is_refused_today() {
 }
 
 #[test]
-fn aborting_a_merge_during_a_bisect_ends_it_today() {
+fn aborting_a_merge_keeps_a_terminal_bisect() {
     let (dir, repo, _ids) = bisect_repo(true);
+    let before = bisect_log(&repo);
+    let head_before = head(&repo);
     assert!(!git(dir.path(), &["merge", "feature"]).status.success());
+    let repo = reopen(&repo);
     assert_eq!(repo.state(), RepositoryState::Merge);
 
     git_core::merge::abort_merge(&repo).unwrap();
 
-    assert_eq!(bisect_log(&repo), None);
+    assert_eq!(bisect_log(&repo), before);
+    assert_eq!(repo.state(), RepositoryState::Bisect);
+    assert_eq!(head(&repo), head_before);
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+    assert!(!repo.path().join("MERGE_MSG").exists());
+    assert!(!repo.path().join("AUTO_MERGE").exists());
+    assert_eq!(common::read(dir.path(), "f"), "main\n");
 
-    // git's twin keeps the bisect.
+    // git's twin keeps the bisect too.
     let (twin_dir, twin, _) = bisect_repo(true);
     let twin_before = bisect_log(&twin);
     assert!(!git(twin_dir.path(), &["merge", "feature"]).status.success());
@@ -212,19 +230,111 @@ fn a_rebase_step_committed_by_hand_during_a_bisect_shows_as_interrupted_today() 
 }
 
 #[test]
-fn finishing_a_rebase_during_a_bisect_ends_it_today() {
+fn finishing_a_rebase_keeps_a_terminal_bisect() {
     let (_dir, repo, _ids) = bisect_repo(false);
+    let before = bisect_log(&repo);
     let plan = plan_onto(&repo, "clean");
     let (_state, result) = git_core::rebase::start_rebase(&repo, "clean", plan).unwrap();
     assert_eq!(result, RebaseStepResult::Done);
 
-    assert_eq!(bisect_log(&repo), None);
+    assert_eq!(bisect_log(&repo), before);
+    assert_eq!(repo.state(), RepositoryState::Bisect);
+    assert!(!repo.head_detached().unwrap());
 
-    // git's twin keeps the bisect.
+    // git's twin keeps the bisect too.
     let (twin_dir, twin, _) = bisect_repo(false);
     let twin_before = bisect_log(&twin);
     git_ok(twin_dir.path(), &["rebase", "clean"]);
     assert_eq!(bisect_log(&twin), twin_before);
+}
+
+#[test]
+fn continuing_a_rebase_keeps_a_terminal_bisect() {
+    let (dir, repo, _ids) = bisect_repo(false);
+    let before = bisect_log(&repo);
+    let plan = plan_onto(&repo, "feature");
+    let (mut state, result) = git_core::rebase::start_rebase(&repo, "feature", plan).unwrap();
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+    common::write_file(dir.path(), "f", "resolved\n");
+    stage(&repo, "f");
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    assert_eq!(bisect_log(&repo), before);
+    assert_eq!(repo.state(), RepositoryState::Bisect);
+    assert_eq!(common::read(dir.path(), "f"), "resolved\n");
+
+    // git's twin keeps the bisect too.
+    let (twin_dir, twin, _) = bisect_repo(false);
+    let twin_before = bisect_log(&twin);
+    assert!(!git(twin_dir.path(), &["rebase", "feature"])
+        .status
+        .success());
+    common::write_file(twin_dir.path(), "f", "resolved\n");
+    git_ok(twin_dir.path(), &["add", "f"]);
+    let output = std::process::Command::new("git")
+        .args(["rebase", "--continue"])
+        .env("GIT_EDITOR", "true")
+        .current_dir(twin_dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(bisect_log(&twin), twin_before);
+}
+
+#[test]
+fn aborting_a_rebase_keeps_a_terminal_bisect() {
+    let (dir, repo, _ids) = bisect_repo(false);
+    let before = bisect_log(&repo);
+    let tip = head(&repo);
+    let plan = plan_onto(&repo, "feature");
+    let (state, result) = git_core::rebase::start_rebase(&repo, "feature", plan).unwrap();
+    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+
+    git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert_eq!(bisect_log(&repo), before);
+    assert_eq!(head(&repo), tip);
+    assert_eq!(common::read(dir.path(), "f"), "main\n");
+
+    // git's twin keeps the bisect too.
+    let (twin_dir, twin, _) = bisect_repo(false);
+    let twin_before = bisect_log(&twin);
+    assert!(!git(twin_dir.path(), &["rebase", "feature"])
+        .status
+        .success());
+    git_ok(twin_dir.path(), &["rebase", "--abort"]);
+    assert_eq!(bisect_log(&twin), twin_before);
+}
+
+/// libgit2's `cleanup_state` also deletes `BISECT_LOG`, `rebase-*` and `sequencer/`, which
+/// belong to operations run in a terminal (#249). git-core clears an operation's own files with
+/// `commit::clear_operation_files` instead; this keeps it that way.
+#[test]
+fn no_cleanup_state_in_git_core_src() {
+    fn visit(dir: &Path, found: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                visit(&path, found);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (number, line) in text.lines().enumerate() {
+                    let code = line.split("//").next().unwrap_or("");
+                    if code.contains("cleanup_state(") {
+                        found.push(format!("{}:{}", path.display(), number + 1));
+                    }
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    visit(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut found,
+    );
+    assert!(found.is_empty(), "cleanup_state called at {found:?}");
 }
 
 #[test]

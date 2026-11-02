@@ -845,8 +845,9 @@ fn after_landed(repo: &Repository, state: &mut RebaseState) -> Result<(), Rebase
     // during a rebase, so re-baseline the drift check from wherever it just landed.
     state.expected_head = repo.head()?.peel_to_commit()?.id();
     // The step is committed: forget its CHERRY_PICK_HEAD/MERGE_MSG, so a later stop (an error
-    // before the next pick, a failed `finish`) is a clean state, never a stale pick.
-    repo.cleanup_state()?;
+    // before the next pick, a failed `finish`) is a clean state, never a stale pick. Only the
+    // pick's own files: a terminal bisect goes on (#249).
+    crate::commit::clear_operation_files(repo)?;
 
     Ok(())
 }
@@ -898,8 +899,9 @@ fn finish(repo: &Repository, state: &RebaseState) -> Result<RebaseStepResult, Re
     repo.set_head(&state.original_branch_ref)?;
     // Clears CHERRY_PICK_HEAD and any other in-progress-operation state left behind by the
     // `cherrypick()` calls in `advance` — without this, `repo.state()` stays `CherryPick` even
-    // though the rebase (from this module's own state machine's point of view) is done.
-    repo.cleanup_state()?;
+    // though the rebase (from this module's own state machine's point of view) is done. Only
+    // the pick's own files: a terminal bisect goes on (#249).
+    crate::commit::clear_operation_files(repo)?;
     Ok(RebaseStepResult::Done)
 }
 
@@ -959,7 +961,7 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
     } else if own_pick {
         // HEAD moved (e.g. `git checkout other`): the index may now hold work staged there, so
         // only forget git's paused pick and leave the index and work tree alone.
-        repo.cleanup_state()?;
+        crate::commit::clear_operation_files(repo)?;
     }
     Ok(RebaseAbort { restored: false })
 }
@@ -991,6 +993,6 @@ fn restore_original_branch(
     checkout.force();
     repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
     repo.set_head(branch_ref)?;
-    repo.cleanup_state()?;
+    crate::commit::clear_operation_files(repo)?;
     Ok(())
 }
