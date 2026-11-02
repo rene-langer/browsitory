@@ -570,8 +570,55 @@ fn no_cleanup_state_in_git_core_src() {
 }
 
 #[test]
-fn head_info_during_a_bisect_shows_nothing_today() {
-    let (_dir, repo, _ids) = bisect_repo(true);
-    let info = git_core::repo::head_info(&repo).unwrap();
+fn a_terminal_bisect_is_reported_with_its_start() {
+    use git_core::repo::{head_info, BisectInfo, OperationKind};
+    let started_from_main = Some(BisectInfo {
+        started_from: "main".to_string(),
+    });
+
+    let (_dir, repo, _ids) = bisect_repo(false);
+    let info = head_info(&repo).unwrap();
     assert_eq!(info.operation, None);
+    assert_eq!(info.bisect, started_from_main);
+
+    let (dir, repo, _ids) = bisect_repo(true);
+    let info = head_info(&repo).unwrap();
+    assert_eq!(info.operation, None);
+    assert_eq!(info.bisect, started_from_main);
+
+    // A merge paused during the bisect: both.
+    assert!(!git(dir.path(), &["merge", "feature"]).status.success());
+    let info = head_info(&reopen(&repo)).unwrap();
+    assert_eq!(info.operation, Some(OperationKind::Merge));
+    assert_eq!(info.bisect, started_from_main);
+
+    // Ended with `git bisect reset`: none.
+    git_ok(dir.path(), &["merge", "--abort"]);
+    git_ok(dir.path(), &["bisect", "reset"]);
+    assert_eq!(head_info(&reopen(&repo)).unwrap().bisect, None);
+}
+
+/// A bisect started from a detached HEAD records the commit id it started from.
+#[test]
+fn a_bisect_started_from_a_detached_head_names_the_commit() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f", "base\n");
+    common::commit_all(&repo, "base");
+    let id = head(&repo);
+    repo.set_head_detached(repo.head().unwrap().target().unwrap())
+        .unwrap();
+    git_ok(dir.path(), &["bisect", "start"]);
+
+    let info = git_core::repo::head_info(&repo).unwrap();
+
+    assert_eq!(info.bisect.unwrap().started_from, id);
+}
+
+#[test]
+fn no_bisect_is_reported_without_one() {
+    let (dir, repo) = common::init_repo();
+    assert_eq!(git_core::repo::head_info(&repo).unwrap().bisect, None);
+    common::write_file(dir.path(), "f", "base\n");
+    common::commit_all(&repo, "base");
+    assert_eq!(git_core::repo::head_info(&repo).unwrap().bisect, None);
 }

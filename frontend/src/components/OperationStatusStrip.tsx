@@ -1,5 +1,5 @@
-import type { OperationKind, RebaseInfo, SequenceProgress } from "../ipc/RepoClient";
-import { conflictReason, rebaseInterruption, sequenceLabel, sequenceNoun } from "../lib/operationStatus";
+import type { BisectInfo, OperationKind, RebaseInfo, SequenceProgress } from "../ipc/RepoClient";
+import { bisectLabel, conflictReason, rebaseInterruption, sequenceLabel, sequenceNoun } from "../lib/operationStatus";
 import styles from "./OperationStatusStrip.module.css";
 
 /**
@@ -8,6 +8,8 @@ import styles from "./OperationStatusStrip.module.css";
  * cherry-pick/revert shows its step and Continue, also when it stopped on an error rather than a
  * conflict (then git itself has nothing in progress). A stored rebase that no longer matches the
  * repository (changed outside Browsitory while paused) shows as interrupted, with Abort only.
+ * When none of these is shown, a `git bisect` started in a terminal shows as information only:
+ * it blocks nothing, and it is ended in the terminal (#250).
  */
 export function OperationStatusStrip({
   merging,
@@ -15,6 +17,7 @@ export function OperationStatusStrip({
   rebaseProgress,
   rebase = null,
   sequence = null,
+  bisect = null,
   conflictCount,
   pending = false,
   onAbortMerge,
@@ -28,6 +31,8 @@ export function OperationStatusStrip({
   /** The stored rebase with its health (`HeadInfo.rebase`). */
   rebase?: RebaseInfo | null;
   sequence?: SequenceProgress | null;
+  /** A `git bisect` started in a terminal (`HeadInfo.bisect`). */
+  bisect?: BisectInfo | null;
   conflictCount: number;
   /** An action is running: Continue/Abort are disabled so a second click can't double-submit. */
   pending?: boolean;
@@ -75,7 +80,15 @@ export function OperationStatusStrip({
       </div>
     );
   }
-  if (!merging && rebaseProgress === null) return null;
+  if (!merging && rebaseProgress === null) {
+    if (bisect === null) return null;
+    return (
+      <div role="status" aria-label="Operation status" className={styles.strip}>
+        <strong>{bisectLabel(bisect)}</strong>
+        <span>Use git bisect good, bad or reset in a terminal.</span>
+      </div>
+    );
+  }
   const mergeLabel =
     operation === "CherryPick" ? "Cherry-picking" : operation === "Revert" ? "Reverting" : "Merging";
   const abortLabel =

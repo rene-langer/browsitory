@@ -550,6 +550,7 @@ function RepoWorkspace({
         rebaseProgress={appState.state.rebaseProgress}
         rebase={appState.state.headInfo.rebase}
         sequence={appState.state.headInfo.sequence}
+        bisect={appState.state.headInfo.bisect}
         pending={appState.state.pending}
         conflictCount={appState.state.status.filter((entry) => entry.kind === "Conflicted").length}
         onAbortMerge={abortMergeOrSequence}
