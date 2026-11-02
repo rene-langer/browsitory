@@ -819,7 +819,9 @@ fn abort_merge_reads_an_index_changed_behind_the_handle() {
 }
 
 /// Abort removes only the merge's own files (#249): a terminal rebase's folder stays, as
-/// `git merge --abort` keeps it.
+/// `git merge --abort` keeps it. A merge paused during a terminal rebase (it has its own
+/// MERGE_HEAD) is still aborted, as git does; the rebase's own step is not (#263,
+/// `tests/terminal_rebase.rs`).
 #[test]
 fn aborting_a_merge_keeps_a_terminal_rebase_dir() {
     let (dir, repo) = make_conflicted_repo();

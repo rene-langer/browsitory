@@ -59,6 +59,10 @@ pub enum MergeError {
     /// files (`commit::clear_operation_files`).
     #[error("Couldn't remove git's merge state: {0}")]
     StateFiles(std::io::Error),
+    /// Abort during a `git rebase` or `git am` started in a terminal: the paused step is the
+    /// rebase's, which only the terminal ends (#263). Nothing was changed.
+    #[error(transparent)]
+    TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
 }
 
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
@@ -708,13 +712,25 @@ impl OperationReset {
 /// work-tree file is the user's resolution of the step, which Abort discards, as git does.
 pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, MergeError> {
     use git2::RepositoryState::{CherryPick, CherryPickSequence, Merge, Revert, RevertSequence};
+    // During a terminal rebase or `git am`, libgit2 reports the rebase whatever else is paused.
+    // A merge, cherry-pick or revert started during it has its own files and is aborted as
+    // `git merge --abort` would; otherwise the conflicts (and MERGE_MSG) are the rebase's step,
+    // which git's `--abort` refuses too ("no merge to abort"): resetting them would leave the
+    // rebase to go on as if the step were resolved to nothing (#263).
+    let own_files = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]
+        .iter()
+        .any(|name| repo.path().join(name).exists());
+    if !own_files {
+        crate::repo::check_no_terminal_rebase(repo)?;
+    }
     // The worker keeps one handle per repository, whose index may predate a merge or pick run
     // in a terminal: read the one on disk, or Abort would leave that operation's conflicts.
     repo.index()?.read(false)?;
-    let in_operation = matches!(
-        repo.state(),
-        Merge | CherryPick | CherryPickSequence | Revert | RevertSequence
-    );
+    let in_operation = own_files
+        || matches!(
+            repo.state(),
+            Merge | CherryPick | CherryPickSequence | Revert | RevertSequence
+        );
     if !in_operation && !repo.index()?.has_conflicts() {
         return Err(MergeError::NotMerging);
     }

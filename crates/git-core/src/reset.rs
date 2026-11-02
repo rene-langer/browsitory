@@ -14,6 +14,9 @@ pub enum ResetError {
     Git(#[from] git2::Error),
     #[error("Finish or abort the current merge/cherry-pick/revert/rebase first.")]
     OperationInProgress,
+    /// A `git rebase` or `git am` started in a terminal isn't finished (#263).
+    #[error(transparent)]
+    TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
     #[error("{0}")]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -29,6 +32,7 @@ pub enum ResetError {
 /// rebase's or cherry-pick list's state), so those two are done here step by step, as libgit2
 /// does them, with `commit::clear_operation_files` instead (#249).
 pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(), ResetError> {
+    crate::repo::check_no_terminal_rebase(repo)?;
     if !crate::repo::no_operation(repo) {
         return Err(ResetError::OperationInProgress);
     }

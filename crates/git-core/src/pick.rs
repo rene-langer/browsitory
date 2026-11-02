@@ -61,6 +61,9 @@ pub enum PickError {
     /// steps: picks, reverts and Continue would mix with it (#258, D5-A).
     #[error("{}", terminal_sequence_refusal(*.0))]
     TerminalSequence(SequenceKind),
+    /// A `git rebase` or `git am` started in a terminal isn't finished (#263).
+    #[error(transparent)]
+    TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
     /// Abort found no terminal sequence (`.git/sequencer/todo`) to abort.
     #[error("No cherry-pick or revert is in progress.")]
     NoTerminalSequence,
@@ -509,6 +512,7 @@ fn clear_state(repo: &Repository) -> Result<(), PickError> {
 /// The preconditions every pick shares, in order: nothing paused, a born HEAD, nothing staged.
 /// Returns HEAD's commit.
 fn check_ready(repo: &Repository) -> Result<Commit<'_>, PickError> {
+    crate::repo::check_no_terminal_rebase(repo)?;
     if !crate::repo::no_operation(repo) {
         return Err(PickError::OperationInProgress);
     }
@@ -897,6 +901,10 @@ pub fn continue_sequence(
             git2::Error::from_str("the stored sequence has no step left"),
             state,
         );
+    }
+    // A terminal rebase or `git am` is git's own operation in progress (#263).
+    if let Err(error) = crate::repo::check_no_terminal_rebase(repo) {
+        return SequenceRun::stopped(error, state);
     }
     // A terminal sequence paused between steps would mix with this one (#258, D5-A).
     if let Err(kind) = check_no_terminal_sequence(repo) {
@@ -1361,6 +1369,7 @@ pub fn abort_terminal_sequence(
             | RepositoryState::RevertSequence
     );
     if !ours {
+        crate::repo::check_no_terminal_rebase(repo)?;
         return Err(PickError::OperationInProgress);
     }
     if let Some(damage) = sequence.damage {

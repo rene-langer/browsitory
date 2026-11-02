@@ -20,6 +20,9 @@ pub enum CommitError {
     NothingToAmend,
     #[error("Finish or abort the current merge/cherry-pick/revert/rebase first.")]
     OperationInProgress,
+    /// A `git rebase` or `git am` started in a terminal isn't finished (#263).
+    #[error(transparent)]
+    TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
     #[error("{0}")]
     Sign(#[from] crate::signing::SignError),
     #[error("{0}")]
@@ -894,6 +897,7 @@ pub fn amend_head(
         Some(author) => Some(valid_author(author).ok_or(CommitError::InvalidAuthor)?),
         None => None,
     };
+    crate::repo::check_no_terminal_rebase(repo)?;
     if !crate::repo::no_operation(repo) {
         return Err(CommitError::OperationInProgress);
     }
