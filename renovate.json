@@ -39,6 +39,13 @@
       "groupName": "Tauri"
     },
     {
+      "description": "0.x minor bumps are breaking (Cargo and npm treat 0.y as major): own PR, after approval",
+      "matchUpdateTypes": ["minor"],
+      "matchCurrentVersion": "/^[\\^~=]?0\\./",
+      "groupName": null,
+      "dependencyDashboardApproval": true
+    },
+    {
       "matchPackageNames": ["git2", "libgit2-sys"],
       "groupName": "git2 / libgit2",
       "dependencyDashboardApproval": true
