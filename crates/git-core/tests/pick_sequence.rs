@@ -2085,8 +2085,11 @@ fn stopped_on_an_error(command: &str) -> (tempfile::TempDir, Repository, [String
 }
 
 /// A terminal `git <command> B A C` that applied B and paused on A's conflict (unresolved).
+/// Before it, a commit adds `x.txt`, a file no step touches.
 fn paused_on_a_later_step(command: &str) -> (tempfile::TempDir, Repository, [String; 3]) {
     let (dir, repo, ids) = terminal_sequence_repo(command);
+    common::write_file(dir.path(), "x.txt", "x\n");
+    common::commit_all(&repo, "x");
     let [a, b, c] = &ids;
     let mut args = vec![command];
     if command == "revert" {
@@ -2302,28 +2305,6 @@ fn commit_and_reset_run_while_a_terminal_sequence_is_paused() {
     assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
 }
 
-#[test]
-fn aborting_a_terminal_sequence_step_keeps_head_today() {
-    let (_dir, repo, _) = paused_on_a_later_step("cherry-pick");
-    let original = sequencer_file(&repo, "head");
-    let after_b = head(&repo);
-    assert_ne!(original, after_b);
-
-    git_core::merge::abort_merge(&repo).unwrap();
-
-    // The step is gone, the list stays (#249), HEAD stays on B's commit.
-    assert!(todo(&repo).is_some());
-    assert_eq!(head(&repo), after_b);
-
-    // git's `--abort` rewinds to where the sequence started.
-    let (twin_dir, twin, _) = paused_on_a_later_step("cherry-pick");
-    let twin_original = sequencer_file(&twin, "head");
-    let output = git(twin_dir.path(), &["cherry-pick", "--abort"]);
-    assert!(output.status.success(), "{output:?}");
-    assert_eq!(head(&twin), twin_original);
-    assert!(!twin.path().join("sequencer").exists());
-}
-
 /// Probe: both error-stop fixtures stop after one step with `abort-safety` == HEAD.
 #[test]
 fn an_error_stop_leaves_abort_safety_at_head() {
@@ -2451,4 +2432,273 @@ fn no_sequencer_folder_is_no_terminal_sequence() {
         git_core::repo::head_info(&repo).unwrap().terminal_sequence,
         None
     );
+}
+
+// --- #253: Abort of a terminal sequence, like `git cherry-pick --abort` ---
+
+use git_core::pick::abort_terminal_sequence;
+
+/// The work tree's files and contents, sorted (`.git` left out).
+fn files(dir: &Path) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == ".git" {
+            continue;
+        }
+        out.push((name, std::fs::read_to_string(entry.path()).unwrap()));
+    }
+    out.sort();
+    out
+}
+
+/// git's `--abort` for `command` in `dir`.
+fn git_abort(dir: &Path, command: &str) -> std::process::Output {
+    git(dir, &[command, "--abort"])
+}
+
+/// What an abort left: the work tree, HEAD's summaries, whether HEAD is where the sequence
+/// started, whether HEAD is still on a branch and git's sequence files.
+fn aborted(
+    dir: &Path,
+    repo: &Repository,
+    started_at: &str,
+) -> (Vec<(String, String)>, Vec<String>, bool, bool, bool) {
+    let leftovers = ["sequencer", "CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"]
+        .iter()
+        .any(|name| repo.path().join(name).exists());
+    (
+        files(dir),
+        summaries(repo, 2),
+        head(repo) == started_at,
+        !repo.head_detached().unwrap(),
+        leftovers,
+    )
+}
+
+fn head_reflog_message(repo: &Repository) -> String {
+    let head = repo.head().unwrap();
+    let reflog = repo.reflog(head.name().unwrap()).unwrap();
+    reflog
+        .get(0)
+        .unwrap()
+        .message()
+        .unwrap()
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[test]
+fn abort_rewinds_a_terminal_sequence_paused_on_a_later_step() {
+    for command in ["cherry-pick", "revert"] {
+        let run = |abort: &dyn Fn(&Path, &Repository) -> bool| {
+            let (dir, repo, _) = paused_on_a_later_step(command);
+            let started_at = sequencer_file(&repo, "head");
+            // An unrelated edit and an untracked file survive, as with `reset --merge`.
+            common::write_file(dir.path(), "x.txt", "edited\n");
+            common::write_file(dir.path(), "u.txt", "untracked\n");
+            assert!(abort(dir.path(), &repo), "{command}");
+            let message = head_reflog_message(&repo);
+            assert_eq!(
+                message,
+                format!("reset: moving to {started_at}"),
+                "{command}"
+            );
+            aborted(dir.path(), &repo, &started_at)
+        };
+        let ours = run(&|_, repo| {
+            let abort = abort_terminal_sequence(repo).unwrap();
+            abort.rewound
+        });
+        let theirs = run(&|dir, _| git_abort(dir, command).status.success());
+
+        assert_eq!(ours, theirs, "{command}");
+        let (files, _, at_start, attached, leftovers) = ours;
+        assert!(at_start && attached && !leftovers, "{command}");
+        assert!(files.contains(&("x.txt".into(), "edited\n".into())));
+        assert!(files.contains(&("u.txt".into(), "untracked\n".into())));
+    }
+}
+
+#[test]
+fn abort_rewinds_after_an_error_stop() {
+    for command in ["cherry-pick", "revert"] {
+        let run = |abort: &dyn Fn(&Path, &Repository) -> bool| {
+            let (dir, repo, _) = stopped_on_an_error(command);
+            let started_at = sequencer_file(&repo, "head");
+            assert!(abort(dir.path(), &repo), "{command}");
+            aborted(dir.path(), &repo, &started_at)
+        };
+        let ours = run(&|_, repo| abort_terminal_sequence(repo).unwrap().rewound);
+        let theirs = run(&|dir, _| git_abort(dir, command).status.success());
+
+        assert_eq!(ours, theirs, "{command}");
+        let (files, _, at_start, _, leftovers) = ours;
+        assert!(at_start && !leftovers, "{command}");
+        // The junk that stopped the sequence stays.
+        assert!(
+            files.contains(&("b.txt".into(), "junk\n".into())),
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn abort_between_steps_after_a_manual_commit_keeps_head() {
+    for command in ["cherry-pick", "revert"] {
+        let (dir, repo, _) = between_steps(command);
+        let before = head(&repo);
+        let worktree = files(dir.path());
+
+        let abort = abort_terminal_sequence(&repo).unwrap();
+
+        assert!(!abort.rewound, "{command}");
+        assert_eq!(head(&repo), before);
+        assert_eq!(files(dir.path()), worktree);
+        assert!(!repo.path().join("sequencer").exists());
+        assert_eq!(detect(&repo), None);
+
+        // git's twin doesn't rewind either.
+        let (twin_dir, twin, _) = between_steps(command);
+        let twin_before = head(&twin);
+        let output = git_abort(twin_dir.path(), command);
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("Not rewinding"));
+        assert_eq!(head(&twin), twin_before);
+        assert!(!twin.path().join("sequencer").exists());
+    }
+}
+
+#[test]
+fn abort_on_the_first_step_only_undoes_the_step() {
+    for command in ["cherry-pick", "revert"] {
+        let run = |abort: &dyn Fn(&Path, &Repository) -> bool| {
+            let (dir, repo, _) = paused_unresolved(command, false);
+            let started_at = sequencer_file(&repo, "head");
+            assert_eq!(head(&repo), started_at);
+            assert!(abort(dir.path(), &repo), "{command}");
+            aborted(dir.path(), &repo, &started_at)
+        };
+        let ours = run(&|_, repo| abort_terminal_sequence(repo).unwrap().rewound);
+        let theirs = run(&|dir, _| git_abort(dir, command).status.success());
+
+        assert_eq!(ours, theirs, "{command}");
+        assert!(ours.2 && !ours.4, "{command}");
+    }
+}
+
+/// A local edit to a file a landed step changed blocks the rewind, as `git cherry-pick --abort`
+/// refuses ("Entry 'b.txt' not uptodate"). git then leaves the step paused; Browsitory has
+/// already aborted the step, and keeps the list so Abort can be retried.
+#[test]
+fn abort_of_a_terminal_sequence_refuses_to_overwrite_a_local_edit() {
+    let (dir, repo, _) = paused_on_a_later_step("cherry-pick");
+    let started_at = sequencer_file(&repo, "head");
+    let after_b = head(&repo);
+    common::write_file(dir.path(), "b.txt", "edited\n");
+
+    assert!(abort_terminal_sequence(&repo).is_err());
+
+    assert_eq!(head(&repo), after_b);
+    assert_eq!(common::read(dir.path(), "b.txt"), "edited\n");
+    assert!(!repo.path().join("CHERRY_PICK_HEAD").exists());
+    let now = detect(&repo).expect("the list is kept");
+    assert!(!now.paused_on_conflict);
+    assert!(now.rewinds);
+    assert_eq!(now.commits_to_remove, 1);
+
+    common::write_file(dir.path(), "b.txt", "b\n");
+    let abort = abort_terminal_sequence(&repo).unwrap();
+    assert!(abort.rewound);
+    assert_eq!(head(&repo), started_at);
+    assert!(!dir.path().join("b.txt").exists());
+    assert_eq!(detect(&repo), None);
+
+    // git's twin refuses too, and leaves the step paused.
+    let (twin_dir, twin, _) = paused_on_a_later_step("cherry-pick");
+    let twin_after_b = head(&twin);
+    common::write_file(twin_dir.path(), "b.txt", "edited\n");
+    let output = git_abort(twin_dir.path(), "cherry-pick");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("not uptodate"));
+    assert_eq!(head(&twin), twin_after_b);
+    assert!(twin.path().join("CHERRY_PICK_HEAD").exists());
+    assert!(twin.path().join("sequencer").exists());
+}
+
+#[test]
+fn abort_keeps_a_terminal_bisect() {
+    let run = |abort: &dyn Fn(&Path, &Repository) -> bool| {
+        let (dir, repo, [a, b, c]) = terminal_sequence_repo("cherry-pick");
+        assert!(git(dir.path(), &["bisect", "start"]).status.success());
+        let log = std::fs::read(repo.path().join("BISECT_LOG")).unwrap();
+        let output = git(dir.path(), &["cherry-pick", &b, &a, &c]);
+        assert!(!output.status.success());
+        drop(repo);
+        let repo = reopen(dir.path());
+        let started_at = sequencer_file(&repo, "head");
+        assert!(abort(dir.path(), &repo));
+        assert_eq!(std::fs::read(repo.path().join("BISECT_LOG")).unwrap(), log);
+        aborted(dir.path(), &repo, &started_at)
+    };
+    let ours = run(&|_, repo| abort_terminal_sequence(repo).unwrap().rewound);
+    let theirs = run(&|dir, _| git_abort(dir, "cherry-pick").status.success());
+    assert_eq!(ours, theirs);
+    assert!(ours.2 && !ours.4);
+}
+
+#[test]
+fn abort_without_a_terminal_sequence_is_refused() {
+    let (_dir, repo, _) = terminal_sequence_repo("cherry-pick");
+    assert!(matches!(
+        abort_terminal_sequence(&repo),
+        Err(PickError::NoTerminalSequence)
+    ));
+}
+
+/// A merge started in Browsitory during a terminal sequence (allowed, D5-A) is not the
+/// sequence's: Abort cherry-pick refuses to touch it.
+#[test]
+fn abort_of_a_terminal_sequence_refuses_a_paused_merge() {
+    let (_dir, repo, _) = between_steps("cherry-pick");
+    let tip = repo.head().unwrap().peel_to_commit().unwrap();
+    let other = common::commit_tree(
+        &repo,
+        &[("f", "other\n", 0o100644)],
+        &[tip.parent_id(0).unwrap()],
+        "other",
+    );
+    repo.branch("other", &repo.find_commit(other).unwrap(), false)
+        .unwrap();
+    git_core::merge::start_merge(&repo, "other", git_core::merge::MergeOptions::default()).unwrap();
+    assert_eq!(repo.state(), RepositoryState::Merge);
+
+    assert!(matches!(
+        abort_terminal_sequence(&repo),
+        Err(PickError::OperationInProgress)
+    ));
+    assert_eq!(repo.state(), RepositoryState::Merge);
+    assert!(detect(&repo).is_some());
+}
+
+/// Paused on the list's last step, a refused rewind still keeps the list (aborting only that
+/// step would end it, as `abort_merge` does), so Abort can be retried.
+#[test]
+fn a_refused_rewind_on_the_last_step_keeps_the_list() {
+    let (dir, repo, [a, b, _]) = terminal_sequence_repo("cherry-pick");
+    let output = git(dir.path(), &["cherry-pick", &b, &a]);
+    assert!(!output.status.success());
+    drop(repo);
+    let repo = reopen(dir.path());
+    let started_at = sequencer_file(&repo, "head");
+    common::write_file(dir.path(), "b.txt", "edited\n");
+
+    assert!(abort_terminal_sequence(&repo).is_err());
+    assert!(detect(&repo).is_some_and(|sequence| sequence.rewinds));
+
+    common::write_file(dir.path(), "b.txt", "b\n");
+    assert!(abort_terminal_sequence(&repo).unwrap().rewound);
+    assert_eq!(head(&repo), started_at);
+    assert_eq!(detect(&repo), None);
 }

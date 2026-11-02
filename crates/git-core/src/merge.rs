@@ -657,6 +657,27 @@ pub(crate) fn has_conflict_markers(content: &[u8]) -> bool {
 }
 
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
+    reset_operation(repo)?;
+    // Only the operation's own files, as git's `remove_branch_state` after `git reset --merge`:
+    // a terminal bisect, rebase or cherry-pick list goes on, except that aborting the list's
+    // last pick ends the list (git's `have_finished_the_last_pick`, #249).
+    crate::commit::clear_commit_state(repo).map_err(MergeError::StateFiles)?;
+    clear_squash_message(repo)?;
+    Ok(())
+}
+
+/// Aborts the paused step of a terminal `git cherry-pick A B C` like `abort_merge`, but always
+/// keeps the list (`.git/sequencer`), also after its last pick: the caller
+/// (`pick::abort_terminal_sequence`) removes it once the rest of the abort has worked (#253).
+pub(crate) fn abort_step_keeping_list(repo: &Repository) -> Result<(), MergeError> {
+    reset_operation(repo)?;
+    crate::commit::clear_operation_files(repo).map_err(MergeError::StateFiles)?;
+    clear_squash_message(repo)?;
+    Ok(())
+}
+
+/// `abort_merge` up to the state files: the touched paths back to HEAD.
+fn reset_operation(repo: &Repository) -> Result<(), MergeError> {
     use git2::RepositoryState::{CherryPick, CherryPickSequence, Merge, Revert, RevertSequence};
     // The worker keeps one handle per repository, whose index may predate a merge or pick run
     // in a terminal: read the one on disk, or Abort would leave that operation's conflicts.
@@ -724,11 +745,6 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
         }
         repo.checkout_head(Some(&mut checkout))?;
     }
-    // Only the operation's own files, as git's `remove_branch_state` after `git reset --merge`:
-    // a terminal bisect, rebase or cherry-pick list goes on, except that aborting the list's
-    // last pick ends the list (git's `have_finished_the_last_pick`, #249).
-    crate::commit::clear_commit_state(repo).map_err(MergeError::StateFiles)?;
-    clear_squash_message(repo)?;
     Ok(())
 }
 

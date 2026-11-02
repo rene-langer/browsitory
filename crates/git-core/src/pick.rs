@@ -1180,27 +1180,90 @@ pub fn abort_sequence(
     }
     if head_id == state.expected_head && state.expected_head != state.original_head {
         let original = repo.find_commit(Oid::from_str(&state.original_head)?)?;
-        // Safe checkouts create files through a symlinked folder (#114). The original tree is
-        // one the user already had (#161), so its case collisions are not "brought in".
-        let tree = original.tree()?;
-        crate::worktree_guard::refuse_linked_folders_known::<PickError>(
-            repo,
-            &[crate::worktree_guard::Incoming::Checkout(&tree)],
-            Some(&tree),
-        )?;
-        repo.checkout_tree(original.as_object(), None)?;
         let reflog = match state.kind {
             SequenceKind::CherryPick => "cherry-pick: abort",
             SequenceKind::Revert => "revert: abort",
         };
-        if repo.head_detached()? {
-            repo.set_head_detached(original.id())?;
-        } else {
-            repo.head()?.set_target(original.id(), reflog)?;
-        }
+        rewind_to(repo, &original, reflog)?;
         return Ok(SequenceAbort { rewound: true });
     }
     Ok(SequenceAbort {
         rewound: head_id == state.original_head,
+    })
+}
+
+/// Puts HEAD (the branch, or a detached HEAD) back at `original`, with the work tree and index
+/// checked out like `git reset --merge`: libgit2's SAFE strategy keeps unrelated local edits and
+/// untracked files, and refuses (changing nothing) when a local edit or an untracked file is in
+/// the way of a file it would change.
+fn rewind_to(repo: &Repository, original: &Commit<'_>, reflog: &str) -> Result<(), PickError> {
+    // Safe checkouts create files through a symlinked folder (#114). The original tree is one
+    // the user already had (#161), so its case collisions are not "brought in".
+    let tree = original.tree()?;
+    crate::worktree_guard::refuse_linked_folders_known::<PickError>(
+        repo,
+        &[crate::worktree_guard::Incoming::Checkout(&tree)],
+        Some(&tree),
+    )?;
+    repo.checkout_tree(original.as_object(), None)?;
+    if repo.head_detached()? {
+        repo.set_head_detached(original.id())?;
+    } else {
+        repo.head()?.set_target(original.id(), reflog)?;
+    }
+    Ok(())
+}
+
+/// Ends a terminal `git cherry-pick A B C` / `git revert A B` (`.git/sequencer`) like
+/// `git cherry-pick --abort` (#253, D7-A):
+///
+/// 1. a paused step (or its conflicts) is aborted like `merge::abort_merge`, keeping unrelated
+///    edits;
+/// 2. when HEAD is still where the sequence last left it (`sequencer/abort-safety`), HEAD goes
+///    back to where it started (`sequencer/head`), removing the commits the sequence made, as
+///    git's `reset --merge` (reflog `reset: moving to <id>`). Otherwise HEAD stays (git:
+///    "You seem to have moved HEAD. Not rewinding");
+/// 3. the list is removed.
+///
+/// A local edit in the way of the rewind is an error that leaves the list, so Abort can be
+/// retried: the step is aborted by then (git would leave it paused), the sequence is between
+/// steps. `rewound` is true when HEAD ends where the sequence started. Another operation paused
+/// here (a merge started during the sequence) is `OperationInProgress`, nothing changed.
+pub fn abort_terminal_sequence(repo: &Repository) -> Result<SequenceAbort, PickError> {
+    let sequence = terminal_sequence(repo).ok_or(PickError::NoTerminalSequence)?;
+    let ours = matches!(
+        repo.state(),
+        RepositoryState::Clean
+            | RepositoryState::Bisect
+            | RepositoryState::CherryPick
+            | RepositoryState::CherryPickSequence
+            | RepositoryState::Revert
+            | RepositoryState::RevertSequence
+    );
+    if !ours {
+        return Err(PickError::OperationInProgress);
+    }
+    if sequence.paused_on_conflict || fresh_index(repo)?.has_conflicts() {
+        crate::merge::abort_step_keeping_list(repo)?;
+    }
+    // HEAD hasn't moved, but read it again after the step's abort, as git decides afterwards.
+    let sequence = terminal_sequence(repo).ok_or(PickError::NoTerminalSequence)?;
+    if sequence.rewinds {
+        let original = repo.find_commit(Oid::from_str(&sequence.started_at)?)?;
+        rewind_to(
+            repo,
+            &original,
+            &format!("reset: moving to {}", sequence.started_at),
+        )?;
+    }
+    match std::fs::remove_dir_all(repo.path().join("sequencer")) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            return Err(PickError::Commit(crate::commit::CommitError::Io(error)))
+        }
+        _ => {}
+    }
+    let head = repo.head().ok().and_then(|head| head.target());
+    Ok(SequenceAbort {
+        rewound: head.is_some_and(|head| head.to_string() == sequence.started_at),
     })
 }
