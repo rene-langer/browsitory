@@ -692,3 +692,115 @@ fn the_branch_being_rebased_cant_be_deleted_renamed_or_checked_out_in_a_new_work
     git_core::branch::rename_branch(&repo, "spare", "spare2").unwrap();
     git_core::branch::delete_branch(&linked, "spare2", true).unwrap();
 }
+
+/// #263 re-review: another worktree can't switch to the branch a terminal rebase is rebasing
+/// (git: "'topic' is already used by worktree at …"). A commit there would be lost when the
+/// rebase is aborted (it resets topic) or finished.
+#[test]
+fn another_worktree_cant_switch_to_the_branch_being_rebased() {
+    let (dir, repo, ids) = terminal_rebase();
+    let elsewhere = TempDir::new().unwrap();
+    let linked_path = elsewhere.path().join("linked");
+    git_ok(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            linked_path.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let linked = Repository::open(&linked_path).unwrap();
+    assert!(!git(&linked_path, &["switch", "topic"]).status.success());
+
+    let error = git_core::branch::switch_branch(&linked, "topic").unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "topic is being rebased by a rebase started in a terminal. Continue it there with git \
+         rebase --continue, or abort it with git rebase --abort."
+    );
+    assert_eq!(linked.head().unwrap().name().ok(), Some("refs/heads/main"));
+    assert_eq!(
+        repo.find_reference("refs/heads/topic").unwrap().target(),
+        Some(ids.topic)
+    );
+}
+
+/// #263 re-review: Undo doesn't put another worktree's HEAD back on the branch a terminal
+/// rebase is rebasing, as it doesn't for a branch checked out elsewhere.
+#[test]
+fn undo_doesnt_check_out_the_branch_being_rebased_in_another_worktree() {
+    let (dir, repo, _ids) = fixture();
+    let elsewhere = TempDir::new().unwrap();
+    let linked_path = elsewhere.path().join("linked");
+    git_ok(dir.path(), &["checkout", "-q", "main"]);
+    git_ok(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            linked_path.to_str().unwrap(),
+            "topic",
+        ],
+    );
+    let linked = Repository::open(&linked_path).unwrap();
+    let on_topic = git_core::undo::capture(&linked, git_core::undo::SnapshotScope::Full).unwrap();
+    git_ok(&linked_path, &["checkout", "-q", "-b", "spare"]);
+    let linked = Repository::open(&linked_path).unwrap();
+    let on_spare = git_core::undo::capture(&linked, git_core::undo::SnapshotScope::Full).unwrap();
+    git_ok(dir.path(), &["checkout", "-q", "topic"]);
+    assert!(!git(dir.path(), &["rebase", "main"]).status.success());
+    drop(repo);
+
+    let error = git_core::undo::restore(&linked, &on_spare, &on_topic, "undo").unwrap_err();
+
+    assert!(
+        matches!(error, git_core::undo::UndoError::RepositoryChanged),
+        "{error}"
+    );
+    assert_eq!(linked.head().unwrap().name().ok(), Some("refs/heads/spare"));
+}
+
+/// #263 re-review: a commit concluding a revert started during a terminal rebase clears
+/// REVERT_HEAD, as `git commit` does. Twinned with the git CLI.
+#[test]
+fn committing_a_revert_during_a_terminal_rebase_clears_it_like_git_commit() {
+    let setup = || {
+        let (dir, repo, ids) = fixture();
+        let path = dir.path();
+        let output = git(path, &["rebase", "-f", "-x", "false", &ids.t1.to_string()]);
+        assert!(!output.status.success(), "the exec must stop: {output:?}");
+        common::write_file(path, "f", "changed\n");
+        git_ok(path, &["commit", "-qam", "changed"]);
+        let output = git(path, &["revert", "--no-edit", &ids.t1.to_string()]);
+        assert!(
+            !output.status.success(),
+            "the revert must conflict: {output:?}"
+        );
+        common::write_file(path, "f", "resolved\n");
+        git_ok(path, &["add", "f"]);
+        let repo = reopen(&repo);
+        assert!(repo.path().join("REVERT_HEAD").exists());
+        (dir, repo)
+    };
+    let (ours_dir, ours) = setup();
+    let (twin_dir, twin) = setup();
+    let message = std::fs::read_to_string(ours.path().join("MERGE_MSG")).unwrap();
+    let mut ours = reopen(&ours);
+
+    git_core::commit::commit_with(
+        &mut ours,
+        &message,
+        git_core::commit::CommitHookSet::Commit,
+        HookOptions::default(),
+    )
+    .unwrap();
+    git_ok(twin_dir.path(), &["commit", "--no-edit"]);
+
+    assert!(!ours.path().join("REVERT_HEAD").exists());
+    assert_eq!(state_files(&ours), state_files(&reopen(&twin)));
+    drop(ours_dir);
+}

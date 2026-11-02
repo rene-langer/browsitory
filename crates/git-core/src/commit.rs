@@ -726,11 +726,7 @@ pub fn commit_with(
     // Cherry-pick/revert leave CHERRY_PICK_HEAD/REVERT_HEAD + MERGE_MSG behind on conflict; the
     // commit that lands the resolved result is single-parent (HEAD only — they are not merges),
     // but the state files must still be cleared or `repo.state()` stays non-Clean.
-    let finishes_pick = picking_now(repo)
-        || matches!(
-            repo.state(),
-            git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence
-        );
+    let finishes_pick = picking_now(repo) || reverting_now(repo);
     // The commit landed: nothing after this point fails it (#183).
     if is_merging || finishes_pick {
         cleanup_after_commit(repo);
@@ -768,6 +764,16 @@ fn picking_now(repo: &git2::Repository) -> bool {
         git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence
     ) || (crate::repo::terminal_rebase(repo).is_some()
         && repo.path().join("CHERRY_PICK_HEAD").exists())
+}
+
+/// A revert is paused for the commit to conclude: libgit2's `Revert` states, or a REVERT_HEAD
+/// left by a `git revert` started during a terminal rebase, which libgit2 reports as the rebase.
+/// `git commit` clears it in both (#263 review).
+fn reverting_now(repo: &git2::Repository) -> bool {
+    matches!(
+        repo.state(),
+        git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence
+    ) || (crate::repo::terminal_rebase(repo).is_some() && repo.path().join("REVERT_HEAD").exists())
 }
 
 /// Every one of `merge_heads` is HEAD or in HEAD's history: the merge was already committed.

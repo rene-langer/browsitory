@@ -731,8 +731,9 @@ across processes).
     `mergehead_foreach` rejects, so `commit::merge_heads` reads the file itself.
   - The rebased branch (`head-name` in any worktree's `rebase-merge/` or `rebase-apply/`) can't
     be deleted, renamed or checked out in a new worktree (`repo::BranchBeingRebased`, "topic is
-    being rebased by a rebase started in a terminal. …"), from this or any other worktree, as
-    git refuses. HEAD is detached during the rebase, so libgit2's own checked-out checks don't
+    being rebased by a rebase started in a terminal. …"), from this or any other worktree, nor
+    switched to from another worktree (`check_branch_not_rebased_elsewhere`), as git refuses.
+    Undo counts it as checked out in that worktree, so it doesn't move HEAD onto it. HEAD is detached during the rebase, so libgit2's own checked-out checks don't
     see it.
   - No in-app Abort: `git rebase --abort` also restores an autostash, `--update-refs` branches
     and the apply backend's state, which Browsitory can't do exactly; the strip says to continue

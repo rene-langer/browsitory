@@ -714,7 +714,8 @@ merge say "A rebase started in a terminal isn't finished. Continue it there with
 hand during the rebase, since Browsitory can't tell it from the rebase's own merge step; use
 `git merge --abort` in the terminal. Stash, amend and the sidebar's branch, tag and worktree
 actions are disabled. As with git, the branch being rebased can't be deleted, renamed or
-checked out in a new worktree, also from another worktree's window.
+checked out in a new worktree, also from another worktree's window, and another worktree can't
+switch to it.
 
 **Interrupted rebase.** If the repository changed outside Browsitory while a rebase was paused, the
 strip shows **Rebase of ⟨branch⟩ interrupted** with the reason: HEAD was moved (for example

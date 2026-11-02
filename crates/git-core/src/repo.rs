@@ -140,6 +140,33 @@ pub(crate) fn check_branch_not_rebased(
     branch: &str,
 ) -> Result<(), BranchBeingRebased> {
     let full = format!("refs/heads/{branch}");
+    if rebased_branches(repo).any(|(_, name)| name == full) {
+        return Err(BranchBeingRebased(branch.to_string()));
+    }
+    Ok(())
+}
+
+/// [`check_branch_not_rebased`] for a terminal rebase in another worktree only: switching to
+/// the branch being rebased in this worktree is what git allows (the UI disables it anyway).
+pub(crate) fn check_branch_not_rebased_elsewhere(
+    repo: &git2::Repository,
+    branch: &str,
+) -> Result<(), BranchBeingRebased> {
+    let full = format!("refs/heads/{branch}");
+    let this = std::fs::canonicalize(repo.path()).ok();
+    let elsewhere = rebased_branches(repo)
+        .any(|(git_dir, name)| name == full && std::fs::canonicalize(&git_dir).ok() != this);
+    if elsewhere {
+        return Err(BranchBeingRebased(branch.to_string()));
+    }
+    Ok(())
+}
+
+/// Every branch a terminal rebase is rebasing (full ref name), with the git folder of the
+/// worktree it runs in: the main one and each linked one (`worktrees/<name>`).
+pub(crate) fn rebased_branches(
+    repo: &git2::Repository,
+) -> impl Iterator<Item = (std::path::PathBuf, String)> {
     let common = repo.commondir().to_path_buf();
     let mut git_dirs = vec![common.clone()];
     if let Ok(entries) = std::fs::read_dir(common.join("worktrees")) {
@@ -149,16 +176,15 @@ pub(crate) fn check_branch_not_rebased(
                 .map(|entry| entry.path()),
         );
     }
-    let rebased = git_dirs.iter().any(|dir| {
-        ["rebase-merge", "rebase-apply"].iter().any(|folder| {
-            std::fs::read_to_string(dir.join(folder).join("head-name"))
-                .is_ok_and(|name| name.trim() == full)
-        })
-    });
-    if rebased {
-        return Err(BranchBeingRebased(branch.to_string()));
-    }
-    Ok(())
+    git_dirs.into_iter().flat_map(|dir| {
+        ["rebase-merge", "rebase-apply"]
+            .into_iter()
+            .filter_map(|folder| std::fs::read_to_string(dir.join(folder).join("head-name")).ok())
+            .map(|name| name.trim().to_string())
+            .filter(|name| name.starts_with("refs/heads/"))
+            .map(|name| (dir.clone(), name))
+            .collect::<Vec<_>>()
+    })
 }
 
 /// `Err` while a terminal rebase or `git am` is in progress.

@@ -20,7 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   step of git rebase --rebase-merges it makes the merge commit (it made a plain commit, so git
   rebase --continue lost the side branch); at an empty pick it keeps the original author (#263).
 - Fixed: the branch being rebased in a terminal could be deleted, renamed or checked out in a new
-  worktree, also from another worktree's window. This is now refused, as git refuses it. Stash
+  worktree, and another worktree could switch to it (a commit made there was lost when the
+  rebase was aborted). This is now refused, as git refuses it; Undo doesn't switch to it either. Stash
   and amend are disabled during the rebase (#263).
 - Fixed: starting a rebase during a paused merge, cherry-pick or revert now refuses up front
   and names it ("A merge is in progress. Commit or abort it before starting a rebase."). A
