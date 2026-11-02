@@ -6,10 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Internal: ctor 0.13
+### Internal: ctor 1.0
 
-- Changed: the test-only `ctor` dependency is now 0.13; the hermetic-git test guard's
-  constructor is marked `unsafe`, as ctor 0.13 requires.
+- Changed: the test-only `ctor` dependency is now 1.0 (the version Tauri already uses); the hermetic-git test guard's
+  constructor is marked `unsafe`, as ctor 0.13+ requires.
 
 ### Terminal rebases
 

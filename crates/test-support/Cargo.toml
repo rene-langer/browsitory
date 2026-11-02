@@ -7,5 +7,5 @@ publish = false
 description = "Test-only helpers shared by the workspace's Rust test suites (never a runtime dependency)."
 
 [dependencies]
-ctor = "0.13"
+ctor = "1.0"
 git2 = "0.21"
