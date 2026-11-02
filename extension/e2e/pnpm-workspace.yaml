@@ -1,0 +1,6 @@
+# Makes extension/e2e its own pnpm workspace root instead of an unlisted
+# directory under extension/pnpm-workspace.yaml. Without this, pnpm (and so
+# Renovate's lockfile update) walks up to extension/ and leaves
+# extension/e2e/pnpm-lock.yaml stale after a package.json bump.
+packages:
+  - '.'

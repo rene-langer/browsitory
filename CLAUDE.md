@@ -55,10 +55,10 @@ cargo build --workspace
 cd frontend && pnpm run generate:release-notes && VITE_E2E_REPO_PATH=/tmp/browsitory-vscode-e2e-repo pnpm exec vite build --config vite.vscode.config.ts && cd ..
 cd extension && pnpm install && pnpm run compile && cd ..
 cd extension/e2e
-pnpm install --ignore-workspace                    # NOT plain `pnpm install` — extension/e2e isn't
-                                                    # listed in extension/pnpm-workspace.yaml's
-                                                    # `packages:`, so a plain install silently
-                                                    # resolves to extension/node_modules instead
+pnpm install --ignore-workspace                    # extension/e2e isn't a member of
+                                                    # extension/pnpm-workspace.yaml; its own
+                                                    # pnpm-workspace.yaml stops pnpm walking up
+                                                    # to extension/, --ignore-workspace too
 pnpm test                                          # spawns the extension under vscode.ExtensionMode.Test; needs a display (xvfb-run on headless CI)
 ```
 
@@ -72,7 +72,28 @@ ln -sf "$(git rev-parse --show-toplevel)/scripts/hooks/pre-push" "$(git rev-pars
 
 Wires up `scripts/check-changelog.py` as a `pre-push` hook: blocks a push touching `crates/`,
 `frontend/src/`, or `e2e/` without a matching `CHANGELOG.md` update. Bypass once with
-`SKIP_CHANGELOG_CHECK=1 git push`.
+`SKIP_CHANGELOG_CHECK=1 git push`. A diff that touches only dependency manifests/lockfiles
+(`Cargo.toml`, `Cargo.lock`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
+`rust-toolchain.toml`) needs no entry.
+
+## Dependency updates
+
+Renovate (`renovate.json`) opens dependency PRs before 6am on Mondays (Europe/Berlin), at most
+three open at a time, labelled `maintainability`, and never automerges — merge by hand once CI
+is green. Covered: the Cargo workspace, all four pnpm projects (`frontend/`, `extension/`,
+`e2e/`, `extension/e2e/`, each with its own lockfile), GitHub Actions, and
+`rust-toolchain.toml`. Minor/patch updates are grouped per ecosystem (Rust, JS, GitHub
+Actions); Tauri crates and `@tauri-apps/*` packages share one group. Majors and
+`git2`/`libgit2-sys` wait for approval on the Dependency Dashboard issue (libgit2 bumps change
+behaviour the tests and `docs/ARCHITECTURE.md` characterize). Security fixes skip the
+schedule; lockfiles get a monthly maintenance PR.
+
+The license policy and the CI `audit` job still apply to these PRs.
+`scripts/check-license-compliance.py` only catches an undocumented *direct* dependency; it
+doesn't read licences or the transitive tree. So check what an update adds to `Cargo.lock` /
+`pnpm-lock.yaml`: a new transitive dependency under a licence the doc doesn't cover yet needs
+a `docs/LICENSE_COMPLIANCE.md` row in the same PR. When an update fixes an advisory, drop its
+ignore from `.cargo/audit.toml` in the same PR and close the matching RUSTSEC issue.
 
 ## Versioning & releases
 
