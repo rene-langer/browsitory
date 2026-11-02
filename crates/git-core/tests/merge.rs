@@ -788,6 +788,104 @@ fn abort_merge_keeps_unrelated_unstaged_edits() {
     );
 }
 
+/// The worker keeps one `Repository` per repo. A conflicting `git merge` run in a terminal after
+/// that handle loaded its index must still be aborted from the index on disk, or the conflicted
+/// file keeps its markers.
+#[test]
+fn abort_merge_reads_an_index_changed_behind_the_handle() {
+    let (dir, repo) = make_conflicting_branches();
+    let loaded = repo.index().unwrap();
+    assert!(!loaded.has_conflicts());
+    drop(loaded);
+    let output = std::process::Command::new("git")
+        .args(["merge", "feature"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "the merge must conflict");
+    assert!(std::fs::read_to_string(dir.path().join("shared.txt"))
+        .unwrap()
+        .contains("<<<<<<<"));
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "line one\nmain two\nline three\n"
+    );
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    assert!(!index.has_conflicts());
+}
+
+/// Abort removes only the merge's own files (#249): a terminal rebase's folder stays, as
+/// `git merge --abort` keeps it.
+#[test]
+fn aborting_a_merge_keeps_a_terminal_rebase_dir() {
+    let (dir, repo) = make_conflicted_repo();
+    let rebase_dir = repo.path().join("rebase-merge");
+    std::fs::create_dir(&rebase_dir).unwrap();
+    std::fs::write(rebase_dir.join("head-name"), "refs/heads/topic\n").unwrap();
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(rebase_dir.join("head-name")).unwrap(),
+        "refs/heads/topic\n"
+    );
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+    assert!(!repo.index().unwrap().has_conflicts());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "line one\nmain two\nline three\n"
+    );
+}
+
+/// ...and a terminal cherry-pick's list (`.git/sequencer`) stays too (#249).
+#[test]
+fn aborting_a_merge_keeps_a_sequencer_todo() {
+    let (_dir, repo) = make_conflicted_repo();
+    let sequencer = repo.path().join("sequencer");
+    std::fs::create_dir(&sequencer).unwrap();
+    std::fs::write(sequencer.join("todo"), "pick 1234567 B\n").unwrap();
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(sequencer.join("todo")).unwrap(),
+        "pick 1234567 B\n"
+    );
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+/// A state file Abort can't remove (here a folder stands at `MERGE_MODE`) is reported as such,
+/// not as "failed to write resolved file" (#249). The other files are still removed.
+#[test]
+fn abort_merge_reports_a_state_file_it_cant_remove() {
+    let (_dir, repo) = make_conflicted_repo();
+    let blocker = repo.path().join("MERGE_MODE");
+    let _ = std::fs::remove_file(&blocker);
+    std::fs::create_dir(&blocker).unwrap();
+    std::fs::write(blocker.join("keep"), "x").unwrap();
+
+    let error = git_core::merge::abort_merge(&repo).unwrap_err();
+
+    assert!(
+        matches!(error, git_core::merge::MergeError::StateFiles(_)),
+        "{error:?}"
+    );
+    assert!(
+        error
+            .to_string()
+            .starts_with("Couldn't remove git's merge state:"),
+        "{error}"
+    );
+    assert!(!repo.path().join("MERGE_HEAD").exists());
+    assert!(!repo.path().join("MERGE_MSG").exists());
+}
+
 #[test]
 fn abort_merge_errors_and_leaves_uncommitted_work_untouched_when_no_merge_is_in_progress() {
     let (dir, repo) = init_repo();

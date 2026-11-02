@@ -1967,3 +1967,80 @@ fn a_commit_without_a_pick_keeps_a_one_line_todo() {
     assert!(!twin.path().join("MERGE_HEAD").exists());
     assert_eq!(todo(&twin).as_deref(), Some(line.as_str()));
 }
+
+// --- #249: Abort of a terminal sequence's paused step, like `git reset --merge` ---
+
+/// A terminal `git <command> A B C` (or `B A` when `last`) paused on A's conflict, unresolved.
+/// Returns a fresh handle: the git CLI wrote the index.
+fn paused_unresolved(command: &str, last: bool) -> (tempfile::TempDir, Repository, [String; 3]) {
+    let (dir, repo, ids) = terminal_sequence_repo(command);
+    let [a, b, c] = &ids;
+    let mut args = vec![command];
+    if command == "revert" {
+        args.push("--no-edit");
+    }
+    if last {
+        args.extend([b.as_str(), a.as_str()]);
+    } else {
+        args.extend([a.as_str(), b.as_str(), c.as_str()]);
+    }
+    let output = git(dir.path(), &args);
+    assert!(!output.status.success(), "the sequence must pause on A");
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    assert!(repo.path().join("sequencer").join("todo").exists());
+    (dir, repo, ids)
+}
+
+/// Abort of the paused last step of a terminal `git cherry-pick B A` (or revert) also ends the
+/// list, as git's `remove_branch_state` does after `git reset --merge`
+/// (`have_finished_the_last_pick`).
+#[test]
+fn aborting_a_terminal_sequences_last_step_removes_its_list() {
+    for command in ["cherry-pick", "revert"] {
+        let (dir, repo, _) = paused_unresolved(command, true);
+        let before = head(&repo);
+        assert_eq!(todo(&repo).unwrap().lines().count(), 1);
+
+        git_core::merge::abort_merge(&repo).unwrap();
+
+        assert_eq!(todo(&repo), None, "{command}");
+        assert!(!repo.path().join("sequencer").exists(), "{command}");
+        assert_eq!(repo.state(), RepositoryState::Clean);
+        assert_eq!(head(&repo), before);
+        assert_eq!(common::read(dir.path(), "f"), "main\n");
+
+        // git's twin.
+        let (twin_dir, twin, _) = paused_unresolved(command, true);
+        let output = git(twin_dir.path(), &["reset", "--merge"]);
+        assert!(output.status.success(), "{output:?}");
+        assert!(!twin.path().join("sequencer").exists(), "{command}");
+    }
+}
+
+/// Abort of an earlier step keeps the rest of the list for `git cherry-pick --continue`, as
+/// `git reset --merge` does (#249).
+#[test]
+fn aborting_an_earlier_step_of_a_terminal_sequence_keeps_its_list() {
+    for command in ["cherry-pick", "revert"] {
+        let (_dir, repo, _) = paused_unresolved(command, false);
+        let before = todo(&repo).unwrap();
+
+        git_core::merge::abort_merge(&repo).unwrap();
+
+        assert_eq!(todo(&repo).as_deref(), Some(before.as_str()), "{command}");
+        assert!(!repo.path().join("CHERRY_PICK_HEAD").exists());
+        assert!(!repo.path().join("REVERT_HEAD").exists());
+
+        // git's twin.
+        let (twin_dir, twin, _) = paused_unresolved(command, false);
+        let twin_before = todo(&twin).unwrap();
+        let output = git(twin_dir.path(), &["reset", "--merge"]);
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            todo(&twin).as_deref(),
+            Some(twin_before.as_str()),
+            "{command}"
+        );
+    }
+}

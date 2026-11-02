@@ -47,6 +47,10 @@ pub enum MergeError {
     FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Abort reset the files but couldn't remove one of git's merge/cherry-pick/revert state
+    /// files (`commit::clear_operation_files`).
+    #[error("Couldn't remove git's merge state: {0}")]
+    StateFiles(std::io::Error),
 }
 
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
@@ -255,8 +259,8 @@ pub fn squash_message(repo: &Repository) -> Option<String> {
     std::fs::read_to_string(repo.path().join("SQUASH_MSG")).ok()
 }
 
-/// Removes `SQUASH_MSG` once it no longer applies (commit, abort, reset, undo); `cleanup_state`
-/// leaves it behind. A missing file is fine.
+/// Removes `SQUASH_MSG` once it no longer applies (commit, abort, reset, undo);
+/// `commit::clear_operation_files` leaves it behind. A missing file is fine.
 pub(crate) fn clear_squash_message(repo: &Repository) -> std::io::Result<()> {
     match std::fs::remove_file(repo.path().join("SQUASH_MSG")) {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
@@ -654,6 +658,9 @@ pub(crate) fn has_conflict_markers(content: &[u8]) -> bool {
 
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
     use git2::RepositoryState::{CherryPick, CherryPickSequence, Merge, Revert, RevertSequence};
+    // The worker keeps one handle per repository, whose index may predate a merge or pick run
+    // in a terminal: read the one on disk, or Abort would leave that operation's conflicts.
+    repo.index()?.read(false)?;
     let in_operation = matches!(
         repo.state(),
         Merge | CherryPick | CherryPickSequence | Revert | RevertSequence
@@ -717,7 +724,10 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
         }
         repo.checkout_head(Some(&mut checkout))?;
     }
-    repo.cleanup_state()?;
+    // Only the operation's own files, as git's `remove_branch_state` after `git reset --merge`:
+    // a terminal bisect, rebase or cherry-pick list goes on, except that aborting the list's
+    // last pick ends the list (git's `have_finished_the_last_pick`, #249).
+    crate::commit::clear_commit_state(repo).map_err(MergeError::StateFiles)?;
     clear_squash_message(repo)?;
     Ok(())
 }

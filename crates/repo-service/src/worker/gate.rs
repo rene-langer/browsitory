@@ -182,7 +182,9 @@ impl OperationProbe<'_> {
                 .map_or_else(String::new, |since| format!(" @{}", since.as_nanos()))
         };
         match repo.state() {
-            RepositoryState::Clean => None,
+            // A terminal `git bisect` alone is nothing in progress, as for git-core (#250).
+            // libgit2 reports `Bisect` only when nothing else is paused.
+            RepositoryState::Clean | RepositoryState::Bisect => None,
             RepositoryState::Merge => {
                 let heads = std::fs::read_to_string(repo.path().join("MERGE_HEAD"))
                     .unwrap_or_default()
@@ -311,6 +313,47 @@ mod tests {
         assert_eq!(marker(&repo, &rebase_store, &sequence_store), Some(merge));
         repo.cleanup_state().unwrap();
         assert_eq!(marker(&repo, &rebase_store, &sequence_store), None);
+    }
+
+    fn git(repo: &Repository, args: &[&str]) -> std::process::Output {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo.workdir().unwrap())
+            .output()
+            .unwrap()
+    }
+
+    /// A terminal `git bisect` alone is not an operation in progress (#250): commands are
+    /// recorded for undo and Undo/Redo run, as with nothing paused.
+    #[test]
+    fn a_bisect_alone_has_no_marker() {
+        let (_dir, repo) = init();
+        commit(&repo, "a.txt", "a\n", "a");
+        assert!(git(&repo, &["bisect", "start"]).status.success());
+        assert_eq!(repo.state(), RepositoryState::Bisect);
+        let (rebase_store, sequence_store) = (RebaseStore::open(&repo), SequenceStore::open(&repo));
+
+        assert_eq!(marker(&repo, &rebase_store, &sequence_store), None);
+    }
+
+    /// A merge paused during a bisect is still an operation in progress, with the merge's marker.
+    #[test]
+    fn a_merge_during_a_bisect_has_the_merge_marker() {
+        let (_dir, repo) = init();
+        let a = commit(&repo, "a.txt", "a\n", "a");
+        commit(&repo, "b.txt", "b\n", "b");
+        assert!(git(&repo, &["bisect", "start"]).status.success());
+        std::fs::write(repo.path().join("MERGE_HEAD"), format!("{a}\n")).unwrap();
+        assert_eq!(repo.state(), RepositoryState::Merge);
+        let (rebase_store, sequence_store) = (RebaseStore::open(&repo), SequenceStore::open(&repo));
+
+        let merge = marker(&repo, &rebase_store, &sequence_store).unwrap();
+
+        let head = repo.head().unwrap().target().unwrap();
+        assert_eq!(
+            merge,
+            format!("merge {head} {a} @{}", mtime_ns(&repo, "MERGE_HEAD"))
+        );
     }
 
     fn probe<'a>(

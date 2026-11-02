@@ -632,6 +632,15 @@ pub struct HeadInfoDto {
     pub commit_hooks: Vec<String>,
     pub sequence: Option<SequenceProgressDto>,
     pub rebase: Option<RebaseInfoDto>,
+    /// A `git bisect` started in a terminal: `{ "startedFrom": "main" }`, or `null`.
+    pub bisect: Option<BisectDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BisectDto {
+    /// A branch name, or a commit id when the bisect started on a detached HEAD.
+    pub started_from: String,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -650,6 +659,9 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),
             rebase: info.rebase.map(RebaseInfoDto::from),
+            bisect: info.bisect.map(|bisect| BisectDto {
+                started_from: bisect.started_from,
+            }),
         }
     }
 }
@@ -3457,10 +3469,11 @@ mod tests {
             commit_hooks: vec!["pre-commit".into()],
             sequence: None,
             rebase: None,
+            bisect: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
-            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null, "rebase": null})
+            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null, "rebase": null, "bisect": null})
         );
         let dto = HeadInfoDto::from(git_core::repo::HeadInfo {
             head_id: Some("abc".into()),
@@ -3471,6 +3484,7 @@ mod tests {
             commit_hooks: vec![],
             sequence: None,
             rebase: None,
+            bisect: None,
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap()["squashMessage"],
@@ -3571,6 +3585,7 @@ mod tests {
                 commit_hooks: vec![],
                 sequence,
                 rebase: None,
+                bisect: None,
             }))
             .unwrap()
         };
@@ -3932,8 +3947,37 @@ mod tests {
                 total_steps: 2,
                 health,
             }),
+            bisect: None,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn head_info_dto_serializes_a_bisect() {
+        let head = |bisect| {
+            serde_json::to_value(HeadInfoDto::from(git_core::repo::HeadInfo {
+                head_id: None,
+                detached_at: None,
+                head_pushed: false,
+                operation: None,
+                squash_message: None,
+                commit_hooks: vec![],
+                sequence: None,
+                rebase: None,
+                bisect,
+            }))
+            .unwrap()
+        };
+        let bisecting = head(Some(git_core::repo::BisectInfo {
+            started_from: "main".into(),
+        }));
+        assert_eq!(
+            bisecting["bisect"],
+            serde_json::json!({ "startedFrom": "main" })
+        );
+        let none = head(None);
+        assert!(none.as_object().unwrap().contains_key("bisect"));
+        assert_eq!(none["bisect"], serde_json::Value::Null);
     }
 
     #[test]

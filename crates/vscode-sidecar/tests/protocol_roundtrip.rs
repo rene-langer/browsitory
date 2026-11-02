@@ -1639,6 +1639,43 @@ fn merge_conflict_lifecycle_round_trips_through_the_sidecar() {
     assert_eq!(aborted["result"], serde_json::Value::Null);
 }
 
+/// A `git bisect` started in a terminal reaches the extension as `bisect.startedFrom` (#250).
+#[test]
+fn get_head_info_reports_a_terminal_bisect() {
+    let (dir, repo) = init_repo();
+    repo.set_head("refs/heads/topic").unwrap();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first commit");
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let before = sidecar.call(
+        2,
+        "get_head_info",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(before["result"]["bisect"], serde_json::Value::Null);
+
+    let output = std::process::Command::new("git")
+        .args(["bisect", "start"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let during = sidecar.call(
+        3,
+        "get_head_info",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        during["result"]["bisect"],
+        serde_json::json!({ "startedFrom": "topic" })
+    );
+    assert_eq!(during["result"]["operation"], serde_json::Value::Null);
+}
+
 #[test]
 fn rebase_lifecycle_round_trips_through_the_sidecar() {
     let (dir, repo) = init_repo();

@@ -182,4 +182,74 @@ describe("OperationStatusStrip", () => {
       expect(onAbortRebase).toHaveBeenCalledTimes(4);
     });
   });
+
+  describe("a bisect started in a terminal (#250)", () => {
+    it("shows a bisect with no buttons", () => {
+      render(
+        <OperationStatusStrip
+          merging={false}
+          operation={null}
+          rebaseProgress={null}
+          bisect={{ startedFrom: "main" }}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(within(strip).getByText("Bisecting (started from main)")).toBeInTheDocument();
+      expect(strip).toHaveTextContent("Use git bisect good, bad or reset in a terminal.");
+      expect(within(strip).queryByRole("button")).toBeNull();
+    });
+
+    it("names a commit it started from by its short id", () => {
+      render(
+        <OperationStatusStrip
+          merging={false}
+          operation={null}
+          rebaseProgress={null}
+          bisect={{ startedFrom: "0123456789abcdef0123456789abcdef01234567" }}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      expect(screen.getByText("Bisecting (started from 0123456)")).toBeInTheDocument();
+    });
+
+    it("says only Bisecting when the start is unknown", () => {
+      render(
+        <OperationStatusStrip
+          merging={false}
+          operation={null}
+          rebaseProgress={null}
+          bisect={{ startedFrom: "" }}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      expect(screen.getByText("Bisecting")).toBeInTheDocument();
+    });
+
+    it("a merge during a bisect shows the merge", () => {
+      const onAbortMerge = vi.fn();
+      render(
+        <OperationStatusStrip
+          merging
+          operation="Merge"
+          rebaseProgress={null}
+          bisect={{ startedFrom: "main" }}
+          conflictCount={1}
+          onAbortMerge={onAbortMerge}
+          onAbortRebase={noop}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(strip).toHaveTextContent("Merging");
+      expect(strip).not.toHaveTextContent("Bisecting");
+      fireEvent.click(within(strip).getByRole("button", { name: "Abort merge" }));
+      expect(onAbortMerge).toHaveBeenCalled();
+    });
+  });
 });

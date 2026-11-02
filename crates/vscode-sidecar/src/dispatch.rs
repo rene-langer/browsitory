@@ -2577,6 +2577,14 @@ struct HeadInfoDto {
     commit_hooks: Vec<String>,
     sequence: Option<SequenceProgressDto>,
     rebase: Option<RebaseInfoDto>,
+    bisect: Option<BisectDto>,
+}
+
+/// Same wire shape as the Tauri app's `BisectDto`: `{ "startedFrom": "main" }`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BisectDto {
+    started_from: String,
 }
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
@@ -2595,6 +2603,9 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),
             rebase: info.rebase.map(RebaseInfoDto::from),
+            bisect: info.bisect.map(|bisect| BisectDto {
+                started_from: bisect.started_from,
+            }),
         }
     }
 }

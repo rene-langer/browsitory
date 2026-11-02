@@ -1,4 +1,5 @@
 import type {
+  BisectInfo,
   PickOutcome,
   RebaseAbort,
   RebaseDivergence,
@@ -19,6 +20,17 @@ export function conflictReason(conflictCount: number): string | undefined {
 export function sequenceLabel(progress: SequenceProgress): string {
   const verb = progress.kind === "CherryPick" ? "Cherry-picking" : "Reverting";
   return `${verb} ${progress.currentStep}/${progress.totalSteps}`;
+}
+
+/**
+ * "Bisecting (started from main)". A bisect started on a detached HEAD names its commit by the
+ * short id; an unknown start (no `BISECT_START`) gives just "Bisecting".
+ */
+export function bisectLabel(bisect: BisectInfo): string {
+  const start = /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(bisect.startedFrom)
+    ? bisect.startedFrom.slice(0, 7)
+    : bisect.startedFrom;
+  return start === "" ? "Bisecting" : `Bisecting (started from ${start})`;
 }
 
 /** The noun the UI uses for a sequence: "cherry-pick" / "revert". */
