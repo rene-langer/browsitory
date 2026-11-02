@@ -669,6 +669,10 @@ It does so only when the commit is recognisably that step: the step's author and
 message git suggests) and the step's changes; any other commit counts as HEAD moved.
 `git cherry-pick --abort` is fine too: Continue then applies the step again.
 
+**During a git bisect.** A rebase works while a `git bisect` started in a terminal is running
+(start it from a branch: `git bisect start` alone keeps HEAD on the branch). The bisect is not
+"another git operation", and finishing or aborting the rebase doesn't end it.
+
 **Interrupted rebase.** If the repository changed outside Browsitory while a rebase was paused, the
 strip shows **Rebase of ⟨branch⟩ interrupted** with the reason: HEAD was moved (for example
 `git switch`), the branch was changed or deleted, or another git operation is in progress. Such a
@@ -761,6 +765,15 @@ stops on a conflict, you can resolve it and commit the step from Browsitory's co
 (or `git revert --continue`) carries on with them. The list is removed only after its last
 commit. A single cherry-pick, revert or squash merge in Browsitory keeps such a list too.
 Committing also no longer ends a `git bisect` started in a terminal, as with `git commit`.
+**Abort** of a merge, cherry-pick or revert removes only that operation's own state, as git
+does, so the list stays for `git cherry-pick --continue`.
+
+**Bisect started in a terminal.** While a `git bisect` runs, a bar says **Bisecting (started
+from main)** and "Use git bisect good, bad or reset in a terminal." It has no buttons: you end
+the bisect in the terminal. Nothing is blocked during it. As with git, you can cherry-pick,
+revert, rebase, reset, amend, commit, and use Undo and Redo, and none of them ends the bisect.
+A commit made while HEAD is detached by the bisect is not on any branch: `git bisect reset`
+leaves it behind (it is still in the reflog).
 
 The palette also has commands to cherry-pick, revert, check out and reset to the selected commit,
 and to amend the last commit (where the commit menu offers them), plus **Continue cherry-pick** /
@@ -782,7 +795,9 @@ cherry-pick, revert, merge, rebase, pull and every discard, so discarded changes
 recoverable. Up to 50 steps are kept, across restarts. An operation that stopped on a conflict
 or an edit step (merge, cherry-pick, revert, a multi-commit sequence, rebase) becomes one undo
 step when it finishes, even if you restarted the app in between; one aborted, or replaced by
-another operation outside Browsitory, leaves nothing to undo.
+another operation outside Browsitory, leaves nothing to undo. A `git bisect` started in a
+terminal doesn't count as an operation in progress: operations are recorded and Undo and Redo
+work during it, and they don't end it.
 
 Undo refuses, instead of overwriting, when the repository changed since the operation, or
 when it would delete, move or switch to a branch that is checked out in another worktree; the
