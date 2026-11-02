@@ -324,6 +324,21 @@ mod tests {
         });
         held(acquired);
         assert_eq!(calls, 1);
+
+        // Held through several polls (10, 20, 40, 80, 100 ms…): still called only once.
+        let guard = held(a.try_acquire());
+        let mut releaser = None;
+        let mut calls = 0;
+        let acquired = b.acquire_with(Duration::from_secs(5), || {
+            calls += 1;
+            releaser = Some(std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(250));
+                drop(guard);
+            }));
+        });
+        held(acquired);
+        releaser.unwrap().join().unwrap();
+        assert_eq!(calls, 1);
     }
 
     #[test]

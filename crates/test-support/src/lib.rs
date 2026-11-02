@@ -15,7 +15,14 @@
 //! - sets `HOME` and `XDG_CONFIG_HOME` to an empty home, plus `GIT_CONFIG_NOSYSTEM=1` and
 //!   `GIT_CONFIG_GLOBAL=<empty file>`, so spawned `git` subprocesses, hook scripts and child
 //!   processes (e.g. the sidecar binary, whose own libgit2 reads `$HOME/.gitconfig`) see no
-//!   global or system config either.
+//!   global or system config either,
+//! - removes every inherited `GIT_*` variable (a hook's `GIT_DIR`/`GIT_INDEX_FILE`/
+//!   `GIT_WORK_TREE`, `GIT_CONFIG_PARAMETERS`, `GIT_AUTHOR_*`, …), so nothing in the run acts
+//!   on the repository a hook or `git rebase -x` started it in,
+//! - sets `GNUPGHOME` to an empty directory (no gpg agent of the developer's) and `LC_ALL=C`.
+//!
+//! [`git_command`] applies the same isolation to each `git` CLI command a test starts, even
+//! in a binary without the guard or after a test changed the environment (#282).
 //!
 //! Setting environment variables is only sound while no other thread runs, which is exactly
 //! the guarantee a pre-`main` constructor gives; [`install`] is still `Once`-guarded so calling
@@ -113,6 +120,11 @@ pub fn install() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         let paths = paths();
+        for name in inherited_git_env() {
+            std::env::remove_var(name);
+        }
+        std::env::set_var("GNUPGHOME", &paths.gnupg_home);
+        std::env::set_var("LC_ALL", "C");
         std::env::set_var("HOME", &paths.home);
         std::env::set_var("XDG_CONFIG_HOME", paths.home.join(".config"));
         std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
@@ -133,14 +145,30 @@ pub fn install() {
     });
 }
 
+/// Every `GIT_*` variable in this process's environment: what a hook or `git rebase -x` hands
+/// its children (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` pointing at the real repository),
+/// config that bypasses `GIT_CONFIG_GLOBAL` (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`/
+/// `_KEY_n`/`_VALUE_n`), and `GIT_AUTHOR_*`/`GIT_COMMITTER_*` (#282 review).
+fn inherited_git_env() -> Vec<std::ffi::OsString> {
+    std::env::vars_os()
+        .map(|(name, _)| name)
+        .filter(|name| name.to_string_lossy().starts_with("GIT_"))
+        .collect()
+}
+
 /// A `git` CLI command ("twin") run in `dir`, isolated from the developer's setup whatever this
-/// process's environment says (#282): `HOME`/`XDG_CONFIG_HOME` are the hermetic home,
-/// `GIT_CONFIG_GLOBAL` is the empty hermetic file, `GIT_CONFIG_NOSYSTEM=1`, `GNUPGHOME` is an
-/// empty directory of its own (no gpg agent of the developer's), and `LC_ALL=C` gives English
-/// messages that tests may match. Every test that runs the git CLI uses this (or [`git`]).
+/// process's environment says (#282): every inherited `GIT_*` variable is removed (so the twin
+/// works on `dir`, never a repository a hook's `GIT_DIR` names), `HOME`/`XDG_CONFIG_HOME` are the
+/// hermetic home, `GIT_CONFIG_GLOBAL` is the empty hermetic file, `GIT_CONFIG_NOSYSTEM=1`,
+/// `GNUPGHOME` is an empty directory of its own (no gpg agent of the developer's), and
+/// `LC_ALL=C` gives English messages that tests may match. Every test that runs the git CLI
+/// uses this (or [`git`]); only a bare `git --version` availability check may skip it.
 pub fn git_command(dir: &Path) -> std::process::Command {
     let paths = paths();
     let mut command = std::process::Command::new("git");
+    for name in inherited_git_env() {
+        command.env_remove(name);
+    }
     command
         .current_dir(dir)
         .env("LC_ALL", "C")

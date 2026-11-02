@@ -6,6 +6,84 @@ test_support::hermetic_git!();
 
 use std::process::Command;
 
+/// Not a test on its own: the child process of
+/// `the_guard_clears_inherited_git_env_and_isolates_gpg_before_main`. Prints what the guard left
+/// of the environment it was started with.
+#[test]
+#[ignore = "child process of the_guard_clears_inherited_git_env_and_isolates_gpg_before_main"]
+fn hermetic_env_child() {
+    if std::env::var_os("BROWSITORY_HERMETIC_ENV_CHILD").is_none() {
+        return;
+    }
+    let show = |name: &str| match std::env::var_os(name) {
+        Some(value) => format!("{name}={}", value.to_string_lossy()),
+        None => format!("{name} unset"),
+    };
+    for name in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_AUTHOR_NAME",
+        "GNUPGHOME",
+        "LC_ALL",
+    ] {
+        println!("env: {}", show(name));
+    }
+}
+
+/// #282 review: started with the GIT_* environment of a hook (or `rebase -x`) in a real
+/// repository and the developer's GNUPGHOME, a test binary sees none of it from `main` on, so
+/// neither its own `git`, nor hook scripts, nor child processes act on the real repository or
+/// talk to the real gpg agent.
+#[test]
+fn the_guard_clears_inherited_git_env_and_isolates_gpg_before_main() {
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "hermetic_env_child",
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("BROWSITORY_HERMETIC_ENV_CHILD", "1")
+        .env("GIT_DIR", "/nonexistent/real-repo/.git")
+        .env("GIT_WORK_TREE", "/nonexistent/real-repo")
+        .env("GIT_INDEX_FILE", "/nonexistent/real-repo/.git/index")
+        .env("GIT_CONFIG_PARAMETERS", "'commit.gpgsign'='true'")
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_AUTHOR_NAME", "Hook Author")
+        .env("GNUPGHOME", "/nonexistent/real-gnupg")
+        .env("LC_ALL", "de_DE.UTF-8")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let env: Vec<&str> = stdout
+        .lines()
+        // The harness's "test hermetic_env_child ... " may share the first line.
+        .filter_map(|line| line.split_once("env: ").map(|(_, rest)| rest))
+        .collect();
+    let gnupg = format!(
+        "GNUPGHOME={}",
+        test_support::paths().gnupg_home.to_string_lossy()
+    );
+    assert_eq!(
+        env,
+        [
+            "GIT_DIR unset",
+            "GIT_WORK_TREE unset",
+            "GIT_INDEX_FILE unset",
+            "GIT_CONFIG_PARAMETERS unset",
+            "GIT_CONFIG_COUNT unset",
+            "GIT_AUTHOR_NAME unset",
+            gnupg.as_str(),
+            "LC_ALL=C",
+        ]
+    );
+}
+
 #[test]
 fn libgit2_sees_no_global_xdg_or_system_config() {
     let config = git2::Config::open_default().expect("open default config");
