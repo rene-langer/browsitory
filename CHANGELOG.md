@@ -8,7 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Safe undo restores
 
-- Fixed: Undo and Redo write a restored file whole (#251).
+- Fixed: if Undo or Redo failed while writing a file back (for example a full disk), the file
+  was left half-written and its previous content was gone. Browsitory now writes the restored
+  file next to it and swaps it in only when it is complete, so a failure leaves the file as it
+  was (#251).
+- Windows: if another program keeps the file open so it can't be swapped, Undo and Redo now say
+  "'f.txt' is open in another program. Close it, then try again." (#251).
 
 ### Safe file writes
 

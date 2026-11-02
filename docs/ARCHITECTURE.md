@@ -789,8 +789,8 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   files, discarding an untracked file), `read_beneath` + `write_beneath` for **Ignore**'s
   `.gitignore` append, `clear_hazards`, `open_beneath` (image preview), and for undo/redo and the
   path-limited stash `read_beneath` (snapshots and checks; never below a symlinked folder, never
-  a FIFO), `replace_beneath` (restore writes; a symlinked folder on the way is removed and
-  recreated, never written through) and `remove_and_prune_beneath` (deletions and the folders
+  a FIFO), `replace_beneath` (restore writes, each file replaced whole; a symlinked folder on
+  the way is removed and recreated, never written through) and `remove_and_prune_beneath` (deletions and the folders
   they empty). `undo.rs` keeps only its mode logic.
 - Those functions walk the path one component at a time and hold every folder on the way, so a
   folder swapped for a link at any moment can't redirect them. Unix
@@ -884,8 +884,26 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   permission to create files in the folder, and on Windows permission to delete the old file
   (`DELETE` on it or `FILE_DELETE_CHILD` on the folder); without it the system's access
   denied is reported. A crash between creating and renaming the temporary file leaves
-  it behind as an untracked file. `replace_beneath` (undo/redo restores) still deletes the old
-  file before writing the new one.
+  it behind as an untracked file.
+- `replace_beneath` (undo/redo restores) goes through the same temporary file + rename (#251):
+  both walkers share `swap_in` with `write_beneath` (Unix `swap_in_file` / `swap_in`: create,
+  fill, `sync_all`, `renameat`, `unlinkat` of the temporary entry on any error, best-effort
+  `fsync` of the folder; Windows `swap_in`: `create_temp`, fill, `sync_all`, the rename with the
+  in-use retry and `on_wait`, `delete_by_handle` of the temporary file on error,
+  `settle_after_rename`). A failed restore leaves the old file or link as it was. Unlike a
+  write, a restore keeps nothing of the old file (D1-A): the mode comes from the restored entry
+  (Unix: the umask's, exec bits set or cleared), Windows attributes are reset, and a read-only
+  file is replaced (Windows: `FILE_RENAME_FLAG_IGNORE_READONLY_ATTRIBUTE` on the POSIX rename;
+  where only the classic rename works, a denied rename clears the target's read-only attribute
+  and tries once more, putting it back if that fails). It keeps the spelling of the name on
+  disk. Unix: a link is made under a temporary name with `symlinkat` and renamed over the
+  target; a FIFO, socket or device is replaced by the rename without being opened; an empty
+  folder is removed first (`AT_REMOVEDIR`), a full one is an error. Windows: a link or an empty
+  folder is deleted through its handle first; the file is not probed for writing, so a file
+  held without sharing delete fails the rename and, after the retry, is
+  `UndoError::FileInUse` ("'f.txt' is open in another program. Close it, then try again.").
+  Atomic per file only: a restore of several files that fails part-way keeps the files already
+  restored.
 - `write_beneath` refuses an existing read-only file and leaves it as it is (#209): nothing is
   written and the read-only state is kept. Unix: an `EACCES` open of a regular file the user
   owns without owner write permission (`fstatat`, `st_uid == geteuid()`, no `S_IWUSR`). Windows:
@@ -900,7 +918,8 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   handle, so an online-only OneDrive file isn't downloaded) and refuses before anything
   is written. Any other denied write (an ACL, another owner) keeps the system's error. Deletes
   still clear the read-only attribute (#194), so the side that deleted the file still deletes
-  it, and `replace_beneath` replaces a read-only file (undo/redo restores, like git).
+  it, and `replace_beneath` replaces a read-only file (undo/redo restores, like git) through
+  its rename, see above.
 - A folder link that HEAD itself tracks is not a hazard for a forced checkout: libgit2 replaces
   a tracked link with the target's folder (a typechange) by unlinking it, never following it,
   even when the user retargeted it; removing it first made `reset --hard` fail ("null OID").
