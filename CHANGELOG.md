@@ -23,6 +23,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Tests: the test that cancels a pull's post-merge hook now waits until the hook has started
   instead of a fixed 300 ms, so it no longer depends on how busy the machine is (#285).
 
+### Internal: ctor 1.0
+
+- Changed: the test-only `ctor` dependency is now 1.0 (the version Tauri already uses); the hermetic-git test guard's
+  constructor is marked `unsafe`, as ctor 0.13+ requires.
+
 ### Terminal rebases
 
 - Fixed: a `git rebase` started in a terminal and paused on a conflict showed as "Merging" with
