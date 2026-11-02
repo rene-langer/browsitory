@@ -24,7 +24,12 @@ forge-fixture-override = []
 git-core = { path = "../git-core" }
 git2 = "0.21"
 keyring = { version = "4.1.6", features = ["v1"] }
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-tls", "json"] }
+# `rustls-no-provider`: rustls, with certificates checked against the OS trust store
+# (rustls-platform-verifier), but no crypto provider compiled in. `ReqwestForgeApi::client`
+# installs ring as the process-default provider before the first client is built. reqwest's
+# own `rustls` feature would pull in aws-lc-rs instead.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider", "json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2.5"

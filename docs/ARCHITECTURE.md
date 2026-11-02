@@ -362,6 +362,19 @@ while open keeps its alias until it is closed. The registry is per process: two 
 run two sidecars, so one repository still gets one worker per window (only the undo lock works
 across processes).
 
+### Forge HTTP client
+
+The pull-request adapters talk to GitHub and Bitbucket through `ReqwestForgeApi`
+(`crates/repo-service/src/pull_requests.rs`), a blocking `reqwest` client. It is built lazily
+on the worker thread at its first request, because building it inside Tauri's tokio runtime
+panics. TLS is rustls with the ring crypto provider. reqwest is built with
+`rustls-no-provider`, so the client installs ring as rustls's process-wide default once, before
+its first build; if something else installed a provider first (Tauri's updater installs ring
+too), that one stays. Server certificates are checked against the operating system's
+certificate store (`rustls-platform-verifier`), not a bundled root list, so a corporate root CA
+the OS trusts works too. The E2E forge fixture server is plain HTTP on `127.0.0.1` and needs no
+certificate.
+
 ## Undo stack
 
 - **Snapshots** (`git-core::undo`): HEAD, `refs/heads/*` + `refs/tags/*`, the index as a tree,
