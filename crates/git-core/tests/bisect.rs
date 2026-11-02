@@ -86,8 +86,9 @@ fn bisect_repo(detached: bool) -> (TempDir, Repository, Ids) {
     )
 }
 
-/// A new handle on `repo`, as the app opens one per command: the git CLI changed the index
-/// behind the old handle's back.
+/// A new handle on `repo`, so a test starts from what the git CLI left on disk. (The app keeps
+/// one handle per repository; operations that must see a terminal's changes re-read the index
+/// themselves, see `abort_merge_reads_an_index_changed_behind_the_handle` in `tests/merge.rs`.)
 fn reopen(repo: &Repository) -> Repository {
     Repository::open(repo.workdir().unwrap()).unwrap()
 }

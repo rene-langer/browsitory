@@ -373,7 +373,8 @@ across processes).
   whole life (the stored rebase and sequence come first because their `CHERRY_PICK_HEAD` changes
   per step). A terminal `git bisect` alone (libgit2's `Bisect`) has no marker, as `Clean`
   (#250): commands are recorded and Undo/Redo run during it (`undo::restore` checks
-  `repo::no_operation`), and its marker no longer changes with every `git bisect good/bad`. `@<mtime>` is the state file's modification time in nanoseconds (omitted when it
+  `repo::no_operation`), and its marker no longer changes with every `git bisect good/bad`.
+  `@<mtime>` is the state file's modification time in nanoseconds (omitted when it
   can't be read): git writes `MERGE_HEAD`/`CHERRY_PICK_HEAD`/`REVERT_HEAD` once per operation and
   nothing rewrites them during the pause, so a merge or pick aborted outside the app and started
   again with the same heads gets a new marker, and both processes stat the same file (#172). On
@@ -520,11 +521,13 @@ across processes).
   one line left (git's `have_finished_the_last_pick`), so `git cherry-pick --continue` carries on
   after a step committed in Browsitory (#241, D2-A). A missing or unreadable todo keeps the
   folder. It never touches `BISECT_LOG`, `rebase-*` or `SQUASH_MSG`, so, as with
-  `git commit`, a commit no longer ends a `git bisect` started in a terminal. Abort
-  (`merge::abort_merge`, `pick::abort_sequence`'s leftover case) and the rebase's
-  `clear_operation_files` keep `sequencer/`, `BISECT_LOG` and `rebase-*` too (#249): an
-  in-app merge or pick aborted while a terminal list is paused leaves that list for
-  `git cherry-pick --continue`. A state file Abort can't remove is
+  `git commit`, a commit no longer ends a `git bisect` started in a terminal.
+  `merge::abort_merge` uses the same `clear_commit_state`, like git's `remove_branch_state`
+  after `git reset --merge` (#249): it keeps `BISECT_LOG` and `rebase-*`, and keeps
+  `sequencer/` for `git cherry-pick --continue` unless the aborted step was the list's last
+  pick. It re-reads the index first (the worker's long-lived handle may predate a terminal
+  merge). `pick::abort_sequence`'s leftover case and the rebase use `clear_operation_files`,
+  which never touches `sequencer/`. A state file Abort can't remove is
   `MergeError::StateFiles` ("Couldn't remove git's merge state: …").
 - `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as
   `<gitdir>/browsitory/sequence.json` (per worktree, versioned, temp file + `sync_all` + rename,

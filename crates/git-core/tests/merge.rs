@@ -788,6 +788,37 @@ fn abort_merge_keeps_unrelated_unstaged_edits() {
     );
 }
 
+/// The worker keeps one `Repository` per repo. A conflicting `git merge` run in a terminal after
+/// that handle loaded its index must still be aborted from the index on disk, or the conflicted
+/// file keeps its markers.
+#[test]
+fn abort_merge_reads_an_index_changed_behind_the_handle() {
+    let (dir, repo) = make_conflicting_branches();
+    let loaded = repo.index().unwrap();
+    assert!(!loaded.has_conflicts());
+    drop(loaded);
+    let output = std::process::Command::new("git")
+        .args(["merge", "feature"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "the merge must conflict");
+    assert!(std::fs::read_to_string(dir.path().join("shared.txt"))
+        .unwrap()
+        .contains("<<<<<<<"));
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("shared.txt")).unwrap(),
+        "line one\nmain two\nline three\n"
+    );
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    assert!(!index.has_conflicts());
+}
+
 /// Abort removes only the merge's own files (#249): a terminal rebase's folder stays, as
 /// `git merge --abort` keeps it.
 #[test]

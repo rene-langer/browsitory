@@ -658,6 +658,9 @@ pub(crate) fn has_conflict_markers(content: &[u8]) -> bool {
 
 pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
     use git2::RepositoryState::{CherryPick, CherryPickSequence, Merge, Revert, RevertSequence};
+    // The worker keeps one handle per repository, whose index may predate a merge or pick run
+    // in a terminal: read the one on disk, or Abort would leave that operation's conflicts.
+    repo.index()?.read(false)?;
     let in_operation = matches!(
         repo.state(),
         Merge | CherryPick | CherryPickSequence | Revert | RevertSequence
@@ -721,9 +724,10 @@ pub fn abort_merge(repo: &Repository) -> Result<(), MergeError> {
         }
         repo.checkout_head(Some(&mut checkout))?;
     }
-    // Only the operation's own files: a terminal bisect, rebase or cherry-pick list goes on, as
-    // with `git merge --abort` (#249).
-    crate::commit::clear_operation_files(repo).map_err(MergeError::StateFiles)?;
+    // Only the operation's own files, as git's `remove_branch_state` after `git reset --merge`:
+    // a terminal bisect, rebase or cherry-pick list goes on, except that aborting the list's
+    // last pick ends the list (git's `have_finished_the_last_pick`, #249).
+    crate::commit::clear_commit_state(repo).map_err(MergeError::StateFiles)?;
     clear_squash_message(repo)?;
     Ok(())
 }

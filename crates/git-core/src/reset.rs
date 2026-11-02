@@ -61,12 +61,32 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
     Ok(())
 }
 
-/// Points the branch HEAD names (or a detached HEAD) at `target`, with git's reflog message,
-/// as libgit2's `git_reset` does.
+/// Points the ref HEAD ends at (a branch, or HEAD itself when detached) at `target`, with git's
+/// reflog message, as libgit2's `git_reset` (`git_reference__update_terminal`) does. The
+/// symbolic chain is followed to its end, so a branch that is a symbolic ref to another
+/// (`git symbolic-ref refs/heads/alias refs/heads/main`) stays an alias and the branch it names
+/// moves; libgit2 writes HEAD's reflog too when it ends at that branch.
 fn move_head(repo: &Repository, target: Oid) -> Result<(), git2::Error> {
+    // git's and libgit2's limit on nested symbolic refs.
+    const MAX_NESTING: usize = 5;
     let message = format!("reset: moving to {target}");
-    let head = repo.find_reference("HEAD")?;
-    let name = head.symbolic_target()?.unwrap_or("HEAD").to_string();
-    repo.reference(&name, target, true, &message)?;
-    Ok(())
+    let mut name = "HEAD".to_string();
+    for _ in 0..=MAX_NESTING {
+        let next = match repo.find_reference(&name) {
+            Ok(reference) => reference.symbolic_target()?.map(str::to_string),
+            // An unborn branch: create it, as libgit2 does.
+            Err(error) if error.code() == git2::ErrorCode::NotFound => None,
+            Err(error) => return Err(error),
+        };
+        match next {
+            Some(next) => name = next,
+            None => {
+                repo.reference(&name, target, true, &message)?;
+                return Ok(());
+            }
+        }
+    }
+    Err(git2::Error::from_str(&format!(
+        "too many nested symbolic refs from HEAD to {name}"
+    )))
 }

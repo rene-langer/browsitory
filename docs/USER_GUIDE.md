@@ -766,7 +766,8 @@ stops on a conflict, you can resolve it and commit the step from Browsitory's co
 commit. A single cherry-pick, revert or squash merge in Browsitory keeps such a list too.
 Committing also no longer ends a `git bisect` started in a terminal, as with `git commit`.
 **Abort** of a merge, cherry-pick or revert removes only that operation's own state, as git
-does, so the list stays for `git cherry-pick --continue`.
+does. The list stays for `git cherry-pick --continue`, unless the step you aborted was its
+last one: then the list ends too, as with git.
 
 **Bisect started in a terminal.** While a `git bisect` runs, a bar says **Bisecting (started
 from main)** and "Use git bisect good, bad or reset in a terminal." It has no buttons: you end

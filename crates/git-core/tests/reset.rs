@@ -2,6 +2,79 @@ mod common;
 
 use git_core::reset::{reset_to, ResetError, ResetMode};
 
+/// The newest reflog entry of `name`: (old id, new id, message).
+fn last_reflog(repo: &git2::Repository, name: &str) -> (git2::Oid, git2::Oid, String) {
+    let reflog = repo.reflog(name).unwrap();
+    let entry = reflog.get(0).expect("a reflog entry");
+    (
+        entry.id_old(),
+        entry.id_new(),
+        entry.message().unwrap().unwrap_or("").to_string(),
+    )
+}
+
+/// HEAD on a branch that is a symbolic ref to another branch (`git symbolic-ref
+/// refs/heads/alias refs/heads/<main>`): a mixed or hard reset moves the branch the chain ends
+/// at and keeps the alias, as libgit2's `git_reset` and `git reset` do; both the branch's and
+/// HEAD's reflogs get the entry.
+#[test]
+fn a_reset_through_a_symbolic_branch_moves_the_branch_it_names() {
+    for mode in [ResetMode::Mixed, ResetMode::Hard] {
+        let (_dir, repo, first) = three_commits();
+        let main = repo.head().unwrap().name().unwrap().to_string();
+        let tip = repo.head().unwrap().target().unwrap();
+        repo.reference_symbolic("refs/heads/alias", &main, true, "alias")
+            .unwrap();
+        repo.set_head("refs/heads/alias").unwrap();
+
+        reset_to(&repo, &first.to_string(), mode).unwrap();
+
+        let alias = repo.find_reference("refs/heads/alias").unwrap();
+        assert_eq!(
+            alias.symbolic_target().unwrap(),
+            Some(main.as_str()),
+            "{mode:?}"
+        );
+        assert_eq!(repo.find_reference(&main).unwrap().target(), Some(first));
+        assert_eq!(repo.head().unwrap().target(), Some(first));
+        let expected = (tip, first, format!("reset: moving to {first}"));
+        assert_eq!(last_reflog(&repo, &main), expected, "{mode:?}");
+        assert_eq!(last_reflog(&repo, "HEAD"), expected, "{mode:?}");
+    }
+}
+
+/// HEAD's reflog entry after a reset is git's: `reset: moving to <id>` from the old to the new
+/// HEAD, on a branch and on a detached HEAD.
+#[test]
+fn a_reset_writes_gits_reflog_entry_for_head() {
+    for (mode, flag) in [(ResetMode::Mixed, "--mixed"), (ResetMode::Hard, "--hard")] {
+        for detached in [false, true] {
+            let run = |use_git: bool| {
+                let (dir, repo, first) = three_commits();
+                let tip = repo.head().unwrap().target().unwrap();
+                if detached {
+                    repo.set_head_detached(tip).unwrap();
+                }
+                if use_git {
+                    let output = std::process::Command::new("git")
+                        .args(["reset", "-q", flag, &first.to_string()])
+                        .current_dir(dir.path())
+                        .output()
+                        .unwrap();
+                    assert!(output.status.success(), "{output:?}");
+                } else {
+                    reset_to(&repo, &first.to_string(), mode).unwrap();
+                }
+                let (old, new, message) = last_reflog(&repo, "HEAD");
+                assert_eq!((old, new), (tip, first));
+                assert_eq!(repo.head_detached().unwrap(), detached);
+                message
+            };
+            assert_eq!(run(false), run(true), "{mode:?} detached={detached}");
+        }
+    }
+}
+
 fn three_commits() -> (tempfile::TempDir, git2::Repository, git2::Oid) {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "a.txt", "1\n");

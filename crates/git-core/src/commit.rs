@@ -485,7 +485,9 @@ const OPERATION_FILES: [&str; 6] = [
 /// - `sequencer/` (the rest of a `git cherry-pick A B C` / `git revert A B` list).
 ///
 /// None of these is touched here, nor `SQUASH_MSG` (`merge::clear_squash_message` handles it).
-/// It touches neither HEAD, the index nor the work tree: callers reset those first.
+/// It touches neither HEAD, the index nor the work tree: callers reset those first. To also end
+/// a terminal list whose last pick this was (git's `remove_branch_state`, as after a commit or
+/// `git reset --merge`), use `clear_commit_state`.
 ///
 /// A missing file is fine. Every file is tried even when one can't be removed, so as much of
 /// the operation as possible is gone; the first error is returned.
