@@ -68,7 +68,12 @@ fn a_reset_writes_gits_reflog_entry_for_head() {
                 let (old, new, message) = last_reflog(&repo, "HEAD");
                 assert_eq!((old, new), (tip, first));
                 assert_eq!(repo.head_detached().unwrap(), detached);
-                message
+                // The twins are separate repositories whose commit ids differ (commit times,
+                // and line endings on Windows): compare the messages with each one's own target
+                // id named the same way, so only the format is compared.
+                let target = first.to_string();
+                assert!(message.contains(&target), "{message}");
+                message.replace(&target, "<target>")
             };
             assert_eq!(run(false), run(true), "{mode:?} detached={detached}");
         }
