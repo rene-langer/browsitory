@@ -2524,30 +2524,44 @@ mod tests {
     #[test]
     fn a_pull_reports_post_merge_as_running_hook_and_cancel_keeps_the_pull() {
         let (_upstream_dir, local_dir, local) = pull_fixture();
-        install_hook(&local, "post-merge", "sleep 30");
+        // The hook says it runs by creating `marker`; the test cancels it only then (#285).
+        let marker_dir = TempDir::new().unwrap();
+        let marker = marker_dir.path().join("post-merge-started");
+        install_hook(
+            &local,
+            "post-merge",
+            &format!(": > '{}'; sleep 30", marker.display()),
+        );
         let worker = Worker::spawn(local_dir.path().to_path_buf()).unwrap();
         let handle = worker.handle();
         let (events_tx, events_rx) = mpsc::channel();
         let canceller = handle.clone();
+        let watched_marker = marker.clone();
         let watcher = std::thread::spawn(move || {
             let mut seen = Vec::new();
+            let mut hook_was_running = false;
             for event in events_rx {
                 if let TransferEvent::Progress(progress) = &event {
                     if progress.phase == git_core::remote::TransferPhase::RunningHook {
-                        // Give the hook a moment to start, then cancel it.
-                        std::thread::sleep(Duration::from_millis(300));
+                        // Generous bound: the hook only has to start, however busy the machine.
+                        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+                        while !watched_marker.exists() && std::time::Instant::now() < deadline {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        hook_was_running = watched_marker.exists();
                         canceller.cancel_transfer(&progress.operation_id);
                     }
                 }
                 seen.push(event);
             }
-            seen
+            (seen, hook_was_running)
         });
         let started = std::time::Instant::now();
 
         let outcome = handle.pull_current_upstream(events_tx);
 
-        let events = watcher.join().unwrap();
+        let (events, hook_was_running) = watcher.join().unwrap();
+        assert!(hook_was_running, "post-merge never started: {events:?}");
         assert!(
             matches!(
                 outcome,

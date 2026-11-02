@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Reflog restore and worktrees
+
+- Fixed: Reflog restore moved a branch that another worktree had checked out, so that
+  worktree's files and staged changes no longer matched its branch. It also moved a branch that
+  a rebase started in a terminal was rebasing, in any worktree; git rebase --abort then undid
+  the restore. Both are now refused, as git branch -f refuses them ("branch 'topic' is checked
+  out in another worktree"; "topic is being rebased by a rebase started in a terminal. …").
+  A worktree whose folder is missing (a locked one on an unmounted drive) still counts, as for
+  git; this applies to Undo too. Restoring the branch checked out in this worktree works as
+  before, but like Reset it is now refused while a merge, cherry-pick, revert or rebase is
+  paused: during a terminal rebase it made git rebase --continue drop the steps already
+  replayed, and during a merge it changed the merge's first parent. The confirmation now says
+  that your files and staged changes stay as they are. A branch moved by another program while
+  it is being restored is left alone (#287).
+- Tests: the test that cancels a pull's post-merge hook now waits until the hook has started
+  instead of a fixed 300 ms, so it no longer depends on how busy the machine is (#285).
+
 ### Internal: ctor 1.0
 
 - Changed: the test-only `ctor` dependency is now 1.0 (the version Tauri already uses); the hermetic-git test guard's

@@ -71,6 +71,8 @@ describe("ReflogPanel", () => {
     expect(onRestore).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog", { name: "Restore refs/heads/main" });
     expect(within(dialog).getByText("Restore refs/heads/main to 2222222222222222222222222222222222222222?")).toBeInTheDocument();
+    // #287: Restore moves only the ref.
+    expect(within(dialog).getByText("Your files and staged changes stay as they are.")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(onRestore).not.toHaveBeenCalled();
 

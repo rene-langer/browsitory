@@ -804,3 +804,67 @@ fn committing_a_revert_during_a_terminal_rebase_clears_it_like_git_commit() {
     assert_eq!(state_files(&ours), state_files(&reopen(&twin)));
     drop(ours_dir);
 }
+
+/// #287: Reflog restore doesn't move the branch a terminal rebase is rebasing, from this or
+/// another worktree, as `git branch -f` refuses it. `git rebase --continue` would fail its final
+/// ref update, and `git rebase --abort` would put the branch back and discard the restore.
+#[test]
+fn reflog_restore_refuses_the_branch_being_rebased() {
+    let (dir, repo, ids) = fixture();
+    // topic's reflog gets an older entry to restore.
+    repo.reference("refs/heads/topic", ids.t1, true, "test")
+        .unwrap();
+    repo.reference("refs/heads/topic", ids.topic, true, "test")
+        .unwrap();
+    assert!(!git(dir.path(), &["rebase", "main"]).status.success());
+    let repo = reopen(&repo);
+    let elsewhere = TempDir::new().unwrap();
+    let linked_path = elsewhere.path().join("linked");
+    git_ok(
+        dir.path(),
+        &[
+            "worktree",
+            "add",
+            "-q",
+            linked_path.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let linked = Repository::open(&linked_path).unwrap();
+    let t1 = ids.t1.to_string();
+    assert!(!git(dir.path(), &["branch", "-f", "topic", &t1])
+        .status
+        .success());
+    assert!(!git(&linked_path, &["branch", "-f", "topic", &t1])
+        .status
+        .success());
+
+    for handle in [&repo, &linked] {
+        assert_eq!(
+            git_core::reflog::restore_reflog_entry(handle, "refs/heads/topic", &t1)
+                .unwrap_err()
+                .to_string(),
+            "topic is being rebased by a rebase started in a terminal. Continue it there with \
+             git rebase --continue, or abort it with git rebase --abort."
+        );
+    }
+    assert_eq!(
+        repo.find_reference("refs/heads/topic").unwrap().target(),
+        Some(ids.topic)
+    );
+}
+
+/// #287 review: restoring the detached HEAD of a paused terminal rebase is refused as Reset
+/// refuses it: `git rebase --continue` would build on the restored commit and drop the steps
+/// already replayed.
+#[test]
+fn reflog_restore_refuses_head_during_a_terminal_rebase() {
+    let (_dir, repo, ids) = terminal_rebase();
+    let head = repo.head().unwrap().target();
+
+    let error =
+        git_core::reflog::restore_reflog_entry(&repo, "HEAD", &ids.topic.to_string()).unwrap_err();
+
+    assert_eq!(error.to_string(), REBASE_REFUSAL);
+    assert_eq!(repo.head().unwrap().target(), head);
+}
