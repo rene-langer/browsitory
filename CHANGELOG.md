@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Reflog restore and worktrees
+
+- Fixed: Reflog restore moved a branch that another worktree had checked out, so that
+  worktree's files and staged changes no longer matched its branch. It also moved a branch that
+  a rebase started in a terminal was rebasing, in any worktree; git rebase --abort then undid
+  the restore. Both are now refused, as git branch -f refuses them ("branch 'topic' is checked
+  out in another worktree"; "topic is being rebased by a rebase started in a terminal. …").
+  Restoring the branch checked out in this worktree works as before (#287).
+- Tests: the test that cancels a pull's post-merge hook now waits until the hook has started
+  instead of a fixed 300 ms, so it no longer depends on how busy the machine is (#285).
+
 ### Terminal rebases
 
 - Fixed: a `git rebase` started in a terminal and paused on a conflict showed as "Merging" with

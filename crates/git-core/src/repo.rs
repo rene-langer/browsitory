@@ -187,6 +187,52 @@ pub(crate) fn rebased_branches(
     })
 }
 
+/// Full names of the branches every other worktree of this repository has checked out (main
+/// and linked; prunable or unopenable ones skipped), and of the branches a terminal rebase is
+/// rebasing in another worktree: git counts those as checked out there, though HEAD is detached
+/// meanwhile (#263).
+pub(crate) fn branches_checked_out_elsewhere(
+    repo: &git2::Repository,
+) -> Result<std::collections::BTreeSet<String>, git2::Error> {
+    use std::fs::canonicalize;
+    let this =
+        canonicalize(repo.path()).map_err(|error| git2::Error::from_str(&error.to_string()))?;
+    let main = git2::Repository::open(repo.commondir())?;
+    let mut others = Vec::new();
+    for name in main.worktrees()?.iter().flatten().flatten() {
+        let Ok(worktree) = main.find_worktree(name) else {
+            continue;
+        };
+        if worktree.is_prunable(None).unwrap_or(true) {
+            continue;
+        }
+        if let Ok(linked) = git2::Repository::open_from_worktree(&worktree) {
+            others.push(linked);
+        }
+    }
+    if !main.is_bare() {
+        others.push(main);
+    }
+    let mut branches = std::collections::BTreeSet::new();
+    for other in others {
+        if canonicalize(other.path()).is_ok_and(|path| path == this) {
+            continue;
+        }
+        let Ok(head) = other.find_reference("HEAD") else {
+            continue;
+        };
+        if let Ok(Some(name)) = head.symbolic_target() {
+            branches.insert(name.to_string());
+        }
+    }
+    for (git_dir, name) in rebased_branches(repo) {
+        if canonicalize(&git_dir).is_ok_and(|path| path != this) {
+            branches.insert(name);
+        }
+    }
+    Ok(branches)
+}
+
 /// `Err` while a terminal rebase or `git am` is in progress.
 pub(crate) fn check_no_terminal_rebase(
     repo: &git2::Repository,

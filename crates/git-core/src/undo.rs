@@ -352,7 +352,7 @@ fn verify_checked_out_branches(
     if branches.is_empty() && target_branch.is_none() {
         return Ok(());
     }
-    let elsewhere = branches_checked_out_elsewhere(repo)?;
+    let elsewhere = crate::repo::branches_checked_out_elsewhere(repo)?;
     if target_branch.is_some_and(|name| elsewhere.contains(name))
         || branches.iter().any(|name| elsewhere.contains(*name))
     {
@@ -371,45 +371,6 @@ fn verify_checked_out_branches(
         }
     }
     Ok(())
-}
-
-/// HEAD branches of every other worktree of this repository (main and linked; prunable or
-/// unopenable ones skipped).
-fn branches_checked_out_elsewhere(repo: &Repository) -> Result<BTreeSet<String>, UndoError> {
-    let this = fs::canonicalize(repo.path())?;
-    let main = Repository::open(repo.commondir())?;
-    let mut others = Vec::new();
-    for name in main.worktrees()?.iter().flatten().flatten() {
-        let Ok(worktree) = main.find_worktree(name) else {
-            continue;
-        };
-        if worktree.is_prunable(None).unwrap_or(true) {
-            continue;
-        }
-        if let Ok(linked) = Repository::open_from_worktree(&worktree) {
-            others.push(linked);
-        }
-    }
-    if !main.is_bare() {
-        others.push(main);
-    }
-    let mut branches = BTreeSet::new();
-    for other in others {
-        if fs::canonicalize(other.path()).is_ok_and(|path| path == this) {
-            continue;
-        }
-        if let Ok(HeadState::Branch(name)) = head_state(&other) {
-            branches.insert(name);
-        }
-    }
-    // A branch a terminal rebase is rebasing in another worktree counts as checked out there,
-    // as for git; its HEAD is detached meanwhile (#263).
-    for (git_dir, name) in crate::repo::rebased_branches(repo) {
-        if fs::canonicalize(&git_dir).is_ok_and(|path| path != this) {
-            branches.insert(name);
-        }
-    }
-    Ok(branches)
 }
 
 type TreeFiles = BTreeMap<String, (Oid, u32)>;
