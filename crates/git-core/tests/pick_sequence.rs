@@ -1655,11 +1655,39 @@ fn a_leftover_after_the_last_step_does_not_author_the_next_commit() {
 
 // --- #241: committing a step of a terminal `git cherry-pick A B C` ---
 
-/// Runs the git CLI in `dir`, with English messages (tests match some of them).
+/// A HOME, an empty global config and a GNUPGHOME of the test run's own, so the git CLI never
+/// reads the developer's global config (`commit.gpgSign`, `core.hooksPath`, …) or talks to their
+/// gpg agent.
+fn isolated_git_env() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("home")).unwrap();
+        std::fs::write(dir.path().join("gitconfig"), "").unwrap();
+        let gnupg = dir.path().join("gnupg");
+        std::fs::create_dir(&gnupg).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&gnupg, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        dir
+    })
+    .path()
+}
+
+/// Runs the git CLI in `dir`, isolated (`isolated_git_env`) and with English messages (tests
+/// match some of them).
 fn git(dir: &Path, args: &[&str]) -> std::process::Output {
+    let env = isolated_git_env();
     std::process::Command::new("git")
         .args(args)
         .env("LC_ALL", "C")
+        .env("HOME", env.join("home"))
+        .env("XDG_CONFIG_HOME", env.join("home"))
+        .env("GIT_CONFIG_GLOBAL", env.join("gitconfig"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GNUPGHOME", env.join("gnupg"))
         .current_dir(dir)
         .output()
         .unwrap()
