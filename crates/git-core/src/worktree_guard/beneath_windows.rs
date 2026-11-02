@@ -2117,11 +2117,12 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_restore_loses_the_old_file_today() {
+    fn a_failed_restore_keeps_the_old_file() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir(dir.path().join("d")).unwrap();
         let f = dir.path().join("d").join("f");
         std::fs::write(&f, "old content").unwrap();
+        make_hidden(&f);
         let error = replace_with(
             dir.path(),
             Path::new("d/f"),
@@ -2132,7 +2133,123 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.to_string(), "disk full");
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old content");
+        assert_ne!(attributes_of(&f) & FILE_ATTRIBUTE_HIDDEN, 0);
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn a_failed_restore_of_a_new_file_leaves_nothing() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d").join("f"), "old").unwrap();
+        let error = replace_with(
+            dir.path(),
+            Path::new("d/new"),
+            new_content(),
+            &mut no_step,
+            &mut fail_after_new,
+            &mut || {},
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn restore_resets_the_attributes_and_leaves_no_temporary_file() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        make_hidden(&f);
+        replace(dir.path(), Path::new("d/f"), new_content(), &mut no_step).unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new content");
+        assert_eq!(attributes_of(&f) & FILE_ATTRIBUTE_HIDDEN, 0);
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn restore_keeps_the_on_disk_name_case() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d").join("F.txt"), "old").unwrap();
+        replace(
+            dir.path(),
+            Path::new("d/f.txt"),
+            new_content(),
+            &mut no_step,
+        )
+        .unwrap();
+        assert_eq!(names_in(&dir.path().join("d")), ["F.txt"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d").join("F.txt")).unwrap(),
+            "new content"
+        );
+    }
+
+    #[test]
+    fn restoring_a_file_held_without_share_delete_is_in_use() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        // As an editor that keeps the file open, sharing read and write but not delete.
+        let _editor = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&f)
+            .unwrap();
+        let mut waits = 0;
+        let error = replace_with(
+            dir.path(),
+            Path::new("d/f"),
+            new_content(),
+            &mut no_step,
+            &mut |file, bytes| file.write_all(bytes),
+            &mut || waits += 1,
+        )
+        .unwrap_err();
+        assert!(crate::worktree_guard::is_in_use(&error), "{error:?}");
+        assert_eq!(
+            error.to_string(),
+            "'d/f' is open in another program. Close it, then try again."
+        );
+        assert_eq!(waits, IN_USE_TRIES - 1);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn a_file_held_for_a_moment_is_restored_after_a_retry() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old").unwrap();
+        let mut holder = Some(
+            OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .open(&f)
+                .unwrap(),
+        );
+        let mut waits = 0;
+        replace_with(
+            dir.path(),
+            Path::new("d/f"),
+            new_content(),
+            &mut no_step,
+            &mut |file, bytes| file.write_all(bytes),
+            // The other program closes the file during the first wait.
+            &mut || {
+                waits += 1;
+                holder.take();
+            },
+        )
+        .unwrap();
+        assert_eq!(waits, 1);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new content");
+        assert_eq!(names_in(&dir.path().join("d")), ["f"]);
     }
 
     #[test]
