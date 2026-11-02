@@ -866,7 +866,10 @@ export function BranchTree({
               />
             </label>
             {addError !== null && <InlineError message={addError} onDismiss={() => setAddError(null)} />}
-            <details open={showPushUrl} onToggle={(event) => setShowPushUrl(event.currentTarget.open)}>
+            {/* `showPushUrl` is the only source of truth: the summary's click handler cancels the native
+                toggle, so no `onToggle` echo. Echoing the async `toggle` event back into state raced a
+                pending update (a toggle queued by opening could land after submit and reopen it). */}
+            <details open={showPushUrl}>
               <summary
                 onClick={(event) => {
                   event.preventDefault();
