@@ -168,6 +168,24 @@ export interface HeadInfo {
    * revert and rebase are refused until it ends; `abortSequence` aborts it.
    */
   terminalSequence: TerminalSequence | null;
+  /**
+   * A `git rebase` or `git am` started in a terminal and not finished (#263). It is continued or
+   * aborted there: Abort merge, picks, reverts, a new rebase, reset and amend are refused until it
+   * ends. `operation` stays `null` even when git wrote `MERGE_MSG` for a conflicted step.
+   */
+  terminalRebase: TerminalRebase | null;
+}
+/**
+ * A terminal rebase (`kind: "Rebase"`) or `git am` (`"Am"`). `branch` is the rebased branch's short
+ * name and `onto` the full id it is rebased onto, both empty when unknown (always for `git am`);
+ * `currentStep` is 1-based, both steps 0 when unknown.
+ */
+export interface TerminalRebase {
+  kind: "Rebase" | "Am";
+  branch: string;
+  onto: string;
+  currentStep: number;
+  totalSteps: number;
 }
 /**
  * A terminal sequence. `startedAt` is where it started (full id, `startedAtSummary` its summary).

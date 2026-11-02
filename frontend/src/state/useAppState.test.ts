@@ -168,7 +168,7 @@ function transferClient(overrides: Partial<RepoClient>): RepoClient {
     resolveConflict: async () => unimplemented(),
     abortMerge: async () => unimplemented(),
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -1374,7 +1374,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1466,7 +1466,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -1558,7 +1558,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2070,7 +2070,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2159,7 +2159,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2244,7 +2244,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2329,7 +2329,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2420,7 +2420,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2507,7 +2507,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2713,7 +2713,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2799,7 +2799,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2884,7 +2884,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -2967,7 +2967,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3053,7 +3053,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3144,7 +3144,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3235,7 +3235,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3322,7 +3322,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3453,7 +3453,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3539,7 +3539,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3624,7 +3624,7 @@ describe("useAppState", () => {
       resolveConflict: async () => unimplemented(),
       abortMerge: async () => unimplemented(),
       getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null }),
+      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       amendCommit: async () => { throw new Error("unimplemented"); },
       getUndoState: async () => ({ undo: null, redo: null }),
       undo: async () => ({ kind: "Nothing" as const }),
@@ -3769,7 +3769,7 @@ describe("useAppState pull requests", () => {
 
 describe("history actions", () => {
   it("loads headInfo on refresh", async () => {
-    const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null };
+    const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo: async () => info }), TEST_REPO_PATH));
     await act(() => result.current.refresh());
     expect(result.current.state.headInfo).toEqual(info);
@@ -3778,7 +3778,7 @@ describe("history actions", () => {
   it("derives rebase progress from headInfo.rebase on the first refresh", async () => {
     // What a restarted app sees: the backend restored the paused rebase from disk.
     const rebase = { branch: "main", onto: "o1", currentStep: 1, totalSteps: 2, health: { kind: "Paused" as const } };
-    const info = { headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null };
+    const info = { headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null };
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo: async () => info }), TEST_REPO_PATH));
     await act(() => result.current.refresh());
     expect(result.current.state.rebaseProgress).toEqual({ currentStep: 1, totalSteps: 2 });
@@ -3787,7 +3787,7 @@ describe("history actions", () => {
   it("clears rebase progress when headInfo.rebase is null", async () => {
     const rebase = { branch: "main", onto: "o1", currentStep: 2, totalSteps: 2, health: { kind: "Paused" as const } };
     let current: typeof rebase | null = rebase;
-    const getHeadInfo = async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: current, bisect: null, terminalSequence: null });
+    const getHeadInfo = async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: current, bisect: null, terminalSequence: null, terminalRebase: null });
     const { result } = renderHook(() => useAppState(transferClient({ getHeadInfo }), TEST_REPO_PATH));
     await act(() => result.current.refresh());
     expect(result.current.state.rebaseProgress).toEqual({ currentStep: 2, totalSteps: 2 });
@@ -4931,7 +4931,7 @@ describe("git hooks", () => {
       commitHooks: [],
       sequence: null,
       rebase: null,
-      bisect: null, terminalSequence: null,
+      bisect: null, terminalSequence: null, terminalRebase: null,
     }));
     const getStatus = vi.fn(async () => []);
     const client = transferClient({
@@ -4964,7 +4964,7 @@ describe("git hooks", () => {
       commitHooks: [],
       sequence: null,
       rebase: null,
-      bisect: null, terminalSequence: null,
+      bisect: null, terminalSequence: null, terminalRebase: null,
     }));
     const getStatus = vi.fn(async () => []);
     const client = transferClient({

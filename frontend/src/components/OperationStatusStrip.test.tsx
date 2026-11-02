@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { RebaseInfo, TerminalSequence } from "../ipc/RepoClient";
+import type { RebaseInfo, TerminalRebase, TerminalSequence } from "../ipc/RepoClient";
 import { OperationStatusStrip } from "./OperationStatusStrip";
 
 const noop = () => {};
@@ -180,6 +180,63 @@ describe("OperationStatusStrip", () => {
         unmount();
       }
       expect(onAbortRebase).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  describe("a rebase or git am started in a terminal (#263)", () => {
+    const rebase: TerminalRebase = { kind: "Rebase", branch: "topic", onto: "abc", currentStep: 2, totalSteps: 3 };
+
+    it("shows a rebase paused on a conflict as a rebase, not a merge, with no buttons", () => {
+      // git wrote MERGE_MSG for the conflicted step, so `merging` is true.
+      render(
+        <OperationStatusStrip
+          merging
+          operation={null}
+          rebaseProgress={null}
+          terminalRebase={rebase}
+          conflictCount={1}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(strip).toHaveTextContent("Rebasing topic, step 2 of 3 (started in a terminal)");
+      expect(strip).toHaveTextContent("Resolve 1 conflict, then run git rebase --continue in the terminal.");
+      expect(strip).not.toHaveTextContent("Merging");
+      expect(within(strip).queryByRole("button")).toBeNull();
+    });
+
+    it("shows a rebase stopped without conflicts, and git am", () => {
+      const { rerender } = render(
+        <OperationStatusStrip
+          merging={false}
+          operation={null}
+          rebaseProgress={null}
+          terminalRebase={rebase}
+          bisect={{ startedFrom: "main" }}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Continue or abort it there with git rebase --continue or git rebase --abort.",
+      );
+      rerender(
+        <OperationStatusStrip
+          merging={false}
+          operation={null}
+          rebaseProgress={null}
+          terminalRebase={{ kind: "Am", branch: "", onto: "", currentStep: 1, totalSteps: 2 }}
+          conflictCount={0}
+          onAbortMerge={noop}
+          onAbortRebase={noop}
+        />,
+      );
+      const strip = screen.getByRole("status");
+      expect(strip).toHaveTextContent("Applying patches, 1 of 2 (started in a terminal)");
+      expect(strip).toHaveTextContent("Continue or abort it there with git am --continue or git am --abort.");
+      expect(within(strip).queryByRole("button")).toBeNull();
     });
   });
 

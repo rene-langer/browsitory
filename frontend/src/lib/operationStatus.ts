@@ -8,6 +8,7 @@ import type {
   SequenceKind,
   SequenceOutcome,
   SequenceProgress,
+  TerminalRebase,
   TerminalSequence,
 } from "../ipc/RepoClient";
 
@@ -82,6 +83,38 @@ export function terminalSequenceLabel(sequence: TerminalSequence): string {
     return `${verb} (started in a terminal)`;
   }
   return `${sequence.kind === "CherryPick" ? "Cherry-pick" : "Revert"} paused in a terminal`;
+}
+
+/**
+ * The strip label of a rebase or `git am` started in a terminal (#263): "Rebasing topic, step 2 of
+ * 3 (started in a terminal)", "Applying patches, 1 of 3 (started in a terminal)".
+ */
+export function terminalRebaseLabel(rebase: TerminalRebase): string {
+  const known = rebase.totalSteps > 0 && rebase.currentStep > 0;
+  if (rebase.kind === "Am") {
+    const step = known ? `, ${rebase.currentStep} of ${rebase.totalSteps}` : "";
+    return `Applying patches${step} (started in a terminal)`;
+  }
+  const branch = rebase.branch === "" ? "" : ` ${rebase.branch}`;
+  const step = known ? `, step ${rebase.currentStep} of ${rebase.totalSteps}` : "";
+  return `Rebasing${branch}${step} (started in a terminal)`;
+}
+
+/** What to do with a terminal rebase or `git am`: it is continued or aborted in the terminal. */
+export function terminalRebaseText(rebase: TerminalRebase, conflictCount: number): string {
+  const command = rebase.kind === "Am" ? "git am" : "git rebase";
+  if (conflictCount > 0) {
+    const conflicts = `${conflictCount} ${conflictCount === 1 ? "conflict" : "conflicts"}`;
+    return `Resolve ${conflicts}, then run ${command} --continue in the terminal.`;
+  }
+  return `Continue or abort it there with ${command} --continue or ${command} --abort.`;
+}
+
+/** Why repository actions are disabled during a terminal rebase or `git am`. */
+export function terminalRebaseReason(rebase: TerminalRebase): string {
+  return rebase.kind === "Am"
+    ? "A git am started in a terminal is in progress."
+    : "A rebase started in a terminal is in progress.";
 }
 
 /** What to do with a terminal sequence paused between steps. */

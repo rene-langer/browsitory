@@ -20,6 +20,7 @@ const DIVERGED_HEAD: HeadInfo = {
     health: { kind: "Diverged", reason: "HeadMoved" },
   },
   bisect: null, terminalSequence: null,
+  terminalRebase: { kind: "Am", branch: "", onto: "", currentStep: 1, totalSteps: 2 },
 };
 
 describe("vscodeRepoClient", () => {
