@@ -530,7 +530,7 @@ mod tests {
             after,
         });
         store.save(&repo, &stacks).unwrap();
-        let status = Process::new("git")
+        let status = test_support::git_command(dir.path())
             .args([
                 "-c",
                 "gc.reflogExpire=now",
@@ -538,13 +538,11 @@ mod tests {
                 "gc.reflogExpireUnreachable=now",
             ])
             .args(["reflog", "expire", "--all", "--expire=now"])
-            .current_dir(dir.path())
             .status()
             .unwrap();
         assert!(status.success());
-        let status = Process::new("git")
+        let status = test_support::git_command(dir.path())
             .args(["gc", "--prune=now", "--quiet"])
-            .current_dir(dir.path())
             .status()
             .unwrap();
         assert!(status.success());
@@ -646,15 +644,13 @@ mod tests {
             after: snapshot,
         });
         store.save(&repo, &stacks).unwrap();
-        assert!(Process::new("git")
+        assert!(test_support::git_command(dir.path())
             .args(["reflog", "expire", "--all", "--expire=now"])
-            .current_dir(dir.path())
             .status()
             .unwrap()
             .success());
-        assert!(Process::new("git")
+        assert!(test_support::git_command(dir.path())
             .args(["gc", "--prune=now", "--quiet"])
-            .current_dir(dir.path())
             .status()
             .unwrap()
             .success());
@@ -770,9 +766,8 @@ mod tests {
             &["reflog", "expire", "--all", "--expire=now"][..],
             &["gc", "--prune=now", "--quiet"][..],
         ] {
-            assert!(Process::new("git")
+            assert!(test_support::git_command(dir.path())
                 .args(args)
-                .current_dir(dir.path())
                 .status()
                 .unwrap()
                 .success());

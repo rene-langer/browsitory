@@ -1658,9 +1658,8 @@ fn get_head_info_reports_a_terminal_bisect() {
     );
     assert_eq!(before["result"]["bisect"], serde_json::Value::Null);
 
-    let output = std::process::Command::new("git")
+    let output = test_support::git_command(dir.path())
         .args(["bisect", "start"])
-        .current_dir(dir.path())
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");

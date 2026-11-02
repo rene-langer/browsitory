@@ -22,43 +22,8 @@ struct Ids {
     clean: Oid,
 }
 
-/// A HOME, an empty global config and a GNUPGHOME of the test run's own, so the git CLI never
-/// reads the developer's global config (`commit.gpgSign`, `core.hooksPath`, …) or talks to their
-/// gpg agent.
-fn isolated_git_env() -> &'static std::path::Path {
-    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir(dir.path().join("home")).unwrap();
-        std::fs::write(dir.path().join("gitconfig"), "").unwrap();
-        let gnupg = dir.path().join("gnupg");
-        std::fs::create_dir(&gnupg).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&gnupg, std::fs::Permissions::from_mode(0o700)).unwrap();
-        }
-        dir
-    })
-    .path()
-}
-
-/// Runs the git CLI in `dir`, isolated (`isolated_git_env`) and with English messages (tests
-/// match some of them).
-fn git(dir: &Path, args: &[&str]) -> std::process::Output {
-    let env = isolated_git_env();
-    std::process::Command::new("git")
-        .args(args)
-        .env("LC_ALL", "C")
-        .env("HOME", env.join("home"))
-        .env("XDG_CONFIG_HOME", env.join("home"))
-        .env("GIT_CONFIG_GLOBAL", env.join("gitconfig"))
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GNUPGHOME", env.join("gnupg"))
-        .current_dir(dir)
-        .output()
-        .unwrap()
-}
+// The git CLI, isolated from the developer's config and gpg agent (#282).
+use test_support::git;
 
 fn git_ok(dir: &Path, args: &[&str]) {
     let output = git(dir, args);
@@ -535,10 +500,9 @@ fn continuing_a_rebase_keeps_a_terminal_bisect() {
         .success());
     common::write_file(twin_dir.path(), "f", "resolved\n");
     git_ok(twin_dir.path(), &["add", "f"]);
-    let output = std::process::Command::new("git")
+    let output = test_support::git_command(twin_dir.path())
         .args(["rebase", "--continue"])
         .env("GIT_EDITOR", "true")
-        .current_dir(twin_dir.path())
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
