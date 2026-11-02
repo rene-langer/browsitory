@@ -33,6 +33,7 @@ export async function packageVsix({
   frontendDist,
   sidecarPath,
   outputPath,
+  preRelease = false,
   run = runCommand,
 }) {
   if (!supportedTargets.has(target)) {
@@ -57,11 +58,10 @@ export async function packageVsix({
     await mkdir(path.dirname(outputPath), { recursive: true });
     await cp(frontendDist, webviewDirectory, { recursive: true });
     await copyFile(sidecarPath, path.join(binDirectory, sidecarName));
-    await run(
-      "pnpm",
-      ["exec", "vsce", "package", "--target", target, "--out", outputPath],
-      extensionRoot,
-    );
+    // `vsce publish --pre-release` refuses a package that wasn't packaged as a pre-release.
+    const vsceArguments = ["exec", "vsce", "package", "--target", target, "--out", outputPath];
+    if (preRelease) vsceArguments.push("--pre-release");
+    await run("pnpm", vsceArguments, extensionRoot);
     return outputPath;
   } finally {
     await Promise.all([
@@ -83,7 +83,9 @@ function runCommand(command, arguments_, cwd) {
 }
 
 export function parseOptions(args) {
-  const argumentList = args[0] === "--" ? args.slice(1) : args;
+  const allArguments = args[0] === "--" ? args.slice(1) : args;
+  const preRelease = allArguments.includes("--pre-release");
+  const argumentList = allArguments.filter((argument) => argument !== "--pre-release");
   const values = new Map();
   for (let index = 0; index < argumentList.length; index += 2) {
     values.set(argumentList[index], argumentList[index + 1]);
@@ -95,6 +97,7 @@ export function parseOptions(args) {
     target: values.get("--target"),
     sidecarPath: sidecarPath && path.resolve(extensionRoot, "..", sidecarPath),
     outputPath: values.get("--out"),
+    preRelease,
     extensionRoot,
     frontendDist: path.resolve(extensionRoot, "..", "frontend", "dist-vscode"),
   };

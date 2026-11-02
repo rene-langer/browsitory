@@ -1,15 +1,42 @@
 {
   "name": "browsitory",
   "displayName": "Browsitory",
-  "description": "A full Git repository browser inside VSCode.",
+  "description": "A full Git client inside VSCode: commit graph, staging by hunk or line, branches, rebase, stashes, tags, worktrees and pull requests.",
   "version": "0.1.0",
   "publisher": "browsitory",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#1b1a24",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rene-langer/browsitory",
+    "directory": "extension"
+  },
+  "homepage": "https://github.com/rene-langer/browsitory#readme",
+  "bugs": {
+    "url": "https://github.com/rene-langer/browsitory/issues"
+  },
   "private": true,
   "engines": {
     "vscode": "^1.134.0"
   },
   "categories": [
-    "SCM Providers"
+    "SCM Providers",
+    "Visualization"
+  ],
+  "keywords": [
+    "git",
+    "git client",
+    "git graph",
+    "commit graph",
+    "history",
+    "rebase",
+    "staging",
+    "branches",
+    "stash",
+    "worktree"
   ],
   "activationEvents": [
     "onCommand:browsitory.open"
@@ -20,8 +47,11 @@
     "dist/**",
     "bin/**",
     "webview/**",
+    "icon.png",
     "README.md",
-    "LICENSE"
+    "CHANGELOG.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "contributes": {
     "commands": [

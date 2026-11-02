@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### VSCode extension on the Marketplace and Open VSX
+
+- Added: release tags now publish the VSCode extension to the Visual Studio Marketplace and to
+  Open VSX (for VSCodium, Cursor and similar editors), one package per platform. It ships as a
+  pre-release for now. Each registry is skipped, with a notice, until its credentials are set
+  up (#271).
+- Added: the extension's listing has an icon, a feature list with screenshots, links to the
+  repository and the User Guide, a changelog link, and a `THIRD_PARTY_NOTICES.md` with the
+  licence texts of libgit2 and the other native libraries the bundled helper program links
+  (#271).
+- Docs: install steps for the Marketplace, Open VSX and a `.vsix` file in the User Guide and the
+  README (#271).
+
 ### Internal: test reliability
 
 - Tests that change the repository while a command waits for the state lock now know the

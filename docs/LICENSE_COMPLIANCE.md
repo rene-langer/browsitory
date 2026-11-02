@@ -72,9 +72,20 @@ extension-host typings; none are loaded by the packaged extension itself.
 |---|---|---|
 | @types/node | MIT | dev only; same package as the frontend row above. |
 | @types/vscode 1.134.0 | MIT | dev only; VSCode extension-host API types. |
-| @vscode/vsce 3.9.2 | MIT | dev only; packages target-specific VSIX artifacts. Source: `npm info @vscode/vsce@3.9.2 license`, verified 2026-08-31. |
+| @vscode/vsce 3.9.2 | MIT | dev only; packages target-specific VSIX artifacts, and `release.yml` runs it to publish them to the Visual Studio Marketplace. Source: `npm info @vscode/vsce@3.9.2 license`, verified 2026-08-31 (re-checked 2026-11-02). |
 | typescript | Apache-2.0 | dev only; same package as the frontend row above. |
 | vitest | MIT | dev only; same package as the frontend row above. |
+
+## Build-only CI tools (not dependencies)
+
+These tools run only inside a GitHub Actions job. They are not declared in any `package.json`
+or `Cargo.toml`, are not linked into anything, and are not shipped. Running a tool places no
+licence obligation on Browsitory, so they may be under a licence outside the allowed list.
+Each is pinned to an exact version where it runs.
+
+| Tool | License | Notes |
+|---|---|---|
+| ovsx 1.3.0 | EPL-2.0 | `release.yml`'s `publish-vsix-open-vsx` job runs it as `npx --yes ovsx@1.3.0 publish` to upload the already-built `.vsix` files to Open VSX. EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it as a dependency. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02. |
 
 ## JavaScript, `e2e/` (`npm info <package> license`)
 
@@ -122,6 +133,15 @@ Browsitory's MIT), so this is a conscious, documented choice, not an oversight â
 `docs/ARCHITECTURE.md`'s "Why git2 (libgit2 bindings), not gitoxide" for the rationale. No
 other GPL/AGPL/SSPL dependency is acceptable without a new, equally explicit decision recorded
 here.
+
+Every VSCode extension package (`.vsix`) bundles the `vscode-sidecar` binary, which links
+libgit2 statically. So the package ships `extension/THIRD_PARTY_NOTICES.md` next to `LICENSE`:
+libgit2's full `COPYING` (GPL-2.0 text, the linking exception, and the licences of the code
+libgit2 bundles), plus the licence texts of the other native libraries the sidecar links:
+libssh2 (static), OpenSSL (static, Linux and macOS packages only) and zlib (static, or the
+build machine's system zlib where `libz-sys` finds one).
+When a `libgit2-sys`, `libssh2-sys`, `openssl-src` or `libz-sys` update changes a version or a
+licence text, update that file in the same PR.
 
 ## Unicode-3.0
 
