@@ -1120,3 +1120,247 @@ fn undo_restores_a_read_only_file() {
     restore(&repo, &after, &before, "undo").unwrap();
     assert_eq!(read(&repo, "a.txt").as_deref(), Some("one\n"));
 }
+
+/// The names in the work tree's root folder, sorted.
+fn names_in(repo: &Repository) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(repo.workdir().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+/// A regression guard for the temporary file + rename restores (#251), not a proof of them (it
+/// passed before too): the restored files have the recorded content and exec bit, and no
+/// temporary file is left next to them. The walker's tests prove a failed restore keeps the
+/// old file.
+#[test]
+fn undo_restores_leave_no_temporary_file() {
+    let (_dir, repo) = seeded();
+    #[cfg_attr(not(unix), allow(unused_variables))]
+    let script = repo.workdir().unwrap().join("run.sh");
+    write(&repo, "run.sh", "#!/bin/sh\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    stage(&repo, "run.sh");
+    commit(&repo, "script");
+    write(&repo, "a.txt", "precious edit\n");
+    write(&repo, "run.sh", "#!/bin/sh\necho edited\n");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_head(Some(&mut checkout)).unwrap();
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("one\n"));
+
+    restore(&repo, &after, &before, "browsitory: undo test").unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("precious edit\n"));
+    assert_eq!(
+        read(&repo, "run.sh").as_deref(),
+        Some("#!/bin/sh\necho edited\n")
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_ne!(
+            fs::metadata(&script).unwrap().permissions().mode() & 0o111,
+            0
+        );
+    }
+    assert_eq!(names_in(&repo), [".git", "a.txt", "run.sh"]);
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), before);
+}
+
+/// Sets `dir`'s permission bits (Unix).
+#[cfg(unix)]
+fn chmod(dir: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(dir, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+/// Whether this test can make a folder refuse writes (root ignores the permission bits).
+#[cfg(unix)]
+fn can_refuse_writes() -> bool {
+    // SAFETY: `geteuid` has no preconditions.
+    let root = unsafe { libc::geteuid() } == 0;
+    if root {
+        eprintln!("skipped: root writes into read-only folders");
+    }
+    !root
+}
+
+/// A restore that turned the file `p` into the folder `p/` and then stopped (`q/` refused
+/// `q/y`) is finished by trying again: the folder it made counts as restored (#251).
+#[cfg(unix)]
+#[test]
+fn trying_again_finishes_a_restore_that_turned_a_file_into_a_folder() {
+    if !can_refuse_writes() {
+        return;
+    }
+    let (_dir, repo) = seeded();
+    let workdir = repo.workdir().unwrap().to_path_buf();
+    let q = workdir.join("q");
+    fs::create_dir(&q).unwrap();
+    write(&repo, "p", "a file\n");
+    let file = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_file(workdir.join("p")).unwrap();
+    write(&repo, "p/x", "x\n");
+    write(&repo, "q/y", "y\n");
+    let folders = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_dir_all(workdir.join("p")).unwrap();
+    fs::remove_file(q.join("y")).unwrap();
+    write(&repo, "p", "a file\n");
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), file);
+
+    chmod(&q, 0o555);
+    let stopped = restore(&repo, &file, &folders, "browsitory: redo test");
+    chmod(&q, 0o755);
+    assert!(matches!(stopped, Err(UndoError::Io(_))), "{stopped:?}");
+    assert_eq!(read(&repo, "p/x").as_deref(), Some("x\n"));
+    assert_eq!(read(&repo, "q/y"), None);
+
+    restore(&repo, &file, &folders, "browsitory: redo test").unwrap();
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), folders);
+}
+
+/// A restore that stopped after the index was written (libgit2's checkout of `d/f.txt` from
+/// it refused) is finished by trying again, in both directions: an index already at the
+/// target counts as restored, and the work tree is still checked against the snapshot (#251).
+#[cfg(unix)]
+#[test]
+fn trying_again_finishes_a_restore_that_stopped_after_the_index() {
+    if !can_refuse_writes() {
+        return;
+    }
+    let (_dir, repo) = seeded();
+    write(&repo, "d/f.txt", "one\n");
+    stage(&repo, "d/f.txt");
+    let head = commit(&repo, "second");
+    let d = repo.workdir().unwrap().join("d");
+    write(&repo, "d/f.txt", "staged\n");
+    stage(&repo, "d/f.txt");
+    let staged = capture(&repo, SnapshotScope::Full).unwrap();
+    let commit_object = repo.find_object(head, None).unwrap();
+    repo.reset(&commit_object, git2::ResetType::Hard, None)
+        .unwrap();
+    let reset = capture(&repo, SnapshotScope::Full).unwrap();
+
+    for (from, to, f) in [(&reset, &staged, "staged\n"), (&staged, &reset, "one\n")] {
+        chmod(&d.join("f.txt"), 0o444);
+        chmod(&d, 0o555);
+        let stopped = restore(&repo, from, to, "browsitory: undo test");
+        chmod(&d, 0o755);
+        chmod(&d.join("f.txt"), 0o644);
+        assert!(stopped.is_err(), "{stopped:?}");
+        assert_ne!(read(&repo, "d/f.txt").as_deref(), Some(f));
+
+        restore(&repo, from, to, "browsitory: undo test").unwrap();
+        assert_eq!(read(&repo, "d/f.txt").as_deref(), Some(f));
+        assert_eq!(&capture(&repo, SnapshotScope::Full).unwrap(), to);
+    }
+
+    // An edit made after the stop is still protected.
+    chmod(&d.join("f.txt"), 0o444);
+    chmod(&d, 0o555);
+    let stopped = restore(&repo, &reset, &staged, "browsitory: undo test");
+    chmod(&d, 0o755);
+    chmod(&d.join("f.txt"), 0o644);
+    assert!(stopped.is_err(), "{stopped:?}");
+    write(&repo, "d/f.txt", "my edit\n");
+    let refused = restore(&repo, &reset, &staged, "browsitory: undo test");
+    assert!(
+        matches!(refused, Err(UndoError::RepositoryChanged)),
+        "{refused:?}"
+    );
+    assert_eq!(read(&repo, "d/f.txt").as_deref(), Some("my edit\n"));
+}
+
+/// A restore that stopped part-way (here: `d/` refused new files after `a.txt` was written)
+/// is finished by trying again, in both directions: files already at the target don't count
+/// as changed since the operation (#251).
+#[cfg(unix)]
+#[test]
+fn trying_again_finishes_a_restore_that_stopped_part_way() {
+    if !can_refuse_writes() {
+        return;
+    }
+    let (_dir, repo) = seeded();
+    write(&repo, "d/f.txt", "one\n");
+    stage(&repo, "d/f.txt");
+    commit(&repo, "second");
+    let d = repo.workdir().unwrap().join("d");
+    write(&repo, "a.txt", "edited a\n");
+    write(&repo, "d/f.txt", "edited f\n");
+    let edited = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "a.txt", "discarded a\n");
+    write(&repo, "d/f.txt", "discarded f\n");
+    let discarded = capture(&repo, SnapshotScope::Full).unwrap();
+
+    for (from, to, a, f) in [
+        (&discarded, &edited, "edited a\n", "edited f\n"),
+        (&edited, &discarded, "discarded a\n", "discarded f\n"),
+    ] {
+        chmod(&d, 0o555);
+        let stopped = restore(&repo, from, to, "browsitory: undo test");
+        chmod(&d, 0o755);
+        assert!(matches!(stopped, Err(UndoError::Io(_))), "{stopped:?}");
+        assert_eq!(read(&repo, "a.txt").as_deref(), Some(a));
+        assert_ne!(read(&repo, "d/f.txt").as_deref(), Some(f));
+
+        restore(&repo, from, to, "browsitory: undo test").unwrap();
+        assert_eq!(read(&repo, "a.txt").as_deref(), Some(a));
+        assert_eq!(read(&repo, "d/f.txt").as_deref(), Some(f));
+        assert_eq!(&capture(&repo, SnapshotScope::Full).unwrap(), to);
+    }
+}
+
+/// Windows: an undo that would replace a file another program keeps open without sharing
+/// delete says so and leaves the file as it is (#251).
+#[cfg(windows)]
+#[test]
+fn undo_of_a_file_held_open_says_so() {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    let (dir, repo) = init_repo();
+    write(&repo, "a.txt", "one\n");
+    write(&repo, "f.txt", "one\n");
+    stage(&repo, "a.txt");
+    stage(&repo, "f.txt");
+    commit(&repo, "initial");
+    // Unstaged edits, then discarded: undoing the discard writes bytes the index doesn't
+    // have, through the walker (content the index has goes through libgit2's checkout).
+    write(&repo, "a.txt", "two\n");
+    write(&repo, "f.txt", "two\n");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "a.txt", "one\n");
+    write(&repo, "f.txt", "one\n");
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    // As an editor that keeps the file open, sharing read and write but not delete.
+    let editor = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .open(dir.path().join("f.txt"))
+        .unwrap();
+
+    let error = restore(&repo, &after, &before, "undo").unwrap_err();
+    assert!(matches!(error, UndoError::FileInUse(_)), "{error:?}");
+    assert_eq!(
+        error.to_string(),
+        "'f.txt' is open in another program. Close it, then try again."
+    );
+    // `a.txt` comes first and was restored; `f.txt` is as it was.
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("two\n"));
+    assert_eq!(read(&repo, "f.txt").as_deref(), Some("one\n"));
+
+    // Closed, then tried again, as the message says: the undo finishes.
+    drop(editor);
+    restore(&repo, &after, &before, "undo").unwrap();
+    assert_eq!(read(&repo, "a.txt").as_deref(), Some("two\n"));
+    assert_eq!(read(&repo, "f.txt").as_deref(), Some("two\n"));
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), before);
+}

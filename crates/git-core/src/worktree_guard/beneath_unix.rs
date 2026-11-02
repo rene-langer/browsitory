@@ -322,24 +322,49 @@ fn write_with(
         }
         Some(_) => return Err(not_a_regular_file()),
     };
-    let (temp, mut file) = create_temp(parent, leaf, &mut next_temp_number)?;
-    let written = (|| {
+    swap_in_file(&at, &target, &mut |file| {
         if let Some(mode) = mode {
             // SAFETY: `file` owns the descriptor of the temporary file just created.
             check(unsafe { libc::fchmod(file.as_raw_fd(), mode) })?;
         }
-        fill(&mut file)?;
-        file.sync_all()?;
-        rename_at(parent, &temp, &target)
-    })();
-    if let Err(error) = written {
-        let _ = unlink_at(parent, &temp, false);
+        fill(file)
+    })?;
+    Ok(true)
+}
+
+/// Puts a new file named `target` in `at`'s held parent, replacing whatever file or link has
+/// that name (never following it) at once: `make` fills a new temporary file next to it
+/// (`create_temp`), which is flushed and renamed over `target`. On any failure the temporary
+/// file is removed and `target` is left as it was.
+fn swap_in_file(
+    at: &Beneath,
+    target: &OsStr,
+    make: &mut dyn FnMut(&mut File) -> io::Result<()>,
+) -> io::Result<()> {
+    let (temp, mut file) = create_temp(at.parent(), at.leaf(), &mut next_temp_number)?;
+    swap_in(at, &temp, target, || {
+        make(&mut file)?;
+        file.sync_all()
+    })
+}
+
+/// Renames the temporary entry `temp` over `target` in `at`'s held parent once `prepare` has
+/// finished it. On any failure `temp` is removed and `target` is left as it was. The rename is
+/// then made durable, as far as the folder's `fsync` does (best effort).
+fn swap_in(
+    at: &Beneath,
+    temp: &OsStr,
+    target: &OsStr,
+    prepare: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    let parent = at.parent();
+    if let Err(error) = prepare().and_then(|()| rename_at(parent, temp, target)) {
+        let _ = unlink_at(parent, temp, false);
         return Err(error);
     }
-    // Best effort: makes the rename itself durable.
     // SAFETY: `parent` is a directory descriptor `at` holds.
     unsafe { libc::fsync(parent) };
-    Ok(true)
+    Ok(())
 }
 
 fn not_a_regular_file() -> io::Error {
@@ -626,41 +651,87 @@ pub(super) fn replace(
     content: Content<'_>,
     step: StepFn<'_>,
 ) -> io::Result<()> {
+    replace_with(
+        workdir,
+        rel,
+        content,
+        step,
+        &mut |file, bytes| file.write_all(bytes),
+        &mut || Ok(()),
+    )
+}
+
+/// `replace` with `fill` writing a file's bytes into the opened file and `before_rename` called
+/// once the new file or link is complete under its temporary name (test seams).
+fn replace_with(
+    workdir: &Path,
+    rel: &Path,
+    content: Content<'_>,
+    step: StepFn<'_>,
+    fill: &mut dyn FnMut(&mut File, &[u8]) -> io::Result<()>,
+    before_rename: &mut dyn FnMut() -> io::Result<()>,
+) -> io::Result<()> {
     let at = match walk(workdir, rel, OnLink::Clear, OnMissing::Create, step)? {
         Walk::Found(at) => at,
         Walk::NotDir => return Err(io::Error::from_raw_os_error(libc::ENOTDIR)),
         // Not returned with `OnMissing::Create`.
         Walk::Link | Walk::Missing => return Err(io::Error::from_raw_os_error(libc::ENOENT)),
     };
-    if let Some(stat) = stat_at(at.parent(), at.leaf())? {
-        match unlink_at(at.parent(), at.leaf(), is_dir(&stat)) {
-            Ok(()) => {}
-            Err(error) if errno(&error) == libc::ENOENT => {}
-            Err(error) => return Err(error),
+    let (parent, leaf) = (at.parent(), at.leaf());
+    // The name the new entry gets. A file or link is replaced by the rename itself (never
+    // followed, never opened), as is a FIFO, socket or device; an empty folder is removed
+    // first (a folder that isn't empty is an error, nothing changed).
+    let target = match stat_at(parent, leaf)? {
+        None => leaf.to_os_string(),
+        Some(stat) if is_link(&stat) || file_type(&stat) == libc::S_IFREG => {
+            on_disk_name(parent, leaf)?
         }
-    }
+        Some(stat) if is_dir(&stat) => {
+            match unlink_at(parent, leaf, true) {
+                Ok(()) => {}
+                Err(error) if errno(&error) == libc::ENOENT => {}
+                Err(error) => return Err(error),
+            }
+            leaf.to_os_string()
+        }
+        Some(_) => leaf.to_os_string(),
+    };
     match content {
-        Content::Link(target) => symlink_at(target, at.parent(), at.leaf()),
-        Content::File { bytes, executable } => {
-            let fd = open_at(
-                at.parent(),
-                at.leaf(),
-                libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW,
-                0o666,
-            )?;
-            let mode = fstat(fd.as_raw_fd())?.st_mode & 0o7777;
+        Content::Link(link_target) => {
+            let temp = symlink_temp(parent, leaf, link_target)?;
+            swap_in(&at, &temp, &target, before_rename)
+        }
+        // The mode comes from the restored entry alone (the umask's, plus or minus the exec
+        // bits), never from the file it replaces.
+        Content::File { bytes, executable } => swap_in_file(&at, &target, &mut |file| {
+            let mode = fstat(file.as_raw_fd())?.st_mode & 0o7777;
             let wanted = if executable {
                 mode | 0o111
             } else {
                 mode & !0o111
             };
             if wanted != mode {
-                // SAFETY: `fd` is the descriptor just opened above and still owned here.
-                check(unsafe { libc::fchmod(fd.as_raw_fd(), wanted) })?;
+                // SAFETY: `file` owns the descriptor of the temporary file just created.
+                check(unsafe { libc::fchmod(file.as_raw_fd(), wanted) })?;
             }
-            File::from(fd).write_all(bytes)
+            fill(file, bytes)?;
+            before_rename()
+        }),
+    }
+}
+
+/// Creates a new link to `target` next to `leaf` in `parent` under a temporary name
+/// (`temp_name`; a name that exists is skipped) and returns that name.
+fn symlink_temp(parent: RawFd, leaf: &OsStr, target: &[u8]) -> io::Result<OsString> {
+    for _ in 0..ATTEMPTS {
+        let name = temp_name(leaf, next_temp_number());
+        match symlink_at(target, parent, &name) {
+            Ok(()) => return Ok(name),
+            Err(error) if errno(&error) == libc::EEXIST => {}
+            Err(error) => return Err(error),
         }
     }
+    Err(io::Error::from_raw_os_error(libc::EEXIST))
 }
 
 #[cfg(test)]
@@ -1231,6 +1302,184 @@ mod tests {
         assert_eq!(
             std::fs::read_link(dir.path().join("d/e")).unwrap(),
             Path::new("f")
+        );
+    }
+
+    /// A fill that writes "new" and then fails, as a full disk would.
+    fn fail_after_new(file: &mut File, _bytes: &[u8]) -> io::Result<()> {
+        file.write_all(b"new")?;
+        Err(io::Error::other("disk full"))
+    }
+
+    fn new_content() -> Content<'static> {
+        Content::File {
+            bytes: b"new content",
+            executable: false,
+        }
+    }
+
+    #[test]
+    fn a_failed_restore_keeps_the_old_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, _outside) = tree();
+        let f = dir.path().join("d/f");
+        std::fs::write(&f, "old content").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let error = replace_with(
+            dir.path(),
+            Path::new("d/f"),
+            new_content(),
+            &mut no_step,
+            &mut fail_after_new,
+            &mut || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(std::fs::read(&f).unwrap(), b"old content");
+        assert_eq!(mode(&f), 0o640);
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f"]);
+    }
+
+    #[test]
+    fn a_failed_restore_of_a_new_file_leaves_nothing() {
+        let (dir, _outside) = tree();
+        let error = replace_with(
+            dir.path(),
+            Path::new("d/new"),
+            new_content(),
+            &mut no_step,
+            &mut fail_after_new,
+            &mut || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f"]);
+    }
+
+    #[test]
+    fn a_failed_restore_over_a_link_keeps_the_link() {
+        let (dir, _outside) = tree();
+        let l = dir.path().join("d/l");
+        std::os::unix::fs::symlink("../t", &l).unwrap();
+        let error = replace_with(
+            dir.path(),
+            Path::new("d/l"),
+            new_content(),
+            &mut no_step,
+            &mut fail_after_new,
+            &mut || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(std::fs::read_link(&l).unwrap(), Path::new("../t"));
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f", "l"]);
+    }
+
+    #[test]
+    fn a_failed_link_restore_keeps_the_old_file() {
+        let (dir, _outside) = tree();
+        let d = dir.path().join("d");
+        let seen = d.clone();
+        // Fails once the new link exists under its temporary name, with the old file still
+        // there: it is replaced by the rename only, never deleted first.
+        let error = replace_with(
+            dir.path(),
+            Path::new("d/f"),
+            Content::Link(b"e"),
+            &mut no_step,
+            &mut |_, _| unreachable!("a link has no bytes to fill"),
+            &mut || {
+                let names = names_in(&seen);
+                assert_eq!(names.len(), 3, "{names:?}");
+                assert!(names.iter().any(|n| n.starts_with(".f.browsitory-")));
+                assert_eq!(std::fs::read(seen.join("f")).unwrap(), b"inner\n");
+                Err(io::Error::other("rename refused"))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "rename refused");
+        assert!(std::fs::symlink_metadata(d.join("f")).unwrap().is_file());
+        assert_eq!(std::fs::read(d.join("f")).unwrap(), b"inner\n");
+        assert_eq!(names_in(&d), ["e", "f"]);
+    }
+
+    #[test]
+    fn restore_replaces_a_link_with_a_link_and_leaves_no_temporary_entry() {
+        let (dir, _outside) = tree();
+        let l = dir.path().join("d/l");
+        std::os::unix::fs::symlink("../old", &l).unwrap();
+        replace(
+            dir.path(),
+            Path::new("d/l"),
+            Content::Link(b"../new"),
+            &mut no_step,
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_link(&l).unwrap(), Path::new("../new"));
+        replace(
+            dir.path(),
+            Path::new("d/f"),
+            Content::Link(b"e"),
+            &mut no_step,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_link(dir.path().join("d/f")).unwrap(),
+            Path::new("e")
+        );
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f", "l"]);
+    }
+
+    #[test]
+    fn restore_replaces_a_hardlink_instead_of_writing_through_it() {
+        let (dir, outside) = tree();
+        std::fs::hard_link(outside.path().join("f"), dir.path().join("d/h")).unwrap();
+        replace(dir.path(), Path::new("d/h"), new_content(), &mut no_step).unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("d/h")).unwrap(),
+            b"new content"
+        );
+        assert_outside_untouched(outside.path());
+    }
+
+    #[test]
+    fn restore_replaces_a_fifo_without_opening_it() {
+        let (dir, _outside) = tree();
+        mkfifo(&dir.path().join("pipe"));
+        let root = dir.path().to_path_buf();
+        within_5s(move || replace(&root, Path::new("pipe"), new_content(), &mut no_step)).unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("pipe")).unwrap(),
+            b"new content"
+        );
+        assert_eq!(names_in(dir.path()), ["d", "pipe"]);
+    }
+
+    #[test]
+    fn restore_refuses_a_non_empty_folder() {
+        let (dir, _outside) = tree();
+        std::fs::write(dir.path().join("d/e/keep"), "k").unwrap();
+        assert!(replace(dir.path(), Path::new("d/e"), new_content(), &mut no_step).is_err());
+        assert_eq!(std::fs::read(dir.path().join("d/e/keep")).unwrap(), b"k");
+        assert_eq!(names_in(&dir.path().join("d")), ["e", "f"]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn restore_keeps_the_on_disk_name_case() {
+        let (dir, _outside) = tree();
+        std::fs::write(dir.path().join("d/F.txt"), "old").unwrap();
+        replace(
+            dir.path(),
+            Path::new("d/f.txt"),
+            new_content(),
+            &mut no_step,
+        )
+        .unwrap();
+        assert_eq!(names_in(&dir.path().join("d")), ["F.txt", "e", "f"]);
+        assert_eq!(
+            std::fs::read(dir.path().join("d/F.txt")).unwrap(),
+            b"new content"
         );
     }
 

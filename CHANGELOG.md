@@ -24,6 +24,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - If Abort can't remove one of git's merge state files, it now says "Couldn't remove git's merge
   state: …" instead of "failed to write resolved file: …" (#249).
 
+### Safe undo restores
+
+- Fixed: if Undo or Redo failed while writing a file back (for example a full disk), the file
+  was left half-written and its previous content was gone. Browsitory now writes the restored
+  file next to it and swaps it in only when it is complete, so a failure leaves the file as it
+  was (#251).
+- Fixed: after such a failure, running Undo or Redo again said the repository had changed.
+  It now finishes the restore (#251).
+- Windows: if another program keeps the file open so it can't be swapped, Undo and Redo now say
+  "'f.txt' is open in another program. Close it, then try again." This also applies to a
+  read-only file (#251).
+
 ### Safe file writes
 
 - Fixed: if writing a resolved conflict or .gitignore failed partway (for example a full
