@@ -8,16 +8,42 @@ once and both callers just invoke this script.
 
 import argparse
 import os
+import posixpath
 import subprocess
 import sys
 
 WATCHED_PREFIXES = ("crates/", "frontend/src/", "e2e/")
 CHANGELOG_FILE = "CHANGELOG.md"
 
+# Dependency manifests and lockfiles, matched by file name in any directory. A
+# change touching only these (e.g. a Renovate PR bumping `crates/*/Cargo.toml` or
+# `e2e/pnpm-lock.yaml`) doesn't need a CHANGELOG.md entry.
+DEPENDENCY_FILES = frozenset(
+    {
+        "Cargo.toml",
+        "Cargo.lock",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "rust-toolchain.toml",
+    }
+)
+
+
+def is_dependency_file(path: str) -> bool:
+    return posixpath.basename(path) in DEPENDENCY_FILES
+
 
 def needs_changelog(changed_files: list[str]) -> bool:
-    """True if changed_files touch a watched path without touching CHANGELOG.md."""
-    touches_watched_path = any(f.startswith(WATCHED_PREFIXES) for f in changed_files)
+    """True if changed_files touch a watched path without touching CHANGELOG.md.
+
+    Dependency manifests/lockfiles (DEPENDENCY_FILES) don't count as touching a
+    watched path; any other file under one still requires a CHANGELOG.md update.
+    """
+    touches_watched_path = any(
+        f.startswith(WATCHED_PREFIXES) and not is_dependency_file(f)
+        for f in changed_files
+    )
     touches_changelog = CHANGELOG_FILE in changed_files
     return touches_watched_path and not touches_changelog
 
@@ -56,6 +82,7 @@ def main() -> int:
         print(
             "check-changelog: code changed under crates/, frontend/src/, or "
             "e2e/ but CHANGELOG.md wasn't updated.\n"
+            "(Changes limited to dependency manifests/lockfiles are exempt.)\n"
             "Add an entry under [Unreleased], or bypass with "
             "SKIP_CHANGELOG_CHECK=1 (local push) / the 'skip-changelog' PR "
             "label (CI).",

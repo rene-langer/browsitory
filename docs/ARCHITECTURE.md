@@ -60,7 +60,10 @@ merge conflict handling, native stash/cherry-pick, native remote transports. The
 alternative (`gitoxide`/`gix`) is a closer license fit (no GPL exception needed at all), but
 its write-side operations (merge, rebase) are less mature as of this writing. `git2` is the
 pragmatic choice; the libgit2 license deviation is documented, not silently accepted — see
-`CLAUDE.md`'s License policy section.
+`CLAUDE.md`'s License policy section. Because the tests and the "git2 API gotchas" below
+characterize libgit2 behaviour, Renovate holds
+`git2`/`libgit2-sys` updates for Dependency Dashboard approval (`renovate.json`; see
+`CLAUDE.md`'s Dependency updates section) — re-check those notes when approving one.
 
 ## The `RepoClient` IPC boundary
 
