@@ -626,6 +626,19 @@ pub(super) fn replace(
     content: Content<'_>,
     step: StepFn<'_>,
 ) -> io::Result<()> {
+    replace_with(workdir, rel, content, step, &mut |file, bytes| {
+        file.write_all(bytes)
+    })
+}
+
+/// `replace` with `fill` writing a file's bytes into the opened file (a test seam).
+fn replace_with(
+    workdir: &Path,
+    rel: &Path,
+    content: Content<'_>,
+    step: StepFn<'_>,
+    fill: &mut dyn FnMut(&mut File, &[u8]) -> io::Result<()>,
+) -> io::Result<()> {
     let at = match walk(workdir, rel, OnLink::Clear, OnMissing::Create, step)? {
         Walk::Found(at) => at,
         Walk::NotDir => return Err(io::Error::from_raw_os_error(libc::ENOTDIR)),
@@ -658,7 +671,7 @@ pub(super) fn replace(
                 // SAFETY: `fd` is the descriptor just opened above and still owned here.
                 check(unsafe { libc::fchmod(fd.as_raw_fd(), wanted) })?;
             }
-            File::from(fd).write_all(bytes)
+            fill(&mut File::from(fd), bytes)
         }
     }
 }
@@ -1232,6 +1245,36 @@ mod tests {
             std::fs::read_link(dir.path().join("d/e")).unwrap(),
             Path::new("f")
         );
+    }
+
+    /// A fill that writes "new" and then fails, as a full disk would.
+    fn fail_after_new(file: &mut File, _bytes: &[u8]) -> io::Result<()> {
+        file.write_all(b"new")?;
+        Err(io::Error::other("disk full"))
+    }
+
+    fn new_content() -> Content<'static> {
+        Content::File {
+            bytes: b"new content",
+            executable: false,
+        }
+    }
+
+    #[test]
+    fn a_failed_restore_loses_the_old_file_today() {
+        let (dir, _outside) = tree();
+        let f = dir.path().join("d/f");
+        std::fs::write(&f, "old content").unwrap();
+        let error = replace_with(
+            dir.path(),
+            Path::new("d/f"),
+            new_content(),
+            &mut no_step,
+            &mut fail_after_new,
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(std::fs::read(&f).unwrap(), b"new");
     }
 
     #[test]

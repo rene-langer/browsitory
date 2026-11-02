@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Safe undo restores
+
+- Fixed: Undo and Redo write a restored file whole (#251).
+
 ### Safe file writes
 
 - Fixed: if writing a resolved conflict or .gitignore failed partway (for example a full

@@ -1453,6 +1453,26 @@ pub(super) fn replace(
     content: Content<'_>,
     step: StepFn<'_>,
 ) -> io::Result<()> {
+    replace_with(
+        workdir,
+        rel,
+        content,
+        step,
+        &mut |file, bytes| file.write_all(bytes),
+        &mut || {},
+    )
+}
+
+/// `replace` with `fill` writing the bytes into the opened file and `on_wait` called before each
+/// wait for a file in use (test seams).
+fn replace_with(
+    workdir: &Path,
+    rel: &Path,
+    content: Content<'_>,
+    step: StepFn<'_>,
+    fill: &mut dyn FnMut(&mut File, &[u8]) -> io::Result<()>,
+    #[allow(unused_variables)] on_wait: &mut dyn FnMut(),
+) -> io::Result<()> {
     let at = match walk(workdir, rel, OnLink::Clear, OnMissing::Create, step)? {
         Walk::Found(at) => at,
         Walk::NotDir => {
@@ -1474,7 +1494,7 @@ pub(super) fn replace(
             drop(leaf);
         }
         if let Some(mut file) = create_leaf(&at)? {
-            return file.write_all(bytes);
+            return fill(&mut file, bytes);
         }
     }
     Err(redirected())
@@ -2081,6 +2101,38 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.to_string(), "disk full");
         assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    /// A fill that writes "new" and then fails, as a full disk would.
+    fn fail_after_new(file: &mut File, _bytes: &[u8]) -> io::Result<()> {
+        file.write_all(b"new")?;
+        Err(io::Error::other("disk full"))
+    }
+
+    fn new_content() -> Content<'static> {
+        Content::File {
+            bytes: b"new content",
+            executable: false,
+        }
+    }
+
+    #[test]
+    fn a_failed_restore_loses_the_old_file_today() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        std::fs::write(&f, "old content").unwrap();
+        let error = replace_with(
+            dir.path(),
+            Path::new("d/f"),
+            new_content(),
+            &mut no_step,
+            &mut fail_after_new,
+            &mut || {},
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "disk full");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
     }
 
     #[test]
