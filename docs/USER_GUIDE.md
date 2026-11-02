@@ -697,6 +697,21 @@ message git suggests) and the step's changes; any other commit counts as HEAD mo
 `git revert A B`) started in a terminal is paused. Continue or abort that first (see
 [Started in a terminal](#rewriting-and-moving-commits)).
 
+**During another operation.** A rebase doesn't start while a merge, cherry-pick or revert is
+paused, even one whose conflicts you already resolved. It says which, for example "A merge is
+in progress. Commit or abort it before starting a rebase."
+
+**Rebase started in a terminal.** While a `git rebase` (or `git am`) from a terminal is paused,
+the bar says **Rebasing topic, step 2 of 3 (started in a terminal)** (or **Applying patches, 1
+of 3 …**) with "Continue or abort it there with git rebase --continue or git rebase --abort."
+On a conflict it says "Resolve 1 conflict, then run git rebase --continue in the terminal."
+It has no buttons: you continue or abort the rebase in the terminal. You can resolve the
+conflicts, stage and commit in Browsitory meanwhile. Cherry-pick, revert, a new rebase, reset,
+amend and Abort merge say "A rebase started in a terminal isn't finished. Continue it there
+with git rebase --continue, or abort it with git rebase --abort.", and the sidebar's branch,
+tag and worktree actions are disabled. A merge you start in the terminal during the rebase is
+still yours to abort, as with `git merge --abort`.
+
 **Interrupted rebase.** If the repository changed outside Browsitory while a rebase was paused, the
 strip shows **Rebase of ⟨branch⟩ interrupted** with the reason: HEAD was moved (for example
 `git switch`), the branch was changed or deleted, or another git operation is in progress. Such a
@@ -852,7 +867,9 @@ cherry-pick, revert, merge, rebase, pull and every discard, so discarded changes
 recoverable. Up to 50 steps are kept, across restarts. An operation that stopped on a conflict
 or an edit step (merge, cherry-pick, revert, a multi-commit sequence, rebase) becomes one undo
 step when it finishes, even if you restarted the app in between; one aborted, or replaced by
-another operation outside Browsitory, leaves nothing to undo. A `git bisect` started in a
+another operation outside Browsitory, leaves nothing to undo. A rebase started in a terminal
+is one operation through all its steps; it is continued and finished in the terminal, so it
+leaves nothing to undo either. A `git bisect` started in a
 terminal doesn't count as an operation in progress: operations are recorded and Undo and Redo
 work during it, and they don't end it.
 
