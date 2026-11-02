@@ -7,7 +7,7 @@ use std::path::Path;
 
 use git2::{Oid, Repository, RepositoryState};
 use git_core::hooks::HookOptions;
-use git_core::pick::PickError;
+use git_core::pick::{PickError, PickOutcome, SequenceOutcome};
 use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseStepResult};
 use tempfile::TempDir;
 
@@ -124,24 +124,30 @@ fn plan_onto(repo: &Repository, onto: &str) -> Vec<RebasePlanEntry> {
 }
 
 #[test]
-fn cherry_pick_and_revert_during_a_bisect_are_refused_today() {
-    let (_dir, repo, ids) = bisect_repo(true);
+fn cherry_pick_and_revert_run_during_a_bisect() {
+    let (dir, repo, ids) = bisect_repo(true);
     let before = bisect_log(&repo);
 
     let picked =
-        git_core::pick::cherry_pick(&repo, &ids.clean.to_string(), None, HookOptions::default());
-    assert!(matches!(picked, Err(PickError::OperationInProgress)));
-    let reverted = git_core::pick::revert(&repo, &head(&repo), None, HookOptions::default());
-    assert!(matches!(reverted, Err(PickError::OperationInProgress)));
-    let many = git_core::pick::cherry_pick_many(
-        &repo,
-        &[ids.clean.to_string(), ids.feature.to_string()],
-        HookOptions::default(),
+        git_core::pick::cherry_pick(&repo, &ids.clean.to_string(), None, HookOptions::default())
+            .unwrap();
+    assert!(
+        matches!(picked, PickOutcome::Committed { .. }),
+        "{picked:?}"
     );
-    assert!(matches!(many.outcome, Err(PickError::OperationInProgress)));
-    assert_eq!(bisect_log(&repo), before);
+    assert_eq!(common::read(dir.path(), "clean.txt"), "clean\n");
+    let reverted =
+        git_core::pick::revert(&repo, &head(&repo), None, HookOptions::default()).unwrap();
+    assert!(
+        matches!(reverted, PickOutcome::Committed { .. }),
+        "{reverted:?}"
+    );
+    assert!(!dir.path().join("clean.txt").exists());
 
-    // git's twin runs both and keeps the bisect.
+    assert_eq!(bisect_log(&repo), before);
+    assert_eq!(repo.state(), RepositoryState::Bisect);
+
+    // git's twin runs both and keeps the bisect too.
     let (twin_dir, twin, twin_ids) = bisect_repo(true);
     let twin_before = bisect_log(&twin);
     git_ok(
@@ -152,9 +158,139 @@ fn cherry_pick_and_revert_during_a_bisect_are_refused_today() {
     assert_eq!(bisect_log(&twin), twin_before);
 }
 
+/// `cherry_pick_many([clean, feature])`: clean applies, feature conflicts.
+fn sequence_paused_during_a_bisect(repo: &Repository, ids: &Ids) -> git_core::pick::SequenceState {
+    let run = git_core::pick::cherry_pick_many(
+        repo,
+        &[ids.clean.to_string(), ids.feature.to_string()],
+        HookOptions::default(),
+    );
+    assert!(
+        matches!(run.outcome, Ok(SequenceOutcome::Conflicted { .. })),
+        "{:?}",
+        run.outcome
+    );
+    run.state.expect("a stopped sequence")
+}
+
 #[test]
-fn reset_and_amend_during_a_bisect_are_refused_today() {
+fn a_sequence_runs_and_aborts_during_a_bisect() {
+    let (dir, repo, ids) = bisect_repo(true);
+    let before = bisect_log(&repo);
+    let original = head(&repo);
+    let state = sequence_paused_during_a_bisect(&repo, &ids);
+
+    let abort = git_core::pick::abort_sequence(&repo, &state).unwrap();
+
+    assert!(abort.rewound);
+    assert_eq!(head(&repo), original);
+    assert!(repo.head_detached().unwrap());
+    assert!(!dir.path().join("clean.txt").exists());
+    assert_eq!(common::read(dir.path(), "f"), "main\n");
+    assert_eq!(bisect_log(&repo), before);
+    assert_eq!(repo.state(), RepositoryState::Bisect);
+
+    // git's twin keeps the bisect too.
+    let (twin_dir, twin, twin_ids) = bisect_repo(true);
+    let twin_before = bisect_log(&twin);
+    let twin_original = head(&twin);
+    let output = git(
+        twin_dir.path(),
+        &[
+            "cherry-pick",
+            &twin_ids.clean.to_string(),
+            &twin_ids.feature.to_string(),
+        ],
+    );
+    assert!(!output.status.success());
+    git_ok(twin_dir.path(), &["cherry-pick", "--abort"]);
+    assert_eq!(head(&twin), twin_original);
+    assert_eq!(bisect_log(&twin), twin_before);
+}
+
+/// The paused step committed with `git commit`, then Continue: the bisect no longer reads as
+/// "another operation" (#250).
+#[test]
+fn a_sequence_continues_after_a_step_committed_by_hand_during_a_bisect() {
+    let (dir, repo, ids) = bisect_repo(true);
+    let before = bisect_log(&repo);
+    let state = sequence_paused_during_a_bisect(&repo, &ids);
+    common::write_file(dir.path(), "f", "resolved\n");
+    stage(&repo, "f");
+    git_ok(dir.path(), &["commit", "--no-edit"]);
+    let repo = reopen(&repo);
+    assert_eq!(repo.state(), RepositoryState::Bisect);
+
+    let run = git_core::pick::continue_sequence(&repo, state, HookOptions::default());
+
+    assert!(
+        matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })),
+        "{:?}",
+        run.outcome
+    );
+    assert!(run.state.is_none());
+    assert_eq!(bisect_log(&repo), before);
+}
+
+#[test]
+fn a_conflicting_pick_during_a_bisect_can_be_aborted() {
+    let (dir, repo, ids) = bisect_repo(true);
+    let before = bisect_log(&repo);
+    let original = head(&repo);
+    let picked = git_core::pick::cherry_pick(
+        &repo,
+        &ids.feature.to_string(),
+        None,
+        HookOptions::default(),
+    )
+    .unwrap();
+    assert!(
+        matches!(picked, PickOutcome::Conflicted { .. }),
+        "{picked:?}"
+    );
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(head(&repo), original);
+    assert_eq!(common::read(dir.path(), "f"), "main\n");
+    assert_eq!(repo.state(), RepositoryState::Bisect);
+    assert_eq!(bisect_log(&repo), before);
+
+    // git's twin keeps the bisect too.
+    let (twin_dir, twin, twin_ids) = bisect_repo(true);
+    let twin_before = bisect_log(&twin);
+    let output = git(
+        twin_dir.path(),
+        &["cherry-pick", &twin_ids.feature.to_string()],
+    );
+    assert!(!output.status.success());
+    git_ok(twin_dir.path(), &["cherry-pick", "--abort"]);
+    assert_eq!(bisect_log(&twin), twin_before);
+}
+
+/// A pick paused during a bisect is libgit2's `CherryPick` state (checked before `Bisect`), so it
+/// still blocks what a paused pick blocks.
+#[test]
+fn a_pick_paused_during_a_bisect_still_blocks_a_new_pick() {
     let (_dir, repo, ids) = bisect_repo(true);
+    let picked = git_core::pick::cherry_pick(
+        &repo,
+        &ids.feature.to_string(),
+        None,
+        HookOptions::default(),
+    )
+    .unwrap();
+    assert!(
+        matches!(picked, PickOutcome::Conflicted { .. }),
+        "{picked:?}"
+    );
+
+    let again =
+        git_core::pick::cherry_pick(&repo, &ids.clean.to_string(), None, HookOptions::default());
+    assert!(
+        matches!(again, Err(PickError::OperationInProgress)),
+        "{again:?}"
+    );
     let reset = git_core::reset::reset_to(
         &repo,
         &ids.base.to_string(),
@@ -164,25 +300,96 @@ fn reset_and_amend_during_a_bisect_are_refused_today() {
         reset,
         Err(git_core::reset::ResetError::OperationInProgress)
     ));
-    let amended = git_core::commit::amend_head(&repo, "amended\n", None, HookOptions::default());
-    assert!(matches!(
-        amended,
-        Err(git_core::commit::CommitError::OperationInProgress)
-    ));
 }
 
 #[test]
-fn undo_restore_during_a_bisect_is_refused_today() {
-    use git_core::undo::{capture, restore, SnapshotScope, UndoError};
+fn reset_and_amend_run_during_a_bisect() {
+    let (dir, repo, ids) = bisect_repo(true);
+    let before = bisect_log(&repo);
+
+    let amended =
+        git_core::commit::amend_head(&repo, "amended\n", None, HookOptions::default()).unwrap();
+    assert_eq!(head(&repo), amended);
+    assert_eq!(
+        repo.head().unwrap().peel_to_commit().unwrap().message(),
+        Ok("amended\n")
+    );
+    git_core::reset::reset_to(
+        &repo,
+        &ids.base.to_string(),
+        git_core::reset::ResetMode::Hard,
+    )
+    .unwrap();
+    assert_eq!(head(&repo), ids.base.to_string());
+    assert_eq!(common::read(dir.path(), "f"), "base\n");
+    assert_eq!(bisect_log(&repo), before);
+
+    // git's twin keeps the bisect too.
+    let (twin_dir, twin, twin_ids) = bisect_repo(true);
+    let twin_before = bisect_log(&twin);
+    git_ok(twin_dir.path(), &["commit", "--amend", "-m", "amended"]);
+    git_ok(
+        twin_dir.path(),
+        &["reset", "--hard", &twin_ids.base.to_string()],
+    );
+    assert_eq!(bisect_log(&twin), twin_before);
+}
+
+/// libgit2's mixed reset ends with `cleanup_state`; Browsitory's keeps the bisect, a terminal
+/// rebase's folder and a cherry-pick list, and writes git's reflog message (#249, #250).
+#[test]
+fn a_mixed_reset_keeps_a_terminal_bisect_and_moves_the_branch() {
+    let (dir, repo, ids) = bisect_repo(false);
+    let before = bisect_log(&repo);
+    let sequencer = repo.path().join("sequencer");
+    std::fs::create_dir(&sequencer).unwrap();
+    std::fs::write(sequencer.join("todo"), "pick 1234567 B\n").unwrap();
+
+    git_core::reset::reset_to(
+        &repo,
+        &ids.base.to_string(),
+        git_core::reset::ResetMode::Mixed,
+    )
+    .unwrap();
+
+    let main = repo.find_reference("refs/heads/main").unwrap();
+    assert_eq!(main.target(), Some(ids.base));
+    assert_eq!(repo.head().unwrap().name().unwrap(), "refs/heads/main");
+    let reflog = repo.reflog("refs/heads/main").unwrap();
+    assert_eq!(
+        reflog.get(0).unwrap().message().unwrap(),
+        Some(format!("reset: moving to {}", ids.base).as_str())
+    );
+    // The index is base's; the work tree keeps main's content.
+    let staged = repo.index().unwrap().get_path(Path::new("f"), 0).unwrap();
+    assert_eq!(
+        repo.find_blob(staged.id).unwrap().content(),
+        b"base\n".as_slice()
+    );
+    assert_eq!(common::read(dir.path(), "f"), "main\n");
+    assert_eq!(bisect_log(&repo), before);
+    assert_eq!(
+        std::fs::read_to_string(sequencer.join("todo")).unwrap(),
+        "pick 1234567 B\n"
+    );
+}
+
+#[test]
+fn undo_restores_during_a_bisect() {
+    use git_core::undo::{capture, restore, SnapshotScope};
     let (dir, repo, _ids) = bisect_repo(true);
+    let before_log = bisect_log(&repo);
+    let original = head(&repo);
     let before = capture(&repo, SnapshotScope::Full).unwrap();
     common::write_file(dir.path(), "x.txt", "x\n");
     common::commit_all(&repo, "x");
     let after = capture(&repo, SnapshotScope::Full).unwrap();
 
-    let result = restore(&repo, &after, &before, "undo: x");
+    restore(&repo, &after, &before, "undo: x").unwrap();
 
-    assert!(matches!(result, Err(UndoError::OperationInProgress)));
+    assert_eq!(head(&repo), original);
+    assert!(!dir.path().join("x.txt").exists());
+    assert_eq!(bisect_log(&repo), before_log);
 }
 
 #[test]
@@ -213,20 +420,45 @@ fn aborting_a_merge_keeps_a_terminal_bisect() {
 }
 
 #[test]
-fn a_rebase_step_committed_by_hand_during_a_bisect_shows_as_interrupted_today() {
-    use git_core::rebase::{RebaseDivergence, RebaseHealth};
-    let (dir, repo, _ids) = bisect_repo(false);
-    let plan = plan_onto(&repo, "feature");
-    let (state, result) = git_core::rebase::start_rebase(&repo, "feature", plan).unwrap();
-    assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
-    common::write_file(dir.path(), "f", "resolved\n");
-    stage(&repo, "f");
-    git_ok(dir.path(), &["commit", "--no-edit"]);
+fn a_rebase_during_a_bisect_is_paused_not_interrupted() {
+    // A rebase step committed with `git commit` during a bisect is adopted like any other (the
+    // bisect is not "another operation", #250): the rebase stays paused, Continue finishes it,
+    // and Abort puts the branch back.
+    use git_core::rebase::RebaseHealth;
+    let committed_by_hand = || {
+        let (dir, repo, _ids) = bisect_repo(false);
+        let tip = head(&repo);
+        let plan = plan_onto(&repo, "feature");
+        let (state, result) = git_core::rebase::start_rebase(&repo, "feature", plan).unwrap();
+        assert!(matches!(result, RebaseStepResult::Conflicted { .. }));
+        common::write_file(dir.path(), "f", "resolved\n");
+        stage(&repo, "f");
+        git_ok(dir.path(), &["commit", "--no-edit"]);
+        let repo = reopen(&repo);
+        assert_eq!(repo.state(), RepositoryState::Bisect);
+        (dir, repo, state, tip)
+    };
 
+    let (dir, repo, mut state, _tip) = committed_by_hand();
+    let before = bisect_log(&repo);
     assert_eq!(
         git_core::rebase::rebase_health(&repo, &state).unwrap(),
-        RebaseHealth::Diverged(RebaseDivergence::OtherOperation)
+        RebaseHealth::Paused
     );
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+    assert!(!repo.head_detached().unwrap());
+    assert_eq!(common::read(dir.path(), "f"), "resolved\n");
+    assert_eq!(bisect_log(&repo), before);
+
+    let (dir, repo, state, tip) = committed_by_hand();
+    let before = bisect_log(&repo);
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+    assert!(abort.restored);
+    assert_eq!(head(&repo), tip);
+    assert!(!repo.head_detached().unwrap());
+    assert_eq!(common::read(dir.path(), "f"), "main\n");
+    assert_eq!(bisect_log(&repo), before);
 }
 
 #[test]

@@ -462,10 +462,10 @@ fn resume_kind(repo: &Repository, state: &RebaseState) -> Result<Resume, RebaseE
     if state.cursor > state.plan.len() {
         return Err(RebaseError::NotRebasing);
     }
-    use git2::RepositoryState::{CherryPick, CherryPickSequence, Clean};
+    use git2::RepositoryState::{Bisect, CherryPick, CherryPickSequence, Clean};
     if state.cursor == state.plan.len() {
         // Every step landed and `finish` failed (the branch moved or was deleted): retry it.
-        if repo.state() != Clean {
+        if !crate::repo::no_operation(repo) {
             return Err(RebaseError::OperationInProgress);
         }
         if !head_at_expected(repo, state)? {
@@ -492,7 +492,8 @@ fn resume_kind(repo: &Repository, state: &RebaseState) -> Result<Resume, RebaseE
             check_head_at_expected(repo, state)?;
             Ok(Resume::Land)
         }
-        Clean => {
+        // A terminal bisect is no operation in progress (#250).
+        Clean | Bisect => {
             if head_at_expected(repo, state)? {
                 return Ok(Resume::Reapply);
             }
@@ -554,7 +555,7 @@ pub fn rebase_health(repo: &Repository, state: &RebaseState) -> Result<RebaseHea
         return Ok(RebaseHealth::Diverged(BranchMoved));
     }
     let own_pick = state.cursor < state.plan.len() && is_own_paused_step(repo, state);
-    if repo.state() != git2::RepositoryState::Clean && !own_pick {
+    if !crate::repo::no_operation(repo) && !own_pick {
         return Ok(RebaseHealth::Diverged(OtherOperation));
     }
     if head_at_expected(repo, state)? || is_step_committed_by_hand(repo, state)? {
@@ -574,7 +575,7 @@ fn is_step_committed_by_hand(repo: &Repository, state: &RebaseState) -> Result<b
     };
     if state.stop == RebaseStop::Error
         || matches!(entry.action, RebaseAction::Drop)
-        || repo.state() != git2::RepositoryState::Clean
+        || !crate::repo::no_operation(repo)
         || !repo.head_detached()?
     {
         return Ok(false);
@@ -931,7 +932,7 @@ pub struct RebaseAbort {
 ///   `restored: false`.
 pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbort, RebaseError> {
     let own_pick = is_own_paused_step(repo, state);
-    let other_operation = repo.state() != git2::RepositoryState::Clean && !own_pick;
+    let other_operation = !crate::repo::no_operation(repo) && !own_pick;
     let at_expected = head_at_expected(repo, state)?;
     // The branch must still be where the rebase found it: a branch moved outside is a
     // divergence, and Abort then leaves HEAD (and any work made during the pause) alone (D3).
@@ -948,7 +949,7 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
         return Ok(RebaseAbort { restored: true });
     }
     if at_expected {
-        let own_conflicts = repo.state() == git2::RepositoryState::Clean && {
+        let own_conflicts = crate::repo::no_operation(repo) && {
             let mut index = repo.index()?;
             index.read(false)?;
             index.has_conflicts()

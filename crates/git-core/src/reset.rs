@@ -1,4 +1,4 @@
-use git2::{Oid, Repository, RepositoryState, ResetType};
+use git2::{Oid, Repository, ResetType};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,28 +23,50 @@ pub enum ResetError {
 /// Moves the current branch (or detached HEAD) to `commit_id`. Soft keeps index + working tree,
 /// Mixed resets the index only, Hard resets both — untracked files are never removed (same as
 /// `git reset --hard`).
+///
+/// Runs during a terminal `git bisect` and keeps it, as git does (#250). libgit2's mixed and
+/// hard `git_reset` end with `cleanup_state`, which would delete `BISECT_LOG` (and a terminal
+/// rebase's or cherry-pick list's state), so those two are done here step by step, as libgit2
+/// does them, with `commit::clear_operation_files` instead (#249).
 pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(), ResetError> {
-    if repo.state() != RepositoryState::Clean {
+    if !crate::repo::no_operation(repo) {
         return Err(ResetError::OperationInProgress);
     }
     let target = repo.find_commit(Oid::from_str(commit_id)?)?;
-    let kind = match mode {
-        ResetMode::Soft => ResetType::Soft,
-        ResetMode::Mixed => ResetType::Mixed,
-        ResetMode::Hard => ResetType::Hard,
-    };
-    if mode == ResetMode::Hard {
-        // libgit2's hard reset writes (and deletes) through a symlink that replaced a tracked
-        // file or folder; remove such links first, like git (#114).
+    if mode == ResetMode::Soft {
+        // A soft reset only moves HEAD; libgit2 cleans no state for it.
+        repo.reset(target.as_object(), ResetType::Soft, None)?;
+    } else {
         let tree = target.tree()?;
-        crate::worktree_guard::prepare_forced_checkout::<ResetError, &str>(
-            repo,
-            Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
-            None,
-        )?;
+        if mode == ResetMode::Hard {
+            // A forced checkout writes (and deletes) through a symlink that replaced a tracked
+            // file or folder; remove such links first, like git (#114).
+            crate::worktree_guard::prepare_forced_checkout::<ResetError, &str>(
+                repo,
+                Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
+                None,
+            )?;
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            checkout.force();
+            repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+        }
+        move_head(repo, target.id())?;
+        let mut index = repo.index()?;
+        index.read_tree(&tree)?;
+        index.write()?;
+        crate::commit::clear_operation_files(repo)?;
     }
-    repo.reset(target.as_object(), kind, None)?;
     // Like git's `remove_branch_state`: a reset abandons a pending squash merge's message.
     crate::merge::clear_squash_message(repo)?;
+    Ok(())
+}
+
+/// Points the branch HEAD names (or a detached HEAD) at `target`, with git's reflog message,
+/// as libgit2's `git_reset` does.
+fn move_head(repo: &Repository, target: Oid) -> Result<(), git2::Error> {
+    let message = format!("reset: moving to {target}");
+    let head = repo.find_reference("HEAD")?;
+    let name = head.symbolic_target()?.unwrap_or("HEAD").to_string();
+    repo.reference(&name, target, true, &message)?;
     Ok(())
 }

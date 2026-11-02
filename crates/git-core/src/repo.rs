@@ -97,6 +97,20 @@ impl RebaseInfo {
     }
 }
 
+/// True when git has no merge, cherry-pick, revert or rebase paused. A `git bisect` started in
+/// a terminal (libgit2's `Bisect` state) counts as nothing in progress, as it does for git: it
+/// allows picks, reverts, rebases, reset, amend and commits while bisecting (#250).
+///
+/// libgit2 reports `Bisect` only when nothing else is paused (it checks the rebase folders,
+/// `MERGE_HEAD`, `REVERT_HEAD` and `CHERRY_PICK_HEAD` first), so a merge or pick paused during a
+/// bisect still counts as in progress.
+pub(crate) fn no_operation(repo: &git2::Repository) -> bool {
+    matches!(
+        repo.state(),
+        git2::RepositoryState::Clean | git2::RepositoryState::Bisect
+    )
+}
+
 /// Snapshot of what HEAD is and which single-commit operation (if any) is paused on it. A
 /// stored sequence or rebase is filled in by `repo-service`.
 pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {

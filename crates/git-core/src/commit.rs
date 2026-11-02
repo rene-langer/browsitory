@@ -892,7 +892,7 @@ pub fn amend_head(
         Some(author) => Some(valid_author(author).ok_or(CommitError::InvalidAuthor)?),
         None => None,
     };
-    if repo.state() != git2::RepositoryState::Clean {
+    if !crate::repo::no_operation(repo) {
         return Err(CommitError::OperationInProgress);
     }
     let head = match repo.head() {
