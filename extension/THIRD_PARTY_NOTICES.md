@@ -2,8 +2,8 @@
 
 Browsitory's own code is MIT-licensed (see `LICENSE`). Each `.vsix` package also carries a
 native helper program, `bin/vscode-sidecar`, built from Browsitory's Rust crates. That program
-statically links the native C libraries listed below (which of them depends on the platform).
-Their licence texts follow, unchanged.
+links the native C libraries listed below, statically unless noted. Their licence texts follow,
+unchanged.
 
 - **libgit2** 1.9.7 (through the `libgit2-sys` crate 0.18.8): GPL-2.0 with the libgit2 linking
   exception. The linking exception lets Browsitory link libgit2 and distribute the result under
@@ -11,9 +11,10 @@ Their licence texts follow, unchanged.
   <https://github.com/libgit2/libgit2/tree/v1.9.7>.
 - **libssh2** (through the `libssh2-sys` crate 0.3.3): BSD-3-Clause. Source:
   <https://github.com/libssh2/libssh2>.
-- **OpenSSL** 3.6.3 (through the `openssl-src` crate 300.6.1): Apache-2.0. Source:
-  <https://github.com/openssl/openssl>.
-- **zlib** (through the `libz-sys` crate 1.1.31): Zlib. Source: <https://zlib.net>.
+- **OpenSSL** 3.6.3 (through the `openssl-src` crate 300.6.1), Linux and macOS packages only:
+  Apache-2.0. Source: <https://github.com/openssl/openssl>.
+- **zlib** (through the `libz-sys` crate 1.1.31): Zlib. Where the build machine has a system
+  zlib, the sidecar may use that library instead of this copy. Source: <https://zlib.net>.
 
 The Rust crates linked into the sidecar are under permissive licences (MIT, Apache-2.0, ISC,
 BSD, MIT-0, Unicode-3.0, Zlib). The full list is in

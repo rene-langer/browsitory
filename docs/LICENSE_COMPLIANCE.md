@@ -135,9 +135,11 @@ other GPL/AGPL/SSPL dependency is acceptable without a new, equally explicit dec
 here.
 
 Every VSCode extension package (`.vsix`) bundles the `vscode-sidecar` binary, which links
-libgit2. So the package ships `extension/THIRD_PARTY_NOTICES.md` next to `LICENSE`: libgit2's
-full `COPYING` (GPL-2.0 text, the linking exception, and the licences of the code libgit2
-bundles), plus the licence texts of libssh2, OpenSSL and zlib, which the sidecar also links.
+libgit2 statically. So the package ships `extension/THIRD_PARTY_NOTICES.md` next to `LICENSE`:
+libgit2's full `COPYING` (GPL-2.0 text, the linking exception, and the licences of the code
+libgit2 bundles), plus the licence texts of the other native libraries the sidecar links:
+libssh2 (static), OpenSSL (static, Linux and macOS packages only) and zlib (static, or the
+build machine's system zlib where `libz-sys` finds one).
 When a `libgit2-sys`, `libssh2-sys`, `openssl-src` or `libz-sys` update changes a version or a
 licence text, update that file in the same PR.
 
