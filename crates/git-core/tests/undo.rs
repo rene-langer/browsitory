@@ -1182,15 +1182,110 @@ fn chmod(dir: &Path, mode: u32) {
     fs::set_permissions(dir, fs::Permissions::from_mode(mode)).unwrap();
 }
 
+/// Whether this test can make a folder refuse writes (root ignores the permission bits).
+#[cfg(unix)]
+fn can_refuse_writes() -> bool {
+    // SAFETY: `geteuid` has no preconditions.
+    let root = unsafe { libc::geteuid() } == 0;
+    if root {
+        eprintln!("skipped: root writes into read-only folders");
+    }
+    !root
+}
+
+/// A restore that turned the file `p` into the folder `p/` and then stopped (`q/` refused
+/// `q/y`) is finished by trying again: the folder it made counts as restored (#251).
+#[cfg(unix)]
+#[test]
+fn trying_again_finishes_a_restore_that_turned_a_file_into_a_folder() {
+    if !can_refuse_writes() {
+        return;
+    }
+    let (_dir, repo) = seeded();
+    let workdir = repo.workdir().unwrap().to_path_buf();
+    let q = workdir.join("q");
+    fs::create_dir(&q).unwrap();
+    write(&repo, "p", "a file\n");
+    let file = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_file(workdir.join("p")).unwrap();
+    write(&repo, "p/x", "x\n");
+    write(&repo, "q/y", "y\n");
+    let folders = capture(&repo, SnapshotScope::Full).unwrap();
+    fs::remove_dir_all(workdir.join("p")).unwrap();
+    fs::remove_file(q.join("y")).unwrap();
+    write(&repo, "p", "a file\n");
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), file);
+
+    chmod(&q, 0o555);
+    let stopped = restore(&repo, &file, &folders, "browsitory: redo test");
+    chmod(&q, 0o755);
+    assert!(matches!(stopped, Err(UndoError::Io(_))), "{stopped:?}");
+    assert_eq!(read(&repo, "p/x").as_deref(), Some("x\n"));
+    assert_eq!(read(&repo, "q/y"), None);
+
+    restore(&repo, &file, &folders, "browsitory: redo test").unwrap();
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), folders);
+}
+
+/// A restore that stopped after the index was written (libgit2's checkout of `d/f.txt` from
+/// it refused) is finished by trying again, in both directions: an index already at the
+/// target counts as restored, and the work tree is still checked against the snapshot (#251).
+#[cfg(unix)]
+#[test]
+fn trying_again_finishes_a_restore_that_stopped_after_the_index() {
+    if !can_refuse_writes() {
+        return;
+    }
+    let (_dir, repo) = seeded();
+    write(&repo, "d/f.txt", "one\n");
+    stage(&repo, "d/f.txt");
+    let head = commit(&repo, "second");
+    let d = repo.workdir().unwrap().join("d");
+    write(&repo, "d/f.txt", "staged\n");
+    stage(&repo, "d/f.txt");
+    let staged = capture(&repo, SnapshotScope::Full).unwrap();
+    let commit_object = repo.find_object(head, None).unwrap();
+    repo.reset(&commit_object, git2::ResetType::Hard, None)
+        .unwrap();
+    let reset = capture(&repo, SnapshotScope::Full).unwrap();
+
+    for (from, to, f) in [(&reset, &staged, "staged\n"), (&staged, &reset, "one\n")] {
+        chmod(&d.join("f.txt"), 0o444);
+        chmod(&d, 0o555);
+        let stopped = restore(&repo, from, to, "browsitory: undo test");
+        chmod(&d, 0o755);
+        chmod(&d.join("f.txt"), 0o644);
+        assert!(stopped.is_err(), "{stopped:?}");
+        assert_ne!(read(&repo, "d/f.txt").as_deref(), Some(f));
+
+        restore(&repo, from, to, "browsitory: undo test").unwrap();
+        assert_eq!(read(&repo, "d/f.txt").as_deref(), Some(f));
+        assert_eq!(&capture(&repo, SnapshotScope::Full).unwrap(), to);
+    }
+
+    // An edit made after the stop is still protected.
+    chmod(&d.join("f.txt"), 0o444);
+    chmod(&d, 0o555);
+    let stopped = restore(&repo, &reset, &staged, "browsitory: undo test");
+    chmod(&d, 0o755);
+    chmod(&d.join("f.txt"), 0o644);
+    assert!(stopped.is_err(), "{stopped:?}");
+    write(&repo, "d/f.txt", "my edit\n");
+    let refused = restore(&repo, &reset, &staged, "browsitory: undo test");
+    assert!(
+        matches!(refused, Err(UndoError::RepositoryChanged)),
+        "{refused:?}"
+    );
+    assert_eq!(read(&repo, "d/f.txt").as_deref(), Some("my edit\n"));
+}
+
 /// A restore that stopped part-way (here: `d/` refused new files after `a.txt` was written)
 /// is finished by trying again, in both directions: files already at the target don't count
 /// as changed since the operation (#251).
 #[cfg(unix)]
 #[test]
 fn trying_again_finishes_a_restore_that_stopped_part_way() {
-    // SAFETY: `geteuid` has no preconditions.
-    if unsafe { libc::geteuid() } == 0 {
-        eprintln!("skipped: root writes into read-only folders");
+    if !can_refuse_writes() {
         return;
     }
     let (_dir, repo) = seeded();

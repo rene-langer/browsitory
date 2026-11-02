@@ -1159,7 +1159,7 @@ pub(crate) fn remove_and_prune_beneath(workdir: &Path, rel: &str) -> io::Result<
 /// is an error for which [`is_in_use`] is true, after a short retry, nothing changed; a
 /// read-only one too. Atomic per file only: a restore of several files that fails part-way
 /// keeps the files already restored; restoring again finishes it (`undo::restore` counts a
-/// file already at its target as unchanged).
+/// path, or the index, already at its target as unchanged).
 pub(crate) fn replace_beneath(workdir: &Path, rel: &str, content: Content<'_>) -> io::Result<()> {
     if !plain_relative(Path::new(rel)) {
         return Err(io::Error::new(

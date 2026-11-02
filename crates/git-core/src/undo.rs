@@ -269,7 +269,11 @@ pub fn restore(
     if index_differs {
         let mut index = repo.index()?;
         index.read(false)?;
-        if index.has_conflicts() || index.write_tree()?.to_string() != expected.index_tree {
+        // Already the target's: a restore that stopped after writing the index (in the checkout
+        // from it) is being tried again (#251). The work tree is still checked below.
+        let current = index.write_tree()?.to_string();
+        if index.has_conflicts() || (current != expected.index_tree && current != target.index_tree)
+        {
             return Err(UndoError::RepositoryChanged);
         }
         // Rewriting the index from a tree would silently drop these per-entry flags.
@@ -517,7 +521,11 @@ impl WorktreeChange {
         config: &WorktreeConfig,
     ) -> Result<bool, UndoError> {
         let Some(&(id, mode)) = self.to.get(path) else {
-            return Ok(fs::symlink_metadata(workdir.join(path)).is_err());
+            // Gone, or the folder the target's files below it need (written there already).
+            return Ok(match fs::symlink_metadata(workdir.join(path)) {
+                Err(_) => true,
+                Ok(meta) => meta.is_dir() && self.has_target_files_below(path),
+            });
         };
         Ok(
             match read_worktree_file(workdir, path, config, Some(mode))? {
@@ -527,6 +535,15 @@ impl WorktreeChange {
                 None => false,
             },
         )
+    }
+
+    /// Whether the target has files below `path` (which then is, or becomes, their folder).
+    fn has_target_files_below(&self, path: &str) -> bool {
+        let below = format!("{path}/");
+        self.to
+            .range(below.clone()..)
+            .next()
+            .is_some_and(|(name, _)| name.starts_with(&below))
     }
 
     fn verify_directory_is_removable(&self, workdir: &Path, dir: &Path) -> Result<(), UndoError> {
@@ -575,6 +592,13 @@ impl WorktreeChange {
             if !self.tracked.contains(path)
                 && repo.is_path_ignored(path)?
                 && fs::symlink_metadata(&full).is_ok()
+            {
+                continue;
+            }
+            // Already the folder of the target's files below it: a restore that stopped after
+            // writing them is being tried again (#251).
+            if fs::symlink_metadata(&full).is_ok_and(|meta| meta.is_dir())
+                && self.has_target_files_below(path)
             {
                 continue;
             }

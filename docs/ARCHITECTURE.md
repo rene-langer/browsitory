@@ -907,8 +907,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   or not) fails the rename and, after the retry, is `UndoError::FileInUse` ("'f.txt' is open in
   another program. Close it, then try again."). Atomic per file only: a restore of several
   files that fails part-way keeps the files already restored. Trying again finishes it:
-  `WorktreeChange::verify` counts a file already at its target (content, mode and kind, or
-  absent when the target deletes it) as unchanged, not as "changed since the operation".
+  `WorktreeChange::verify` counts a path already at its target (content, mode and kind; absent
+  when the target deletes it; or a folder when the target deletes the file there but has files
+  below it, which `apply` then leaves) as unchanged, not as "changed since the operation", and
+  `restore` accepts an index already equal to the target's (a stop in `checkout_from_index`,
+  after the index was written). Every other path is still checked against the snapshot, so an
+  edit made since the stop is still refused.
 - `write_beneath` refuses an existing read-only file and leaves it as it is (#209): nothing is
   written and the read-only state is kept. Unix: an `EACCES` open of a regular file the user
   owns without owner write permission (`fstatat`, `st_uid == geteuid()`, no `S_IWUSR`). Windows:
