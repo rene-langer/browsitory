@@ -1185,8 +1185,11 @@ fn undo_of_a_file_held_open_says_so() {
     write(&repo, "f.txt", "one\n");
     stage(&repo, "f.txt");
     commit(&repo, "initial");
-    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    // An unstaged edit, then discarded: undoing the discard writes bytes the index doesn't
+    // have, through the walker (content the index has goes through libgit2's checkout).
     write(&repo, "f.txt", "two\n");
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    write(&repo, "f.txt", "one\n");
     let after = capture(&repo, SnapshotScope::Full).unwrap();
     // As an editor that keeps the file open, sharing read and write but not delete.
     let _editor = fs::OpenOptions::new()
@@ -1201,5 +1204,5 @@ fn undo_of_a_file_held_open_says_so() {
         error.to_string(),
         "'f.txt' is open in another program. Close it, then try again."
     );
-    assert_eq!(read(&repo, "f.txt").as_deref(), Some("two\n"));
+    assert_eq!(read(&repo, "f.txt").as_deref(), Some("one\n"));
 }
