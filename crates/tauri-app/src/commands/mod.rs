@@ -3969,6 +3969,7 @@ mod tests {
                 sequence: None,
                 rebase: None,
                 bisect,
+                terminal_sequence: None,
             }))
             .unwrap()
         };

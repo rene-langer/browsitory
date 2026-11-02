@@ -1838,50 +1838,49 @@ fn committing_the_last_step_of_a_terminal_revert_sequence_ends_it() {
     assert!(!git_reports_a_pick(dir.path()));
 }
 
+/// A single cherry-pick between the steps of a terminal sequence is refused (D5-A), so a paused
+/// pick in the repository is always the terminal's own step and Abort can't mistake it. git
+/// itself allows it (twin below): a deliberate difference.
 #[test]
-fn a_single_cherry_pick_keeps_a_terminal_sequences_todo() {
+fn a_single_cherry_pick_is_refused_while_a_terminal_sequence_is_paused() {
     let (_dir, repo, [_, b, _]) = terminal_sequence("cherry-pick", false);
     let before = todo(&repo).unwrap();
     let repo = commit_the_step(repo, "A\n");
+    let head_before = head(&repo);
 
-    let outcome = cherry_pick(&repo, &b, None, HookOptions::default()).unwrap();
+    let error = cherry_pick(&repo, &b, None, HookOptions::default()).unwrap_err();
 
-    assert!(matches!(
-        outcome,
-        git_core::pick::PickOutcome::Committed { .. }
-    ));
+    assert!(
+        matches!(error, PickError::TerminalSequence(SequenceKind::CherryPick)),
+        "{error:?}"
+    );
     assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
-    assert_eq!(repo.state(), RepositoryState::Clean);
-    // Picking it again changes nothing: refused as empty, the todo still kept.
-    assert!(matches!(
-        cherry_pick(&repo, &b, None, HookOptions::default()),
-        Err(PickError::EmptyResult)
-    ));
-    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
+    assert_eq!(head(&repo), head_before);
     assert_eq!(repo.state(), RepositoryState::Clean);
 
-    // git's twin keeps it as well.
+    // git's twin allows it and keeps the list.
     let (twin_dir, twin, [_, b, _], twin_before) = paused_twin("cherry-pick", false);
     let output = git(twin_dir.path(), &["cherry-pick", &b]);
     assert!(output.status.success(), "{output:?}");
     assert_eq!(todo(&twin).as_deref(), Some(twin_before.as_str()));
 }
 
+/// The same for a single revert (D5-A); git allows it.
 #[test]
-fn a_single_revert_keeps_a_terminal_sequences_todo() {
+fn a_single_revert_is_refused_while_a_terminal_sequence_is_paused() {
     let (_dir, repo, _) = terminal_sequence("cherry-pick", false);
     let before = todo(&repo).unwrap();
     let repo = commit_the_step(repo, "A\n");
     let resolved = head(&repo);
 
-    let outcome = git_core::pick::revert(&repo, &resolved, None, HookOptions::default()).unwrap();
+    let error = git_core::pick::revert(&repo, &resolved, None, HookOptions::default()).unwrap_err();
 
-    assert!(matches!(
-        outcome,
-        git_core::pick::PickOutcome::Committed { .. }
-    ));
+    assert!(
+        matches!(error, PickError::TerminalSequence(SequenceKind::CherryPick)),
+        "{error:?}"
+    );
     assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
-    assert_eq!(repo.state(), RepositoryState::Clean);
+    assert_eq!(head(&repo), resolved);
 
     let (twin_dir, twin, _, twin_before) = paused_twin("cherry-pick", false);
     let output = git(twin_dir.path(), &["revert", "--no-edit", "HEAD"]);
@@ -2123,17 +2122,184 @@ fn a_terminal_sequence_between_steps_is_reported() {
     }
 }
 
-#[test]
-fn a_sequence_starts_during_a_paused_terminal_sequence_today() {
-    let (_dir, repo, [_, b, _]) = between_steps("cherry-pick");
-    let run = cherry_pick_many(&repo, &[b], HookOptions::default());
-    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+/// What a refusal must leave alone: HEAD, the index, the todo.
+fn snapshot(repo: &Repository) -> (String, Vec<u8>, Option<String>) {
+    let index = std::fs::read(repo.path().join("index")).unwrap();
+    (head(repo), index, todo(repo))
+}
 
-    // git refuses a second list.
+#[test]
+fn picks_are_refused_while_a_terminal_sequence_is_paused() {
+    type Fixture = fn(&str) -> (tempfile::TempDir, Repository, [String; 3]);
+    let fixtures: [(&str, Fixture); 2] = [
+        ("between steps", between_steps),
+        ("after an error stop", stopped_on_an_error),
+    ];
+    for (name, fixture) in fixtures {
+        for (command, kind) in [
+            ("cherry-pick", SequenceKind::CherryPick),
+            ("revert", SequenceKind::Revert),
+        ] {
+            let (_dir, repo, [a, b, c]) = fixture(command);
+            let before = snapshot(&repo);
+            let noun = if command == "revert" {
+                "revert"
+            } else {
+                "cherry-pick"
+            };
+            let text = format!(
+                "A {noun} started in a terminal isn't finished. Continue it there with git {noun} \
+                 --continue, or abort it first."
+            );
+            let errors = [
+                cherry_pick(&repo, &a, None, HookOptions::default()).unwrap_err(),
+                git_core::pick::revert(&repo, &a, None, HookOptions::default()).unwrap_err(),
+                cherry_pick_many(&repo, &[b.clone(), c.clone()], HookOptions::default())
+                    .outcome
+                    .unwrap_err(),
+                revert_many(&repo, &[b.clone(), c.clone()], HookOptions::default())
+                    .outcome
+                    .unwrap_err(),
+            ];
+            for error in errors {
+                assert!(
+                    matches!(&error, PickError::TerminalSequence(k) if *k == kind),
+                    "{name} {command}: {error:?}"
+                );
+                assert_eq!(error.to_string(), text);
+            }
+            assert_eq!(snapshot(&repo), before, "{name} {command}");
+        }
+    }
+
+    // git refuses a second list too (it allows a single pick, see above).
     let (twin_dir, _twin, [_, b, c]) = between_steps("cherry-pick");
     let output = git(twin_dir.path(), &["cherry-pick", &b, &c]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("already in progress"));
+}
+
+#[test]
+fn continue_of_a_stored_sequence_is_refused_while_a_terminal_sequence_is_paused() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f", "base\n");
+    common::commit_all(&repo, "base");
+    let base = head(&repo);
+    common::write_file(dir.path(), "x.txt", "x\n");
+    common::commit_all(&repo, "x");
+    let x = head(&repo);
+    let branch = base_branch_ref(&repo);
+    repo.reset(
+        repo.find_commit(Oid::from_str(&base).unwrap())
+            .unwrap()
+            .as_object(),
+        git2::ResetType::Hard,
+        None,
+    )
+    .unwrap();
+    // A stored sequence stopped on an error before its first step, and a terminal list.
+    let state = SequenceState {
+        kind: SequenceKind::CherryPick,
+        commits: vec![x.clone()],
+        next: 0,
+        skipped: Vec::new(),
+        original_head: base.clone(),
+        expected_head: base.clone(),
+        stopped_on_conflict: false,
+        original_ref: git_core::pick::OriginalRef::Branch(branch),
+    };
+    let sequencer = repo.path().join("sequencer");
+    std::fs::create_dir(&sequencer).unwrap();
+    std::fs::write(sequencer.join("todo"), format!("pick {x} x\n")).unwrap();
+    std::fs::write(sequencer.join("head"), format!("{base}\n")).unwrap();
+
+    let run = continue_sequence(&repo, state.clone(), HookOptions::default());
+
+    assert!(
+        matches!(
+            run.outcome,
+            Err(PickError::TerminalSequence(SequenceKind::CherryPick))
+        ),
+        "{:?}",
+        run.outcome
+    );
+    assert_eq!(run.state, Some(state));
+    assert_eq!(head(&repo), base);
+}
+
+#[test]
+fn a_rebase_is_refused_while_a_terminal_sequence_is_paused() {
+    for command in ["cherry-pick", "revert"] {
+        let (_dir, repo, _) = between_steps(command);
+        let before = snapshot(&repo);
+        let tip = repo.head().unwrap().peel_to_commit().unwrap();
+        let onto = tip.parent_id(0).unwrap().to_string();
+        let plan = vec![git_core::rebase::RebasePlanEntry {
+            commit_id: tip.id().to_string(),
+            action: git_core::rebase::RebaseAction::Pick,
+            combined_message: None,
+        }];
+
+        let error = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap_err();
+
+        assert!(
+            matches!(error, git_core::rebase::RebaseError::TerminalSequence(_)),
+            "{command}: {error:?}"
+        );
+        assert!(error
+            .to_string()
+            .starts_with(&format!("A {command} started")));
+        assert_eq!(snapshot(&repo), before, "{command}");
+        assert!(!repo.head_detached().unwrap(), "{command}");
+    }
+}
+
+/// D5-A allows a merge: its Abort keeps the terminal list (relies on #249).
+#[test]
+fn a_merge_during_a_terminal_sequence_can_be_aborted_and_keeps_its_todo() {
+    let (_dir, repo, _) = between_steps("cherry-pick");
+    let before = todo(&repo).unwrap();
+    let tip = repo.head().unwrap().peel_to_commit().unwrap();
+    let other = common::commit_tree(
+        &repo,
+        &[("f", "other\n", 0o100644)],
+        &[tip.parent_id(0).unwrap()],
+        "other",
+    );
+    repo.branch("other", &repo.find_commit(other).unwrap(), false)
+        .unwrap();
+
+    let outcome =
+        git_core::merge::start_merge(&repo, "other", git_core::merge::MergeOptions::default())
+            .unwrap();
+    assert!(
+        matches!(outcome, git_core::merge::MergeOutcome::Conflicted { .. }),
+        "{outcome:?}"
+    );
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
+    assert_eq!(repo.state(), RepositoryState::Clean);
+    assert_eq!(head(&repo), tip.id().to_string());
+}
+
+/// D5-A allows commit and reset, as git does; both keep the terminal list.
+#[test]
+fn commit_and_reset_run_while_a_terminal_sequence_is_paused() {
+    let (dir, repo, _) = between_steps("cherry-pick");
+    let before = todo(&repo).unwrap();
+    let tip = head(&repo);
+    common::write_file(dir.path(), "n.txt", "n\n");
+    stage(&repo, "n.txt");
+    let mut repo = repo;
+
+    git_core::commit::commit(&mut repo, "n", HookOptions::default()).unwrap();
+    assert_ne!(head(&repo), tip);
+    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
+
+    git_core::reset::reset_to(&repo, &tip, git_core::reset::ResetMode::Hard).unwrap();
+    assert_eq!(head(&repo), tip);
+    assert_eq!(todo(&repo).as_deref(), Some(before.as_str()));
 }
 
 #[test]

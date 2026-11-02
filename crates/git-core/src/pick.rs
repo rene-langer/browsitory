@@ -57,6 +57,34 @@ pub enum PickError {
     /// message after the hooks).
     #[error("{0}")]
     Commit(crate::commit::CommitError),
+    /// A `git cherry-pick A B C` / `git revert A B` started in a terminal is paused between
+    /// steps: picks, reverts and Continue would mix with it (#258, D5-A).
+    #[error("{}", terminal_sequence_refusal(*.0))]
+    TerminalSequence(SequenceKind),
+    /// Abort found no terminal sequence (`.git/sequencer/todo`) to abort.
+    #[error("No cherry-pick or revert is in progress.")]
+    NoTerminalSequence,
+}
+
+/// Why an operation is refused while a terminal sequence of `kind` is paused (#258).
+pub(crate) fn terminal_sequence_refusal(kind: SequenceKind) -> String {
+    let noun = match kind {
+        SequenceKind::CherryPick => "cherry-pick",
+        SequenceKind::Revert => "revert",
+    };
+    format!(
+        "A {noun} started in a terminal isn't finished. Continue it there with git {noun} \
+         --continue, or abort it first."
+    )
+}
+
+/// `Err(kind)` while a terminal sequence is paused between steps. One paused on a step is
+/// already refused as an operation in progress.
+pub(crate) fn check_no_terminal_sequence(repo: &Repository) -> Result<(), SequenceKind> {
+    match terminal_sequence(repo) {
+        Some(sequence) if !sequence.paused_on_conflict => Err(sequence.kind),
+        _ => Ok(()),
+    }
 }
 
 impl From<crate::commit::CommitError> for PickError {
@@ -376,6 +404,7 @@ fn check_ready(repo: &Repository) -> Result<Commit<'_>, PickError> {
     if !crate::repo::no_operation(repo) {
         return Err(PickError::OperationInProgress);
     }
+    check_no_terminal_sequence(repo).map_err(PickError::TerminalSequence)?;
     let head = match repo.head() {
         Ok(head) => head.peel_to_commit()?,
         Err(error) if error.code() == git2::ErrorCode::UnbornBranch => {
@@ -760,6 +789,10 @@ pub fn continue_sequence(
             git2::Error::from_str("the stored sequence has no step left"),
             state,
         );
+    }
+    // A terminal sequence paused between steps would mix with this one (#258, D5-A).
+    if let Err(kind) = check_no_terminal_sequence(repo) {
+        return SequenceRun::stopped(PickError::TerminalSequence(kind), state);
     }
     if let Err(error) = check_signing(repo) {
         return SequenceRun::stopped(error, state);
