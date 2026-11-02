@@ -56,9 +56,8 @@ fn a_reset_writes_gits_reflog_entry_for_head() {
                     repo.set_head_detached(tip).unwrap();
                 }
                 if use_git {
-                    let output = std::process::Command::new("git")
+                    let output = test_support::git_command(dir.path())
                         .args(["reset", "-q", flag, &first.to_string()])
-                        .current_dir(dir.path())
                         .output()
                         .unwrap();
                     assert!(output.status.success(), "{output:?}");

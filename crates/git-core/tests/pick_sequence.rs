@@ -1248,10 +1248,9 @@ fn git_cherry_pick_runs_the_same_hooks_on_clean_steps() {
     let (dir, repo, ids) = side_branch(false, true);
     log_hooks_by_file_name(&repo, &COMMIT_HOOKS);
 
-    let status = std::process::Command::new("git")
+    let status = test_support::git_command(dir.path())
         .arg("cherry-pick")
         .args(&ids)
-        .current_dir(dir.path())
         .stdout(std::process::Stdio::null())
         .status()
         .unwrap();
@@ -1298,9 +1297,8 @@ fn git_revert_runs_the_same_hooks_on_clean_steps() {
     log_hooks_by_file_name(&repo, &COMMIT_HOOKS);
 
     // `git revert A B` reverts in the order given: newest first, like `revert_many`.
-    let status = std::process::Command::new("git")
+    let status = test_support::git_command(dir.path())
         .args(["revert", "--no-edit", "HEAD", "HEAD~1"])
-        .current_dir(dir.path())
         .stdout(std::process::Stdio::null())
         .status()
         .unwrap();
@@ -1655,43 +1653,8 @@ fn a_leftover_after_the_last_step_does_not_author_the_next_commit() {
 
 // --- #241: committing a step of a terminal `git cherry-pick A B C` ---
 
-/// A HOME, an empty global config and a GNUPGHOME of the test run's own, so the git CLI never
-/// reads the developer's global config (`commit.gpgSign`, `core.hooksPath`, …) or talks to their
-/// gpg agent.
-fn isolated_git_env() -> &'static std::path::Path {
-    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-    DIR.get_or_init(|| {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir(dir.path().join("home")).unwrap();
-        std::fs::write(dir.path().join("gitconfig"), "").unwrap();
-        let gnupg = dir.path().join("gnupg");
-        std::fs::create_dir(&gnupg).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&gnupg, std::fs::Permissions::from_mode(0o700)).unwrap();
-        }
-        dir
-    })
-    .path()
-}
-
-/// Runs the git CLI in `dir`, isolated (`isolated_git_env`) and with English messages (tests
-/// match some of them).
-fn git(dir: &Path, args: &[&str]) -> std::process::Output {
-    let env = isolated_git_env();
-    std::process::Command::new("git")
-        .args(args)
-        .env("LC_ALL", "C")
-        .env("HOME", env.join("home"))
-        .env("XDG_CONFIG_HOME", env.join("home"))
-        .env("GIT_CONFIG_GLOBAL", env.join("gitconfig"))
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GNUPGHOME", env.join("gnupg"))
-        .current_dir(dir)
-        .output()
-        .unwrap()
-}
+// The git CLI, isolated from the developer's config and gpg agent (#282).
+use test_support::git;
 
 /// base: f="base\n". side, by "Side Author": A (f="A\n"), B (+b.txt), C (+c.txt). Then a commit "main" sets
 /// f="main\n": on the base branch (checked out) for a cherry-pick, on side (checked out) for a

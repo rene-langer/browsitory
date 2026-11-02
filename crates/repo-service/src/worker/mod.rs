@@ -764,7 +764,20 @@ impl Worker {
     /// the test lets it go (see `PauseControl`), to make cross-worker races deterministic.
     #[cfg(test)]
     pub(crate) fn spawn_with_pause_before_finish(path: PathBuf) -> (Self, PauseControl) {
-        let (hook, control) = PauseHook::new();
+        Self::spawn_with_pause(path, PausePoint::BeforeFinish)
+    }
+
+    /// Test-only: a worker that stops when an armed command first finds the state lock busy,
+    /// before its wait starts, until the test lets it go (see `PauseControl`, #274). The test
+    /// knows the worker is waiting, and the wait can't run out while the test works.
+    #[cfg(test)]
+    pub(crate) fn spawn_with_pause_on_lock_wait(path: PathBuf) -> (Self, PauseControl) {
+        Self::spawn_with_pause(path, PausePoint::LockWait)
+    }
+
+    #[cfg(test)]
+    fn spawn_with_pause(path: PathBuf, point: PausePoint) -> (Self, PauseControl) {
+        let (hook, control) = PauseHook::new(point);
         // The credential store `spawn` uses; these tests never touch it.
         #[cfg(not(feature = "forge-fixture-override"))]
         let store = KeyringCredentialStore;
@@ -853,9 +866,14 @@ impl Worker {
                 // operation ended, but its entry isn't recorded yet". Reads never wait.
                 let mut unrecorded = false;
                 let guard = if undo::locks_state(&command) {
-                    match state_lock.acquire(
+                    match state_lock.acquire_with(
                         contention
                             .wait(std::time::Instant::now(), undo::refuses_when_busy(&command)),
+                        || {
+                            if let Some(pause) = &pause {
+                                pause.pause_here(PausePoint::LockWait);
+                            }
+                        },
                     ) {
                         state_lock::Acquire::Held(guard) => {
                             contention.held();
@@ -1743,7 +1761,7 @@ impl Worker {
                     }
                 }
                 if let Some(pause) = &pause {
-                    pause.pause_here();
+                    pause.pause_here(PausePoint::BeforeFinish);
                 }
                 if track {
                     undo_recorder.finish(
@@ -1780,21 +1798,31 @@ impl Worker {
     }
 }
 
-/// Test-only pause between a command and its undo `finish` (see
-/// `Worker::spawn_with_pause_before_finish`). Uninhabited outside tests, so the loop's check
-/// compiles away.
+/// Where a test-only `PauseHook` stops the worker.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PausePoint {
+    /// Between a command and its undo `finish` (`Worker::spawn_with_pause_before_finish`).
+    BeforeFinish,
+    /// When a command first finds the state lock busy, before its wait starts
+    /// (`Worker::spawn_with_pause_on_lock_wait`, #274).
+    LockWait,
+}
+
+/// Test-only pause of the worker at one `PausePoint`. Uninhabited outside tests, so the loop's
+/// checks compile away.
 #[cfg(not(test))]
 enum PauseHook {}
 
 #[cfg(not(test))]
 impl PauseHook {
-    fn pause_here(&self) {
+    fn pause_here(&self, _point: PausePoint) {
         match *self {}
     }
 }
 
 #[cfg(test)]
 struct PauseHook {
+    point: PausePoint,
     armed: Arc<std::sync::atomic::AtomicBool>,
     reached: Sender<()>,
     go: Mutex<mpsc::Receiver<()>>,
@@ -1802,12 +1830,13 @@ struct PauseHook {
 
 #[cfg(test)]
 impl PauseHook {
-    fn new() -> (Self, PauseControl) {
+    fn new(point: PausePoint) -> (Self, PauseControl) {
         let armed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (reached_tx, reached_rx) = mpsc::channel();
         let (go_tx, go_rx) = mpsc::channel();
         (
             Self {
+                point,
                 armed: Arc::clone(&armed),
                 reached: reached_tx,
                 go: Mutex::new(go_rx),
@@ -1820,8 +1849,8 @@ impl PauseHook {
         )
     }
 
-    fn pause_here(&self) {
-        if self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+    fn pause_here(&self, point: PausePoint) {
+        if point == self.point && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
             let _ = self.reached.send(());
             let _ = self.go.lock().unwrap().recv();
         }
@@ -1829,7 +1858,7 @@ impl PauseHook {
 }
 
 /// Drives a `PauseHook` from a test: `arm` before sending the command to pause, then
-/// `wait_reached` (the command ran, its `finish` hasn't) and `go`.
+/// `wait_reached` (the worker stopped at the hook's `PausePoint`) and `go`.
 #[cfg(test)]
 pub(crate) struct PauseControl {
     armed: Arc<std::sync::atomic::AtomicBool>,
@@ -1846,7 +1875,7 @@ impl PauseControl {
     pub fn wait_reached(&self) {
         self.reached
             .recv_timeout(std::time::Duration::from_secs(10))
-            .expect("the paused command never reached its finish");
+            .expect("the paused command never reached its pause point");
     }
 
     pub fn go(&self) {
@@ -7487,21 +7516,26 @@ mod state_lock_tests {
         git_core::pick::PickError::OperationInProgress.to_string()
     }
 
+    /// The worker waits on the lock (`PauseControl::wait_reached`, #274) before the outside
+    /// change lands, and its wait starts only after `go`, so neither a slow runner nor a slow
+    /// outside change lets the command run before the change is complete.
     #[test]
     fn stash_save_waits_for_the_lock_and_sees_a_sequence_stored_meanwhile() {
         let (dir, repo, ids) = super::tests::side_commits_with_a_conflict();
-        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let (worker, pause) = Worker::spawn_with_pause_on_lock_wait(dir.path().to_path_buf());
         let handle = worker.handle();
 
         let guard = hold(&repo);
+        pause.arm();
         let saving = {
             let handle = handle.clone();
             std::thread::spawn(move || handle.save_stash(Default::default()))
         };
-        std::thread::sleep(Duration::from_millis(100));
+        pause.wait_reached();
         start_sequence_outside(&repo, ids);
         write_file(dir.path(), "b.txt", "edited\n");
         drop(guard);
+        pause.go();
         assert_eq!(saving.join().unwrap(), Err(in_progress()));
         assert!(repo.find_reference("refs/stash").is_err());
     }
@@ -7509,21 +7543,39 @@ mod state_lock_tests {
     #[test]
     fn worktree_add_waits_for_the_lock_and_sees_a_sequence_stored_meanwhile() {
         let (dir, repo, ids) = super::tests::side_commits_with_a_conflict();
-        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let (worker, pause) = Worker::spawn_with_pause_on_lock_wait(dir.path().to_path_buf());
         let handle = worker.handle();
         let branch = repo.head().unwrap().shorthand().unwrap().to_string();
         let path = dir.path().with_extension("wt");
 
         let guard = hold(&repo);
+        pause.arm();
         let adding = {
             let (handle, path) = (handle.clone(), path.clone());
             std::thread::spawn(move || handle.create_worktree("wt".into(), path, branch, None))
         };
-        std::thread::sleep(Duration::from_millis(100));
+        pause.wait_reached();
         start_sequence_outside(&repo, ids);
         drop(guard);
+        pause.go();
         assert_eq!(adding.join().unwrap(), Err(in_progress()));
         assert!(!path.exists());
+    }
+
+    /// #274: with both a stored sequence and index conflicts, a stash save names the operation
+    /// (the worker's gate runs before git-core's conflict check), not the conflicts.
+    #[test]
+    fn stash_save_names_the_operation_when_it_also_has_conflicts() {
+        let (dir, repo, ids) = super::tests::side_commits_with_a_conflict();
+        start_sequence_outside(&repo, ids);
+        assert!(repo.index().unwrap().has_conflicts());
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+
+        assert_eq!(
+            worker.handle().save_stash(Default::default()),
+            Err(in_progress())
+        );
+        assert!(repo.find_reference("refs/stash").is_err());
     }
 
     #[test]

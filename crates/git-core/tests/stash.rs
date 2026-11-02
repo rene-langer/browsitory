@@ -811,9 +811,8 @@ fn git_stash_apply_index_restores_the_selected_files_of_a_path_limited_stash() {
     let head = repo.head().unwrap().target().unwrap().to_string();
     git_core::reset::reset_to(&repo, &head, git_core::reset::ResetMode::Mixed).unwrap();
 
-    let output = std::process::Command::new("git")
+    let output = test_support::git_command(dir.path())
         .args(["stash", "apply", "--index"])
-        .current_dir(dir.path())
         .output()
         .unwrap();
     assert!(
@@ -822,9 +821,8 @@ fn git_stash_apply_index_restores_the_selected_files_of_a_path_limited_stash() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let staged_a = std::process::Command::new("git")
+    let staged_a = test_support::git_command(dir.path())
         .args(["show", ":a"])
-        .current_dir(dir.path())
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&staged_a.stdout), "a2\n");
@@ -1134,13 +1132,7 @@ fn file_replaced_by_folder() -> (tempfile::TempDir, git2::Repository) {
     (dir, repo)
 }
 
-fn git(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
-    std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap()
-}
+use test_support::git;
 
 /// The names of the worktree's top-level entries, sorted (catches libgit2's `d~…` side files).
 fn top_level(dir: &std::path::Path) -> Vec<String> {

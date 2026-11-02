@@ -1328,6 +1328,15 @@ only `error`.
   test that needs a global config builds its own `git2::Config` or passes `HOME` to a child —
   never moves the process-wide search path. New test binaries must include the macro (a
   `tests/common` module counts).
+- git CLI twins: a test that runs the `git` CLI starts it with `test_support::git_command(dir)`
+  or `test_support::git(dir, args)`, never `Command::new("git")` (#282). The helper sets the
+  hermetic `HOME`, `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1` on the command itself, plus
+  an empty `GNUPGHOME` of its own (no gpg agent of the developer's) and `LC_ALL=C` (English
+  messages tests can match).
+- Lock-wait races: a test that changes the repository while a worker waits for the state lock
+  uses `Worker::spawn_with_pause_on_lock_wait` (test-only) and `PauseControl`, not a fixed
+  sleep: the worker stops when it first finds the lock busy, and its wait starts after `go`
+  (#274).
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
   native-method routing, process-loss recovery, webview security, and deterministic disposal.

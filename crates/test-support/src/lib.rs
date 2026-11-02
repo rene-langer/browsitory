@@ -55,6 +55,9 @@ pub struct HermeticPaths {
     pub home: PathBuf,
     /// Empty file: `GIT_CONFIG_GLOBAL` for spawned `git`.
     pub global_config: PathBuf,
+    /// Empty `GNUPGHOME` (mode 0700 on Unix) for the git CLI started by [`git_command`], so a
+    /// twin never talks to the developer's gpg agent.
+    pub gnupg_home: PathBuf,
 }
 
 /// The hermetic paths, created on first use. Never deleted while tests run.
@@ -66,9 +69,17 @@ pub fn paths() -> &'static HermeticPaths {
             search_dir: root.join("empty"),
             home: root.join("home"),
             global_config: root.join("gitconfig"),
+            gnupg_home: root.join("gnupg"),
         };
         let _ = std::fs::create_dir_all(&paths.search_dir);
         let _ = std::fs::create_dir_all(paths.home.join(".config"));
+        let _ = std::fs::create_dir_all(&paths.gnupg_home);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ =
+                std::fs::set_permissions(&paths.gnupg_home, std::fs::Permissions::from_mode(0o700));
+        }
         if !paths.global_config.exists() {
             let _ = std::fs::write(&paths.global_config, "");
         }
@@ -120,4 +131,31 @@ pub fn install() {
             }
         }
     });
+}
+
+/// A `git` CLI command ("twin") run in `dir`, isolated from the developer's setup whatever this
+/// process's environment says (#282): `HOME`/`XDG_CONFIG_HOME` are the hermetic home,
+/// `GIT_CONFIG_GLOBAL` is the empty hermetic file, `GIT_CONFIG_NOSYSTEM=1`, `GNUPGHOME` is an
+/// empty directory of its own (no gpg agent of the developer's), and `LC_ALL=C` gives English
+/// messages that tests may match. Every test that runs the git CLI uses this (or [`git`]).
+pub fn git_command(dir: &Path) -> std::process::Command {
+    let paths = paths();
+    let mut command = std::process::Command::new("git");
+    command
+        .current_dir(dir)
+        .env("LC_ALL", "C")
+        .env("HOME", &paths.home)
+        .env("XDG_CONFIG_HOME", paths.home.join(".config"))
+        .env("GIT_CONFIG_GLOBAL", &paths.global_config)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GNUPGHOME", &paths.gnupg_home);
+    command
+}
+
+/// Runs `git <args>` in `dir` through [`git_command`] and returns its output.
+pub fn git(dir: &Path, args: &[&str]) -> std::process::Output {
+    git_command(dir)
+        .args(args)
+        .output()
+        .unwrap_or_else(|err| panic!("run git {args:?}: {err}"))
 }

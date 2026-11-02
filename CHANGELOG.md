@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Internal: test reliability
+
+- Tests that change the repository while a command waits for the state lock now know the
+  command is waiting, instead of sleeping a fixed time. They no longer fail on a slow runner
+  (#274).
+- Every test that runs the git CLI now uses one shared helper with its own HOME, an empty
+  global git config, no system config and its own GNUPGHOME. A developer's git config or gpg
+  agent no longer affects the tests (#282).
+
 ### Terminal cherry-picks
 
 - Fixed: when a cherry-pick or revert of several commits started in a terminal paused on a
