@@ -1655,10 +1655,11 @@ fn a_leftover_after_the_last_step_does_not_author_the_next_commit() {
 
 // --- #241: committing a step of a terminal `git cherry-pick A B C` ---
 
-/// Runs the git CLI in `dir`.
+/// Runs the git CLI in `dir`, with English messages (tests match some of them).
 fn git(dir: &Path, args: &[&str]) -> std::process::Output {
     std::process::Command::new("git")
         .args(args)
+        .env("LC_ALL", "C")
         .current_dir(dir)
         .output()
         .unwrap()
@@ -2042,5 +2043,124 @@ fn aborting_an_earlier_step_of_a_terminal_sequence_keeps_its_list() {
             Some(twin_before.as_str()),
             "{command}"
         );
+    }
+}
+
+// --- #258, #253: a terminal sequence paused between steps ---
+
+/// A fresh handle: the git CLI wrote the index and the refs.
+fn reopen(dir: &Path) -> Repository {
+    Repository::open(dir).unwrap()
+}
+
+/// A terminal `git <command> A B C` whose paused step A was committed by `git commit`: the
+/// sequence is between steps, and HEAD moved past `sequencer/abort-safety` (a manual commit
+/// doesn't update it).
+fn between_steps(command: &str) -> (tempfile::TempDir, Repository, [String; 3]) {
+    let (dir, repo, ids, _) = paused_twin(command, false);
+    drop(repo);
+    let repo = reopen(dir.path());
+    (dir, repo, ids)
+}
+
+/// A terminal `git <command> C B` that applied C and stopped with an error before B (an
+/// untracked `b.txt` in a cherry-pick's way, a local edit to `b.txt` in a revert's): between
+/// steps, with `abort-safety` == HEAD.
+fn stopped_on_an_error(command: &str) -> (tempfile::TempDir, Repository, [String; 3]) {
+    let (dir, repo, ids) = terminal_sequence_repo(command);
+    let [_, b, c] = &ids;
+    common::write_file(dir.path(), "b.txt", "junk\n");
+    let mut args = vec![command];
+    if command == "revert" {
+        args.push("--no-edit");
+    }
+    args.extend([c.as_str(), b.as_str()]);
+    let output = git(dir.path(), &args);
+    assert!(!output.status.success(), "the sequence must stop on B");
+    drop(repo);
+    let repo = reopen(dir.path());
+    assert!(repo.path().join("sequencer").join("todo").exists());
+    assert!(!repo.path().join("CHERRY_PICK_HEAD").exists());
+    assert!(!repo.path().join("REVERT_HEAD").exists());
+    (dir, repo, ids)
+}
+
+/// A terminal `git <command> B A C` that applied B and paused on A's conflict (unresolved).
+fn paused_on_a_later_step(command: &str) -> (tempfile::TempDir, Repository, [String; 3]) {
+    let (dir, repo, ids) = terminal_sequence_repo(command);
+    let [a, b, c] = &ids;
+    let mut args = vec![command];
+    if command == "revert" {
+        args.push("--no-edit");
+    }
+    args.extend([b.as_str(), a.as_str(), c.as_str()]);
+    let output = git(dir.path(), &args);
+    assert!(!output.status.success(), "the sequence must pause on A");
+    drop(repo);
+    let repo = reopen(dir.path());
+    assert!(repo.path().join("sequencer").join("todo").exists());
+    (dir, repo, ids)
+}
+
+fn sequencer_file(repo: &Repository, name: &str) -> String {
+    std::fs::read_to_string(repo.path().join("sequencer").join(name))
+        .unwrap()
+        .trim()
+        .to_string()
+}
+
+#[test]
+fn a_paused_terminal_sequence_is_invisible_today() {
+    for command in ["cherry-pick", "revert"] {
+        let (dir, repo, _) = between_steps(command);
+        assert_eq!(repo.state(), RepositoryState::Clean, "{command}");
+        let info = git_core::repo::head_info(&repo).unwrap();
+        assert_eq!(info.operation, None, "{command}");
+        assert!(git_reports_a_pick(dir.path()), "{command}");
+    }
+}
+
+#[test]
+fn a_sequence_starts_during_a_paused_terminal_sequence_today() {
+    let (_dir, repo, [_, b, _]) = between_steps("cherry-pick");
+    let run = cherry_pick_many(&repo, &[b], HookOptions::default());
+    assert!(matches!(run.outcome, Ok(SequenceOutcome::Completed { .. })));
+
+    // git refuses a second list.
+    let (twin_dir, _twin, [_, b, c]) = between_steps("cherry-pick");
+    let output = git(twin_dir.path(), &["cherry-pick", &b, &c]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("already in progress"));
+}
+
+#[test]
+fn aborting_a_terminal_sequence_step_keeps_head_today() {
+    let (_dir, repo, _) = paused_on_a_later_step("cherry-pick");
+    let original = sequencer_file(&repo, "head");
+    let after_b = head(&repo);
+    assert_ne!(original, after_b);
+
+    git_core::merge::abort_merge(&repo).unwrap();
+
+    // The step is gone, the list stays (#249), HEAD stays on B's commit.
+    assert!(todo(&repo).is_some());
+    assert_eq!(head(&repo), after_b);
+
+    // git's `--abort` rewinds to where the sequence started.
+    let (twin_dir, twin, _) = paused_on_a_later_step("cherry-pick");
+    let twin_original = sequencer_file(&twin, "head");
+    let output = git(twin_dir.path(), &["cherry-pick", "--abort"]);
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(head(&twin), twin_original);
+    assert!(!twin.path().join("sequencer").exists());
+}
+
+/// Probe: both error-stop fixtures stop after one step with `abort-safety` == HEAD.
+#[test]
+fn an_error_stop_leaves_abort_safety_at_head() {
+    for command in ["cherry-pick", "revert"] {
+        let (_dir, repo, _) = stopped_on_an_error(command);
+        assert_eq!(sequencer_file(&repo, "abort-safety"), head(&repo), "{command}");
+        assert_ne!(sequencer_file(&repo, "head"), head(&repo), "{command}");
     }
 }
