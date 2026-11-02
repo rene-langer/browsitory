@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Terminal bisect
+
+- (in progress, #249, #250)
+
 ### Safe file writes
 
 - Fixed: if writing a resolved conflict or .gitignore failed partway (for example a full
