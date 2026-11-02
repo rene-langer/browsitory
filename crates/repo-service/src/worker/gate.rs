@@ -316,11 +316,7 @@ mod tests {
     }
 
     fn git(repo: &Repository, args: &[&str]) -> std::process::Output {
-        std::process::Command::new("git")
-            .args(args)
-            .current_dir(repo.workdir().unwrap())
-            .output()
-            .unwrap()
+        test_support::git(repo.workdir().unwrap(), args)
     }
 
     /// A terminal `git bisect` alone is not an operation in progress (#250): commands are

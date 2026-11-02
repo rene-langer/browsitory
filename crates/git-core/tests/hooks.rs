@@ -494,9 +494,8 @@ fn merge_during_a_bisect() -> (tempfile::TempDir, git2::Repository) {
     common::write_file(dir.path(), "a.txt", "main\n");
     common::commit_all(&repo, "main");
     let run = |args: &[&str]| {
-        std::process::Command::new("git")
+        test_support::git_command(dir.path())
             .args(args)
-            .current_dir(dir.path())
             .output()
             .unwrap()
     };
@@ -523,9 +522,8 @@ fn committing_a_merge_started_in_a_terminal_removes_auto_merge() {
     // git's twin.
     let (twin_dir, twin) = merge_during_a_bisect();
     assert!(twin.path().join("AUTO_MERGE").exists());
-    let output = std::process::Command::new("git")
+    let output = test_support::git_command(twin_dir.path())
         .args(["commit", "--no-edit"])
-        .current_dir(twin_dir.path())
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
@@ -554,9 +552,8 @@ fn committing_a_merge_during_a_bisect_keeps_the_bisect() {
 
     // git's twin.
     let (twin_dir, twin) = merge_during_a_bisect();
-    let output = std::process::Command::new("git")
+    let output = test_support::git_command(twin_dir.path())
         .args(["commit", "--no-edit"])
-        .current_dir(twin_dir.path())
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
@@ -1321,9 +1318,8 @@ fn git_merge_also_gives_prepare_commit_msg_merge_msg() {
         &format!("echo \"$(basename \"$1\") $2\" >> '{}'", log.display()),
     );
 
-    let status = std::process::Command::new("git")
+    let status = test_support::git_command(dir.path())
         .args(["merge", "--no-ff", "-m", "Merge feature", "feature"])
-        .current_dir(dir.path())
         .stdout(std::process::Stdio::null())
         .status()
         .unwrap();

@@ -797,9 +797,8 @@ fn abort_merge_reads_an_index_changed_behind_the_handle() {
     let loaded = repo.index().unwrap();
     assert!(!loaded.has_conflicts());
     drop(loaded);
-    let output = std::process::Command::new("git")
+    let output = test_support::git_command(dir.path())
         .args(["merge", "feature"])
-        .current_dir(dir.path())
         .output()
         .unwrap();
     assert!(!output.status.success(), "the merge must conflict");

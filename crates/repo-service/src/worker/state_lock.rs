@@ -139,17 +139,29 @@ impl StateLock {
 
     /// Tries once, then polls (10 ms, doubling to 100 ms) until `wait` has elapsed.
     pub fn acquire(&self, wait: Duration) -> Acquire {
+        self.acquire_with(wait, || {})
+    }
+
+    /// `acquire`, calling `on_wait` once when the first try finds the lock busy; `wait` starts
+    /// after it returns. Only tests pass a non-empty `on_wait` (the worker's lock-wait pause,
+    /// #274), to change the repository while the worker is known to be waiting.
+    pub fn acquire_with(&self, wait: Duration, on_wait: impl FnOnce()) -> Acquire {
         let file = match self.open_file() {
             Ok(file) => file,
             Err(error) => return Acquire::Unavailable(error),
         };
-        let deadline = Instant::now() + wait;
+        let mut on_wait = Some(on_wait);
+        let mut deadline = Instant::now() + wait;
         let mut pause = Duration::from_millis(10);
         loop {
             match file.try_lock() {
                 Ok(()) => return Acquire::Held(StateGuard { file }),
                 Err(TryLockError::WouldBlock) => {}
                 Err(TryLockError::Error(error)) => return Acquire::Unavailable(error),
+            }
+            if let Some(on_wait) = on_wait.take() {
+                on_wait();
+                deadline = Instant::now() + wait;
             }
             let now = Instant::now();
             if now >= deadline {
@@ -290,6 +302,43 @@ mod tests {
         let start = Instant::now();
         assert!(is_busy(&b.acquire(Duration::from_millis(150))));
         assert!(start.elapsed() >= Duration::from_millis(150));
+    }
+
+    /// #274: `on_wait` runs once, when the first try finds the lock busy, and the wait starts
+    /// after it returns, so a test can change the repository "meanwhile" for as long as it needs.
+    #[test]
+    fn acquire_with_calls_on_wait_once_before_the_wait_starts() {
+        let (_dir, repo) = repo();
+        let (a, b) = (StateLock::open(&repo), StateLock::open(&repo));
+        let mut calls = 0;
+        held(b.acquire_with(Duration::ZERO, || calls += 1));
+        assert_eq!(calls, 0, "the lock was free");
+
+        let guard = held(a.try_acquire());
+        let mut guard = Some(guard);
+        let acquired = b.acquire_with(Duration::from_millis(100), || {
+            calls += 1;
+            // Longer than the wait: still held, since the wait starts after this.
+            std::thread::sleep(Duration::from_millis(300));
+            drop(guard.take());
+        });
+        held(acquired);
+        assert_eq!(calls, 1);
+
+        // Held through several polls (10, 20, 40, 80, 100 ms…): still called only once.
+        let guard = held(a.try_acquire());
+        let mut releaser = None;
+        let mut calls = 0;
+        let acquired = b.acquire_with(Duration::from_secs(5), || {
+            calls += 1;
+            releaser = Some(std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(250));
+                drop(guard);
+            }));
+        });
+        held(acquired);
+        releaser.unwrap().join().unwrap();
+        assert_eq!(calls, 1);
     }
 
     #[test]

@@ -271,13 +271,7 @@ fn committed_repo() -> (tempfile::TempDir, git2::Repository, String) {
     (dir, repo, main_branch)
 }
 
-fn git(dir: &std::path::Path, args: &[&str]) -> std::process::Output {
-    std::process::Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap()
-}
+use test_support::git;
 
 fn has_branch(repo: &git2::Repository, name: &str) -> bool {
     repo.find_branch(name, git2::BranchType::Local).is_ok()

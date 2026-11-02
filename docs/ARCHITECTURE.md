@@ -1328,6 +1328,19 @@ only `error`.
   test that needs a global config builds its own `git2::Config` or passes `HOME` to a child —
   never moves the process-wide search path. New test binaries must include the macro (a
   `tests/common` module counts).
+  The guard also removes every inherited `GIT_*` variable (a hook's or `git rebase -x`'s
+  `GIT_DIR`/`GIT_INDEX_FILE`/`GIT_WORK_TREE`, `GIT_CONFIG_PARAMETERS`, `GIT_AUTHOR_*`, …) and
+  sets an empty `GNUPGHOME` and `LC_ALL=C` (#282).
+- git CLI twins: a test that runs the `git` CLI starts it with `test_support::git_command(dir)`
+  or `test_support::git(dir, args)`, not `Command::new("git")` (#282). Only a bare
+  `git --version` availability check may skip the helper. The helper applies the same
+  isolation to the command itself (it removes inherited `GIT_*` variables and sets the hermetic
+  `HOME`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`, `GNUPGHOME` and `LC_ALL=C`), so it holds
+  even where a test changed the environment.
+- Lock-wait races: a test that changes the repository while a worker waits for the state lock
+  uses `Worker::spawn_with_pause_on_lock_wait` (test-only) and `PauseControl`, not a fixed
+  sleep: the worker stops when it first finds the lock busy, and its wait starts after `go`
+  (#274).
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
   native-method routing, process-loss recovery, webview security, and deterministic disposal.

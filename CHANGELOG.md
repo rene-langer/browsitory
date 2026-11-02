@@ -19,6 +19,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Docs: install steps for the Marketplace, Open VSX and a `.vsix` file in the User Guide and the
   README (#271).
 
+### Internal: test reliability
+
+- Tests that change the repository while a command waits for the state lock now know the
+  command is waiting, instead of sleeping a fixed time. They no longer fail on a slow runner
+  (#274).
+- Tests already ignored a developer's global and system git config. Now every test that runs
+  the git CLI uses one shared helper, and every test process also gets its own empty GNUPGHOME
+  and English messages. It drops the GIT_* variables a hook or `git rebase -x` passes on, so
+  running the tests from a hook can't touch the real repository or gpg agent (#282).
+
 ### Terminal cherry-picks
 
 - Fixed: when a cherry-pick or revert of several commits started in a terminal paused on a
