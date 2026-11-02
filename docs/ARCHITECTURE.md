@@ -748,6 +748,21 @@ certificate.
     switched to from another worktree (`check_branch_not_rebased_elsewhere`), as git refuses.
     Undo counts it as checked out in that worktree, so it doesn't move HEAD onto it. HEAD is detached during the rebase, so libgit2's own checked-out checks don't
     see it.
+  - Reflog restore (`reflog::restore_reflog_entry`, #287) refuses to move a branch that is
+    being rebased in any worktree (`BranchBeingRebased`) or that another worktree has checked
+    out (`ReflogError::CheckedOutInAnotherWorktree`, "branch 'topic' is checked out in another
+    worktree", the wording of `switch_branch`), as `git branch -f` refuses both. The first is
+    `check_branch_not_rebased`; the second reads `repo::branches_checked_out_elsewhere`, which
+    Undo uses too. That helper reads each worktree's `HEAD` from its git folder, as git's
+    `find_shared_symref` does, so a worktree whose folder is gone (locked on an unmounted drive,
+    or not pruned yet) still counts. The branch checked out in this worktree is still moved
+    (ref only; the work tree and index stay), though `git branch -f` refuses that one: moving
+    HEAD's branch back is what Restore is for. Moving this worktree's HEAD (detached, or its
+    branch by `HEAD` or by name) has Reset's guards: refused during a terminal rebase
+    (`TerminalRebaseInProgress`) or a paused merge, cherry-pick, revert or rebase
+    (`ReflogError::OperationInProgress`, Reset's wording). The move is a compare-and-swap
+    (`reference_matching` on the target read just before), so a ref moved meanwhile is left
+    alone (`ReflogError::ReferenceMoved`).
   - No in-app Abort: `git rebase --abort` also restores an autostash, `--update-refs` branches
     and the apply backend's state, which Browsitory can't do exactly; the strip says to continue
     or abort in the terminal.

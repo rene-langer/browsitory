@@ -81,6 +81,7 @@ export function ReflogPanel({
       {restoreConfirmation !== null && (
         <dialog open aria-label={`Restore ${restoreConfirmation.reference}`}>
           <p>Restore {restoreConfirmation.reference} to {restoreConfirmation.newId}?</p>
+          <p>Your files and staged changes stay as they are.</p>
           <Toolbar>
             <button
               type="button"
