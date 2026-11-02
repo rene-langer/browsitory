@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Forge HTTP client
+
+- Changed: the GitHub and Bitbucket pull-request features use reqwest 0.13 and now check server
+  certificates against the operating system's certificate store, not a list bundled into the
+  app. A root CA your system trusts (for example a company proxy's) now works there too. TLS
+  still uses rustls with the ring crypto library.
+
 ### Reflog restore and worktrees
 
 - Fixed: Reflog restore moved a branch that another worktree had checked out, so that

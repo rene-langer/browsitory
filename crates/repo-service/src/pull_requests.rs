@@ -201,6 +201,7 @@ impl ReqwestForgeApi {
     fn client(&self) -> Result<&reqwest::blocking::Client, ForgeApiError> {
         self.client
             .get_or_init(|| {
+                install_crypto_provider();
                 reqwest::blocking::Client::builder()
                     .timeout(Duration::from_secs(30))
                     .build()
@@ -209,6 +210,17 @@ impl ReqwestForgeApi {
             .as_ref()
             .map_err(|()| ForgeApiError::Transport)
     }
+}
+
+/// reqwest is built with `rustls-no-provider` (see this crate's Cargo.toml), so it panics when
+/// building a client unless rustls has a process-default crypto provider. Install ring, once per
+/// process. If something else installed a provider first (Tauri's updater plugin installs ring
+/// too), `install_default` returns an error and that provider stays: that is fine.
+fn install_crypto_provider() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
 }
 
 impl Default for ReqwestForgeApi {
@@ -1263,5 +1275,23 @@ mod tests {
 
         assert!(!debug_output.contains("super-secret-token"));
         assert!(debug_output.contains("<redacted>"));
+    }
+
+    // `ReqwestForgeApi::client` installs ring as rustls's process-default crypto provider. These
+    // run in the same process as each other (and in any order), so between them they cover:
+    // building a client when the provider is already ours, and building one after someone else
+    // (e.g. Tauri's updater plugin) installed a provider first. The "nothing installed yet" case
+    // needs a fresh process: see `tests/forge_client_crypto_provider.rs`.
+    #[test]
+    fn builds_the_forge_client_twice_without_panicking() {
+        assert!(ReqwestForgeApi::new().client().is_ok());
+        assert!(ReqwestForgeApi::new().client().is_ok());
+    }
+
+    #[test]
+    fn builds_the_forge_client_after_another_crypto_provider_was_installed() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
+        assert!(ReqwestForgeApi::new().client().is_ok());
     }
 }
