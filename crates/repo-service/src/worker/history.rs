@@ -157,12 +157,39 @@ fn abort_stored(
     Ok(abort)
 }
 
+/// Abort cherry-pick/revert: the stored sequence if there is one, else a `git cherry-pick A B C`
+/// started in a terminal, like `git cherry-pick --abort` (#253).
 pub(super) fn abort_sequence(
     repo: &git2::Repository,
     sequence_store: &SequenceStore,
     reply: Sender<Result<SequenceAbort, String>>,
 ) {
-    let _ = reply.send(abort_stored(repo, sequence_store));
+    let result = if sequence_store.load(repo).is_none()
+        && git_core::pick::terminal_sequence(repo).is_some()
+    {
+        git_core::pick::abort_terminal_sequence(repo).map_err(|error| error.to_string())
+    } else {
+        abort_stored(repo, sequence_store)
+    };
+    let _ = reply.send(result);
+}
+
+/// Why `AbortMerge` (no stored sequence) refuses: a terminal sequence's own step or list, which
+/// only `AbortSequence` ends. The UI always sends that for one, so only a view that predates the
+/// sequence gets here; nothing is changed. A merge paused during the sequence is aborted as
+/// usual (`None`).
+pub(super) fn abort_merge_refusal(repo: &git2::Repository) -> Option<String> {
+    let sequence = git_core::pick::terminal_sequence(repo)?;
+    if repo.state() == git2::RepositoryState::Merge {
+        return None;
+    }
+    let noun = match sequence.kind {
+        SequenceKind::CherryPick => "cherry-pick",
+        SequenceKind::Revert => "revert",
+    };
+    Some(format!(
+        "This {noun} was started in a terminal. Try Abort again to see what it will undo."
+    ))
 }
 
 /// `AbortMerge` while a sequence is stored: abort the whole sequence.
