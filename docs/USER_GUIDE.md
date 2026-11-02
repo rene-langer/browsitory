@@ -673,6 +673,10 @@ message git suggests) and the step's changes; any other commit counts as HEAD mo
 (start it from a branch: `git bisect start` alone keeps HEAD on the branch). The bisect is not
 "another git operation", and finishing or aborting the rebase doesn't end it.
 
+**During a terminal cherry-pick.** A rebase doesn't start while a `git cherry-pick A B C` (or
+`git revert A B`) started in a terminal is paused. Continue or abort that first (see
+[Started in a terminal](#rewriting-and-moving-commits)).
+
 **Interrupted rebase.** If the repository changed outside Browsitory while a rebase was paused, the
 strip shows **Rebase of ⟨branch⟩ interrupted** with the reason: HEAD was moved (for example
 `git switch`), the branch was changed or deleted, or another git operation is in progress. Such a
@@ -763,11 +767,30 @@ the steps applied by themselves run none, like a single cherry-pick.
 stops on a conflict, you can resolve it and commit the step from Browsitory's commit box. Like
 `git commit`, this keeps git's list of the remaining commits, so `git cherry-pick --continue`
 (or `git revert --continue`) carries on with them. The list is removed only after its last
-commit. A single cherry-pick, revert or squash merge in Browsitory keeps such a list too.
-Committing also no longer ends a `git bisect` started in a terminal, as with `git commit`.
-**Abort** of a merge, cherry-pick or revert removes only that operation's own state, as git
-does. The list stays for `git cherry-pick --continue`, unless the step you aborted was its
-last one: then the list ends too, as with git.
+commit. A squash merge in Browsitory keeps such a list too. Committing also no longer ends a
+`git bisect` started in a terminal, as with `git commit`.
+
+While such a list is paused, the bar shows it. On a conflict it says **Cherry-picking (started
+in a terminal)** (or **Reverting …**). Between two commits (after you committed a step, or
+when git stopped on an error) it says **Cherry-pick paused in a terminal** and "Run git
+cherry-pick --continue there to apply the remaining commits." Continue it in the terminal.
+Until it is finished, cherry-pick, revert (one commit or several) and rebase in Browsitory say
+"A cherry-pick started in a terminal isn't finished. Continue it there with git cherry-pick
+--continue, or abort it first." git itself allows a single cherry-pick here; Browsitory refuses
+it so that Abort always knows which commits belong to the list. Merge, commit, amend, reset,
+checkout and stash still work, and they keep the list.
+
+**Abort cherry-pick** (or **Abort revert**) in the bar, the commit box or the palette works
+like `git cherry-pick --abort`. It aborts the paused step, keeping unrelated edits. If HEAD is
+still where the list left it, it also removes the commits the list made and puts the branch
+back where the list started. It asks first: "Abort the whole cherry-pick? This also removes the
+2 commits it made and puts the branch back at 1a2b3c4 "X". Changes you haven't committed stay."
+If you moved HEAD since (for example by committing a step yourself), HEAD stays where it is, as
+with git, and the toast says so. Either way the list ends. If a file you changed is in the way,
+Abort says so and changes nothing more: the step is aborted, the list is kept, and you can try
+again after you commit or discard that change. Abort can't be undone with **Undo**, but the
+removed commits are still in the reflog. **Abort** of a merge started during such a list
+removes only the merge, as git does.
 
 **Bisect started in a terminal.** While a `git bisect` runs, a bar says **Bisecting (started
 from main)** and "Use git bisect good, bad or reset in a terminal." It has no buttons: you end

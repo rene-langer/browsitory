@@ -11,11 +11,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed: when a cherry-pick or revert of several commits started in a terminal paused on a
   conflict, committing the resolution in Browsitory dropped the remaining commits. They are now
   kept, as with git commit, so git cherry-pick --continue (or git revert --continue) carries on;
-  the list is removed after its last commit. A single cherry-pick, revert or squash merge in
-  Browsitory no longer drops such a list either (#241).
+  the list is removed after its last commit. A squash merge in Browsitory no longer drops such
+  a list either (#241).
 - Fixed: committing a merge or cherry-pick no longer ends a git bisect started in a terminal
   (#241).
-- (#258, #253: in progress)
+- Fixed: a cherry-pick or revert of several commits started in a terminal and paused between
+  commits was invisible in Browsitory, and a cherry-pick, revert or rebase started in the app
+  could mix with it or delete its list. A bar now says "Cherry-pick paused in a terminal. Run
+  git cherry-pick --continue there to apply the remaining commits.", and cherry-pick, revert
+  and rebase say "A cherry-pick started in a terminal isn't finished. …" until it is (#258).
+- Changed: a single cherry-pick or revert in Browsitory is now refused while such a list is
+  paused (git allows it). Merge, commit and reset still work and keep the list (#258).
+- Fixed: Abort cherry-pick (or revert) on a cherry-pick of several commits started in a
+  terminal ended the list but left the commits it had made. It now works like git cherry-pick
+  --abort: after asking, it removes the commits it made and puts the branch back where it
+  started. If HEAD moved since, it leaves HEAD and only ends the cherry-pick (#253).
 
 ### Terminal bisect
 
