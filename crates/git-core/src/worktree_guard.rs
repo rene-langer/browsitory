@@ -1144,6 +1144,18 @@ pub(crate) fn remove_and_prune_beneath(workdir: &Path, rel: &str) -> io::Result<
 /// Replaces whatever is at `rel` (a file, link or empty folder) with `content`. A link that
 /// replaced a folder on the way is removed first and the folder recreated (never written
 /// through); missing folders are created.
+///
+/// A file is replaced whole (#251), as by [`write_beneath`]: the new file (or, on Unix, link)
+/// is made under a temporary name in the same held folder (`.{name}.browsitory-{pid}-{n}.tmp`)
+/// and renamed over `rel` only once it is complete, so on any failure the old file or link is
+/// left as it was and the temporary entry is removed. Unlike [`write_beneath`], nothing of the
+/// old file is kept: the new file's mode comes from `content` (Unix: the umask's, with the exec
+/// bits set or cleared), Windows attributes are reset and a read-only file is replaced too. An
+/// existing file keeps the spelling of its name on disk. An empty folder is removed first; one
+/// that isn't empty is an error. On Windows a link is deleted before the new file is made, and a
+/// file another program holds open without sharing delete is an error for which [`is_in_use`]
+/// is true, after a short retry, nothing changed. Atomic per file only: a restore of several
+/// files that fails part-way keeps the files already restored.
 pub(crate) fn replace_beneath(workdir: &Path, rel: &str, content: Content<'_>) -> io::Result<()> {
     if !plain_relative(Path::new(rel)) {
         return Err(io::Error::new(
