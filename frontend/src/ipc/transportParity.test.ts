@@ -11,7 +11,9 @@
 // - `sidecar-methods.json`: the VSCode sidecar's dispatch table
 //   (`crates/vscode-sidecar/src/dispatch.rs`, test `method_list_is_current`).
 // - `extension-native-methods.json`: the methods the VSCode extension host answers itself
-//   (`extension/src/sidecarBridge.ts`'s `NATIVE_METHODS`, test in `sidecarBridge.test.ts`).
+//   (`extension/src/sidecarBridge.ts`'s `NATIVE_METHODS`, test in `nativeMethods.test.ts`).
+// - `extension-host-sidecar-methods.json`: the sidecar methods the extension host calls itself
+//   and refuses to forward for the webview (`HOST_SIDECAR_METHODS`, same test).
 //
 // The client side is not parsed from source either: this test calls every method of each client
 // with a mocked transport and records the backend name it sends.
@@ -21,6 +23,7 @@ import type { RepoClient } from "./RepoClient";
 import tauriCommands from "./generated/tauri-commands.json";
 import sidecarMethods from "./generated/sidecar-methods.json";
 import extensionNativeMethods from "./generated/extension-native-methods.json";
+import extensionHostSidecarMethods from "./generated/extension-host-sidecar-methods.json";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
@@ -154,6 +157,12 @@ describe("transport parity", () => {
     const called = new Set(vscodeNames.values());
     const uncalled = [...sidecarMethods, ...extensionNativeMethods].filter((name) => !called.has(name));
     expect(sorted(uncalled)).toEqual(sorted(SIDECAR_HOST_ONLY));
+  });
+
+  it("the host-only sidecar methods are the ones the extension host calls, and exist", () => {
+    expect(sorted(SIDECAR_HOST_ONLY)).toEqual(sorted(extensionHostSidecarMethods));
+    const sidecar = new Set(sidecarMethods);
+    expect(extensionHostSidecarMethods.filter((name) => !sidecar.has(name))).toEqual([]);
   });
 
   it("both clients use the same backend name for each method they share", () => {

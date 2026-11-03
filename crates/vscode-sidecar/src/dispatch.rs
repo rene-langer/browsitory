@@ -57,7 +57,7 @@ fn test_delay_before_dispatch(method: &str) {
 /// `frontend/src/ipc/generated/sidecar-methods.json`. The arms name the request's `params`,
 /// `repos` and `stdout` through the idents given first (macro hygiene).
 macro_rules! methods {
-    (|$params:ident, $repos:ident, $stdout:ident| { $($name:literal => $call:expr,)* }) => {
+    (|$params:ident, $repos:ident, $stdout:ident| { $($name:literal => $call:expr),* $(,)? }) => {
         pub fn dispatch(
             method: &str,
             $params: Value,

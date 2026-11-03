@@ -1471,14 +1471,15 @@ only `error`.
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
 - Transport parity (#306): `frontend/src/ipc/transportParity.test.ts` calls every method of
   both `RepoClient` implementations with a mocked transport and records the backend name each
-  sends. It checks those names against three generated lists in `frontend/src/ipc/generated/`:
-  the Tauri commands (`tauri-commands.json`), the sidecar methods (`sidecar-methods.json`) and
-  the methods the extension host answers itself (`extension-native-methods.json`). Each list
-  comes from one declaration in code (the `commands!` macro in `crates/tauri-app/src/main.rs`,
-  the `methods!` macro in `crates/vscode-sidecar/src/dispatch.rs`, `NATIVE_METHODS` in
-  `extension/src/sidecarBridge.ts`), and that code's own test suite fails when the checked-in
-  file is out of date (rerun the failing test with `UPDATE_TRANSPORT_METHODS=1` to rewrite
-  it). Intended differences between the transports are explicit, commented allow-lists in the
+  sends. It checks those names against four generated lists in `frontend/src/ipc/generated/`:
+  the Tauri commands (`tauri-commands.json`), the sidecar methods (`sidecar-methods.json`),
+  the methods the extension host answers itself (`extension-native-methods.json`) and the
+  sidecar methods only the extension host may call (`extension-host-sidecar-methods.json`).
+  Each list comes from one declaration in code (the `commands!` macro in
+  `crates/tauri-app/src/main.rs`, the `methods!` macro in `crates/vscode-sidecar/src/dispatch.rs`,
+  `NATIVE_METHODS` and `HOST_SIDECAR_METHODS` in `extension/src/sidecarBridge.ts`), and that
+  code's own test suite fails when the checked-in file is out of date (rerun the failing test
+  with `UPDATE_TRANSPORT_METHODS=1` to rewrite it; never in CI). Intended differences between the transports are explicit, commented allow-lists in the
   parity test. A new operation must reach both transports, or be added to an allow-list with a
   reason.
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,

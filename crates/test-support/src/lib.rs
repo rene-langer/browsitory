@@ -188,6 +188,11 @@ pub const UPDATE_ENV: &str = "UPDATE_TRANSPORT_METHODS";
 /// Used for the transport method lists in `frontend/src/ipc/generated/` (#306).
 pub fn assert_generated_file(path: &Path, expected: &str) {
     if std::env::var(UPDATE_ENV).as_deref() == Ok("1") {
+        // CI must check the checked-in file, never rewrite it.
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "{UPDATE_ENV} must not be set in CI"
+        );
         std::fs::write(path, expected).unwrap_or_else(|err| panic!("write {path:?}: {err}"));
         return;
     }
