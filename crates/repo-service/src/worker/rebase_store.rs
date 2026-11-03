@@ -1,168 +1,16 @@
 //! Persists a paused interactive rebase (`git_core::rebase::RebaseState`) to
-//! `<gitdir>/browsitory/rebase.json`, so Continue/Abort survive an app restart, a closed tab and
-//! a crashed worker. Written atomically (temp file + `sync_all` + `rename`, like
-//! `sequence.json`). A file that is unreadable, malformed, of another version, or that doesn't
-//! describe commits of this repository is ignored (logged once), never fatal: a corrupt file
-//! must not wedge the repository.
-//!
-//! Versioning follows `sequence_store`: a later version that only adds fields with a safe
-//! default bumps `FORMAT_VERSION` and keeps reading the older one (`OLDEST_READABLE_VERSION`).
-//! An unknown version is ignored, and the next `StartRebase` overwrites it.
+//! `<gitdir>/browsitory/rebase.json` (format: `git_core::rebase_file`), so Continue/Abort
+//! survive an app restart, a closed tab and a crashed worker. Written atomically (temp file +
+//! `sync_all` + `rename`, like `sequence.json`). A file that is unreadable, malformed, of another
+//! version, or that doesn't describe commits of this repository is ignored (logged once), never
+//! fatal: a corrupt file must not wedge the repository.
 use super::atomic_file::write_atomically;
 use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
 
-use git2::{Oid, Repository};
-use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseState, RebaseStop};
-use serde::{Deserialize, Serialize};
-
-const FORMAT_VERSION: u32 = 1;
-const OLDEST_READABLE_VERSION: u32 = 1;
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredRebase {
-    version: u32,
-    original_branch_ref: String,
-    original_tip: String,
-    onto: String,
-    plan: Vec<StoredEntry>,
-    cursor: usize,
-    group_start_parent: Option<String>,
-    expected_head: String,
-    stop: StoredStop,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredEntry {
-    commit_id: String,
-    action: StoredAction,
-    combined_message: Option<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "kind")]
-enum StoredAction {
-    Pick,
-    Reword { message: String },
-    Edit,
-    Squash,
-    Fixup,
-    Drop,
-}
-
-#[derive(Serialize, Deserialize)]
-enum StoredStop {
-    Conflict,
-    Edit,
-    Error,
-}
-
-impl From<&RebaseState> for StoredRebase {
-    fn from(state: &RebaseState) -> Self {
-        Self {
-            version: FORMAT_VERSION,
-            original_branch_ref: state.original_branch_ref.clone(),
-            original_tip: state.original_tip.to_string(),
-            onto: state.onto.to_string(),
-            plan: state
-                .plan
-                .iter()
-                .map(|entry| StoredEntry {
-                    commit_id: entry.commit_id.clone(),
-                    action: match &entry.action {
-                        RebaseAction::Pick => StoredAction::Pick,
-                        RebaseAction::Reword { message } => StoredAction::Reword {
-                            message: message.clone(),
-                        },
-                        RebaseAction::Edit => StoredAction::Edit,
-                        RebaseAction::Squash => StoredAction::Squash,
-                        RebaseAction::Fixup => StoredAction::Fixup,
-                        RebaseAction::Drop => StoredAction::Drop,
-                    },
-                    combined_message: entry.combined_message.clone(),
-                })
-                .collect(),
-            cursor: state.cursor,
-            group_start_parent: state.group_start_parent.map(|oid| oid.to_string()),
-            expected_head: state.expected_head.to_string(),
-            stop: match state.stop {
-                RebaseStop::Conflict => StoredStop::Conflict,
-                RebaseStop::Edit => StoredStop::Edit,
-                RebaseStop::Error => StoredStop::Error,
-            },
-        }
-    }
-}
-
-/// Rebuilds the state, checking it against `repo`: the plan is non-empty with the cursor in
-/// range and not on a `Drop`, the branch is a valid `refs/heads/` name, every id is a commit
-/// here, and a `Reword` has a message.
-fn to_state(stored: StoredRebase, repo: &Repository) -> Result<RebaseState, String> {
-    if stored.plan.is_empty() || stored.cursor > stored.plan.len() {
-        return Err(format!(
-            "step {} of {} is out of range",
-            stored.cursor + 1,
-            stored.plan.len()
-        ));
-    }
-    let branch = &stored.original_branch_ref;
-    if !branch.starts_with("refs/heads/") || !git2::Reference::is_valid_name(branch) {
-        return Err(format!("{branch:?} is not a branch"));
-    }
-    let commit = |id: &str| -> Result<Oid, String> {
-        Oid::from_str(id)
-            .ok()
-            .filter(|oid| repo.find_commit(*oid).is_ok())
-            .ok_or_else(|| format!("{id:?} is not a commit in this repository"))
-    };
-    let mut plan = Vec::with_capacity(stored.plan.len());
-    for entry in stored.plan {
-        commit(&entry.commit_id)?;
-        let action = match entry.action {
-            StoredAction::Pick => RebaseAction::Pick,
-            StoredAction::Reword { message } if message.trim().is_empty() => {
-                return Err("a reworded step has no message".to_string())
-            }
-            StoredAction::Reword { message } => RebaseAction::Reword { message },
-            StoredAction::Edit => RebaseAction::Edit,
-            StoredAction::Squash => RebaseAction::Squash,
-            StoredAction::Fixup => RebaseAction::Fixup,
-            StoredAction::Drop => RebaseAction::Drop,
-        };
-        plan.push(RebasePlanEntry {
-            commit_id: entry.commit_id,
-            action,
-            combined_message: entry.combined_message,
-        });
-    }
-    if plan
-        .get(stored.cursor)
-        .is_some_and(|entry| entry.action == RebaseAction::Drop)
-    {
-        return Err("the current step is dropped".to_string());
-    }
-    Ok(RebaseState {
-        plan,
-        cursor: stored.cursor,
-        original_tip: commit(&stored.original_tip)?,
-        onto: commit(&stored.onto)?,
-        group_start_parent: stored
-            .group_start_parent
-            .as_deref()
-            .map(commit)
-            .transpose()?,
-        expected_head: commit(&stored.expected_head)?,
-        original_branch_ref: stored.original_branch_ref,
-        stop: match stored.stop {
-            StoredStop::Conflict => RebaseStop::Conflict,
-            StoredStop::Edit => RebaseStop::Edit,
-            StoredStop::Error => RebaseStop::Error,
-        },
-    })
-}
+use git2::Repository;
+use git_core::rebase::RebaseState;
 
 pub(super) struct RebaseStore {
     file: PathBuf,
@@ -172,10 +20,10 @@ pub(super) struct RebaseStore {
 
 impl RebaseStore {
     /// `repo.path()` is the worktree's own git dir, so every worktree has its own rebase. Other
-    /// worktrees read its `originalBranchRef` to protect the branch (#291).
+    /// worktrees load it too, to protect its branch (#291).
     pub fn open(repo: &Repository) -> Self {
         Self {
-            file: git_core::repo::stored_rebase_file(repo.path()),
+            file: git_core::rebase_file::file(repo.path()),
             last_warning: RefCell::new(None),
         }
     }
@@ -192,14 +40,7 @@ impl RebaseStore {
             }
             Err(error) => return self.ignore(format!("can't read it: {error}")),
         };
-        let stored = match serde_json::from_slice::<StoredRebase>(&bytes) {
-            Ok(stored) => stored,
-            Err(error) => return self.ignore(format!("malformed: {error}")),
-        };
-        if !(OLDEST_READABLE_VERSION..=FORMAT_VERSION).contains(&stored.version) {
-            return self.ignore(format!("unknown version {}", stored.version));
-        }
-        match to_state(stored, repo) {
+        match git_core::rebase_file::decode(&bytes, repo) {
             Ok(state) => {
                 self.last_warning.replace(None);
                 Some(state)
@@ -221,8 +62,7 @@ impl RebaseStore {
     }
 
     pub fn save(&self, state: &RebaseState) -> Result<(), String> {
-        let json = serde_json::to_vec_pretty(&StoredRebase::from(state))
-            .map_err(|error| error.to_string())?;
+        let json = git_core::rebase_file::encode(state)?;
         let dir = self.file.parent().expect("rebase file has a parent");
         fs::create_dir_all(dir).map_err(|error| error.to_string())?;
         write_atomically(&self.file, &json).map_err(|error| error.to_string())?;
@@ -245,6 +85,8 @@ impl RebaseStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use git2::Oid;
+    use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseStop};
 
     /// A repo with three commits on `refs/heads/main`; returns their ids oldest-first.
     fn repo_with_commits() -> (tempfile::TempDir, Repository, Vec<Oid>) {

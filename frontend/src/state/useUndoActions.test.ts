@@ -60,6 +60,21 @@ describe("useUndoActions", () => {
     );
   });
 
+  it("names the branch another worktree holds (#291)", async () => {
+    const message = "branch 'topic' is being bisected in another worktree at '/work/linked'";
+    const { result, getState } = setup({ kind: "BranchHeld", label: "Commit", message });
+    await act(async () => {
+      await result.current.undo();
+    });
+    expect(getState().error).toBe(`Can't undo Commit: ${message}.`);
+    const hint = `${message}. Its folder no longer exists: run git worktree prune to remove that worktree, then try again.`;
+    const pruned = setup({ kind: "BranchHeld", label: "Commit", message: hint });
+    await act(async () => {
+      await pruned.result.current.redo();
+    });
+    expect(pruned.getState().error).toBe(`Can't redo Commit: ${hint}`);
+  });
+
   it("asks to finish the merge or rebase first", async () => {
     const { result, getState } = setup({ kind: "OperationInProgress" });
     await act(async () => {

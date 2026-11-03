@@ -1105,6 +1105,7 @@ pub enum UndoOutcomeDto {
     Done { label: String },
     Nothing,
     RepositoryChanged { label: String },
+    BranchHeld { label: String, message: String },
     OperationInProgress,
 }
 
@@ -1115,6 +1116,7 @@ impl From<repo_service::worker::UndoOutcome> for UndoOutcomeDto {
             UndoOutcome::Done { label } => Self::Done { label },
             UndoOutcome::Nothing => Self::Nothing,
             UndoOutcome::RepositoryChanged { label } => Self::RepositoryChanged { label },
+            UndoOutcome::BranchHeld { label, message } => Self::BranchHeld { label, message },
             UndoOutcome::OperationInProgress => Self::OperationInProgress,
         }
     }
@@ -3897,6 +3899,17 @@ mod tests {
             (
                 UndoOutcome::RepositoryChanged { label: "x".into() },
                 serde_json::json!({ "kind": "RepositoryChanged", "label": "x" }),
+            ),
+            (
+                UndoOutcome::BranchHeld {
+                    label: "x".into(),
+                    message: "branch 'b' is checked out in another worktree at '/w'".into(),
+                },
+                serde_json::json!({
+                    "kind": "BranchHeld",
+                    "label": "x",
+                    "message": "branch 'b' is checked out in another worktree at '/w'",
+                }),
             ),
             (
                 UndoOutcome::OperationInProgress,

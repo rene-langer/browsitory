@@ -10,7 +10,7 @@ pub enum BranchError {
     /// Another worktree holds the branch: checked out, or being rebased or bisected there
     /// (#291).
     #[error(transparent)]
-    HeldElsewhere(#[from] crate::repo::BranchHeldElsewhere),
+    Held(#[from] crate::repo::BranchHeld),
     #[error("worktree operation failed: {0}")]
     Worktree(#[from] crate::worktree::WorktreeError),
     #[error("{0}")]
@@ -87,7 +87,13 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
     crate::repo::check_branch_not_rebased_elsewhere(repo, name)?;
     // Read from each worktree's git folder, so this works in a linked worktree of a bare
     // repository too (#291).
-    if let Some(held) = crate::repo::branch_held_elsewhere(repo, name, true)? {
+    if let Some(held) = crate::repo::branch_held(
+        repo,
+        name,
+        crate::repo::HoldRule::CheckOut {
+            include_this: false,
+        },
+    )? {
         return Err(held.into());
     }
     let branch_ref = format!("refs/heads/{name}");
@@ -126,8 +132,8 @@ pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchE
 pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Result<(), BranchError> {
     crate::repo::check_branch_not_rebased(repo, old_name)?;
     // A branch checked out elsewhere may be renamed (that worktree's HEAD moves along), but not
-    // one a rebase or bisect there returns to, as `git branch -m` refuses (#291).
-    if let Some(held) = crate::repo::branch_held_elsewhere(repo, old_name, false)? {
+    // one a rebase or bisect returns to, as `git branch -m` refuses (#291).
+    if let Some(held) = crate::repo::branch_held(repo, old_name, crate::repo::HoldRule::Rename)? {
         return Err(held.into());
     }
     let mut branch = repo.find_branch(old_name, BranchType::Local)?;
@@ -137,7 +143,7 @@ pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
 
 pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), BranchError> {
     crate::repo::check_branch_not_rebased(repo, name)?;
-    if let Some(held) = crate::repo::branch_held_elsewhere(repo, name, true)? {
+    if let Some(held) = crate::repo::branch_held(repo, name, crate::repo::HoldRule::MoveOrDelete)? {
         return Err(held.into());
     }
     let mut branch = repo.find_branch(name, BranchType::Local)?;

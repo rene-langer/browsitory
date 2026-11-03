@@ -13,6 +13,7 @@ pub mod merge;
 pub mod pick;
 pub mod process;
 pub mod rebase;
+pub mod rebase_file;
 pub mod reflog;
 pub mod remote;
 pub mod repo;

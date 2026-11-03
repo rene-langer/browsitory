@@ -38,7 +38,7 @@ pub enum WorktreeError {
     /// Another worktree holds the branch: checked out, or being rebased or bisected there
     /// (#291).
     #[error(transparent)]
-    HeldElsewhere(#[from] crate::repo::BranchHeldElsewhere),
+    Held(#[from] crate::repo::BranchHeld),
 }
 
 impl From<git2::Error> for WorktreeError {
@@ -124,7 +124,11 @@ pub fn create_worktree_with(
     probe: impl FnOnce(&Path) -> std::io::Result<bool>,
 ) -> Result<(), WorktreeError> {
     crate::repo::check_branch_not_rebased(repo, branch)?;
-    if let Some(held) = crate::repo::branch_held_elsewhere(repo, branch, true)? {
+    if let Some(held) = crate::repo::branch_held(
+        repo,
+        branch,
+        crate::repo::HoldRule::CheckOut { include_this: true },
+    )? {
         return Err(held.into());
     }
     match std::fs::symlink_metadata(path) {

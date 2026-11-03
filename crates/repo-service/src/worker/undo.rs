@@ -296,9 +296,19 @@ pub struct UndoState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UndoOutcome {
-    Done { label: String },
+    Done {
+        label: String,
+    },
     Nothing,
-    RepositoryChanged { label: String },
+    RepositoryChanged {
+        label: String,
+    },
+    /// A branch to move, delete or check out is held by a worktree (#291): `message` says which
+    /// and how. The entry stays on its stack.
+    BranchHeld {
+        label: String,
+        message: String,
+    },
     OperationInProgress,
 }
 
@@ -628,6 +638,12 @@ impl UndoRecorder {
             Ok(()) => {}
             Err(UndoError::RepositoryChanged) => {
                 return Ok(UndoOutcome::RepositoryChanged { label })
+            }
+            Err(UndoError::Held(held)) => {
+                return Ok(UndoOutcome::BranchHeld {
+                    label,
+                    message: held.to_string(),
+                })
             }
             Err(UndoError::OperationInProgress) => return Ok(UndoOutcome::OperationInProgress),
             Err(error) => return Err(error.to_string()),
