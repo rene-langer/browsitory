@@ -1,11 +1,14 @@
 # License compliance
 
-Browsitory is MIT-licensed. Every dependency below was verified permissive (MIT, Apache-2.0,
-ISC, BSD, MIT-0, Unicode-3.0, Zlib) except the one documented exception. Verified with `cargo info <crate>` (Rust)
-and `npm info <package> license` (JS) on 2026-08-12, against the direct dependencies declared
-in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`, `e2e/package.json`,
-and `extension/e2e/package.json` (not the full transitive tree); dependencies added later carry
-their own verification date in the Notes column.
+Browsitory is MIT-licensed. The allowed licences are MIT, Apache-2.0, ISC, BSD-2-Clause,
+BSD-3-Clause, MIT-0, Unicode-3.0, Zlib, BlueOak-1.0.0 and PSF-2.0 / Python-2.0. Anything else
+needs a recorded owner decision: the libgit2 exception and the per-package exceptions below.
+
+The tables below list the direct dependencies, verified with `cargo info <crate>` (Rust) and
+`npm info <package> license` (JS) on 2026-08-12, against `crates/*/Cargo.toml`,
+`frontend/package.json`, `extension/package.json`, `e2e/package.json` and
+`extension/e2e/package.json`; dependencies added later carry their own verification date in
+the Notes column. CI checks the full transitive trees automatically (see "Automated checks").
 
 ## Rust (`cargo info <crate>`)
 
@@ -86,6 +89,7 @@ Each is pinned to an exact version where it runs.
 
 | Tool | License | Notes |
 |---|---|---|
+| cargo-deny 0.20.2 | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and runs `cargo deny check licenses`. Version pinned in the job's `CARGO_DENY_VERSION` (Renovate updates it). Source: `cargo info cargo-deny@0.20.2`, verified 2026-11-03. |
 | ovsx 1.3.0 | EPL-2.0 | `release.yml`'s `publish-vsix-open-vsx` job runs it as `npx --yes ovsx@1.3.0 publish` to upload the already-built `.vsix` files to Open VSX. EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it as a dependency. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02. |
 
 ## JavaScript, `e2e/` (`npm info <package> license`)
@@ -133,7 +137,8 @@ exception explicitly permits linking libgit2 from software under a different lic
 Browsitory's MIT), so this is a conscious, documented choice, not an oversight — see
 `docs/ARCHITECTURE.md`'s "Why git2 (libgit2 bindings), not gitoxide" for the rationale. No
 other GPL/AGPL/SSPL dependency is acceptable without a new, equally explicit decision recorded
-here.
+here. `deny.toml` scopes this exception to the `libgit2-sys` crate alone (see "Rust
+exceptions").
 
 Every VSCode extension package (`.vsix`) bundles the `vscode-sidecar` binary, which links
 libgit2 statically. So the package ships `extension/THIRD_PARTY_NOTICES.md` next to `LICENSE`:
@@ -165,14 +170,98 @@ lockfile maintenance #279). Crates carrying it only: the transitive `zlib-rs` (0
 handling. Other crates offer Zlib as one option among MIT/Apache-2.0 (`tinyvec`,
 `miniz_oxide`).
 
+## BlueOak-1.0.0 and PSF-2.0 / Python-2.0
+
+Both are permissive licences on the allowed list since 2026-11-03 (owner decision, #273).
+BlueOak-1.0.0 (the Blue Oak Model License) allows use, modification and redistribution with
+the licence or its notice kept; it also grants patent rights. PSF-2.0 (the Python Software
+Foundation License) and Python-2.0 (the Python licence stack that contains it) allow the same
+with the copyright notice kept. They appear only in the npm dev trees: BlueOak-1.0.0 in `glob`,
+`minimatch`, `lru-cache`, `path-scurry` and related packages; PSF-2.0 / Python-2.0 in
+`argparse` (through `js-yaml`).
+
+## Rust exceptions
+
+Recorded in `deny.toml`'s `[licenses] exceptions`, pinned by crate name (not version, so a
+routine update doesn't break CI; a new crate under the same licence still fails).
+
+| Crate | License | Why it's acceptable |
+|---|---|---|
+| libgit2-sys | GPL-2.0-only WITH GCC-exception-2.0 (vendored libgit2) | The one exception, see "The one exception" below. `libgit2-sys` declares only `MIT OR Apache-2.0` (its binding), so `deny.toml` clarifies the real licence from `libgit2/COPYING`, pinned by that file's hash. If the file changes, the clarification stops matching, the exception goes unused and the check fails, so someone re-reads the licence. `git2` vendors nothing and needs no entry. |
+| option-ext 0.2.0 | MPL-2.0 | **Ships** in the desktop app and in the VSCode sidecar, through `directories` (our `config` crate) and `dirs` (Tauri). MPL-2.0 is file-level copyleft: we use it unmodified and say where its source is in `extension/THIRD_PARTY_NOTICES.md` (source: <https://crates.io/crates/option-ext/0.2.0>, <https://github.com/soc/option-ext>). The desktop app has no notices file; this row is its record. Owner decision 2026-11-03 (#273). |
+| cssparser, cssparser-macros, selectors, dtoa-short | MPL-2.0 | Build time only on our targets: Tauri's build and code generation (`tauri-build`, `tauri-codegen`) through `dom_query`. Not linked into anything we ship. Owner decision 2026-11-03 (#273). |
+| target-lexicon | Apache-2.0 WITH LLVM-exception | Build time only (`system-deps`, used by the Linux GTK bindings' build scripts). The LLVM exception only adds permissions to Apache-2.0. Owner decision 2026-11-03 (#273). |
+
+## JavaScript dev-tree exceptions
+
+Recorded in `EXCEPTIONS` and `CLARIFICATIONS` in `scripts/check-dependency-licenses.py`; keep
+both in sync. None of these ship: they are build, test or packaging tools, or data those tools
+read. An exception never applies to the production trees of `frontend/` and `extension/`.
+"Versions" is a version prefix: `1` means any 1.x.y. Owner decision 2026-11-03 (#273).
+
+| Package | Versions | License | Reason |
+|---|---|---|---|
+| lightningcss, lightningcss-* | 1 | MPL-2.0 | Vite's CSS minifier and its per-platform native binaries (`frontend/`, `extension/`'s vitest). A build tool; its output isn't covered. |
+| caniuse-lite | 1 | CC-BY-4.0 | Browser support data for browserslist (`eslint-plugin-react-hooks` > `@babel/core`). |
+| mdn-data | 2 | CC0-1.0 | CSS data for `css-tree` (`jsdom`, tests only). |
+| spdx-license-ids | 3 | CC0-1.0 | SPDX id list for package metadata tools (`@vscode/vsce`, `@wdio/cli`). |
+| spdx-exceptions | 2 | CC-BY-3.0 | SPDX exception list, same tools. |
+| tslib | 2 | 0BSD | TypeScript runtime helpers inside `@vscode/vsce`'s and WebdriverIO's dependencies. |
+| stream-buffers | 3 | Unlicense | `@wdio/local-runner` (`e2e/` only). |
+| @promptbook/utils | 0 | CC-BY-4.0 | `@wdio/utils` > `locate-app` (`e2e/` only). |
+| @azu/style-format | 1 | WTFPL | `@vscode/vsce` > secretlint formatter (packaging only). |
+| binaryextensions, editions, istextorbinary, textextensions, version-range | 6, 6, 9, 6, 4 | Artistic-2.0 | `@vscode/vsce` > secretlint > `istextorbinary` (packaging only). |
+| @vscode/vsce-sign, @vscode/vsce-sign-* | 2 | Microsoft licence terms (`SEE LICENSE IN LICENSE.txt`, reported as Unknown) | Required by Microsoft's own publishing tool `@vscode/vsce`. Used only to package and publish, locally and in CI; never redistributed in the VSIX or the app. |
+
+| Clarified package | Versions | License | Reason |
+|---|---|---|---|
+| css-value | 0.0.1 | MIT | No licence field in its `package.json`; its `Readme.md` carries the MIT licence. Through `webdriverio` (`e2e/` only). |
+
+## Automated checks
+
+CI's `licenses` job (`.github/workflows/ci.yml`) checks every licence in the full trees, on
+every pull request, every push to `main` and the weekly scheduled run:
+
+- **Rust:** `cargo deny check licenses` with `deny.toml`. It covers every workspace crate and
+  every transitive dependency for all the platforms we build for (Linux, macOS and Windows,
+  x86_64 and aarch64), all features, including build and dev dependencies. Only the
+  `licenses` check runs: advisories stay with `cargo audit` in the `audit` job
+  (`.cargo/audit.toml`), and cargo-deny's `bans` and `sources` checks aren't used.
+- **npm:** `scripts/check-dependency-licenses.py` (unit tests in
+  `scripts/test_check_dependency_licenses.py`). For each of `frontend/`, `extension/`, `e2e/`
+  and `extension/e2e/` it reads the installed tree with `pnpm licenses list --json`,
+  production and dev. The production trees of `frontend/` and `extension/` must use allowed
+  licences only; dev packages may also match the exceptions table above. pnpm installs only
+  the current platform's native binaries, so the script looks up every lockfile package that
+  isn't installed (esbuild, rolldown, lightningcss, `@tauri-apps/cli`, `@vscode/vsce-sign`
+  for other platforms) in the npm registry by exact `name@version`. A published version can't
+  change, so this is as reliable as installing every platform. Installing them instead
+  (pnpm's `supportedArchitectures`, or `pnpm install --force`) would download every
+  platform's native binaries, hundreds of MB, on every run, and would need a different
+  setting for pnpm 9 and pnpm 11. Such a binary counts as production when a production
+  package depends on it.
+- An exception or clarification that no longer matches anything fails both checks, so the
+  tables can't go stale.
+
+`scripts/check-license-compliance.py` (the `audit` job) still runs: it fails if a direct
+dependency has no row in the tables above. The tree checks verify licence values; this one
+keeps the per-dependency notes complete.
+
+Run them locally:
+
+```bash
+cargo install cargo-deny --locked --version 0.20.2   # once
+cargo deny check licenses
+# after `pnpm install` in frontend/, extension/, e2e/ and extension/e2e/ (see CLAUDE.md):
+python3 scripts/check-dependency-licenses.py --summary
+```
+
+When a check fails, the new package's licence is outside the policy. Replace the dependency,
+or ask the owner for a decision and record it as an exception (`deny.toml` or the script)
+and in the tables above, in the same PR.
+
 ## Process
 
 Before adding a new dependency: run `cargo info <crate>` or `npm info <package> license`,
 confirm it's permissive, and add a row to the relevant table above in the same commit that
-adds the dependency.
-
-CI's `audit` job runs `scripts/check-license-compliance.py`, which fails the build if any
-direct dependency in `crates/*/Cargo.toml`, `frontend/package.json`, `extension/package.json`,
-`e2e/package.json`, or `extension/e2e/package.json` has no matching row here — it checks
-presence, not the license value itself, so the manual `cargo info`/`npm info` step above still
-applies.
+adds the dependency. CI's tree checks (above) then catch anything it pulls in transitively.

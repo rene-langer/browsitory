@@ -88,12 +88,17 @@ Actions); Tauri crates and `@tauri-apps/*` packages share one group. Majors and
 behaviour the tests and `docs/ARCHITECTURE.md` characterize). Security fixes skip the
 schedule; lockfiles get a monthly maintenance PR.
 
-The license policy and the CI `audit` job still apply to these PRs.
-`scripts/check-license-compliance.py` only catches an undocumented *direct* dependency; it
-doesn't read licences or the transitive tree. So check what an update adds to `Cargo.lock` /
-`pnpm-lock.yaml`: a new transitive dependency under a licence the doc doesn't cover yet needs
-a `docs/LICENSE_COMPLIANCE.md` row in the same PR. When an update fixes an advisory, drop its
-ignore from `.cargo/audit.toml` in the same PR and close the matching RUSTSEC issue.
+The license policy and the CI `audit` and `licenses` jobs still apply to these PRs. The
+`licenses` job checks every licence in the full Rust and npm trees, transitive and dev
+included (`cargo deny check licenses` with `deny.toml`; `scripts/check-dependency-licenses.py`
+for all four pnpm projects). If an update pulls in a licence outside the policy, it fails:
+replace the dependency or ask the owner, then record the decision as an exception in
+`deny.toml` or the script and in `docs/LICENSE_COMPLIANCE.md`, in the same PR. A stale
+exception fails too; remove it. `scripts/check-license-compliance.py` (`audit` job) still
+requires a `docs/LICENSE_COMPLIANCE.md` row for every *direct* dependency. Renovate also
+updates the pinned `CARGO_DENY_VERSION` in `ci.yml`. Advisories stay with `cargo audit`: when an
+update fixes one, drop its ignore from `.cargo/audit.toml` in the same PR and close the
+matching RUSTSEC issue.
 
 ## Versioning & releases
 
@@ -146,10 +151,15 @@ Owner setup (once):
 
 ## License policy
 
-Permissive dependencies only (MIT, Apache-2.0, ISC, BSD, MIT-0, Unicode-3.0, Zlib), with one deliberate exception
-(`git2`/libgit2 — see `docs/LICENSE_COMPLIANCE.md`). Before adding a dependency: verify its
-license (`cargo info <crate>` / `npm info <package> license`) and add a row to
-`docs/LICENSE_COMPLIANCE.md` in the same commit.
+Permissive dependencies only: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, MIT-0,
+Unicode-3.0, Zlib, BlueOak-1.0.0 and PSF-2.0 / Python-2.0. One deliberate exception,
+`libgit2-sys` (vendored libgit2), plus per-package owner decisions for a few Rust crates and
+dev-only npm packages; all are listed in `docs/LICENSE_COMPLIANCE.md`. Never add a licence or
+an exception on your own: ask the owner. Before adding a dependency: verify its license
+(`cargo info <crate>` / `npm info <package> license`) and add a row to
+`docs/LICENSE_COMPLIANCE.md` in the same commit. CI's `licenses` job then checks the whole
+tree it pulls in (`deny.toml`, `scripts/check-dependency-licenses.py`); keep their allow-lists
+in sync with this one.
 
 ## Testing conventions
 
