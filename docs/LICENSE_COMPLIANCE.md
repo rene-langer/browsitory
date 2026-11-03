@@ -90,6 +90,7 @@ Each is pinned to an exact version where it runs.
 | Tool | License | Notes |
 |---|---|---|
 | cargo-deny | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and runs `cargo deny check licenses`. The exact version is pinned in that job's `CARGO_DENY_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-deny@0.20.2` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
+| cargo-mutants | MIT | `ci.yml`'s `mutants` job (pull requests only, informational) installs it with `taiki-e/install-action` and runs `cargo mutants` on the changed code. The exact version is pinned in that job's `CARGO_MUTANTS_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-mutants@27.1.0` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
 | ovsx 1.3.0 | EPL-2.0 | `release.yml`'s `publish-vsix-open-vsx` job runs it as `npx --yes ovsx@1.3.0 publish` to upload the already-built `.vsix` files to Open VSX. EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it as a dependency. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02. |
 
 ## JavaScript, `e2e/` (`npm info <package> license`)
