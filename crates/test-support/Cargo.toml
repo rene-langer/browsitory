@@ -9,3 +9,4 @@ description = "Test-only helpers shared by the workspace's Rust test suites (nev
 [dependencies]
 ctor = "1.0"
 git2 = "0.21"
+ts-rs = "12"

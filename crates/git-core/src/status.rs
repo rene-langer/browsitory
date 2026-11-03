@@ -7,6 +7,7 @@ pub enum StatusError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum StatusKind {
     New,
     Modified,

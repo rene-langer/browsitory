@@ -1442,7 +1442,8 @@ only `error`.
   real worker thread against a real temp-dir repo — no mocks. It also owns the DTO wire-format
   contract: `crates/repo-service/src/lib.rs`'s `wire_format_tests` module pins the `StatusKind`
   and `DiffLineOrigin` `Debug` output against the matching unions in
-  `frontend/src/ipc/RepoClient.ts`, a contract no other test covers.
+  `frontend/src/ipc/RepoClient.ts`. That `Debug` output equals the variant names, which is
+  what the generated DTO types below use for those fields.
 - `tauri-app`: now a thin Tauri command adapter over `repo-service`, so it doesn't need
   delegation tests of its own. It keeps `crates/tauri-app/src/commands/mod.rs`'s inline tests
   for the DTO serialization it's still responsible for (e.g. camelCase field names on structs
@@ -1482,6 +1483,21 @@ only `error`.
   with `UPDATE_TRANSPORT_METHODS=1` to rewrite it; never in CI). Intended differences between the transports are explicit, commented allow-lists in the
   parity test. A new operation must reach both transports, or be added to an allow-list with a
   reason.
+- DTO types (#306): each transport's wire DTOs derive ts-rs's `TS` in test builds only
+  (`#[cfg_attr(test, derive(ts_rs::TS))]`). Their test `dto_bindings_are_current` (in
+  `crates/tauri-app/src/commands/mod.rs` and `crates/vscode-sidecar/src/dispatch.rs`) writes
+  `frontend/src/ipc/generated/tauri-dto.ts` and `sidecar-dto.ts` and fails when the checked-in
+  file is out of date (`UPDATE_TRANSPORT_METHODS=1` rewrites it). It also fails when a listed
+  DTO uses a type that isn't listed. `frontend/src/ipc/dtoContract.ts` then requires each
+  generated type to equal its hand-written type in `RepoClient.ts`, so `pnpm build` fails when a
+  Rust field is renamed, retyped or made optional. The few intended differences are written out
+  there. `dtoContract.test.ts` checks that every generated type is compared. A wire field that
+  Rust sends as a string but TypeScript types as a union uses `ts(as = "<enum>")` with the
+  `git-core`/`repo-service` enum the string comes from (their `ts` feature, enabled only by
+  the transports' dev-dependencies), or `ts(type = "...")` for a fixed set of literals. ts-rs
+  reads the serde attributes, except that it can't tell a `skip_serializing_if` field (sent
+  only sometimes) or a `#[serde(default)]` input field (may be omitted) from a required one:
+  mark those `ts(optional)` / `ts(optional = nullable)`.
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
   native-method routing, process-loss recovery, webview security, and deterministic disposal.
 - E2E: `tauri-driver` + WebdriverIO (`e2e/`) driving

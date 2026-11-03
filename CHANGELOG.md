@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### DTO types generated from Rust
+
+- Added: the frontend type check now fails when a wire DTO in the desktop app or the VSCode
+  sidecar no longer matches its TypeScript type in `RepoClient.ts`, for example after a
+  renamed field (#306). Both transports' DTOs generate TypeScript with ts-rs (test builds
+  only) into `frontend/src/ipc/generated/`, and `frontend/src/ipc/dtoContract.ts` compares
+  them with the hand-written types. The wire format is unchanged.
+
 ### Transport parity check
 
 - Added: a test fails when an operation reaches only one of the two transports, the desktop

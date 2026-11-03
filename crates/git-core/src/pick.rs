@@ -141,6 +141,7 @@ impl From<SequenceKind> for Kind {
 
 /// Which operation a multi-commit sequence runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum SequenceKind {
     CherryPick,
     Revert,
