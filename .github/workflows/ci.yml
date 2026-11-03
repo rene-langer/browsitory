@@ -112,6 +112,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      # Caches ~/.cargo and the dependencies in target/ (#308). The key is the job id plus the
+      # rustc version and host, so each OS gets its own cache. Only main saves; PRs restore
+      # main's cache and never write one, so a PR can't evict or poison it. The action sets
+      # CARGO_INCREMENTAL=0 and never caches the workspace crates or incremental dirs.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -153,8 +160,9 @@ jobs:
     # Backstop only; the mutation step has its own, shorter limit (see there).
     timeout-minutes: 60
     env:
+      # Not CARGO_*: rust-cache hashes CARGO* env vars into its key (see the rust-cache step).
       # renovate: datasource=crate depName=cargo-mutants
-      CARGO_MUTANTS_VERSION: 27.1.0
+      MUTANTS_VERSION: 27.1.0
     steps:
       - uses: actions/checkout@v7
         with:
@@ -177,10 +185,21 @@ jobs:
           sudo apt-get install -y libdbus-1-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
         if: steps.diff.outputs.relevant == 'true'
+      # Restores the `rust` job's Linux cache, so the baseline build only compiles the workspace
+      # crates. rust-cache's restore key is `shared-key`, OS, arch and a hash of the rustc version
+      # and every CARGO*/RUST*/CC*/CFLAGS*/CXX*/CMAKE* env var, so `shared-key: rust` matches
+      # the `rust` job only while this job sets no env var with those prefixes (hence
+      # `MUTANTS_VERSION`, not `CARGO_MUTANTS_VERSION`). Never saves: this job runs only on pull
+      # requests, and `--in-place` builds mutated code that must not end up in a cache.
+      - uses: Swatinem/rust-cache@v2
+        if: steps.diff.outputs.relevant == 'true'
+        with:
+          shared-key: rust
+          save-if: false
       - uses: taiki-e/install-action@v2
         if: steps.diff.outputs.relevant == 'true'
         with:
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
+          tool: cargo-mutants@${{ env.MUTANTS_VERSION }}
       - name: Mutation testing (changed code)
         id: mutants
         if: steps.diff.outputs.relevant == 'true'
@@ -262,6 +281,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Own cache (job-id key): this job builds only the dev vscode-sidecar. See the `rust` job.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # sidecarBridge.real.test.ts spawns the real vscode-sidecar binary and only builds it
       # itself as a fallback if missing; on a cold CI runner that inline `cargo build` blows
       # the test's own timeout, so prebuild it here instead.
@@ -306,6 +329,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      # Caches ~/.cargo only (registry and the tauri-cli binary installed below), not target/:
+      # the release builds for three OSes would take a large share of the 10 GB repository
+      # cache limit and evict the caches the PR jobs use. This job runs only on main.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install tauri-cli
         run: cargo install tauri-cli --locked
       - uses: pnpm/action-setup@v6
@@ -401,6 +431,10 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
       - uses: dtolnay/rust-toolchain@stable
+      # Own cache (job-id key): a plain `cargo build --workspace`. See the `rust` job.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v6
         with:
           version: 11  # extension/package.json pins pnpm@11.28.10
@@ -467,6 +501,13 @@ jobs:
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential \
             webkit2gtk-driver xvfb dbus
       - uses: dtolnay/rust-toolchain@stable
+      # Own cache (job-id key): this build enables the custom-protocol and
+      # forge-fixture-override features, so it must not share a cache with a plain build.
+      # Placed before `cargo install tauri-driver` so the installed binary is cached too.
+      # See the `rust` job.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install tauri-driver
         # tauri-driver's version is independent of any other Tauri versions.
         run: cargo install tauri-driver --locked
