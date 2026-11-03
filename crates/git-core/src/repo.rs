@@ -205,6 +205,9 @@ pub enum BranchUse {
     /// A terminal `git bisect` started from it there (`BISECT_START`); `git bisect reset`
     /// returns to it (#291).
     Bisected,
+    /// Browsitory's own cherry-pick or revert sequence paused there runs on it; its Abort
+    /// rewinds it (#293).
+    Sequence(crate::pick::SequenceKind),
 }
 
 /// Whether the folder of another worktree that holds a branch is still a worktree.
@@ -244,22 +247,20 @@ pub struct BranchHeld {
 
 impl std::fmt::Display for BranchHeld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use crate::pick::SequenceKind;
         let how = match self.usage {
-            BranchUse::CheckedOut => "checked out",
-            BranchUse::Rebased => "being rebased",
-            BranchUse::Bisected => "being bisected",
+            BranchUse::CheckedOut => "is checked out",
+            BranchUse::Rebased => "is being rebased",
+            BranchUse::Bisected => "is being bisected",
+            BranchUse::Sequence(SequenceKind::CherryPick) => "has a paused cherry-pick",
+            BranchUse::Sequence(SequenceKind::Revert) => "has a paused revert",
         };
         let branch = &self.branch;
         let (path, folder) = match &self.holder {
-            Holder::ThisWorktree => {
-                return write!(f, "branch '{branch}' is {how} in this worktree")
-            }
+            Holder::ThisWorktree => return write!(f, "branch '{branch}' {how} in this worktree"),
             Holder::Other { path, folder } => (path.display(), folder),
         };
-        write!(
-            f,
-            "branch '{branch}' is {how} in another worktree at '{path}'"
-        )?;
+        write!(f, "branch '{branch}' {how} in another worktree at '{path}'")?;
         let (what, locked) = match *folder {
             WorktreeFolder::Present => return Ok(()),
             WorktreeFolder::Missing { locked } => ("Its folder no longer exists", locked),
@@ -284,6 +285,13 @@ impl std::fmt::Display for BranchHeld {
 }
 
 /// Which of git's rules decides whether a worktree holds a branch.
+///
+/// Browsitory's own paused cherry-pick/revert in another worktree counts under every rule
+/// (#293). That worktree's HEAD is on its branch, so git's rules hold the branch already, except
+/// `branch -m`, which git allows (its `cherry-pick --abort` rewinds commits, not a name).
+/// Browsitory refuses that rename too, as the owning window does: the stored sequence keeps the
+/// old name, which that window protects, and Abort finds a renamed branch only through its
+/// reflog (`pick::abort_sequence`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HoldRule {
     /// git's `branch_checked_out` (`branch -f`, `branch -D`): every worktree, this one too, holds
@@ -296,8 +304,9 @@ pub(crate) enum HoldRule {
     /// there started from. `include_this`: `worktree add` counts this worktree too, Switch
     /// doesn't.
     CheckOut { include_this: bool },
-    /// `branch -m` (`reject_rebase_or_bisect_branch`): only rebases and bisects, in worktrees
-    /// whose HEAD is detached, this one too. HEAD moves along with a renamed branch.
+    /// `branch -m` (`reject_rebase_or_bisect_branch`): rebases and bisects in worktrees whose
+    /// HEAD is detached, this one too, and (Browsitory only) a paused cherry-pick/revert in
+    /// another worktree. HEAD moves along with a renamed branch.
     Rename,
 }
 
@@ -313,6 +322,10 @@ struct WorktreeBranches {
     /// Browsitory's own paused rebase's branch: only read for other worktrees, only while
     /// their HEAD is detached, and only when that worktree would load the file itself.
     stored_rebase: Option<String>,
+    /// Browsitory's own paused cherry-pick/revert's branch and kind: only read for other
+    /// worktrees, only while their HEAD is on that branch, and only when that worktree would
+    /// load the file itself.
+    stored_sequence: Option<(String, crate::pick::SequenceKind)>,
     /// The branch a bisect started from.
     bisecting: Option<String>,
 }
@@ -322,7 +335,12 @@ impl WorktreeBranches {
     fn held(&self, rule: HoldRule) -> Vec<(&str, BranchUse)> {
         let this = self.holder == Holder::ThisWorktree;
         let detached = self.head.is_none();
-        let mut held = Vec::new();
+        // First, so the refusal names the sequence rather than HEAD on the same branch.
+        let mut held: Vec<(&str, BranchUse)> = self
+            .stored_sequence
+            .iter()
+            .map(|(name, kind)| (name.as_str(), BranchUse::Sequence(*kind)))
+            .collect();
         let counts_head = match rule {
             HoldRule::MoveOrDelete => !this,
             HoldRule::CheckOut { include_this } => include_this || !this,
@@ -474,6 +492,19 @@ fn worktree_branches(repo: &git2::Repository) -> Result<Vec<WorktreeBranches>, g
             .flatten()
             .and_then(|bytes| crate::rebase_file::decode(&bytes, repo).ok())
             .map(|state| state.original_branch_ref);
+        // Likewise for a stored cherry-pick/revert (#293), which runs on its branch. Once that
+        // worktree's HEAD left it, the sequence no longer touches it: Abort doesn't rewind it,
+        // and Continue, which checks only the commit HEAD is on, goes on on HEAD's new branch.
+        let stored_sequence = (holder != Holder::ThisWorktree)
+            .then(|| std::fs::read(crate::sequence_file::file(&git_dir)).ok())
+            .flatten()
+            .and_then(|bytes| crate::sequence_file::decode(&bytes, repo).ok())
+            .and_then(|state| match state.original_ref {
+                crate::pick::OriginalRef::Branch(name) if head.as_ref() == Some(&name) => {
+                    Some((name, state.kind))
+                }
+                _ => None,
+            });
         // git's `wt_status_check_bisect`: BISECT_LOG marks the bisect, BISECT_START names the
         // branch it started from (or a commit id, which names no branch). BISECT_LOG holds raw
         // commit subjects, which needn't be UTF-8, so only its existence is checked.
@@ -489,6 +520,7 @@ fn worktree_branches(repo: &git2::Repository) -> Result<Vec<WorktreeBranches>, g
             rebasing,
             update_refs,
             stored_rebase,
+            stored_sequence,
             bisecting,
         });
     }

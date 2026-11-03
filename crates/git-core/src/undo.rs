@@ -48,8 +48,8 @@ pub enum SnapshotScope {
 pub enum UndoError {
     #[error("the repository changed since this operation")]
     RepositoryChanged,
-    /// A branch to move, delete or check out is held by another worktree: checked out, or
-    /// being rebased or bisected there (#291).
+    /// A branch to move, delete or check out is held by another worktree: checked out, being
+    /// rebased or bisected, or used by a paused cherry-pick or revert there (#291, #293).
     #[error(transparent)]
     Held(#[from] crate::repo::BranchHeld),
     #[error("a merge, rebase, cherry-pick or revert is in progress")]

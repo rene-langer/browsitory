@@ -35,8 +35,8 @@ pub enum WorktreeError {
     /// The branch is being rebased in a terminal, in this or another worktree (#263).
     #[error(transparent)]
     BeingRebased(#[from] crate::repo::BranchBeingRebased),
-    /// Another worktree holds the branch: checked out, or being rebased or bisected there
-    /// (#291).
+    /// Another worktree holds the branch: checked out, being rebased or bisected, or used by a
+    /// paused cherry-pick or revert there (#291, #293).
     #[error(transparent)]
     Held(#[from] crate::repo::BranchHeld),
 }

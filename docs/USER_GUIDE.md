@@ -663,6 +663,8 @@ finish or abort the rebase first. It also refuses:
 - a branch that a `git rebase --update-refs` in another worktree will move.
 - the branch a rebase paused in Browsitory is rebasing in another worktree ("branch 'topic' is
   being rebased in another worktree at …"). Continue or abort that rebase first.
+- the branch a cherry-pick or revert paused in Browsitory runs on in another worktree ("branch
+  'topic' has a paused cherry-pick in another worktree at …"). Continue or abort it first.
 
 If that other worktree's folder is gone, or is no longer a worktree, the message says so and
 asks you to run `git worktree prune`, which removes the stale entry. If that worktree is locked
@@ -808,7 +810,11 @@ another reason (say an untracked file is in the way) also shows **Continue**, wh
 step. The paused sequence is kept on disk, so it is still there after you close and reopen the
 app. While it is paused, other cherry-picks, merges, rebases, commits, amend, reset, checkout,
 branch switching, pull and stash apply/pop are unavailable, and so are saving a stash and
-deleting, renaming or adding a worktree on the branch the sequence runs on.
+deleting, renaming or adding a worktree on the branch the sequence runs on. While that worktree
+is still on the branch, the windows of the repository's other worktrees can't move, delete,
+rename or switch to it either, or add a worktree on it ("branch 'main' has a paused
+cherry-pick in another worktree at …"). Unlike git, this includes renaming, so the paused
+sequence keeps its branch under the name it started with.
 
 If you finish a conflicted step yourself in a terminal (`git commit` after resolving),
 **Continue** recognises it when it is exactly that step: one commit on top of where the sequence
@@ -819,8 +825,10 @@ means HEAD moved, and Continue refuses.
 **Abort** puts the branch back where it was before the first commit was applied, keeping
 unrelated uncommitted edits. If HEAD was moved elsewhere in the meantime (for example by a commit,
 reset or branch switch in a terminal), Abort only ends the sequence and leaves HEAD and every
-branch alone, and says so.
-Continue refuses in that case. A whole sequence is one **Undo** step; an aborted one leaves
+branch alone, and says so. If HEAD is on another commit than where the sequence stopped,
+Continue refuses too. Renaming the branch in a terminal (`git branch -m`) doesn't count as
+moving HEAD: Continue carries on on the renamed branch, and, as with `git cherry-pick --abort`,
+Abort puts the renamed branch back. A whole sequence is one **Undo** step; an aborted one leaves
 nothing to undo. The step **Continue** commits runs the commit hooks (see [Hooks](#hooks));
 the steps applied by themselves run none, like a single cherry-pick.
 
@@ -906,10 +914,11 @@ work during it, and they don't end it.
 Undo refuses, instead of overwriting, when the repository changed since the operation. It also
 refuses when it would delete, move or switch to a branch that a worktree holds, and names it:
 checked out in another worktree, being rebased (in a terminal, or paused in Browsitory in
-another worktree), or being bisected ("Can't undo Commit: branch 'topic' is checked out in
-another worktree at '/work/topic'."). The step stays on the Undo stack, so you can try again
-once that worktree lets go of the branch. A missing worktree folder gets the same `git worktree
-prune` hint as Reflog restore. The reflog stays available for all of these cases.
+another worktree), being bisected, or used by a cherry-pick or revert paused in Browsitory in
+another worktree ("Can't undo Commit: branch 'topic' is checked out in another worktree at
+'/work/topic'.", or "… has a paused cherry-pick in another worktree at …"). The step stays on
+the Undo stack, so you can try again once that worktree lets go of the branch. A missing
+worktree folder gets the same `git worktree prune` hint as Reflog restore. The reflog stays available for all of these cases.
 
 Undo and Redo write each restored file next to the old one and swap it in only when it is
 complete. If writing fails (for example a full disk), that file stays as it was. Files restored

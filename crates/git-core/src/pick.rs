@@ -1255,8 +1255,9 @@ fn clean_message(message: &[u8]) -> String {
 /// --abort` (unrelated edits survive). If HEAD is still where the sequence stopped, the steps
 /// that landed are undone by checking out the original HEAD (libgit2's SAFE strategy: a local
 /// edit in the way is an error, and Abort can be retried) and moving the branch (or detached
-/// HEAD) back. When HEAD was moved elsewhere, or another operation is paused, nothing is moved
-/// (`rewound: false`). The caller forgets the state only on `Ok`.
+/// HEAD) back. A rename of the sequence's branch is followed, as git's `--abort` does
+/// ([`renamed_to`], #293). When HEAD was moved elsewhere, or another operation is paused,
+/// nothing is moved (`rewound: false`). The caller forgets the state only on `Ok`.
 pub fn abort_sequence(
     repo: &Repository,
     state: &SequenceState,
@@ -1285,8 +1286,10 @@ pub fn abort_sequence(
             rewound: head_id == state.original_head,
         });
     }
-    let same_ref =
-        head_ref(repo)? == state.original_ref && state.original_ref != OriginalRef::Unknown;
+    let current_ref = head_ref(repo)?;
+    let same_ref = (current_ref == state.original_ref
+        && state.original_ref != OriginalRef::Unknown)
+        || (head_id == state.expected_head && renamed_to(repo, state, &current_ref));
     if !same_ref {
         // HEAD now names another branch (or detached/attached changed): rewinding would move
         // a ref the sequence never touched.
@@ -1306,6 +1309,57 @@ pub fn abort_sequence(
     Ok(SequenceAbort {
         rewound: head_id == state.original_head,
     })
+}
+
+/// The sequence's branch (`originalRef`) was renamed to `current` (HEAD's branch) during the
+/// sequence, maybe in steps (#293): `originalRef` no longer exists, and `current`'s reflog
+/// records the renames from it (`git branch -m` and libgit2 write "[Bb]ranch: renamed <old> to
+/// <new>" and carry the log along). git's `cherry-pick --abort` rewinds a renamed branch, since
+/// it records commits, not the name.
+///
+/// Only renames written during the sequence count: a rename entry's ids are the branch tip at
+/// that moment, which then was the sequence's start (`original_head`) or a commit after it (a
+/// rename by a step's `post-commit` hook too). An older rename that once had the same name, and
+/// a branch switched to after the original was deleted (no rename entries), aren't taken for
+/// a rename. This is a heuristic, not proof: a reflog entry can be written with any message
+/// (`git update-ref -m`), so a forged "renamed" entry at such a commit would count.
+fn renamed_to(repo: &Repository, state: &SequenceState, current: &OriginalRef) -> bool {
+    let (OriginalRef::Branch(original), OriginalRef::Branch(current)) =
+        (&state.original_ref, current)
+    else {
+        return false;
+    };
+    if original == current || repo.find_reference(original).is_ok() {
+        return false;
+    }
+    let Ok(start) = Oid::from_str(&state.original_head) else {
+        return false;
+    };
+    let during_the_sequence =
+        |id: Oid| id == start || repo.graph_descendant_of(id, start).unwrap_or(false);
+    let Ok(reflog) = repo.reflog(current) else {
+        return false;
+    };
+    // Entries come newest first; follow the renames oldest first.
+    let mut name = original.clone();
+    for entry in (0..reflog.len()).rev().filter_map(|i| reflog.get(i)) {
+        if !during_the_sequence(entry.id_new()) {
+            continue;
+        }
+        let Ok(Some(message)) = entry.message() else {
+            continue;
+        };
+        let Some(rest) = message
+            .strip_prefix("Branch: renamed ")
+            .or_else(|| message.strip_prefix("branch: renamed "))
+        else {
+            continue;
+        };
+        if let Some(new) = rest.strip_prefix(&format!("{name} to ")) {
+            name = new.trim().to_string();
+        }
+    }
+    name == *current
 }
 
 /// Puts HEAD (the branch, or a detached HEAD) back at `original`, with the work tree and index

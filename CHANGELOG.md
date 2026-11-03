@@ -6,6 +6,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Paused cherry-picks in other worktrees
+
+- Fixed: a cherry-pick or revert paused in Browsitory protected its branch from renaming only
+  in its own worktree. Another worktree's window could rename it, and Abort then left the
+  picked commits in place instead of putting the branch back. The other worktrees now refuse
+  to rename it, unlike git, whose abort doesn't depend on the branch name (#293).
+- Changed: moving, deleting or switching to that branch from another worktree, or adding a
+  worktree on it, was already refused because it is checked out there. The message now names
+  the paused sequence ("branch 'topic' has a paused cherry-pick in another worktree at '…'").
+  Only a sequence that worktree would load itself counts, and only while its HEAD is on that
+  branch.
+- Fixed: after the branch of a paused cherry-pick or revert was renamed in a terminal (`git
+  branch -m`, which git allows), Abort left the picked commits in place. It now puts the
+  renamed branch back, as `git cherry-pick --abort` does. It recognises the rename by the
+  branch's reflog entries written during the sequence, so a branch you switched to, or one
+  renamed before the sequence started, is not rewound.
+
 ### Internal
 
 - Updated Vitest to 5 in the frontend and the VSCode extension. Vitest 5 changed its assertion

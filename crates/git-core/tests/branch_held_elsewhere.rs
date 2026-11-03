@@ -1,6 +1,7 @@
 //! Branches a worktree holds (#291): checked out in another worktree, the branch a terminal
 //! `git bisect` started from, the branches a terminal rebase rebases or updates
-//! (`--update-refs`), and the branch Browsitory's own paused rebase in another worktree rebases.
+//! (`--update-refs`), the branch Browsitory's own paused rebase in another worktree rebases,
+//! and the branch its own paused cherry-pick or revert there runs on (#293).
 //! Restore, Undo, delete, rename, worktree add and Switch refuse what git refuses: `branch -f`
 //! and `branch -D` follow git's `branch_checked_out`; `switch` and `worktree add` its
 //! `find_shared_symref`; `branch -m` its `reject_rebase_or_bisect_branch`. Each rule is twinned
@@ -11,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use git2::{Oid, Repository};
 use git_core::branch::{delete_branch, rename_branch, switch_branch};
+use git_core::pick::{OriginalRef, SequenceKind, SequenceState};
 use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseState, RebaseStop};
 use git_core::reflog::restore_reflog_entry;
 use git_core::undo::{capture, restore, RepoSnapshot, SnapshotScope};
@@ -103,9 +105,15 @@ fn bisect(dir: &Path, good: Oid) {
 }
 
 /// The folder `message` names ("branch '<branch>' is <how> in another worktree at '<folder>'",
-/// maybe followed by a hint), as written, and the rest of the message after it.
+/// maybe followed by a hint), as written, and the rest of the message after it. A `how` that
+/// starts with "has " ("has a paused cherry-pick") replaces "is <how>".
 fn named_folder<'a>(message: &'a str, branch: &str, how: &str) -> (&'a str, &'a str) {
-    let prefix = format!("branch '{branch}' is {how} in another worktree at '");
+    let how = if how.starts_with("has ") {
+        how.to_string()
+    } else {
+        format!("is {how}")
+    };
+    let prefix = format!("branch '{branch}' {how} in another worktree at '");
     let rest = message
         .strip_prefix(&prefix)
         .unwrap_or_else(|| panic!("{message:?} should start with {prefix:?}"));
@@ -632,4 +640,194 @@ fn switch_works_in_a_linked_worktree_of_a_bare_repository() {
     switch_branch(&repo, "spare").unwrap();
 
     assert_eq!(repo.head().unwrap().name().ok(), Some("refs/heads/spare"));
+}
+
+/// A terminal `git cherry-pick A B` paused in the linked worktree on `topic`, at its second
+/// step (a conflict); the first step landed. Returns the commit `topic` was on before it.
+fn terminal_cherry_pick(f: &Fixture) -> Oid {
+    let linked = f.linked_path.as_path();
+    common::write_file(linked, "x.txt", "x");
+    git_ok(linked, &["add", "x.txt"]);
+    git_ok(linked, &["commit", "-qm", "x"]);
+    common::write_file(linked, "n.txt", "5");
+    git_ok(linked, &["commit", "-qam", "five"]);
+    let picks =
+        String::from_utf8(git(linked, &["rev-list", "--reverse", "-2", "HEAD"]).stdout).unwrap();
+    let picks: Vec<&str> = picks.lines().collect();
+    git_ok(
+        linked,
+        &["reset", "-q", "--hard", &f.commits[3].to_string()],
+    );
+    common::write_file(linked, "n.txt", "conflict");
+    git_ok(linked, &["commit", "-qam", "conflict"]);
+    let linked_repo = Repository::open(linked).unwrap();
+    let start = linked_repo.head().unwrap().target().unwrap();
+    let output = git(linked, &["cherry-pick", picks[0], picks[1]]);
+    assert!(!output.status.success(), "the second pick conflicts");
+    assert!(linked_repo.path().join("sequencer").exists());
+    assert_eq!(
+        linked_repo.head().unwrap().name().ok(),
+        Some("refs/heads/topic"),
+        "a sequence runs on its branch"
+    );
+    start
+}
+
+/// git counts a terminal cherry-pick sequence in another worktree only through that worktree's
+/// HEAD, which stays on its branch: `branch -f`, `branch -D`, `switch` and `worktree add`
+/// refuse the branch, `branch -m` renames it (HEAD moves along, and `git cherry-pick --abort`
+/// still rewinds it: git records the start commit, not the branch). Browsitory does the same
+/// (#293).
+#[test]
+fn a_branch_with_a_terminal_cherry_pick_in_another_worktree_is_refused_like_git() {
+    let f = fixture();
+    let start = terminal_cherry_pick(&f);
+    let main = f.dir.path();
+    let tip = target(&f.repo, "refs/heads/topic").unwrap();
+    let one = f.commits[0].to_string();
+    assert!(git_refuses(main, &["branch", "-f", "topic", &one]).contains("used by worktree"));
+    assert!(git_refuses(main, &["branch", "-D", "topic"]).contains("used by worktree"));
+    assert!(git_refuses(main, &["switch", "topic"]).contains("already used by worktree"));
+    let added = f.elsewhere.path().join("added");
+    assert!(
+        git_refuses(main, &["worktree", "add", added.to_str().unwrap(), "topic"])
+            .contains("already used by worktree")
+    );
+
+    let check = |message: String| assert_held_at(&message, "topic", "checked out", &f.linked_path);
+    check(
+        restore_reflog_entry(&f.repo, "refs/heads/topic", &f.commits[2].to_string())
+            .unwrap_err()
+            .to_string(),
+    );
+    check(
+        delete_branch(&f.repo, "topic", true)
+            .unwrap_err()
+            .to_string(),
+    );
+    check(switch_branch(&f.repo, "topic").unwrap_err().to_string());
+    check(
+        create_worktree(&f.repo, "added", &added, "topic", None)
+            .unwrap_err()
+            .to_string(),
+    );
+    assert_eq!(target(&f.repo, "refs/heads/topic"), Some(tip));
+
+    // Renaming is allowed, and the terminal sequence still aborts onto the renamed branch.
+    git_ok(main, &["branch", "-m", "topic", "renamed"]);
+    git_ok(main, &["branch", "-m", "renamed", "topic"]);
+    rename_branch(&f.repo, "topic", "renamed").unwrap();
+    git_ok(&f.linked_path, &["cherry-pick", "--abort"]);
+    let linked = Repository::open(&f.linked_path).unwrap();
+    assert_eq!(
+        linked.head().unwrap().name().ok(),
+        Some("refs/heads/renamed")
+    );
+    assert_eq!(target(&f.repo, "refs/heads/renamed"), Some(start));
+}
+
+/// A cherry-pick or revert sequence as Browsitory stores it, run on `original_ref`, stopped at
+/// its second step with HEAD on "4".
+fn stored_sequence(
+    f: &Fixture,
+    kind: SequenceKind,
+    commits: &[String],
+    original_ref: OriginalRef,
+) -> SequenceState {
+    SequenceState {
+        kind,
+        commits: commits.to_vec(),
+        next: 1,
+        skipped: Vec::new(),
+        original_head: f.commits[1].to_string(),
+        expected_head: f.commits[3].to_string(),
+        stopped_on_conflict: true,
+        original_ref,
+    }
+}
+
+/// Browsitory's own paused cherry-pick or revert in another worktree
+/// (`browsitory/sequence.json`; git doesn't know it) holds the branch it runs on (#293), as
+/// that worktree's own window does: its Abort rewinds that branch only while HEAD is still on
+/// it under that name. So unlike git, renaming it is refused too. Only a file that worktree
+/// would load itself counts, and only while its HEAD is on the sequence's branch: once HEAD
+/// left it, Abort no longer rewinds it.
+#[test]
+fn a_branch_a_browsitory_sequence_runs_on_in_another_worktree_is_refused() {
+    let f = fixture();
+    let linked = Repository::open(&f.linked_path).unwrap();
+    let file = git_core::sequence_file::file(linked.path());
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let topic = || OriginalRef::Branch("refs/heads/topic".into());
+    let steps = [f.commits[2].to_string(), f.commits[3].to_string()];
+    let valid = stored_sequence(&f, SequenceKind::CherryPick, &steps, topic());
+    let encode = |state: &SequenceState| git_core::sequence_file::encode(state).unwrap();
+    std::fs::write(&file, encode(&valid)).unwrap();
+
+    let check = |how: &'static str| {
+        let linked_path = f.linked_path.clone();
+        move |message: &str, _: &str| assert_held_at(message, "topic", how, &linked_path)
+    };
+    assert_all_refused(&f, true, check("has a paused cherry-pick"));
+    let rename = || {
+        rename_branch(&f.repo, "topic", "renamed")
+            .unwrap_err()
+            .to_string()
+    };
+    check("has a paused cherry-pick")(&rename(), "rename");
+    let revert = stored_sequence(&f, SequenceKind::Revert, &steps, topic());
+    std::fs::write(&file, encode(&revert)).unwrap();
+    check("has a paused revert")(&rename(), "rename");
+
+    // Files its own worktree would ignore, and sequences that don't run on `topic`, hold only
+    // what HEAD holds: renaming is allowed, as git allows it.
+    let mut unknown_version: serde_json::Value = serde_json::from_slice(&encode(&valid)).unwrap();
+    unknown_version["version"] = serde_json::json!(99);
+    let on = |original_ref| stored_sequence(&f, SequenceKind::CherryPick, &steps, original_ref);
+    let out_of_range = SequenceState {
+        next: 2,
+        ..valid.clone()
+    };
+    let missing_commit = SequenceState {
+        commits: vec!["1".repeat(40), "2".repeat(40)],
+        ..valid.clone()
+    };
+    for (what, bytes) in [
+        (
+            "unknown version",
+            serde_json::to_vec(&unknown_version).unwrap(),
+        ),
+        ("step out of range", encode(&out_of_range)),
+        ("missing commit", encode(&missing_commit)),
+        ("not json", b"not json".to_vec()),
+        (
+            "another branch",
+            encode(&on(OriginalRef::Branch("refs/heads/other".into()))),
+        ),
+        ("detached", encode(&on(OriginalRef::Detached))),
+        ("unknown ref", encode(&on(OriginalRef::Unknown))),
+    ] {
+        std::fs::write(&file, bytes).unwrap();
+        rename_branch(&f.repo, "topic", "renamed").unwrap_or_else(|e| panic!("{what}: {e}"));
+        rename_branch(&f.repo, "renamed", "topic").unwrap();
+        let message = delete_branch(&f.repo, "topic", true)
+            .unwrap_err()
+            .to_string();
+        assert_held_at(&message, "topic", "checked out", &f.linked_path);
+        // The sequence's own branch isn't held either while that worktree's HEAD isn't on it.
+        rename_branch(&f.repo, "other", "other2").unwrap_or_else(|e| panic!("{what}: {e}"));
+        rename_branch(&f.repo, "other2", "other").unwrap();
+    }
+
+    // HEAD off the branch, on another one or detached: the sequence no longer touches it.
+    std::fs::write(&file, encode(&valid)).unwrap();
+    git_ok(&f.linked_path, &["switch", "-q", "other"]);
+    rename_branch(&f.repo, "topic", "renamed").unwrap();
+    rename_branch(&f.repo, "renamed", "topic").unwrap();
+    let message = delete_branch(&f.repo, "other", true)
+        .unwrap_err()
+        .to_string();
+    assert_held_at(&message, "other", "checked out", &f.linked_path);
+    git_ok(&f.linked_path, &["switch", "-q", "--detach"]);
+    rename_branch(&f.repo, "topic", "renamed").unwrap();
 }

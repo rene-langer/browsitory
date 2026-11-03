@@ -11,8 +11,8 @@ pub enum ReflogError {
     TargetNotFound,
     #[error("target object is not in the selected reflog")]
     TargetNotInReflog,
-    /// Another worktree holds the branch: checked out, or being rebased or bisected there
-    /// (#287, #291); `git branch -f` refuses it too.
+    /// Another worktree holds the branch: checked out, being rebased or bisected, or used by a
+    /// paused cherry-pick or revert there (#287, #291, #293); `git branch -f` refuses it too.
     #[error(transparent)]
     Held(#[from] crate::repo::BranchHeld),
     /// A terminal rebase in this or another worktree is rebasing the branch (#287).
