@@ -8,7 +8,7 @@ license = "MIT"
 git2 = { version = "0.21", features = ["https", "ssh", "vendored-openssl"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "1.0"
+thiserror = "2.0"
 tempfile = "3"
 unicode-normalization = "0.1.26"
 url = "2.5"
