@@ -180,6 +180,46 @@ pub fn git_command(dir: &Path) -> std::process::Command {
     command
 }
 
+/// Set to `1` to rewrite generated files (see [`assert_generated_file`]) instead of failing.
+pub const UPDATE_ENV: &str = "UPDATE_TRANSPORT_METHODS";
+
+/// Checks that the checked-in file at `path` holds exactly `expected`, or rewrites it when
+/// [`UPDATE_ENV`] is `1`. Line endings are ignored, so a CRLF checkout still compares equal.
+/// Used for the transport method lists in `frontend/src/ipc/generated/` (#306).
+pub fn assert_generated_file(path: &Path, expected: &str) {
+    if std::env::var(UPDATE_ENV).as_deref() == Ok("1") {
+        std::fs::write(path, expected).unwrap_or_else(|err| panic!("write {path:?}: {err}"));
+        return;
+    }
+    let actual = std::fs::read_to_string(path).unwrap_or_default();
+    assert!(
+        actual.replace("\r\n", "\n") == expected,
+        "{} is out of date; rerun this test with {UPDATE_ENV}=1 to regenerate it",
+        path.display()
+    );
+}
+
+/// `names`, sorted, as a pretty-printed JSON array of strings (one per line, trailing newline).
+/// The names are plain identifiers, so no JSON escaping is needed.
+pub fn json_name_list(names: &[&str]) -> String {
+    let mut names = names.to_vec();
+    names.sort_unstable();
+    if names.is_empty() {
+        return "[]\n".to_string();
+    }
+    let lines: Vec<String> = names.iter().map(|name| format!("  \"{name}\"")).collect();
+    format!("[\n{}\n]\n", lines.join(",\n"))
+}
+
+/// The repository root (the parent of `crates/`), for tests that read checked-in files.
+pub fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("crates/test-support has a repository root")
+        .to_path_buf()
+}
+
 /// Runs `git <args>` in `dir` through [`git_command`] and returns its output.
 pub fn git(dir: &Path, args: &[&str]) -> std::process::Output {
     git_command(dir)

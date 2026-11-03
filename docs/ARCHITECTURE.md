@@ -1469,6 +1469,18 @@ only `error`.
   sleep: the worker stops when it first finds the lock busy, and its wait starts after `go`
   (#274).
 - `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
+- Transport parity (#306): `frontend/src/ipc/transportParity.test.ts` calls every method of
+  both `RepoClient` implementations with a mocked transport and records the backend name each
+  sends. It checks those names against three generated lists in `frontend/src/ipc/generated/`:
+  the Tauri commands (`tauri-commands.json`), the sidecar methods (`sidecar-methods.json`) and
+  the methods the extension host answers itself (`extension-native-methods.json`). Each list
+  comes from one declaration in code (the `commands!` macro in `crates/tauri-app/src/main.rs`,
+  the `methods!` macro in `crates/vscode-sidecar/src/dispatch.rs`, `NATIVE_METHODS` in
+  `extension/src/sidecarBridge.ts`), and that code's own test suite fails when the checked-in
+  file is out of date (rerun the failing test with `UPDATE_TRANSPORT_METHODS=1` to rewrite
+  it). Intended differences between the transports are explicit, commented allow-lists in the
+  parity test. A new operation must reach both transports, or be added to an allow-list with a
+  reason.
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
   native-method routing, process-loss recovery, webview security, and deterministic disposal.
 - E2E: `tauri-driver` + WebdriverIO (`e2e/`) driving

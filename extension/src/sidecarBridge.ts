@@ -11,7 +11,9 @@ import {
 } from "./toolUris";
 
 const LAST_SEEN_VERSION_KEY = "lastSeenVersion";
-const NATIVE_METHODS = new Set([
+// Listed in `frontend/src/ipc/generated/extension-native-methods.json` for the transport
+// parity check (#306); `nativeMethods.test.ts` keeps that file current.
+export const NATIVE_METHODS: ReadonlySet<string> = new Set([
   "pick_repo_folder",
   "open_external_url",
   "get_app_version",
