@@ -194,43 +194,178 @@ fn worktree_git_dirs(repo: &git2::Repository) -> Vec<std::path::PathBuf> {
     git_dirs
 }
 
-/// Full names of the branches every other worktree of this repository has checked out, and of
-/// the branches a terminal rebase is rebasing in another worktree: git counts those as checked
-/// out there, though HEAD is detached meanwhile (#263).
+/// Where Browsitory stores its own paused rebase in a worktree's git folder (`git_dir`): every
+/// worktree has its own. repo-service's rebase store writes it; [`branches_held_elsewhere`]
+/// reads the rebased branch from other worktrees' files.
+pub fn stored_rebase_file(git_dir: &std::path::Path) -> std::path::PathBuf {
+    git_dir.join("browsitory").join("rebase.json")
+}
+
+/// The branch (full name) Browsitory's paused rebase stored in `git_dir` is rebasing. Only its
+/// `originalBranchRef` is read: a file that names no branch holds none.
+fn stored_rebase_branch(git_dir: &std::path::Path) -> Option<String> {
+    let bytes = std::fs::read(stored_rebase_file(git_dir)).ok()?;
+    let stored: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    stored
+        .get("originalBranchRef")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// How another worktree uses a branch, so that it can't be moved, deleted or checked out here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchUse {
+    /// The worktree's HEAD is on it.
+    CheckedOut,
+    /// A rebase paused there is rebasing it: a terminal one, or Browsitory's own (#291).
+    Rebased,
+    /// A terminal `git bisect` started from it there (`BISECT_START`); `git bisect reset`
+    /// returns to it (#291).
+    Bisected,
+}
+
+/// Whether the folder of the worktree that holds a branch still exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorktreeFolder {
+    Present,
+    /// Gone, and the worktree isn't locked: `git worktree prune` removes it.
+    Missing,
+    /// Gone, but the worktree is locked (an unmounted drive): git keeps it.
+    MissingLocked,
+}
+
+/// The refusal to move, delete, rename or check out a branch another worktree holds (#287,
+/// #291), with a hint when that worktree's folder is gone.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub struct BranchHeldElsewhere {
+    /// Short name.
+    pub branch: String,
+    pub usage: BranchUse,
+    /// The other worktree's folder, as git recorded it.
+    pub worktree: std::path::PathBuf,
+    pub folder: WorktreeFolder,
+}
+
+impl std::fmt::Display for BranchHeldElsewhere {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let how = match self.usage {
+            BranchUse::CheckedOut => "checked out",
+            BranchUse::Rebased => "being rebased",
+            BranchUse::Bisected => "being bisected",
+        };
+        write!(f, "branch '{}' is {how} in another worktree", self.branch)?;
+        let folder = self.worktree.display();
+        match self.folder {
+            WorktreeFolder::Present => Ok(()),
+            WorktreeFolder::Missing => write!(
+                f,
+                ". Its folder '{folder}' no longer exists: run git worktree prune to remove that \
+                 worktree, then try again."
+            ),
+            WorktreeFolder::MissingLocked => write!(
+                f,
+                ". Its folder '{folder}' is missing, but that worktree is locked, so git keeps \
+                 it. If the folder is gone for good, run git worktree unlock and then git \
+                 worktree prune."
+            ),
+        }
+    }
+}
+
+/// A linked worktree's folder (from its git folder's `gitdir` file, which names the worktree's
+/// `.git` file, absolute or relative to the git folder) and whether it still exists, as `git
+/// worktree prune` decides it.
+fn linked_worktree_folder(git_dir: &std::path::Path) -> (std::path::PathBuf, WorktreeFolder) {
+    let dot_git = std::fs::read_to_string(git_dir.join("gitdir"))
+        .ok()
+        .map(|text| git_dir.join(text.trim()));
+    let folder = dot_git
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .map_or_else(|| git_dir.to_path_buf(), std::path::Path::to_path_buf);
+    let state = if dot_git.is_some_and(|path| path.exists()) {
+        WorktreeFolder::Present
+    } else if git_dir.join("locked").exists() {
+        WorktreeFolder::MissingLocked
+    } else {
+        WorktreeFolder::Missing
+    };
+    (folder, state)
+}
+
+/// Every branch another worktree of this repository holds, as git's `find_shared_symref` sees
+/// it: checked out there, being rebased there (by a terminal rebase, or by Browsitory's own
+/// paused rebase, which git doesn't know), or the branch a terminal bisect there started from.
+/// HEAD is detached during a rebase or bisect, but `git rebase --abort` and `git bisect reset`
+/// return to the branch (#263, #291).
 ///
-/// Like git's `find_shared_symref`, each worktree's `HEAD` is read from its git folder, so a
-/// worktree whose folder is gone (a locked one on an unmounted drive, or one not pruned yet)
-/// still counts (#287). Only a bare main repository has no branch checked out.
-pub(crate) fn branches_checked_out_elsewhere(
+/// Each worktree is read from its git folder, so a worktree whose folder is gone (a locked one
+/// on an unmounted drive, or one not pruned yet) still counts (#287). Only a bare main
+/// repository has no branch checked out. A branch may be listed more than once.
+pub(crate) fn branches_held_elsewhere(
     repo: &git2::Repository,
-) -> Result<std::collections::BTreeSet<String>, git2::Error> {
-    use std::fs::canonicalize;
+) -> Result<Vec<BranchHeldElsewhere>, git2::Error> {
+    use std::fs::{canonicalize, read_to_string};
     let this =
         canonicalize(repo.path()).map_err(|error| git2::Error::from_str(&error.to_string()))?;
     let common = repo.commondir().to_path_buf();
-    let main_is_bare = git2::Repository::open(&common)?.is_bare();
-    let mut branches = std::collections::BTreeSet::new();
+    let main = git2::Repository::open(&common)?;
+    let mut held = Vec::new();
     for git_dir in worktree_git_dirs(repo) {
-        if (git_dir == common && main_is_bare)
-            || canonicalize(&git_dir).is_ok_and(|path| path == this)
-        {
+        let is_main = git_dir == common;
+        if (is_main && main.is_bare()) || canonicalize(&git_dir).is_ok_and(|path| path == this) {
             continue;
         }
-        let Ok(head) = std::fs::read_to_string(git_dir.join("HEAD")) else {
-            continue;
+        let (worktree, folder) = if is_main {
+            let workdir = main.workdir().unwrap_or(&common).to_path_buf();
+            (workdir, WorktreeFolder::Present)
+        } else {
+            linked_worktree_folder(&git_dir)
         };
-        if let Some(name) = head.strip_prefix("ref:").map(str::trim) {
-            if name.starts_with("refs/heads/") {
-                branches.insert(name.to_string());
+        let mut uses = Vec::new();
+        if let Ok(head) = read_to_string(git_dir.join("HEAD")) {
+            if let Some(name) = head.strip_prefix("ref:") {
+                uses.push((name.trim().to_string(), BranchUse::CheckedOut));
             }
         }
-    }
-    for (git_dir, name) in rebased_branches(repo) {
-        if canonicalize(&git_dir).is_ok_and(|path| path != this) {
-            branches.insert(name);
+        for folder in ["rebase-merge", "rebase-apply"] {
+            if let Ok(name) = read_to_string(git_dir.join(folder).join("head-name")) {
+                uses.push((name.trim().to_string(), BranchUse::Rebased));
+            }
         }
+        if let Some(name) = stored_rebase_branch(&git_dir) {
+            uses.push((name, BranchUse::Rebased));
+        }
+        // git's `wt_status_check_bisect`: BISECT_LOG marks the bisect, BISECT_START names the
+        // branch it started from (or a commit id, which names no branch).
+        if git_dir.join("BISECT_LOG").exists() {
+            if let Ok(start) = read_to_string(git_dir.join("BISECT_START")) {
+                uses.push((format!("refs/heads/{}", start.trim()), BranchUse::Bisected));
+            }
+        }
+        held.extend(uses.into_iter().filter_map(|(name, usage)| {
+            Some(BranchHeldElsewhere {
+                branch: name.strip_prefix("refs/heads/")?.to_string(),
+                usage,
+                worktree: worktree.clone(),
+                folder,
+            })
+        }));
     }
-    Ok(branches)
+    Ok(held)
+}
+
+/// The refusal for `branch` (short name) when another worktree holds it
+/// ([`branches_held_elsewhere`]). `checked_out` says whether being checked out there counts:
+/// renaming such a branch is fine, git and libgit2 move that worktree's HEAD along.
+pub(crate) fn branch_held_elsewhere(
+    repo: &git2::Repository,
+    branch: &str,
+    checked_out: bool,
+) -> Result<Option<BranchHeldElsewhere>, git2::Error> {
+    Ok(branches_held_elsewhere(repo)?
+        .into_iter()
+        .find(|held| held.branch == branch && (checked_out || held.usage != BranchUse::CheckedOut)))
 }
 
 /// `Err` while a terminal rebase or `git am` is in progress.

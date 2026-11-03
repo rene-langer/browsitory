@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Branches held by other worktrees
+
+- Fixed: Switch failed in a linked worktree of a bare repository. It now reads the other
+  worktrees from the repository's git folder, as Reflog restore and Undo do.
+- Fixed: a branch that a git bisect in another worktree started from could be moved, deleted,
+  renamed, switched to or checked out in a new worktree, so git bisect reset returned to a
+  changed or missing branch. Reflog restore, Undo, branch delete and rename, worktree add and
+  Switch now refuse it, as git does ("branch 'topic' is being bisected in another worktree").
+- Fixed: a rebase paused in Browsitory protected its branch only in its own worktree. The other
+  worktrees now refuse to move, delete, rename, switch to or add a worktree on that branch too
+  ("branch 'topic' is being rebased in another worktree").
+- Changed: when the worktree that holds the branch has lost its folder, the refusal names the
+  folder and says to run git worktree prune. If that worktree is locked, it says so instead,
+  because git worktree prune keeps locked worktrees. Undo now gives these reasons too, instead
+  of "the repository changed since" (#291).
+
 ### Forge HTTP client
 
 - Changed: the GitHub and Bitbucket pull-request features use reqwest 0.13 and now check server

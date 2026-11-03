@@ -749,13 +749,17 @@ certificate.
     Undo counts it as checked out in that worktree, so it doesn't move HEAD onto it. HEAD is detached during the rebase, so libgit2's own checked-out checks don't
     see it.
   - Reflog restore (`reflog::restore_reflog_entry`, #287) refuses to move a branch that is
-    being rebased in any worktree (`BranchBeingRebased`) or that another worktree has checked
-    out (`ReflogError::CheckedOutInAnotherWorktree`, "branch 'topic' is checked out in another
-    worktree", the wording of `switch_branch`), as `git branch -f` refuses both. The first is
-    `check_branch_not_rebased`; the second reads `repo::branches_checked_out_elsewhere`, which
-    Undo uses too. That helper reads each worktree's `HEAD` from its git folder, as git's
-    `find_shared_symref` does, so a worktree whose folder is gone (locked on an unmounted drive,
-    or not pruned yet) still counts. The branch checked out in this worktree is still moved
+    being rebased in any worktree (`BranchBeingRebased`) or that another worktree holds
+    (`repo::BranchHeldElsewhere`, "branch 'topic' is checked out in another worktree"), as `git
+    branch -f` refuses both. The first is `check_branch_not_rebased`; the second is
+    `repo::branches_held_elsewhere` (#291), which Undo, Switch, branch delete and rename, and
+    worktree add use too. Like git's `find_shared_symref`, it reads each other worktree's git
+    folder: the branch its `HEAD` is on, the branch a rebase there is rebasing (git's
+    `head-name`, or Browsitory's own `browsitory/rebase.json`, `repo::stored_rebase_file`), and
+    the branch a `git bisect` there started from (`BISECT_START`, while `BISECT_LOG` exists).
+    Rename only refuses the last two, as `git branch -m` does. A worktree whose folder is gone
+    (locked on an unmounted drive, or not pruned yet) still counts; the refusal then names the
+    folder and says to run `git worktree prune`, or that the worktree is locked. The branch checked out in this worktree is still moved
     (ref only; the work tree and index stay), though `git branch -f` refuses that one: moving
     HEAD's branch back is what Restore is for. Moving this worktree's HEAD (detached, or its
     branch by `HEAD` or by name) has Reset's guards: refused during a terminal rebase

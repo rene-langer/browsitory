@@ -48,6 +48,10 @@ pub enum SnapshotScope {
 pub enum UndoError {
     #[error("the repository changed since this operation")]
     RepositoryChanged,
+    /// A branch to move, delete or check out is held by another worktree: checked out, or
+    /// being rebased or bisected there (#291).
+    #[error(transparent)]
+    HeldElsewhere(#[from] crate::repo::BranchHeldElsewhere),
     #[error("a merge, rebase, cherry-pick or revert is in progress")]
     OperationInProgress,
     #[error("the index has conflicts")]
@@ -352,11 +356,15 @@ fn verify_checked_out_branches(
     if branches.is_empty() && target_branch.is_none() {
         return Ok(());
     }
-    let elsewhere = crate::repo::branches_checked_out_elsewhere(repo)?;
-    if target_branch.is_some_and(|name| elsewhere.contains(name))
-        || branches.iter().any(|name| elsewhere.contains(*name))
+    let wanted = |name: &str| {
+        target_branch.is_some_and(|target| target == name)
+            || branches.iter().any(|branch| *branch == name)
+    };
+    if let Some(held) = crate::repo::branches_held_elsewhere(repo)?
+        .into_iter()
+        .find(|held| wanted(&format!("refs/heads/{}", held.branch)))
     {
-        return Err(UndoError::RepositoryChanged);
+        return Err(held.into());
     }
     // Deleting this worktree's HEAD branch is only fine when HEAD moves off it, or when the
     // target itself has HEAD on that (then unborn) branch, e.g. undoing the first commit.

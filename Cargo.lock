@@ -1497,6 +1497,7 @@ version = "0.1.0"
 dependencies = [
  "git2",
  "libc",
+ "serde_json",
  "tempfile",
  "test-support",
  "thiserror 1.0.69",

@@ -171,10 +171,11 @@ pub(super) struct RebaseStore {
 }
 
 impl RebaseStore {
-    /// `repo.path()` is the worktree's own git dir, so every worktree has its own rebase.
+    /// `repo.path()` is the worktree's own git dir, so every worktree has its own rebase. Other
+    /// worktrees read its `originalBranchRef` to protect the branch (#291).
     pub fn open(repo: &Repository) -> Self {
         Self {
-            file: repo.path().join("browsitory").join("rebase.json"),
+            file: git_core::repo::stored_rebase_file(repo.path()),
             last_warning: RefCell::new(None),
         }
     }

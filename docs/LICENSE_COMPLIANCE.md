@@ -26,7 +26,7 @@ their own verification date in the Notes column.
 | tauri-plugin-dialog | Apache-2.0 OR MIT | `tauri-app` — native folder-picker dialog |
 | tauri-plugin-opener 2.5.4 | Apache-2.0 OR MIT | `tauri-app` — opens a pull request's provider URL in the user's default external browser instead of navigating the app's own webview away. Source: [crates.io](https://crates.io/crates/tauri-plugin-opener/2.5.4); verified with `cargo info tauri-plugin-opener` on 2026-08-17. |
 | serde | MIT OR Apache-2.0 | `tauri-app` and `repo-service`; also `config` |
-| serde_json | MIT OR Apache-2.0 | `tauri-app` and `repo-service` |
+| serde_json | MIT OR Apache-2.0 | `tauri-app`, `repo-service` and `git-core` |
 | directories | MIT OR Apache-2.0 | `config` |
 | toml | MIT OR Apache-2.0 | `config` |
 | tauri-plugin-updater 2 | Apache-2.0 OR MIT | `tauri-app` — checks/downloads app updates for `UpdateBanner`. Source: [crates.io](https://crates.io/crates/tauri-plugin-updater); verified with `cargo info tauri-plugin-updater` on 2026-08-26. |

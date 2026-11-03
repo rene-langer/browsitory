@@ -35,6 +35,10 @@ pub enum WorktreeError {
     /// The branch is being rebased in a terminal, in this or another worktree (#263).
     #[error(transparent)]
     BeingRebased(#[from] crate::repo::BranchBeingRebased),
+    /// Another worktree holds the branch: checked out, or being rebased or bisected there
+    /// (#291).
+    #[error(transparent)]
+    HeldElsewhere(#[from] crate::repo::BranchHeldElsewhere),
 }
 
 impl From<git2::Error> for WorktreeError {
@@ -120,6 +124,9 @@ pub fn create_worktree_with(
     probe: impl FnOnce(&Path) -> std::io::Result<bool>,
 ) -> Result<(), WorktreeError> {
     crate::repo::check_branch_not_rebased(repo, branch)?;
+    if let Some(held) = crate::repo::branch_held_elsewhere(repo, branch, true)? {
+        return Err(held.into());
+    }
     match std::fs::symlink_metadata(path) {
         Ok(_) => return Err(WorktreeError::PathExists),
         // A file where a parent folder should be is named when the parents are created.

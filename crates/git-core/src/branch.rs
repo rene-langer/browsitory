@@ -7,8 +7,10 @@ pub enum BranchError {
     Git(#[from] git2::Error),
     #[error("branch '{0}' has unmerged commits; use force to delete anyway")]
     NotMerged(String),
-    #[error("branch '{0}' is checked out in another worktree")]
-    CheckedOutInAnotherWorktree(String),
+    /// Another worktree holds the branch: checked out, or being rebased or bisected there
+    /// (#291).
+    #[error(transparent)]
+    HeldElsewhere(#[from] crate::repo::BranchHeldElsewhere),
     #[error("worktree operation failed: {0}")]
     Worktree(#[from] crate::worktree::WorktreeError),
     #[error("{0}")]
@@ -83,14 +85,12 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
     // worktree is rebasing; git refuses it ("already used by worktree"), since a commit made on
     // it here is lost when that rebase is aborted or finished (#263).
     crate::repo::check_branch_not_rebased_elsewhere(repo, name)?;
-    let branch_ref = format!("refs/heads/{name}");
-    let current_workdir = repo.workdir().and_then(|path| path.canonicalize().ok());
-    let checked_out_elsewhere = crate::worktree::list_worktrees(repo)?
-        .into_iter()
-        .any(|worktree| worktree.head == name && current_workdir.as_ref() != Some(&worktree.path));
-    if checked_out_elsewhere {
-        return Err(BranchError::CheckedOutInAnotherWorktree(name.to_string()));
+    // Read from each worktree's git folder, so this works in a linked worktree of a bare
+    // repository too (#291).
+    if let Some(held) = crate::repo::branch_held_elsewhere(repo, name, true)? {
+        return Err(held.into());
     }
+    let branch_ref = format!("refs/heads/{name}");
     let target = repo.find_reference(&branch_ref)?.peel_to_commit()?;
     // Checking out the tree before moving HEAD means a refused checkout (libgit2's default
     // "safe" strategy errors rather than overwriting modified/untracked files that differ from
@@ -125,6 +125,11 @@ pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchE
 
 pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Result<(), BranchError> {
     crate::repo::check_branch_not_rebased(repo, old_name)?;
+    // A branch checked out elsewhere may be renamed (that worktree's HEAD moves along), but not
+    // one a rebase or bisect there returns to, as `git branch -m` refuses (#291).
+    if let Some(held) = crate::repo::branch_held_elsewhere(repo, old_name, false)? {
+        return Err(held.into());
+    }
     let mut branch = repo.find_branch(old_name, BranchType::Local)?;
     branch.rename(new_name, false)?;
     Ok(())
@@ -132,6 +137,9 @@ pub fn rename_branch(repo: &Repository, old_name: &str, new_name: &str) -> Resul
 
 pub fn delete_branch(repo: &Repository, name: &str, force: bool) -> Result<(), BranchError> {
     crate::repo::check_branch_not_rebased(repo, name)?;
+    if let Some(held) = crate::repo::branch_held_elsewhere(repo, name, true)? {
+        return Err(held.into());
+    }
     let mut branch = repo.find_branch(name, BranchType::Local)?;
     if !force {
         let branch_oid = branch.get().peel_to_commit()?.id();

@@ -162,9 +162,12 @@ fn a_branch_checked_out_in_a_locked_worktree_whose_folder_is_gone_isnt_restored(
 
     let error = restore_reflog_entry(&repo, "refs/heads/topic", &first).unwrap_err();
 
-    assert_eq!(
-        error.to_string(),
-        "branch 'topic' is checked out in another worktree"
+    // The refusal names the missing folder and the lock (#291, branch_held_elsewhere.rs).
+    let error = error.to_string();
+    assert!(
+        error.starts_with("branch 'topic' is checked out in another worktree. Its folder")
+            && error.contains("that worktree is locked"),
+        "{error}"
     );
     assert_eq!(target(&repo, "refs/heads/topic"), Some(second));
 }

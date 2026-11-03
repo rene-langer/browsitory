@@ -11,9 +11,10 @@ pub enum ReflogError {
     TargetNotFound,
     #[error("target object is not in the selected reflog")]
     TargetNotInReflog,
-    /// Another worktree has the branch checked out (#287); `git branch -f` refuses it too.
-    #[error("branch '{0}' is checked out in another worktree")]
-    CheckedOutInAnotherWorktree(String),
+    /// Another worktree holds the branch: checked out, or being rebased or bisected there
+    /// (#287, #291); `git branch -f` refuses it too.
+    #[error(transparent)]
+    HeldElsewhere(#[from] crate::repo::BranchHeldElsewhere),
     /// A terminal rebase in this or another worktree is rebasing the branch (#287).
     #[error(transparent)]
     BeingRebased(#[from] crate::repo::BranchBeingRebased),
@@ -121,7 +122,7 @@ pub fn restore_reflog_entry(
         check_head_movable(repo)?;
     }
     if let Some(short) = name.strip_prefix("refs/heads/") {
-        check_branch_movable(repo, &name, short)?;
+        check_branch_movable(repo, short)?;
     }
     let Some(current) = selected.target() else {
         return Err(ReflogError::InvalidReference);
@@ -150,14 +151,14 @@ fn check_head_movable(repo: &Repository) -> Result<(), ReflogError> {
     Ok(())
 }
 
-/// Refuses to move `branch` (full name; `short` without `refs/heads/`) under a worktree that
-/// has it: checked out in another worktree, or being rebased by a terminal rebase in any
-/// worktree (#287), as `git branch -f` refuses. The branch checked out in this worktree is
-/// still moved: that is what restoring an entry of HEAD's reflog does.
-fn check_branch_movable(repo: &Repository, branch: &str, short: &str) -> Result<(), ReflogError> {
+/// Refuses to move branch `short` (without `refs/heads/`) under a worktree that has it: held by
+/// another worktree (checked out, rebased or bisected there), or being rebased by a terminal
+/// rebase in any worktree (#287, #291), as `git branch -f` refuses. The branch checked out in
+/// this worktree is still moved: that is what restoring an entry of HEAD's reflog does.
+fn check_branch_movable(repo: &Repository, short: &str) -> Result<(), ReflogError> {
     crate::repo::check_branch_not_rebased(repo, short)?;
-    if crate::repo::branches_checked_out_elsewhere(repo)?.contains(branch) {
-        return Err(ReflogError::CheckedOutInAnotherWorktree(short.to_string()));
+    if let Some(held) = crate::repo::branch_held_elsewhere(repo, short, true)? {
+        return Err(held.into());
     }
     Ok(())
 }

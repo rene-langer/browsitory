@@ -7304,6 +7304,60 @@ mod tests {
         handle.delete_branch("renamed".into(), true).unwrap();
     }
 
+    /// A rebase paused in one worktree protects its branch from the other worktrees' windows
+    /// too (#291), with the wording a branch held by another worktree gets: Continue and Abort
+    /// return to that branch.
+    #[test]
+    fn another_worktree_cant_touch_the_branch_a_paused_rebase_rebases() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, branch, tip) = paused_for_edit(dir.path(), &repo);
+        let short = branch.trim_start_matches("refs/heads/").to_string();
+        repo.branch("side", &repo.find_commit(tip).unwrap(), false)
+            .unwrap();
+        let parent = TempDir::new().unwrap();
+        let linked_path = parent.path().join("linked");
+        git_core::worktree::create_worktree(&repo, "linked", &linked_path, "side", None).unwrap();
+        let linked_worker = Worker::spawn(linked_path).unwrap();
+        let linked = linked_worker.handle();
+        let refusal = format!("branch '{short}' is being rebased in another worktree");
+
+        assert_eq!(
+            linked.delete_branch(short.clone(), true).unwrap_err(),
+            refusal
+        );
+        assert_eq!(
+            linked
+                .rename_branch(short.clone(), "renamed".into())
+                .unwrap_err(),
+            refusal
+        );
+        assert_eq!(
+            linked
+                .switch_branch(short.clone(), no_events())
+                .unwrap_err(),
+            refusal
+        );
+        assert_eq!(
+            linked
+                .create_worktree(
+                    "second".into(),
+                    parent.path().join("second"),
+                    short.clone(),
+                    None
+                )
+                .unwrap_err(),
+            refusal
+        );
+        assert_eq!(branch_target(dir.path(), &branch), tip);
+
+        // Once the rebase is aborted, the branch is checked out there again, as before.
+        handle.abort_rebase().unwrap();
+        assert_eq!(
+            linked.delete_branch(short.clone(), true).unwrap_err(),
+            format!("branch '{short}' is checked out in another worktree")
+        );
+    }
+
     /// A `rebase.json` that can't be deleted (read-only folder) must not keep gating the
     /// repository after the rebase ended.
     #[test]
