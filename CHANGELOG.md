@@ -22,6 +22,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   renamed branch back, as `git cherry-pick --abort` does. It still leaves alone a different
   branch you switched to.
 
+### Internal
+
+- Updated Vitest to 5 in the frontend and the VSCode extension. Vitest 5 changed its assertion
+  types, and @testing-library/jest-dom 7.0.1 no longer adds its matchers to them, so the
+  frontend now declares them itself (`frontend/src/jest-dom-vitest.d.ts`, the augmentation the
+  Vitest 5 migration guide documents). The test setup imports `@testing-library/jest-dom/vitest`.
+
 ### Branches held by other worktrees
 
 - Fixed: Switch failed in a linked worktree of a bare repository. It now reads the other
