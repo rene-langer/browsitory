@@ -475,9 +475,13 @@ fn worktree_branches(repo: &git2::Repository) -> Result<Vec<WorktreeBranches>, g
             .and_then(|bytes| crate::rebase_file::decode(&bytes, repo).ok())
             .map(|state| state.original_branch_ref);
         // git's `wt_status_check_bisect`: BISECT_LOG marks the bisect, BISECT_START names the
-        // branch it started from (or a commit id, which names no branch).
-        let bisecting = read("BISECT_LOG")
-            .and_then(|_| read("BISECT_START"))
+        // branch it started from (or a commit id, which names no branch). BISECT_LOG holds raw
+        // commit subjects, which needn't be UTF-8, so only its existence is checked.
+        let bisecting = git_dir
+            .join("BISECT_LOG")
+            .exists()
+            .then(|| read("BISECT_START"))
+            .flatten()
             .map(|start| format!("refs/heads/{}", start.trim()));
         worktrees.push(WorktreeBranches {
             holder,

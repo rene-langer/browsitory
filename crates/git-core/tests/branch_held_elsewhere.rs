@@ -267,6 +267,52 @@ fn a_branch_bisected_in_this_worktree_is_refused_like_git() {
     assert_eq!(f.repo.head().unwrap().name().ok(), Some("refs/heads/topic"));
 }
 
+/// `BISECT_LOG` holds the commits' raw subjects, which needn't be UTF-8 (a subject in
+/// Latin-1 with no encoding header): the bisect still holds its start branch, or `git bisect
+/// reset` couldn't check it out again.
+#[test]
+fn a_bisect_over_a_non_utf8_subject_still_holds_its_branch() {
+    use std::io::Write;
+    let f = fixture();
+    let tree = f.repo.find_commit(f.commits[3]).unwrap().tree_id();
+    let raw = [
+        format!(
+            "tree {tree}\nparent {}\nauthor A <a@b> 1700000000 +0000\ncommitter A <a@b> \
+             1700000000 +0000\n\n",
+            f.commits[3]
+        )
+        .into_bytes(),
+        b"caf\xe9\n".to_vec(),
+    ]
+    .concat();
+    let mut hash = test_support::git_command(f.dir.path())
+        .args(["hash-object", "-t", "commit", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    hash.stdin.take().unwrap().write_all(&raw).unwrap();
+    let output = hash.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let latin1 = String::from_utf8(output.stdout).unwrap().trim().to_string();
+    git_ok(&f.linked_path, &["reset", "-q", "--hard", &latin1]);
+    bisect(&f.linked_path, f.commits[0]);
+    let linked = Repository::open(&f.linked_path).unwrap();
+    let log = std::fs::read(linked.path().join("BISECT_LOG")).unwrap();
+    assert!(
+        String::from_utf8(log).is_err(),
+        "BISECT_LOG holds the raw subject"
+    );
+    assert!(git_refuses(f.dir.path(), &["branch", "-D", "topic"]).contains("used by worktree"));
+
+    let message = delete_branch(&f.repo, "topic", true)
+        .unwrap_err()
+        .to_string();
+
+    assert_held_at(&message, "topic", "being bisected", &f.linked_path);
+    git_ok(&f.linked_path, &["bisect", "reset"]);
+}
+
 /// A bisect started on a detached HEAD (`BISECT_START` holds a commit id) holds no branch.
 #[test]
 fn a_bisect_started_on_a_detached_head_holds_no_branch() {
