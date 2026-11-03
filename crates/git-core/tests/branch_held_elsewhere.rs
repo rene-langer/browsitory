@@ -425,7 +425,7 @@ fn a_worktree_whose_folder_is_gone_names_git_worktree_prune() {
 
     assert_all_refused(&f, true, |message, what| {
         let (named, rest) = named_folder(message, "topic", "checked out");
-        assert_eq!(named, recorded, "{what}");
+        assert_eq!(Path::new(named), recorded, "{what}");
         assert_eq!(
             rest,
             ". Its folder no longer exists: run git worktree prune to remove that worktree, \
@@ -440,15 +440,13 @@ fn a_worktree_whose_folder_is_gone_names_git_worktree_prune() {
 }
 
 /// The linked worktree's folder as git recorded it (its `gitdir` file names `<folder>/.git`):
-/// on Windows git writes it with forward slashes and the long user name.
-fn recorded_folder(f: &Fixture) -> String {
+/// on Windows git writes it with forward slashes and the long user name, and the refusal shows
+/// it with native separators, so the two are compared component by component.
+fn recorded_folder(f: &Fixture) -> PathBuf {
     let gitdir = std::fs::read_to_string(f.repo.path().join("worktrees/linked/gitdir")).unwrap();
-    let gitdir = gitdir.trim();
-    gitdir
-        .strip_suffix("/.git")
-        .or_else(|| gitdir.strip_suffix("\\.git"))
-        .unwrap_or_else(|| panic!("unexpected gitdir {gitdir:?}"))
-        .to_string()
+    let dot_git = Path::new(gitdir.trim());
+    assert!(dot_git.ends_with(".git"), "unexpected gitdir {gitdir:?}");
+    dot_git.parent().unwrap().to_path_buf()
 }
 
 /// A locked worktree whose folder is gone (an unmounted drive) keeps its branch: `git worktree
@@ -468,7 +466,7 @@ fn a_locked_worktree_whose_folder_is_gone_says_it_is_locked() {
 
     assert_all_refused(&f, true, |message, what| {
         let (named, rest) = named_folder(message, "topic", "checked out");
-        assert_eq!(named, recorded, "{what}");
+        assert_eq!(Path::new(named), recorded, "{what}");
         assert_eq!(
             rest,
             ". Its folder no longer exists, but that worktree is locked, so git keeps it. If it \
