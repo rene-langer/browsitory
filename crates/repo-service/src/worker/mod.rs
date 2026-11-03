@@ -7385,7 +7385,10 @@ mod tests {
         assert_eq!(repo.head().unwrap().target(), Some(original));
         // Once the sequence is over, the branch is only checked out there, as before.
         let message = linked.delete_branch(branch.clone(), true).unwrap_err();
-        assert_eq!(held_folder(&message, &branch, "is checked out"), main_folder);
+        assert_eq!(
+            held_folder(&message, &branch, "is checked out"),
+            main_folder
+        );
     }
 
     /// A rebase paused in one worktree protects its branch from the other worktrees' windows
@@ -7406,7 +7409,10 @@ mod tests {
         let main_folder = std::fs::canonicalize(dir.path()).unwrap();
         let refused = |result: Result<(), String>| {
             let message = result.unwrap_err();
-            assert_eq!(held_folder(&message, &short, "is being rebased"), main_folder);
+            assert_eq!(
+                held_folder(&message, &short, "is being rebased"),
+                main_folder
+            );
         };
 
         refused(linked.delete_branch(short.clone(), true));

@@ -19,6 +19,7 @@ pub mod remote;
 pub mod repo;
 pub mod reset;
 pub mod search;
+pub mod sequence_file;
 pub mod signing;
 pub mod stage;
 pub mod stash;

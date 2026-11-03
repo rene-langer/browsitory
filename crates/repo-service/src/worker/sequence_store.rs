@@ -1,97 +1,16 @@
 //! Persists a stopped multi-commit cherry-pick/revert (`git_core::pick::SequenceState`) to
-//! `<gitdir>/browsitory/sequence.json`, so Continue/Abort survive an app restart. Written
-//! atomically (temp file + `sync_all` + `rename`, like `undo.json`). A file that is unreadable,
-//! malformed, of another version, or that doesn't describe commits of this repository is
-//! ignored (logged once), never fatal: a corrupt file must not wedge the repository.
+//! `<gitdir>/browsitory/sequence.json` (format: `git_core::sequence_file`), so Continue/Abort
+//! survive an app restart. Written atomically (temp file + `sync_all` + `rename`, like
+//! `undo.json`). A file that is unreadable, malformed, of another version, or that doesn't
+//! describe commits of this repository is ignored (logged once), never fatal: a corrupt file
+//! must not wedge the repository.
 use super::atomic_file::write_atomically;
 use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
 
-use git2::{Oid, Repository};
-use git_core::pick::{OriginalRef, SequenceKind, SequenceState};
-use serde::{Deserialize, Serialize};
-
-/// 2 added `stoppedOnConflict` and `originalRef`. A version 1 file still loads: it counts as an
-/// error stop (Continue then needs HEAD unmoved) with an unknown original ref (Abort never
-/// rewinds), the cautious reading of what it doesn't say.
-const FORMAT_VERSION: u32 = 2;
-const OLDEST_READABLE_VERSION: u32 = 1;
-
-#[derive(Serialize, Deserialize)]
-enum StoredKind {
-    CherryPick,
-    Revert,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredSequence {
-    version: u32,
-    kind: StoredKind,
-    commits: Vec<String>,
-    next: usize,
-    skipped: Vec<String>,
-    original_head: String,
-    expected_head: String,
-    #[serde(default)]
-    stopped_on_conflict: bool,
-    /// Full ref name, `null` for a detached HEAD; absent in version 1 (unknown).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    original_ref: Option<StoredRef>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "kind", content = "name")]
-enum StoredRef {
-    Branch(String),
-    Detached,
-}
-
-impl From<&SequenceState> for StoredSequence {
-    fn from(state: &SequenceState) -> Self {
-        Self {
-            version: FORMAT_VERSION,
-            kind: match state.kind {
-                SequenceKind::CherryPick => StoredKind::CherryPick,
-                SequenceKind::Revert => StoredKind::Revert,
-            },
-            commits: state.commits.clone(),
-            next: state.next,
-            skipped: state.skipped.clone(),
-            original_head: state.original_head.clone(),
-            expected_head: state.expected_head.clone(),
-            stopped_on_conflict: state.stopped_on_conflict,
-            original_ref: match &state.original_ref {
-                OriginalRef::Branch(name) => Some(StoredRef::Branch(name.clone())),
-                OriginalRef::Detached => Some(StoredRef::Detached),
-                OriginalRef::Unknown => None,
-            },
-        }
-    }
-}
-
-impl From<StoredSequence> for SequenceState {
-    fn from(stored: StoredSequence) -> Self {
-        Self {
-            kind: match stored.kind {
-                StoredKind::CherryPick => SequenceKind::CherryPick,
-                StoredKind::Revert => SequenceKind::Revert,
-            },
-            commits: stored.commits,
-            next: stored.next,
-            skipped: stored.skipped,
-            original_head: stored.original_head,
-            expected_head: stored.expected_head,
-            stopped_on_conflict: stored.stopped_on_conflict,
-            original_ref: match stored.original_ref {
-                Some(StoredRef::Branch(name)) => OriginalRef::Branch(name),
-                Some(StoredRef::Detached) => OriginalRef::Detached,
-                None => OriginalRef::Unknown,
-            },
-        }
-    }
-}
+use git2::Repository;
+use git_core::pick::SequenceState;
 
 pub(super) struct SequenceStore {
     file: PathBuf,
@@ -100,10 +19,11 @@ pub(super) struct SequenceStore {
 }
 
 impl SequenceStore {
-    /// `repo.path()` is the worktree's own git dir, so every worktree has its own sequence.
+    /// `repo.path()` is the worktree's own git dir, so every worktree has its own sequence. Other
+    /// worktrees load it too, to protect its branch (#293).
     pub fn open(repo: &Repository) -> Self {
         Self {
-            file: repo.path().join("browsitory").join("sequence.json"),
+            file: git_core::sequence_file::file(repo.path()),
             last_warning: RefCell::new(None),
         }
     }
@@ -121,19 +41,13 @@ impl SequenceStore {
             }
             Err(error) => return self.ignore(format!("can't read it: {error}")),
         };
-        let stored = match serde_json::from_slice::<StoredSequence>(&bytes) {
-            Ok(stored) => stored,
-            Err(error) => return self.ignore(format!("malformed: {error}")),
-        };
-        if !(OLDEST_READABLE_VERSION..=FORMAT_VERSION).contains(&stored.version) {
-            return self.ignore(format!("unknown version {}", stored.version));
+        match git_core::sequence_file::decode(&bytes, repo) {
+            Ok(state) => {
+                self.last_warning.replace(None);
+                Some(state)
+            }
+            Err(reason) => self.ignore(reason),
         }
-        let state = SequenceState::from(stored);
-        if let Err(reason) = validate(&state, repo) {
-            return self.ignore(reason);
-        }
-        self.last_warning.replace(None);
-        Some(state)
     }
 
     fn ignore(&self, reason: String) -> Option<SequenceState> {
@@ -149,8 +63,7 @@ impl SequenceStore {
     }
 
     pub fn save(&self, state: &SequenceState) -> Result<(), String> {
-        let json = serde_json::to_vec_pretty(&StoredSequence::from(state))
-            .map_err(|error| error.to_string())?;
+        let json = git_core::sequence_file::encode(state)?;
         let dir = self.file.parent().expect("sequence file has a parent");
         fs::create_dir_all(dir).map_err(|error| error.to_string())?;
         write_atomically(&self.file, &json).map_err(|error| error.to_string())?;
@@ -170,37 +83,11 @@ impl SequenceStore {
     }
 }
 
-fn validate(state: &SequenceState, repo: &Repository) -> Result<(), String> {
-    if state.commits.is_empty() || state.next >= state.commits.len() {
-        return Err(format!(
-            "step {} of {} is out of range",
-            state.next + 1,
-            state.commits.len()
-        ));
-    }
-    if let Some(stray) = state.skipped.iter().find(|id| !state.commits.contains(id)) {
-        return Err(format!(
-            "skipped commit {stray} is not part of the sequence"
-        ));
-    }
-    let ids = state
-        .commits
-        .iter()
-        .chain([&state.original_head, &state.expected_head]);
-    for id in ids {
-        let found = Oid::from_str(id)
-            .ok()
-            .is_some_and(|oid| repo.find_commit(oid).is_ok());
-        if !found {
-            return Err(format!("{id:?} is not a commit in this repository"));
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use git2::Oid;
+    use git_core::pick::{OriginalRef, SequenceKind};
 
     /// A repo with three commits; returns their ids oldest-first.
     fn repo_with_commits() -> (tempfile::TempDir, Repository, Vec<String>) {

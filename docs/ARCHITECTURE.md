@@ -623,7 +623,9 @@ certificate.
   like `undo.json`), written only when a sequence stops and deleted when it completes or is
   aborted. On load it must parse, have a known version (2; a version 1 file loads as an error
   stop with an unknown original ref), and name commits that exist in the repository; anything
-  else is logged once and treated as absent, never fatal.
+  else is logged once and treated as absent, never fatal. The format and these checks are
+  `git_core::sequence_file` (`encode`/`decode`), so the other worktrees load the file exactly
+  as its own worktree does (#293, `repo::HoldRule` below).
 - Whether the stored state still matches the repository is checked when it is used, so a stale
   sequence stays visible and abortable: Continue requires git's paused pick (`CHERRY_PICK_HEAD` /
   `REVERT_HEAD`) to be the sequence's current commit, and HEAD to be where the stop left it;
@@ -759,7 +761,13 @@ certificate.
     `rebase-merge/update-refs`, the branch a bisect started from (`BISECT_START`, while
     `BISECT_LOG` exists), and, for other worktrees whose HEAD is detached, Browsitory's own
     paused rebase (`rebase_file::decode`, the same check the owning worktree's `RebaseStore`
-    loads with; this worktree's own is the worker's gate's). Which of these count follows the
+    loads with; this worktree's own is the worker's gate's). For other worktrees whose HEAD is
+    on that branch, it also reads Browsitory's own paused cherry-pick or revert sequence
+    (`sequence_file::decode`, the owning `SequenceStore`'s check; its `originalRef` branch,
+    `BranchUse::Sequence`, "branch 'topic' has a paused cherry-pick in another worktree at
+    '<folder>'", #293). A sequence runs on its branch, so HEAD stays attached during the pause;
+    once HEAD left that branch, Abort no longer rewinds it and Continue refuses, so it holds
+    nothing. Which of these count follows the
     git command the action stands for (`repo::HoldRule`): Restore and branch delete follow
     `branch_checked_out` (`branch -f`/`-D`: all of them, in every worktree, this one too except
     its HEAD branch, whether or not HEAD is detached); Switch and worktree add follow
@@ -773,7 +781,15 @@ certificate.
     unmounted drive, or not pruned yet); the refusal then says to run `git worktree prune`, or
     that the worktree is locked. Unlike git, rename, Switch and worktree add stay refused while
     a terminal rebase in another worktree (for rename and worktree add, any worktree) rebases
-    the branch, whether or not HEAD is detached there (`check_branch_not_rebased`, #263). The branch checked out in this worktree is still moved
+    the branch, whether or not HEAD is detached there (`check_branch_not_rebased`, #263). A
+    stored sequence counts under every rule. git counts a terminal `git cherry-pick`/`git
+    revert` sequence in another worktree only through that worktree's HEAD, so `branch -f`/`-D`,
+    `switch` and `worktree add` refuse its branch and `branch -m` renames it; Browsitory follows
+    git for a terminal sequence. For its own sequence, rename is refused too, unlike git: git's
+    `cherry-pick --abort` rewinds whatever branch HEAD is on, while Browsitory's Abort rewinds
+    only while HEAD still names `originalRef`, so after a rename (libgit2 moves the other
+    worktree's HEAD along) Abort left the sequence's commits in place (`rewound: false`). The
+    owning worktree's gate refuses that rename for the same reason. The branch checked out in this worktree is still moved
     (ref only; the work tree and index stay), though `git branch -f` refuses that one: moving
     HEAD's branch back is what Restore is for. Moving this worktree's HEAD (detached, or its
     branch by `HEAD` or by name) has Reset's guards: refused during a terminal rebase
