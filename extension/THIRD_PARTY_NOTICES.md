@@ -19,9 +19,10 @@ unchanged.
 The Rust crates linked into the sidecar are under permissive licences (MIT, Apache-2.0, ISC,
 BSD, MIT-0, Unicode-3.0, Zlib), with one exception:
 
-- **option-ext** 0.2.0 (through the `directories` and `dirs-sys` crates): MPL-2.0
-  (<https://mozilla.org/MPL/2.0/>). It is used unmodified. Its source code is available at
-  <https://crates.io/crates/option-ext/0.2.0> and <https://github.com/soc/option-ext>.
+- **option-ext** (through the `directories` and `dirs-sys` crates): MPL-2.0
+  (<https://mozilla.org/MPL/2.0/>). It is used unmodified. The source code of every published
+  version, including the one in this package, is available at
+  <https://crates.io/crates/option-ext> and <https://github.com/soc/option-ext>.
 
 The full list is in
 <https://github.com/rene-langer/browsitory/blob/main/docs/LICENSE_COMPLIANCE.md>.

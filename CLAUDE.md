@@ -96,7 +96,8 @@ replace the dependency or ask the owner, then record the decision as an exceptio
 `deny.toml` or the script and in `docs/LICENSE_COMPLIANCE.md`, in the same PR. A stale
 exception fails too; remove it. `scripts/check-license-compliance.py` (`audit` job) still
 requires a `docs/LICENSE_COMPLIANCE.md` row for every *direct* dependency. Renovate also
-updates the pinned `CARGO_DENY_VERSION` in `ci.yml`. Advisories stay with `cargo audit`: when an
+updates the pinned `CARGO_DENY_VERSION` in `ci.yml`; cargo-deny is 0.x, so its minor bumps
+wait for approval on the Dependency Dashboard like other 0.x dependencies. Advisories stay with `cargo audit`: when an
 update fixes one, drop its ignore from `.cargo/audit.toml` in the same PR and close the
 matching RUSTSEC issue.
 

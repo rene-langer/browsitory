@@ -89,7 +89,7 @@ Each is pinned to an exact version where it runs.
 
 | Tool | License | Notes |
 |---|---|---|
-| cargo-deny 0.20.2 | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and runs `cargo deny check licenses`. Version pinned in the job's `CARGO_DENY_VERSION` (Renovate updates it). Source: `cargo info cargo-deny@0.20.2`, verified 2026-11-03. |
+| cargo-deny | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and runs `cargo deny check licenses`. The exact version is pinned in that job's `CARGO_DENY_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-deny@0.20.2` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
 | ovsx 1.3.0 | EPL-2.0 | `release.yml`'s `publish-vsix-open-vsx` job runs it as `npx --yes ovsx@1.3.0 publish` to upload the already-built `.vsix` files to Open VSX. EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it as a dependency. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02. |
 
 ## JavaScript, `e2e/` (`npm info <package> license`)
@@ -188,7 +188,7 @@ routine update doesn't break CI; a new crate under the same licence still fails)
 | Crate | License | Why it's acceptable |
 |---|---|---|
 | libgit2-sys | GPL-2.0-only WITH GCC-exception-2.0 (vendored libgit2) | The one exception, see "The one exception" below. `libgit2-sys` declares only `MIT OR Apache-2.0` (its binding), so `deny.toml` clarifies the real licence from `libgit2/COPYING`, pinned by that file's hash. If the file changes, the clarification stops matching, the exception goes unused and the check fails, so someone re-reads the licence. `git2` vendors nothing and needs no entry. |
-| option-ext 0.2.0 | MPL-2.0 | **Ships** in the desktop app and in the VSCode sidecar, through `directories` (our `config` crate) and `dirs` (Tauri). MPL-2.0 is file-level copyleft: we use it unmodified and say where its source is in `extension/THIRD_PARTY_NOTICES.md` (source: <https://crates.io/crates/option-ext/0.2.0>, <https://github.com/soc/option-ext>). The desktop app has no notices file; this row is its record. Owner decision 2026-11-03 (#273). |
+| option-ext | MPL-2.0 | **Ships** in the desktop app and in the VSCode sidecar, through `directories` (our `config` crate) and `dirs` (Tauri). MPL-2.0 is file-level copyleft: we use it unmodified and say where its source is in `extension/THIRD_PARTY_NOTICES.md` (source of every version: <https://crates.io/crates/option-ext>, <https://github.com/soc/option-ext>). The desktop app has no notices file; this row is its record. Owner decision 2026-11-03 (#273). |
 | cssparser, cssparser-macros, selectors, dtoa-short | MPL-2.0 | Build time only on our targets: Tauri's build and code generation (`tauri-build`, `tauri-codegen`) through `dom_query`. Not linked into anything we ship. Owner decision 2026-11-03 (#273). |
 | target-lexicon | Apache-2.0 WITH LLVM-exception | Build time only (`system-deps`, used by the Linux GTK bindings' build scripts). The LLVM exception only adds permissions to Apache-2.0. Owner decision 2026-11-03 (#273). |
 
@@ -197,11 +197,13 @@ routine update doesn't break CI; a new crate under the same licence still fails)
 Recorded in `EXCEPTIONS` and `CLARIFICATIONS` in `scripts/check-dependency-licenses.py`; keep
 both in sync. None of these ship: they are build, test or packaging tools, or data those tools
 read. An exception never applies to the production trees of `frontend/` and `extension/`.
-"Versions" is a version prefix: `1` means any 1.x.y. Owner decision 2026-11-03 (#273).
+"Versions" is a version prefix: `1` means any 1.x.y (not 10.x). `*-*` in a name matches the
+per-platform binary packages (`lightningcss-linux-x64-gnu`, `@vscode/vsce-sign-darwin-arm64`),
+not a lookalike such as `lightningcss-plugin`. Owner decision 2026-11-03 (#273).
 
 | Package | Versions | License | Reason |
 |---|---|---|---|
-| lightningcss, lightningcss-* | 1 | MPL-2.0 | Vite's CSS minifier and its per-platform native binaries (`frontend/`, `extension/`'s vitest). A build tool; its output isn't covered. |
+| lightningcss, lightningcss-*-* | 1 | MPL-2.0 | Vite's CSS minifier and its per-platform native binaries (`frontend/`, `extension/`'s vitest). A build tool; its output isn't covered. |
 | caniuse-lite | 1 | CC-BY-4.0 | Browser support data for browserslist (`eslint-plugin-react-hooks` > `@babel/core`). |
 | mdn-data | 2 | CC0-1.0 | CSS data for `css-tree` (`jsdom`, tests only). |
 | spdx-license-ids | 3 | CC0-1.0 | SPDX id list for package metadata tools (`@vscode/vsce`, `@wdio/cli`). |
@@ -211,7 +213,7 @@ read. An exception never applies to the production trees of `frontend/` and `ext
 | @promptbook/utils | 0 | CC-BY-4.0 | `@wdio/utils` > `locate-app` (`e2e/` only). |
 | @azu/style-format | 1 | WTFPL | `@vscode/vsce` > secretlint formatter (packaging only). |
 | binaryextensions, editions, istextorbinary, textextensions, version-range | 6, 6, 9, 6, 4 | Artistic-2.0 | `@vscode/vsce` > secretlint > `istextorbinary` (packaging only). |
-| @vscode/vsce-sign, @vscode/vsce-sign-* | 2 | Microsoft licence terms (`SEE LICENSE IN LICENSE.txt`, reported as Unknown) | Required by Microsoft's own publishing tool `@vscode/vsce`. Used only to package and publish, locally and in CI; never redistributed in the VSIX or the app. |
+| @vscode/vsce-sign, @vscode/vsce-sign-*-* | 2 | Microsoft licence terms (`SEE LICENSE IN LICENSE.txt`, reported as Unknown) | Required by Microsoft's own publishing tool `@vscode/vsce`. Used only to package and publish, locally and in CI; never redistributed in the VSIX or the app. |
 
 | Clarified package | Versions | License | Reason |
 |---|---|---|---|
@@ -240,6 +242,10 @@ every pull request, every push to `main` and the weekly scheduled run:
   platform's native binaries, hundreds of MB, on every run, and would need a different
   setting for pnpm 9 and pnpm 11. Such a binary counts as production when a production
   package depends on it.
+- The npm check fails closed: an unknown pnpm lockfile format, an installed package missing
+  from the lockfile, or a failed registry lookup stops it with an error naming the problem.
+  Licence ids and `OR`/`AND` must use SPDX spelling (`mit` or `MIT or ISC` fail), and an
+  old-style `licenses` array counts as all of its licences together.
 - An exception or clarification that no longer matches anything fails both checks, so the
   tables can't go stale.
 
@@ -250,7 +256,7 @@ keeps the per-dependency notes complete.
 Run them locally:
 
 ```bash
-cargo install cargo-deny --locked --version 0.20.2   # once
+cargo install cargo-deny --locked --version <CARGO_DENY_VERSION from ci.yml>   # once
 cargo deny check licenses
 # after `pnpm install` in frontend/, extension/, e2e/ and extension/e2e/ (see CLAUDE.md):
 python3 scripts/check-dependency-licenses.py --summary

@@ -31,6 +31,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -87,9 +88,15 @@ class Clarification:
 
 # Dev-only packages under a licence outside ALLOWED. Mirrored in docs/LICENSE_COMPLIANCE.md
 # ("JavaScript dev-tree exceptions"). Never add one for a production dependency.
+# Globs: `*-*` matches the per-platform binary names (`lightningcss-linux-x64-gnu`,
+# `@vscode/vsce-sign-darwin-arm64`), not a lookalike such as `lightningcss-plugin`.
+VSCE_SIGN_REASON = (
+    "Microsoft licence terms (LICENSE.txt), required by Microsoft's own publishing tool @vscode/vsce; "
+    "used only to package and publish in CI, never redistributed in the VSIX or the app"
+)
 EXCEPTIONS: tuple[LicenseException, ...] = (
     LicenseException("lightningcss", "1", "MPL-2.0", "Vite's CSS minifier; build tool, its output isn't covered"),
-    LicenseException("lightningcss-*", "1", "MPL-2.0", "lightningcss's per-platform native binaries"),
+    LicenseException("lightningcss-*-*", "1", "MPL-2.0", "lightningcss's per-platform native binaries"),
     LicenseException("caniuse-lite", "1", "CC-BY-4.0", "browser support data for browserslist (eslint-plugin-react-hooks > @babel/core)"),
     LicenseException("mdn-data", "2", "CC0-1.0", "CSS data for css-tree (jsdom, tests only)"),
     LicenseException("spdx-license-ids", "3", "CC0-1.0", "SPDX id list for package metadata tools (@vscode/vsce, @wdio/cli)"),
@@ -103,13 +110,8 @@ EXCEPTIONS: tuple[LicenseException, ...] = (
     LicenseException("istextorbinary", "9", "Artistic-2.0", "@vscode/vsce > secretlint (packaging only)"),
     LicenseException("textextensions", "6", "Artistic-2.0", "@vscode/vsce > secretlint > istextorbinary (packaging only)"),
     LicenseException("version-range", "4", "Artistic-2.0", "@vscode/vsce > secretlint > istextorbinary > editions (packaging only)"),
-    LicenseException(
-        "@vscode/vsce-sign*",
-        "2",
-        UNKNOWN,
-        "Microsoft licence terms (LICENSE.txt), required by Microsoft's own publishing tool @vscode/vsce; "
-        "used only to package and publish in CI, never redistributed in the VSIX or the app",
-    ),
+    LicenseException("@vscode/vsce-sign", "2", UNKNOWN, VSCE_SIGN_REASON),
+    LicenseException("@vscode/vsce-sign-*-*", "2", UNKNOWN, "@vscode/vsce-sign's per-platform binaries; " + VSCE_SIGN_REASON),
 )
 
 # Packages whose declared licence is missing or wrong.
@@ -126,8 +128,10 @@ def normalize_license(value: object) -> str:
     if isinstance(value, dict):
         value = value.get("type")
     if isinstance(value, list):
+        # A legacy `licenses` array doesn't say whether the user may choose; assume every
+        # licence applies (fail closed).
         parts = [normalize_license(v) for v in value]
-        return " OR ".join(f"({p})" if " " in p else p for p in parts) if parts else UNKNOWN
+        return " AND ".join(f"({p})" if " " in p else p for p in parts) if parts else UNKNOWN
     if not isinstance(value, str) or not value.strip():
         return UNKNOWN
     value = value.strip()
@@ -280,17 +284,31 @@ def _split_ref(ref: str) -> tuple[str, str]:
     return name, version
 
 
+class CheckError(Exception):
+    """The check couldn't run reliably (unknown lockfile format, failed registry lookup)."""
+
+
+# Lockfile formats parse_lockfile understands. pnpm 9, 10 and 11 all write 9.0.
+KNOWN_LOCKFILE_VERSIONS = {"9.0"}
+
+
 def parse_lockfile(text: str) -> tuple[set[tuple[str, str]], dict[tuple[str, str], set[tuple[str, str]]]]:
     """pnpm-lock.yaml (v9) -> (all packages, {package: its direct dependencies}).
 
     Reads only the `packages:` keys and the `snapshots:` dependency lists, which pnpm writes
-    in a fixed two-space layout.
+    in a fixed two-space layout. Raises CheckError on anything else, so a format change can't
+    silently skip packages.
     """
+    first = text.split("\n", 1)[0].strip()
+    version = first.partition(":")[2].strip().strip("'\"")
+    if not first.startswith("lockfileVersion:") or version not in KNOWN_LOCKFILE_VERSIONS:
+        raise CheckError(f"unsupported pnpm lockfile format ({first!r}); update parse_lockfile")
     packages: set[tuple[str, str]] = set()
     children: dict[tuple[str, str], set[tuple[str, str]]] = {}
     section = None
     current: tuple[str, str] | None = None
     in_deps = False
+    content_lines = 0
     for line in text.splitlines():
         if line and not line.startswith(" "):
             section = line.rstrip(":").strip()
@@ -298,6 +316,7 @@ def parse_lockfile(text: str) -> tuple[set[tuple[str, str]], dict[tuple[str, str
             continue
         if section not in ("packages", "snapshots") or not line.strip():
             continue
+        content_lines += 1
         indent = len(line) - len(line.lstrip(" "))
         stripped = line.strip()
         if indent == 2:
@@ -318,20 +337,35 @@ def parse_lockfile(text: str) -> tuple[set[tuple[str, str]], dict[tuple[str, str
                 children[current].add(_split_ref(ref))
             else:
                 children[current].add((name, ref.split("(")[0]))
+    if content_lines and not packages:
+        raise CheckError("no package entries found in pnpm lockfile's `packages:` section; update parse_lockfile")
+    if set(children) != packages:
+        raise CheckError(
+            "pnpm lockfile's `packages:` and `snapshots:` sections disagree "
+            f"({len(packages)} vs {len(children)} entries); update parse_lockfile"
+        )
     return packages, children
 
 
-def registry_license(name: str, version: str) -> str:
+def registry_license(name: str, version: str, urlopen=urllib.request.urlopen, sleep=time.sleep) -> str:
+    """The licence npm's registry records for exactly name@version."""
     url = f"https://registry.npmjs.org/{urllib.parse.quote(name, safe='@')}/{urllib.parse.quote(version)}"
     for attempt in range(4):
         try:
-            with urllib.request.urlopen(url, timeout=30) as resp:
+            with urlopen(url, timeout=30) as resp:
                 data = json.load(resp)
+            if not isinstance(data, dict):
+                raise ValueError("not a JSON object")
             return normalize_license(data.get("license") or data.get("licenses"))
-        except OSError:
+        except urllib.error.HTTPError as e:
+            if 400 <= e.code < 500 or attempt == 3:
+                raise CheckError(f"npm registry lookup of {name}@{version} failed: HTTP {e.code}") from e
+        except ValueError as e:  # includes json.JSONDecodeError
+            raise CheckError(f"npm registry lookup of {name}@{version} returned bad JSON: {e}") from e
+        except OSError as e:
             if attempt == 3:
-                raise
-            time.sleep(2**attempt)
+                raise CheckError(f"npm registry lookup of {name}@{version} failed: {e}") from e
+        sleep(2**attempt)
     raise AssertionError("unreachable")
 
 
@@ -349,6 +383,12 @@ def collect_project(project: str, ships: bool, lookup=registry_license, run=pnpm
     installed = parse_licenses_json(run(project, False))
     prod = set(parse_licenses_json(run(project, True))) if ships else set()
     lock_packages, children = parse_lockfile((ROOT / project / "pnpm-lock.yaml").read_text())
+    unknown = set(installed) - lock_packages
+    if unknown:
+        raise CheckError(
+            f"{project}: installed packages missing from pnpm-lock.yaml, so the lockfile parse "
+            f"is incomplete or node_modules is stale: {sorted(unknown)[:5]}"
+        )
 
     missing = sorted(lock_packages - set(installed))
     licenses = dict(installed)
@@ -371,14 +411,18 @@ def collect_project(project: str, ships: bool, lookup=registry_license, run=pnpm
     return [Package(project, name, version, lic, (name, version) in prod) for (name, version), lic in licenses.items()]
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, collect=collect_project) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--summary", action="store_true", help="print each project's licences and counts")
     args = parser.parse_args(argv)
 
     packages: list[Package] = []
-    for project, ships in PROJECTS:
-        packages.extend(collect_project(project, ships))
+    try:
+        for project, ships in PROJECTS:
+            packages.extend(collect(project, ships))
+    except CheckError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
 
     if args.summary:
         for project, _ in PROJECTS:

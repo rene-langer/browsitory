@@ -57,15 +57,42 @@ class SatisfiesTests(unittest.TestCase):
         for expr in ("", "MIT OR", "(MIT", "MIT)", "OR MIT", "MIT MIT"):
             self.assertFalse(cdl.satisfies(expr, ALLOWED), expr)
 
+    def test_lowercase_ids_and_operators_fail_closed(self):
+        for expr in ("mit", "MIT or Apache-2.0", "MIT and Zlib", "GPL-3.0-only or MIT"):
+            self.assertFalse(cdl.satisfies(expr, ALLOWED), expr)
+
 
 class NormalizeTests(unittest.TestCase):
     def test_missing_or_see_file_is_unknown(self):
         for value in (None, "", "SEE LICENSE IN LICENSE.txt", "Unknown"):
             self.assertEqual(cdl.normalize_license(value), cdl.UNKNOWN)
 
-    def test_legacy_object_and_list_forms(self):
+    def test_legacy_object_form(self):
         self.assertEqual(cdl.normalize_license({"type": "MIT"}), "MIT")
-        self.assertEqual(cdl.normalize_license([{"type": "MIT"}, {"type": "Apache-2.0"}]), "MIT OR Apache-2.0")
+
+    def test_legacy_list_form_requires_every_licence(self):
+        # A `licenses` array doesn't say the user may choose, so every entry must be allowed.
+        self.assertEqual(cdl.normalize_license([{"type": "MIT"}, {"type": "Apache-2.0"}]), "MIT AND Apache-2.0")
+        self.assertFalse(cdl.satisfies(cdl.normalize_license([{"type": "MIT"}, {"type": "GPL-2.0-only"}]), ALLOWED))
+        self.assertTrue(cdl.satisfies(cdl.normalize_license([{"type": "MIT"}, "Zlib"]), ALLOWED))
+
+
+class MatchingTests(unittest.TestCase):
+    def test_version_prefix_matches_whole_components(self):
+        self.assertTrue(cdl.version_matches("1", "1.33.0"))
+        self.assertFalse(cdl.version_matches("1", "10.0.0"))
+        self.assertFalse(cdl.version_matches("1.3", "1.33.0"))
+        self.assertTrue(cdl.version_matches("0.0.1", "0.0.1"))
+        self.assertFalse(cdl.version_matches("0.0.1", "0.0.10"))
+
+    def test_platform_globs_dont_overreach(self):
+        self.assertEqual(check_alone(pkg("@vscode/vsce-sign", cdl.UNKNOWN, "2.1.0")), [])
+        self.assertEqual(check_alone(pkg("@vscode/vsce-sign-linux-arm", cdl.UNKNOWN, "2.0.6")), [])
+        for name in ("@vscode/vsce-signature-x", "@vscode/vsce-sign-x", "@vscode/vsce-signer"):
+            self.assertEqual(len(check_alone(pkg(name, cdl.UNKNOWN, "2.0.0"))), 1, name)
+        self.assertEqual(check_alone(pkg("lightningcss-linux-x64-gnu", "MPL-2.0", "1.33.0")), [])
+        for name in ("lightningcss-plugin", "lightningcss2", "lightningcssx-a-b"):
+            self.assertEqual(len(check_alone(pkg(name, "MPL-2.0", "1.33.0"))), 1, name)
 
 
 class CheckPackagesTests(unittest.TestCase):
@@ -176,6 +203,20 @@ class LockfileTests(unittest.TestCase):
         )
         self.assertEqual(children[("@scope/thing", "2.0.0")], {("string-width", "4.2.3")})
 
+    def test_unknown_lockfile_version_fails(self):
+        for first_line in ("lockfileVersion: '10.0'", "lockfileVersion: 6.0", "packages:"):
+            with self.assertRaises(cdl.CheckError, msg=first_line):
+                cdl.parse_lockfile(LOCKFILE.replace("lockfileVersion: '9.0'", first_line, 1))
+
+    def test_unexpected_layout_fails(self):
+        # Same version, but the entries are indented differently: nothing would parse.
+        reindented = LOCKFILE.replace("\n  ", "\n   ")
+        with self.assertRaises(cdl.CheckError):
+            cdl.parse_lockfile(reindented)
+        # A `packages:` entry with no snapshot.
+        with self.assertRaises(cdl.CheckError):
+            cdl.parse_lockfile(LOCKFILE.replace("  string-width@4.2.3: {}\n", ""))
+
     def test_parse_licenses_json(self):
         data = {"MIT": [{"name": "a", "versions": ["1.0.0", "2.0.0"], "license": "MIT"}], "Unknown": [{"name": "b", "versions": ["1.0.0"]}]}
         self.assertEqual(
@@ -231,6 +272,156 @@ class CollectProjectTests(unittest.TestCase):
         self.assertTrue(by_name["lightningcss-darwin-arm64"].production)
         problems = check_alone(*packages)
         self.assertTrue(any("lightningcss-darwin-arm64" in p and "production tree" in p for p in problems))
+
+    def test_installed_package_missing_from_lockfile_fails(self):
+        def run(project, prod):
+            return {"MIT": [{"name": "not-in-lockfile", "versions": ["1.0.0"], "license": "MIT"}]}
+
+        with self.assertRaises(cdl.CheckError):
+            cdl.collect_project("proj", False, lookup=lambda n, v: "MIT", run=run)
+
+    def test_production_status_follows_several_skipped_hops(self):
+        lockfile = """\
+lockfileVersion: '9.0'
+
+packages:
+
+  app-dep@1.0.0:
+    resolution: {integrity: sha512-a}
+
+  native@1.0.0:
+    resolution: {integrity: sha512-b}
+
+  native-sub@1.0.0:
+    resolution: {integrity: sha512-c}
+
+  dev-only@1.0.0:
+    resolution: {integrity: sha512-d}
+
+snapshots:
+
+  app-dep@1.0.0:
+    optionalDependencies:
+      native: 1.0.0
+
+  native@1.0.0:
+    dependencies:
+      native-sub: 1.0.0
+
+  native-sub@1.0.0: {}
+
+  dev-only@1.0.0: {}
+"""
+        (cdl.ROOT / "proj" / "pnpm-lock.yaml").write_text(lockfile)
+
+        def run(project, prod):
+            entries = [{"name": "app-dep", "versions": ["1.0.0"], "license": "MIT"}]
+            if not prod:
+                entries.append({"name": "dev-only", "versions": ["1.0.0"], "license": "MIT"})
+            return {"MIT": entries}
+
+        packages = cdl.collect_project("proj", True, lookup=lambda n, v: "MIT", run=run)
+        production = {p.name for p in packages if p.production}
+        self.assertEqual(production, {"app-dep", "native", "native-sub"})
+
+
+class FakeResponse:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        import io
+
+        return io.BytesIO(self.body)
+
+    def __exit__(self, *exc):
+        return False
+
+
+class RegistryTests(unittest.TestCase):
+    def fake_urlopen(self, *results):
+        calls = []
+
+        def urlopen(url, timeout):
+            calls.append(url)
+            result = results[min(len(calls), len(results)) - 1]
+            if isinstance(result, Exception):
+                raise result
+            return FakeResponse(result)
+
+        return urlopen, calls
+
+    def http_error(self, code):
+        import urllib.error
+
+        return urllib.error.HTTPError("https://registry.npmjs.org/x", code, "err", {}, None)
+
+    def test_reads_the_licence(self):
+        urlopen, calls = self.fake_urlopen(b'{"name": "@scope/x", "license": "MIT"}')
+        self.assertEqual(cdl.registry_license("@scope/x", "1.0.0", urlopen=urlopen, sleep=lambda s: None), "MIT")
+        self.assertEqual(calls, ["https://registry.npmjs.org/@scope%2Fx/1.0.0"])
+
+    def test_404_fails_at_once_and_names_the_package(self):
+        urlopen, calls = self.fake_urlopen(self.http_error(404))
+        with self.assertRaisesRegex(cdl.CheckError, r"gone@1\.2\.3.*HTTP 404"):
+            cdl.registry_license("gone", "1.2.3", urlopen=urlopen, sleep=lambda s: None)
+        self.assertEqual(len(calls), 1)
+
+    def test_server_errors_are_retried(self):
+        urlopen, calls = self.fake_urlopen(self.http_error(503), b'{"license": "ISC"}')
+        self.assertEqual(cdl.registry_license("x", "1.0.0", urlopen=urlopen, sleep=lambda s: None), "ISC")
+        self.assertEqual(len(calls), 2)
+
+    def test_malformed_json_fails_with_the_package_name(self):
+        for body in (b"<html>", b"[1, 2]"):
+            urlopen, _ = self.fake_urlopen(body)
+            with self.assertRaisesRegex(cdl.CheckError, r"x@1\.0\.0.*bad JSON"):
+                cdl.registry_license("x", "1.0.0", urlopen=urlopen, sleep=lambda s: None)
+
+
+class MainTests(unittest.TestCase):
+    def run_main(self, collect):
+        import contextlib
+        import io
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cdl.main([], collect=collect)
+        return code, out.getvalue(), err.getvalue()
+
+    def every_entry(self, project, ships):
+        if project != "e2e":
+            return []
+        packages = [pkg(e.name.replace("*", "x"), e.license, e.versions + ".0.0", project=project) for e in cdl.EXCEPTIONS]
+        packages += [pkg(c.name, cdl.UNKNOWN, c.versions, project=project) for c in cdl.CLARIFICATIONS]
+        return packages
+
+    def test_passes_when_every_package_is_allowed_or_excepted(self):
+        code, out, err = self.run_main(self.every_entry)
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("Licences OK", out)
+
+    def test_fails_on_a_disallowed_licence(self):
+        def collect(project, ships):
+            extra = [pkg("bad", "GPL-3.0-only", project=project)] if project == "frontend" else []
+            return self.every_entry(project, ships) + extra
+
+        code, _, err = self.run_main(collect)
+        self.assertEqual(code, 1)
+        self.assertIn("frontend: bad@1.0.0 (GPL-3.0-only)", err)
+
+    def test_fails_on_an_unused_entry(self):
+        code, _, err = self.run_main(lambda project, ships: [])
+        self.assertEqual(code, 1)
+        self.assertIn("clarification css-value 0.0.1 matches no package", err)
+
+    def test_check_error_is_reported_not_raised(self):
+        def collect(project, ships):
+            raise cdl.CheckError("npm registry lookup of gone@1.2.3 failed: HTTP 404")
+
+        code, _, err = self.run_main(collect)
+        self.assertEqual(code, 1)
+        self.assertIn("error: npm registry lookup of gone@1.2.3 failed: HTTP 404", err)
 
 
 if __name__ == "__main__":
