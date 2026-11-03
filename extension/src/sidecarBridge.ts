@@ -11,7 +11,9 @@ import {
 } from "./toolUris";
 
 const LAST_SEEN_VERSION_KEY = "lastSeenVersion";
-const NATIVE_METHODS = new Set([
+// Listed in `frontend/src/ipc/generated/extension-native-methods.json` for the transport
+// parity check (#306); `nativeMethods.test.ts` keeps that file current.
+export const NATIVE_METHODS: ReadonlySet<string> = new Set([
   "pick_repo_folder",
   "open_external_url",
   "get_app_version",
@@ -25,6 +27,20 @@ const NATIVE_METHODS = new Set([
   "open_diff_tool",
   "open_merge_tool",
 ]);
+
+// Sidecar methods only the extension host calls (#306). The webview may not call them: a
+// request for one gets an error reply instead of reaching the sidecar. Listed in
+// `frontend/src/ipc/generated/extension-host-sidecar-methods.json`; `nativeMethods.test.ts`
+// keeps that file current.
+export const HOST_SIDECAR_METHODS = {
+  readFileVersion: "read_file_version",
+  repoWorkdir: "repo_workdir",
+  checkMergeTarget: "check_merge_target",
+} as const;
+const HOST_SIDECAR_METHOD_NAMES: ReadonlySet<string> = new Set(Object.values(HOST_SIDECAR_METHODS));
+
+// JSON-RPC "method not found".
+const METHOD_NOT_FOUND = -32601;
 
 interface SidecarReadable {
   on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -94,6 +110,7 @@ export interface SidecarBridgeDependencies {
 }
 
 class InvalidParamsError extends Error {}
+class MethodNotFoundError extends Error {}
 
 type SidecarBridgeState = "idle" | "running" | "reconnecting" | "failed";
 
@@ -146,6 +163,18 @@ export class SidecarBridge {
 
     if (NATIVE_METHODS.has(message.method)) {
       await this.handleNativeRequest(message);
+      return;
+    }
+
+    if (HOST_SIDECAR_METHOD_NAMES.has(message.method)) {
+      this.dependencies.postToWebview({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code: METHOD_NOT_FOUND,
+          message: `${message.method} is not available to the webview`,
+        },
+      });
       return;
     }
 
@@ -446,7 +475,7 @@ export class SidecarBridge {
 
   /** Contents of a repository file version for the `browsitory-file:` content provider. */
   async readFileVersion(ref: FileVersionRef): Promise<string> {
-    const result = await this.callRunningSidecar("read_file_version", {
+    const result = await this.callRunningSidecar(HOST_SIDECAR_METHODS.readFileVersion, {
       repoPath: ref.repoPath,
       path: ref.path,
       version: ref.version,
@@ -459,7 +488,7 @@ export class SidecarBridge {
 
   /** The work tree root of an open repository (its path may be a subdirectory). */
   private async workdir(repoPath: string): Promise<string> {
-    const result = await this.callRunningSidecar("repo_workdir", { repoPath });
+    const result = await this.callRunningSidecar(HOST_SIDECAR_METHODS.repoWorkdir, { repoPath });
     if (typeof result !== "string" || result === "") {
       throw new Error("repo_workdir returned an invalid result");
     }
@@ -568,14 +597,16 @@ export class SidecarBridge {
           repoFile(workdir, rel);
           // The desktop merge tool's guards (a text conflict, no symlink or submodule, a work
           // tree file inside the tree): the merge editor writes its result to that file.
-          await this.callRunningSidecar("check_merge_target", { repoPath, path: rel });
+          await this.callRunningSidecar(HOST_SIDECAR_METHODS.checkMergeTarget, { repoPath, path: rel });
           await this.dependencies.openMergeEditor(mergeSides(repoPath, workdir, rel));
           // VSCode owns the merge from here; Browsitory can't see when it's done.
           result = "HandedOff";
           break;
         }
         default:
-          return;
+          // A name in NATIVE_METHODS without a case here: reply, so the webview's call
+          // doesn't wait forever.
+          throw new MethodNotFoundError(`unknown native method: ${request.method}`);
       }
 
       this.dependencies.postToWebview({
@@ -588,7 +619,12 @@ export class SidecarBridge {
         jsonrpc: "2.0",
         id: request.id,
         error: {
-          code: error instanceof InvalidParamsError ? -32602 : -32000,
+          code:
+            error instanceof InvalidParamsError
+              ? -32602
+              : error instanceof MethodNotFoundError
+                ? METHOD_NOT_FOUND
+                : -32000,
           message: errorMessage(error),
         },
       });

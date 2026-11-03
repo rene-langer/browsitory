@@ -1,0 +1,13 @@
+[
+  "get_app_version",
+  "get_last_seen_version",
+  "log_frontend_error",
+  "open_diff_tool",
+  "open_external_url",
+  "open_in_editor",
+  "open_merge_tool",
+  "open_terminal",
+  "pick_repo_folder",
+  "reveal_in_file_manager",
+  "set_last_seen_version"
+]

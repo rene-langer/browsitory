@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Transport parity check
+
+- Added: a test fails when an operation reaches only one of the two transports, the desktop
+  app (Tauri commands) or the VSCode extension (sidecar and extension host), unless an
+  allow-list in `frontend/src/ipc/transportParity.test.ts` says why (#306). The Tauri command
+  list, the sidecar's dispatch table and the extension host's own methods are each declared
+  once in code and checked in as generated lists under `frontend/src/ipc/generated/`.
+  Today's differences are all intended: clone and init are desktop-only, frontend error
+  logging needs no Tauri command, and three sidecar methods serve only the extension host.
+- Changed: in VSCode, the webview can no longer call the three sidecar methods meant only for
+  the extension host (`read_file_version`, `repo_workdir`, `check_merge_target`). Such a
+  request now gets an error reply and never reaches the sidecar (#306).
+- Fixed: a request for a VSCode extension host method without a handler now gets an error
+  reply instead of never being answered (#306).
+
 ### Files open in another program, via git's checkout (Windows)
 
 - Fixed: on Windows, an undo or redo that puts back a file's staged content, a discard of a
