@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Files open in another program, via git's checkout (Windows)
+
+- Fixed: on Windows, an undo or redo that puts back a file's staged content, a discard of a
+  file's changes, and taking one side's whole file in a conflict showed libgit2's raw "could
+  not remove … being used by another process" error when another program kept the file open.
+  They now say "'f.txt' is open in another program. Close it, then try again.", as the other
+  writes do (#268). Closing the file and trying again finishes the act.
+
 ### Licence check for the full dependency trees
 
 - Added: CI's new `licenses` job checks the licence of every dependency, transitive and dev

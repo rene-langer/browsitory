@@ -1360,3 +1360,47 @@ fn undo_of_a_file_held_open_says_so() {
     assert_eq!(read(&repo, "f.txt").as_deref(), Some("two\n"));
     assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), before);
 }
+
+/// Windows: a restore whose content matches the index goes through libgit2's checkout, not the
+/// walker (here with `core.autocrlf`, so the restored file has CRLF, which only the checkout
+/// writes). A file another program keeps open without sharing delete gets the same message as
+/// on the walker's path, not libgit2's raw error (#268).
+#[cfg(windows)]
+#[test]
+fn redo_of_a_discard_with_the_file_held_open_says_so() {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    let (_dir, repo) = crlf_seeded();
+    let full = repo.workdir().unwrap().join("a.txt");
+    fs::write(&full, b"edited\r\n").unwrap();
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    checkout_path(&repo, "a.txt"); // the discard
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    restore(&repo, &after, &before, "undo").unwrap();
+    assert_eq!(fs::read(&full).unwrap(), b"edited\r\n");
+    // As an editor that keeps the file open, sharing read and write but not delete.
+    let editor = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .open(&full)
+        .unwrap();
+
+    let error = restore(&repo, &before, &after, "redo").unwrap_err();
+    assert!(
+        matches!(error, UndoError::FileInUse(ref p) if p == "a.txt"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'a.txt' is open in another program. Close it, then try again."
+    );
+    assert_eq!(fs::read(&full).unwrap(), b"edited\r\n");
+
+    // Closed, then tried again, as the message says: the redo finishes, through the checkout.
+    drop(editor);
+    restore(&repo, &before, &after, "redo").unwrap();
+    assert_eq!(fs::read(&full).unwrap(), b"one\r\ntwo\r\n");
+    assert_eq!(status_of(&repo, "a.txt"), git2::Status::CURRENT);
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
+}
