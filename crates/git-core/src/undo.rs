@@ -470,9 +470,16 @@ impl WorktreeChange {
                     Ok::<_, git2::Error>((Oid::hash_object(ObjectType::Blob, bytes)?, *mode))
                 })
                 .transpose()?;
+            // A path checked out from the index already, by a checkout that stopped part-way
+            // (#268): filters (`core.autocrlf`) mean its bytes needn't be the target's raw ones.
+            let checked_out = || {
+                self.from_index.contains(path)
+                    && clean_against_index(repo, &index, path, self.to.get(path).copied())
+            };
             if current != expected
                 && !clean_against_index(repo, &index, path, expected)
                 && !self.already_restored(workdir, path, &config)?
+                && !checked_out()
             {
                 // Ignored files are not snapshotted: absent from the tree but present on disk
                 // is fine as long as the file is ignored and the target would not change it.

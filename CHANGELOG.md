@@ -13,6 +13,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   not remove … being used by another process" error when another program kept the file open.
   They now say "'f.txt' is open in another program. Close it, then try again.", as the other
   writes do (#268). Closing the file and trying again finishes it.
+- Fixed: an undo or redo that stopped part-way through putting back staged content (a file
+  open in another program) refused to try again with `core.autocrlf` on, calling the files it
+  had already written changed. Trying again now finishes it (#268).
 
 ### Licence check for the full dependency trees
 

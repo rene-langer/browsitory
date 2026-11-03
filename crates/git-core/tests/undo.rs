@@ -793,6 +793,34 @@ fn undoes_a_discard_with_autocrlf() {
     assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
 }
 
+/// A redo whose checkout from the index stopped part-way (a file open in another program,
+/// #268) left the files it wrote with CRLF (`core.autocrlf`), not the target's raw bytes.
+/// Trying again still finishes it, rather than calling those files changed since.
+#[test]
+fn a_redo_whose_checkout_stopped_part_way_finishes_when_tried_again() {
+    let (_dir, repo) = crlf_seeded();
+    let workdir = repo.workdir().unwrap().to_path_buf();
+    write(&repo, "b.txt", "three\n");
+    stage(&repo, "b.txt");
+    commit(&repo, "b");
+    fs::remove_file(workdir.join("b.txt")).unwrap();
+    checkout_path(&repo, "b.txt");
+    fs::write(workdir.join("a.txt"), b"edited a\r\n").unwrap();
+    fs::write(workdir.join("b.txt"), b"edited b\r\n").unwrap();
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    checkout_path(&repo, "a.txt");
+    checkout_path(&repo, "b.txt"); // the discard
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    restore(&repo, &after, &before, "undo").unwrap();
+    // The redo's checkout wrote `a.txt`, then stopped at `b.txt`.
+    checkout_path(&repo, "a.txt");
+
+    restore(&repo, &before, &after, "redo").unwrap();
+    assert_eq!(fs::read(workdir.join("a.txt")).unwrap(), b"one\r\ntwo\r\n");
+    assert_eq!(fs::read(workdir.join("b.txt")).unwrap(), b"three\r\n");
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
+}
+
 #[test]
 fn undoes_a_branch_switch_with_autocrlf() {
     let (_dir, repo) = crlf_seeded();
