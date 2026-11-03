@@ -1,6 +1,6 @@
 # cargo-deny configuration (#273). CI's `audit` job runs `cargo deny check licenses` only:
 # advisories stay with `cargo audit` (.cargo/audit.toml), and bans/sources aren't checked.
-# The licence policy lives in CLAUDE.md and docs/LICENSE_COMPLIANCE.md; keep this file in sync.
+# The licence policy lives in AGENTS.md and docs/LICENSE_COMPLIANCE.md; keep this file in sync.
 
 [graph]
 # Every platform we build for (ci.yml's `rust`/`build-dist`/`build-vsix` matrices,

@@ -1,5 +1,9 @@
 # Task template
 
+> **Retired.** Phases 1 and 6 used this format (`docs/tasks/`). Later work uses dated specs and
+> plans in `docs/superpowers/` instead; see `AGENTS.md`'s "Task workflow". Kept because older
+> docs and CI comments link to these task files.
+
 Every implementation task in Browsitory (Phase 1 onward) follows this shape, one file per
 task, named `docs/tasks/phase-<N>/<workstream>-<id>-<slug>.md` (e.g.
 `docs/tasks/phase-1/a-01-diff-viewer.md`). Tasks within the same phase that touch disjoint

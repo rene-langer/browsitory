@@ -1,7 +1,7 @@
 name: Release
 
 # Tags of the form release/MAJOR.MINOR.PATCH (semantic versioning, no `v` prefix — see
-# CLAUDE.md's versioning note) build standalone distributables for Linux/macOS/Windows and
+# docs/RELEASING.md) build standalone distributables for Linux/macOS/Windows and
 # publish them as a GitHub Release.
 on:
   push:
@@ -265,7 +265,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
       # The Entra app's Marketplace profile id is not a secret. The owner adds it to publisher
-      # `browsitory` as a Contributor once (see CLAUDE.md's "Publishing the extension").
+      # `browsitory` as a Contributor once (see docs/RELEASING.md's "Publishing the extension").
       - name: Show the Entra app's Marketplace member id
         if: env.HAS_AZURE == 'true'
         shell: bash

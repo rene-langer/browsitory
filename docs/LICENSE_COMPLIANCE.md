@@ -258,7 +258,7 @@ Run them locally:
 ```bash
 cargo install cargo-deny --locked --version <CARGO_DENY_VERSION from ci.yml>   # once
 cargo deny check licenses
-# after `pnpm install` in frontend/, extension/, e2e/ and extension/e2e/ (see CLAUDE.md):
+# after `pnpm install` in frontend/, extension/, e2e/ and extension/e2e/ (see AGENTS.md):
 python3 scripts/check-dependency-licenses.py --summary
 ```
 

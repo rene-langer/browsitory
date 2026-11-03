@@ -45,4 +45,5 @@ scripts\build-dist.ps1     # Windows: .msi/.exe
 
 Bundles land in `crates/tauri-app/target/release/bundle/`.
 
-See the [User Guide](docs/USER_GUIDE.md) for a tour of the UI, and [CLAUDE.md](CLAUDE.md) / [AGENTS.md](AGENTS.md) for full build, test, and E2E commands.
+See the [User Guide](docs/USER_GUIDE.md) for a tour of the UI, and [AGENTS.md](AGENTS.md) for full build, test, and E2E commands, and
+[docs/RELEASING.md](docs/RELEASING.md) for releases.
