@@ -90,6 +90,7 @@ Each is pinned to an exact version where it runs.
 | Tool | License | Notes |
 |---|---|---|
 | cargo-deny | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and runs `cargo deny check licenses`. The exact version is pinned in that job's `CARGO_DENY_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-deny@0.20.2` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
+| Swatinem/rust-cache v2 | LGPL-3.0 | A GitHub Action. `ci.yml`'s cargo jobs run it to cache `~/.cargo` and the dependency build output in `target/` (#308). It runs on the CI runner only; nothing of it is built into or shipped with Browsitory, and we don't change it. Pinned to the `v2` major tag like the other actions (Renovate updates it). Source: the repository's `LICENSE` and `package.json` (`"license": "LGPL-3.0"`), checked for v2.9.3 on 2026-11-03. |
 | ovsx 1.3.0 | EPL-2.0 | `release.yml`'s `publish-vsix-open-vsx` job runs it as `npx --yes ovsx@1.3.0 publish` to upload the already-built `.vsix` files to Open VSX. EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it as a dependency. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02. |
 
 ## JavaScript, `e2e/` (`npm info <package> license`)

@@ -112,6 +112,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      # Caches ~/.cargo and the dependencies in target/ (#308). The key is the job id plus the
+      # rustc version and host, so each OS gets its own cache. Only main saves; PRs restore
+      # main's cache and never write one, so a PR can't evict or poison it. The action sets
+      # CARGO_INCREMENTAL=0 and never caches the workspace crates or incremental dirs.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -169,6 +176,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Own cache (job-id key): this job builds only the dev vscode-sidecar. See the `rust` job.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # sidecarBridge.real.test.ts spawns the real vscode-sidecar binary and only builds it
       # itself as a fallback if missing; on a cold CI runner that inline `cargo build` blows
       # the test's own timeout, so prebuild it here instead.
@@ -213,6 +224,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      # Caches ~/.cargo only (registry and the tauri-cli binary installed below), not target/:
+      # the release builds for three OSes would take a large share of the 10 GB repository
+      # cache limit and evict the caches the PR jobs use. This job runs only on main.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install tauri-cli
         run: cargo install tauri-cli --locked
       - uses: pnpm/action-setup@v6
@@ -308,6 +326,10 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
       - uses: dtolnay/rust-toolchain@stable
+      # Own cache (job-id key): a plain `cargo build --workspace`. See the `rust` job.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v6
         with:
           version: 11  # extension/package.json pins pnpm@11.28.10
@@ -374,6 +396,13 @@ jobs:
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential \
             webkit2gtk-driver xvfb dbus
       - uses: dtolnay/rust-toolchain@stable
+      # Own cache (job-id key): this build enables the custom-protocol and
+      # forge-fixture-override features, so it must not share a cache with a plain build.
+      # Placed before `cargo install tauri-driver` so the installed binary is cached too.
+      # See the `rust` job.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install tauri-driver
         # tauri-driver's version is independent of any other Tauri versions.
         run: cargo install tauri-driver --locked
