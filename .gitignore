@@ -29,6 +29,8 @@ extension/e2e/.vscode-test
 .claude/worktrees/
 .worktrees/
 
-# graphifyy
-graphify-out/cost.json
+# superpowers session state
 .superpowers/
+
+# graphify output (local, regenerate with /graphify)
+graphify-out/

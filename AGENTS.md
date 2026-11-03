@@ -1,6 +1,13 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+Guidance for coding agents (Claude Code, Codex and others) working in this repo. Claude Code
+loads it through `CLAUDE.md`'s `@AGENTS.md` import.
+
+## Project
+
+Browsitory: a Git GUI. Rust backend (`git2`) shared across two frontends — a Tauri desktop app
+and a VSCode extension — behind one `RepoClient` IPC interface. See
+`docs/ARCHITECTURE.md` for the full design and `CHANGELOG.md` for what shipped when.
 
 ## Commands
 
@@ -10,7 +17,12 @@ cargo test --workspace                            # run all Rust tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check                        # format check (CI)
 cargo tauri dev                                    # run the desktop app (from crates/tauri-app)
+scripts/build-dist.sh                              # build standalone distributable (Linux/macOS)
+scripts\build-dist.ps1                             # build standalone distributable (Windows)
 ```
+
+Single Rust test: `cargo test -p git-core --test status` or
+`cargo test -p git-core -- reports_an_untracked_file_as_unstaged_new`.
 
 ```bash
 cd frontend
@@ -21,141 +33,117 @@ pnpm lint
 pnpm test -- --run
 ```
 
-Run a single Rust test: `cargo test -p git-core --test status` or
-`cargo test -p git-core -- reports_an_untracked_file_as_unstaged_new`.
-
 ```bash
-# E2E (tauri-driver + WebdriverIO), from the repo root:
-cargo install tauri-driver --locked               # once, if not already installed
-cd frontend && VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo pnpm build && cd ..
-cargo build --workspace --features tauri-app/custom-protocol
-cd e2e
+cd extension
 pnpm install
-pnpm test                                          # spawns/reaps tauri-driver itself; needs a display (xvfb-run on headless CI)
+pnpm test -- --run
+pnpm run compile
 ```
 
-## Project status
+### E2E: Tauri app (tauri-driver + WebdriverIO), from repo root
 
-Second from-scratch rewrite (branch `feat/rust_from_scratch`). See
-`docs/superpowers/specs/2026-08-11-browsitory-architecture-design.md` for the full rationale —
-in short: a prior native Rust+egui pass (also on this branch, see git history) worked but
-produced a UI that can't be reused as a VSCode webview, which is a stated future requirement.
-This pass keeps the Rust git layer but replaces egui with Tauri + a React/TypeScript frontend
-behind a `RepoClient` IPC interface, so a VSCode extension can implement the same interface
-later without touching UI code.
+```bash
+cargo install tauri-driver --locked               # once, if not already installed
+cd frontend && VITE_E2E_REPO_PATH=/tmp/browsitory-e2e-repo pnpm build && cd ..
+cargo build --workspace --features tauri-app/custom-protocol,tauri-app/forge-fixture-override
+cd e2e && pnpm install && pnpm test               # spawns/reaps tauri-driver itself; needs a display (headless: dbus-run-session -- xvfb-run -a pnpm test)
+```
 
-Phase 0 was setup only: workspace scaffold, CI, `git-core::repo`/`status` with tests, and a
-Tauri shell proving the IPC boundary end-to-end with a minimal status view.
+### E2E: VSCode extension (@vscode/test-electron), from repo root
 
-Phase 1 (this pass) is complete: full repo view. Added `git-core::log` (commit history),
-`git-core::diff` (line-level diffs for both the working tree and a given commit, plus a
-`commit_files` helper), `git-core::stage` (whole-file stage/unstage), and `git-core::commit`
-(commit creation) to the git layer; turned `crates/config` from a stub into a real recent-repos
-registry backed by TOML; added 9 Tauri commands and a `tauri-plugin-dialog`-backed folder
-picker; and built the unified frontend layout (`RepoPicker`, `HistoryList`, `DiffPane`,
-`CommitBox`, composed in `App.tsx`) with basic keyboard navigation, retiring the old
-`StatusView`. Also added Browsitory's first GUI E2E layer (`e2e/`, see "Testing conventions"
-below) and a CI job for it. Phase 2 (branch management, stash, merge, rebase, blame, multi-branch
-graph) is next and not started — see `docs/ARCHITECTURE.md`'s Roadmap.
+```bash
+cargo build --workspace
+cd frontend && pnpm run generate:release-notes && VITE_E2E_REPO_PATH=/tmp/browsitory-vscode-e2e-repo pnpm exec vite build --config vite.vscode.config.ts && cd ..
+cd extension && pnpm install && pnpm run compile && cd ..
+cd extension/e2e
+pnpm install --ignore-workspace                    # extension/e2e isn't a member of
+                                                    # extension/pnpm-workspace.yaml; its own
+                                                    # pnpm-workspace.yaml stops pnpm walking up
+                                                    # to extension/, --ignore-workspace too
+pnpm test                                          # spawns the extension under vscode.ExtensionMode.Test; needs a display (xvfb-run on headless CI)
+```
 
-## Architecture
+## Git hooks
 
-See `docs/ARCHITECTURE.md` for the full crate/package layout, the `RepoClient` IPC boundary,
-and the threading model. Summary: `crates/git-core` (git2, UI-agnostic, DI'd per function,
-tested against real temp-dir repos) + `crates/config` (TOML-backed recent-repos registry) +
-`crates/repo-service` (transport-agnostic worker threads, credentials, forge/PR API access) +
-`crates/tauri-app` (a thin Tauri command adapter over `repo-service`) + `frontend/` (React/TS,
-talks to the backend only through `frontend/src/ipc/RepoClient.ts`).
+One-time setup, per clone/worktree:
 
-Building `tauri-app` standalone (no dev server) requires the `custom-protocol` Cargo feature —
-see the "Commands" section's E2E block and `crates/tauri-app/Cargo.toml`'s comment on it. Plain
-`cargo build --workspace` always leaves the binary looking for the Vite dev server, regardless
-of debug/release.
+```bash
+ln -sf "$(git rev-parse --show-toplevel)/scripts/hooks/pre-push" "$(git rev-parse --git-path hooks)/pre-push"
+```
 
-### git2 API gotchas
+Wires up `scripts/check-changelog.py` as a `pre-push` hook: blocks a push touching `crates/`,
+`frontend/src/`, or `e2e/` without a matching `CHANGELOG.md` update. Bypass once with
+`SKIP_CHANGELOG_CHECK=1 git push`. A diff that touches only dependency manifests/lockfiles
+(`Cargo.toml`, `Cargo.lock`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
+`rust-toolchain.toml`) needs no entry.
 
-- `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return
-  `Result<&str, Error>` — never `Option`, not even nested. Handle with `let Ok(x) = ... else {
-  continue };` in a loop, or `.ok().unwrap_or_default()` otherwise (no `.flatten()` — there's no
-  `Option` layer to flatten; it won't compile). See `crates/git-core/src/status.rs`,
-  `crates/git-core/src/log.rs`.
-- `Commit::summary()` is the one in this family that's actually `Result<Option<&str>, Error>` —
-  `Ok(None)` means no summary, not an error. This is the one that wants
-  `.ok().flatten().unwrap_or_default()`. See `crates/git-core/src/log.rs`.
-- All of the above verified against the vendored `git2` 0.21 source — don't assume a shared
-  shape across "similar-sounding" accessors; check the actual signature, since this crate mixes
-  both shapes and an incorrect assumption in either direction fails to compile with an
-  unhelpful-looking error at the call site (a plain-`Result` accessor rejects `.flatten()`,
-  which is where this note came from).
-- `StringArray::iter()` (from `Repository::remotes()`) yields `Result<Option<&str>, Error>`
-  per slot — needs `.iter().flatten().flatten()`, not a single `.flatten()`, once remote
-  support is added.
+## Dependency updates
 
-### Threading model
+Renovate (`renovate.json`) opens dependency PRs before 6am on Mondays (Europe/Berlin), at most
+three open at a time, labelled `maintainability`, and never automerges — merge by hand once CI
+is green. Covered: the Cargo workspace, all four pnpm projects (`frontend/`, `extension/`,
+`e2e/`, `extension/e2e/`, each with its own lockfile), GitHub Actions, and
+`rust-toolchain.toml`. Minor/patch updates are grouped per ecosystem (Rust, JS, GitHub
+Actions); Tauri crates and `@tauri-apps/*` packages share one group. Majors and
+`git2`/`libgit2-sys` wait for approval on the Dependency Dashboard issue (libgit2 bumps change
+behaviour the tests and `docs/ARCHITECTURE.md` characterize). Security fixes skip the
+schedule; lockfiles get a monthly maintenance PR.
 
-`git2::Repository` **is** `Send` but is **not** `Sync`. It can be moved into one thread and
-owned there (that's why `Worker::spawn`'s `thread::spawn(move || …)` compiles), but a
-`&Repository` can never be shared across threads. Tauri managed state requires `Send + Sync`,
-so a `Repository` can't be `State` directly, and putting it behind `State<Mutex<Repository>>`
-would serialize every command on one lock held across blocking git work. The response to
-`!Sync` is therefore message-passing to a single owning thread:
-`crates/repo-service/src/worker/mod.rs`'s `Worker::spawn` opens the repository on a dedicated
-thread and owns it for that thread's lifetime; Tauri commands (`crates/tauri-app/src/commands.rs`)
-send `Command`s over an `mpsc` channel and get replies over a per-call reply channel. UI code
-never touches `git-core` directly — only through `RepoClient` → a Tauri command → the worker
-thread.
+The license policy and the CI `audit` and `licenses` jobs still apply to these PRs. The
+`licenses` job checks every licence in the full Rust and npm trees, transitive and dev
+included (`cargo deny check licenses` with `deny.toml`; `scripts/check-dependency-licenses.py`
+for all four pnpm projects). If an update pulls in a licence outside the policy, it fails:
+replace the dependency or ask the owner, then record the decision as an exception in
+`deny.toml` or the script and in `docs/LICENSE_COMPLIANCE.md`, in the same PR. A stale
+exception fails too; remove it. `scripts/check-license-compliance.py` (`audit` job) still
+requires a `docs/LICENSE_COMPLIANCE.md` row for every *direct* dependency. Renovate also
+updates the pinned `CARGO_DENY_VERSION` in `ci.yml`; cargo-deny is 0.x, so its minor bumps
+wait for approval on the Dependency Dashboard like other 0.x dependencies. Advisories stay with `cargo audit`: when an
+update fixes one, drop its ignore from `.cargo/audit.toml` in the same PR and close the
+matching RUSTSEC issue.
 
-### `RepoClient`: why it exists
+## Versioning & releases
 
-`frontend/src/ipc/RepoClient.ts` is the only interface `frontend/src/components` and
-`frontend/src/state` are allowed to depend on for backend calls.
-`frontend/src/ipc/tauriRepoClient.ts` is the only file that imports `@tauri-apps/api`; a
-`no-restricted-imports` override in `frontend/eslint.config.js` fails `pnpm lint` if any file
-under `src/components/` or `src/state/` imports `@tauri-apps/*` directly. When a
-VSCode extension frontend is built later, it gets a second implementation
-(`frontend/src/ipc/vscodeRepoClient.ts`, over `postMessage`) behind the same interface — no
-changes to any component.
+Semantic versioning; a `release/MAJOR.MINOR.PATCH` tag (no `v` prefix) triggers
+`.github/workflows/release.yml`. Full process, extension publishing and owner setup:
+`docs/RELEASING.md`. Two rules agents must not break:
+
+- **Never re-tag a published version at a different commit.** The extension registries refuse
+  to replace a published version; bump the version instead.
+- Don't change `VSIX_PRE_RELEASE` in `release.yml` or release secrets/environments without the
+  owner asking for it.
 
 ## License policy
 
-Permissive dependencies only (MIT, Apache-2.0, ISC, BSD, MIT-0) with **one explicit, deliberate
-exception**: `git2` links against libgit2 (via vendored build), which is
-GPL-2.0-with-linking-exception — not MIT, but the linking exception explicitly permits linking
-from differently-licensed code. Verify new dependencies (`cargo info <crate>` / `npm info
-<package>`) before adding them and record them in `docs/LICENSE_COMPLIANCE.md`.
+Permissive dependencies only: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, MIT-0,
+Unicode-3.0, Zlib, BlueOak-1.0.0 and PSF-2.0 / Python-2.0. One deliberate exception,
+`libgit2-sys` (vendored libgit2), plus per-package owner decisions for a few Rust crates and
+dev-only npm packages; all are listed in `docs/LICENSE_COMPLIANCE.md`. Never add a licence or
+an exception on your own: ask the owner. Before adding a dependency: verify its license
+(`cargo info <crate>` / `npm info <package> license`) and add a row to
+`docs/LICENSE_COMPLIANCE.md` in the same commit. CI's `licenses` job then checks the whole
+tree it pulls in (`deny.toml`, `scripts/check-dependency-licenses.py`); keep their allow-lists
+in sync with this one.
 
 ## Testing conventions
 
-- `git-core` tests live in `crates/git-core/tests/*.rs` (one file per module) plus a shared
-  `tests/common/mod.rs` helper. They use real repos via `git2::Repository::init`/`TempDir`,
-  never a mocked `Repository`.
-- `repo-service` tests live inline (`#[cfg(test)] mod tests`) next to the code they test (see
-  `worker/mod.rs`), against real temp-dir repos, and also own the DTO wire-format pinning:
-  `crates/repo-service/src/lib.rs`'s `wire_format_tests` module asserts the `StatusKind` and
-  `DiffLineOrigin` strings it emits match the matching unions in
-  `frontend/src/ipc/RepoClient.ts`, since nothing else catches that drift.
-- `tauri-app` tests live inline (`#[cfg(test)] mod tests`) next to the code they test (see
-  `commands/mod.rs`). It's now a thin adapter over `repo-service`, so pass-through Tauri
-  commands don't need their own tests — the `git-core`/`repo-service` logic they call already
-  is tested. What remains is its own DTO serialization (e.g. camelCase field names), covered by
-  `commands/mod.rs`'s test module.
-- `frontend` tests mock `RepoClient` (a real interface seam), never `@tauri-apps/api`.
-- `e2e/` holds `tauri-driver` + WebdriverIO specs (`e2e/specs/*.spec.ts`) that drive the real
-  built `tauri-app` binary as a black box, one flow per major feature area (currently: open
-  repo → stage a file → commit → see it in history). Run separately from `cargo test`/`pnpm
-  test` — it needs a debug build with the `custom-protocol` feature and a frontend build with
-  `VITE_E2E_REPO_PATH` baked in first; see the "Commands" section above for the exact sequence
-  (mirrors `.github/workflows/ci.yml`'s `e2e` job, the source of truth if this drifts).
+- `git-core`/`repo-service`: real temp-dir repos via `git2::Repository::init`/`TempDir`, never a
+  mocked `Repository`.
+- `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam) — never
+  `@tauri-apps/api` or `postMessage` directly.
+- `tauri-app`: inline tests cover only its own DTO serialization; pass-through commands rely on
+  `git-core`/`repo-service` coverage.
+- `e2e/` (Tauri) and `extension/e2e/` (VSCode) are black-box, one flow per major feature area.
+  Build steps are order-sensitive — see the "Commands" section above, not a paraphrase of it.
+
+Full rationale and the wire-format/DTO contract details: `docs/ARCHITECTURE.md`'s "Testing
+strategy".
 
 ## Task workflow
 
-This repo uses the `superpowers` plugin's `test-driven-development`, `writing-plans`,
-`subagent-driven-development`, and `executing-plans` skills for all implementation work, plus
-the project-local `.Codex/skills/browsitory-conventions` skill for the Browsitory-specific
-conventions those global skills don't cover (real temp-dir repos in tests, the `RepoClient`
-transport-isolation rule, task-file naming). That skill is a pointer into this file and
-`docs/ARCHITECTURE.md`, which stay authoritative if the two ever disagree. New implementation
-tasks (Phase 1 onward) follow `docs/TASK_TEMPLATE.md`.
-
-
-@RTK.md
+Larger implementation work: a design spec in `docs/superpowers/specs/` and a plan in
+`docs/superpowers/plans/`, both named `YYYY-MM-DD-<slug>[-design].md`, written and executed with
+the `superpowers` plugin's `writing-plans`, `subagent-driven-development` / `executing-plans`
+and `test-driven-development` skills. Those files are a record of past decisions, not current
+truth: if one disagrees with the code, `AGENTS.md` or `docs/ARCHITECTURE.md`, the latter win.
+`.claude/skills/browsitory-conventions` lists the Browsitory rules generic skills don't cover.

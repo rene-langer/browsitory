@@ -1,6 +1,6 @@
 ---
 name: browsitory-conventions
-description: Use when adding or modifying code in this repo's git-core, config, tauri-app, or frontend crates/packages — covers Browsitory-specific test, transport-isolation, and task-file rules not covered by generic skills.
+description: Use when adding or modifying code in this repo's crates, frontend or extension — covers Browsitory-specific test, transport-isolation, and task-file rules not covered by generic skills.
 ---
 
 # Browsitory Conventions
@@ -8,16 +8,16 @@ description: Use when adding or modifying code in this repo's git-core, config, 
 ## Overview
 
 Project-local rules for Browsitory that generic skills (TDD, writing-plans, etc.) don't
-cover. Source of truth is `CLAUDE.md` and `docs/ARCHITECTURE.md` — this skill is a short
+cover. Source of truth is `AGENTS.md` and `docs/ARCHITECTURE.md` — this skill is a short
 pointer into them, not a replacement. If this skill and those docs ever disagree, the docs
 win; fix this skill to match.
 
 ## Rules
 
-1. **Real repos in tests, never mocks.** `git-core`/`tauri-app` tests always exercise a real
+1. **Real repos in tests, never mocks.** `git-core`/`repo-service` tests always exercise a real
    temp-dir repo (`tempfile` + `git2::Repository::init`), never a mocked `git2::Repository`.
    `frontend` tests always mock the `RepoClient` interface, never `@tauri-apps/api` or
-   `postMessage` directly. See CLAUDE.md's "Testing conventions".
+   `postMessage` directly. See AGENTS.md's "Testing conventions".
 
 2. **`RepoClient` is the only transport seam.** `frontend/src/components` and
    `frontend/src/state` never import `@tauri-apps/api` or any transport directly — only files
@@ -25,11 +25,13 @@ win; fix this skill to match.
    override in `frontend/eslint.config.js` (`pnpm lint`). See `docs/ARCHITECTURE.md`'s "The
    `RepoClient` IPC boundary".
 
-3. **Task files follow the template.** New implementation tasks (Phase 1 onward) follow
-   `docs/TASK_TEMPLATE.md`'s shape and are named
-   `docs/tasks/phase-<N>/<workstream>-<id>-<slug>.md`.
+3. **Specs and plans are dated records.** Larger work gets a design spec in
+   `docs/superpowers/specs/` and a plan in `docs/superpowers/plans/`, named
+   `YYYY-MM-DD-<slug>[-design].md`. Older specs and plans describe the code as it was; never
+   treat one as current without checking the code. (`docs/tasks/` and `docs/TASK_TEMPLATE.md`
+   are the retired Phase 1/6 process.)
 
 ## When in doubt
 
-Read `CLAUDE.md` and `docs/ARCHITECTURE.md` directly — they're authoritative. This skill only
+Read `AGENTS.md` and `docs/ARCHITECTURE.md` directly — they're authoritative. This skill only
 exists to flag, at a glance, when it's worth going to look.

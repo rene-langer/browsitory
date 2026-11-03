@@ -40,7 +40,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Keep in sync with CLAUDE.md ("License policy"), docs/LICENSE_COMPLIANCE.md and deny.toml.
+# Keep in sync with AGENTS.md ("License policy"), docs/LICENSE_COMPLIANCE.md and deny.toml.
 ALLOWED = frozenset(
     {
         "MIT",
@@ -64,7 +64,7 @@ PROJECTS = (
     ("e2e", False),
     ("extension/e2e", False),
 )
-# Not a member of extension/'s workspace; CLAUDE.md installs it with --ignore-workspace too.
+# Not a member of extension/'s workspace; AGENTS.md installs it with --ignore-workspace too.
 IGNORE_WORKSPACE = {"extension/e2e"}
 
 UNKNOWN = "Unknown"

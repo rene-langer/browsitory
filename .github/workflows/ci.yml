@@ -39,7 +39,7 @@ jobs:
       - name: License compliance doc is in sync
         run: python3 scripts/check-license-compliance.py
 
-  # Every licence in the full dependency trees, Rust and npm, against the policy in CLAUDE.md
+  # Every licence in the full dependency trees, Rust and npm, against the policy in AGENTS.md
   # and docs/LICENSE_COMPLIANCE.md (#273). Advisories stay in the `audit` job above.
   licenses:
     runs-on: ubuntu-latest
