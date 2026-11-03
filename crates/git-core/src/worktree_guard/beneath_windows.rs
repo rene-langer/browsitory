@@ -1439,6 +1439,22 @@ pub(super) fn is_read_only(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::
     }
 }
 
+/// See `worktree_guard::held_open_after_checkout`: whether another program holds the leaf
+/// `rel` open without sharing delete, so it can't be deleted or replaced. Probed by opening it
+/// as itself for deleting (sharing everything, closed at once): that open fails with a sharing
+/// violation then. A missing leaf, or one past a link, isn't held.
+pub(super) fn is_held_open(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<bool> {
+    let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? {
+        Walk::Found(at) => at,
+        Walk::Link | Walk::Missing | Walk::NotDir => return Ok(false),
+    };
+    match open_leaf(&at, Purpose::Delete) {
+        Ok(_) => Ok(false),
+        Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION) => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+
 /// See `worktree_guard::remove_beneath`.
 pub(super) fn remove(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<bool> {
     let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? {
@@ -2324,6 +2340,61 @@ mod tests {
         assert_eq!(waits, IN_USE_TRIES - 1);
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
         assert_eq!(names_in(&dir.path().join("d")), ["f"]);
+    }
+
+    #[test]
+    fn is_held_open_only_for_a_file_held_without_share_delete() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let f = dir.path().join("d").join("f");
+        let g = dir.path().join("d").join("g");
+        std::fs::write(&f, "old").unwrap();
+        std::fs::write(&g, "old").unwrap();
+        let _editor = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&f)
+            .unwrap();
+        // A scanner or the indexer shares delete: not in the way.
+        let _scanner = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(&g)
+            .unwrap();
+        assert!(is_held_open(dir.path(), Path::new("d/f"), &mut no_step).unwrap());
+        assert!(!is_held_open(dir.path(), Path::new("d/g"), &mut no_step).unwrap());
+        assert!(!is_held_open(dir.path(), Path::new("d/missing"), &mut no_step).unwrap());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "old");
+    }
+
+    #[test]
+    fn is_held_open_detects_a_held_read_only_file() {
+        let dir = TempDir::new().unwrap();
+        let f = dir.path().join("f");
+        std::fs::write(&f, "old").unwrap();
+        make_read_only(&f);
+        let _writable_again = WritableAgain(f.clone());
+        let _editor = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&f)
+            .unwrap();
+        assert!(is_held_open(dir.path(), Path::new("f"), &mut no_step).unwrap());
+    }
+
+    #[test]
+    fn is_held_open_never_looks_past_a_linked_folder() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let f = outside.path().join("f");
+        std::fs::write(&f, "old").unwrap();
+        junction(&dir.path().join("j"), outside.path());
+        let _editor = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&f)
+            .unwrap();
+        assert!(!is_held_open(dir.path(), Path::new("j/f"), &mut no_step).unwrap());
     }
 
     #[test]

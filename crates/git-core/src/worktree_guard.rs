@@ -1040,6 +1040,72 @@ pub(crate) fn is_read_only_beneath(workdir: &Path, rel: &str) -> bool {
         && beneath::is_read_only(workdir, Path::new(rel), &mut no_step).unwrap_or(false)
 }
 
+/// For a libgit2 checkout of `paths` that failed with `error`: the one of `paths` that another
+/// program keeps open so it can't be replaced (Windows: opened without sharing delete, as some
+/// editors do), the file to name in a "Close it, then try again" message (#268).
+///
+/// libgit2 reports such a file only as an OS error, "could not remove '<full path>': " plus the
+/// system's reason in the user's language. Only for an OS or file-system error, the path is
+/// taken from the quoted full path (either slash direction; the localized reason is never
+/// read), and that file alone is checked. When no path of the checkout is quoted, each one is
+/// checked in turn. A check opens the file through the walker (never through a link) for
+/// deleting, sharing everything, and closes it at once: a sharing violation means another
+/// program holds it. Anything else, and every other platform (where an open file never stops a
+/// replace), is `None`, so the caller keeps libgit2's error.
+///
+/// Known misses, which keep libgit2's raw error: a program holding the file shared for reading
+/// and deleting but not writing (the check's delete open succeeds, libgit2's write fails), and
+/// a running program or a loaded library (`.exe`, `.dll`), which Windows refuses with access
+/// denied rather than a sharing violation.
+pub(crate) fn held_open_after_checkout<'a>(
+    workdir: &Path,
+    error: &git2::Error,
+    paths: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    if !matches!(
+        error.class(),
+        git2::ErrorClass::Os | git2::ErrorClass::Filesystem
+    ) {
+        return None;
+    }
+    let paths: Vec<&'a str> = paths.into_iter().collect();
+    match quoted_in_message(workdir, error.message(), &paths) {
+        Some(named) => held_open_among(workdir, [named]),
+        None => held_open_among(workdir, paths),
+    }
+}
+
+/// The one of `paths` whose full path below `workdir` libgit2's `message` quotes
+/// (`'C:/repo/d/f.txt'`), compared with forward slashes.
+fn quoted_in_message<'a>(workdir: &Path, message: &str, paths: &[&'a str]) -> Option<&'a str> {
+    let message = message.replace('\\', "/");
+    let base = workdir.to_string_lossy().replace('\\', "/");
+    let base = base.trim_end_matches('/');
+    paths
+        .iter()
+        .copied()
+        .find(|rel| message.contains(&format!("'{base}/{}'", rel.replace('\\', "/"))))
+}
+
+#[cfg(windows)]
+fn held_open_among<'a>(
+    workdir: &Path,
+    paths: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    paths.into_iter().find(|rel| {
+        plain_relative(Path::new(rel))
+            && beneath::is_held_open(workdir, Path::new(rel), &mut no_step).unwrap_or(false)
+    })
+}
+
+#[cfg(not(windows))]
+fn held_open_among<'a>(
+    _workdir: &Path,
+    _paths: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    None
+}
+
 /// Writes `bytes` to `rel` as a regular file. Returns `Ok(false)` and writes nothing when an
 /// ancestor is a symlink or `rel` is not a plain relative path.
 ///
@@ -1431,6 +1497,24 @@ mod tests {
         assert!(scan(dir.path(), &GuardSource::Tree(&tree), ALL)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn quoted_in_message_finds_the_quoted_path_in_either_slash_direction() {
+        let paths = ["a.txt", "d/b.txt"];
+        let workdir = Path::new("C:/w/repo/");
+        let quoted = |message: &str| quoted_in_message(workdir, message, &paths);
+        assert_eq!(
+            quoted("could not remove 'C:/w/repo/d/b.txt': in use"),
+            Some("d/b.txt")
+        );
+        assert_eq!(
+            quoted(r"could not remove 'C:\w\repo\d\b.txt': in use"),
+            Some("d/b.txt")
+        );
+        assert_eq!(quoted("could not remove 'C:/w/repo/a.txt.bak': x"), None);
+        assert_eq!(quoted("could not remove 'C:/w/repo/e/a.txt': x"), None);
+        assert_eq!(quoted("failed to write"), None);
     }
 
     #[test]

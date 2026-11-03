@@ -2202,3 +2202,35 @@ fn resolving_a_conflict_in_a_file_open_in_another_program_is_refused() {
     assert_eq!(conflict_stages(&repo, "shared.txt"), stages);
     assert_eq!(top_level_names(dir.path()), ["shared.txt"]);
 }
+
+/// Taking one side's whole file goes through libgit2's checkout: a file another program keeps
+/// open gets the same message, not libgit2's raw error, and the conflict stays (#268).
+#[cfg(windows)]
+#[test]
+fn taking_a_whole_side_of_a_file_open_in_another_program_is_refused() {
+    let (dir, repo) = make_conflicted_repo();
+    let file = dir.path().join("shared.txt");
+    let before = std::fs::read(&file).unwrap();
+    let stages = conflict_stages(&repo, "shared.txt");
+    let editor = hold_open_without_share_delete(&file);
+
+    let error =
+        git_core::merge::resolve_whole_file(&repo, "shared.txt", ConflictSide::Theirs).unwrap_err();
+
+    assert!(
+        matches!(error, MergeError::FileInUse(ref p) if p == "shared.txt"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'shared.txt' is open in another program. Close it, then try again."
+    );
+    drop(editor);
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    assert_eq!(conflict_stages(&repo, "shared.txt"), stages);
+    git_core::merge::resolve_whole_file(&repo, "shared.txt", ConflictSide::Theirs).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "line one\nfeature two\nline three\n"
+    );
+}

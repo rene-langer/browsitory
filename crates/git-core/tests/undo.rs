@@ -793,6 +793,34 @@ fn undoes_a_discard_with_autocrlf() {
     assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
 }
 
+/// A redo whose checkout from the index stopped part-way (a file open in another program,
+/// #268) left the files it wrote with CRLF (`core.autocrlf`), not the target's raw bytes.
+/// Trying again still finishes it, rather than calling those files changed since.
+#[test]
+fn a_redo_whose_checkout_stopped_part_way_finishes_when_tried_again() {
+    let (_dir, repo) = crlf_seeded();
+    let workdir = repo.workdir().unwrap().to_path_buf();
+    write(&repo, "b.txt", "three\n");
+    stage(&repo, "b.txt");
+    commit(&repo, "b");
+    fs::remove_file(workdir.join("b.txt")).unwrap();
+    checkout_path(&repo, "b.txt");
+    fs::write(workdir.join("a.txt"), b"edited a\r\n").unwrap();
+    fs::write(workdir.join("b.txt"), b"edited b\r\n").unwrap();
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    checkout_path(&repo, "a.txt");
+    checkout_path(&repo, "b.txt"); // the discard
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    restore(&repo, &after, &before, "undo").unwrap();
+    // The redo's checkout wrote `a.txt`, then stopped at `b.txt`.
+    checkout_path(&repo, "a.txt");
+
+    restore(&repo, &before, &after, "redo").unwrap();
+    assert_eq!(fs::read(workdir.join("a.txt")).unwrap(), b"one\r\ntwo\r\n");
+    assert_eq!(fs::read(workdir.join("b.txt")).unwrap(), b"three\r\n");
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
+}
+
 #[test]
 fn undoes_a_branch_switch_with_autocrlf() {
     let (_dir, repo) = crlf_seeded();
@@ -1359,4 +1387,88 @@ fn undo_of_a_file_held_open_says_so() {
     assert_eq!(read(&repo, "a.txt").as_deref(), Some("two\n"));
     assert_eq!(read(&repo, "f.txt").as_deref(), Some("two\n"));
     assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), before);
+}
+
+/// Windows: a restore whose content matches the index goes through libgit2's checkout, not the
+/// walker (here with `core.autocrlf`, so the restored file has CRLF, which only the checkout
+/// writes). A file another program keeps open without sharing delete gets the same message as
+/// on the walker's path, not libgit2's raw error (#268).
+#[cfg(windows)]
+#[test]
+fn redo_of_a_discard_with_the_file_held_open_says_so() {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    let (_dir, repo) = crlf_seeded();
+    let full = repo.workdir().unwrap().join("a.txt");
+    fs::write(&full, b"edited\r\n").unwrap();
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    checkout_path(&repo, "a.txt"); // the discard
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    restore(&repo, &after, &before, "undo").unwrap();
+    assert_eq!(fs::read(&full).unwrap(), b"edited\r\n");
+    // As an editor that keeps the file open, sharing read and write but not delete.
+    let editor = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .open(&full)
+        .unwrap();
+
+    let error = restore(&repo, &before, &after, "redo").unwrap_err();
+    assert!(
+        matches!(error, UndoError::FileInUse(ref p) if p == "a.txt"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'a.txt' is open in another program. Close it, then try again."
+    );
+    assert_eq!(fs::read(&full).unwrap(), b"edited\r\n");
+
+    // Closed, then tried again, as the message says: the redo finishes, through the checkout.
+    drop(editor);
+    restore(&repo, &before, &after, "redo").unwrap();
+    assert_eq!(fs::read(&full).unwrap(), b"one\r\ntwo\r\n");
+    assert_eq!(status_of(&repo, "a.txt"), git2::Status::CURRENT);
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
+}
+
+/// Windows: of several files checked out from the index, the message names the one another
+/// program holds, not just the first (#268).
+#[cfg(windows)]
+#[test]
+fn redo_of_a_discard_of_two_files_names_the_held_one() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_dir, repo) = crlf_seeded();
+    let workdir = repo.workdir().unwrap().to_path_buf();
+    write(&repo, "b.txt", "three\n");
+    stage(&repo, "b.txt");
+    commit(&repo, "b");
+    fs::remove_file(workdir.join("b.txt")).unwrap();
+    checkout_path(&repo, "b.txt");
+    fs::write(workdir.join("a.txt"), b"edited a\r\n").unwrap();
+    fs::write(workdir.join("b.txt"), b"edited b\r\n").unwrap();
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    checkout_path(&repo, "a.txt");
+    checkout_path(&repo, "b.txt"); // the discard
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    restore(&repo, &after, &before, "undo").unwrap();
+    let editor = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1 | 0x2)
+        .open(workdir.join("b.txt"))
+        .unwrap();
+
+    let error = restore(&repo, &before, &after, "redo").unwrap_err();
+    assert!(
+        matches!(error, UndoError::FileInUse(ref p) if p == "b.txt"),
+        "{error:?}"
+    );
+    assert_eq!(fs::read(workdir.join("b.txt")).unwrap(), b"edited b\r\n");
+
+    drop(editor);
+    restore(&repo, &before, &after, "redo").unwrap();
+    assert_eq!(fs::read(workdir.join("a.txt")).unwrap(), b"one\r\ntwo\r\n");
+    assert_eq!(fs::read(workdir.join("b.txt")).unwrap(), b"three\r\n");
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
 }

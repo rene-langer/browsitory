@@ -805,3 +805,36 @@ fn ignoring_a_file_leaves_no_temporary_file() {
         .collect();
     assert_eq!(untracked, [".gitignore"]);
 }
+
+/// Discarding the changes of a file another program keeps open (sharing read and write, not
+/// delete) goes through libgit2's checkout: it says so instead of showing libgit2's raw error,
+/// and the file keeps its changes (#268).
+#[cfg(windows)]
+#[test]
+fn discarding_a_file_open_in_another_program_is_refused() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", "v1\n");
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "f.txt", "v2\n");
+    let editor = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1 | 0x2)
+        .open(dir.path().join("f.txt"))
+        .unwrap();
+
+    let error = discard_file(&repo, "f.txt").unwrap_err();
+
+    assert!(
+        matches!(error, StageError::FileInUse(ref p) if p == "f.txt"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'f.txt' is open in another program. Close it, then try again."
+    );
+    drop(editor);
+    assert_eq!(read(dir.path(), "f.txt"), "v2\n");
+    discard_file(&repo, "f.txt").unwrap();
+    assert_eq!(read(dir.path(), "f.txt"), "v1\n");
+}
