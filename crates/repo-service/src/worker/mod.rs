@@ -6426,7 +6426,7 @@ mod tests {
 
         assert_eq!(refused, label);
         assert_eq!(
-            held_folder(&message, &base, "checked out"),
+            held_folder(&message, &base, "is checked out"),
             std::fs::canonicalize(&linked).unwrap()
         );
         assert_eq!(handle.get_undo_state().unwrap().undo, Some(label));
@@ -7336,6 +7336,58 @@ mod tests {
         handle.delete_branch("renamed".into(), true).unwrap();
     }
 
+    /// A cherry-pick paused in one worktree protects its branch from the other worktrees'
+    /// windows (#293). HEAD stays on that branch during the pause, so moving, deleting and
+    /// switching to it, or adding a worktree on it, were refused already ("checked out"); the
+    /// refusal now names the cherry-pick. Renaming it is refused too, unlike git: libgit2 moves
+    /// that worktree's HEAD along, and Abort then left the commits the sequence made in place
+    /// (`rewound: false`), because HEAD named another branch than the one it started on.
+    #[test]
+    fn another_worktree_cant_touch_the_branch_a_paused_sequence_runs_on() {
+        let (dir, repo, _worker, handle, branch) = paused_sequence();
+        let full = format!("refs/heads/{branch}");
+        let original = repo.reflog(&full).unwrap().get(1).unwrap().id_new();
+        let paused_at = repo.head().unwrap().target().unwrap();
+        assert_ne!(original, paused_at, "the first step landed");
+        let parent = TempDir::new().unwrap();
+        let linked_path = parent.path().join("linked");
+        git_core::worktree::create_worktree(&repo, "linked", &linked_path, "feature", None)
+            .unwrap();
+        let linked_worker = Worker::spawn(linked_path).unwrap();
+        let linked = linked_worker.handle();
+        let main_folder = std::fs::canonicalize(dir.path()).unwrap();
+        let refused = |result: Result<(), String>| {
+            let message = result.unwrap_err();
+            assert_eq!(
+                held_folder(&message, &branch, "has a paused cherry-pick"),
+                main_folder
+            );
+        };
+
+        refused(linked.rename_branch(branch.clone(), "renamed".into()));
+        refused(linked.delete_branch(branch.clone(), true));
+        refused(linked.switch_branch(branch.clone(), no_events()));
+        refused(linked.create_worktree(
+            "second".into(),
+            parent.path().join("second"),
+            branch.clone(),
+            None,
+        ));
+        refused(linked.restore_reflog_entry(full.clone(), original.to_string()));
+        assert_eq!(repo.head().unwrap().name().unwrap(), full);
+        assert_eq!(branch_target(dir.path(), &full), paused_at);
+
+        // Abort rewinds the branch the sequence started on.
+        assert_eq!(
+            handle.abort_sequence(None).unwrap(),
+            git_core::pick::SequenceAbort { rewound: true }
+        );
+        assert_eq!(repo.head().unwrap().target(), Some(original));
+        // Once the sequence is over, the branch is only checked out there, as before.
+        let message = linked.delete_branch(branch.clone(), true).unwrap_err();
+        assert_eq!(held_folder(&message, &branch, "is checked out"), main_folder);
+    }
+
     /// A rebase paused in one worktree protects its branch from the other worktrees' windows
     /// too (#291), with the wording a branch held by another worktree gets: Continue and Abort
     /// return to that branch.
@@ -7354,7 +7406,7 @@ mod tests {
         let main_folder = std::fs::canonicalize(dir.path()).unwrap();
         let refused = |result: Result<(), String>| {
             let message = result.unwrap_err();
-            assert_eq!(held_folder(&message, &short, "being rebased"), main_folder);
+            assert_eq!(held_folder(&message, &short, "is being rebased"), main_folder);
         };
 
         refused(linked.delete_branch(short.clone(), true));
@@ -7371,13 +7423,13 @@ mod tests {
         // Once the rebase is aborted, the branch is checked out there again, as before.
         handle.abort_rebase().unwrap();
         let message = linked.delete_branch(short.clone(), true).unwrap_err();
-        assert_eq!(held_folder(&message, &short, "checked out"), main_folder);
+        assert_eq!(held_folder(&message, &short, "is checked out"), main_folder);
     }
 
-    /// The folder `message` ("branch '<branch>' is <how> in another worktree at '<folder>'")
-    /// names, canonicalized.
+    /// The folder `message` ("branch '<branch>' <how> in another worktree at '<folder>'", `how`
+    /// like "is checked out") names, canonicalized.
     fn held_folder(message: &str, branch: &str, how: &str) -> std::path::PathBuf {
-        let prefix = format!("branch '{branch}' is {how} in another worktree at '");
+        let prefix = format!("branch '{branch}' {how} in another worktree at '");
         let folder = message
             .strip_prefix(&prefix)
             .and_then(|rest| rest.strip_suffix('\''))
