@@ -43,6 +43,7 @@ pub fn init_repo(path: &Path) -> Result<(), RepoError> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum OperationKind {
     Merge,
     CherryPick,
@@ -79,6 +80,7 @@ pub struct HeadInfo {
 
 /// Which command a terminal rebase folder belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum TerminalRebaseKind {
     /// `git rebase` (`rebase-merge`, or `rebase-apply` with the apply backend).
     Rebase,

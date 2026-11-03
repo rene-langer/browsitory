@@ -19,6 +19,10 @@ license = "MIT"
 # too, not just documented at tauri-app's call site: no consumer's build-time toggle should be
 # able to silently redirect a user's real credentials or forge traffic.
 forge-fixture-override = []
+# Test-only: derives ts-rs's `TS` for the enums whose variant names cross the wire as strings
+# (#306), so `tauri-app`'s and `vscode-sidecar`'s tests can generate the frontend's DTO types.
+# Only those crates' dev-dependencies enable it; no build of the app or the sidecar does.
+ts = ["dep:ts-rs"]
 
 [dependencies]
 git-core = { path = "../git-core" }
@@ -33,6 +37,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2.5"
+ts-rs = { version = "12", optional = true }
 
 [dev-dependencies]
 test-support = { path = "../test-support" }

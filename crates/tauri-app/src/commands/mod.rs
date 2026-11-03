@@ -71,11 +71,23 @@ pub use undo::{get_undo_state, redo_last, undo_last};
 pub use worktree::{create_worktree, list_worktrees, prune_worktrees, remove_worktree};
 
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "TransferProgress"))]
 #[serde(rename_all = "camelCase")]
 pub struct TransferProgressDto {
     pub operation_id: String,
+    #[cfg_attr(test, ts(as = "git_core::remote::TransferOperation"))]
     pub operation: String,
+    #[cfg_attr(
+        test,
+        ts(
+            // `TransferPhase` (declared in the same generated file) plus the phases only the
+            // transfer relay emits.
+            type = r#"TransferPhase | "Starting" | "RemoteFailed" | "Completed" | "Failed""#
+        )
+    )]
     pub phase: String,
+    #[cfg_attr(test, ts(as = "Option<git_core::remote::TransferErrorKind>"))]
     pub error_kind: Option<String>,
     pub current: usize,
     pub total: usize,
@@ -83,6 +95,7 @@ pub struct TransferProgressDto {
     pub message: Option<String>,
     /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     pub remote_name: Option<String>,
     /// Local `pre-push` hook output on a `HookFailed` completion, `null` otherwise. Unlike
     /// `message` this comes from the user's own script, not the remote.
@@ -188,12 +201,15 @@ fn emit_transfer_events(app: AppHandle, events: mpsc::Receiver<TransferEvent>) {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StatusEntry"))]
 #[serde(rename_all = "camelCase")]
 pub struct StatusEntryDto {
     pub path: String,
     /// A staged rename's old path; always present (`null` otherwise).
     pub old_path: Option<String>,
     pub staged: bool,
+    #[cfg_attr(test, ts(as = "git_core::status::StatusKind"))]
     pub kind: String,
 }
 
@@ -209,6 +225,8 @@ impl From<git_core::status::StatusEntry> for StatusEntryDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "BranchInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct BranchInfoDto {
     pub name: String,
@@ -220,6 +238,8 @@ pub struct BranchInfoDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "WorktreeInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeInfoDto {
     pub name: String,
@@ -244,6 +264,8 @@ impl From<git_core::worktree::WorktreeInfo> for WorktreeInfoDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "Workspace"))]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDto {
     pub id: String,
@@ -268,6 +290,8 @@ impl From<config::Workspace> for WorkspaceDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "OpenRepoEntry"))]
 #[serde(rename_all = "camelCase")]
 pub struct OpenRepoEntryDto {
     pub path: String,
@@ -284,6 +308,7 @@ impl From<config::OpenRepoEntry> for OpenRepoEntryDto {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct OpenRepoEntryInput {
     pub path: String,
@@ -291,6 +316,8 @@ pub struct OpenRepoEntryInput {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SubmoduleInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct SubmoduleInfoDto {
     pub path: String,
@@ -313,6 +340,8 @@ impl From<git_core::submodule::SubmoduleInfo> for SubmoduleInfoDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ReflogEntry"))]
 #[serde(rename_all = "camelCase")]
 pub struct ReflogEntryDto {
     pub reference: String,
@@ -341,6 +370,8 @@ impl From<git_core::reflog::ReflogEntry> for ReflogEntryDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RemoteInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteInfoDto {
     pub name: String,
@@ -353,12 +384,16 @@ pub struct RemoteInfoDto {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RemoteAuthMode"))]
 pub enum RemoteAuthModeDto {
     HttpsToken,
     SshAgent,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "TagInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct TagInfoDto {
     pub name: String,
@@ -417,6 +452,8 @@ impl
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "UpstreamInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct UpstreamInfoDto {
     pub local_branch: String,
@@ -429,6 +466,8 @@ pub struct UpstreamInfoDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PullOutcome"))]
 #[serde(tag = "kind", rename_all_fields = "camelCase")]
 pub enum PullOutcomeDto {
     UpToDate,
@@ -476,6 +515,8 @@ impl From<git_core::branch::BranchInfo> for BranchInfoDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StashEntry"))]
 #[serde(rename_all = "camelCase")]
 pub struct StashEntryDto {
     pub index: usize,
@@ -494,6 +535,8 @@ impl From<git_core::stash::StashEntry> for StashEntryDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "BlameLine"))]
 #[serde(rename_all = "camelCase")]
 pub struct BlameLineDto {
     pub line_number: usize,
@@ -518,6 +561,8 @@ impl From<git_core::blame::BlameLine> for BlameLineDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GraphCommit"))]
 #[serde(rename_all = "camelCase")]
 pub struct GraphCommitDto {
     pub id: String,
@@ -550,6 +595,8 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileHistoryEntry"))]
 #[serde(rename_all = "camelCase")]
 pub struct FileHistoryEntryDto {
     pub commit: GraphCommitDto,
@@ -569,6 +616,8 @@ impl From<git_core::history::FileHistoryEntry> for FileHistoryEntryDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SearchPage"))]
 #[serde(rename_all = "camelCase")]
 pub struct SearchPageDto {
     pub commits: Vec<GraphCommitDto>,
@@ -589,6 +638,8 @@ impl From<git_core::search::SearchPage> for SearchPageDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ChangedFile"))]
 #[serde(rename_all = "camelCase")]
 pub struct ChangedFileDto {
     pub path: String,
@@ -606,6 +657,8 @@ impl From<git_core::diff::ChangedFile> for ChangedFileDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CompareRange"))]
 #[serde(rename_all = "camelCase")]
 pub struct CompareRangeDto {
     pub from_id: String,
@@ -622,12 +675,15 @@ impl From<git_core::diff::CompareRange> for CompareRangeDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "HeadInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct HeadInfoDto {
     pub head_id: Option<String>,
     pub detached_at: Option<String>,
     pub head_pushed: bool,
-    pub operation: Option<&'static str>,
+    #[cfg_attr(test, ts(as = "Option<git_core::repo::OperationKind>"))]
+    pub operation: Option<String>,
     pub squash_message: Option<String>,
     pub commit_hooks: Vec<String>,
     pub sequence: Option<SequenceProgressDto>,
@@ -644,9 +700,12 @@ pub struct HeadInfoDto {
 /// `{ "kind": "Rebase" | "Am", "branch", "onto", "currentStep", "totalSteps" }`: `branch` and
 /// `onto` empty when unknown (always for `git am`), the steps 0 when unknown.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "TerminalRebase"))]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalRebaseDto {
-    pub kind: &'static str,
+    #[cfg_attr(test, ts(as = "git_core::repo::TerminalRebaseKind"))]
+    pub kind: String,
     pub branch: String,
     pub onto: String,
     pub current_step: usize,
@@ -656,10 +715,7 @@ pub struct TerminalRebaseDto {
 impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
     fn from(rebase: git_core::repo::TerminalRebase) -> Self {
         Self {
-            kind: match rebase.kind {
-                git_core::repo::TerminalRebaseKind::Rebase => "Rebase",
-                git_core::repo::TerminalRebaseKind::Am => "Am",
-            },
+            kind: format!("{:?}", rebase.kind),
             branch: rebase.branch,
             onto: rebase.onto,
             current_step: rebase.current_step,
@@ -672,6 +728,8 @@ impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
 /// `confirmed`): `{ "headId", "startedAt", "rewinds", "commitsToRemove", "pausedOnConflict" }`, as last shown by
 /// `HeadInfo.terminalSequence` (#281 review).
 #[derive(Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ConfirmedAbort"))]
 #[serde(rename_all = "camelCase")]
 pub struct ConfirmedAbortDto {
     pub head_id: String,
@@ -696,9 +754,12 @@ impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
 /// `{ "kind": "CherryPick" | "Revert", "pausedOnConflict", "startedAt", "startedAtSummary",
 /// "rewinds", "commitsToRemove" }`.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "TerminalSequence"))]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSequenceDto {
-    pub kind: &'static str,
+    #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
+    pub kind: String,
     pub paused_on_conflict: bool,
     pub started_at: String,
     pub started_at_summary: String,
@@ -709,10 +770,7 @@ pub struct TerminalSequenceDto {
 impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
     fn from(sequence: git_core::pick::TerminalSequence) -> Self {
         Self {
-            kind: match sequence.kind {
-                git_core::pick::SequenceKind::CherryPick => "CherryPick",
-                git_core::pick::SequenceKind::Revert => "Revert",
-            },
+            kind: format!("{:?}", sequence.kind),
             paused_on_conflict: sequence.paused_on_conflict,
             started_at: sequence.started_at,
             started_at_summary: sequence.started_at_summary,
@@ -723,6 +781,8 @@ impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "BisectInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct BisectDto {
     /// A branch name, or a commit id when the bisect started on a detached HEAD.
@@ -731,16 +791,11 @@ pub struct BisectDto {
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
     fn from(info: git_core::repo::HeadInfo) -> Self {
-        use git_core::repo::OperationKind;
         Self {
             head_id: info.head_id,
             detached_at: info.detached_at,
             head_pushed: info.head_pushed,
-            operation: info.operation.map(|kind| match kind {
-                OperationKind::Merge => "Merge",
-                OperationKind::CherryPick => "CherryPick",
-                OperationKind::Revert => "Revert",
-            }),
+            operation: info.operation.map(|kind| format!("{:?}", kind)),
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),
@@ -757,6 +812,8 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
 /// A paused interactive rebase: `health` is `{ "kind": "Paused" }` or `{ "kind": "Diverged",
 /// "reason": "HeadMoved" | "BranchMoved" | "BranchMissing" | "OtherOperation" }`.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct RebaseInfoDto {
     pub branch: String,
@@ -767,15 +824,17 @@ pub struct RebaseInfoDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseHealth"))]
 #[serde(tag = "kind", content = "reason")]
 pub enum RebaseHealthDto {
     Paused,
-    Diverged(&'static str),
+    Diverged(#[cfg_attr(test, ts(as = "git_core::rebase::RebaseDivergence"))] String),
 }
 
 impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
     fn from(info: git_core::repo::RebaseInfo) -> Self {
-        use git_core::rebase::{RebaseDivergence, RebaseHealth};
+        use git_core::rebase::RebaseHealth;
         Self {
             branch: info.branch,
             onto: info.onto,
@@ -783,18 +842,17 @@ impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
             total_steps: info.total_steps,
             health: match info.health {
                 RebaseHealth::Paused => RebaseHealthDto::Paused,
-                RebaseHealth::Diverged(reason) => RebaseHealthDto::Diverged(match reason {
-                    RebaseDivergence::HeadMoved => "HeadMoved",
-                    RebaseDivergence::BranchMoved => "BranchMoved",
-                    RebaseDivergence::BranchMissing => "BranchMissing",
-                    RebaseDivergence::OtherOperation => "OtherOperation",
-                }),
+                RebaseHealth::Diverged(reason) => {
+                    RebaseHealthDto::Diverged(format!("{:?}", reason))
+                }
             },
         }
     }
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseAbort"))]
 pub struct RebaseAbortDto {
     pub restored: bool,
 }
@@ -808,9 +866,12 @@ impl From<git_core::rebase::RebaseAbort> for RebaseAbortDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SequenceProgress"))]
 #[serde(rename_all = "camelCase")]
 pub struct SequenceProgressDto {
-    pub kind: &'static str,
+    #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
+    pub kind: String,
     pub current_step: usize,
     pub total_steps: usize,
     pub current_commit: String,
@@ -819,10 +880,7 @@ pub struct SequenceProgressDto {
 impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
     fn from(progress: git_core::pick::SequenceProgress) -> Self {
         Self {
-            kind: match progress.kind {
-                git_core::pick::SequenceKind::CherryPick => "CherryPick",
-                git_core::pick::SequenceKind::Revert => "Revert",
-            },
+            kind: format!("{:?}", progress.kind),
             current_step: progress.current_step,
             total_steps: progress.total_steps,
             current_commit: progress.current_commit,
@@ -831,6 +889,8 @@ impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SequenceOutcome"))]
 #[serde(tag = "kind")]
 pub enum SequenceOutcomeDto {
     Completed {
@@ -884,6 +944,8 @@ impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SequenceAbort"))]
 pub struct SequenceAbortDto {
     pub rewound: bool,
 }
@@ -897,6 +959,8 @@ impl From<git_core::pick::SequenceAbort> for SequenceAbortDto {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ConflictSide"))]
 pub enum ConflictSideDto {
     Ours,
     Theirs,
@@ -913,6 +977,8 @@ impl From<ConflictSideDto> for git_core::merge::ConflictSide {
 
 /// A commit/amend result: a failing gate hook is data the UI renders, not an error.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CommitOutcome"))]
 #[serde(tag = "kind")]
 pub enum CommitOutcomeDto {
     Committed {
@@ -942,23 +1008,22 @@ impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
 /// pushes and a pull's post-merge report `RunningHook` through `transfer-progress` instead).
 /// `source` (`"Commit" | "Checkout" | "Merge" | "Pick"`) tells the UI where to show it (#185).
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "HookProgress"))]
 #[serde(rename_all = "camelCase")]
 pub struct HookProgressDto {
     pub repo_path: String,
     pub operation_id: String,
     pub hook: String,
+    #[cfg_attr(test, ts(type = r#""Started" | "Finished""#))]
     pub phase: &'static str,
-    pub source: &'static str,
+    #[cfg_attr(test, ts(as = "repo_service::worker::HookSource"))]
+    pub source: String,
 }
 
 /// The wire name of a `HookSource`.
-fn hook_source_name(source: HookSource) -> &'static str {
-    match source {
-        HookSource::Commit => "Commit",
-        HookSource::Checkout => "Checkout",
-        HookSource::Merge => "Merge",
-        HookSource::Pick => "Pick",
-    }
+fn hook_source_name(source: HookSource) -> String {
+    format!("{:?}", source)
 }
 
 fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
@@ -1000,6 +1065,8 @@ fn emit_hook_events(app: AppHandle, repo_path: String, events: mpsc::Receiver<Ho
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PickOutcome"))]
 #[serde(tag = "kind")]
 pub enum PickOutcomeDto {
     Committed {
@@ -1029,6 +1096,8 @@ impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "UndoState"))]
 pub struct UndoStateDto {
     undo: Option<String>,
     redo: Option<String>,
@@ -1044,6 +1113,8 @@ impl From<repo_service::worker::UndoState> for UndoStateDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SignatureStatus"))]
 #[serde(rename_all = "camelCase")]
 pub enum SignatureStatusDto {
     Unsigned,
@@ -1058,6 +1129,8 @@ pub enum SignatureStatusDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SignatureFormat"))]
 #[serde(rename_all = "lowercase")]
 pub enum SignatureFormatDto {
     Openpgp,
@@ -1065,6 +1138,8 @@ pub enum SignatureFormatDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CommitSignature"))]
 pub struct CommitSignatureDto {
     status: SignatureStatusDto,
     format: Option<SignatureFormatDto>,
@@ -1100,6 +1175,8 @@ impl From<git_core::signing::CommitSignature> for CommitSignatureDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "UndoOutcome"))]
 #[serde(tag = "kind")]
 pub enum UndoOutcomeDto {
     Done { label: String },
@@ -1123,6 +1200,8 @@ impl From<repo_service::worker::UndoOutcome> for UndoOutcomeDto {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ResetMode"))]
 #[serde(rename_all = "lowercase")]
 pub enum ResetModeDto {
     Soft,
@@ -1143,6 +1222,8 @@ impl From<ResetModeDto> for git_core::reset::ResetMode {
 /// One side of a file for the image preview. `Loaded` carries the bytes as base64 and the
 /// image type sniffed from them (`null` when they are not a previewable image).
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileSide"))]
 #[serde(tag = "kind")]
 pub enum FileSideDto {
     Missing,
@@ -1171,6 +1252,8 @@ impl From<git_core::diff::FileSide> for FileSideDto {
 }
 
 #[derive(Debug, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileSides"))]
 pub struct FileSidesDto {
     pub old: FileSideDto,
     pub new: FileSideDto,
@@ -1187,6 +1270,8 @@ impl From<git_core::diff::FileSides> for FileSidesDto {
 
 /// A `Key: value` trailer for a commit/amend message (`RepoClient`'s `Trailer`).
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "Trailer"))]
 pub struct TrailerDto {
     pub key: String,
     pub value: String,
@@ -1203,6 +1288,8 @@ impl From<TrailerDto> for git_core::commit::Trailer {
 
 /// A person: the amend author override (in) and a recent author (out).
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SignatureInput"))]
 pub struct SignatureInputDto {
     pub name: String,
     pub email: String,
@@ -1235,6 +1322,8 @@ pub(crate) fn trailers_from(dtos: Option<Vec<TrailerDto>>) -> Vec<git_core::comm
 
 /// Which two sides "Open in diff tool" compares (`RepoClient`'s `DiffSource`).
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffSource"))]
 #[serde(tag = "kind")]
 pub enum DiffSourceDto {
     Unstaged,
@@ -1284,6 +1373,8 @@ impl From<DiffSourceDto> for git_core::tools::DiffSource {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "MergeToolOutcome"))]
 pub enum MergeToolOutcomeDto {
     Resolved,
     Unresolved,
@@ -1299,6 +1390,8 @@ impl From<git_core::tools::MergeToolOutcome> for MergeToolOutcomeDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "MarkResolvedOutcome"))]
 pub enum MarkResolvedOutcomeDto {
     Resolved,
     MarkersRemain,
@@ -1314,6 +1407,8 @@ impl From<git_core::merge::MarkResolvedOutcome> for MarkResolvedOutcomeDto {
 }
 
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ExternalToolSettings"))]
 pub struct ExternalToolSettingsDto {
     pub editor: Option<String>,
     pub terminal: Option<String>,
@@ -1338,6 +1433,8 @@ impl From<ExternalToolSettingsDto> for config::ExternalToolSettings {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GitConfigSource"))]
 pub enum GitConfigSourceDto {
     System,
     Xdg,
@@ -1362,6 +1459,8 @@ impl From<git_core::tools::ConfigSource> for GitConfigSourceDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GitToolInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct GitToolDto {
     name: String,
@@ -1384,6 +1483,8 @@ impl From<git_core::tools::GitToolInfo> for GitToolDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GitTools"))]
 #[serde(rename_all = "camelCase")]
 pub struct GitToolsDto {
     diff_tool: Option<GitToolDto>,
@@ -1400,6 +1501,8 @@ impl From<git_core::tools::GitTools> for GitToolsDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "MergeOutcome"))]
 #[serde(tag = "kind")]
 pub enum MergeOutcomeDto {
     UpToDate,
@@ -1424,6 +1527,8 @@ impl From<git_core::merge::MergeOutcome> for MergeOutcomeDto {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FastForwardMode"))]
 pub enum FastForwardDto {
     Allow,
     Never,
@@ -1431,6 +1536,8 @@ pub enum FastForwardDto {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "MergeOptions"))]
 #[serde(rename_all = "camelCase")]
 pub struct MergeOptionsDto {
     pub fast_forward: FastForwardDto,
@@ -1489,6 +1596,8 @@ impl From<FastForwardDto> for config::MergeFastForward {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StashOptions"))]
 #[serde(rename_all = "camelCase")]
 pub struct StashOptionsDto {
     pub message: Option<String>,
@@ -1509,6 +1618,8 @@ impl From<StashOptionsDto> for git_core::stash::StashOptions {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StashApplyOutcome"))]
 #[serde(tag = "kind")]
 pub enum StashApplyOutcomeDto {
     Applied,
@@ -1525,6 +1636,8 @@ impl From<git_core::stash::StashApplyOutcome> for StashApplyOutcomeDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StashFiles"))]
 #[serde(rename_all = "camelCase")]
 pub struct StashFilesDto {
     pub tracked: Vec<String>,
@@ -1543,6 +1656,8 @@ impl From<git_core::stash::StashFiles> for StashFilesDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ConflictSegment"))]
 #[serde(tag = "kind")]
 pub enum ConflictSegmentDto {
     Clean { content: String },
@@ -1563,6 +1678,8 @@ impl From<git_core::merge::ConflictSegment> for ConflictSegmentDto {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileConflictChoice"))]
 pub enum FileConflictChoiceDto {
     Ours,
     Theirs,
@@ -1580,6 +1697,8 @@ impl From<FileConflictChoiceDto> for git_core::merge::FileConflictChoice {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebasePlanCommit"))]
 #[serde(rename_all = "camelCase")]
 pub struct RebasePlanCommitDto {
     pub id: String,
@@ -1602,6 +1721,8 @@ impl From<git_core::rebase::RebasePlanCommit> for RebasePlanCommitDto {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseAction"))]
 #[serde(tag = "kind")]
 pub enum RebaseActionDto {
     Pick,
@@ -1628,6 +1749,8 @@ impl From<RebaseActionDto> for git_core::rebase::RebaseAction {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebasePlanEntry"))]
 #[serde(rename_all = "camelCase")]
 pub struct RebasePlanEntryDto {
     pub commit_id: String,
@@ -1646,6 +1769,8 @@ impl From<RebasePlanEntryDto> for git_core::rebase::RebasePlanEntry {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseStepResult"))]
 #[serde(tag = "kind")]
 pub enum RebaseStepResultDto {
     Conflicted { files: Vec<String> },
@@ -1668,12 +1793,17 @@ impl From<git_core::rebase::RebaseStepResult> for RebaseStepResultDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffLine"))]
 pub struct DiffLineDto {
+    #[cfg_attr(test, ts(as = "git_core::diff::DiffLineOrigin"))]
     pub origin: String,
     pub content: String,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffHunk"))]
 #[serde(rename_all = "camelCase")]
 pub struct DiffHunkDto {
     pub old_start: u32,
@@ -1703,6 +1833,8 @@ impl From<DiffHunk> for DiffHunkDto {
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ForgeProvider"))]
 pub enum ForgeProviderDto {
     GitHub,
     Bitbucket,
@@ -1727,6 +1859,8 @@ impl From<ForgeProviderDto> for git_core::forge::ForgeProvider {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ForgeRepository"))]
 #[serde(rename_all = "camelCase")]
 pub struct ForgeRepositoryDto {
     pub provider: ForgeProviderDto,
@@ -1749,6 +1883,8 @@ impl From<git_core::forge::ForgeRepository> for ForgeRepositoryDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PullRequest"))]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestDto {
     pub id: String,
@@ -1780,6 +1916,8 @@ impl From<repo_service::pull_requests::PullRequest> for PullRequestDto {
 /// page (see `repo_service::pull_requests::PullRequestList`) — the frontend uses `truncated` to show
 /// an explicit "more available" notice instead of silently displaying a partial list.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PullRequestList"))]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestListDto {
     pub pull_requests: Vec<PullRequestDto>,
@@ -1803,6 +1941,8 @@ impl From<repo_service::pull_requests::PullRequestList> for PullRequestListDto {
 /// `repo_service::pull_requests::CreatePullRequest`'s doc comment, which this DTO mirrors field-for-
 /// field.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CreatePullRequest"))]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePullRequestDto {
     pub title: String,
@@ -1995,6 +2135,8 @@ pub fn list_recent_repos() -> Result<Vec<String>, String> {
 }
 
 #[derive(Deserialize, Clone, Copy)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffOptions"))]
 #[serde(rename_all = "camelCase")]
 pub struct DiffOptionsDto {
     pub ignore_whitespace: bool,
@@ -2011,6 +2153,8 @@ impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
 }
 
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffSettings"))]
 #[serde(rename_all = "camelCase")]
 pub struct DiffSettingsDto {
     pub ignore_whitespace: bool,
@@ -2051,6 +2195,8 @@ pub fn set_diff_settings(settings: DiffSettingsDto) -> Result<(), String> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CommitMessageSettings"))]
 #[serde(rename_all = "camelCase")]
 pub struct CommitMessageSettingsDto {
     pub summary_limit: u32,
@@ -4244,6 +4390,117 @@ mod tests {
             }))
             .unwrap(),
             serde_json::json!({ "restored": false })
+        );
+    }
+}
+
+/// #306: the TypeScript shape of every wire DTO above, checked in as
+/// `frontend/src/ipc/generated/tauri-dto.ts`. `frontend/src/ipc/dtoContract.ts` checks it against
+/// the hand-written types in `RepoClient.ts`, so a renamed field fails the frontend type check.
+/// Regenerate with `UPDATE_TRANSPORT_METHODS=1 cargo test -p tauri-app dto_bindings_are_current`.
+#[cfg(test)]
+mod ts_bindings {
+    use super::clone::{CloneErrorDto, CloneOutcomeDto, CloneRequestDto, HttpsInputDto};
+    use super::*;
+
+    #[test]
+    fn dto_bindings_are_current() {
+        let bindings = test_support::ts_declarations!(
+            "// Generated from the desktop app's wire DTOs (crates/tauri-app/src/commands) by ts-rs.\n\
+             // Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p tauri-app dto_bindings_are_current\n";
+            git_core::diff::DiffLineOrigin,
+            git_core::pick::SequenceKind,
+            git_core::rebase::RebaseDivergence,
+            git_core::remote::TransferErrorKind,
+            git_core::remote::TransferOperation,
+            git_core::remote::TransferPhase,
+            git_core::repo::OperationKind,
+            git_core::repo::TerminalRebaseKind,
+            git_core::status::StatusKind,
+            repo_service::worker::HookSource,
+            HttpsInputDto,
+            CloneRequestDto,
+            CloneOutcomeDto,
+            CloneErrorDto,
+            TransferProgressDto,
+            StatusEntryDto,
+            BranchInfoDto,
+            WorktreeInfoDto,
+            WorkspaceDto,
+            OpenRepoEntryDto,
+            OpenRepoEntryInput,
+            SubmoduleInfoDto,
+            ReflogEntryDto,
+            RemoteInfoDto,
+            RemoteAuthModeDto,
+            TagInfoDto,
+            UpstreamInfoDto,
+            PullOutcomeDto,
+            StashEntryDto,
+            BlameLineDto,
+            GraphCommitDto,
+            FileHistoryEntryDto,
+            SearchPageDto,
+            ChangedFileDto,
+            CompareRangeDto,
+            HeadInfoDto,
+            TerminalRebaseDto,
+            ConfirmedAbortDto,
+            TerminalSequenceDto,
+            BisectDto,
+            RebaseInfoDto,
+            RebaseHealthDto,
+            RebaseAbortDto,
+            SequenceProgressDto,
+            SequenceOutcomeDto,
+            SequenceAbortDto,
+            ConflictSideDto,
+            CommitOutcomeDto,
+            HookProgressDto,
+            PickOutcomeDto,
+            UndoStateDto,
+            SignatureStatusDto,
+            SignatureFormatDto,
+            CommitSignatureDto,
+            UndoOutcomeDto,
+            ResetModeDto,
+            FileSideDto,
+            FileSidesDto,
+            TrailerDto,
+            SignatureInputDto,
+            DiffSourceDto,
+            MergeToolOutcomeDto,
+            MarkResolvedOutcomeDto,
+            ExternalToolSettingsDto,
+            GitConfigSourceDto,
+            GitToolDto,
+            GitToolsDto,
+            MergeOutcomeDto,
+            FastForwardDto,
+            MergeOptionsDto,
+            StashOptionsDto,
+            StashApplyOutcomeDto,
+            StashFilesDto,
+            ConflictSegmentDto,
+            FileConflictChoiceDto,
+            RebasePlanCommitDto,
+            RebaseActionDto,
+            RebasePlanEntryDto,
+            RebaseStepResultDto,
+            DiffLineDto,
+            DiffHunkDto,
+            ForgeProviderDto,
+            ForgeRepositoryDto,
+            PullRequestDto,
+            PullRequestListDto,
+            CreatePullRequestDto,
+            DiffOptionsDto,
+            DiffSettingsDto,
+            CommitMessageSettingsDto,
+        );
+        test_support::assert_generated_file(
+            &test_support::repo_root().join("frontend/src/ipc/generated/tauri-dto.ts"),
+            &bindings,
         );
     }
 }

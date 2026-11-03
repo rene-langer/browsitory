@@ -14,6 +14,8 @@ pub struct CloneState(pub Arc<DefaultCloneService>);
 
 // No `Debug` derive on the two request DTOs: they carry the HTTPS token.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "HttpsInput"))]
 #[serde(rename_all = "camelCase")]
 pub struct HttpsInputDto {
     pub username: String,
@@ -21,6 +23,8 @@ pub struct HttpsInputDto {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CloneRequest"))]
 #[serde(rename_all = "camelCase")]
 pub struct CloneRequestDto {
     pub url: String,
@@ -31,6 +35,8 @@ pub struct CloneRequestDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CloneOutcome"))]
 #[serde(rename_all = "camelCase")]
 pub struct CloneOutcomeDto {
     pub path: String,
@@ -52,6 +58,8 @@ impl From<ServiceCloneOutcome> for CloneOutcomeDto {
 /// `message` is a `Display` string from git-core: it never contains the token (the token only
 /// lives in `OneShotHttps`, and libgit2 error text doesn't echo credentials).
 #[derive(Serialize, Debug)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CloneErrorPayload"))]
 pub struct CloneErrorDto {
     pub kind: String,
     pub message: String,

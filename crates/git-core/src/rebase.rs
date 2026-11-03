@@ -562,6 +562,7 @@ pub enum RebaseHealth {
 
 /// What changed outside the app while the rebase was paused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum RebaseDivergence {
     HeadMoved,
     BranchMoved,

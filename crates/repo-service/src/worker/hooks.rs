@@ -10,6 +10,7 @@ use git_core::hooks::{HookError, HookInvocation, HookOutcome, HookReporter};
 /// `Commit` in the commit box and the sequence panel (commit, amend, Continue), the others in
 /// the "Hook status" strip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum HookSource {
     /// A commit, an amend or a sequence's Continue.
     Commit,

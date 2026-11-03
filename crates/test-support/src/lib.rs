@@ -40,6 +40,54 @@ use std::sync::{Once, OnceLock};
 
 #[doc(hidden)]
 pub use ctor as __ctor;
+#[doc(hidden)]
+pub use ts_rs as __ts_rs;
+
+/// TypeScript declarations (ts-rs) of the listed wire DTOs, as one file: `header`, then one
+/// `export type` per type, sorted by TypeScript name (#306). 64-bit integers become `number`,
+/// as the frontend reads them. Panics when a listed type uses a type that isn't listed, or when
+/// two types share a TypeScript name, so the file is always complete and self-contained.
+#[macro_export]
+macro_rules! ts_declarations {
+    ($header:expr; $($ty:ty),* $(,)?) => {{
+        use $crate::__ts_rs::TS as _;
+        let cfg = $crate::__ts_rs::Config::new().with_large_int("number");
+        let mut declarations: Vec<(String, String)> = Vec::new();
+        let mut used: Vec<String> = Vec::new();
+        $(
+            declarations.push((<$ty>::name(&cfg), <$ty>::decl(&cfg)));
+            used.extend(<$ty>::dependencies(&cfg).into_iter().map(|dep| dep.ts_name));
+        )*
+        $crate::join_ts_declarations($header, declarations, used)
+    }};
+}
+
+#[doc(hidden)]
+pub fn join_ts_declarations(
+    header: &str,
+    mut declarations: Vec<(String, String)>,
+    used: Vec<String>,
+) -> String {
+    declarations.sort();
+    for pair in declarations.windows(2) {
+        assert_ne!(pair[0].0, pair[1].0, "two types are named {}", pair[0].0);
+    }
+    // Matches TypeScript names, not Rust types: an unlisted Rust type that a `ts(rename)` gives
+    // the name of a listed one would pass here (and then fail the frontend's `dtoContract.ts`).
+    for name in used {
+        assert!(
+            declarations.iter().any(|(declared, _)| *declared == name),
+            "{name} is used by a listed type but not listed itself"
+        );
+    }
+    let mut out = header.to_string();
+    for (_, declaration) in declarations {
+        out.push_str("\nexport ");
+        out.push_str(&declaration);
+        out.push('\n');
+    }
+    out
+}
 
 /// Registers a constructor that runs [`install`] before `main` in the test binary this
 /// expands into. Use once per test binary, at module level.

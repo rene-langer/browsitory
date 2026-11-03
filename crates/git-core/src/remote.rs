@@ -21,6 +21,7 @@ mod tests {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum TransferOperation {
     Fetch,
     FetchAll,
@@ -33,6 +34,7 @@ pub enum TransferOperation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum TransferPhase {
     Receiving,
     Updating,
@@ -41,6 +43,7 @@ pub enum TransferPhase {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum TransferErrorKind {
     NonFastForward,
     RejectedRemoteRef,

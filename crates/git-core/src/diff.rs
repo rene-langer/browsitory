@@ -21,6 +21,7 @@ pub enum DiffError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum DiffLineOrigin {
     Add,
     Remove,

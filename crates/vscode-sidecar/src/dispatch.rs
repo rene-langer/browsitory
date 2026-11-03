@@ -15,7 +15,7 @@ use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
-use repo_service::worker::{HookEvent, HookSource, TransferEvent, WorkerRegistry};
+use repo_service::worker::{HookEvent, TransferEvent, WorkerRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -261,12 +261,15 @@ fn close_repo(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StatusEntry"))]
 #[serde(rename_all = "camelCase")]
 struct StatusEntryDto {
     path: String,
     /// A staged rename's old path; always present (`null` otherwise).
     old_path: Option<String>,
     staged: bool,
+    #[cfg_attr(test, ts(as = "git_core::status::StatusKind"))]
     kind: String,
 }
 
@@ -301,6 +304,8 @@ struct GetCommitGraphParams {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GraphCommit"))]
 #[serde(rename_all = "camelCase")]
 struct GraphCommitDto {
     id: String,
@@ -344,12 +349,17 @@ fn get_commit_graph(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffLine"))]
 struct DiffLineDto {
+    #[cfg_attr(test, ts(as = "git_core::diff::DiffLineOrigin"))]
     origin: String,
     content: String,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffHunk"))]
 #[serde(rename_all = "camelCase")]
 struct DiffHunkDto {
     old_start: u32,
@@ -427,6 +437,8 @@ fn get_commit_diff(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileHistoryEntry"))]
 #[serde(rename_all = "camelCase")]
 struct FileHistoryEntryDto {
     commit: GraphCommitDto,
@@ -468,6 +480,8 @@ struct SearchCommitsParams {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SearchPage"))]
 #[serde(rename_all = "camelCase")]
 struct SearchPageDto {
     commits: Vec<GraphCommitDto>,
@@ -529,6 +543,8 @@ fn get_commit_rename_diff(params: Value, repos: &Repos) -> Result<Value, String>
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ChangedFile"))]
 #[serde(rename_all = "camelCase")]
 struct ChangedFileDto {
     path: String,
@@ -545,6 +561,8 @@ impl From<git_core::diff::ChangedFile> for ChangedFileDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CompareRange"))]
 #[serde(rename_all = "camelCase")]
 struct CompareRangeDto {
     from_id: String,
@@ -664,6 +682,8 @@ fn list_recent_repos() -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "OpenRepoEntry"))]
 #[serde(rename_all = "camelCase")]
 struct OpenRepoEntryDto {
     path: String,
@@ -679,15 +699,28 @@ impl From<config::OpenRepoEntry> for OpenRepoEntryDto {
     }
 }
 
+/// `list_open_repos`'s answer. (The desktop app's command returns an `(entries, activePath)`
+/// tuple instead, which `tauriRepoClient.ts` turns into this shape.)
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "OpenRepos"))]
+#[serde(rename_all = "camelCase")]
+struct OpenReposDto {
+    entries: Vec<OpenRepoEntryDto>,
+    active_path: Option<String>,
+}
+
 fn list_open_repos_handler() -> Result<Value, String> {
     let (entries, active) = config::list_open_repos().map_err(|error| error.to_string())?;
-    let entries: Vec<OpenRepoEntryDto> = entries.into_iter().map(OpenRepoEntryDto::from).collect();
-    let active = active.map(|p| p.to_string_lossy().into_owned());
-    serde_json::to_value(serde_json::json!({ "entries": entries, "activePath": active }))
-        .map_err(|error| error.to_string())
+    let open = OpenReposDto {
+        entries: entries.into_iter().map(OpenRepoEntryDto::from).collect(),
+        active_path: active.map(|p| p.to_string_lossy().into_owned()),
+    };
+    serde_json::to_value(open).map_err(|error| error.to_string())
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 struct OpenRepoEntryInput {
     path: String,
@@ -735,6 +768,8 @@ fn scan_repos_in_root(params: Value) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "Workspace"))]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceDto {
     id: String,
@@ -1039,6 +1074,8 @@ fn ignore_path(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Deserialize, Clone, Copy)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffOptions"))]
 #[serde(rename_all = "camelCase")]
 struct DiffOptionsDto {
     ignore_whitespace: bool,
@@ -1055,6 +1092,8 @@ impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
 }
 
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffSettings"))]
 #[serde(rename_all = "camelCase")]
 struct DiffSettingsDto {
     ignore_whitespace: bool,
@@ -1100,6 +1139,8 @@ fn set_diff_settings(params: Value) -> Result<Value, String> {
 }
 
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ExternalToolSettings"))]
 struct ExternalToolSettingsDto {
     editor: Option<String>,
     terminal: Option<String>,
@@ -1146,6 +1187,8 @@ fn set_external_tool_settings(params: Value) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GitConfigSource"))]
 enum GitConfigSourceDto {
     System,
     Xdg,
@@ -1170,6 +1213,8 @@ impl From<git_core::tools::ConfigSource> for GitConfigSourceDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GitToolInfo"))]
 #[serde(rename_all = "camelCase")]
 struct GitToolDto {
     name: String,
@@ -1192,6 +1237,8 @@ impl From<git_core::tools::GitToolInfo> for GitToolDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "GitTools"))]
 #[serde(rename_all = "camelCase")]
 struct GitToolsDto {
     diff_tool: Option<GitToolDto>,
@@ -1210,6 +1257,8 @@ fn get_git_tools(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "MarkResolvedOutcome"))]
 enum MarkResolvedOutcomeDto {
     Resolved,
     MarkersRemain,
@@ -1233,6 +1282,8 @@ struct MarkResolvedParams {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ConflictSide"))]
 enum ConflictSideDto {
     Ours,
     Theirs,
@@ -1266,6 +1317,8 @@ fn mark_resolved(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileVersion"))]
 #[serde(tag = "kind")]
 enum FileVersionDto {
     Head,
@@ -1354,6 +1407,8 @@ struct CommitMessageParams {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "Trailer"))]
 struct TrailerDto {
     key: String,
     value: String,
@@ -1369,6 +1424,8 @@ fn trailers(dtos: Vec<TrailerDto>) -> Vec<git_core::commit::Trailer> {
 }
 
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SignatureInput"))]
 struct SignatureInputDto {
     name: String,
     email: String,
@@ -1390,6 +1447,8 @@ fn list_recent_authors(params: Value, repos: &Repos) -> Result<Value, String> {
 
 /// Which two sides of a diff (`RepoClient`'s `DiffSource`).
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "DiffSource"))]
 #[serde(tag = "kind")]
 enum DiffSourceDto {
     Unstaged,
@@ -1448,6 +1507,8 @@ struct FileSidesParams {
 
 /// One side for the image preview; `mime` is sniffed from the bytes (`null`: not an image).
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileSide"))]
 #[serde(tag = "kind")]
 enum FileSideDto {
     Missing,
@@ -1480,13 +1541,24 @@ fn get_file_sides(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let sides = worker_handle(repos, &params.repo_path)?
         .get_file_sides(params.path, params.source.into())?;
-    Ok(serde_json::json!({
-        "old": FileSideDto::from(sides.old),
-        "new": FileSideDto::from(sides.new),
-    }))
+    serde_json::to_value(FileSidesDto {
+        old: sides.old.into(),
+        new: sides.new.into(),
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileSides"))]
+struct FileSidesDto {
+    old: FileSideDto,
+    new: FileSideDto,
 }
 
 #[derive(Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CommitMessageSettings"))]
 #[serde(rename_all = "camelCase")]
 struct CommitMessageSettingsDto {
     summary_limit: u32,
@@ -1523,6 +1595,8 @@ fn set_commit_message_settings(params: Value) -> Result<Value, String> {
 
 /// A commit/amend result: a failing gate hook is data the UI renders, not an error.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CommitOutcome"))]
 #[serde(tag = "kind")]
 enum CommitOutcomeDto {
     Committed {
@@ -1552,13 +1626,17 @@ impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
 /// hooks). `source` (`"Commit" | "Checkout" | "Merge" | "Pick"`) tells the UI where to show it
 /// (#185).
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "HookProgress"))]
 #[serde(rename_all = "camelCase")]
 struct HookProgressDto {
     repo_path: String,
     operation_id: String,
     hook: String,
+    #[cfg_attr(test, ts(type = r#""Started" | "Finished""#))]
     phase: &'static str,
-    source: &'static str,
+    #[cfg_attr(test, ts(as = "repo_service::worker::HookSource"))]
+    source: String,
 }
 
 fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
@@ -1579,12 +1657,7 @@ fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
         operation_id,
         hook,
         phase,
-        source: match source {
-            HookSource::Commit => "Commit",
-            HookSource::Checkout => "Checkout",
-            HookSource::Merge => "Merge",
-            HookSource::Pick => "Pick",
-        },
+        source: format!("{:?}", source),
     }
 }
 
@@ -1642,6 +1715,8 @@ fn commit(
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "BranchInfo"))]
 #[serde(rename_all = "camelCase")]
 struct BranchInfoDto {
     name: String,
@@ -1741,6 +1816,8 @@ fn rename_branch(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "WorktreeInfo"))]
 #[serde(rename_all = "camelCase")]
 struct WorktreeInfoDto {
     name: String,
@@ -1819,6 +1896,8 @@ fn prune_worktrees(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SubmoduleInfo"))]
 #[serde(rename_all = "camelCase")]
 struct SubmoduleInfoDto {
     path: String,
@@ -1874,6 +1953,8 @@ fn update_submodule(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ReflogEntry"))]
 #[serde(rename_all = "camelCase")]
 struct ReflogEntryDto {
     reference: String,
@@ -1943,12 +2024,16 @@ fn restore_reflog_entry(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RemoteAuthMode"))]
 enum RemoteAuthModeDto {
     HttpsToken,
     SshAgent,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RemoteInfo"))]
 #[serde(rename_all = "camelCase")]
 struct RemoteInfoDto {
     name: String,
@@ -2023,6 +2108,8 @@ fn list_remote_branches(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "UpstreamInfo"))]
 #[serde(rename_all = "camelCase")]
 struct UpstreamInfoDto {
     local_branch: String,
@@ -2220,6 +2307,8 @@ fn clear_current_upstream(params: Value, repos: &Repos) -> Result<Value, String>
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "TagInfo"))]
 #[serde(rename_all = "camelCase")]
 struct TagInfoDto {
     name: String,
@@ -2286,11 +2375,23 @@ fn delete_tag(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "TransferProgress"))]
 #[serde(rename_all = "camelCase")]
 struct TransferProgressDto {
     operation_id: String,
+    #[cfg_attr(test, ts(as = "git_core::remote::TransferOperation"))]
     operation: String,
+    #[cfg_attr(
+        test,
+        ts(
+            // `TransferPhase` (declared in the same generated file) plus the phases only the
+            // transfer relay emits.
+            type = r#"TransferPhase | "Starting" | "RemoteFailed" | "Completed" | "Failed""#
+        )
+    )]
     phase: String,
+    #[cfg_attr(test, ts(as = "Option<git_core::remote::TransferErrorKind>"))]
     error_kind: Option<String>,
     current: usize,
     total: usize,
@@ -2298,6 +2399,7 @@ struct TransferProgressDto {
     message: Option<String>,
     /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
     remote_name: Option<String>,
     /// Local `pre-push` hook output on a `HookFailed` completion, `null` otherwise. Unlike
     /// `message` this comes from the user's own script, not the remote.
@@ -2582,12 +2684,15 @@ fn force_push_current_branch(
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "HeadInfo"))]
 #[serde(rename_all = "camelCase")]
 struct HeadInfoDto {
     head_id: Option<String>,
     detached_at: Option<String>,
     head_pushed: bool,
-    operation: Option<&'static str>,
+    #[cfg_attr(test, ts(as = "Option<git_core::repo::OperationKind>"))]
+    operation: Option<String>,
     squash_message: Option<String>,
     commit_hooks: Vec<String>,
     sequence: Option<SequenceProgressDto>,
@@ -2599,9 +2704,12 @@ struct HeadInfoDto {
 
 /// Same wire shape as the Tauri app's `TerminalRebaseDto` (#263).
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "TerminalRebase"))]
 #[serde(rename_all = "camelCase")]
 struct TerminalRebaseDto {
-    kind: &'static str,
+    #[cfg_attr(test, ts(as = "git_core::repo::TerminalRebaseKind"))]
+    kind: String,
     branch: String,
     onto: String,
     current_step: usize,
@@ -2611,10 +2719,7 @@ struct TerminalRebaseDto {
 impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
     fn from(rebase: git_core::repo::TerminalRebase) -> Self {
         Self {
-            kind: match rebase.kind {
-                git_core::repo::TerminalRebaseKind::Rebase => "Rebase",
-                git_core::repo::TerminalRebaseKind::Am => "Am",
-            },
+            kind: format!("{:?}", rebase.kind),
             branch: rebase.branch,
             onto: rebase.onto,
             current_step: rebase.current_step,
@@ -2627,6 +2732,8 @@ impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
 /// `confirmed`): `{ "headId", "startedAt", "rewinds", "commitsToRemove", "pausedOnConflict" }`, as last shown by
 /// `HeadInfo.terminalSequence` (#281 review).
 #[derive(Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ConfirmedAbort"))]
 #[serde(rename_all = "camelCase")]
 struct ConfirmedAbortDto {
     head_id: String,
@@ -2658,9 +2765,12 @@ struct AbortSequenceParams {
 
 /// Same wire shape as the Tauri app's `TerminalSequenceDto` (#258).
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "TerminalSequence"))]
 #[serde(rename_all = "camelCase")]
 struct TerminalSequenceDto {
-    kind: &'static str,
+    #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
+    kind: String,
     paused_on_conflict: bool,
     started_at: String,
     started_at_summary: String,
@@ -2671,10 +2781,7 @@ struct TerminalSequenceDto {
 impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
     fn from(sequence: git_core::pick::TerminalSequence) -> Self {
         Self {
-            kind: match sequence.kind {
-                git_core::pick::SequenceKind::CherryPick => "CherryPick",
-                git_core::pick::SequenceKind::Revert => "Revert",
-            },
+            kind: format!("{:?}", sequence.kind),
             paused_on_conflict: sequence.paused_on_conflict,
             started_at: sequence.started_at,
             started_at_summary: sequence.started_at_summary,
@@ -2686,6 +2793,8 @@ impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
 
 /// Same wire shape as the Tauri app's `BisectDto`: `{ "startedFrom": "main" }`.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "BisectInfo"))]
 #[serde(rename_all = "camelCase")]
 struct BisectDto {
     started_from: String,
@@ -2693,16 +2802,11 @@ struct BisectDto {
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
     fn from(info: git_core::repo::HeadInfo) -> Self {
-        use git_core::repo::OperationKind;
         Self {
             head_id: info.head_id,
             detached_at: info.detached_at,
             head_pushed: info.head_pushed,
-            operation: info.operation.map(|kind| match kind {
-                OperationKind::Merge => "Merge",
-                OperationKind::CherryPick => "CherryPick",
-                OperationKind::Revert => "Revert",
-            }),
+            operation: info.operation.map(|kind| format!("{:?}", kind)),
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),
@@ -2718,6 +2822,8 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
 
 /// Same wire shape as the Tauri app's `RebaseInfoDto`.
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseInfo"))]
 #[serde(rename_all = "camelCase")]
 struct RebaseInfoDto {
     branch: String,
@@ -2728,15 +2834,17 @@ struct RebaseInfoDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseHealth"))]
 #[serde(tag = "kind", content = "reason")]
 enum RebaseHealthDto {
     Paused,
-    Diverged(&'static str),
+    Diverged(#[cfg_attr(test, ts(as = "git_core::rebase::RebaseDivergence"))] String),
 }
 
 impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
     fn from(info: git_core::repo::RebaseInfo) -> Self {
-        use git_core::rebase::{RebaseDivergence, RebaseHealth};
+        use git_core::rebase::RebaseHealth;
         Self {
             branch: info.branch,
             onto: info.onto,
@@ -2744,21 +2852,21 @@ impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
             total_steps: info.total_steps,
             health: match info.health {
                 RebaseHealth::Paused => RebaseHealthDto::Paused,
-                RebaseHealth::Diverged(reason) => RebaseHealthDto::Diverged(match reason {
-                    RebaseDivergence::HeadMoved => "HeadMoved",
-                    RebaseDivergence::BranchMoved => "BranchMoved",
-                    RebaseDivergence::BranchMissing => "BranchMissing",
-                    RebaseDivergence::OtherOperation => "OtherOperation",
-                }),
+                RebaseHealth::Diverged(reason) => {
+                    RebaseHealthDto::Diverged(format!("{:?}", reason))
+                }
             },
         }
     }
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SequenceProgress"))]
 #[serde(rename_all = "camelCase")]
 struct SequenceProgressDto {
-    kind: &'static str,
+    #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
+    kind: String,
     current_step: usize,
     total_steps: usize,
     current_commit: String,
@@ -2767,10 +2875,7 @@ struct SequenceProgressDto {
 impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
     fn from(progress: git_core::pick::SequenceProgress) -> Self {
         Self {
-            kind: match progress.kind {
-                git_core::pick::SequenceKind::CherryPick => "CherryPick",
-                git_core::pick::SequenceKind::Revert => "Revert",
-            },
+            kind: format!("{:?}", progress.kind),
             current_step: progress.current_step,
             total_steps: progress.total_steps,
             current_commit: progress.current_commit,
@@ -2779,6 +2884,8 @@ impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SequenceOutcome"))]
 #[serde(tag = "kind")]
 enum SequenceOutcomeDto {
     Completed {
@@ -2832,11 +2939,15 @@ impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SequenceAbort"))]
 struct SequenceAbortDto {
     rewound: bool,
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PickOutcome"))]
 #[serde(tag = "kind")]
 enum PickOutcomeDto {
     Committed {
@@ -2866,6 +2977,8 @@ impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "UndoState"))]
 struct UndoStateDto {
     undo: Option<String>,
     redo: Option<String>,
@@ -2881,6 +2994,8 @@ impl From<repo_service::worker::UndoState> for UndoStateDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SignatureStatus"))]
 #[serde(rename_all = "camelCase")]
 enum SignatureStatusDto {
     Unsigned,
@@ -2895,6 +3010,8 @@ enum SignatureStatusDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "SignatureFormat"))]
 #[serde(rename_all = "lowercase")]
 enum SignatureFormatDto {
     Openpgp,
@@ -2902,6 +3019,8 @@ enum SignatureFormatDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CommitSignature"))]
 struct CommitSignatureDto {
     status: SignatureStatusDto,
     format: Option<SignatureFormatDto>,
@@ -2937,6 +3056,8 @@ impl From<git_core::signing::CommitSignature> for CommitSignatureDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "UndoOutcome"))]
 #[serde(tag = "kind")]
 enum UndoOutcomeDto {
     Done { label: String },
@@ -2960,6 +3081,8 @@ impl From<repo_service::worker::UndoOutcome> for UndoOutcomeDto {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ResetMode"))]
 #[serde(rename_all = "lowercase")]
 enum ResetModeDto {
     Soft,
@@ -3202,6 +3325,8 @@ fn push_tags(
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PullOutcome"))]
 #[serde(tag = "kind", rename_all_fields = "camelCase")]
 enum PullOutcomeDto {
     UpToDate,
@@ -3237,6 +3362,8 @@ fn pull_current_upstream(
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StashEntry"))]
 #[serde(rename_all = "camelCase")]
 struct StashEntryDto {
     index: usize,
@@ -3266,6 +3393,8 @@ fn list_stashes(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StashOptions"))]
 #[serde(rename_all = "camelCase")]
 struct StashOptionsDto {
     message: Option<String>,
@@ -3319,6 +3448,8 @@ struct StashApplyParams {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StashApplyOutcome"))]
 #[serde(tag = "kind")]
 enum StashApplyOutcomeDto {
     Applied,
@@ -3364,6 +3495,8 @@ struct StashFilesParams {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "StashFiles"))]
 #[serde(rename_all = "camelCase")]
 struct StashFilesDto {
     tracked: Vec<String>,
@@ -3391,6 +3524,8 @@ fn drop_stash(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "BlameLine"))]
 #[serde(rename_all = "camelCase")]
 struct BlameLineDto {
     line_number: usize,
@@ -3434,6 +3569,8 @@ fn get_blame(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "MergeOutcome"))]
 #[serde(tag = "kind")]
 enum MergeOutcomeDto {
     UpToDate,
@@ -3456,6 +3593,8 @@ impl From<MergeOutcome> for MergeOutcomeDto {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FastForwardMode"))]
 enum FastForwardDto {
     Allow,
     Never,
@@ -3463,6 +3602,8 @@ enum FastForwardDto {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "MergeOptions"))]
 #[serde(rename_all = "camelCase")]
 struct MergeOptionsDto {
     fast_forward: FastForwardDto,
@@ -3568,6 +3709,8 @@ fn set_merge_options(params: Value) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ConflictSegment"))]
 #[serde(tag = "kind")]
 enum ConflictSegmentDto {
     Clean { content: String },
@@ -3627,6 +3770,8 @@ fn get_merge_message(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileConflictChoice"))]
 enum FileConflictChoiceDto {
     Ours,
     Theirs,
@@ -3660,6 +3805,8 @@ fn resolve_add_delete_conflict(params: Value, repos: &Repos) -> Result<Value, St
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebasePlanCommit"))]
 #[serde(rename_all = "camelCase")]
 struct RebasePlanCommitDto {
     id: String,
@@ -3700,6 +3847,8 @@ fn commits_since(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseAction"))]
 #[serde(tag = "kind")]
 enum RebaseActionDto {
     Pick,
@@ -3724,6 +3873,8 @@ impl From<RebaseActionDto> for RebaseAction {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebasePlanEntry"))]
 #[serde(rename_all = "camelCase")]
 struct RebasePlanEntryDto {
     commit_id: String,
@@ -3742,6 +3893,8 @@ impl From<RebasePlanEntryDto> for RebasePlanEntry {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseStepResult"))]
 #[serde(tag = "kind")]
 enum RebaseStepResultDto {
     Conflicted { files: Vec<String> },
@@ -3790,10 +3943,22 @@ fn abort_rebase(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let abort = worker_handle(repos, &params.repo_path)?.abort_rebase()?;
-    Ok(serde_json::json!({ "restored": abort.restored }))
+    serde_json::to_value(RebaseAbortDto {
+        restored: abort.restored,
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseAbort"))]
+struct RebaseAbortDto {
+    restored: bool,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ForgeProvider"))]
 enum ForgeProviderDto {
     GitHub,
     Bitbucket,
@@ -3818,6 +3983,8 @@ impl From<ForgeProviderDto> for ForgeProvider {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "ForgeRepository"))]
 #[serde(rename_all = "camelCase")]
 struct ForgeRepositoryDto {
     provider: ForgeProviderDto,
@@ -3887,6 +4054,8 @@ fn forget_forge_token(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PullRequest"))]
 #[serde(rename_all = "camelCase")]
 struct PullRequestDto {
     id: String,
@@ -3915,6 +4084,8 @@ impl From<repo_service::pull_requests::PullRequest> for PullRequestDto {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "PullRequestList"))]
 #[serde(rename_all = "camelCase")]
 struct PullRequestListDto {
     pull_requests: Vec<PullRequestDto>,
@@ -3951,6 +4122,8 @@ fn list_pull_requests(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "CreatePullRequest"))]
 #[serde(rename_all = "camelCase")]
 struct CreatePullRequestInputDto {
     title: String,
@@ -3994,6 +4167,109 @@ fn create_pull_request(params: Value, repos: &Repos) -> Result<Value, String> {
 mod tests {
     use super::*;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
+    use repo_service::worker::HookSource;
+
+    /// #306: the TypeScript shape of every wire DTO in this file, checked in as
+    /// `frontend/src/ipc/generated/sidecar-dto.ts` and checked against `RepoClient.ts` by
+    /// `frontend/src/ipc/dtoContract.ts`. Regenerate with
+    /// `UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar dto_bindings_are_current`.
+    #[test]
+    fn dto_bindings_are_current() {
+        let bindings = test_support::ts_declarations!(
+            "// Generated from the VSCode sidecar's wire DTOs (crates/vscode-sidecar/src/dispatch.rs) by ts-rs.\n\
+             // Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar dto_bindings_are_current\n";
+            git_core::diff::DiffLineOrigin,
+            git_core::pick::SequenceKind,
+            git_core::rebase::RebaseDivergence,
+            git_core::remote::TransferErrorKind,
+            git_core::remote::TransferOperation,
+            git_core::remote::TransferPhase,
+            git_core::repo::OperationKind,
+            git_core::repo::TerminalRebaseKind,
+            git_core::status::StatusKind,
+            repo_service::worker::HookSource,
+            StatusEntryDto,
+            GraphCommitDto,
+            DiffLineDto,
+            DiffHunkDto,
+            FileHistoryEntryDto,
+            SearchPageDto,
+            ChangedFileDto,
+            CompareRangeDto,
+            OpenRepoEntryDto,
+            OpenRepoEntryInput,
+            WorkspaceDto,
+            DiffOptionsDto,
+            DiffSettingsDto,
+            ExternalToolSettingsDto,
+            GitConfigSourceDto,
+            GitToolDto,
+            GitToolsDto,
+            MarkResolvedOutcomeDto,
+            ConflictSideDto,
+            FileVersionDto,
+            TrailerDto,
+            SignatureInputDto,
+            DiffSourceDto,
+            FileSideDto,
+            CommitMessageSettingsDto,
+            CommitOutcomeDto,
+            HookProgressDto,
+            BranchInfoDto,
+            WorktreeInfoDto,
+            SubmoduleInfoDto,
+            ReflogEntryDto,
+            RemoteAuthModeDto,
+            RemoteInfoDto,
+            UpstreamInfoDto,
+            TagInfoDto,
+            TransferProgressDto,
+            HeadInfoDto,
+            TerminalRebaseDto,
+            ConfirmedAbortDto,
+            TerminalSequenceDto,
+            BisectDto,
+            FileSidesDto,
+            OpenReposDto,
+            RebaseAbortDto,
+            RebaseInfoDto,
+            RebaseHealthDto,
+            SequenceProgressDto,
+            SequenceOutcomeDto,
+            SequenceAbortDto,
+            PickOutcomeDto,
+            UndoStateDto,
+            SignatureStatusDto,
+            SignatureFormatDto,
+            CommitSignatureDto,
+            UndoOutcomeDto,
+            ResetModeDto,
+            PullOutcomeDto,
+            StashEntryDto,
+            StashOptionsDto,
+            StashApplyOutcomeDto,
+            StashFilesDto,
+            BlameLineDto,
+            MergeOutcomeDto,
+            FastForwardDto,
+            MergeOptionsDto,
+            ConflictSegmentDto,
+            FileConflictChoiceDto,
+            RebasePlanCommitDto,
+            RebaseActionDto,
+            RebasePlanEntryDto,
+            RebaseStepResultDto,
+            ForgeProviderDto,
+            ForgeRepositoryDto,
+            PullRequestDto,
+            PullRequestListDto,
+            CreatePullRequestInputDto,
+        );
+        test_support::assert_generated_file(
+            &test_support::repo_root().join("frontend/src/ipc/generated/sidecar-dto.ts"),
+            &bindings,
+        );
+    }
 
     /// #306. Regenerate with
     /// `UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar method_list_is_current`.
