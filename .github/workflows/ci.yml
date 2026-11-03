@@ -39,6 +39,48 @@ jobs:
       - name: License compliance doc is in sync
         run: python3 scripts/check-license-compliance.py
 
+  # Every licence in the full dependency trees, Rust and npm, against the policy in CLAUDE.md
+  # and docs/LICENSE_COMPLIANCE.md (#273). Advisories stay in the `audit` job above.
+  licenses:
+    runs-on: ubuntu-latest
+    env:
+      # renovate: datasource=crate depName=cargo-deny
+      CARGO_DENY_VERSION: 0.20.2
+    steps:
+      - uses: actions/checkout@v7
+      - name: check-dependency-licenses.py unit tests
+        run: python3 scripts/test_check_dependency_licenses.py
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@${{ env.CARGO_DENY_VERSION }}
+      - name: Rust licences (cargo deny, all target platforms)
+        run: cargo deny check licenses
+      - uses: pnpm/action-setup@v6
+        with:
+          # pnpm 11 runs each project with the pnpm version its package.json `packageManager`
+          # pins (9.15.9 for frontend, e2e and extension/e2e; 11.28.10 for extension), so one
+          # job can install all four. The other jobs set up the pinned version directly. The
+          # pnpm cache below is keyed to pnpm 11's store path, so the pnpm 9 installs may not
+          # hit it; that costs a few seconds, so it's left as is.
+          version: 11
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            extension/pnpm-lock.yaml
+            e2e/pnpm-lock.yaml
+            extension/e2e/pnpm-lock.yaml
+      - name: Install npm trees (no install scripts)
+        run: |
+          pnpm --dir frontend install --frozen-lockfile --ignore-scripts
+          pnpm --dir extension install --frozen-lockfile --ignore-scripts
+          pnpm --dir e2e install --frozen-lockfile --ignore-scripts
+          cd extension/e2e && pnpm install --frozen-lockfile --ignore-scripts --ignore-workspace
+      - name: npm licences (all four projects, production and dev, all platforms)
+        run: python3 scripts/check-dependency-licenses.py --summary
+
   changelog:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -135,7 +177,7 @@ jobs:
         run: cargo build -p vscode-sidecar
       - uses: pnpm/action-setup@v6
         with:
-          version: 11  # extension/pnpm-lock.yaml pins pnpm@11.24.0, independent of frontend/e2e's pnpm@9.15.9 pin
+          version: 11  # extension/package.json pins pnpm@11.28.10, independent of frontend/e2e's pnpm@9.15.9 pin
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -227,7 +269,7 @@ jobs:
           targets: ${{ matrix.rust_target }}
       - uses: pnpm/action-setup@v6
         with:
-          version: 11  # extension/pnpm-lock.yaml pins pnpm@11.24.0
+          version: 11  # extension/package.json pins pnpm@11.28.10
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -268,7 +310,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: pnpm/action-setup@v6
         with:
-          version: 11  # extension/pnpm-lock.yaml pins pnpm@11.24.0
+          version: 11  # extension/package.json pins pnpm@11.28.10
       - uses: actions/setup-node@v7
         with:
           node-version: 24

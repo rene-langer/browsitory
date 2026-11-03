@@ -1,0 +1,67 @@
+# cargo-deny configuration (#273). CI's `audit` job runs `cargo deny check licenses` only:
+# advisories stay with `cargo audit` (.cargo/audit.toml), and bans/sources aren't checked.
+# The licence policy lives in CLAUDE.md and docs/LICENSE_COMPLIANCE.md; keep this file in sync.
+
+[graph]
+# Every platform we build for (ci.yml's `rust`/`build-dist`/`build-vsix` matrices,
+# release.yml), so a Windows- or macOS-only dependency can't slip past the Linux CI runner.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+all-features = true
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "MIT-0",
+    "Unicode-3.0",
+    "Zlib",
+    "BlueOak-1.0.0",
+    "PSF-2.0",
+    "Python-2.0",
+]
+# Fail on an unclear licence instead of guessing.
+confidence-threshold = 0.93
+# The allow-list is the whole policy, so listing a licence no Rust crate uses yet is fine.
+unused-allowed-license = "allow"
+# A stale exception (crate gone, or the libgit2-sys clarification no longer matching) fails.
+unused-license-exception = "deny"
+
+# Per-crate exceptions, each a recorded owner decision (docs/LICENSE_COMPLIANCE.md,
+# "Exceptions"). Pinned by crate name, not version, so a routine update doesn't break CI;
+# a new crate under these licences still fails.
+exceptions = [
+    # libgit2, vendored by libgit2-sys: GPL-2.0 with the linking exception (see the clarify
+    # entry below and docs/LICENSE_COMPLIANCE.md, "The one exception").
+    { crate = "libgit2-sys", allow = ["GPL-2.0-only WITH GCC-exception-2.0"] },
+    # Linked into the app and the sidecar through `directories`/`dirs`. Used unmodified; the
+    # source location is in extension/THIRD_PARTY_NOTICES.md.
+    { crate = "option-ext", allow = ["MPL-2.0"] },
+    # Build time only on our targets (tauri-build/tauri-codegen through dom_query).
+    { crate = "cssparser", allow = ["MPL-2.0"] },
+    { crate = "cssparser-macros", allow = ["MPL-2.0"] },
+    { crate = "selectors", allow = ["MPL-2.0"] },
+    { crate = "dtoa-short", allow = ["MPL-2.0"] },
+    # Build time only (system-deps for the Linux GTK bindings). The LLVM exception only adds
+    # permissions to Apache-2.0.
+    { crate = "target-lexicon", allow = ["Apache-2.0 WITH LLVM-exception"] },
+]
+
+# libgit2-sys declares only its binding's licence (MIT OR Apache-2.0), but it vendors libgit2.
+# State the real licence so the exception above is what lets it through. libgit2's linking
+# exception is the GCC runtime library exception 2.0 wording. If libgit2/COPYING changes, the
+# hash no longer matches and cargo-deny falls back to the declared licence: the exception is
+# then reported unused, which fails the check (`unused-license-exception` above).
+[[licenses.clarify]]
+crate = "libgit2-sys"
+expression = "(MIT OR Apache-2.0) AND GPL-2.0-only WITH GCC-exception-2.0"
+license-files = [{ path = "libgit2/COPYING", hash = 0xfb547a4d }]

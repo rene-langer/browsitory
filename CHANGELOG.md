@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Licence check for the full dependency trees
+
+- Added: CI's new `licenses` job checks the licence of every dependency, transitive and dev
+  included, not just the direct ones (#273). Rust: `cargo deny check licenses` (`deny.toml`)
+  for every platform we build for. npm: `scripts/check-dependency-licenses.py` for
+  `frontend/`, `extension/`, `e2e/` and `extension/e2e/`, including other platforms' native
+  binaries. What ships in the app or the VSIX must use an allowed licence; dev tooling may
+  also match a short list of recorded exceptions. Exceptions that no longer match anything
+  fail the check.
+- Changed: BlueOak-1.0.0 and PSF-2.0 / Python-2.0 are now allowed licences. The libgit2
+  exception is scoped to the `libgit2-sys` crate. MPL-2.0 is allowed for `option-ext`
+  (linked into the app and the sidecar) and a few build-time crates, each as a recorded
+  exception. `extension/THIRD_PARTY_NOTICES.md` says where `option-ext`'s source is.
+- Changed: `.cargo/audit.toml` no longer ignores RUSTSEC-2026-0367, -0368 and -0369. The
+  updater now uses zip 9, which fixes them (#81).
+
 ### Paused cherry-picks in other worktrees
 
 - Fixed: a cherry-pick or revert paused in Browsitory protected its branch from renaming only
