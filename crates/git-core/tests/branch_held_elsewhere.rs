@@ -221,6 +221,18 @@ fn a_branch_rebased_by_browsitory_in_another_worktree_is_refused() {
     assert_eq!(target(&f.repo, "refs/heads/topic"), Some(f.commits[2]));
 }
 
+/// The linked worktree's folder as git recorded it (its `gitdir` file names `<folder>/.git`):
+/// on Windows git writes it with forward slashes and the long user name.
+fn recorded_folder(f: &Fixture) -> String {
+    let gitdir = std::fs::read_to_string(f.repo.path().join("worktrees/linked/gitdir")).unwrap();
+    let gitdir = gitdir.trim();
+    gitdir
+        .strip_suffix("/.git")
+        .or_else(|| gitdir.strip_suffix("\\.git"))
+        .unwrap_or_else(|| panic!("unexpected gitdir {gitdir:?}"))
+        .to_string()
+}
+
 /// A worktree whose folder is gone and that isn't locked still holds its branch, for git too,
 /// until it is pruned: the refusal says so, and after `git worktree prune` the branch is free.
 #[test]
@@ -229,7 +241,7 @@ fn a_worktree_whose_folder_is_gone_names_git_worktree_prune() {
     std::fs::remove_dir_all(&f.linked_path).unwrap();
     let three = f.commits[2].to_string();
     assert!(git_refuses(f.dir.path(), &["branch", "-f", "topic", &three]).contains("used by"));
-    let linked_path = f.linked_path.display();
+    let linked_path = recorded_folder(&f);
 
     let expected = format!(
         "branch 'topic' is checked out in another worktree. Its folder '{linked_path}' no \
@@ -255,7 +267,7 @@ fn a_locked_worktree_whose_folder_is_gone_says_it_is_locked() {
     git_ok(f.dir.path(), &["worktree", "prune"]);
     let three = f.commits[2].to_string();
     assert!(git_refuses(f.dir.path(), &["branch", "-f", "topic", &three]).contains("used by"));
-    let linked_path = f.linked_path.display();
+    let linked_path = recorded_folder(&f);
 
     assert_all_refused(
         &f,
