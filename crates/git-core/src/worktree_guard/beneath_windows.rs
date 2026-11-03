@@ -2368,6 +2368,36 @@ mod tests {
     }
 
     #[test]
+    fn is_held_open_detects_a_held_read_only_file() {
+        let dir = TempDir::new().unwrap();
+        let f = dir.path().join("f");
+        std::fs::write(&f, "old").unwrap();
+        make_read_only(&f);
+        let _writable_again = WritableAgain(f.clone());
+        let _editor = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&f)
+            .unwrap();
+        assert!(is_held_open(dir.path(), Path::new("f"), &mut no_step).unwrap());
+    }
+
+    #[test]
+    fn is_held_open_never_looks_past_a_linked_folder() {
+        let dir = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let f = outside.path().join("f");
+        std::fs::write(&f, "old").unwrap();
+        junction(&dir.path().join("j"), outside.path());
+        let _editor = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&f)
+            .unwrap();
+        assert!(!is_held_open(dir.path(), Path::new("j/f"), &mut no_step).unwrap());
+    }
+
+    #[test]
     fn a_file_held_for_a_moment_is_restored_after_a_retry() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir(dir.path().join("d")).unwrap();

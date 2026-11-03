@@ -12,7 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   file's changes, and taking one side's whole file in a conflict showed libgit2's raw "could
   not remove … being used by another process" error when another program kept the file open.
   They now say "'f.txt' is open in another program. Close it, then try again.", as the other
-  writes do (#268). Closing the file and trying again finishes the act.
+  writes do (#268). Closing the file and trying again finishes it.
 
 ### Licence check for the full dependency trees
 

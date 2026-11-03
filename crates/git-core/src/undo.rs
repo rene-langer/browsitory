@@ -63,7 +63,8 @@ pub enum UndoError {
     #[error("io error: {0}")]
     Io(#[from] io::Error),
     /// Windows: another program keeps a file to restore open so it can't be replaced; that
-    /// file was left as it was (#251).
+    /// file was left as it was (#251, #268). Other files and the index may already be
+    /// restored; trying again once the file is closed finishes the restore.
     #[error("'{0}' is open in another program. Close it, then try again.")]
     FileInUse(String),
     #[error(transparent)]

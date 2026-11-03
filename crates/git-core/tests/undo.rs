@@ -1404,3 +1404,43 @@ fn redo_of_a_discard_with_the_file_held_open_says_so() {
     assert_eq!(status_of(&repo, "a.txt"), git2::Status::CURRENT);
     assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
 }
+
+/// Windows: of several files checked out from the index, the message names the one another
+/// program holds, not just the first (#268).
+#[cfg(windows)]
+#[test]
+fn redo_of_a_discard_of_two_files_names_the_held_one() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_dir, repo) = crlf_seeded();
+    let workdir = repo.workdir().unwrap().to_path_buf();
+    write(&repo, "b.txt", "three\n");
+    stage(&repo, "b.txt");
+    commit(&repo, "b");
+    fs::remove_file(workdir.join("b.txt")).unwrap();
+    checkout_path(&repo, "b.txt");
+    fs::write(workdir.join("a.txt"), b"edited a\r\n").unwrap();
+    fs::write(workdir.join("b.txt"), b"edited b\r\n").unwrap();
+    let before = capture(&repo, SnapshotScope::Full).unwrap();
+    checkout_path(&repo, "a.txt");
+    checkout_path(&repo, "b.txt"); // the discard
+    let after = capture(&repo, SnapshotScope::Full).unwrap();
+    restore(&repo, &after, &before, "undo").unwrap();
+    let editor = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1 | 0x2)
+        .open(workdir.join("b.txt"))
+        .unwrap();
+
+    let error = restore(&repo, &before, &after, "redo").unwrap_err();
+    assert!(
+        matches!(error, UndoError::FileInUse(ref p) if p == "b.txt"),
+        "{error:?}"
+    );
+    assert_eq!(fs::read(workdir.join("b.txt")).unwrap(), b"edited b\r\n");
+
+    drop(editor);
+    restore(&repo, &before, &after, "redo").unwrap();
+    assert_eq!(fs::read(workdir.join("a.txt")).unwrap(), b"one\r\ntwo\r\n");
+    assert_eq!(fs::read(workdir.join("b.txt")).unwrap(), b"three\r\n");
+    assert_eq!(capture(&repo, SnapshotScope::Full).unwrap(), after);
+}
