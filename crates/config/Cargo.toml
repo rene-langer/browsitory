@@ -8,5 +8,5 @@ license = "MIT"
 directories = "6"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
-thiserror = "1.0"
+thiserror = "2.0"
 tempfile = "3"
