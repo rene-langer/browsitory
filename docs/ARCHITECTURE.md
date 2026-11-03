@@ -640,10 +640,13 @@ certificate.
   the ref the sequence started on (`originalRef`) and is still at the stop point and git has
   nothing else in progress, and otherwise just forgets the sequence (`rewound: false`). A
   renamed branch counts as that ref, as git's `cherry-pick --abort` rewinds it (#293): HEAD is
-  at the stop point on a branch whose reflog records the renames from `originalRef` ("Branch:
-  renamed <old> to <new>", written by `git branch -m` and libgit2, maybe in steps), and
-  `originalRef` no longer exists. A branch switched to after `originalRef` was deleted has no
-  such entries and is left alone; so is a rename whose reflog is gone.
+  at the stop point, `originalRef` no longer exists, and HEAD's branch's reflog records the
+  renames from `originalRef` ("Branch: renamed <old> to <new>", written by `git branch -m` and
+  libgit2, maybe in steps) at `originalHead` or a commit after it, so written during the
+  sequence (a step's `post-commit` hook may rename too). An older rename from that name, or a
+  branch switched to after `originalRef` was deleted, has no such entries and isn't rewound; nor
+  is a rename whose reflog is gone. This reads reflog messages, which anyone can write (`git
+  update-ref -m`), so it is a heuristic: a forged rename entry at such a commit would count.
 - A stored sequence counts as "in progress" for undo (one pending entry, dropped on abort),
   blocks picks, merge, rebase, commit/amend, reset, checkout, branch switch, pull, stash
   apply/pop and reflog restore in the worker (`gate::gate_during_operation`), and, like a

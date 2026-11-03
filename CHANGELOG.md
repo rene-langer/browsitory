@@ -19,8 +19,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   branch.
 - Fixed: after the branch of a paused cherry-pick or revert was renamed in a terminal (`git
   branch -m`, which git allows), Abort left the picked commits in place. It now puts the
-  renamed branch back, as `git cherry-pick --abort` does. It still leaves alone a different
-  branch you switched to.
+  renamed branch back, as `git cherry-pick --abort` does. It recognises the rename by the
+  branch's reflog entries written during the sequence, so a branch you switched to, or one
+  renamed before the sequence started, is not rewound.
 
 ### Internal
 

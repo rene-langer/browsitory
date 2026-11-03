@@ -825,9 +825,10 @@ means HEAD moved, and Continue refuses.
 **Abort** puts the branch back where it was before the first commit was applied, keeping
 unrelated uncommitted edits. If HEAD was moved elsewhere in the meantime (for example by a commit,
 reset or branch switch in a terminal), Abort only ends the sequence and leaves HEAD and every
-branch alone, and says so. Renaming the branch in a terminal (`git branch -m`) doesn't count
-as moving HEAD: as with `git cherry-pick --abort`, Abort puts the renamed branch back.
-Continue refuses in that case. A whole sequence is one **Undo** step; an aborted one leaves
+branch alone, and says so. If HEAD is on another commit than where the sequence stopped,
+Continue refuses too. Renaming the branch in a terminal (`git branch -m`) doesn't count as
+moving HEAD: Continue carries on on the renamed branch, and, as with `git cherry-pick --abort`,
+Abort puts the renamed branch back. A whole sequence is one **Undo** step; an aborted one leaves
 nothing to undo. The step **Continue** commits runs the commit hooks (see [Hooks](#hooks));
 the steps applied by themselves run none, like a single cherry-pick.
 
@@ -913,12 +914,11 @@ work during it, and they don't end it.
 Undo refuses, instead of overwriting, when the repository changed since the operation. It also
 refuses when it would delete, move or switch to a branch that a worktree holds, and names it:
 checked out in another worktree, being rebased (in a terminal, or paused in Browsitory in
-another worktree), being bisected, or having a paused cherry-pick or revert in another
-worktree, as Browsitory paused it there ("Can't undo Commit: branch 'topic' is checked out in
-another worktree at '/work/topic'.", or "… has a paused cherry-pick in another worktree at …").
-The step stays on the Undo stack, so you can try again
-once that worktree lets go of the branch. A missing worktree folder gets the same `git worktree
-prune` hint as Reflog restore. The reflog stays available for all of these cases.
+another worktree), being bisected, or used by a cherry-pick or revert paused in Browsitory in
+another worktree ("Can't undo Commit: branch 'topic' is checked out in another worktree at
+'/work/topic'.", or "… has a paused cherry-pick in another worktree at …"). The step stays on
+the Undo stack, so you can try again once that worktree lets go of the branch. A missing
+worktree folder gets the same `git worktree prune` hint as Reflog restore. The reflog stays available for all of these cases.
 
 Undo and Redo write each restored file next to the old one and swap it in only when it is
 complete. If writing fails (for example a full disk), that file stays as it was. Files restored

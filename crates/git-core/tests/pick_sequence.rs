@@ -805,6 +805,70 @@ fn abort_follows_a_rename_of_the_sequence_branch() {
     }
 }
 
+/// A rename made by a step's `post-commit` hook while the sequence runs is followed too: its
+/// reflog entry is at a commit the sequence made.
+#[cfg(unix)]
+#[test]
+fn abort_follows_a_rename_made_by_a_post_commit_hook() {
+    let (dir, repo, ids) = side_branch(true, true);
+    let original = head(&repo);
+    let base = repo.head().unwrap().shorthand().unwrap().to_string();
+    let marker = repo.path().join("renamed-once");
+    common::install_hook(
+        &repo.path().join("hooks"),
+        "post-commit",
+        &format!(
+            "[ -e '{marker}' ] && exit 0\ntouch '{marker}'\n\
+             GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git branch -m '{base}' renamed",
+            marker = marker.display()
+        ),
+    );
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
+    assert!(marker.exists(), "the hook ran");
+    assert_eq!(repo.head().unwrap().name().ok(), Some("refs/heads/renamed"));
+
+    let abort = abort_sequence(&repo, &state).unwrap();
+
+    assert!(abort.rewound);
+    assert_eq!(head(&repo), original);
+    assert_eq!(repo.head().unwrap().name().ok(), Some("refs/heads/renamed"));
+    assert!(!dir.path().join("one.txt").exists());
+}
+
+/// A rename from before the sequence doesn't count: `old` was renamed from the sequence's
+/// branch name long ago (a new branch of that name was made later). Switching to `old` at the
+/// stop (`git checkout -B old`) and deleting the sequence's branch isn't a rename of it, so
+/// Abort leaves `old` alone.
+#[test]
+fn abort_ignores_a_rename_from_before_the_sequence() {
+    let (dir, repo, ids) = side_branch(true, true);
+    let base_ref = base_branch_ref(&repo);
+    let base = base_ref.trim_start_matches("refs/heads/").to_string();
+    let git_ok = |args: &[&str]| {
+        let output = test_support::git(dir.path(), args);
+        assert!(output.status.success(), "{args:?}: {output:?}");
+    };
+    git_ok(&["branch", "-m", &base, "old"]);
+    git_ok(&["switch", "-q", "-c", &base, "old"]);
+    common::write_file(dir.path(), "later.txt", "later\n");
+    common::commit_all(&repo, "later");
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
+    git_core::merge::abort_merge(&repo).unwrap();
+    let landed = head(&repo);
+    git_ok(&["checkout", "-q", "-B", "old"]);
+    git_ok(&["branch", "-D", &base]);
+
+    let abort = abort_sequence(&repo, &state).unwrap();
+
+    assert!(!abort.rewound);
+    assert_eq!(head(&repo), landed);
+    assert_eq!(repo.head().unwrap().name().ok(), Some("refs/heads/old"));
+}
+
 /// A branch switched to after the stop isn't rewound, even when the sequence's own branch was
 /// deleted meanwhile and HEAD is at the stop: that is no rename.
 #[test]

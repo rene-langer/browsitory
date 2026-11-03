@@ -1289,7 +1289,7 @@ pub fn abort_sequence(
     let current_ref = head_ref(repo)?;
     let same_ref = (current_ref == state.original_ref
         && state.original_ref != OriginalRef::Unknown)
-        || (head_id == state.expected_head && renamed_to(repo, &state.original_ref, &current_ref));
+        || (head_id == state.expected_head && renamed_to(repo, state, &current_ref));
     if !same_ref {
         // HEAD now names another branch (or detached/attached changed): rewinding would move
         // a ref the sequence never touched.
@@ -1311,25 +1311,41 @@ pub fn abort_sequence(
     })
 }
 
-/// The sequence's branch `original` was renamed to `current` (HEAD's branch), maybe in steps
-/// (#293): `original` no longer exists, and `current`'s reflog records the renames from it
-/// (`git branch -m` and libgit2 write "[Bb]ranch: renamed <old> to <new>" and carry the log
-/// along). git's `cherry-pick --abort` rewinds a renamed branch, since it records commits, not
-/// the name. A branch switched to after the original was deleted has no such entries, so it
-/// isn't taken for a rename.
-fn renamed_to(repo: &Repository, original: &OriginalRef, current: &OriginalRef) -> bool {
-    let (OriginalRef::Branch(original), OriginalRef::Branch(current)) = (original, current) else {
+/// The sequence's branch (`originalRef`) was renamed to `current` (HEAD's branch) during the
+/// sequence, maybe in steps (#293): `originalRef` no longer exists, and `current`'s reflog
+/// records the renames from it (`git branch -m` and libgit2 write "[Bb]ranch: renamed <old> to
+/// <new>" and carry the log along). git's `cherry-pick --abort` rewinds a renamed branch, since
+/// it records commits, not the name.
+///
+/// Only renames written during the sequence count: a rename entry's ids are the branch tip at
+/// that moment, which then was the sequence's start (`original_head`) or a commit after it (a
+/// rename by a step's `post-commit` hook too). An older rename that once had the same name, and
+/// a branch switched to after the original was deleted (no rename entries), aren't taken for
+/// a rename. This is a heuristic, not proof: a reflog entry can be written with any message
+/// (`git update-ref -m`), so a forged "renamed" entry at such a commit would count.
+fn renamed_to(repo: &Repository, state: &SequenceState, current: &OriginalRef) -> bool {
+    let (OriginalRef::Branch(original), OriginalRef::Branch(current)) =
+        (&state.original_ref, current)
+    else {
         return false;
     };
     if original == current || repo.find_reference(original).is_ok() {
         return false;
     }
+    let Ok(start) = Oid::from_str(&state.original_head) else {
+        return false;
+    };
+    let during_the_sequence =
+        |id: Oid| id == start || repo.graph_descendant_of(id, start).unwrap_or(false);
     let Ok(reflog) = repo.reflog(current) else {
         return false;
     };
     // Entries come newest first; follow the renames oldest first.
     let mut name = original.clone();
     for entry in (0..reflog.len()).rev().filter_map(|i| reflog.get(i)) {
+        if !during_the_sequence(entry.id_new()) {
+            continue;
+        }
         let Ok(Some(message)) = entry.message() else {
             continue;
         };
