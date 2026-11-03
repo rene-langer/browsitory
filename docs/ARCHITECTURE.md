@@ -1523,6 +1523,14 @@ only `error`.
   leftover `dconf watch` process before launch, then picks a dynamically free CDP port, to
   mitigate a GTK/GLib proxy-resolver helper that can otherwise squat the debug port. CI runs it
   under `xvfb-run` as its own `e2e-vscode` job (`.github/workflows/ci.yml`), parallel to `e2e`.
+- Mutation testing (`ci.yml`'s `mutants` job, pull requests only, informational): cargo-mutants
+  mutates the lines a PR changes under `crates/git-core/src/` and `crates/repo-service/src/` and
+  runs that package's tests against each mutant. A *missed* mutant is a code change no test
+  noticed. It measures whether new tests check the behaviour or merely run the code — the risk
+  when the same agent writes a test and the code it tests. The job never fails a PR; its run
+  summary lists missed mutants and the full `mutants.out` is uploaded as an artifact. To
+  reproduce locally: `git diff origin/main...HEAD > pr.diff && cargo mutants --in-diff pr.diff
+  --package git-core --package repo-service`. Frontend and extension code are not covered.
 
 ### Credential release acceptance
 

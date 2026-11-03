@@ -141,6 +141,99 @@ jobs:
       - name: Test (forge-fixture-override feature)
         run: cargo test -p tauri-app --features forge-fixture-override
 
+  # Mutation testing of the code a pull request changes in git-core and repo-service: cargo-mutants
+  # makes small edits to that code (return a default, flip a condition, …) and runs the package's
+  # tests against each one. A "missed" mutant is a change no test noticed. Informational only:
+  # this job never fails, so it cannot block a merge; read its summary on the run page. Mutants
+  # are only generated for changed lines in `src/`, so a PR that changes only tests or other
+  # crates skips the run. See docs/ARCHITECTURE.md's "Testing strategy".
+  mutants:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    # Backstop only; the mutation step has its own, shorter limit (see there).
+    timeout-minutes: 60
+    env:
+      # renovate: datasource=crate depName=cargo-mutants
+      CARGO_MUTANTS_VERSION: 27.1.0
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Diff against the pull request's base
+        id: diff
+        run: |
+          git diff "origin/${{ github.base_ref }}...HEAD" > pr.diff
+          if grep -qE '^\+\+\+ b/crates/(git-core|repo-service)/src/.*\.rs$' pr.diff; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "No Rust source changes in git-core or repo-service; nothing to mutate." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Install system dependencies
+        if: steps.diff.outputs.relevant == 'true'
+        # libdbus-sys (keyring, in repo-service) builds against libdbus via pkg-config.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.diff.outputs.relevant == 'true'
+      - uses: taiki-e/install-action@v2
+        if: steps.diff.outputs.relevant == 'true'
+        with:
+          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
+      - name: Mutation testing (changed code)
+        id: mutants
+        if: steps.diff.outputs.relevant == 'true'
+        # Uncached, the baseline build and test run alone take about 5 minutes; each mutant then
+        # rebuilds incrementally and reruns the tests. The limit keeps a large diff from tying up
+        # a runner for hours; a run cut off by it still counts what finished, and
+        # continue-on-error keeps the job green.
+        timeout-minutes: 40
+        continue-on-error: true
+        # Exit codes: 0 all caught, 2 some missed, 3 some timed out, 4 baseline tests failed (the
+        # `rust` job reports those). None of them fail this step; the summary below reports them.
+        run: |
+          status=0
+          cargo mutants --no-shuffle --in-place --in-diff pr.diff \
+            --package git-core --package repo-service || status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+      - name: Summary
+        if: always() && steps.diff.outputs.relevant == 'true'
+        run: |
+          out=mutants.out
+          count() { if [ -f "$out/$1" ]; then grep -c . "$out/$1" || true; else echo 0; fi; }
+          {
+            echo "## Mutation testing (changed code)"
+            echo
+            echo "| Caught | Missed | Timed out | Unviable |"
+            echo "|---|---|---|---|"
+            echo "| $(count caught.txt) | $(count missed.txt) | $(count timeout.txt) | $(count unviable.txt) |"
+            echo
+            if [ "${{ steps.mutants.outcome }}" = "failure" ]; then
+              echo "The run hit its time limit; the counts above cover only the mutants it finished."
+              echo
+            fi
+            if [ "${{ steps.mutants.outputs.status }}" = "4" ]; then
+              echo "The tests failed without any mutation, so no mutant was tested. See the \`rust\` job."
+            elif [ -s "$out/missed.txt" ]; then
+              echo "### Missed: no test noticed these changes"
+              echo
+              echo '```'
+              cat "$out/missed.txt"
+              echo '```'
+              echo
+              echo "Each line is a change to the code that every test still passed. Either a test"
+              echo "is missing, or the mutated code doesn't matter (then it may be worth removing)."
+            else
+              echo "Every viable mutant was caught by a test."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.diff.outputs.relevant == 'true'
+        with:
+          name: mutants-out
+          path: mutants.out
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
