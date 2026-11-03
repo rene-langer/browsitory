@@ -85,13 +85,17 @@ fn a_branch_checked_out_in_another_worktree_isnt_restored() {
     let from_main = restore_reflog_entry(&f.repo, "refs/heads/topic", &first).unwrap_err();
     let from_linked = restore_reflog_entry(&f.linked, "refs/heads/main", &first).unwrap_err();
 
-    assert_eq!(
-        from_main.to_string(),
-        "branch 'topic' is checked out in another worktree"
+    // Each names the other worktree's folder (#291).
+    let from_main = from_main.to_string();
+    assert!(
+        from_main.starts_with("branch 'topic' is checked out in another worktree at '")
+            && from_main.ends_with("linked'"),
+        "{from_main}"
     );
-    assert_eq!(
-        from_linked.to_string(),
-        "branch 'main' is checked out in another worktree"
+    let from_linked = from_linked.to_string();
+    assert!(
+        from_linked.starts_with("branch 'main' is checked out in another worktree at '"),
+        "{from_linked}"
     );
     assert_eq!(target(&f.repo, "refs/heads/topic"), Some(f.second));
     assert_eq!(target(&f.repo, "refs/heads/main"), Some(f.second));
@@ -162,9 +166,12 @@ fn a_branch_checked_out_in_a_locked_worktree_whose_folder_is_gone_isnt_restored(
 
     let error = restore_reflog_entry(&repo, "refs/heads/topic", &first).unwrap_err();
 
-    assert_eq!(
-        error.to_string(),
-        "branch 'topic' is checked out in another worktree"
+    // The refusal names the missing folder and the lock (#291, branch_held_elsewhere.rs).
+    let error = error.to_string();
+    assert!(
+        error.starts_with("branch 'topic' is checked out in another worktree at '")
+            && error.contains("that worktree is locked"),
+        "{error}"
     );
     assert_eq!(target(&repo, "refs/heads/topic"), Some(second));
 }

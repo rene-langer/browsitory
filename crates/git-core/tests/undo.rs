@@ -639,9 +639,11 @@ fn refuses_to_delete_a_branch_checked_out_in_another_worktree() {
     let after = capture(&repo, SnapshotScope::RefsAndIndex).unwrap();
     let _linked = add_worktree(&repo, &worktrees, "wt", "refs/heads/x");
     let result = restore(&repo, &after, &before, "browsitory: undo test");
+    let message = result.unwrap_err().to_string();
     assert!(
-        matches!(result, Err(UndoError::RepositoryChanged)),
-        "{result:?}"
+        message.starts_with("branch 'x' is checked out in another worktree at '")
+            && message.ends_with("wt'"),
+        "{message}"
     );
     assert!(repo.find_reference("refs/heads/x").is_ok());
 }
@@ -680,10 +682,7 @@ fn refuses_to_move_a_branch_checked_out_in_another_worktree() {
     repo.set_head(&main_branch).unwrap();
     let _linked = add_worktree(&repo, &worktrees, "wt", "refs/heads/x");
     let result = restore(&repo, &after, &before, "browsitory: undo test");
-    assert!(
-        matches!(result, Err(UndoError::RepositoryChanged)),
-        "{result:?}"
-    );
+    assert!(matches!(result, Err(UndoError::Held(_))), "{result:?}");
 }
 
 #[test]
@@ -697,10 +696,7 @@ fn refuses_to_switch_back_to_a_branch_checked_out_in_another_worktree() {
     let after = capture(&repo, SnapshotScope::Full).unwrap();
     let _linked = add_worktree(&repo, &worktrees, "wt", &head_branch(&before));
     let result = restore(&repo, &after, &before, "browsitory: undo test");
-    assert!(
-        matches!(result, Err(UndoError::RepositoryChanged)),
-        "{result:?}"
-    );
+    assert!(matches!(result, Err(UndoError::Held(_))), "{result:?}");
     assert_eq!(repo.head().unwrap().name(), Ok("refs/heads/x"));
 }
 

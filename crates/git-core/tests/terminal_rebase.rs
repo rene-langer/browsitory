@@ -757,8 +757,9 @@ fn undo_doesnt_check_out_the_branch_being_rebased_in_another_worktree() {
 
     let error = git_core::undo::restore(&linked, &on_spare, &on_topic, "undo").unwrap_err();
 
+    let error = error.to_string();
     assert!(
-        matches!(error, git_core::undo::UndoError::RepositoryChanged),
+        error.starts_with("branch 'topic' is being rebased in another worktree at '"),
         "{error}"
     );
     assert_eq!(linked.head().unwrap().name().ok(), Some("refs/heads/spare"));

@@ -194,43 +194,340 @@ fn worktree_git_dirs(repo: &git2::Repository) -> Vec<std::path::PathBuf> {
     git_dirs
 }
 
-/// Full names of the branches every other worktree of this repository has checked out, and of
-/// the branches a terminal rebase is rebasing in another worktree: git counts those as checked
-/// out there, though HEAD is detached meanwhile (#263).
-///
-/// Like git's `find_shared_symref`, each worktree's `HEAD` is read from its git folder, so a
-/// worktree whose folder is gone (a locked one on an unmounted drive, or one not pruned yet)
-/// still counts (#287). Only a bare main repository has no branch checked out.
-pub(crate) fn branches_checked_out_elsewhere(
-    repo: &git2::Repository,
-) -> Result<std::collections::BTreeSet<String>, git2::Error> {
-    use std::fs::canonicalize;
-    let this =
-        canonicalize(repo.path()).map_err(|error| git2::Error::from_str(&error.to_string()))?;
-    let common = repo.commondir().to_path_buf();
-    let main_is_bare = git2::Repository::open(&common)?.is_bare();
-    let mut branches = std::collections::BTreeSet::new();
-    for git_dir in worktree_git_dirs(repo) {
-        if (git_dir == common && main_is_bare)
-            || canonicalize(&git_dir).is_ok_and(|path| path == this)
-        {
-            continue;
-        }
-        let Ok(head) = std::fs::read_to_string(git_dir.join("HEAD")) else {
-            continue;
+/// How a worktree uses a branch, so that it can't be moved, deleted or checked out elsewhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchUse {
+    /// The worktree's HEAD is on it.
+    CheckedOut,
+    /// A rebase paused there is rebasing it, or will update it (`--update-refs`): a terminal
+    /// one, or Browsitory's own (#291).
+    Rebased,
+    /// A terminal `git bisect` started from it there (`BISECT_START`); `git bisect reset`
+    /// returns to it (#291).
+    Bisected,
+}
+
+/// Whether the folder of another worktree that holds a branch is still a worktree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorktreeFolder {
+    Present,
+    /// The folder is gone. `git worktree prune` removes the worktree unless it is `locked`.
+    Missing {
+        locked: bool,
+    },
+    /// The folder exists, but its `.git` file is gone. Pruned like a missing folder.
+    NotAWorktree {
+        locked: bool,
+    },
+}
+
+/// Which worktree holds a branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Holder {
+    ThisWorktree,
+    /// Another worktree, at `path` (as git recorded it).
+    Other {
+        path: std::path::PathBuf,
+        folder: WorktreeFolder,
+    },
+}
+
+/// The refusal to move, delete, rename or check out a branch a worktree holds (#287, #291). It
+/// names the other worktree, with a hint when its folder is no longer a worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub struct BranchHeld {
+    /// Short name.
+    pub branch: String,
+    pub usage: BranchUse,
+    pub holder: Holder,
+}
+
+impl std::fmt::Display for BranchHeld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let how = match self.usage {
+            BranchUse::CheckedOut => "checked out",
+            BranchUse::Rebased => "being rebased",
+            BranchUse::Bisected => "being bisected",
         };
-        if let Some(name) = head.strip_prefix("ref:").map(str::trim) {
-            if name.starts_with("refs/heads/") {
-                branches.insert(name.to_string());
+        let branch = &self.branch;
+        let (path, folder) = match &self.holder {
+            Holder::ThisWorktree => {
+                return write!(f, "branch '{branch}' is {how} in this worktree")
             }
+            Holder::Other { path, folder } => (path.display(), folder),
+        };
+        write!(
+            f,
+            "branch '{branch}' is {how} in another worktree at '{path}'"
+        )?;
+        let (what, locked) = match *folder {
+            WorktreeFolder::Present => return Ok(()),
+            WorktreeFolder::Missing { locked } => ("Its folder no longer exists", locked),
+            WorktreeFolder::NotAWorktree { locked } => (
+                "That folder is no longer a worktree (its .git file is missing)",
+                locked,
+            ),
+        };
+        if locked {
+            write!(
+                f,
+                ". {what}, but that worktree is locked, so git keeps it. If it is gone for good, \
+                 run git worktree unlock and then git worktree prune."
+            )
+        } else {
+            write!(
+                f,
+                ". {what}: run git worktree prune to remove that worktree, then try again."
+            )
         }
     }
-    for (git_dir, name) in rebased_branches(repo) {
-        if canonicalize(&git_dir).is_ok_and(|path| path != this) {
-            branches.insert(name);
+}
+
+/// Which of git's rules decides whether a worktree holds a branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HoldRule {
+    /// git's `branch_checked_out` (`branch -f`, `branch -D`): every worktree, this one too, holds
+    /// the branch its HEAD is on (except this worktree's own: Restore moves it, and libgit2
+    /// refuses to delete it), the branch a rebase there rebases or updates (`update-refs`), and
+    /// the branch a bisect there started from, whether or not its HEAD is detached.
+    MoveOrDelete,
+    /// git's `find_shared_symref` (`switch`, `worktree add`): a worktree holds the branch its
+    /// HEAD is on, and while its HEAD is detached, the branch a rebase there rebases or a bisect
+    /// there started from. `include_this`: `worktree add` counts this worktree too, Switch
+    /// doesn't.
+    CheckOut { include_this: bool },
+    /// `branch -m` (`reject_rebase_or_bisect_branch`): only rebases and bisects, in worktrees
+    /// whose HEAD is detached, this one too. HEAD moves along with a renamed branch.
+    Rename,
+}
+
+/// What a worktree's git folder says about the branches it uses (full names).
+struct WorktreeBranches {
+    holder: Holder,
+    /// The branch HEAD is on; `None` while HEAD is detached.
+    head: Option<String>,
+    /// A terminal rebase's branch (`head-name`).
+    rebasing: Option<String>,
+    /// The refs a terminal rebase with `--update-refs` will update.
+    update_refs: Vec<String>,
+    /// Browsitory's own paused rebase's branch: only read for other worktrees, only while
+    /// their HEAD is detached, and only when that worktree would load the file itself.
+    stored_rebase: Option<String>,
+    /// The branch a bisect started from.
+    bisecting: Option<String>,
+}
+
+impl WorktreeBranches {
+    /// The branches this worktree holds under `rule`.
+    fn held(&self, rule: HoldRule) -> Vec<(&str, BranchUse)> {
+        let this = self.holder == Holder::ThisWorktree;
+        let detached = self.head.is_none();
+        let mut held = Vec::new();
+        let counts_head = match rule {
+            HoldRule::MoveOrDelete => !this,
+            HoldRule::CheckOut { include_this } => include_this || !this,
+            HoldRule::Rename => false,
+        };
+        let counts_operations = match rule {
+            HoldRule::MoveOrDelete => true,
+            HoldRule::CheckOut { include_this } => (include_this || !this) && detached,
+            HoldRule::Rename => detached,
+        };
+        if counts_head {
+            held.extend(
+                self.head
+                    .as_deref()
+                    .map(|name| (name, BranchUse::CheckedOut)),
+            );
+        }
+        if counts_operations {
+            held.extend(
+                self.rebasing
+                    .as_deref()
+                    .map(|name| (name, BranchUse::Rebased)),
+            );
+            held.extend(
+                self.stored_rebase
+                    .as_deref()
+                    .map(|name| (name, BranchUse::Rebased)),
+            );
+            held.extend(
+                self.bisecting
+                    .as_deref()
+                    .map(|name| (name, BranchUse::Bisected)),
+            );
+        }
+        if rule == HoldRule::MoveOrDelete {
+            held.extend(
+                self.update_refs
+                    .iter()
+                    .map(|name| (name.as_str(), BranchUse::Rebased)),
+            );
+        }
+        held
+    }
+}
+
+/// Removes `.` and `..` components without touching the file system: a relative `gitdir`
+/// (`git worktree add --relative-paths`) is relative to the worktree's git folder.
+fn normalize_lexically(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component);
+                }
+            }
+            other => normalized.push(other),
         }
     }
-    Ok(branches)
+    normalized
+}
+
+/// A linked worktree's folder and state, from its git folder's `gitdir` file (which names the
+/// worktree's `.git` file), as `git worktree prune` decides it. `None` when that file is missing
+/// or empty: git doesn't list such a worktree, so it holds nothing.
+fn linked_worktree_folder(
+    git_dir: &std::path::Path,
+) -> Option<(std::path::PathBuf, WorktreeFolder)> {
+    let recorded = std::fs::read_to_string(git_dir.join("gitdir")).ok()?;
+    let recorded = recorded.trim();
+    if recorded.is_empty() {
+        return None;
+    }
+    let dot_git = normalize_lexically(&git_dir.join(recorded));
+    let folder = dot_git.parent()?.to_path_buf();
+    let locked = git_dir.join("locked").exists();
+    let state = if dot_git.exists() {
+        WorktreeFolder::Present
+    } else if folder.is_dir() {
+        WorktreeFolder::NotAWorktree { locked }
+    } else {
+        WorktreeFolder::Missing { locked }
+    };
+    Some((folder, state))
+}
+
+/// Whether two paths name the same folder: equal, or equal once canonicalized.
+fn same_dir(a: &std::path::Path, b: &std::path::Path) -> bool {
+    use std::fs::canonicalize;
+    a == b || matches!((canonicalize(a), canonicalize(b)), (Ok(a), Ok(b)) if a == b)
+}
+
+/// Reads every worktree of the repository from its git folder, as git's `get_worktrees` and
+/// `wt_status_check_rebase`/`_bisect` do, so a worktree whose folder is gone still counts
+/// (#287). A bare main repository has none of these.
+fn worktree_branches(repo: &git2::Repository) -> Result<Vec<WorktreeBranches>, git2::Error> {
+    use std::fs::read_to_string;
+    let common = repo.commondir().to_path_buf();
+    let main = git2::Repository::open(&common)?;
+    let mut worktrees = Vec::new();
+    for git_dir in worktree_git_dirs(repo) {
+        let is_main = git_dir == common;
+        if is_main && main.is_bare() {
+            continue;
+        }
+        let holder = if same_dir(&git_dir, repo.path()) {
+            Holder::ThisWorktree
+        } else if is_main {
+            let workdir = main.workdir().unwrap_or(&common);
+            Holder::Other {
+                path: workdir.components().collect(),
+                folder: WorktreeFolder::Present,
+            }
+        } else {
+            let Some((path, folder)) = linked_worktree_folder(&git_dir) else {
+                continue;
+            };
+            Holder::Other { path, folder }
+        };
+        let read = |name: &str| read_to_string(git_dir.join(name)).ok();
+        let branch = |name: String| name.starts_with("refs/heads/").then_some(name);
+        let head = read("HEAD")
+            .and_then(|head| {
+                head.strip_prefix("ref:")
+                    .map(|name| name.trim().to_string())
+            })
+            .and_then(branch);
+        let rebasing = ["rebase-merge/head-name", "rebase-apply/head-name"]
+            .into_iter()
+            .find_map(&read)
+            .map(|name| name.trim().to_string())
+            .and_then(branch);
+        // git's `sequencer_get_update_refs_state`: refname, old id and new id per ref.
+        let update_refs = read("rebase-merge/update-refs")
+            .map(|text| {
+                text.lines()
+                    .step_by(3)
+                    .map(|name| name.trim().to_string())
+                    .filter_map(branch)
+                    .collect()
+            })
+            .unwrap_or_default();
+        // This worktree's own stored rebase is the worker's gate's (it knows a file it couldn't
+        // delete is over). Elsewhere, a paused rebase always has HEAD detached.
+        let stored_rebase = (holder != Holder::ThisWorktree && head.is_none())
+            .then(|| std::fs::read(crate::rebase_file::file(&git_dir)).ok())
+            .flatten()
+            .and_then(|bytes| crate::rebase_file::decode(&bytes, repo).ok())
+            .map(|state| state.original_branch_ref);
+        // git's `wt_status_check_bisect`: BISECT_LOG marks the bisect, BISECT_START names the
+        // branch it started from (or a commit id, which names no branch). BISECT_LOG holds raw
+        // commit subjects, which needn't be UTF-8, so only its existence is checked.
+        let bisecting = git_dir
+            .join("BISECT_LOG")
+            .exists()
+            .then(|| read("BISECT_START"))
+            .flatten()
+            .map(|start| format!("refs/heads/{}", start.trim()));
+        worktrees.push(WorktreeBranches {
+            holder,
+            head,
+            rebasing,
+            update_refs,
+            stored_rebase,
+            bisecting,
+        });
+    }
+    Ok(worktrees)
+}
+
+/// Every branch a worktree holds under `rule` (#287, #291). A branch may be listed more than
+/// once.
+pub(crate) fn branches_held(
+    repo: &git2::Repository,
+    rule: HoldRule,
+) -> Result<Vec<BranchHeld>, git2::Error> {
+    Ok(worktree_branches(repo)?
+        .iter()
+        .flat_map(|worktree| {
+            worktree
+                .held(rule)
+                .into_iter()
+                .filter_map(|(name, usage)| {
+                    Some(BranchHeld {
+                        branch: name.strip_prefix("refs/heads/")?.to_string(),
+                        usage,
+                        holder: worktree.holder.clone(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect())
+}
+
+/// The refusal for `branch` (short name) when a worktree holds it under `rule`.
+pub(crate) fn branch_held(
+    repo: &git2::Repository,
+    branch: &str,
+    rule: HoldRule,
+) -> Result<Option<BranchHeld>, git2::Error> {
+    Ok(branches_held(repo, rule)?
+        .into_iter()
+        .find(|held| held.branch == branch))
 }
 
 /// `Err` while a terminal rebase or `git am` is in progress.

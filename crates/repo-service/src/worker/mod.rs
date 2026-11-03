@@ -6400,6 +6400,38 @@ mod tests {
         );
     }
 
+    /// Undo that would put HEAD back on a branch another worktree has checked out since is a
+    /// refusal outcome naming that worktree, not a failure, and keeps the entry (#291).
+    #[test]
+    fn undo_onto_a_branch_held_by_another_worktree_is_a_refusal() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "a.txt", "one\n");
+        commit_all(&repo, "initial");
+        let base = repo.head().unwrap().shorthand().unwrap().to_string();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        handle.create_branch("other".into(), "HEAD".into()).unwrap();
+        let label = handle.get_undo_state().unwrap().undo.unwrap();
+        let parent = TempDir::new().unwrap();
+        let linked = parent.path().join("linked");
+        git_core::worktree::create_worktree(&repo, "linked", &linked, &base, None).unwrap();
+
+        let UndoOutcome::BranchHeld {
+            label: refused,
+            message,
+        } = handle.undo().unwrap()
+        else {
+            panic!("expected a BranchHeld refusal");
+        };
+
+        assert_eq!(refused, label);
+        assert_eq!(
+            held_folder(&message, &base, "checked out"),
+            std::fs::canonicalize(&linked).unwrap()
+        );
+        assert_eq!(handle.get_undo_state().unwrap().undo, Some(label));
+    }
+
     /// `base` → `feature` and `main` both rewrite `a.txt`, so merging `feature` conflicts.
     fn conflicting_branches() -> (TempDir, Repository) {
         let (dir, repo) = init_repo();
@@ -7302,6 +7334,55 @@ mod tests {
             .rename_branch("other".into(), "renamed".into())
             .unwrap();
         handle.delete_branch("renamed".into(), true).unwrap();
+    }
+
+    /// A rebase paused in one worktree protects its branch from the other worktrees' windows
+    /// too (#291), with the wording a branch held by another worktree gets: Continue and Abort
+    /// return to that branch.
+    #[test]
+    fn another_worktree_cant_touch_the_branch_a_paused_rebase_rebases() {
+        let (dir, repo) = init_repo();
+        let (_worker, handle, branch, tip) = paused_for_edit(dir.path(), &repo);
+        let short = branch.trim_start_matches("refs/heads/").to_string();
+        repo.branch("side", &repo.find_commit(tip).unwrap(), false)
+            .unwrap();
+        let parent = TempDir::new().unwrap();
+        let linked_path = parent.path().join("linked");
+        git_core::worktree::create_worktree(&repo, "linked", &linked_path, "side", None).unwrap();
+        let linked_worker = Worker::spawn(linked_path).unwrap();
+        let linked = linked_worker.handle();
+        let main_folder = std::fs::canonicalize(dir.path()).unwrap();
+        let refused = |result: Result<(), String>| {
+            let message = result.unwrap_err();
+            assert_eq!(held_folder(&message, &short, "being rebased"), main_folder);
+        };
+
+        refused(linked.delete_branch(short.clone(), true));
+        refused(linked.rename_branch(short.clone(), "renamed".into()));
+        refused(linked.switch_branch(short.clone(), no_events()));
+        refused(linked.create_worktree(
+            "second".into(),
+            parent.path().join("second"),
+            short.clone(),
+            None,
+        ));
+        assert_eq!(branch_target(dir.path(), &branch), tip);
+
+        // Once the rebase is aborted, the branch is checked out there again, as before.
+        handle.abort_rebase().unwrap();
+        let message = linked.delete_branch(short.clone(), true).unwrap_err();
+        assert_eq!(held_folder(&message, &short, "checked out"), main_folder);
+    }
+
+    /// The folder `message` ("branch '<branch>' is <how> in another worktree at '<folder>'")
+    /// names, canonicalized.
+    fn held_folder(message: &str, branch: &str, how: &str) -> std::path::PathBuf {
+        let prefix = format!("branch '{branch}' is {how} in another worktree at '");
+        let folder = message
+            .strip_prefix(&prefix)
+            .and_then(|rest| rest.strip_suffix('\''))
+            .unwrap_or_else(|| panic!("{message}"));
+        std::fs::canonicalize(folder).unwrap()
     }
 
     /// A `rebase.json` that can't be deleted (read-only folder) must not keep gating the

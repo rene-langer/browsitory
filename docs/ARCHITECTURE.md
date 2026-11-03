@@ -746,16 +746,34 @@ certificate.
     be deleted, renamed or checked out in a new worktree (`repo::BranchBeingRebased`, "topic is
     being rebased by a rebase started in a terminal. …"), from this or any other worktree, nor
     switched to from another worktree (`check_branch_not_rebased_elsewhere`), as git refuses.
-    Undo counts it as checked out in that worktree, so it doesn't move HEAD onto it. HEAD is detached during the rebase, so libgit2's own checked-out checks don't
-    see it.
+    Undo refuses to move it, or to put HEAD on it from another worktree (`repo::HoldRule`
+    below). HEAD is detached during the rebase, so libgit2's own checked-out checks don't see
+    it.
   - Reflog restore (`reflog::restore_reflog_entry`, #287) refuses to move a branch that is
-    being rebased in any worktree (`BranchBeingRebased`) or that another worktree has checked
-    out (`ReflogError::CheckedOutInAnotherWorktree`, "branch 'topic' is checked out in another
-    worktree", the wording of `switch_branch`), as `git branch -f` refuses both. The first is
-    `check_branch_not_rebased`; the second reads `repo::branches_checked_out_elsewhere`, which
-    Undo uses too. That helper reads each worktree's `HEAD` from its git folder, as git's
-    `find_shared_symref` does, so a worktree whose folder is gone (locked on an unmounted drive,
-    or not pruned yet) still counts. The branch checked out in this worktree is still moved
+    being rebased in any worktree (`BranchBeingRebased`) or that a worktree holds
+    (`repo::BranchHeld`, "branch 'topic' is checked out in another worktree at '<folder>'"). The
+    first is `check_branch_not_rebased`; the second is `repo::branch_held` (#291), which Undo,
+    Switch, branch delete and rename, and worktree add use too. It reads every worktree's git
+    folder, like git's `get_worktrees` (a linked worktree whose `gitdir` file is gone isn't
+    listed, as in git): the branch its `HEAD` is on, a terminal rebase's `head-name` and
+    `rebase-merge/update-refs`, the branch a bisect started from (`BISECT_START`, while
+    `BISECT_LOG` exists), and, for other worktrees whose HEAD is detached, Browsitory's own
+    paused rebase (`rebase_file::decode`, the same check the owning worktree's `RebaseStore`
+    loads with; this worktree's own is the worker's gate's). Which of these count follows the
+    git command the action stands for (`repo::HoldRule`): Restore and branch delete follow
+    `branch_checked_out` (`branch -f`/`-D`: all of them, in every worktree, this one too except
+    its HEAD branch, whether or not HEAD is detached); Switch and worktree add follow
+    `find_shared_symref` (HEAD, and a rebase's or bisect's branch only while that worktree's
+    HEAD is detached; Switch skips this worktree, worktree add doesn't; update-refs don't
+    count); rename follows `reject_rebase_or_bisect_branch` (rebase and bisect in worktrees
+    whose HEAD is detached, this one too). Undo uses the first rule for the refs it moves or
+    deletes and Switch's for the branch it puts HEAD on, and returns the refusal as
+    `UndoOutcome::BranchHeld` (the entry stays). Each case is twinned with the git CLI. A
+    worktree whose folder is gone, or no longer has its `.git` file, still counts (locked on an
+    unmounted drive, or not pruned yet); the refusal then says to run `git worktree prune`, or
+    that the worktree is locked. Unlike git, rename, Switch and worktree add stay refused while
+    a terminal rebase in another worktree (for rename and worktree add, any worktree) rebases
+    the branch, whether or not HEAD is detached there (`check_branch_not_rebased`, #263). The branch checked out in this worktree is still moved
     (ref only; the work tree and index stay), though `git branch -f` refuses that one: moving
     HEAD's branch back is what Restore is for. Moving this worktree's HEAD (detached, or its
     branch by `HEAD` or by name) has Reset's guards: refused during a terminal rebase

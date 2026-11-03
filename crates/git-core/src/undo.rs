@@ -48,6 +48,10 @@ pub enum SnapshotScope {
 pub enum UndoError {
     #[error("the repository changed since this operation")]
     RepositoryChanged,
+    /// A branch to move, delete or check out is held by another worktree: checked out, or
+    /// being rebased or bisected there (#291).
+    #[error(transparent)]
+    Held(#[from] crate::repo::BranchHeld),
     #[error("a merge, rebase, cherry-pick or revert is in progress")]
     OperationInProgress,
     #[error("the index has conflicts")]
@@ -352,11 +356,25 @@ fn verify_checked_out_branches(
     if branches.is_empty() && target_branch.is_none() {
         return Ok(());
     }
-    let elsewhere = crate::repo::branches_checked_out_elsewhere(repo)?;
-    if target_branch.is_some_and(|name| elsewhere.contains(name))
-        || branches.iter().any(|name| elsewhere.contains(*name))
-    {
-        return Err(UndoError::RepositoryChanged);
+    let moves = |name: &str| branches.iter().any(|branch| *branch == name);
+    // Moving or deleting a branch follows `git branch -f`/`-D`; putting HEAD on one follows
+    // `git switch` (#291).
+    let moved = crate::repo::branches_held(repo, crate::repo::HoldRule::MoveOrDelete)?
+        .into_iter()
+        .find(|held| moves(&format!("refs/heads/{}", held.branch)));
+    let checked_out = match target_branch {
+        Some(target) => crate::repo::branches_held(
+            repo,
+            crate::repo::HoldRule::CheckOut {
+                include_this: false,
+            },
+        )?
+        .into_iter()
+        .find(|held| *target == format!("refs/heads/{}", held.branch)),
+        None => None,
+    };
+    if let Some(held) = moved.or(checked_out) {
+        return Err(held.into());
     }
     // Deleting this worktree's HEAD branch is only fine when HEAD moves off it, or when the
     // target itself has HEAD on that (then unborn) branch, e.g. undoing the first commit.

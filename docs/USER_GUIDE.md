@@ -654,9 +654,20 @@ branch to an earlier entry — useful for recovering from a bad reset or
 rebase. Restore moves only the branch: your files and staged changes stay as they are.
 
 Like `git branch -f`, Restore refuses a branch that another worktree has checked out
-("branch 'topic' is checked out in another worktree"), and a branch that a rebase started in a
-terminal is rebasing, in any worktree. Restore it from that worktree, or finish or abort the
-rebase first. Like Reset, Restore doesn't move this worktree's HEAD or current branch while a
+("branch 'topic' is checked out in another worktree at '/work/topic'"), and a branch that a
+rebase started in a terminal is rebasing, in any worktree. Restore it from that worktree, or
+finish or abort the rebase first. It also refuses:
+
+- the branch a `git bisect` started from, in any worktree ("branch 'topic' is being bisected
+  …"). End the bisect with `git bisect reset` first.
+- a branch that a `git rebase --update-refs` in another worktree will move.
+- the branch a rebase paused in Browsitory is rebasing in another worktree ("branch 'topic' is
+  being rebased in another worktree at …"). Continue or abort that rebase first.
+
+If that other worktree's folder is gone, or is no longer a worktree, the message says so and
+asks you to run `git worktree prune`, which removes the stale entry. If that worktree is locked
+(for example on an unmounted drive), git keeps it, and the message says so: run `git worktree
+unlock` first if it is gone for good. Like Reset, Restore doesn't move this worktree's HEAD or current branch while a
 merge, cherry-pick, revert or rebase is paused ("Finish or abort the current
 merge/cherry-pick/revert/rebase first."; for a rebase started in a terminal, it says to
 continue or abort it there).
@@ -732,7 +743,9 @@ rebase can only be aborted, and **Abort rebase** then stops it without moving HE
 branches; it only cleans up the rebase's own paused step. When the branch had changed, the toast
 offers **Switch to ⟨branch⟩**, an ordinary branch switch that refuses rather than overwrite local
 changes. While a rebase is paused, the branch being rebased can't be deleted, renamed or checked
-out in a new worktree. Continue also refuses to finish if the
+out in a new worktree. The windows of the repository's other worktrees can't move, delete,
+rename or switch to that branch either, or add a worktree on it ("branch 'topic' is being
+rebased in another worktree at …"). Continue also refuses to finish if the
 branch being rebased moved during the pause, rather than overwriting those commits; put the branch
 back and Continue again, or abort and start over.
 
@@ -855,8 +868,12 @@ removes only the merge, as git does.
 
 **Bisect started in a terminal.** While a `git bisect` runs, a bar says **Bisecting (started
 from main)** and "Use git bisect good, bad or reset in a terminal." It has no buttons: you end
-the bisect in the terminal. Nothing is blocked during it. As with git, you can cherry-pick,
-revert, rebase, reset, amend, commit, and use Undo and Redo, and none of them ends the bisect.
+the bisect in the terminal. As with git, you can cherry-pick, revert, rebase, reset, amend,
+commit, and use Undo and Redo, and none of them ends the bisect. Only the branch the bisect
+started from is protected, because `git bisect reset` returns to it. As with git, it can't be
+restored from the reflog, deleted, renamed or checked out in a new worktree, from any
+worktree's window ("branch 'main' is being bisected in this worktree"). Undo doesn't move it
+either. Switching to it is allowed in this worktree, but not from another one.
 A commit made while HEAD is detached by the bisect is not on any branch: `git bisect reset`
 leaves it behind (it is still in the reflog).
 
@@ -886,9 +903,13 @@ leaves nothing to undo either. A `git bisect` started in a
 terminal doesn't count as an operation in progress: operations are recorded and Undo and Redo
 work during it, and they don't end it.
 
-Undo refuses, instead of overwriting, when the repository changed since the operation, or
-when it would delete, move or switch to a branch that is checked out in another worktree; the
-reflog stays available for those cases.
+Undo refuses, instead of overwriting, when the repository changed since the operation. It also
+refuses when it would delete, move or switch to a branch that a worktree holds, and names it:
+checked out in another worktree, being rebased (in a terminal, or paused in Browsitory in
+another worktree), or being bisected ("Can't undo Commit: branch 'topic' is checked out in
+another worktree at '/work/topic'."). The step stays on the Undo stack, so you can try again
+once that worktree lets go of the branch. A missing worktree folder gets the same `git worktree
+prune` hint as Reflog restore. The reflog stays available for all of these cases.
 
 Undo and Redo write each restored file next to the old one and swap it in only when it is
 complete. If writing fails (for example a full disk), that file stays as it was. Files restored

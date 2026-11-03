@@ -267,6 +267,8 @@ export type UndoOutcome =
   | { kind: "Done"; label: string }
   | { kind: "Nothing" }
   | { kind: "RepositoryChanged"; label: string }
+  /** A branch to move, delete or check out is held by a worktree (#291); `message` says how. */
+  | { kind: "BranchHeld"; label: string; message: string }
   | { kind: "OperationInProgress" };
 /**
  * A single cherry-pick/revert. `HookFailed`: its `prepare-commit-msg` failed (#183); nothing was
@@ -793,7 +795,7 @@ export interface RepoClient {
   setCommitMessageSettings(settings: CommitMessageSettings): Promise<void>;
   /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
   getUndoState(repoPath: string): Promise<UndoState>;
-  /** Refusals (`Nothing`, `RepositoryChanged`, `OperationInProgress`) resolve; only real failures reject. */
+  /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `OperationInProgress`) resolve; only real failures reject. */
   undo(repoPath: string): Promise<UndoOutcome>;
   redo(repoPath: string): Promise<UndoOutcome>;
   /** `mainline` (1-based parent) is required for a merge commit and refused for any other. */
