@@ -17,6 +17,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the paused sequence ("branch 'topic' has a paused cherry-pick in another worktree at '…'").
   Only a sequence that worktree would load itself counts, and only while its HEAD is on that
   branch.
+- Fixed: after the branch of a paused cherry-pick or revert was renamed in a terminal (`git
+  branch -m`, which git allows), Abort left the picked commits in place. It now puts the
+  renamed branch back, as `git cherry-pick --abort` does. It still leaves alone a different
+  branch you switched to.
 
 ### Branches held by other worktrees
 

@@ -7,8 +7,8 @@ pub enum BranchError {
     Git(#[from] git2::Error),
     #[error("branch '{0}' has unmerged commits; use force to delete anyway")]
     NotMerged(String),
-    /// Another worktree holds the branch: checked out, or being rebased or bisected there
-    /// (#291).
+    /// Another worktree holds the branch: checked out, being rebased or bisected, or used by a
+    /// paused cherry-pick or revert there (#291, #293).
     #[error(transparent)]
     Held(#[from] crate::repo::BranchHeld),
     #[error("worktree operation failed: {0}")]

@@ -773,6 +773,65 @@ fn abort_does_not_rewind_a_branch_switched_to_after_the_stop() {
     assert_ne!(landed, original);
 }
 
+/// `git branch -m` (allowed by git during a cherry-pick) moves HEAD along to the new name. git's
+/// `cherry-pick --abort` still rewinds that branch, since it records commits, not the name;
+/// Abort follows the rename the same way (#293): the original branch is gone, HEAD is still
+/// where the sequence stopped, and the branch's reflog records the rename, also in steps.
+#[test]
+fn abort_follows_a_rename_of_the_sequence_branch() {
+    for names in [&["renamed"][..], &["between", "renamed"][..]] {
+        let (dir, repo, ids) = side_branch(true, true);
+        let original = head(&repo);
+        let mut current = repo.head().unwrap().shorthand().unwrap().to_string();
+        let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+            .state
+            .unwrap();
+        let landed = head(&repo);
+        assert_ne!(landed, original);
+        for name in names {
+            let output = test_support::git(dir.path(), &["branch", "-m", &current, name]);
+            assert!(output.status.success(), "{output:?}");
+            current = name.to_string();
+        }
+        assert_eq!(repo.head().unwrap().name().ok(), Some("refs/heads/renamed"));
+
+        let abort = abort_sequence(&repo, &state).unwrap();
+
+        assert!(abort.rewound, "{names:?}");
+        assert_eq!(head(&repo), original);
+        assert_eq!(repo.head().unwrap().name().ok(), Some("refs/heads/renamed"));
+        assert_eq!(repo.state(), RepositoryState::Clean);
+        assert!(!dir.path().join("one.txt").exists());
+    }
+}
+
+/// A branch switched to after the stop isn't rewound, even when the sequence's own branch was
+/// deleted meanwhile and HEAD is at the stop: that is no rename.
+#[test]
+fn abort_does_not_rewind_another_branch_when_the_original_was_deleted() {
+    let (dir, repo, ids) = side_branch(true, true);
+    let base_ref = base_branch_ref(&repo);
+    let base = base_ref.trim_start_matches("refs/heads/").to_string();
+    let state = cherry_pick_many(&repo, &ids, git_core::hooks::HookOptions::default())
+        .state
+        .unwrap();
+    git_core::merge::abort_merge(&repo).unwrap();
+    let landed = head(&repo);
+    for args in [
+        &["switch", "-q", "-c", "other"][..],
+        &["branch", "-D", &base][..],
+    ] {
+        let output = test_support::git(dir.path(), args);
+        assert!(output.status.success(), "{output:?}");
+    }
+
+    let abort = abort_sequence(&repo, &state).unwrap();
+
+    assert!(!abort.rewound);
+    assert_eq!(head(&repo), landed);
+    assert_eq!(repo.head().unwrap().name().ok(), Some("refs/heads/other"));
+}
+
 #[test]
 fn abort_cleans_up_a_conflict_whose_pick_head_was_deleted() {
     let (dir, repo, _ids, state) = paused(true);

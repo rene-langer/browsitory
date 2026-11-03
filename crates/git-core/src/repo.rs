@@ -285,6 +285,13 @@ impl std::fmt::Display for BranchHeld {
 }
 
 /// Which of git's rules decides whether a worktree holds a branch.
+///
+/// Browsitory's own paused cherry-pick/revert in another worktree counts under every rule
+/// (#293). That worktree's HEAD is on its branch, so git's rules hold the branch already, except
+/// `branch -m`, which git allows (its `cherry-pick --abort` rewinds commits, not a name).
+/// Browsitory refuses that rename too, as the owning window does: the stored sequence keeps the
+/// old name, which that window protects, and Abort finds a renamed branch only through its
+/// reflog (`pick::abort_sequence`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HoldRule {
     /// git's `branch_checked_out` (`branch -f`, `branch -D`): every worktree, this one too, holds
@@ -297,14 +304,11 @@ pub(crate) enum HoldRule {
     /// there started from. `include_this`: `worktree add` counts this worktree too, Switch
     /// doesn't.
     CheckOut { include_this: bool },
-    /// `branch -m` (`reject_rebase_or_bisect_branch`): only rebases and bisects, in worktrees
-    /// whose HEAD is detached, this one too. HEAD moves along with a renamed branch.
+    /// `branch -m` (`reject_rebase_or_bisect_branch`): rebases and bisects in worktrees whose
+    /// HEAD is detached, this one too, and (Browsitory only) a paused cherry-pick/revert in
+    /// another worktree. HEAD moves along with a renamed branch.
     Rename,
 }
-// Browsitory's own paused cherry-pick/revert in another worktree counts under every rule
-// (#293). Its HEAD is on that branch, so git's rules hold it already, except `branch -m`:
-// unlike git's `cherry-pick --abort`, which rewinds to a commit, its Abort rewinds only while
-// HEAD still names the branch it started on.
 
 /// What a worktree's git folder says about the branches it uses (full names).
 struct WorktreeBranches {
@@ -488,8 +492,9 @@ fn worktree_branches(repo: &git2::Repository) -> Result<Vec<WorktreeBranches>, g
             .flatten()
             .and_then(|bytes| crate::rebase_file::decode(&bytes, repo).ok())
             .map(|state| state.original_branch_ref);
-        // Likewise for a stored cherry-pick/revert (#293), which runs on its branch: once that
-        // worktree's HEAD left it, its Abort no longer rewinds it and Continue refuses.
+        // Likewise for a stored cherry-pick/revert (#293), which runs on its branch. Once that
+        // worktree's HEAD left it, the sequence no longer touches it: Abort doesn't rewind it,
+        // and Continue, which checks only the commit HEAD is on, goes on on HEAD's new branch.
         let stored_sequence = (holder != Holder::ThisWorktree)
             .then(|| std::fs::read(crate::sequence_file::file(&git_dir)).ok())
             .flatten()

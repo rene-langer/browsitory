@@ -814,10 +814,20 @@ fn a_branch_a_browsitory_sequence_runs_on_in_another_worktree_is_refused() {
             .unwrap_err()
             .to_string();
         assert_held_at(&message, "topic", "checked out", &f.linked_path);
+        // The sequence's own branch isn't held either while that worktree's HEAD isn't on it.
+        rename_branch(&f.repo, "other", "other2").unwrap_or_else(|e| panic!("{what}: {e}"));
+        rename_branch(&f.repo, "other2", "other").unwrap();
     }
 
-    // HEAD off the branch: the sequence no longer returns to it.
+    // HEAD off the branch, on another one or detached: the sequence no longer touches it.
     std::fs::write(&file, encode(&valid)).unwrap();
+    git_ok(&f.linked_path, &["switch", "-q", "other"]);
+    rename_branch(&f.repo, "topic", "renamed").unwrap();
+    rename_branch(&f.repo, "renamed", "topic").unwrap();
+    let message = delete_branch(&f.repo, "other", true)
+        .unwrap_err()
+        .to_string();
+    assert_held_at(&message, "other", "checked out", &f.linked_path);
     git_ok(&f.linked_path, &["switch", "-q", "--detach"]);
     rename_branch(&f.repo, "topic", "renamed").unwrap();
 }
