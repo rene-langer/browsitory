@@ -616,10 +616,22 @@ impl WorktreeChange {
         for path in &self.from_index {
             checkout.path(path);
         }
-        repo.checkout_index(None, Some(&mut checkout))?;
+        let workdir = repo.workdir().ok_or(UndoError::Bare)?;
+        // A file another program holds open: the walker's message, not libgit2's raw error
+        // (#268). Files checked out before it stay written; trying again finishes the restore.
+        repo.checkout_index(None, Some(&mut checkout))
+            .map_err(|error| {
+                match crate::worktree_guard::held_open_after_checkout(
+                    workdir,
+                    &error,
+                    self.from_index.iter().map(String::as_str),
+                ) {
+                    Some(path) => UndoError::FileInUse(path.to_string()),
+                    None => UndoError::Git(error),
+                }
+            })?;
         // libgit2 skips a file whose HEAD (its checkout baseline) still has a directory there,
         // as in a dir -> file swap; fall back to the raw blob for anything still missing.
-        let workdir = repo.workdir().ok_or(UndoError::Bare)?;
         let config = worktree_config(repo)?;
         for path in &self.from_index {
             let full = workdir.join(path);

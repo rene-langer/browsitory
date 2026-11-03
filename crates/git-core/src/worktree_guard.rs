@@ -1040,6 +1040,49 @@ pub(crate) fn is_read_only_beneath(workdir: &Path, rel: &str) -> bool {
         && beneath::is_read_only(workdir, Path::new(rel), &mut no_step).unwrap_or(false)
 }
 
+/// For a libgit2 checkout of `paths` that failed with `error`: the first of `paths` that
+/// another program keeps open so it can't be replaced (Windows: opened without sharing delete,
+/// as some editors do), the file to name in a "Close it, then try again" message (#268).
+///
+/// libgit2 reports such a file only as an OS error, "could not remove '<full path>': " plus the
+/// system's message in the user's language, so the file isn't read from the message. Instead,
+/// for an OS or file-system error only, each path that exists is opened through the walker
+/// (never through a link) for deleting, sharing everything, and closed at once: a sharing
+/// violation means another program holds it. Anything else, and every other platform (where an
+/// open file never stops a replace), is `None`, so the caller keeps libgit2's error.
+pub(crate) fn held_open_after_checkout<'a>(
+    workdir: &Path,
+    error: &git2::Error,
+    paths: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    if !matches!(
+        error.class(),
+        git2::ErrorClass::Os | git2::ErrorClass::Filesystem
+    ) {
+        return None;
+    }
+    held_open_among(workdir, paths)
+}
+
+#[cfg(windows)]
+fn held_open_among<'a>(
+    workdir: &Path,
+    paths: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    paths.into_iter().find(|rel| {
+        plain_relative(Path::new(rel))
+            && beneath::is_held_open(workdir, Path::new(rel), &mut no_step).unwrap_or(false)
+    })
+}
+
+#[cfg(not(windows))]
+fn held_open_among<'a>(
+    _workdir: &Path,
+    _paths: impl IntoIterator<Item = &'a str>,
+) -> Option<&'a str> {
+    None
+}
+
 /// Writes `bytes` to `rel` as a regular file. Returns `Ok(false)` and writes nothing when an
 /// ancestor is a symlink or `rel` is not a plain relative path.
 ///

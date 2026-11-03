@@ -220,7 +220,14 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         )?;
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force().path(rel).disable_pathspec_match(true);
-        repo.checkout_index(None, Some(&mut checkout))?;
+        // A file another program holds open: say so, not libgit2's raw error (#268).
+        repo.checkout_index(None, Some(&mut checkout))
+            .map_err(|error| {
+                match crate::worktree_guard::held_open_after_checkout(workdir, &error, [path]) {
+                    Some(path) => StageError::FileInUse(path.to_string()),
+                    None => error.into(),
+                }
+            })?;
     } else {
         // Through the held-folder walker, so a folder swapped for a link after the checks above
         // can't redirect the delete outside the repository (#149).
