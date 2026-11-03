@@ -160,8 +160,9 @@ jobs:
     # Backstop only; the mutation step has its own, shorter limit (see there).
     timeout-minutes: 60
     env:
+      # Not CARGO_*: rust-cache hashes CARGO* env vars into its key (see the rust-cache step).
       # renovate: datasource=crate depName=cargo-mutants
-      CARGO_MUTANTS_VERSION: 27.1.0
+      MUTANTS_VERSION: 27.1.0
     steps:
       - uses: actions/checkout@v7
         with:
@@ -184,8 +185,11 @@ jobs:
           sudo apt-get install -y libdbus-1-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
         if: steps.diff.outputs.relevant == 'true'
-      # Restores the `rust` job's Linux cache (same key prefix via shared-key), so the baseline
-      # build only compiles the workspace crates. Never saves: this job runs only on pull
+      # Restores the `rust` job's Linux cache, so the baseline build only compiles the workspace
+      # crates. rust-cache's restore key is `shared-key`, OS, arch and a hash of the rustc version
+      # and every CARGO*/RUST*/CC*/CFLAGS*/CXX*/CMAKE* env var, so `shared-key: rust` matches
+      # the `rust` job only while this job sets no env var with those prefixes (hence
+      # `MUTANTS_VERSION`, not `CARGO_MUTANTS_VERSION`). Never saves: this job runs only on pull
       # requests, and `--in-place` builds mutated code that must not end up in a cache.
       - uses: Swatinem/rust-cache@v2
         if: steps.diff.outputs.relevant == 'true'
@@ -195,7 +199,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: steps.diff.outputs.relevant == 'true'
         with:
-          tool: cargo-mutants@${{ env.CARGO_MUTANTS_VERSION }}
+          tool: cargo-mutants@${{ env.MUTANTS_VERSION }}
       - name: Mutation testing (changed code)
         id: mutants
         if: steps.diff.outputs.relevant == 'true'
