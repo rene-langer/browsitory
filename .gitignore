@@ -29,9 +29,6 @@ extension/e2e/.vscode-test
 .claude/worktrees/
 .worktrees/
 
-# graft's local graph cache — regenerable, not committed (run `graft build`).
-graft/
-
 # graphifyy
 graphify-out/cost.json
 .superpowers/
