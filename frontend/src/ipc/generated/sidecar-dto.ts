@@ -35,7 +35,7 @@ export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, };
 
 export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, };
 
-export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath?: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
+export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 
 export type ExternalToolSettings = { editor: string | null, terminal: string | null, };
 
@@ -46,6 +46,8 @@ export type FileConflictChoice = "Ours" | "Theirs" | "Delete";
 export type FileHistoryEntry = { commit: GraphCommit, path: string, oldPath: string | null, };
 
 export type FileSide = { "kind": "Missing" } | { "kind": "TooLarge", size: number, } | { "kind": "Loaded", size: number, base64: string, mime: string | null, };
+
+export type FileSides = { old: FileSide, new: FileSide, };
 
 export type FileVersion = { "kind": "Head" } | { "kind": "Index" } | { "kind": "Stage", stage: number, } | { "kind": "Commit", commitId: string, } | { "kind": "FirstParent", commitId: string, };
 
@@ -77,6 +79,8 @@ export type OpenRepoEntry = { path: string, workspaceId: string | null, };
 
 export type OpenRepoEntryInput = { path: string, workspaceId: string | null, };
 
+export type OpenRepos = { entries: Array<OpenRepoEntry>, activePath: string | null, };
+
 export type OperationKind = "Merge" | "CherryPick" | "Revert";
 
 export type PickOutcome = { "kind": "Committed", commitId: string, } | { "kind": "Conflicted", files: Array<string>, } | { "kind": "HookFailed", hook: string, output: string, };
@@ -86,6 +90,8 @@ export type PullOutcome = { "kind": "UpToDate" } | { "kind": "FastForwarded", up
 export type PullRequest = { id: string, number: number, title: string, url: string, author: string, sourceBranch: string, targetBranch: string, state: string, };
 
 export type PullRequestList = { pullRequests: Array<PullRequest>, truncated: boolean, };
+
+export type RebaseAbort = { restored: boolean, };
 
 export type RebaseAction = { "kind": "Pick" } | { "kind": "Reword", message: string, } | { "kind": "Edit" } | { "kind": "Squash" } | { "kind": "Fixup" } | { "kind": "Drop" };
 
@@ -161,7 +167,9 @@ export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "StaleL
 
 export type TransferOperation = "Fetch" | "FetchAll" | "Pull" | "PushBranch" | "ForcePushBranch" | "PushTags" | "DeleteRemoteBranch" | "Clone";
 
-export type TransferProgress = { operationId: string, operation: TransferOperation, phase: "Starting" | "Receiving" | "Updating" | "RunningHook" | "RemoteFailed" | "Completed" | "Failed", errorKind: TransferErrorKind | null, current: number, total: number, receivedBytes: number, message: string | null, 
+export type TransferPhase = "Receiving" | "Updating" | "RunningHook";
+
+export type TransferProgress = { operationId: string, operation: TransferOperation, phase: TransferPhase | "Starting" | "RemoteFailed" | "Completed" | "Failed", errorKind: TransferErrorKind | null, current: number, total: number, receivedBytes: number, message: string | null, 
 /**
  * Only on `RemoteFailed`: the remote that failed during a Fetch all.
  */

@@ -72,6 +72,8 @@ pub fn join_ts_declarations(
     for pair in declarations.windows(2) {
         assert_ne!(pair[0].0, pair[1].0, "two types are named {}", pair[0].0);
     }
+    // Matches TypeScript names, not Rust types: an unlisted Rust type that a `ts(rename)` gives
+    // the name of a listed one would pass here (and then fail the frontend's `dtoContract.ts`).
     for name in used {
         assert!(
             declarations.iter().any(|(declared, _)| *declared == name),

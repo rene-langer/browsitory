@@ -15,8 +15,6 @@ type Expect<T extends true> = T;
 type Flat<T> = { [K in keyof T]: T[K] };
 /** `T` with the fields `K` optional. */
 type Loosen<T, K extends keyof T> = Flat<Omit<T, K> & Partial<Pick<T, K>>>;
-/** `T` with its `Staged` variant's `oldPath` required. */
-type StagedOldPathRequired<T> = T extends { kind: "Staged" } ? Flat<Required<T>> : T;
 
 // Deliberate differences, each written out below:
 // - `BranchInfo`, `GraphCommit`, `RemoteInfo`, `UpstreamInfo`: both backends always send these
@@ -24,8 +22,9 @@ type StagedOldPathRequired<T> = T extends { kind: "Staged" } ? Flat<Required<T>>
 //   `FileHistoryEntry` and `SearchPage` hold a `GraphCommit`, so they are compared with the
 //   hand-written one in its place (`GraphCommit` itself is compared on its own line).
 // - `MergeToolOutcome`: `"HandedOff"` comes from the VSCode extension host, never from Tauri.
-// - `DiffSource`: the backends accept a `Staged` source without `oldPath` (`#[serde(default)]`);
-//   the frontend always sends it, and the extension host, which also reads it, requires it.
+// - `listOpenRepos`: the sidecar answers `OpenRepos`, compared with the method's return type.
+//   The desktop app's command returns an `(entries, activePath)` tuple, not a DTO, which
+//   `tauriRepoClient.ts` turns into the same shape; only its `OpenRepoEntry` is compared.
 
 export type DtoContract = [
   Expect<Equal<Hand.BisectInfo, Tauri.BisectInfo>>,
@@ -64,8 +63,8 @@ export type DtoContract = [
   Expect<Equal<Hand.DiffOptions, Sidecar.DiffOptions>>,
   Expect<Equal<Hand.DiffSettings, Tauri.DiffSettings>>,
   Expect<Equal<Hand.DiffSettings, Sidecar.DiffSettings>>,
-  Expect<Equal<Hand.DiffSource, StagedOldPathRequired<Tauri.DiffSource>>>,
-  Expect<Equal<Hand.DiffSource, StagedOldPathRequired<Sidecar.DiffSource>>>,
+  Expect<Equal<Hand.DiffSource, Tauri.DiffSource>>,
+  Expect<Equal<Hand.DiffSource, Sidecar.DiffSource>>,
   Expect<Equal<Hand.ExternalToolSettings, Tauri.ExternalToolSettings>>,
   Expect<Equal<Hand.ExternalToolSettings, Sidecar.ExternalToolSettings>>,
   Expect<Equal<Hand.FastForwardMode, Tauri.FastForwardMode>>,
@@ -77,6 +76,7 @@ export type DtoContract = [
   Expect<Equal<Hand.FileSide, Tauri.FileSide>>,
   Expect<Equal<Hand.FileSide, Sidecar.FileSide>>,
   Expect<Equal<Hand.FileSides, Tauri.FileSides>>,
+  Expect<Equal<Hand.FileSides, Sidecar.FileSides>>,
   Expect<Equal<Hand.ForgeProvider, Tauri.ForgeProvider>>,
   Expect<Equal<Hand.ForgeProvider, Sidecar.ForgeProvider>>,
   Expect<Equal<Hand.ForgeRepository, Tauri.ForgeRepository>>,
@@ -115,6 +115,7 @@ export type DtoContract = [
   Expect<Equal<Hand.PullRequestList, Tauri.PullRequestList>>,
   Expect<Equal<Hand.PullRequestList, Sidecar.PullRequestList>>,
   Expect<Equal<Hand.RebaseAbort, Tauri.RebaseAbort>>,
+  Expect<Equal<Hand.RebaseAbort, Sidecar.RebaseAbort>>,
   Expect<Equal<Hand.RebaseAction, Tauri.RebaseAction>>,
   Expect<Equal<Hand.RebaseAction, Sidecar.RebaseAction>>,
   Expect<Equal<Hand.RebaseDivergence, Tauri.RebaseDivergence>>,
@@ -193,4 +194,5 @@ export type DtoContract = [
   Expect<Equal<Hand.OpenRepoEntry, Tauri.OpenRepoEntryInput>>,
   // `persistOpenRepos` sends `OpenRepoEntry`s; the backends read them as `OpenRepoEntryInput`.
   Expect<Equal<Hand.OpenRepoEntry, Sidecar.OpenRepoEntryInput>>,
+  Expect<Equal<Awaited<ReturnType<Hand.RepoClient["listOpenRepos"]>>, Sidecar.OpenRepos>>,
 ];

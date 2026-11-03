@@ -1491,13 +1491,20 @@ only `error`.
   DTO uses a type that isn't listed. `frontend/src/ipc/dtoContract.ts` then requires each
   generated type to equal its hand-written type in `RepoClient.ts`, so `pnpm build` fails when a
   Rust field is renamed, retyped or made optional. The few intended differences are written out
-  there. `dtoContract.test.ts` checks that every generated type is compared. A wire field that
-  Rust sends as a string but TypeScript types as a union uses `ts(as = "<enum>")` with the
-  `git-core`/`repo-service` enum the string comes from (their `ts` feature, enabled only by
-  the transports' dev-dependencies), or `ts(type = "...")` for a fixed set of literals. ts-rs
-  reads the serde attributes, except that it can't tell a `skip_serializing_if` field (sent
-  only sometimes) or a `#[serde(default)]` input field (may be omitted) from a required one:
-  mark those `ts(optional)` / `ts(optional = nullable)`.
+  there. `dtoContract.test.ts` checks that every generated type is compared.
+  - String fields with a union type: a wire field that Rust sends as a string holds an enum's
+    `Debug` output (its variant name), and uses `ts(as = "<enum>")` with the `git-core`/
+    `repo-service` enum it comes from (their `ts` feature, enabled only by the transports'
+    dev-dependencies). The few literals the DTO code adds itself (`TransferProgress.phase`'s
+    `"Starting"` …) are written in a `ts(type = "...")` next to that enum.
+  - ts-rs reads the serde attributes, but it can't tell a `skip_serializing_if` field (sent
+    only sometimes) from one that is always sent: mark it `ts(optional)`. On input, serde reads
+    any missing `Option` field as `None`; the generated types describe what the frontend sends.
+  - Not covered: answers that are plain strings, lists of strings or `null` (such as
+    `get_commit_message` or `list_recent_repos`); the JSON-RPC notification envelopes (their
+    `params` are the checked `TransferProgress`/`HookProgress`); and `read_file_version`'s
+    `{ text }`, which only the extension host reads. The desktop app's `list_open_repos` returns
+    a tuple, which `tauriRepoClient.ts` reshapes, so only its entries are compared.
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
   native-method routing, process-loss recovery, webview security, and deterministic disposal.
 - E2E: `tauri-driver` + WebdriverIO (`e2e/`) driving

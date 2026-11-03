@@ -45,7 +45,7 @@ export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, };
 
 export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, };
 
-export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath?: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
+export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 
 export type ExternalToolSettings = { editor: string | null, terminal: string | null, };
 
@@ -190,7 +190,9 @@ export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "StaleL
 
 export type TransferOperation = "Fetch" | "FetchAll" | "Pull" | "PushBranch" | "ForcePushBranch" | "PushTags" | "DeleteRemoteBranch" | "Clone";
 
-export type TransferProgress = { operationId: string, operation: TransferOperation, phase: "Starting" | "Receiving" | "Updating" | "RunningHook" | "RemoteFailed" | "Completed" | "Failed", errorKind: TransferErrorKind | null, current: number, total: number, receivedBytes: number, message: string | null, 
+export type TransferPhase = "Receiving" | "Updating" | "RunningHook";
+
+export type TransferProgress = { operationId: string, operation: TransferOperation, phase: TransferPhase | "Starting" | "RemoteFailed" | "Completed" | "Failed", errorKind: TransferErrorKind | null, current: number, total: number, receivedBytes: number, message: string | null, 
 /**
  * Only on `RemoteFailed`: the remote that failed during a Fetch all.
  */

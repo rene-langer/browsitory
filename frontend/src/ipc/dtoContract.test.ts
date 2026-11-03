@@ -7,13 +7,15 @@ import sidecarBindings from "./generated/sidecar-dto.ts?raw";
 
 /** Generated types with no hand-written counterpart in `RepoClient.ts`, and why. */
 const NOT_COMPARED: Record<string, string> = {
-  // Inline in `CloneRequest`, `CommitSignature` and `TerminalRebase`, compared as a whole.
+  // Inline in `CloneRequest`, `CommitSignature`, `TerminalRebase` and `TransferProgress`, which
+  // are compared as a whole.
   HttpsInput: "inline in CloneRequest",
   SignatureFormat: "inline in CommitSignature",
   TerminalRebaseKind: "inline in TerminalRebase",
+  TransferPhase: "part of TransferProgress.phase",
   // `toCloneError` reads the error payload defensively; its `kind` is a plain string in Rust.
   CloneErrorPayload: "read by toCloneError, not typed",
-  // Answer of the host-only `read_file_version`, which the webview never calls.
+  // Parameter of the host-only `read_file_version`, which the webview never calls.
   FileVersion: "extension host only",
 };
 

@@ -15,7 +15,7 @@ use git_core::stash::StashEntry;
 use git_core::status::StatusEntry;
 use git_core::submodule::SubmoduleInfo;
 use git_core::worktree::WorktreeInfo;
-use repo_service::worker::{HookEvent, HookSource, TransferEvent, WorkerRegistry};
+use repo_service::worker::{HookEvent, TransferEvent, WorkerRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -699,12 +699,24 @@ impl From<config::OpenRepoEntry> for OpenRepoEntryDto {
     }
 }
 
+/// `list_open_repos`'s answer. (The desktop app's command returns an `(entries, activePath)`
+/// tuple instead, which `tauriRepoClient.ts` turns into this shape.)
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "OpenRepos"))]
+#[serde(rename_all = "camelCase")]
+struct OpenReposDto {
+    entries: Vec<OpenRepoEntryDto>,
+    active_path: Option<String>,
+}
+
 fn list_open_repos_handler() -> Result<Value, String> {
     let (entries, active) = config::list_open_repos().map_err(|error| error.to_string())?;
-    let entries: Vec<OpenRepoEntryDto> = entries.into_iter().map(OpenRepoEntryDto::from).collect();
-    let active = active.map(|p| p.to_string_lossy().into_owned());
-    serde_json::to_value(serde_json::json!({ "entries": entries, "activePath": active }))
-        .map_err(|error| error.to_string())
+    let open = OpenReposDto {
+        entries: entries.into_iter().map(OpenRepoEntryDto::from).collect(),
+        active_path: active.map(|p| p.to_string_lossy().into_owned()),
+    };
+    serde_json::to_value(open).map_err(|error| error.to_string())
 }
 
 #[derive(Deserialize)]
@@ -1444,7 +1456,6 @@ enum DiffSourceDto {
     #[serde(rename_all = "camelCase")]
     Staged {
         #[serde(default)]
-        #[cfg_attr(test, ts(optional = nullable))]
         old_path: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
@@ -1530,10 +1541,19 @@ fn get_file_sides(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let sides = worker_handle(repos, &params.repo_path)?
         .get_file_sides(params.path, params.source.into())?;
-    Ok(serde_json::json!({
-        "old": FileSideDto::from(sides.old),
-        "new": FileSideDto::from(sides.new),
-    }))
+    serde_json::to_value(FileSidesDto {
+        old: sides.old.into(),
+        new: sides.new.into(),
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "FileSides"))]
+struct FileSidesDto {
+    old: FileSideDto,
+    new: FileSideDto,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1616,7 +1636,7 @@ struct HookProgressDto {
     #[cfg_attr(test, ts(type = r#""Started" | "Finished""#))]
     phase: &'static str,
     #[cfg_attr(test, ts(as = "repo_service::worker::HookSource"))]
-    source: &'static str,
+    source: String,
 }
 
 fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
@@ -1637,12 +1657,7 @@ fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
         operation_id,
         hook,
         phase,
-        source: match source {
-            HookSource::Commit => "Commit",
-            HookSource::Checkout => "Checkout",
-            HookSource::Merge => "Merge",
-            HookSource::Pick => "Pick",
-        },
+        source: format!("{:?}", source),
     }
 }
 
@@ -2370,7 +2385,9 @@ struct TransferProgressDto {
     #[cfg_attr(
         test,
         ts(
-            type = r#""Starting" | "Receiving" | "Updating" | "RunningHook" | "RemoteFailed" | "Completed" | "Failed""#
+            // `TransferPhase` (declared in the same generated file) plus the phases only the
+            // transfer relay emits.
+            type = r#"TransferPhase | "Starting" | "RemoteFailed" | "Completed" | "Failed""#
         )
     )]
     phase: String,
@@ -2675,7 +2692,7 @@ struct HeadInfoDto {
     detached_at: Option<String>,
     head_pushed: bool,
     #[cfg_attr(test, ts(as = "Option<git_core::repo::OperationKind>"))]
-    operation: Option<&'static str>,
+    operation: Option<String>,
     squash_message: Option<String>,
     commit_hooks: Vec<String>,
     sequence: Option<SequenceProgressDto>,
@@ -2692,7 +2709,7 @@ struct HeadInfoDto {
 #[serde(rename_all = "camelCase")]
 struct TerminalRebaseDto {
     #[cfg_attr(test, ts(as = "git_core::repo::TerminalRebaseKind"))]
-    kind: &'static str,
+    kind: String,
     branch: String,
     onto: String,
     current_step: usize,
@@ -2702,10 +2719,7 @@ struct TerminalRebaseDto {
 impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
     fn from(rebase: git_core::repo::TerminalRebase) -> Self {
         Self {
-            kind: match rebase.kind {
-                git_core::repo::TerminalRebaseKind::Rebase => "Rebase",
-                git_core::repo::TerminalRebaseKind::Am => "Am",
-            },
+            kind: format!("{:?}", rebase.kind),
             branch: rebase.branch,
             onto: rebase.onto,
             current_step: rebase.current_step,
@@ -2756,7 +2770,7 @@ struct AbortSequenceParams {
 #[serde(rename_all = "camelCase")]
 struct TerminalSequenceDto {
     #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
-    kind: &'static str,
+    kind: String,
     paused_on_conflict: bool,
     started_at: String,
     started_at_summary: String,
@@ -2767,10 +2781,7 @@ struct TerminalSequenceDto {
 impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
     fn from(sequence: git_core::pick::TerminalSequence) -> Self {
         Self {
-            kind: match sequence.kind {
-                git_core::pick::SequenceKind::CherryPick => "CherryPick",
-                git_core::pick::SequenceKind::Revert => "Revert",
-            },
+            kind: format!("{:?}", sequence.kind),
             paused_on_conflict: sequence.paused_on_conflict,
             started_at: sequence.started_at,
             started_at_summary: sequence.started_at_summary,
@@ -2791,16 +2802,11 @@ struct BisectDto {
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
     fn from(info: git_core::repo::HeadInfo) -> Self {
-        use git_core::repo::OperationKind;
         Self {
             head_id: info.head_id,
             detached_at: info.detached_at,
             head_pushed: info.head_pushed,
-            operation: info.operation.map(|kind| match kind {
-                OperationKind::Merge => "Merge",
-                OperationKind::CherryPick => "CherryPick",
-                OperationKind::Revert => "Revert",
-            }),
+            operation: info.operation.map(|kind| format!("{:?}", kind)),
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),
@@ -2833,12 +2839,12 @@ struct RebaseInfoDto {
 #[serde(tag = "kind", content = "reason")]
 enum RebaseHealthDto {
     Paused,
-    Diverged(#[cfg_attr(test, ts(as = "git_core::rebase::RebaseDivergence"))] &'static str),
+    Diverged(#[cfg_attr(test, ts(as = "git_core::rebase::RebaseDivergence"))] String),
 }
 
 impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
     fn from(info: git_core::repo::RebaseInfo) -> Self {
-        use git_core::rebase::{RebaseDivergence, RebaseHealth};
+        use git_core::rebase::RebaseHealth;
         Self {
             branch: info.branch,
             onto: info.onto,
@@ -2846,12 +2852,9 @@ impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
             total_steps: info.total_steps,
             health: match info.health {
                 RebaseHealth::Paused => RebaseHealthDto::Paused,
-                RebaseHealth::Diverged(reason) => RebaseHealthDto::Diverged(match reason {
-                    RebaseDivergence::HeadMoved => "HeadMoved",
-                    RebaseDivergence::BranchMoved => "BranchMoved",
-                    RebaseDivergence::BranchMissing => "BranchMissing",
-                    RebaseDivergence::OtherOperation => "OtherOperation",
-                }),
+                RebaseHealth::Diverged(reason) => {
+                    RebaseHealthDto::Diverged(format!("{:?}", reason))
+                }
             },
         }
     }
@@ -2863,7 +2866,7 @@ impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
 #[serde(rename_all = "camelCase")]
 struct SequenceProgressDto {
     #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
-    kind: &'static str,
+    kind: String,
     current_step: usize,
     total_steps: usize,
     current_commit: String,
@@ -2872,10 +2875,7 @@ struct SequenceProgressDto {
 impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
     fn from(progress: git_core::pick::SequenceProgress) -> Self {
         Self {
-            kind: match progress.kind {
-                git_core::pick::SequenceKind::CherryPick => "CherryPick",
-                git_core::pick::SequenceKind::Revert => "Revert",
-            },
+            kind: format!("{:?}", progress.kind),
             current_step: progress.current_step,
             total_steps: progress.total_steps,
             current_commit: progress.current_commit,
@@ -3943,7 +3943,17 @@ fn abort_rebase(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let abort = worker_handle(repos, &params.repo_path)?.abort_rebase()?;
-    Ok(serde_json::json!({ "restored": abort.restored }))
+    serde_json::to_value(RebaseAbortDto {
+        restored: abort.restored,
+    })
+    .map_err(|error| error.to_string())
+}
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[cfg_attr(test, ts(rename = "RebaseAbort"))]
+struct RebaseAbortDto {
+    restored: bool,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -4157,6 +4167,7 @@ fn create_pull_request(params: Value, repos: &Repos) -> Result<Value, String> {
 mod tests {
     use super::*;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
+    use repo_service::worker::HookSource;
 
     /// #306: the TypeScript shape of every wire DTO in this file, checked in as
     /// `frontend/src/ipc/generated/sidecar-dto.ts` and checked against `RepoClient.ts` by
@@ -4172,6 +4183,7 @@ mod tests {
             git_core::rebase::RebaseDivergence,
             git_core::remote::TransferErrorKind,
             git_core::remote::TransferOperation,
+            git_core::remote::TransferPhase,
             git_core::repo::OperationKind,
             git_core::repo::TerminalRebaseKind,
             git_core::status::StatusKind,
@@ -4217,6 +4229,9 @@ mod tests {
             ConfirmedAbortDto,
             TerminalSequenceDto,
             BisectDto,
+            FileSidesDto,
+            OpenReposDto,
+            RebaseAbortDto,
             RebaseInfoDto,
             RebaseHealthDto,
             SequenceProgressDto,

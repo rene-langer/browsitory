@@ -81,7 +81,9 @@ pub struct TransferProgressDto {
     #[cfg_attr(
         test,
         ts(
-            type = r#""Starting" | "Receiving" | "Updating" | "RunningHook" | "RemoteFailed" | "Completed" | "Failed""#
+            // `TransferPhase` (declared in the same generated file) plus the phases only the
+            // transfer relay emits.
+            type = r#"TransferPhase | "Starting" | "RemoteFailed" | "Completed" | "Failed""#
         )
     )]
     pub phase: String,
@@ -681,7 +683,7 @@ pub struct HeadInfoDto {
     pub detached_at: Option<String>,
     pub head_pushed: bool,
     #[cfg_attr(test, ts(as = "Option<git_core::repo::OperationKind>"))]
-    pub operation: Option<&'static str>,
+    pub operation: Option<String>,
     pub squash_message: Option<String>,
     pub commit_hooks: Vec<String>,
     pub sequence: Option<SequenceProgressDto>,
@@ -703,7 +705,7 @@ pub struct HeadInfoDto {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalRebaseDto {
     #[cfg_attr(test, ts(as = "git_core::repo::TerminalRebaseKind"))]
-    pub kind: &'static str,
+    pub kind: String,
     pub branch: String,
     pub onto: String,
     pub current_step: usize,
@@ -713,10 +715,7 @@ pub struct TerminalRebaseDto {
 impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
     fn from(rebase: git_core::repo::TerminalRebase) -> Self {
         Self {
-            kind: match rebase.kind {
-                git_core::repo::TerminalRebaseKind::Rebase => "Rebase",
-                git_core::repo::TerminalRebaseKind::Am => "Am",
-            },
+            kind: format!("{:?}", rebase.kind),
             branch: rebase.branch,
             onto: rebase.onto,
             current_step: rebase.current_step,
@@ -760,7 +759,7 @@ impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSequenceDto {
     #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
-    pub kind: &'static str,
+    pub kind: String,
     pub paused_on_conflict: bool,
     pub started_at: String,
     pub started_at_summary: String,
@@ -771,10 +770,7 @@ pub struct TerminalSequenceDto {
 impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
     fn from(sequence: git_core::pick::TerminalSequence) -> Self {
         Self {
-            kind: match sequence.kind {
-                git_core::pick::SequenceKind::CherryPick => "CherryPick",
-                git_core::pick::SequenceKind::Revert => "Revert",
-            },
+            kind: format!("{:?}", sequence.kind),
             paused_on_conflict: sequence.paused_on_conflict,
             started_at: sequence.started_at,
             started_at_summary: sequence.started_at_summary,
@@ -795,16 +791,11 @@ pub struct BisectDto {
 
 impl From<git_core::repo::HeadInfo> for HeadInfoDto {
     fn from(info: git_core::repo::HeadInfo) -> Self {
-        use git_core::repo::OperationKind;
         Self {
             head_id: info.head_id,
             detached_at: info.detached_at,
             head_pushed: info.head_pushed,
-            operation: info.operation.map(|kind| match kind {
-                OperationKind::Merge => "Merge",
-                OperationKind::CherryPick => "CherryPick",
-                OperationKind::Revert => "Revert",
-            }),
+            operation: info.operation.map(|kind| format!("{:?}", kind)),
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),
@@ -838,12 +829,12 @@ pub struct RebaseInfoDto {
 #[serde(tag = "kind", content = "reason")]
 pub enum RebaseHealthDto {
     Paused,
-    Diverged(#[cfg_attr(test, ts(as = "git_core::rebase::RebaseDivergence"))] &'static str),
+    Diverged(#[cfg_attr(test, ts(as = "git_core::rebase::RebaseDivergence"))] String),
 }
 
 impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
     fn from(info: git_core::repo::RebaseInfo) -> Self {
-        use git_core::rebase::{RebaseDivergence, RebaseHealth};
+        use git_core::rebase::RebaseHealth;
         Self {
             branch: info.branch,
             onto: info.onto,
@@ -851,12 +842,9 @@ impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
             total_steps: info.total_steps,
             health: match info.health {
                 RebaseHealth::Paused => RebaseHealthDto::Paused,
-                RebaseHealth::Diverged(reason) => RebaseHealthDto::Diverged(match reason {
-                    RebaseDivergence::HeadMoved => "HeadMoved",
-                    RebaseDivergence::BranchMoved => "BranchMoved",
-                    RebaseDivergence::BranchMissing => "BranchMissing",
-                    RebaseDivergence::OtherOperation => "OtherOperation",
-                }),
+                RebaseHealth::Diverged(reason) => {
+                    RebaseHealthDto::Diverged(format!("{:?}", reason))
+                }
             },
         }
     }
@@ -883,7 +871,7 @@ impl From<git_core::rebase::RebaseAbort> for RebaseAbortDto {
 #[serde(rename_all = "camelCase")]
 pub struct SequenceProgressDto {
     #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
-    pub kind: &'static str,
+    pub kind: String,
     pub current_step: usize,
     pub total_steps: usize,
     pub current_commit: String,
@@ -892,10 +880,7 @@ pub struct SequenceProgressDto {
 impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
     fn from(progress: git_core::pick::SequenceProgress) -> Self {
         Self {
-            kind: match progress.kind {
-                git_core::pick::SequenceKind::CherryPick => "CherryPick",
-                git_core::pick::SequenceKind::Revert => "Revert",
-            },
+            kind: format!("{:?}", progress.kind),
             current_step: progress.current_step,
             total_steps: progress.total_steps,
             current_commit: progress.current_commit,
@@ -1033,17 +1018,12 @@ pub struct HookProgressDto {
     #[cfg_attr(test, ts(type = r#""Started" | "Finished""#))]
     pub phase: &'static str,
     #[cfg_attr(test, ts(as = "repo_service::worker::HookSource"))]
-    pub source: &'static str,
+    pub source: String,
 }
 
 /// The wire name of a `HookSource`.
-fn hook_source_name(source: HookSource) -> &'static str {
-    match source {
-        HookSource::Commit => "Commit",
-        HookSource::Checkout => "Checkout",
-        HookSource::Merge => "Merge",
-        HookSource::Pick => "Pick",
-    }
+fn hook_source_name(source: HookSource) -> String {
+    format!("{:?}", source)
 }
 
 fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
@@ -1351,7 +1331,6 @@ pub enum DiffSourceDto {
     #[serde(rename_all = "camelCase")]
     Staged {
         #[serde(default)]
-        #[cfg_attr(test, ts(optional = nullable))]
         old_path: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
@@ -4434,6 +4413,7 @@ mod ts_bindings {
             git_core::rebase::RebaseDivergence,
             git_core::remote::TransferErrorKind,
             git_core::remote::TransferOperation,
+            git_core::remote::TransferPhase,
             git_core::repo::OperationKind,
             git_core::repo::TerminalRebaseKind,
             git_core::status::StatusKind,
