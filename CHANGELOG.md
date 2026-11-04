@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operations that stop part-way can be tried again
+
+- Fixed: when a cherry-pick, revert, rebase start, pull or stash apply (or pop) stopped
+  part-way, for example at a file another program kept open on Windows or at a read-only
+  file, the files already written stayed changed. Trying again was then refused ("Commit or
+  unstage your staged changes first", local changes, a dirty work tree, or local changes the
+  stash would overwrite). These operations now put those files back, so nothing is left
+  changed and trying again works. On Windows they also name the file: "'f.txt' is open in
+  another program. Close it, then try again." Your own changes to other files are kept, and a
+  failed pop keeps the stash (#321).
+- Fixed: when aborting a merge, cherry-pick or revert stopped part-way, aborting again ended
+  it but left the files it hadn't reached with the merge's changes. Aborting again now puts
+  them back too. On Windows the message names the file: "'f.txt' is open in another program.
+  Some files were already put back. Close it, then abort again to finish." (#321)
+- Fixed: on Windows, a rebase abort stopped by a file another program kept open said "Some
+  files were already put back" even when it hadn't changed anything yet. It now says only
+  "Close it, then try again." in that case (#321).
+
 ### Internal: notices on Renovate PRs
 
 - Added: a workflow regenerates `THIRD_PARTY_NOTICES.md` on Renovate pull requests, commits it
@@ -34,8 +52,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   because it is being used by another process." They now name the file and say how to
   finish, for example "'f.txt' is open in another program. Some files were already switched.
   Close it, then try again to finish." All but a clone also say that some files were already
-  changed; a failed clone removes its folder, so it says "Close it, then try again." (#303). Stash apply and pop, merge abort, cherry-pick, revert, rebase start and pull
-  still show the raw error (#321).
+  changed; a failed clone removes its folder, so it says "Close it, then try again." (#303).
 
 ### Internal: publishing checks for the extension
 

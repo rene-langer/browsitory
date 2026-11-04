@@ -1058,12 +1058,11 @@ fn a_leftover_of_a_mainline_pick_does_not_block_the_next_commit() {
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
 }
 
-/// Windows: a cherry-pick's checkout stopping at a file another program keeps open still
-/// reports libgit2's own error: retrying it doesn't finish a part-way checkout, so the
-/// "try again" message of #303 is left to #321.
+/// Windows: a cherry-pick's checkout stopping at a file another program keeps open names it
+/// with #302's plain message: nothing was left changed (#321, more in `partial_checkout.rs`).
 #[cfg(windows)]
 #[test]
-fn cherry_pick_onto_a_file_open_in_another_program_keeps_libgit2s_error() {
+fn cherry_pick_onto_a_file_open_in_another_program_says_so() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "a.txt", "1\n");
     common::commit_all(&repo, "base");
@@ -1084,5 +1083,14 @@ fn cherry_pick_onto_a_file_open_in_another_program_keeps_libgit2s_error() {
     let error = cherry_pick(&repo, &picked, None, Default::default()).unwrap_err();
 
     drop(editor);
-    assert!(matches!(error, PickError::Git(_)), "{error:?}");
+    assert_eq!(
+        error.to_string(),
+        "'a.txt' is open in another program. Close it, then try again."
+    );
+    assert!(
+        matches!(error, PickError::HeldOpen(ref held) if held.path == "a.txt"),
+        "{error:?}"
+    );
+    cherry_pick(&repo, &picked, None, Default::default()).unwrap();
+    assert_eq!(common::read(dir.path(), "a.txt"), "a longer line\n");
 }

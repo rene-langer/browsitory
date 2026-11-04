@@ -46,6 +46,10 @@ pub enum PickError {
     HeadMoved,
     #[error("{0}")]
     Merge(#[from] crate::merge::MergeError),
+    /// Windows: a cherry-pick or revert stopped at a file another program holds open; what its
+    /// checkout had written was put back (#321).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
@@ -585,12 +589,20 @@ fn step(
             crate::worktree_guard::GuardSource::Index(&merged),
         )],
     )?;
+    // A checkout that stops part-way (a file another program holds open, a read-only file) is
+    // rolled back, so the step can be tried again (#321). libgit2's own default strategy for a
+    // pick is safe with conflicts allowed; a builder of our own must say so.
+    let written = crate::partial_checkout::Written::default();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.safe().allow_conflicts(true);
+    written.record(&mut checkout);
     let applied = match kind {
         Kind::CherryPick => {
             let mut options = git2::CherrypickOptions::new();
             if let Some(mainline) = mainline {
                 options.mainline(mainline);
             }
+            options.checkout_builder(checkout);
             repo.cherrypick(target, Some(&mut options))
         }
         Kind::Revert => {
@@ -598,12 +610,19 @@ fn step(
             if let Some(mainline) = mainline {
                 options.mainline(mainline);
             }
+            options.checkout_builder(checkout);
             repo.revert(target, Some(&mut options))
         }
     };
     if let Err(error) = applied {
+        let restored = crate::partial_checkout::roll_back(repo, &written);
         let _ = crate::commit::clear_commit_state(repo);
-        return Err(error.into());
+        return Err(crate::partial_checkout::report(
+            repo,
+            restored,
+            crate::HeldDuring::RolledBack,
+            error,
+        ));
     }
 
     let mut index = repo.index()?;

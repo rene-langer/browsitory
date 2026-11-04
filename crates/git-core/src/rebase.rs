@@ -398,7 +398,21 @@ pub fn start_rebase(
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&onto_tree)],
     )?;
-    repo.checkout_tree(onto_commit.as_object(), None)?;
+    // A checkout that stops part-way (a file another program holds open, a read-only file) is
+    // rolled back, so the rebase can be started again (#321).
+    let written = crate::partial_checkout::Written::default();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    written.record(&mut checkout);
+    repo.checkout_tree(onto_commit.as_object(), Some(&mut checkout))
+        .map_err(|error| {
+            let restored = crate::partial_checkout::roll_back(repo, &written);
+            crate::partial_checkout::report::<RebaseError>(
+                repo,
+                restored,
+                crate::HeldDuring::RolledBack,
+                error,
+            )
+        })?;
     repo.set_head_detached(onto_commit.id())?;
 
     let mut state = RebaseState {
@@ -980,17 +994,9 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
     // says Paused), so it is aborted like one.
     let paused_here = at_expected || is_step_committed_by_hand(repo, state)?;
     if paused_here && branch_unmoved && !other_operation {
-        // A file another program holds open: say so, not libgit2's raw error (#303). Only
-        // here: `start_rebase`'s rollback reports the step's error instead.
-        restore_original_branch(repo, &state.original_branch_ref, state.original_tip).map_err(
-            |error| match error {
-                RebaseError::Git(error) => crate::worktree_guard::held_open::<RebaseError>(
-                    repo.workdir(),
-                    crate::HeldDuring::RebaseAbort,
-                )(error),
-                other => other,
-            },
-        )?;
+        // A file another program holds open is named (#303, in `restore_original_branch`).
+        // `start_rebase`'s rollback reports the step's error instead.
+        restore_original_branch(repo, &state.original_branch_ref, state.original_tip)?;
         return Ok(RebaseAbort { restored: true });
     }
     if at_expected {
@@ -1037,7 +1043,20 @@ fn restore_original_branch(
     )?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
-    repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+    // A file another program holds open: say so, not libgit2's raw error (#303). Aborting again
+    // rewrites everything, so nothing is rolled back; the message says whether the checkout
+    // had already put some files back (#321).
+    let written = crate::partial_checkout::Written::default();
+    written.record(&mut checkout);
+    repo.checkout_tree(tree.as_object(), Some(&mut checkout))
+        .map_err(|error| {
+            let during = if written.is_empty() {
+                crate::HeldDuring::RolledBack
+            } else {
+                crate::HeldDuring::RebaseAbort
+            };
+            crate::worktree_guard::held_open::<RebaseError>(repo.workdir(), during)(error)
+        })?;
     repo.set_head(branch_ref)?;
     crate::commit::clear_operation_files(repo)?;
     Ok(())

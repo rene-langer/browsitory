@@ -1163,11 +1163,47 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   ("… put back. Close it, then abort again to finish."), clone ("Close it, then try again.":
   the clone's folder is removed, kind `FileInUse`) and submodule update. Each of these
   finishes when tried again: a forced checkout rewrites everything, and a safe one against a
-  tree accepts a file already at its target. Stash apply and pop, merge
-  abort, cherry-pick and revert, rebase start and pull fast-forward still show libgit2's
-  error: their retry refuses or skips the files already written (#321). Stash apply's
-  checkout compares with the index, which it doesn't update, so a written file whose size
-  changed counts as a local change (`WouldOverwrite`).
+  tree accepts a file already at its target.
+- Operations whose retry would refuse or skip the files a stopped checkout already wrote roll
+  them back instead (#321, `partial_checkout`), on every platform, when a checkout stops
+  before it touched a file (Windows held file, read-only file or folder). libgit2 writes the
+  index on disk only once a checkout has finished; until then only its in-memory copy holds
+  the entries of the files written. `Written` records each path the checkout wrote or removed
+  through libgit2's progress callback (reported once done, so never the file it stopped at).
+  Known gap: an error *while* writing a file (a full disk) leaves that file truncated or empty;
+  it isn't among the recorded paths, so it isn't put back.
+  - Cherry-pick and revert (each step of a sequence too), rebase start (onto's checkout,
+    before HEAD is detached), pull fast-forward, and stash apply and pop (both of the stash's
+    checkouts, untracked files first): `roll_back` re-reads the index from disk and puts each
+    written path back as it has it. A path the index has is checked out from it (forced, just
+    those paths, after `prepare_forced_checkout` removed links in the way, so filters apply
+    and nothing is written through a link); a path it lacks (a file the checkout created) is
+    removed with `remove_and_prune_beneath`, unless the index has files below it. Every path
+    is tried even after one fails (tracked files first, then created ones, then tracked ones
+    again if a created one was in the way); the first error is reported. These are safe
+    checkouts from that index (each refuses a staged change first), which write over a
+    tracked file only when it matches the index, so no uncommitted change to a tracked file is
+    lost, and unrelated edits stay. An ignored file in the way of a file the checkout creates
+    is written over by libgit2 (git also treats ignored files as expendable), so the rollback
+    removes it rather than bringing it back. The message is #302's plain one,
+    `HeldDuring::RolledBack`: "'f.txt' is open in another program. Close it, then try
+    again." A pop keeps the stash.
+  - Merge abort (also the cherry-pick and revert aborts, and a rebase abort that undoes its
+    paused step) runs its forced checkout of HEAD's touched paths *before* it resets the
+    index, so a stop leaves the index with what is still to abort. `roll_forward` then
+    finishes the paths reached (and the files the abort removed itself): their work-tree files
+    are checked out from HEAD again without touching the index (libgit2's forced checkout of a
+    tree drops every conflict of the index, also outside its path list), then each one's
+    index entry is set to HEAD's, conflicts included. `MERGE_HEAD` and the other state files
+    stay, and aborting again finishes: `HeldDuring::Abort`, "… Some files were already put
+    back. Close it, then abort again to finish.", or the plain message when nothing was put
+    back yet. A file the operation added that can't be removed (Windows: held open) doesn't
+    stop the rest of the abort; it is named the same way and stays for the next abort.
+  - Rebase abort back to the branch (`restore_original_branch`, a forced checkout of the whole
+    tree) needs no rollback: aborting again rewrites everything. `Written` only decides the
+    message: "… Some files were already put back. …" (`HeldDuring::RebaseAbort`) once the
+    checkout wrote something, the plain one before.
+  - When a rollback itself fails, libgit2's error is reported unchanged.
 - `replace_beneath` (undo/redo restores) goes through the same temporary file + rename (#251):
   both walkers share `swap_in` with `write_beneath` (Unix `swap_in_file` / `swap_in`: create,
   fill, `sync_all`, `renameat`, `unlinkat` of the temporary entry on any error, best-effort

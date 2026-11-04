@@ -370,17 +370,7 @@ pub(super) fn pull<S: CredentialStore>(
         .as_ref()
         .err()
         .map(|error| error.transfer_error_kind());
-    let _ = reply.send(result.map_err(|error| match error {
-        git_core::remote::RemoteError::DirtyWorktree
-        | git_core::remote::RemoteError::NoUpstream
-        | git_core::remote::RemoteError::CheckoutConflict
-        | git_core::remote::RemoteError::LinkedFolder(_)
-        | git_core::remote::RemoteError::CaseCollision(_)
-        | git_core::remote::RemoteError::DetachedHead
-        // Static, secret-free text: the user asked for this by pressing Cancel.
-        | git_core::remote::RemoteError::Cancelled => error.to_string(),
-        _ => "pull failed".to_string(),
-    }));
+    let _ = reply.send(result.map_err(pull_error_message));
     op.clear();
     let _ = events.send(TransferEvent::Completed {
         operation_id: op.id,
@@ -389,6 +379,26 @@ pub(super) fn pull<S: CredentialStore>(
         hook_output: None,
     });
 }
+
+/// What a failed pull says: git-core's own text for the refusals and errors whose text is
+/// static or names only a path in the work tree, "pull failed" for anything else (a transport
+/// error may quote a URL with credentials).
+fn pull_error_message(error: git_core::remote::RemoteError) -> String {
+    match error {
+        git_core::remote::RemoteError::DirtyWorktree
+        | git_core::remote::RemoteError::NoUpstream
+        | git_core::remote::RemoteError::CheckoutConflict
+        | git_core::remote::RemoteError::LinkedFolder(_)
+        | git_core::remote::RemoteError::CaseCollision(_)
+        | git_core::remote::RemoteError::DetachedHead
+        // A file another program holds open; the pull was rolled back (#321).
+        | git_core::remote::RemoteError::HeldOpen(_)
+        // Static, secret-free text: the user asked for this by pressing Cancel.
+        | git_core::remote::RemoteError::Cancelled => error.to_string(),
+        _ => "pull failed".to_string(),
+    }
+}
+
 /// Refuses a current-branch push before any transfer starts when `push.default` does not settle
 /// its target (the frontend then offers "Push to…"); the reply carries git-core's static,
 /// secret-free message. Other resolution errors are left to the transfer itself to report.
@@ -1015,8 +1025,22 @@ impl WorkerHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::credential_operation_error;
+    use super::{credential_operation_error, pull_error_message};
     use crate::credentials::CredentialStoreError;
+
+    /// A pull stopped at a file another program holds open names it (#321), not "pull failed".
+    #[test]
+    fn a_pull_stopped_at_a_held_file_says_so() {
+        let error = git_core::remote::RemoteError::HeldOpen(git_core::HeldOpen {
+            path: "d/f.txt".to_string(),
+            during: git_core::HeldDuring::RolledBack,
+        });
+
+        assert_eq!(
+            pull_error_message(error),
+            "'d/f.txt' is open in another program. Close it, then try again."
+        );
+    }
 
     #[test]
     fn credential_operation_error_keeps_the_backend_diagnostic() {

@@ -1087,6 +1087,12 @@ fn quoted_in_message<'a>(workdir: &Path, message: &str, paths: &[&'a str]) -> Op
         .find(|rel| message.contains(&format!("'{base}/{}'", rel.replace('\\', "/"))))
 }
 
+/// Whether another program holds `rel` open so it can't be replaced or removed (Windows; see
+/// [`held_open_after_checkout`] for the probe). Always false elsewhere.
+pub(crate) fn is_held_open(workdir: &Path, rel: &str) -> bool {
+    held_open_among(workdir, [rel]).is_some()
+}
+
 #[cfg(windows)]
 fn held_open_among<'a>(
     workdir: &Path,
@@ -1108,8 +1114,8 @@ fn held_open_among<'a>(
 
 /// The operation whose libgit2 checkout of a whole tree stopped at a file another program holds
 /// open ([`HeldOpen`], #303). It decides what the message says about the files already
-/// written. Each of these finishes when tried again once the file is closed (a rebase abort
-/// when aborted again; a clone starts over, its folder removed).
+/// written. Each of these finishes when tried again once the file is closed (an abort when
+/// aborted again; a clone starts over, its folder removed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeldDuring {
     /// Switching to a branch, or checking out a commit.
@@ -1124,6 +1130,13 @@ pub enum HeldDuring {
     Clone,
     /// Updating a submodule.
     SubmoduleUpdate,
+    /// A cherry-pick, revert, rebase start, pull or stash apply (or pop) that put back what its
+    /// checkout had already written (#321), or an abort that hadn't put anything back yet:
+    /// nothing was left changed.
+    RolledBack,
+    /// Aborting a merge, cherry-pick or revert (#321): the files before the held one are back as
+    /// they were before the operation, the rest is still there to abort.
+    Abort,
 }
 
 impl HeldDuring {
@@ -1139,10 +1152,10 @@ impl HeldDuring {
             HeldDuring::FastForward | HeldDuring::SubmoduleUpdate => {
                 "Some files were already updated. Close it, then try again to finish."
             }
-            HeldDuring::RebaseAbort => {
+            HeldDuring::RebaseAbort | HeldDuring::Abort => {
                 "Some files were already put back. Close it, then abort again to finish."
             }
-            HeldDuring::Clone => "Close it, then try again.",
+            HeldDuring::Clone | HeldDuring::RolledBack => "Close it, then try again.",
         }
     }
 }

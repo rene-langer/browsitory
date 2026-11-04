@@ -338,6 +338,10 @@ pub enum RemoteError {
     DetachedHead,
     #[error("untracked or ignored files would be overwritten by the pull")]
     CheckoutConflict,
+    /// Windows: a fast-forward pull stopped at a file another program holds open; what its
+    /// checkout had written was put back (#321).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
     #[error("current branch has no upstream")]
     NoUpstream,
     #[error("push was rejected because it was not a fast-forward")]
@@ -912,12 +916,22 @@ pub fn pull_after_fetch(
     let local_ref = format!("refs/heads/{local_branch}");
     let mut checkout = CheckoutBuilder::new();
     checkout.safe();
+    // A checkout that stops part-way (a file another program holds open, a read-only file) is
+    // rolled back, so the pull can be tried again (#321).
+    let written = crate::partial_checkout::Written::default();
+    written.record(&mut checkout);
     repo.checkout_tree(upstream_commit.as_object(), Some(&mut checkout))
         .map_err(|error| {
+            let restored = crate::partial_checkout::roll_back(repo, &written);
             if error.code() == ErrorCode::Conflict {
                 RemoteError::CheckoutConflict
             } else {
-                RemoteError::Git(error)
+                crate::partial_checkout::report(
+                    repo,
+                    restored,
+                    crate::HeldDuring::RolledBack,
+                    error,
+                )
             }
         })?;
     repo.reference(&local_ref, upstream_oid, true, "fast-forward pull")?;
