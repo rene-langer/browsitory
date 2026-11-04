@@ -9,6 +9,7 @@ describe("ThirdPartyLicencesDialog", () => {
     render(<ThirdPartyLicencesDialog load={load} onClose={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: "Third-party licences" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Third-party licences" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Loading licences…");
 
     await act(async () => resolve("# Third-party notices\n\nlibgit2 licence text"));

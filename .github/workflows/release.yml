@@ -37,6 +37,10 @@ jobs:
   verify:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    env:
+      # Same pin as ci.yml's `licenses` job; keep both in sync (Renovate updates both).
+      # renovate: datasource=crate depName=cargo-about
+      CARGO_ABOUT_VERSION: 0.9.3
     steps:
       - uses: actions/checkout@v7
       - name: Validate tag is strict semver (release/MAJOR.MINOR.PATCH)
@@ -56,16 +60,29 @@ jobs:
       - run: cargo test --workspace
       - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          # pnpm 11 runs each project with the version its package.json pins (9.15.9 for
+          # frontend, 11.28.10 for extension), so this job can install both. See ci.yml's
+          # `licenses` job.
+          version: 11
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            extension/pnpm-lock.yaml
       - working-directory: frontend
         run: |
           pnpm install --frozen-lockfile
           pnpm test -- --run
+      # A tag on a commit that never went through main's CI must not ship stale notices
+      # (THIRD_PARTY_NOTICES.md, #301). Same check as ci.yml's `licenses` job.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about@${{ env.CARGO_ABOUT_VERSION }}
+      - run: pnpm --dir extension install --frozen-lockfile --ignore-scripts
+      - name: THIRD_PARTY_NOTICES.md is current
+        run: python3 scripts/generate-third-party-notices.py --check
 
   build-release:
     needs: verify

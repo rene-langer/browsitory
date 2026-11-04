@@ -187,6 +187,21 @@ class NpmEntriesTests(unittest.TestCase):
         self.assertEqual([name for name, _ in texts], ["LICENSE-APACHE", "LICENSE-MIT"])
 
 
+class RunTests(unittest.TestCase):
+    def test_decodes_utf8(self):
+        seen = {}
+
+        class Done:
+            stdout = "ok"
+
+        def run(cmd, **kwargs):
+            seen.update(kwargs)
+            return Done()
+
+        self.assertEqual(gen._run(["cargo", "about"], run=run), "ok")
+        self.assertEqual(seen["encoding"], "utf-8")
+
+
 class MainTests(unittest.TestCase):
     def run_main(self, argv, content, current):
         with tempfile.TemporaryDirectory() as tmp:

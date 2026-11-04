@@ -27,6 +27,12 @@ describe("ReleaseNotesModal", () => {
     expect(screen.getByText("Behavior change")).toBeInTheDocument();
   });
 
+  it("names the dialog itself", () => {
+    render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("dialog", { name: "Release notes" })).toBeInTheDocument();
+  });
+
   it("omits section headings with no entries", () => {
     render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
 

@@ -325,6 +325,30 @@ snapshots:
         self.assertEqual(production, {"app-dep", "native", "native-sub"})
 
 
+class PnpmLicensesTests(unittest.TestCase):
+    def test_runs_the_resolved_pnpm_and_decodes_utf8(self):
+        calls = []
+
+        class Done:
+            stdout = '{"MIT": [{"name": "a", "versions": ["1.0.0"], "author": "Zoë"}]}'
+
+        def run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            return Done()
+
+        data = cdl.pnpm_licenses("extension/e2e", True, run=run, which=lambda name: r"C:\pnpm\pnpm.cmd")
+        self.assertEqual(data["MIT"][0]["author"], "Zoë")
+        cmd, kwargs = calls[0]
+        self.assertEqual(cmd[0], r"C:\pnpm\pnpm.cmd")
+        self.assertIn("--prod", cmd)
+        self.assertIn("--ignore-workspace", cmd)
+        self.assertEqual(kwargs["encoding"], "utf-8")
+
+    def test_missing_pnpm_is_a_check_error(self):
+        with self.assertRaisesRegex(cdl.CheckError, "pnpm not found"):
+            cdl.pnpm_licenses("frontend", False, which=lambda name: None)
+
+
 class FakeResponse:
     def __init__(self, body):
         self.body = body

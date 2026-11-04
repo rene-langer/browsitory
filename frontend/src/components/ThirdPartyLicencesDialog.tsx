@@ -36,7 +36,7 @@ export function ThirdPartyLicencesDialog({ load, onClose }: { load: () => Promis
   }, []);
 
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} ariaLabel="Third-party licences">
       <Panel title="Third-party licences" ariaLabel="Third-party licences">
         <p className={styles.intro}>
           Browsitory includes open source software. These are its licences and copyright notices.

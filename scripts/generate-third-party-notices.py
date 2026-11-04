@@ -175,9 +175,11 @@ def parse_cargo_tree(output: str, workspace: set[str]) -> set[tuple[str, str]]:
     return shipped
 
 
-def _run(cmd: list[str]) -> str:
+def _run(cmd: list[str], run=subprocess.run) -> str:
     try:
-        return subprocess.run(cmd, cwd=ROOT, check=True, capture_output=True, text=True).stdout
+        # cargo-about's JSON carries non-ASCII licence texts; never decode with the locale's
+        # default (cp1252 on Windows).
+        return run(cmd, cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8").stdout
     except FileNotFoundError as e:
         raise NoticesError(f"{cmd[0]} not found") from e
     except subprocess.CalledProcessError as e:
@@ -263,7 +265,7 @@ def run_pnpm_licenses(project: str) -> dict:
         raise NoticesError(f"{project}/node_modules is missing; run `pnpm install --frozen-lockfile` in {project}/")
     try:
         return checker.pnpm_licenses(project, True)
-    except (OSError, subprocess.CalledProcessError) as e:
+    except (OSError, subprocess.CalledProcessError, checker.CheckError) as e:
         raise NoticesError(f"`pnpm licenses list --prod` failed in {project}/: {e}") from e
 
 

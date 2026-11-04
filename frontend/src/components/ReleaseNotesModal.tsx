@@ -30,7 +30,7 @@ export function ReleaseNotesModal({
   onOpenThirdPartyLicences?: () => void;
 }) {
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} ariaLabel="Release notes">
       <Panel title="Release Notes" ariaLabel="Release notes">
         {entries.length === 0 ? (
           <p className={styles.empty}>No release notes yet.</p>

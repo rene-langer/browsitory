@@ -276,9 +276,11 @@ and in the tables above, in the same PR.
 notices of everything Browsitory ships (#301, #202). It is generated; never edit it by hand.
 
 - **Where it ships:** every desktop installer as a Tauri resource (`bundle.resources` in
-  `crates/tauri-app/tauri.conf.json`: next to the executable on Windows and Linux,
-  `Contents/Resources/` on macOS), next to the bundles from `scripts/build-dist.*`, on the
-  draft GitHub Release (`release.yml`'s `publish-vsix-release`), and in every `.vsix` at its
+  `crates/tauri-app/tauri.conf.json`), in Tauri's resource folder: next to the executable on
+  Windows, `/usr/lib/Browsitory/` for the `.deb` and `.rpm` packages, `usr/lib/Browsitory/`
+  inside the AppImage, and `Contents/Resources/` in the macOS `.app` (Tauri's `resource_dir`
+  documentation; Tauri doesn't promise these paths stay the same). It is also next to the
+  bundles from `scripts/build-dist.*`, on the draft GitHub Release (`release.yml`'s `publish-vsix-release`), and in every `.vsix` at its
   root (`extension/scripts/package-vsix.mjs` copies it there; `package.json` lists it). Both
   frontend builds also put it at their root as `third-party-notices.md`
   (`frontend/vite.notices.ts`), and the app shows it under "Third-party licences" (command
@@ -302,7 +304,8 @@ notices of everything Browsitory ships (#301, #202). It is generated; never edit
   python3 scripts/generate-third-party-notices.py
   ```
 
-- **Checked in CI:** the `licenses` job runs `scripts/generate-third-party-notices.py --check`
+- **Checked in CI:** the `licenses` job (and `release.yml`'s `verify` job, before a release
+  builds anything) runs `scripts/generate-third-party-notices.py --check`
   (unit tests in `scripts/test_generate_third_party_notices.py`). It fails, naming the command
   above, when the file no longer matches the dependency trees. It also fails when a
   `libgit2-sys`, `libssh2-sys`, `openssl-src` or `libz-sys` version in `Cargo.lock` differs

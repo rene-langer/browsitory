@@ -2,8 +2,8 @@
 
 Browsitory's own code is MIT-licensed (see `LICENSE`). Browsitory also includes code from other
 projects. This file lists that code and carries the licence texts and copyright notices its
-licences ask for, unchanged. It covers both the desktop app and the VSCode extension packages
-(`.vsix`).
+licences ask for, unchanged apart from whitespace. It covers both the desktop app and the
+VSCode extension packages (`.vsix`).
 
 The desktop app and the VSCode extension's native helper program, `bin/vscode-sidecar`, are
 built from Browsitory's Rust crates. Both link the native C libraries listed below, statically
