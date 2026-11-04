@@ -447,6 +447,44 @@ mod tests {
         assert!(crate::status::status(&repo).unwrap().is_empty());
     }
 
+    /// Windows: the clone's checkout stopping at a file another program holds open is
+    /// `HeldOpen` with the clone's advice, named while the file is still there (#303).
+    #[cfg(windows)]
+    #[test]
+    fn a_held_file_stops_the_clone_checkout_with_held_open() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let src = source(false);
+        let parent = TempDir::new().unwrap();
+        let dest = parent.path().join("clone");
+        clone(src.path(), dest.clone(), &mut Phases::default(), &|| false).unwrap();
+        let repo = Repository::open(&dest).unwrap();
+        std::fs::write(dest.join("a.txt"), "changed\n").unwrap();
+        let _editor = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2)
+            .open(dest.join("a.txt"))
+            .unwrap();
+        let mut phases = Phases::default();
+        let reporter: RefCell<&mut dyn TransferReporter> = RefCell::new(&mut phases);
+
+        let failure = checkout_clone(&repo, &reporter, &|| false, CasePolicy::Always);
+
+        let Err(CheckoutFailure::Held(held)) = failure else {
+            panic!("expected HeldOpen");
+        };
+        assert_eq!(
+            held,
+            crate::HeldOpen {
+                path: "a.txt".to_string(),
+                during: crate::HeldDuring::Clone,
+            }
+        );
+        assert_eq!(
+            CloneError::from(held).to_string(),
+            "'a.txt' is open in another program. Close it, then try again."
+        );
+    }
+
     #[test]
     fn cancel_during_checkout_still_cancels() {
         let src = source(false);

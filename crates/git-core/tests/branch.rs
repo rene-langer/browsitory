@@ -350,3 +350,91 @@ fn switching_with_a_file_open_in_another_program_says_so_and_finishes_when_tried
     assert_eq!(common::read(dir.path(), "z.txt"), "2\n");
     assert!(repo.statuses(None).unwrap().is_empty());
 }
+
+/// Windows: as above, but the branch deletes the held file (present in HEAD, absent in the
+/// target), which libgit2 removes before it writes anything (#303).
+#[cfg(windows)]
+#[test]
+fn switching_to_a_branch_that_deletes_a_file_open_in_another_program_says_so() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "1\n");
+    write_file(dir.path(), "z.txt", "1\n");
+    commit_all(&repo, "base");
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    git_core::branch::create_branch(&repo, "side", "HEAD").unwrap();
+    write_file(dir.path(), "a.txt", "a longer line\n");
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("z.txt")).unwrap();
+    index.write().unwrap();
+    std::fs::remove_file(dir.path().join("z.txt")).unwrap();
+    commit_all(&repo, "side");
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+    let editor = common::hold_open_without_share_delete(&dir.path().join("z.txt"));
+
+    let error = git_core::branch::switch_branch(&repo, "side").unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            git_core::branch::BranchError::HeldOpen(ref held) if held.path == "z.txt"
+        ),
+        "{error:?}"
+    );
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some(main.as_str()));
+    assert!(dir.path().join("z.txt").exists());
+    drop(editor);
+    git_core::branch::switch_branch(&repo, "side").unwrap();
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some("side"));
+    assert!(!dir.path().join("z.txt").exists());
+    assert_eq!(common::read(dir.path(), "a.txt"), "a longer line\n");
+    assert!(repo.statuses(None).unwrap().is_empty());
+}
+
+/// Windows: what libgit2 itself reports for a file another program holds, when a checkout
+/// writes over it and when it deletes it. `worktree_guard` finds the file by its quoted full
+/// path; this pins that libgit2 quotes it (#303).
+#[cfg(windows)]
+#[test]
+fn libgit2_quotes_the_full_path_of_a_held_file() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "1\n");
+    write_file(dir.path(), "z.txt", "1\n");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    write_file(dir.path(), "z.txt", "a longer line\n");
+    commit_all(&repo, "updated");
+    let updated = repo.head().unwrap().peel_to_commit().unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("z.txt")).unwrap();
+    index.write().unwrap();
+    std::fs::remove_file(dir.path().join("z.txt")).unwrap();
+    commit_all(&repo, "deleted");
+    let deleted = repo.head().unwrap().peel_to_commit().unwrap();
+    let workdir = repo.workdir().unwrap().to_string_lossy().replace('\\', "/");
+    let quoted = format!("'{}/z.txt'", workdir.trim_end_matches('/'));
+    let mut seen = Vec::new();
+    for target in [&updated, &deleted] {
+        let mut force = git2::build::CheckoutBuilder::new();
+        force.force();
+        repo.checkout_tree(base.as_object(), Some(&mut force))
+            .unwrap();
+        repo.set_head_detached(base.id()).unwrap();
+        let editor = common::hold_open_without_share_delete(&dir.path().join("z.txt"));
+        let error = repo.checkout_tree(target.as_object(), None).unwrap_err();
+        drop(editor);
+        seen.push(format!(
+            "{:?}/{:?}: {}",
+            error.class(),
+            error.code(),
+            error.message()
+        ));
+        assert!(
+            matches!(
+                error.class(),
+                git2::ErrorClass::Os | git2::ErrorClass::Filesystem
+            ) && error.message().replace('\\', "/").contains(&quoted),
+            "{seen:?}"
+        );
+    }
+    panic!("CAPTURE (temporary) {seen:#?}");
+}
