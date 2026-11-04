@@ -118,7 +118,7 @@ describe("Documentation screenshots", () => {
   it("stashes", async () => {
     await collapseSidebarSection("Branches");
     await expandSidebarSection("Stashes");
-    await $("*=Try a closer default zoom").waitForExist({ timeout: 10000 });
+    await $("span*=Try a closer default zoom").waitForExist({ timeout: 10000 });
     await shoot("stashes");
   });
 
@@ -150,14 +150,26 @@ describe("Documentation screenshots", () => {
     await input.waitForDisplayed({ timeout: 10000 });
     await input.setValue("Refresh");
     await browser.keys(["Enter"]);
-    await $("*=Abort merge").waitForExist({ timeout: 10000 });
+    await $("button*=Abort merge").waitForExist({ timeout: 10000 });
     await click("li*=Uncommitted changes");
+    // Bring the conflicted file's resolve controls into view.
+    const conflicted = await $("span*=src/search.js (Conflicted)");
+    await conflicted.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => {
+      (el as HTMLElement).scrollIntoView({ block: "start" });
+      // scrollIntoView also scrolls ancestors that only clip (overflow: hidden), shifting the whole
+      // window; put those back so only the diff pane's own scroll area moved.
+      for (let node = (el as HTMLElement).parentElement; node !== null; node = node.parentElement) {
+        const overflowY = getComputedStyle(node).overflowY;
+        if (overflowY !== "auto" && overflowY !== "scroll") node.scrollTop = 0;
+      }
+    }, conflicted);
     await shoot("conflict");
   });
 
-  it("overview-dark", async () => {
+  it("dark-theme", async () => {
     await setTheme("dark");
-    await shoot("overview-dark");
+    await shoot("dark-theme");
     await setTheme("light");
   });
 });

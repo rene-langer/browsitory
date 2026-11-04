@@ -44,6 +44,11 @@ export function isolateHome(): void {
   fs.writeFileSync(gitConfig, "");
   process.env.GIT_CONFIG_GLOBAL = gitConfig;
   process.env.GIT_CONFIG_NOSYSTEM = "1";
+  // English dates and a fixed time zone, whatever the machine's own settings are.
+  process.env.LANG = "en_US.UTF-8";
+  process.env.LC_ALL = "en_US.UTF-8";
+  process.env.LANGUAGE = "en_US";
+  process.env.TZ = "UTC";
 }
 
 let clock = Date.parse("2026-09-01T09:00:00+02:00");
