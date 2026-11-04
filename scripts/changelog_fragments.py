@@ -27,6 +27,16 @@ def is_fragment(path: str) -> bool:
     )
 
 
+def is_stray(path: str) -> bool:
+    """True for a file directly in changelog.d/ that is neither README.md nor a fragment.
+
+    For example `240-x.MD` or `240-x.txt`: probably a misnamed entry, so callers
+    fail instead of silently ignoring it.
+    """
+    folder, name = posixpath.split(path)
+    return folder == FRAGMENT_DIR and name != README and not is_fragment(path)
+
+
 def fragment_problems(text: str) -> list[str]:
     """What's wrong with a fragment's content; an empty list if nothing.
 

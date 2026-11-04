@@ -31,12 +31,14 @@ Wrap lines at about 100 characters. Don't add a `## [Unreleased]` header or any 
 
 `scripts/check-changelog.py` (pre-push hook and CI) accepts a change to `crates/`,
 `frontend/src/` or `e2e/` when it adds or edits a fragment here (or edits `CHANGELOG.md`). It
-also checks that each added or edited fragment starts with a `### ` heading and has entries.
-This README is never a fragment.
+also checks that each added or edited fragment starts with a `### ` heading and has at least
+one line under it. This README is never a fragment. Any other file here that isn't a `*.md`
+fragment (for example `240-x.MD` or `240-x.txt`) fails the check, so a misnamed entry is never
+lost.
 
 ## Releasing
 
 Before a release, `scripts/fold-changelog.py` moves all fragments to the top of
-`## [Unreleased]` in `CHANGELOG.md`, newest first (by the date of the commit that added each
-one; ties and uncommitted files by file name), and deletes them. The release workflow fails
-while fragments are left. See `docs/RELEASING.md`.
+`## [Unreleased]` in `CHANGELOG.md` and deletes them. Uncommitted fragments go first, by file
+name. Committed ones follow, newest first by the date of the commit that added each; ties go by
+file name. The release workflow fails while fragments are left. See `docs/RELEASING.md`.

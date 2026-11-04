@@ -21,11 +21,12 @@ and `scripts/fold-changelog.py --check`, so unfolded changelog fragments stop it
 Pull requests don't edit `CHANGELOG.md`. Each adds a fragment, `changelog.d/<issue>-<slug>.md`
 (format: `changelog.d/README.md`). Before tagging, open a release-prep pull request that:
 
-1. runs `python3 scripts/fold-changelog.py`. It moves every fragment to the top of
-   `## [Unreleased]`, newest first (by the date of the commit that added it; ties and
-   uncommitted files by file name), and deletes the fragment files. It changes nothing if
-   `## [Unreleased]` is missing or a fragment is malformed, and does nothing when no fragments
-   are left.
+1. runs `python3 scripts/fold-changelog.py` in a full (not shallow) clone. It moves every
+   fragment to the top of `## [Unreleased]` and deletes the fragment files. Uncommitted
+   fragments go first, by file name. Committed ones follow, newest first by the date of the
+   commit that added each; ties go by file name. It changes nothing if `## [Unreleased]` is
+   missing, a fragment is malformed, `changelog.d/` holds a file that isn't a `*.md` fragment
+   or `README.md`, or the clone is shallow. With no fragments left it does nothing.
 2. renames `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, adds a new empty `## [Unreleased]`
    above it, and edits the text where needed.
 

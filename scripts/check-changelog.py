@@ -17,7 +17,11 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from changelog_fragments import fragment_problems, is_fragment  # noqa: E402
+from changelog_fragments import (  # noqa: E402
+    fragment_problems,
+    is_fragment,
+    is_stray,
+)
 
 WATCHED_PREFIXES = ("crates/", "frontend/src/", "e2e/")
 CHANGELOG_FILE = "CHANGELOG.md"
@@ -61,18 +65,23 @@ def needs_changelog(changed_files: list[str]) -> bool:
     return touches_watched_path and not has_entry
 
 
-def parse_name_status(output: str) -> list[str]:
-    """Paths from `git diff --name-status --no-renames` output.
+def stray_files(changed_files: list[str]) -> list[str]:
+    """Files directly in changelog.d/ that are neither README.md nor a fragment."""
+    return [f for f in changed_files if is_stray(f)]
 
-    A deleted fragment is dropped: removing one (as fold-changelog.py does) is
-    not an entry. Other deletions stay, so deleting code still needs an entry.
+
+def parse_name_status(output: str) -> list[str]:
+    """Paths from `git diff -z --name-status --no-renames` output.
+
+    With -z, git separates status and path by NUL and leaves paths unquoted, so
+    non-ASCII names come through as they are. A deleted fragment (or stray file
+    in changelog.d/) is dropped: removing one, as fold-changelog.py does, is not
+    an entry. Other deletions stay, so deleting code still needs an entry.
     """
+    fields = output.split("\0")
     files = []
-    for line in output.splitlines():
-        if not line:
-            continue
-        status, path = line.split("\t", 1)
-        if status.startswith("D") and is_fragment(path):
+    for status, path in zip(fields[0::2], fields[1::2]):
+        if status.startswith("D") and (is_fragment(path) or is_stray(path)):
             continue
         files.append(path)
     return files
@@ -80,14 +89,32 @@ def parse_name_status(output: str) -> list[str]:
 
 def git(*args: str) -> str:
     return subprocess.run(
-        ["git", *args], capture_output=True, text=True, check=True
+        ["git", *args],
+        capture_output=True,
+        encoding="utf-8",
+        errors="surrogateescape",
+        check=True,
     ).stdout
+
+
+def default_base() -> str:
+    """origin/main if this clone has it, else main.
+
+    The pre-push hook uses this. origin/main is only as fresh as the last
+    `git fetch`; a stale local main would count fragments that other PRs
+    already merged as this branch's entry.
+    """
+    found = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"],
+        capture_output=True,
+    )
+    return "origin/main" if found.returncode == 0 else "main"
 
 
 def changed_files(base: str) -> list[str]:
     merge_base = git("merge-base", "HEAD", base).strip()
     return parse_name_status(
-        git("diff", "--name-status", "--no-renames", merge_base, "HEAD")
+        git("diff", "-z", "--name-status", "--no-renames", merge_base, "HEAD")
     )
 
 
@@ -95,8 +122,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--base",
-        default="main",
-        help="ref to diff against (default: main)",
+        default=None,
+        help="ref to diff against (default: origin/main if it exists, else main)",
     )
     args = parser.parse_args()
 
@@ -104,9 +131,16 @@ def main() -> int:
         print("check-changelog: skipped via SKIP_CHANGELOG_CHECK=1")
         return 0
 
-    files = changed_files(args.base)
+    files = changed_files(args.base or default_base())
 
     bad = False
+    for path in stray_files(files):
+        print(
+            f"check-changelog: {path} is not a fragment; fragments are "
+            "changelog.d/<name>.md (lower-case .md).",
+            file=sys.stderr,
+        )
+        bad = True
     for path in fragment_files(files):
         for problem in fragment_problems(git("show", f"HEAD:{path}")):
             print(f"check-changelog: {path} {problem}.", file=sys.stderr)

@@ -5,17 +5,23 @@ Each fragment becomes a section at the top of `## [Unreleased]`, and the
 fragment files are deleted. Run it in a release-prep pull request, before
 renaming [Unreleased] to the new version (see docs/RELEASING.md).
 
-Order: newest first, by the date of the commit that added each fragment
-(`git log --diff-filter=A`). Fragments with no such commit (not committed yet,
-or no git history) come first. Ties go by file name.
+Order: fragments not committed yet (or with no git history at all) come
+first, by file name. Then committed ones, newest first by the date of the
+commit that added each (`git log --diff-filter=A`); ties go by file name. In a
+shallow clone those dates are wrong, so the script refuses to run there.
 
-Safe to re-run: with no fragments left it changes nothing, and a fragment whose
-text is already in [Unreleased] is not added again. It refuses, changing
-nothing, if CHANGELOG.md has no `## [Unreleased]` heading or a fragment is
-malformed.
+Safe to re-run: with no fragments left it changes nothing, and a fragment equal
+to a section already in [Unreleased] (ignoring trailing whitespace) is not
+added again. It refuses, changing nothing, if CHANGELOG.md has no
+`## [Unreleased]` heading, a fragment is malformed, or changelog.d/ holds a
+file that is neither README.md nor a `*.md` fragment.
 
---check changes nothing and exits 1 while fragments remain; the release
-workflow uses it so a release never ships a CHANGELOG.md without them.
+CHANGELOG.md keeps its line endings (LF or CRLF); fragments are converted to
+them.
+
+--check changes nothing, needs no git, and exits 1 while fragments (or stray
+files) remain; the release workflow uses it so a release never ships a
+CHANGELOG.md without them.
 
 Python standard library only.
 """
@@ -32,6 +38,7 @@ from changelog_fragments import (  # noqa: E402
     FRAGMENT_DIR,
     fragment_problems,
     is_fragment,
+    is_stray,
 )
 
 CHANGELOG_FILE = "CHANGELOG.md"
@@ -48,11 +55,29 @@ def _strip_blank_edges(lines: list[str]) -> list[str]:
     return lines[start:end]
 
 
+def _normalise(lines: list[str]) -> str:
+    return "\n".join(_strip_blank_edges([line.rstrip() for line in lines]))
+
+
+def _sections(lines: list[str]) -> list[str]:
+    """The `### ` sections in lines (outside code fences), normalised."""
+    sections: list[list[str]] = [[]]
+    in_fence = False
+    for line in lines:
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+        if not in_fence and line.startswith("### ") and sections[-1]:
+            sections.append([])
+        sections[-1].append(line)
+    return [_normalise(section) for section in sections]
+
+
 def fold_text(changelog: str, fragments: list[str]) -> str:
     """CHANGELOG.md text with fragments inserted, in order, at the top of [Unreleased].
 
-    Raises ValueError if there is no `## [Unreleased]` heading. A fragment whose
-    text is already in [Unreleased] is skipped; with nothing to add, the text is
+    Expects LF line endings. Raises ValueError if there is no `## [Unreleased]`
+    heading. A fragment equal to a whole section already in [Unreleased]
+    (ignoring trailing whitespace) is skipped; with nothing to add, the text is
     returned unchanged.
     """
     lines = changelog.split("\n")
@@ -63,12 +88,14 @@ def fold_text(changelog: str, fragments: list[str]) -> str:
         (i for i in range(start + 1, len(lines)) if NEXT_SECTION.match(lines[i])),
         len(lines),
     )
-    body = "\n".join(_strip_blank_edges(lines[start + 1 : end]))
+    body_lines = lines[start + 1 : end]
+    body = "\n".join(_strip_blank_edges(body_lines))
+    existing = set(_sections(body_lines))
 
     blocks = []
     for fragment in fragments:
-        block = "\n".join(_strip_blank_edges(fragment.split("\n")))
-        if block and block not in body and block not in blocks:
+        block = _normalise(fragment.replace("\r\n", "\n").split("\n"))
+        if block and block not in existing and block not in blocks:
             blocks.append(block)
     if not blocks:
         return changelog
@@ -115,6 +142,32 @@ def commit_time_of_add(root: pathlib.Path, path: str) -> int | None:
     return int(output.splitlines()[0])
 
 
+def is_shallow(root: pathlib.Path) -> bool:
+    """True if root is a shallow git clone; False if not, or if git can't tell."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def find_strays(root: pathlib.Path) -> list[str]:
+    """Paths (relative to root) of files in changelog.d/ that aren't README.md or a fragment."""
+    folder = root / FRAGMENT_DIR
+    if not folder.is_dir():
+        return []
+    return sorted(
+        f"{FRAGMENT_DIR}/{entry.name}"
+        for entry in folder.iterdir()
+        if entry.is_file() and is_stray(f"{FRAGMENT_DIR}/{entry.name}")
+    )
+
+
 def find_fragments(root: pathlib.Path) -> list[str]:
     """Paths (relative to root) of all fragments, sorted by name."""
     folder = root / FRAGMENT_DIR
@@ -146,6 +199,16 @@ def main(argv: list[str] | None = None) -> int:
     root = args.root
 
     fragments = find_fragments(root)
+    strays = find_strays(root)
+    if strays:
+        for path in strays:
+            print(
+                f"fold-changelog: {path} is not a fragment; fragments are "
+                "changelog.d/<name>.md (lower-case .md). Rename or remove it.",
+                file=sys.stderr,
+            )
+        print("Nothing changed.", file=sys.stderr)
+        return 1
     if args.check:
         if fragments:
             print(
@@ -168,7 +231,19 @@ def main(argv: list[str] | None = None) -> int:
         print("fold-changelog: no fragments to fold.")
         return 0
 
-    texts = {path: (root / path).read_text(encoding="utf-8") for path in fragments}
+    if is_shallow(root):
+        print(
+            "fold-changelog: this is a shallow clone, so the commit dates that order "
+            "fragments are unreliable. Run `git fetch --unshallow` first. "
+            "Nothing changed.",
+            file=sys.stderr,
+        )
+        return 1
+
+    texts = {
+        path: (root / path).read_text(encoding="utf-8").replace("\r\n", "\n")
+        for path in fragments
+    }
     bad = False
     for path, text in texts.items():
         for problem in fragment_problems(text):
@@ -181,15 +256,18 @@ def main(argv: list[str] | None = None) -> int:
     ordered = order_fragments({path: commit_time_of_add(root, path) for path in fragments})
     changelog_path = root / CHANGELOG_FILE
     try:
+        with changelog_path.open(encoding="utf-8", newline="") as file:
+            original = file.read()
+        eol = "\r\n" if "\r\n" in original else "\n"
         folded = fold_text(
-            changelog_path.read_text(encoding="utf-8"),
-            [texts[path] for path in ordered],
+            original.replace("\r\n", "\n"), [texts[path] for path in ordered]
         )
     except (OSError, ValueError) as error:
         print(f"fold-changelog: {error}. Nothing changed.", file=sys.stderr)
         return 1
 
-    changelog_path.write_text(folded, encoding="utf-8")
+    with changelog_path.open("w", encoding="utf-8", newline="") as file:
+        file.write(folded.replace("\n", eol))
     for path in ordered:
         (root / path).unlink()
         print(f"fold-changelog: folded {path}")

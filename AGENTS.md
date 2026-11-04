@@ -72,8 +72,9 @@ ln -sf "$(git rev-parse --show-toplevel)/scripts/hooks/pre-push" "$(git rev-pars
 ```
 
 Wires up `scripts/check-changelog.py` as a `pre-push` hook: blocks a push touching `crates/`,
-`frontend/src/`, or `e2e/` without a changelog entry (see below). Bypass once with
-`SKIP_CHANGELOG_CHECK=1 git push`. A diff that touches only dependency manifests/lockfiles
+`frontend/src/`, or `e2e/` without a changelog entry (see below). The hook diffs against
+`origin/main` if your clone has it, else `main`; it never fetches, so `git fetch` now and then
+keeps it accurate. Bypass once with `SKIP_CHANGELOG_CHECK=1 git push`. A diff that touches only dependency manifests/lockfiles
 (`Cargo.toml`, `Cargo.lock`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
 `rust-toolchain.toml`) needs no entry. CI's `changelog` job runs the same check (the
 `skip-changelog` PR label bypasses it).

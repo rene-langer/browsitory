@@ -98,6 +98,22 @@ Intro.
             fold_changelog.fold_text(once, ["### New\n\n- Fixed: a.\n"]), once
         )
 
+    def test_fragment_equal_up_to_trailing_whitespace_is_not_added_twice(self):
+        once = fold_changelog.fold_text(CHANGELOG, ["### New\n\n- Fixed: a.\n"])
+        self.assertEqual(
+            fold_changelog.fold_text(once, ["### New  \n\n- Fixed: a.\t\n\n\n"]), once
+        )
+
+    def test_fragment_that_is_part_of_an_existing_section_is_still_added(self):
+        result = fold_changelog.fold_text(
+            CHANGELOG, ["### Older topic\n\n- Fixed: older"]
+        )
+        self.assertIn(
+            "## [Unreleased]\n\n### Older topic\n\n- Fixed: older\n\n"
+            "### Older topic\n\n- Fixed: older thing (#1).\n",
+            result,
+        )
+
 
 class OrderTests(unittest.TestCase):
     def test_newest_first_then_filename_then_untracked_on_top(self):
@@ -232,14 +248,69 @@ class FoldRepoTests(RepoTestCase):
         self.assertEqual(self.changelog(), CHANGELOG)
         self.assertEqual(self.fragments(), ["1-a.md", "2-bad.md", "README.md"])
 
-    def test_ignores_readme_and_other_files(self):
-        (self.root / "changelog.d" / "notes.txt").write_text("not a fragment\n")
-
+    def test_ignores_readme(self):
         code, out, _ = self.run_main()
 
         self.assertEqual(code, 0)
         self.assertIn("no fragments", out)
         self.assertEqual(self.changelog(), CHANGELOG)
+
+    def test_refuses_stray_files_and_changes_nothing(self):
+        self.write_fragment("1-a.md", "A")
+        for name in ("2-b.MD", "notes.txt"):
+            (self.root / "changelog.d" / name).write_text("### B\n\n- x\n")
+
+        code, _, err = self.run_main()
+
+        self.assertEqual(code, 1)
+        self.assertIn("changelog.d/2-b.MD", err)
+        self.assertIn("changelog.d/notes.txt", err)
+        self.assertEqual(self.changelog(), CHANGELOG)
+        self.assertEqual(
+            self.fragments(), ["1-a.md", "2-b.MD", "README.md", "notes.txt"]
+        )
+
+    def test_keeps_crlf_line_endings_of_changelog(self):
+        (self.root / "CHANGELOG.md").write_bytes(CHANGELOG.replace("\n", "\r\n").encode())
+        (self.root / "changelog.d" / "1-a.md").write_bytes(b"### A\n\n- Fixed: a.\n")
+        (self.root / "changelog.d" / "2-b.md").write_bytes(b"### B\r\n\r\n- Fixed: b.\r\n")
+
+        self.assertEqual(self.run_main()[0], 0)
+
+        data = (self.root / "CHANGELOG.md").read_bytes()
+        self.assertIn(b"### A\r\n\r\n- Fixed: a.\r\n", data)
+        self.assertIn(b"### B\r\n\r\n- Fixed: b.\r\n", data)
+        self.assertEqual(data.count(b"\n"), data.count(b"\r\n"))
+
+    def test_keeps_lf_line_endings_with_a_crlf_fragment(self):
+        (self.root / "changelog.d" / "1-a.md").write_bytes(b"### A\r\n\r\n- Fixed: a.\r\n")
+
+        self.assertEqual(self.run_main()[0], 0)
+
+        data = (self.root / "CHANGELOG.md").read_bytes()
+        self.assertNotIn(b"\r", data)
+        self.assertIn(b"### A\n\n- Fixed: a.\n", data)
+
+    def test_refuses_in_a_shallow_clone(self):
+        self.write_fragment("1-a.md", "A")
+        self.commit("fragment", 1_700_000_100)
+        shallow = self.root.parent / "shallow"
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", self.root.as_uri(), str(shallow)],
+            check=True,
+            capture_output=True,
+        )
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = fold_changelog.main(["--root", str(shallow)])
+
+        self.assertEqual(code, 1)
+        self.assertIn("shallow", err.getvalue())
+        self.assertTrue((shallow / "changelog.d" / "1-a.md").exists())
+        self.assertEqual((shallow / "CHANGELOG.md").read_text(), CHANGELOG)
+
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            self.assertEqual(fold_changelog.main(["--root", str(shallow), "--check"]), 1)
 
     def test_works_outside_a_git_repository(self):
         # No history: every fragment counts as untracked, ordered by file name.
@@ -267,6 +338,22 @@ class CheckModeTests(RepoTestCase):
         self.assertIn("changelog.d/1-a.md", err)
         self.assertEqual(self.changelog(), CHANGELOG)
         self.assertEqual(self.fragments(), ["1-a.md", "README.md"])
+
+    def test_check_fails_on_stray_files(self):
+        (self.root / "changelog.d" / "1-a.txt").write_text("### A\n\n- x\n")
+
+        code, _, err = self.run_main("--check")
+
+        self.assertEqual(code, 1)
+        self.assertIn("changelog.d/1-a.txt", err)
+
+    def test_check_does_not_need_git(self):
+        self.write_fragment("1-a.md", "A")
+        with mock.patch.object(
+            fold_changelog.subprocess, "run", side_effect=AssertionError("git used")
+        ):
+            code, _, _ = self.run_main("--check")
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":
