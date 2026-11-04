@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ReleaseNotesModal, type ReleaseNotesEntry } from "./ReleaseNotesModal";
 
@@ -6,12 +6,22 @@ const ENTRIES: ReleaseNotesEntry[] = [
   {
     version: "0.6.0",
     date: "2026-09-01",
-    sections: { added: ["Feature A"], fixed: ["Bug fix A"] },
+    groups: [
+      {
+        title: "Commit signing",
+        intro: ["Commits can now be signed."],
+        items: [
+          { text: "Commits are signed with gpg or SSH." },
+          { kind: "fixed", text: "A failed signature no longer makes a commit." },
+        ],
+      },
+      { title: "Added", items: [{ text: "Feature A" }] },
+    ],
   },
   {
     version: "0.5.0",
     date: "2026-08-26",
-    sections: { changed: ["Behavior change"] },
+    groups: [{ title: "Changed", items: [{ text: "Behavior change" }] }],
   },
 ];
 
@@ -22,22 +32,52 @@ describe("ReleaseNotesModal", () => {
     expect(screen.getByText("0.6.0", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("2026-09-01")).toBeInTheDocument();
     expect(screen.getByText("Feature A")).toBeInTheDocument();
-    expect(screen.getByText("Bug fix A")).toBeInTheDocument();
+    expect(screen.getByText("Commits are signed with gpg or SSH.")).toBeInTheDocument();
     expect(screen.getByText("0.5.0", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("Behavior change")).toBeInTheDocument();
+  });
+
+  it("shows each group under its own heading, with its intro", () => {
+    render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("heading", { level: 4, name: "Commit signing" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 4, name: "Added" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 4, name: "Changed" })).toBeInTheDocument();
+    expect(screen.getByText("Commits can now be signed.")).toBeInTheDocument();
+  });
+
+  it("labels a bullet with its kind", () => {
+    render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
+
+    const item = screen.getByText("A failed signature no longer makes a commit.").closest("li")!;
+    expect(within(item).getByText("Fixed")).toBeInTheDocument();
+    const plain = screen.getByText("Commits are signed with gpg or SSH.").closest("li")!;
+    expect(plain).toHaveTextContent(/^Commits are signed with gpg or SSH\.$/);
+  });
+
+  it("renders inline code and bold text from the changelog", () => {
+    render(
+      <ReleaseNotesModal
+        entries={[
+          {
+            version: "1.0.0",
+            date: "2026-01-01",
+            groups: [{ title: "Undo", items: [{ text: "Press **Ctrl+Z** when `commit.gpgSign` is set." }] }],
+          },
+        ]}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Ctrl+Z").tagName).toBe("STRONG");
+    expect(screen.getByText("commit.gpgSign").tagName).toBe("CODE");
+    expect(screen.getByText("Ctrl+Z").closest("li")).toHaveTextContent("Press Ctrl+Z when commit.gpgSign is set.");
   });
 
   it("names the dialog itself", () => {
     render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
 
     expect(screen.getByRole("dialog", { name: "Release notes" })).toBeInTheDocument();
-  });
-
-  it("omits section headings with no entries", () => {
-    render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
-
-    // 0.6.0 has no "Changed" or "Removed" bullets — those headings shouldn't render for it.
-    expect(screen.queryByText("Removed")).not.toBeInTheDocument();
   });
 
   it("shows a fallback message when there are no entries", () => {

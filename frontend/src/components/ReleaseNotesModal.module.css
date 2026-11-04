@@ -12,6 +12,53 @@
   color: var(--color-text-muted);
 }
 
+.group h4 {
+  margin-bottom: var(--space-1);
+}
+
+.intro {
+  margin: 0 0 var(--space-2);
+}
+
+.group code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* The kind a bullet's "Fixed:" (etc.) prefix gave it, shown as a small label. */
+.kind {
+  display: inline-block;
+  margin-right: var(--space-1);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: 0.8em;
+  font-weight: 600;
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+}
+
+.added {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.fixed {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+}
+
+.changed,
+.deprecated {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.removed,
+.security {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
 .footer {
   display: flex;
   gap: var(--space-2);
