@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { highlightLines, withoutExcludedGrammars } from "./highlight";
+import { highlightLines, loadedLanguages, withoutExcludedGrammars } from "./highlight";
 
 describe("highlightLines", () => {
   it("tokenizes per line with css-variable colors", async () => {
@@ -15,10 +15,15 @@ describe("highlightLines", () => {
     expect(b).toBe(a);
   }, 20000);
 
-  it("loads Ruby without the C++ grammar it embeds, and keeps C++-free Ruby highlighting", async () => {
+  it("loads Ruby without the C++ grammars its module brings along", async () => {
+    // Vitest doesn't run vite.grammars.ts, so shiki's ruby module still includes cpp, cpp-macro
+    // and glsl here: this checks that highlight.ts itself never registers them.
     const lines = await highlightLines("ruby", "x = <<~CPP\n  int main() {}\nCPP\nputs x");
     expect(lines).toHaveLength(4);
     expect(lines[3].map((t) => t.content).join("")).toBe("puts x");
+    const languages = await loadedLanguages();
+    expect(languages).toEqual(expect.arrayContaining(["ruby", "c", "yaml"]));
+    for (const excluded of ["cpp", "cpp-macro", "glsl"]) expect(languages).not.toContain(excluded);
   }, 20000);
 });
 

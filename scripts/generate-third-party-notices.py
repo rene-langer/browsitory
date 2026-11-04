@@ -319,14 +319,31 @@ def excluded_grammars(source: str) -> set[str]:
 
 
 def grammar_imports(module_source: str) -> list[str]:
-    """The grammars a @shikijs/langs module imports (`import x from './name.mjs'`)."""
-    return re.findall(r"^import \w+ from '\./([\w.+-]+)\.mjs'", module_source, re.MULTILINE)
+    """The grammars a @shikijs/langs module pulls in: any `from './name.mjs'` (import or
+    re-export)."""
+    return re.findall(r"""\bfrom\s*['"]\./([\w.+-]+)\.mjs['"]""", module_source)
+
+
+def loader_roots(highlight_source: str) -> list[str]:
+    """The grammar modules highlight.ts's LOADERS import. Fails unless every LOADERS entry was
+    read, so a reformatted loader can't silently drop a grammar from the notices."""
+    block = re.search(r"const LOADERS\b[^\n]*?=\s*\{(.*?)\n\};", highlight_source, re.DOTALL)
+    if block is None:
+        raise NoticesError(f"no LOADERS object found in {HIGHLIGHT_TS.relative_to(ROOT)}")
+    entries = re.findall(r"^\s*[\w$\"'-]+\s*:", block.group(1), re.MULTILINE)
+    roots = re.findall(r'import\("shiki/langs/([\w.+-]+)\.mjs"\)', block.group(1))
+    if len(roots) != len(entries):
+        raise NoticesError(
+            f"{HIGHLIGHT_TS.relative_to(ROOT)} has {len(entries)} LOADERS entries but {len(roots)} "
+            'read as `import("shiki/langs/<name>.mjs")`; update loader_roots'
+        )
+    return roots
 
 
 def shipped_grammars(highlight_source: str, read_module, excluded: set[str]) -> set[str]:
     """Every grammar the app bundles: highlight.ts's loaders plus what they import, without the
     excluded ones (vite.grammars.ts cuts those imports)."""
-    roots = re.findall(r'import\("shiki/langs/([\w.+-]+)\.mjs"\)', highlight_source)
+    roots = loader_roots(highlight_source)
     if not roots:
         raise NoticesError(f"no shiki/langs imports found in {HIGHLIGHT_TS.relative_to(ROOT)}")
     shipped: set[str] = set()
@@ -357,7 +374,9 @@ def grammar_drift(shiki: dict, upstream: dict) -> list[str]:
 def parse_grammar_notice(notice: str) -> dict[str, tuple[str, str]]:
     """tm-grammars' NOTICE -> {grammar name: (SPDX id, licence text)}."""
     sections: dict[str, tuple[str, str]] = {}
-    for block in re.split(r"^=+\n", notice, flags=re.MULTILINE)[1:]:
+    # A section starts with a line of "=" followed by its "Files:" line. Licence texts also
+    # contain "=" lines (title underlines), which are not followed by "Files:".
+    for block in re.split(r"^=+\n(?=Files:)", notice, flags=re.MULTILINE)[1:]:
         head, sep, text = block.partition("\n" + "-" * 20)
         if not sep:
             continue
@@ -403,6 +422,9 @@ def grammar_entries(
             continue
         if name not in notice:
             problems.append(f"grammar {name} has no section in tm-grammars' NOTICE")
+            continue
+        if not notice[name][1].strip():
+            problems.append(f"grammar {name} has an empty licence text in tm-grammars' NOTICE")
             continue
         entries.append((name, license_id, notice[name][1]))
     for name in sorted(set(exceptions) - shipped):

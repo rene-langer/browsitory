@@ -55,6 +55,11 @@ function getHighlighter(): Promise<HighlighterCore> {
   return highlighter;
 }
 
+/** The grammars registered so far (tests check that excluded ones never are). */
+export async function loadedLanguages(): Promise<string[]> {
+  return (await getHighlighter()).getLoadedLanguages();
+}
+
 /**
  * Drops the grammars Browsitory doesn't ship (`excludedGrammars.ts`) from a language module's
  * grammar list, and from the embedded languages the rest name, so Shiki doesn't ask for them.

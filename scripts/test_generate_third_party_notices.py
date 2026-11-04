@@ -204,18 +204,34 @@ class RunTests(unittest.TestCase):
 
 class GrammarTests(unittest.TestCase):
     MODULES = {
-        "ruby": "import cpp from './cpp.mjs'\nimport yaml from './yaml.mjs'\nconst lang = 1",
+        "ruby": "import cpp from './cpp.mjs'\nimport yaml from './yaml.mjs'\nexport { default as x } from './xml.mjs'\nconst lang = 1",
+        "xml": "",
         "cpp": "import glsl from './glsl.mjs'\n",
         "glsl": "",
         "yaml": "",
         "rust": "",
     }
-    HIGHLIGHT = 'a: () => import("shiki/langs/ruby.mjs"),\nb: () => import("shiki/langs/rust.mjs"),'
+    HIGHLIGHT = (
+        'const LOADERS: Record<HighlightLanguage, () => Promise<unknown>> = {\n'
+        '  ruby: () => import("shiki/langs/ruby.mjs"),\n'
+        '  rust: () => import("shiki/langs/rust.mjs"),\n'
+        "};\n"
+    )
 
     def test_shipped_set_follows_imports_and_stops_at_excluded_grammars(self):
         shipped = gen.shipped_grammars(self.HIGHLIGHT, self.MODULES.__getitem__, {"cpp", "glsl"})
-        self.assertEqual(shipped, {"ruby", "yaml", "rust"})
+        self.assertEqual(shipped, {"ruby", "yaml", "xml", "rust"})
         self.assertIn("glsl", gen.shipped_grammars(self.HIGHLIGHT, self.MODULES.__getitem__, set()))
+
+    def test_a_loader_the_walk_cannot_read_fails(self):
+        highlight = self.HIGHLIGHT.replace("};", '  go: () => import(`shiki/langs/go.mjs`),\n};')
+        with self.assertRaisesRegex(gen.NoticesError, "3 LOADERS entries but 2"):
+            gen.shipped_grammars(highlight, self.MODULES.__getitem__, set())
+
+    def test_the_real_highlight_loaders_are_all_read(self):
+        source = gen.HIGHLIGHT_TS.read_text(encoding="utf-8")
+        modules = {name: "" for name in gen.loader_roots(source)}
+        self.assertEqual(gen.shipped_grammars(source, modules.__getitem__, set()), set(modules))
 
     def test_excluded_grammars_reads_the_typescript_list(self):
         source = gen.EXCLUDED_GRAMMARS_TS.read_text(encoding="utf-8")
@@ -224,12 +240,16 @@ class GrammarTests(unittest.TestCase):
     def test_parse_notice_maps_each_file_to_its_section(self):
         notice = (
             "THIRD-PARTY SOFTWARE NOTICES\n"
-            "=====\nFiles:   c.json, rust.json\nLicense: https://x\nSPDX:    MIT\n"
-            + "-" * 30 + "\nMIT text\n"
-            "=====\nFiles:   ada.json\nLicense: https://y\nSPDX:    GPL-3.0\n" + "-" * 30 + "\nGPL text\n"
+            + "=" * 105 + "\nFiles:   c.json, rust.json\nLicense: https://x\nSPDX:    MIT\n"
+            + "-" * 105 + "\nThe MIT License (MIT)\n=====================\n\nCopyright (c) X\n\nPermission text\n"
+            + "=" * 105 + "\nFiles:   ada.json\nLicense: https://y\nSPDX:    GPL-3.0\n" + "-" * 105 + "\nGPL text\n"
         )
         sections = gen.parse_grammar_notice(notice)
-        self.assertEqual(sections["rust"], ("MIT", "MIT text\n"))
+        # haml's real NOTICE text underlines its title with "=" lines; that is not a separator.
+        self.assertEqual(
+            sections["rust"],
+            ("MIT", "The MIT License (MIT)\n=====================\n\nCopyright (c) X\n\nPermission text\n"),
+        )
         self.assertEqual(sections["c"], sections["rust"])
         self.assertEqual(sections["ada"][0], "GPL-3.0")
 
@@ -249,6 +269,18 @@ class GrammarTests(unittest.TestCase):
         _, problems = self.entries({"glsl", "mystery", "yaml"}, {"glsl": {"source": "https://g"}})
         self.assertTrue(any("grammar glsl (https://g) is licensed nowhere" in p for p in problems), problems)
         self.assertTrue(any("mystery has no tm-grammars metadata" in p for p in problems), problems)
+
+    def test_an_empty_licence_text_fails(self):
+        _, problems = gen.grammar_entries(
+            {"rust"}, {"rust": {"license": "MIT"}}, {"rust": ("MIT", " \n ")}, frozenset({"MIT"}), exceptions={}
+        )
+        self.assertEqual(problems, ["grammar rust has an empty licence text in tm-grammars' NOTICE"])
+
+    def test_the_real_notice_gives_every_shipped_grammar_a_complete_text(self):
+        notice = gen.parse_grammar_notice((gen.FRONTEND / "node_modules" / "tm-grammars" / "NOTICE").read_text(encoding="utf-8"))
+        haml = notice["haml"][1]
+        self.assertIn("Copyright", haml)
+        self.assertIn("Permission is hereby granted", haml)
 
     def test_an_unused_exception_fails(self):
         _, problems = self.entries({"rust"}, {"rust": {"license": "MIT"}})

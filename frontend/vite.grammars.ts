@@ -10,6 +10,10 @@ const LANGS_DIST = /[\\/]@shikijs[\\/]langs[\\/]dist[\\/]/;
  * import to an empty list instead, and `highlight.ts` drops the reference to it. The build
  * then fails if an excluded grammar's definition still made it into any output file, so a
  * Shiki update that pulls one in another way can't ship it unnoticed.
+ *
+ * Only `vite build` is covered: `vite dev` pre-bundles dependencies with its own resolver, so
+ * a dev server may still load the excluded modules. `highlight.ts` never registers them, and
+ * nothing from a dev server ships.
  */
 export function excludeGrammarsPlugin(): Plugin {
   const names = new Set<string>(EXCLUDED_GRAMMARS.map((g) => g.name));
