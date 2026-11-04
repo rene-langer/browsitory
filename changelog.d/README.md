@@ -27,6 +27,18 @@ Wrap lines at about 100 characters. Don't add a `## [Unreleased]` header or any 
 - Fixed: "Amend last commit" was hidden while such a leftover was there (#240).
 ```
 
+## In-app release notes
+
+The app builds its release notes from the released sections of `CHANGELOG.md`
+(`frontend/scripts/generateReleaseNotes.mjs`). Each `### Heading` becomes a group, and a
+`Fixed:`, `Added:`, `Changed:`, `Removed:`, `Deprecated:` or `Security:` prefix becomes a label.
+Changes only developers care about are left out of the app:
+
+- a section headed exactly `### Internal`, or starting with `### Internal:`;
+- a bullet starting with `Internal:`.
+
+A heading that only starts with the word, such as `### Internal links`, is still shown.
+
 ## Checks
 
 `scripts/check-changelog.py` (pre-push hook and CI) accepts a change to `crates/`,
