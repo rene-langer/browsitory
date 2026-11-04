@@ -14,14 +14,18 @@ const KIND_PREFIXES = {
   Security: "security",
 };
 
-// Developer-only content ("### Internal", "### Internal: ...", "- Internal: ...") is left
-// out of the in-app notes.
-const INTERNAL_HEADING = /^Internal\b/i;
+// Developer-only content is left out of the in-app notes: a section headed exactly
+// "### Internal" or "### Internal: ...", and a bullet starting "- Internal: ...". A topic that
+// merely starts with the word ("### Internal links") is kept. See changelog.d/README.md.
+const INTERNAL_HEADING = /^Internal(:|\s*$)/i;
 const INTERNAL_BULLET = /^Internal:\s*/i;
 
 const UNRELEASED = /^##\s+\[?Unreleased\b/i;
-const RELEASE = /^##\s+\[([^\]]+)\]\s*[-–—]\s*(\S+)\s*$/;
-const FENCE = /^\s*(```|~~~)/;
+// Text after the date ("(yanked)") is allowed and ignored.
+const RELEASE = /^##\s+\[([^\]]+)\]\s*[-–—]\s*(\S+)/;
+// A code fence: three or more backticks or tildes. It is closed only by a line of the same
+// character, at least as long, with nothing after it.
+const FENCE = /^\s*(`{3,}|~{3,})(.*)$/;
 
 /** Parses a bullet's text; `null` for an internal bullet. */
 function parseItem(raw) {
@@ -58,8 +62,8 @@ export function parseChangelog(markdown, { onWarning = console.warn } = {}) {
   let subItem = null; // the last sub-item of `item`
   let subIndent = 0;
   let afterBlank = false;
-  let inFence = false;
-  let fenceLine = 0; // the line that opened the current code fence
+  let openFence = ""; // the marker of the open code fence ("```", "~~~~"), or "" outside one
+  let fenceLine = 0; // the line that opened it
 
   function flushParagraph() {
     if (paragraph.length > 0) group.blocks.push({ paragraph: paragraph.join(" ") });
@@ -82,15 +86,26 @@ export function parseChangelog(markdown, { onWarning = console.warn } = {}) {
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index].replace(/\r$/, "");
 
-    if (FENCE.test(line)) {
-      // A fence ends the paragraph or bullet before it, like a blank line.
-      if (group !== null) flushParagraph();
-      afterBlank = true;
-      fenceLine = inFence ? 0 : index + 1;
-      inFence = !inFence;
+    const fence = line.match(FENCE);
+    if (openFence !== "") {
+      const closes =
+        fence !== null &&
+        fence[1][0] === openFence[0] &&
+        fence[1].length >= openFence.length &&
+        fence[2].trim() === "";
+      if (closes) {
+        openFence = "";
+        // A fence ends the bullet before it, like a blank line.
+        afterBlank = true;
+      }
       continue;
     }
-    if (inFence) continue;
+    if (fence !== null) {
+      if (group !== null) flushParagraph();
+      openFence = fence[1];
+      fenceLine = index + 1;
+      continue;
+    }
 
     if (/^##\s/.test(line)) {
       closeGroup();
@@ -170,7 +185,7 @@ export function parseChangelog(markdown, { onWarning = console.warn } = {}) {
     closeList();
     paragraph.push(text);
   }
-  if (inFence) {
+  if (openFence !== "") {
     throw new Error(`CHANGELOG.md line ${fenceLine}: this code fence is never closed.`);
   }
   closeGroup();

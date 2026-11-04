@@ -245,6 +245,25 @@ describe("parseChangelog", () => {
     expect(onWarning.mock.calls[0][0]).toMatch(/1\.1\.0/);
   });
 
+  it("keeps topics that only start with the word Internal", () => {
+    const [entry] = parse("## [1.0.0] - 2026-01-01\n### Internal links\n- kept\n### Internals view\n- kept too\n");
+    expect(entry.groups.map((g) => g.title)).toEqual(["Internal links", "Internals view"]);
+  });
+
+  it("accepts text after the date of a release", () => {
+    const entries = parse("## [1.0.0] - 2026-01-01 (yanked)\n### A\n- a\n");
+    expect(entries.map((e) => [e.version, e.date])).toEqual([["1.0.0", "2026-01-01"]]);
+  });
+
+  it("closes a code fence only with the same kind of fence, at least as long", () => {
+    for (const inner of ["~~~", "```", "```` not a close"]) {
+      const [entry] = parse(
+        ["## [1.0.0] - 2026-01-01", "### Topic", "````", inner, "- not a bullet", "````", "- kept"].join("\n"),
+      );
+      expect(itemsOf(entry.groups[0]), inner).toEqual([{ text: "kept" }]);
+    }
+  });
+
   it("treats any Unreleased heading as unreleased, even with a date", () => {
     const entries = parse("## [Unreleased] - 2026-01-01\n### A\n- not yet\n## [1.0.0] - 2026-01-01\n### B\n- b\n");
     expect(entries.map((e) => e.version)).toEqual(["1.0.0"]);

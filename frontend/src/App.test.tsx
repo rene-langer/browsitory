@@ -2176,6 +2176,18 @@ describe("App release notes on a new version", () => {
     );
   });
 
+  it("on a fresh install shows the newest release that has notes", async () => {
+    await withReleaseNotes(
+      [internalOnly("0.5.0"), notes("0.4.0", "Notes for 0.4.0"), notes("0.3.0", "Notes for 0.3.0")],
+      async () => {
+        render(<App client={fakeClient({ getAppVersion: async () => "0.5.0", getLastSeenVersion: async () => null })} />);
+        const dialog = await screen.findByRole("dialog", { name: "Release notes" });
+        expect(within(dialog).getByText("Notes for 0.4.0")).toBeInTheDocument();
+        expect(within(dialog).queryByText("Notes for 0.3.0")).toBeNull();
+      },
+    );
+  });
+
   it("records the new version without opening when the new releases have nothing for users", async () => {
     const setLastSeenVersion = vi.fn(async () => {});
     await withReleaseNotes([internalOnly("0.3.5"), notes("0.3.0", "Notes for 0.3.0")], async () => {

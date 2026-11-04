@@ -1393,9 +1393,11 @@ function AppContent({
           lastSeenVersion === null
             ? -1
             : allReleaseNotes.findIndex((entry) => entry.version === lastSeenVersion);
-        const entries = (seenIndex === -1 ? allReleaseNotes.slice(0, 1) : allReleaseNotes.slice(0, seenIndex)).filter(
-          (entry) => entry.groups.length > 0,
-        );
+        // Releases with only developer-only changes have no groups and aren't shown.
+        const withNotes = (list: ReleaseNotesEntry[]) => list.filter((entry) => entry.groups.length > 0);
+        // A fresh install (or an unknown last-seen version) gets the newest release with notes.
+        const entries =
+          seenIndex === -1 ? withNotes(allReleaseNotes).slice(0, 1) : withNotes(allReleaseNotes.slice(0, seenIndex));
         if (entries.length === 0) {
           // Only developer-only releases since the last one seen: nothing to show users.
           await client.setLastSeenVersion(appVersion);
