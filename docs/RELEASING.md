@@ -12,8 +12,27 @@ Release. The workflow stamps the version into `crates/tauri-app/tauri.conf.json`
 Every installer carries `THIRD_PARTY_NOTICES.md` (a Tauri resource), and
 `publish-vsix-release` also attaches it to the draft release. It is generated, so a release
 needs no extra step for it (see `docs/LICENSE_COMPLIANCE.md`). The `verify` job runs first on
-the tagged commit: `cargo test --workspace`, the frontend test suite, and
-`scripts/generate-third-party-notices.py --check`, so a stale notices file stops the release.
+the tagged commit: `cargo test --workspace`, the frontend test suite,
+`scripts/generate-third-party-notices.py --check`, so a stale notices file stops the release,
+and `scripts/fold-changelog.py --check`, so unfolded changelog fragments stop it too.
+
+### Preparing the changelog
+
+Pull requests don't edit `CHANGELOG.md`. Each adds a fragment, `changelog.d/<issue>-<slug>.md`
+(format: `changelog.d/README.md`). Before tagging, open a release-prep pull request that:
+
+1. runs `python3 scripts/fold-changelog.py` in a full (not shallow) clone. It moves every
+   fragment to the top of `## [Unreleased]` and deletes the fragment files. Uncommitted
+   fragments go first, by file name. Committed ones follow, newest first by the date of the
+   commit that added each; ties go by file name. It changes nothing if `## [Unreleased]` is
+   missing, a fragment is malformed, `changelog.d/` holds a file that isn't a `*.md` fragment
+   or `README.md`, or the clone is shallow. With no fragments left it does nothing.
+2. renames `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, adds a new empty `## [Unreleased]`
+   above it, and edits the text where needed.
+
+Merge it, then tag that commit. The `verify` job fails while any fragment is left
+(`scripts/fold-changelog.py --check`), because every VSIX ships `CHANGELOG.md` and the app's
+release notes are built from it.
 
 ### Publishing the extension
 

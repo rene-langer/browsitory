@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# No --base: check-changelog.py diffs against origin/main when this clone has it, else
+# main. Fetch now and then so origin/main stays current; the hook itself never fetches.
 repo_root="$(git rev-parse --show-toplevel)"
-python3 "$repo_root/scripts/check-changelog.py" --base main
+python3 "$repo_root/scripts/check-changelog.py"
