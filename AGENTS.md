@@ -102,10 +102,21 @@ wait for approval on the Dependency Dashboard like other 0.x dependencies. Advis
 update fixes one, drop its ignore from `.cargo/audit.toml` in the same PR and close the
 matching RUSTSEC issue.
 
-Any change to the shipped Rust or npm trees (including Renovate PRs) also changes the generated
+Any change to the shipped Rust or npm trees also changes the generated
 `THIRD_PARTY_NOTICES.md`: CI's `licenses` job fails until it is regenerated with
 `python3 scripts/generate-third-party-notices.py` (needs cargo-about and `pnpm install` in
-`frontend/` and `extension/`) and committed on the PR branch.
+`frontend/` and `extension/`) and committed on the PR branch. On Renovate PRs a workflow does
+this (`.github/workflows/renovate-notices.yml`, #325), but only when Renovate itself pushed
+or opened the PR, not when someone else pushes to a Renovate branch. A read-only job
+regenerates the file; a second job, which runs no package code, commits it to the Renovate
+branch as `github-actions[bot]` and starts `ci.yml` on that branch with `workflow_dispatch`,
+because a push made with `GITHUB_TOKEN` starts no workflow run. That run's checks show on the
+PR. `renovate.json` lists the bot in `gitIgnoredAuthors`, so Renovate keeps rebasing the
+branch. A rebase drops the bot's commit; the next `pull_request` run then regenerates once
+more (one cycle per Renovate update, no loop). If that workflow fails, regenerate by hand as
+above. Keep `ci.yml` working on `workflow_dispatch`: a job that reads pull request context
+needs a fallback for it. A dispatched run has no labels, so `changelog` ignores
+`skip-changelog` there (Renovate PRs don't need it).
 
 ## Versioning & releases
 

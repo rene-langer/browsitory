@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Internal: notices on Renovate PRs
+
+- Added: a workflow regenerates `THIRD_PARTY_NOTICES.md` on Renovate pull requests, commits it
+  to the Renovate branch and starts CI on the new commit, so dependency updates no longer fail
+  the `licenses` job until someone regenerates the file by hand. CI can now also be started by
+  hand (`workflow_dispatch`) (#325).
+
 ### Third-party licences
 
 - Added: the app now lists the licences and copyright notices of the open source code it
