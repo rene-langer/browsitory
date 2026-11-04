@@ -9,12 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Files open in another program, in branch switches and other checkouts (Windows)
 
 - Fixed: on Windows, a branch switch or commit checkout, a hard reset, a fast-forward merge, a
-  rebase abort, a clone and a submodule update showed libgit2's raw "could not remove … being
-  used by another process" error when another program kept a file open. They now name the
-  file and say how to finish, for example "'f.txt' is open in another program. Some files were
-  already switched. Close it, then try again to finish." All but a clone also say that some
-  files were already changed; a failed clone removes its folder, so it says "Close it, then try
-  again." (#303). Stash apply and pop, merge abort, cherry-pick, revert, rebase start and pull
+  rebase abort, a clone and a submodule update showed libgit2's raw error when another
+  program kept a file open: "could not remove 'C:/…/f.txt': The process cannot access the file
+  because it is being used by another process." They now name the file and say how to
+  finish, for example "'f.txt' is open in another program. Some files were already switched.
+  Close it, then try again to finish." All but a clone also say that some files were already
+  changed; a failed clone removes its folder, so it says "Close it, then try again." (#303). Stash apply and pop, merge abort, cherry-pick, revert, rebase start and pull
   still show the raw error (#321).
 
 ### Internal: publishing checks for the extension

@@ -428,13 +428,16 @@ fn libgit2_quotes_the_full_path_of_a_held_file() {
             error.code(),
             error.message()
         ));
+        // windows-latest, both cases: "could not remove 'C:/Users/runneradmin/AppData/Local/
+        // Temp/.tmpJhLclX/z.txt': The process cannot access the file because it is being used
+        // by another process." (Os/GenericError); the reason is in the system's language.
         assert!(
-            matches!(
-                error.class(),
-                git2::ErrorClass::Os | git2::ErrorClass::Filesystem
-            ) && error.message().replace('\\', "/").contains(&quoted),
+            error.class() == git2::ErrorClass::Os
+                && error
+                    .message()
+                    .replace('\\', "/")
+                    .starts_with(&format!("could not remove {quoted}: ")),
             "{seen:?}"
         );
     }
-    panic!("CAPTURE (temporary) {seen:#?}");
 }
