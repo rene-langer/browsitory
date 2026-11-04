@@ -72,10 +72,21 @@ ln -sf "$(git rev-parse --show-toplevel)/scripts/hooks/pre-push" "$(git rev-pars
 ```
 
 Wires up `scripts/check-changelog.py` as a `pre-push` hook: blocks a push touching `crates/`,
-`frontend/src/`, or `e2e/` without a matching `CHANGELOG.md` update. Bypass once with
+`frontend/src/`, or `e2e/` without a changelog entry (see below). Bypass once with
 `SKIP_CHANGELOG_CHECK=1 git push`. A diff that touches only dependency manifests/lockfiles
 (`Cargo.toml`, `Cargo.lock`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
-`rust-toolchain.toml`) needs no entry.
+`rust-toolchain.toml`) needs no entry. CI's `changelog` job runs the same check (the
+`skip-changelog` PR label bypasses it).
+
+## Changelog entries
+
+Don't edit `CHANGELOG.md` in a pull request; add a fragment instead, so parallel PRs don't
+conflict. One file per PR: `changelog.d/<issue>-<short-slug>.md` (lowest issue number if
+several; without an issue, a descriptive slug alone). It holds exactly the section you would
+have put at the top of `## [Unreleased]`: a `### Heading` line, an optional intro, then
+`- Fixed:`/`Added:`/`Changed:` bullets with issue refs, wrapped at about 100 characters. No
+`## [Unreleased]` header. Format and example: `changelog.d/README.md`. Before a release,
+`scripts/fold-changelog.py` folds all fragments into `CHANGELOG.md` (see `docs/RELEASING.md`).
 
 ## Dependency updates
 
