@@ -88,14 +88,16 @@ These tools run only inside a GitHub Actions job. They are not declared in any `
 or `Cargo.toml`, are not linked into anything, and are not shipped. Running a tool places no
 licence obligation on Browsitory, so they may be under a licence outside the allowed list.
 Each tool is pinned to an exact version where it runs. GitHub Actions are pinned to a major
-tag like `v2` instead, and Renovate updates them. A GitHub Action is listed here only when its
+tag like `v2` instead, and Renovate updates them. `renovate-notices.yml`, which can push to
+Renovate branches, pins its actions to a full commit SHA with the version in a comment;
+Renovate updates both. A GitHub Action is listed here only when its
 licence is outside the policy.
 
 | Tool | License | Notes |
 |---|---|---|
 | cargo-deny | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and runs `cargo deny check licenses`. The exact version is pinned in that job's `CARGO_DENY_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-deny@0.20.2` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
 | cargo-about | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and `scripts/generate-third-party-notices.py --check` runs `cargo about generate --format json` (configuration: `about.toml`) to collect the licence texts of the shipped Rust crates for `THIRD_PARTY_NOTICES.md`. Only its output, licence texts copied from the crates, ships. The exact version is pinned in that job's `CARGO_ABOUT_VERSION` (Renovate updates it). Owner approved it as a build-only tool on 2026-11-04 (#301). Licence verified with `cargo info cargo-about@0.9.3` on 2026-11-04; re-check it when a Renovate PR bumps the version. |
-| cargo-mutants | MIT | `ci.yml`'s `mutants` job (pull requests only, informational) installs it with `taiki-e/install-action` and runs `cargo mutants` on the changed code. The exact version is pinned in that job's `MUTANTS_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-mutants@27.1.0` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
+| cargo-mutants | MIT | `ci.yml`'s `mutants` job (pull requests and dispatched runs only, informational) installs it with `taiki-e/install-action` and runs `cargo mutants` on the changed code. The exact version is pinned in that job's `MUTANTS_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-mutants@27.1.0` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
 | Swatinem/rust-cache v2 | LGPL-3.0 | A GitHub Action. `ci.yml`'s cargo jobs run it to cache `~/.cargo` and the dependency build output in `target/` (#308). LGPL-3.0 is weak copyleft: it only covers changes to the action itself, which we neither make nor distribute, and it runs on the CI runner only, so nothing of it is built into or shipped with Browsitory. The owner accepted it as a build-only tool (2026-11-03). Never add it as a dependency. Pinned to the `v2` major tag like the other actions (Renovate updates it). Source: the repository's `LICENSE` and `package.json` (`"license": "LGPL-3.0"`), checked for v2.9.3 on 2026-11-03. |
 | ovsx 1.3.0 | EPL-2.0 | `release.yml`'s `publish-vsix-open-vsx` job runs it as `npx --yes ovsx@1.3.0 publish` to upload the already-built `.vsix` files to Open VSX. EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it as a dependency. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02. |
 
@@ -313,7 +315,18 @@ notices of everything Browsitory ships (#301, #202). It is generated; never edit
      without `@types/*`, with each package's own licence files.
   4. The syntax highlighting grammars the app bundles, with their upstream licence texts (see
      "Syntax highlighting grammars" above).
-- **Regenerate** after any dependency change (Renovate PRs too), then commit the result:
+- **On Renovate PRs it is regenerated for you** (#325). `.github/workflows/renovate-notices.yml`
+  runs only on pull requests opened by `renovate[bot]` from a `renovate/` branch in this
+  repository. It installs the `CARGO_ABOUT_VERSION` from `ci.yml`, runs the generator, and, if
+  the file changed, commits it to the branch as `github-actions[bot]` (a normal push, never a
+  force push). Only that job may write: `contents: write` to push and `actions: write` to start
+  `ci.yml` on the branch with `workflow_dispatch`. A push made with `GITHUB_TOKEN` starts no
+  workflow run, so that dispatched run is what checks the new commit; its checks show on the
+  PR as `(workflow_dispatch)`. A run that finds the file current commits nothing.
+  `renovate.json`'s `gitIgnoredAuthors` lists the bot, so Renovate still rebases the branch;
+  the workflow then runs again on Renovate's new commit. If the workflow fails (for example
+  on a `native-libraries.md` version mismatch, below), fix and regenerate by hand.
+- **Regenerate** by hand after any other dependency change, then commit the result:
 
   ```bash
   cargo install cargo-about --locked --features cli --version <CARGO_ABOUT_VERSION from ci.yml>   # once

@@ -1,0 +1,113 @@
+# Regenerates THIRD_PARTY_NOTICES.md on Renovate pull requests (#325). A dependency update
+# changes the generated file, and ci.yml's `licenses` job fails until it is regenerated. This
+# job runs the generator on the Renovate branch and, if the file changed, commits it there.
+#
+# A push made with GITHUB_TOKEN starts no new workflow runs, so the job then dispatches ci.yml
+# on the branch (workflow_dispatch is the one event GITHUB_TOKEN may start). That run checks
+# the new head commit, and its checks show on the pull request. No extra secret is needed.
+#
+# No loop: the bot's push starts no pull_request run, so this workflow doesn't run again, and
+# a run that finds the file current commits and dispatches nothing. renovate.json lists the bot
+# in `gitIgnoredAuthors`, so Renovate keeps rebasing the branch (and drops the bot's commit;
+# this job then runs again on Renovate's new commit).
+name: Renovate notices
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# One run per pull request; a newer Renovate push cancels the older run.
+concurrency:
+  group: renovate-notices-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    # Only Renovate's own pull requests from a branch in this repository: never forks, never
+    # other authors, never a branch outside renovate/.
+    if: >-
+      github.event.pull_request.user.login == 'renovate[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'renovate/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the regenerated file to the Renovate branch
+      actions: write # dispatch ci.yml on that branch
+    env:
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    steps:
+      # The pull request's head commit, not the merge commit. No stored credentials: only the
+      # push and dispatch steps below get the token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      # The same cargo-about version as ci.yml's `licenses` job (one pin, which Renovate updates).
+      - name: Read CARGO_ABOUT_VERSION from ci.yml
+        run: |
+          version="$(sed -n 's/^ *CARGO_ABOUT_VERSION: *\([0-9][0-9.]*\) *$/\1/p' .github/workflows/ci.yml)"
+          if ! printf '%s' "$version" | grep -qxE '[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::Could not read CARGO_ABOUT_VERSION from .github/workflows/ci.yml"
+            exit 1
+          fi
+          echo "CARGO_ABOUT_VERSION=$version" >> "$GITHUB_ENV"
+      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+        with:
+          tool: cargo-about@${{ env.CARGO_ABOUT_VERSION }}
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          # pnpm 11 runs each project with the version its package.json pins (see ci.yml's
+          # `licenses` job).
+          version: 11
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            extension/pnpm-lock.yaml
+      - name: Install the shipped npm trees (no install scripts)
+        run: |
+          pnpm --dir frontend install --frozen-lockfile --ignore-scripts
+          pnpm --dir extension install --frozen-lockfile --ignore-scripts
+      - name: Regenerate THIRD_PARTY_NOTICES.md
+        run: python3 scripts/generate-third-party-notices.py
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet -- THIRD_PARTY_NOTICES.md; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "THIRD_PARTY_NOTICES.md is already current; nothing to commit." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat -- THIRD_PARTY_NOTICES.md
+          fi
+      # A normal push of one new commit on top of the head this run checked out. If Renovate
+      # pushed in the meantime, the push is rejected (no force) and this job fails; Renovate's
+      # push has already started a new run.
+      - name: Commit and push
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- THIRD_PARTY_NOTICES.md
+          git commit -m "Regenerate THIRD_PARTY_NOTICES.md for this dependency update" \
+            -m "Generated by the Renovate notices workflow (#325): $RUN_URL"
+          auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push origin "HEAD:refs/heads/$HEAD_REF"
+      # The push above starts no workflow run, so start CI on the new head commit.
+      - name: Run CI on the new commit
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF"
+          echo "Committed the regenerated THIRD_PARTY_NOTICES.md to \`$HEAD_REF\` and started CI on it." >> "$GITHUB_STEP_SUMMARY"

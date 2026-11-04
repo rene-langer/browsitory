@@ -8,6 +8,10 @@ on:
     # Catches newly-disclosed advisories against dependencies already on main, independent of
     # any PR activity — see SEC-003 (issue #24).
     - cron: "0 6 * * 1"
+  # Started by renovate-notices.yml after it commits a regenerated THIRD_PARTY_NOTICES.md to a
+  # Renovate branch: that push, made with GITHUB_TOKEN, starts no run of its own (#325). Jobs
+  # that read pull request context fall back to the default branch as the base.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -93,7 +97,7 @@ jobs:
         run: python3 scripts/generate-third-party-notices.py --check
 
   changelog:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -103,8 +107,10 @@ jobs:
         run: python3 scripts/test_check_changelog.py
       - name: CHANGELOG.md updated
         env:
+          # A dispatched run has no pull request: no labels, and the default branch as the base.
           SKIP_CHANGELOG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'skip-changelog') && '1' || '' }}
-        run: python3 scripts/check-changelog.py --base "origin/${{ github.base_ref }}"
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: python3 scripts/check-changelog.py --base "origin/$BASE_REF"
 
   rust:
     runs-on: ${{ matrix.os }}
@@ -164,9 +170,10 @@ jobs:
   # tests against each one. A "missed" mutant is a change no test noticed. Informational only:
   # this job never fails, so it cannot block a merge; read its summary on the run page. Mutants
   # are only generated for changed lines in `src/`, so a PR that changes only tests or other
-  # crates skips the run. See docs/ARCHITECTURE.md's "Testing strategy".
+  # crates skips the run. A dispatched run diffs against the default branch instead. See
+  # docs/ARCHITECTURE.md's "Testing strategy".
   mutants:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # Backstop only; the mutation step has its own, shorter limit (see there).
     timeout-minutes: 60
@@ -180,8 +187,11 @@ jobs:
           fetch-depth: 0
       - name: Diff against the pull request's base
         id: diff
+        env:
+          # A dispatched run has no pull request: diff against the default branch.
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         run: |
-          git diff "origin/${{ github.base_ref }}...HEAD" > pr.diff
+          git diff "origin/$BASE_REF...HEAD" > pr.diff
           if grep -qE '^\+\+\+ b/crates/(git-core|repo-service)/src/.*\.rs$' pr.diff; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
@@ -201,7 +211,7 @@ jobs:
       # and every CARGO*/RUST*/CC*/CFLAGS*/CXX*/CMAKE* env var, so `shared-key: rust` matches
       # the `rust` job only while this job sets no env var with those prefixes (hence
       # `MUTANTS_VERSION`, not `CARGO_MUTANTS_VERSION`). Never saves: this job runs only on pull
-      # requests, and `--in-place` builds mutated code that must not end up in a cache.
+      # requests (and dispatched runs), and `--in-place` builds mutated code that must not end up in a cache.
       - uses: Swatinem/rust-cache@v2
         if: steps.diff.outputs.relevant == 'true'
         with:
