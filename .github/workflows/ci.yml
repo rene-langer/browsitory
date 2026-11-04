@@ -363,7 +363,7 @@ jobs:
   # main-branch CI validate the installable package without creating a GitHub Release.
   build-vsix:
     if: github.ref == 'refs/heads/main'
-    needs: [rust, frontend, extension, e2e, e2e-vscode]
+    needs: [rust, frontend, extension, e2e, e2e-vscode, vsix-smoke]
     strategy:
       fail-fast: false
       matrix:
@@ -410,11 +410,73 @@ jobs:
           pnpm --dir extension run package:vsix -- --target ${{ matrix.vsix_target }}
           --sidecar target/${{ matrix.rust_target }}/release/vscode-sidecar${{ matrix.sidecar_suffix }}
           --out artifacts/browsitory-${{ github.sha }}-${{ matrix.vsix_target }}.vsix
+      # Identity, version, listing metadata, file list and the target's sidecar binary
+      # (extension/scripts/check-vsix.mjs). release.yml runs the same check before publishing.
+      - name: Check the package
+        shell: bash
+        run: >-
+          pnpm --dir extension run check:vsix -- --target ${{ matrix.vsix_target }}
+          --version "$(node -p "require('./extension/package.json').version")"
+          artifacts/browsitory-${{ github.sha }}-${{ matrix.vsix_target }}.vsix
       - uses: actions/upload-artifact@v7
         with:
           name: browsitory-vsix-${{ matrix.vsix_target }}
           path: extension/artifacts/browsitory-${{ github.sha }}-${{ matrix.vsix_target }}.vsix
           retention-days: 7
+
+  # Packages the linux-x64 .vsix the way build-vsix and release.yml do, checks it
+  # (extension/scripts/check-vsix.mjs), then installs that package into a real VSCode with
+  # `code --install-extension` and checks that it activates and that its bundled sidecar opens a
+  # repository (extension/e2e's smoke:vsix). e2e-vscode instead runs this checkout in
+  # development mode. Runs on every PR; build-vsix checks all four targets on main.
+  vsix-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb dbus
+      - uses: dtolnay/rust-toolchain@stable
+      # Own cache (job-id key): only the release vscode-sidecar.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11  # extension/package.json pins pnpm@11.28.10
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            frontend/pnpm-lock.yaml
+            extension/pnpm-lock.yaml
+            extension/e2e/pnpm-lock.yaml
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend run generate:release-notes
+      - run: pnpm --dir frontend exec vite build --config vite.vscode.config.ts
+      - run: pnpm --dir extension install --frozen-lockfile
+      - run: pnpm --dir extension run compile
+      - run: cargo build --release -p vscode-sidecar
+      # Pre-release, like release.yml while VSIX_PRE_RELEASE is "true".
+      - name: Package the linux-x64 .vsix
+        run: >-
+          pnpm --dir extension run package:vsix -- --target linux-x64
+          --sidecar target/release/vscode-sidecar
+          --out artifacts/browsitory-linux-x64.vsix --pre-release
+      - name: Check the package
+        run: >-
+          pnpm --dir extension run check:vsix -- --target linux-x64
+          --version "$(node -p "require('./extension/package.json').version")"
+          --pre-release artifacts/browsitory-linux-x64.vsix
+      - name: Install e2e dependencies
+        working-directory: extension/e2e
+        # --ignore-workspace: see e2e-vscode.
+        run: pnpm install --frozen-lockfile --ignore-workspace
+      - name: Install the package into VSCode and smoke-test it
+        working-directory: extension/e2e
+        run: >-
+          dbus-run-session -- xvfb-run --auto-servernum
+          pnpm --ignore-workspace smoke:vsix ../artifacts/browsitory-linux-x64.vsix
 
   e2e-vscode:
     runs-on: ubuntu-latest
