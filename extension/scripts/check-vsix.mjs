@@ -35,6 +35,8 @@ const ALLOWED_FILES = [
   /^extension\/changelog\.md$/i,
   /^extension\/license(?:\.txt|\.md)?$/i,
   /^extension\/THIRD_PARTY_NOTICES\.md$/,
+  // The same notices, which the webview's "Third-party licences" dialog fetches.
+  /^extension\/webview\/third-party-notices\.md$/,
 ];
 const FORBIDDEN_FILES = [/\.map$/, /\.test\.[cm]?js$/, /\.spec\.[cm]?js$/, /\.ts$/, /(?:^|\/)node_modules\//];
 
@@ -45,6 +47,7 @@ const REQUIRED_NON_EMPTY = [
   "extension/webview/assets/vscode-main.css",
   "extension/icon.png",
   "extension/THIRD_PARTY_NOTICES.md",
+  "extension/webview/third-party-notices.md",
 ];
 
 /** Reads a zip's central directory: name, Unix mode (or null) and a lazy reader per file. */

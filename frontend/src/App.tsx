@@ -21,6 +21,7 @@ import { RepoPicker } from "./components/RepoPicker";
 import { RepoTabs } from "./components/RepoTabs";
 import { repoPanelId, repoTabId } from "./components/repoTabIds";
 import { ReleaseNotesModal, type ReleaseNotesEntry } from "./components/ReleaseNotesModal";
+import { ThirdPartyLicencesDialog } from "./components/ThirdPartyLicencesDialog";
 import { OperationStatusStrip } from "./components/OperationStatusStrip";
 import { HookRunStrip } from "./components/HookRunStrip";
 import { ToastRegion } from "./components/primitives/ToastRegion";
@@ -1217,6 +1218,8 @@ export default function App(props: {
   updateBanner?: ReactNode;
   /** Which host launches external tools; VSCode opens them in VSCode itself. */
   toolHost?: "desktop" | "vscode";
+  /** Loads THIRD_PARTY_NOTICES.md (`lib/thirdPartyNotices.ts`); without it the app offers no licences view. */
+  loadThirdPartyNotices?: () => Promise<string>;
 }) {
   return (
     <DiffSettingsProvider client={props.client}>
@@ -1231,12 +1234,15 @@ function AppContent({
   client,
   updateBanner = null,
   toolHost = "desktop",
+  loadThirdPartyNotices,
 }: {
   client: RepoClient;
   updateBanner?: ReactNode;
   toolHost?: "desktop" | "vscode";
+  loadThirdPartyNotices?: () => Promise<string>;
 }) {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [licencesOpen, setLicencesOpen] = useState(false);
   // Failures of the repo tab menu's actions (terminal, reveal); workspace tool errors show in
   // that workspace.
   const [tabToolError, setTabToolError] = useState<string | null>(null);
@@ -1326,12 +1332,17 @@ function AppContent({
     );
   }, [client, openRepoTab, pushAppToast]);
   const openPreferences = useCallback(() => setPreferencesOpen(true), []);
+  const openLicences = useMemo(
+    () => (loadThirdPartyNotices === undefined ? undefined : () => setLicencesOpen(true)),
+    [loadThirdPartyNotices],
+  );
   const appCommands = useMemo<AppCommands>(
-    () =>
-      client.supportsCloneAndInit
-        ? { onCloneRepository: startClone, onNewRepository: startNewRepository, onOpenPreferences: openPreferences }
-        : { onOpenPreferences: openPreferences },
-    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences],
+    () => ({
+      ...(client.supportsCloneAndInit ? { onCloneRepository: startClone, onNewRepository: startNewRepository } : {}),
+      onOpenPreferences: openPreferences,
+      onOpenThirdPartyLicences: openLicences,
+    }),
+    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences, openLicences],
   );
   const tabMenuItems = useCallback(
     (path: string) => {
@@ -1545,7 +1556,21 @@ function AppContent({
         </div>
       )}
       {releaseNotesView !== null && (
-        <ReleaseNotesModal entries={releaseNotesView.entries} onClose={closeReleaseNotes} />
+        <ReleaseNotesModal
+          entries={releaseNotesView.entries}
+          onClose={closeReleaseNotes}
+          onOpenThirdPartyLicences={
+            openLicences === undefined
+              ? undefined
+              : () => {
+                  closeReleaseNotes();
+                  openLicences();
+                }
+          }
+        />
+      )}
+      {licencesOpen && loadThirdPartyNotices !== undefined && (
+        <ThirdPartyLicencesDialog load={loadThirdPartyNotices} onClose={() => setLicencesOpen(false)} />
       )}
       {pickingRepo && (
         <Overlay onClose={() => setPickingRepo(false)}>

@@ -1975,6 +1975,27 @@ describe("App external tools", () => {
     expect(await screen.findByRole("dialog", { name: "Preferences" })).toBeInTheDocument();
   });
 
+  it("the palette and the release notes open the third-party licences", async () => {
+    const loadThirdPartyNotices = vi.fn(async () => "libgit2 licence text");
+    const { container } = render(<App client={toolsClient()} loadThirdPartyNotices={loadThirdPartyNotices} />);
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("combobox", { name: "Command palette" });
+    fireEvent.change(input, { target: { value: "licen" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Third-party licences" }));
+    expect(await screen.findByRole("region", { name: "Licence texts" })).toHaveTextContent("libgit2 licence text");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Licence texts" })).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Release notes" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Third-party licences" }));
+    expect(await screen.findByRole("region", { name: "Licence texts" })).toBeInTheDocument();
+    // The licences replace the release notes instead of stacking a second dialog on top.
+    expect(screen.queryByRole("region", { name: "Release notes" })).toBeNull();
+  });
+
   it("the palette opens Edit remote while the Branches section is collapsed", async () => {
     localStorage.setItem("sidebar-branches", "closed");
     try {

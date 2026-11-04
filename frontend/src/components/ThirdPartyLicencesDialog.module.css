@@ -1,0 +1,24 @@
+.intro {
+  margin: 0 0 var(--space-3);
+}
+
+.status {
+  color: var(--color-text-muted);
+}
+
+.text {
+  max-height: 60vh;
+  max-width: min(80ch, 80vw);
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.closeButton {
+  margin-top: var(--space-3);
+}

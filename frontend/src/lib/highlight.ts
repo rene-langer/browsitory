@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
-import { createHighlighterCore, createCssVariablesTheme, type HighlighterCore } from "shiki/core";
+import {
+  createHighlighterCore,
+  createCssVariablesTheme,
+  type HighlighterCore,
+  type LanguageRegistration,
+} from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import type { DiffHunk, DiffLine } from "../ipc/RepoClient";
+import { EXCLUDED_GRAMMAR_NAMES } from "./excludedGrammars";
 import type { HighlightLanguage } from "./languageForPath";
 
 export interface Token {
@@ -24,7 +30,6 @@ const LOADERS: Record<HighlightLanguage, () => Promise<unknown>> = {
   go: () => import("shiki/langs/go.mjs"),
   java: () => import("shiki/langs/java.mjs"),
   c: () => import("shiki/langs/c.mjs"),
-  cpp: () => import("shiki/langs/cpp.mjs"),
   csharp: () => import("shiki/langs/csharp.mjs"),
   css: () => import("shiki/langs/css.mjs"),
   scss: () => import("shiki/langs/scss.mjs"),
@@ -50,11 +55,30 @@ function getHighlighter(): Promise<HighlighterCore> {
   return highlighter;
 }
 
+/** The grammars registered so far (tests check that excluded ones never are). */
+export async function loadedLanguages(): Promise<string[]> {
+  return (await getHighlighter()).getLoadedLanguages();
+}
+
+/**
+ * Drops the grammars Browsitory doesn't ship (`excludedGrammars.ts`) from a language module's
+ * grammar list, and from the embedded languages the rest name, so Shiki doesn't ask for them.
+ * Code embedded in such a language (C++ in a Ruby heredoc) then stays plain.
+ */
+export function withoutExcludedGrammars(langs: readonly LanguageRegistration[]): LanguageRegistration[] {
+  const excluded = (name: string) => EXCLUDED_GRAMMAR_NAMES.includes(name);
+  return langs
+    .filter((lang) => !excluded(lang.name))
+    .map((lang) =>
+      lang.embeddedLangs?.some(excluded) ? { ...lang, embeddedLangs: lang.embeddedLangs.filter((n) => !excluded(n)) } : lang,
+    );
+}
+
 async function ensureLanguage(h: HighlighterCore, lang: HighlightLanguage): Promise<void> {
   let p = loaded.get(lang);
   if (p === undefined) {
     p = LOADERS[lang]().then((mod) =>
-      h.loadLanguage((mod as { default: Parameters<HighlighterCore["loadLanguage"]>[0] }).default),
+      h.loadLanguage(withoutExcludedGrammars((mod as { default: LanguageRegistration[] }).default)),
     );
     loaded.set(lang, p);
   }

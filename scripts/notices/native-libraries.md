@@ -1,30 +1,35 @@
 # Third-party notices
 
-Browsitory's own code is MIT-licensed (see `LICENSE`). Each `.vsix` package also carries a
-native helper program, `bin/vscode-sidecar`, built from Browsitory's Rust crates. That program
-links the native C libraries listed below, statically unless noted. Their licence texts follow,
-unchanged.
+Browsitory's own code is MIT-licensed (see `LICENSE`). Browsitory also includes code from other
+projects. This file lists that code and carries the licence texts and copyright notices its
+licences ask for, unchanged apart from whitespace. It covers both the desktop app and the
+VSCode extension packages (`.vsix`).
 
-- **libgit2** 1.9.7 (through the `libgit2-sys` crate 0.18.8): GPL-2.0 with the libgit2 linking
-  exception. The linking exception lets Browsitory link libgit2 and distribute the result under
-  its own licence. libgit2's licence file also covers the code libgit2 bundles. Source:
-  <https://github.com/libgit2/libgit2/tree/v1.9.7>.
+The desktop app and the VSCode extension's native helper program, `bin/vscode-sidecar`, are
+built from Browsitory's Rust crates. Both link the native C libraries listed below, statically
+unless noted:
+
+- **libgit2** 1.9.7 (through the `libgit2-sys` crate 0.18.8+1.9.7): GPL-2.0 with the libgit2
+  linking exception. The linking exception lets Browsitory link libgit2 and distribute the
+  result under its own licence. libgit2's licence file also covers the code libgit2 bundles.
+  Source: <https://github.com/libgit2/libgit2/tree/v1.9.7>.
 - **libssh2** (through the `libssh2-sys` crate 0.3.3): BSD-3-Clause. Source:
   <https://github.com/libssh2/libssh2>.
-- **OpenSSL** 3.6.3 (through the `openssl-src` crate 300.6.1), Linux and macOS packages only:
+- **OpenSSL** 3.6.3 (through the `openssl-src` crate 300.6.1+3.6.3), Linux and macOS only:
   Apache-2.0. Source: <https://github.com/openssl/openssl>.
 - **zlib** (through the `libz-sys` crate 1.1.31): Zlib. Where the build machine has a system
-  zlib, the sidecar may use that library instead of this copy. Source: <https://zlib.net>.
+  zlib, the program may use that library instead of this copy. Source: <https://zlib.net>.
 
-The Rust crates linked into the sidecar are under permissive licences (MIT, Apache-2.0, ISC,
-BSD, MIT-0, Unicode-3.0, Zlib), with one exception:
+The Rust crates and JavaScript packages are listed after the native libraries, each with its
+licence text. They are under permissive licences (MIT, Apache-2.0, ISC, BSD, MIT-0,
+Unicode-3.0, Zlib), with one exception:
 
 - **option-ext** (through the `directories` and `dirs-sys` crates): MPL-2.0
   (<https://mozilla.org/MPL/2.0/>). It is used unmodified. The source code of every published
-  version, including the one in this package, is available at
+  version, including the one Browsitory ships, is available at
   <https://crates.io/crates/option-ext> and <https://github.com/soc/option-ext>.
 
-The full list is in
+How these notices are produced and checked:
 <https://github.com/rene-langer/browsitory/blob/main/docs/LICENSE_COMPLIANCE.md>.
 
 ## libgit2

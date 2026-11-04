@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Third-party licences
+
+- Added: the app now lists the licences and copyright notices of the open source code it
+  includes. Open "Third-party licences" from the command palette or from the release notes
+  dialog. The same text ships as `THIRD_PARTY_NOTICES.md` with every desktop installer and
+  every VSCode extension package, and is attached to each GitHub Release (#301, #202).
+- Changed: C++ files (`.cpp`, `.cc`, `.hpp`) are now highlighted with the C grammar. Shiki's
+  C++ grammar includes a grammar that has no licence, so Browsitory no longer ships it. Most
+  C++ code looks the same; C++-only keywords and syntax may stay plain.
+- Changed: `THIRD_PARTY_NOTICES.md` is now generated from the Rust and npm dependency trees
+  (`scripts/generate-third-party-notices.py`, using cargo-about), plus a hand-kept part for the
+  bundled C libraries. CI fails when it no longer matches the dependencies or `Cargo.lock`.
+
 ### Files open in another program, in branch switches and other checkouts (Windows)
 
 - Fixed: on Windows, a branch switch or commit checkout, a hard reset, a fast-forward merge, a

@@ -9,6 +9,8 @@ export interface AppCommands {
   onNewRepository?: () => void;
   /** Opens the Preferences dialog ("Preferences…"). */
   onOpenPreferences?: () => void;
+  /** Opens the third-party licences dialog ("Third-party licences"). */
+  onOpenThirdPartyLicences?: () => void;
 }
 
 /**
@@ -217,6 +219,14 @@ export function buildCommands(
         label: "Preferences…",
         keywords: ["preferences", "settings", "options", "editor", "terminal", "tools"],
         run: appCommands.onOpenPreferences,
+      });
+    }
+    if (appCommands.onOpenThirdPartyLicences !== undefined) {
+      commands.push({
+        id: "third-party-licences",
+        label: "Third-party licences",
+        keywords: ["licences", "licenses", "notices", "copyright", "about", "open source", "legal"],
+        run: appCommands.onOpenThirdPartyLicences,
       });
     }
   }

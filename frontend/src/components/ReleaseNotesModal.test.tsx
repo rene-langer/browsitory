@@ -27,6 +27,12 @@ describe("ReleaseNotesModal", () => {
     expect(screen.getByText("Behavior change")).toBeInTheDocument();
   });
 
+  it("names the dialog itself", () => {
+    render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("dialog", { name: "Release notes" })).toBeInTheDocument();
+  });
+
   it("omits section headings with no entries", () => {
     render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
 
@@ -38,6 +44,19 @@ describe("ReleaseNotesModal", () => {
     render(<ReleaseNotesModal entries={[]} onClose={vi.fn()} />);
 
     expect(screen.getByText("No release notes yet.")).toBeInTheDocument();
+  });
+
+  it("offers the third-party licences when the app can show them", () => {
+    const onOpenThirdPartyLicences = vi.fn();
+    const { rerender } = render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Third-party licences" })).not.toBeInTheDocument();
+
+    rerender(
+      <ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} onOpenThirdPartyLicences={onOpenThirdPartyLicences} />,
+    );
+    screen.getByRole("button", { name: "Third-party licences" }).click();
+
+    expect(onOpenThirdPartyLicences).toHaveBeenCalledOnce();
   });
 
   it("calls onClose when the close button is clicked", () => {

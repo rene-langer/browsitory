@@ -118,6 +118,26 @@ describe("command palette", () => {
     });
   });
 
+  it("shows the third-party licences from the bundled notices file", async () => {
+    await waitForAppReady();
+    const input = await openPalette();
+    await input.setValue("third-party licences");
+    await browser.keys(["Enter"]);
+    await input.waitForDisplayed({ reverse: true, timeout: 10000 });
+
+    // The text region renders only once third-party-notices.md was fetched from the app's own
+    // assets, so this proves the CSP's connect-src and the asset path. `textContent` via
+    // `browser.execute`: see the note on `getText()` and native <dialog>s above.
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(
+          () => document.querySelector('pre[aria-label="Licence texts"]')?.textContent ?? "",
+        )).includes("option-ext"),
+      { timeout: 10000, timeoutMsg: "expected the licences dialog to show the notices file" },
+    );
+    await browser.keys(["Escape"]);
+  });
+
   it("closes on Escape without running anything", async () => {
     await waitForAppReady();
     const input = await openPalette();

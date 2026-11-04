@@ -22,12 +22,15 @@ const SECTION_ORDER: ReleaseNotesSection[] = ["added", "changed", "fixed", "remo
 export function ReleaseNotesModal({
   entries,
   onClose,
+  onOpenThirdPartyLicences,
 }: {
   entries: ReleaseNotesEntry[];
   onClose: () => void;
+  /** Shows the "Third-party licences" button; absent where the app can't show them. */
+  onOpenThirdPartyLicences?: () => void;
 }) {
   return (
-    <Overlay onClose={onClose}>
+    <Overlay onClose={onClose} ariaLabel="Release notes">
       <Panel title="Release Notes" ariaLabel="Release notes">
         {entries.length === 0 ? (
           <p className={styles.empty}>No release notes yet.</p>
@@ -50,9 +53,16 @@ export function ReleaseNotesModal({
             </section>
           ))
         )}
-        <button type="button" className={styles.closeButton} onClick={onClose}>
-          Close
-        </button>
+        <div className={styles.footer}>
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+          {onOpenThirdPartyLicences !== undefined && (
+            <button type="button" onClick={onOpenThirdPartyLicences}>
+              Third-party licences
+            </button>
+          )}
+        </div>
       </Panel>
     </Overlay>
   );
