@@ -106,12 +106,14 @@ jobs:
           fetch-depth: 0
       - name: check-changelog.py unit tests
         run: python3 scripts/test_check_changelog.py
-      - name: CHANGELOG.md updated
+      - name: fold-changelog.py unit tests
+        run: python3 scripts/test_fold_changelog.py
+      - name: Changelog entry (fragment in changelog.d/ or CHANGELOG.md)
         env:
           # A dispatched run has no pull request: the default branch is the base, and there are
           # no labels, so a `skip-changelog` label on the PR doesn't apply there. Renovate PRs
           # don't need it: dependency manifests, lockfiles and THIRD_PARTY_NOTICES.md need no
-          # CHANGELOG.md entry.
+          # changelog entry.
           SKIP_CHANGELOG_CHECK: ${{ contains(github.event.pull_request.labels.*.name, 'skip-changelog') && '1' || '' }}
           BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
         run: python3 scripts/check-changelog.py --base "origin/$BASE_REF"
