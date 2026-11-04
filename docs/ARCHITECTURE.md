@@ -571,9 +571,10 @@ certificate.
 
 - `git-core::pick` is a pure state machine: `cherry_pick_many`/`revert_many`/`continue_sequence`
   take and return a `SequenceState` (`SequenceRun { outcome, state }`, `state: Some` = "keep
-  this", `None` = "no sequence any more"); `git-core` has no persistence. Its only serde is the
-  file formats in `rebase_file.rs`/`sequence_file.rs` and `Serialize` on the few enums the wire
-  DTOs carry (see "Wire DTOs").
+  this", `None` = "no sequence any more"); `git-core` never stores this state itself:
+  `repo-service` does, using the file formats in `rebase_file.rs`/`sequence_file.rs`. Those
+  formats and `Serialize` on the few enums the wire DTOs carry (see "Wire DTOs") are
+  `git-core`'s only serde.
 - git's own terminal sequences (`git cherry-pick A B C`, `git revert A B`) keep their remaining
   list in `.git/sequencer/todo`. Wherever Browsitory finishes or clears a pick after a commit
   (the Commit button's `commit_with` and its leftover handling, a single `cherry_pick`/`revert`
