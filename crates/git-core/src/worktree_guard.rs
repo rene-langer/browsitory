@@ -2810,7 +2810,7 @@ mod tests {
     }
 
     /// The regular file `rel` below `held`, as text.
-    #[cfg(any(unix, windows))]
+    #[cfg(unix)]
     fn read_held(held: &HeldFolder, rel: &str) -> String {
         match held.read(rel, u64::MAX).unwrap() {
             Some(Leaf::File { bytes, .. }) => String::from_utf8(bytes).unwrap(),
