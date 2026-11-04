@@ -1112,8 +1112,13 @@ fn refuse_untracked_file_over_folder(repo: &Repository, index: usize) -> Result<
 /// untracked_tree)`, stash.c), so `d/x` over the indexed file `d` is a directory/file conflict
 /// it checks out as `d~Updated upstream` while reporting success, and a pop would drop the
 /// stash (#206). Typically the stash itself recorded the swap (the untracked `d/x` with the
-/// file `d` deleted); the deletion is applied only after the untracked files. Paths compare
-/// exactly, as libgit2's merge does.
+/// file `d` deleted); the deletion is applied only after the untracked files. libgit2's merge
+/// compares exact case. Where names fold (`folds_case`: the repository sets `core.ignorecase`,
+/// or always on macOS and Windows, like the case-collision walker) paths compare as `fold_name`
+/// folds them, so `d/x` is refused over the indexed file `D` too (#234). On a case-insensitive
+/// drive `d` is `D` and `git stash pop` refuses as well. On a case-sensitive drive with
+/// `core.ignorecase` set, git would pop it; Browsitory refuses on purpose, since the setting may
+/// be right (a Linux casefold folder or a vfat mount folds names too).
 fn refuse_untracked_below_tracked_file(repo: &Repository, index: usize) -> Result<(), StashError> {
     let Some(id) = repo
         .reflog("refs/stash")
@@ -1125,12 +1130,25 @@ fn refuse_untracked_below_tracked_file(repo: &Repository, index: usize) -> Resul
     let Ok(untracked) = repo.find_commit(id)?.parent(2) else {
         return Ok(());
     };
-    let files: std::collections::HashSet<String> = repo
-        .index()?
-        .iter()
-        .filter(|entry| (entry.flags >> 12) & 0x3 == 0)
-        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
-        .collect();
+    let ignore_case = crate::worktree_guard::folds_case(repo);
+    let fold = |path: &[u8]| {
+        let folded = if ignore_case {
+            crate::worktree_guard::fold_name(path)
+        } else {
+            path.to_vec()
+        };
+        String::from_utf8_lossy(&folded).into_owned()
+    };
+    // Folded path → the index's own spelling. When two index paths fold together (only a
+    // case-sensitive drive holds both), the first in index order is the one reported.
+    let mut files = std::collections::HashMap::new();
+    for entry in repo.index()?.iter() {
+        if (entry.flags >> 12) & 0x3 == 0 {
+            files
+                .entry(fold(&entry.path))
+                .or_insert_with(|| String::from_utf8_lossy(&entry.path).into_owned());
+        }
+    }
     let mut blocked = None;
     untracked
         .tree()?
@@ -1142,12 +1160,12 @@ fn refuse_untracked_below_tracked_file(repo: &Repository, index: usize) -> Resul
                 return git2::TreeWalkResult::Ok;
             };
             let path = format!("{root}{name}");
-            if let Some(file) = path
+            let folded = fold(path.as_bytes());
+            if let Some(file) = folded
                 .match_indices('/')
-                .map(|(slash, _)| &path[..slash])
-                .find(|prefix| files.contains(*prefix))
+                .find_map(|(slash, _)| files.get(&folded[..slash]))
             {
-                blocked = Some((path.clone(), file.to_string()));
+                blocked = Some((path.clone(), file.clone()));
                 return git2::TreeWalkResult::Abort;
             }
             git2::TreeWalkResult::Ok
