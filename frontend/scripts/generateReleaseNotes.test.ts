@@ -1,8 +1,16 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isMainModule, parseChangelog } from "./generateReleaseNotes.mjs";
+
+type Item = { kind?: string; text: string; children?: Item[] };
+type Block = { paragraph: string } | { items: Item[] };
+type Group = { title: string; blocks: Block[] };
+type Entry = { version: string; date: string; groups: Group[] };
+
+const parse = (markdown: string, onWarning = vi.fn()): Entry[] => parseChangelog(markdown, { onWarning });
+const itemsOf = (group: Group): Item[] => group.blocks.flatMap((b) => ("items" in b ? b.items : []));
 
 const SAMPLE = `# Changelog
 
@@ -58,6 +66,7 @@ This paragraph wraps.
 ### Worktrees
 
 - Internal: a developer-only bullet in a user topic.
+  Its continuation goes too.
 - Added: worktrees can be locked.
 
 ### Fixed
@@ -75,90 +84,194 @@ This paragraph wraps.
 
 describe("parseChangelog", () => {
   it("skips the Unreleased section", () => {
-    const entries = parseChangelog(SAMPLE);
-    expect(entries.map((e) => e.version)).toEqual(["0.6.0", "0.5.0"]);
+    expect(parse(SAMPLE).map((e) => e.version)).toEqual(["0.6.0", "0.5.0"]);
   });
 
   it("parses Keep a Changelog headings into groups in changelog order", () => {
-    const entries = parseChangelog(SAMPLE);
+    const entries = parse(SAMPLE);
     expect(entries[0]).toEqual({
       version: "0.6.0",
       date: "2026-09-01",
       groups: [
-        { title: "Added", items: [{ text: "Feature A" }, { text: "Feature B" }] },
-        { title: "Fixed", items: [{ text: "Bug fix A" }] },
+        { title: "Added", blocks: [{ items: [{ text: "Feature A" }, { text: "Feature B" }] }] },
+        { title: "Fixed", blocks: [{ items: [{ text: "Bug fix A" }] }] },
       ],
     });
-    expect(entries[1].groups).toEqual([{ title: "Changed", items: [{ text: "Behavior change" }] }]);
+    expect(entries[1].groups).toEqual([{ title: "Changed", blocks: [{ items: [{ text: "Behavior change" }] }] }]);
   });
 
   it("joins indented continuation lines onto their bullet", () => {
-    const entries = parseChangelog(
+    const [entry] = parse(
       "## [1.0.0] - 2026-01-01\n\n### Fixed\n- First line of a long note\n  continues here\n  and here.\n- Next bullet\n",
     );
-    expect(entries[0].groups[0].items).toEqual([
+    expect(itemsOf(entry.groups[0])).toEqual([
       { text: "First line of a long note continues here and here." },
       { text: "Next bullet" },
     ]);
   });
 
+  it("reads CRLF line endings like LF", () => {
+    const [entry] = parse("## [1.0.0] - 2026-01-01\r\n\r\n### Fixed\r\n- Fixed: one\r\n  two\r\n- three\r\n");
+    expect(entry.groups).toEqual([
+      { title: "Fixed", blocks: [{ items: [{ kind: "fixed", text: "one two" }, { text: "three" }] }] },
+    ]);
+  });
+
   it("turns each topic heading into a group, with the bullet prefix as its kind", () => {
-    const [entry] = parseChangelog(TOPICS);
+    const [entry] = parse(TOPICS);
     expect(entry.version).toBe("0.7.0");
     expect(entry.groups[0]).toEqual({
       title: "Commit signing",
-      intro: ["Commits can now be signed. This paragraph wraps."],
-      items: [
-        { text: "Commits are signed with gpg or SSH, using your existing agent." },
-        { kind: "fixed", text: "A failed signature no longer makes a commit (#12)." },
-        { kind: "changed", text: "`commit.gpgSign` is read per repository." },
-        { text: "Windows: keeps its prefix because it is not a kind." },
+      blocks: [
+        { paragraph: "Commits can now be signed. This paragraph wraps." },
+        {
+          items: [
+            { text: "Commits are signed with gpg or SSH, using your existing agent." },
+            { kind: "fixed", text: "a failed signature no longer makes a commit (#12)." },
+            { kind: "changed", text: "`commit.gpgSign` is read per repository." },
+            { text: "Windows: keeps its prefix because it is not a kind." },
+          ],
+        },
       ],
     });
   });
 
-  it("leaves out Internal sections and Internal bullets", () => {
-    const [entry] = parseChangelog(TOPICS);
+  it("recognises all six kinds and leaves the text as written", () => {
+    const [entry] = parse(
+      [
+        "## [1.0.0] - 2026-01-01",
+        "### Topic",
+        "- Added: macOS support",
+        "- Changed: gpg is found on PATH",
+        "- Fixed: a",
+        "- Removed: b",
+        "- Deprecated: c",
+        "- Security: d",
+      ].join("\n"),
+    );
+    expect(itemsOf(entry.groups[0])).toEqual([
+      { kind: "added", text: "macOS support" },
+      { kind: "changed", text: "gpg is found on PATH" },
+      { kind: "fixed", text: "a" },
+      { kind: "removed", text: "b" },
+      { kind: "deprecated", text: "c" },
+      { kind: "security", text: "d" },
+    ]);
+  });
+
+  it("leaves out Internal sections and Internal bullets with their continuation lines", () => {
+    const [entry] = parse(TOPICS);
     expect(entry.groups.map((g) => g.title)).toEqual(["Commit signing", "Worktrees", "Fixed", "Security"]);
-    expect(entry.groups[1].items).toEqual([{ kind: "added", text: "Worktrees can be locked." }]);
+    expect(itemsOf(entry.groups[1])).toEqual([{ kind: "added", text: "worktrees can be locked." }]);
   });
 
   it("merges repeated headings within a release into one group", () => {
-    const [entry] = parseChangelog(TOPICS);
-    expect(entry.groups[2]).toEqual({ title: "Fixed", items: [{ text: "Bug fix A" }, { text: "Bug fix B" }] });
+    const [entry] = parse(TOPICS);
+    expect(itemsOf(entry.groups[2])).toEqual([{ text: "Bug fix A" }, { text: "Bug fix B" }]);
   });
 
   it("drops a group whose bullets are all internal", () => {
-    const [entry] = parseChangelog("## [1.0.0] - 2026-01-01\n\n### Tooling\n- Internal: faster CI.\n");
-    expect(entry.groups).toEqual([]);
+    const [entry] = parse("## [1.0.0] - 2026-01-01\n\n### Tooling\n- Internal: faster CI.\n### Topic\n- kept\n");
+    expect(entry.groups.map((g) => g.title)).toEqual(["Topic"]);
+  });
+
+  it("turns indented bullets into sub-items of the bullet above", () => {
+    const [entry] = parse(
+      [
+        "## [1.0.0] - 2026-01-01",
+        "### Topic",
+        "- Parent",
+        "  continues.",
+        "  - Fixed: first sub",
+        "    wraps.",
+        "  - second sub",
+        "- Next",
+      ].join("\n"),
+    );
+    expect(itemsOf(entry.groups[0])).toEqual([
+      {
+        text: "Parent continues.",
+        children: [{ kind: "fixed", text: "first sub wraps." }, { text: "second sub" }],
+      },
+      { text: "Next" },
+    ]);
+  });
+
+  it("joins unindented text right after a bullet onto it, and keeps a paragraph after the list", () => {
+    const [entry] = parse(
+      ["## [1.0.0] - 2026-01-01", "### Topic", "- A bullet", "lazily continued.", "", "A closing paragraph", "on two lines."].join(
+        "\n",
+      ),
+    );
+    expect(entry.groups[0].blocks).toEqual([
+      { items: [{ text: "A bullet lazily continued." }] },
+      { paragraph: "A closing paragraph on two lines." },
+    ]);
+  });
+
+  it("ignores everything inside code fences", () => {
+    const [entry] = parse(
+      ["## [1.0.0] - 2026-01-01", "### Topic", "- Kept", "```", "### Not a heading", "- not a bullet", "## not a release", "```", "- Also kept"].join(
+        "\n",
+      ),
+    );
+    expect(entry.groups).toEqual([{ title: "Topic", blocks: [{ items: [{ text: "Kept" }, { text: "Also kept" }] }] }]);
+  });
+
+  it("accepts an en dash or em dash between version and date", () => {
+    const entries = parse("## [1.1.0] – 2026-02-01\n### A\n- a\n## [1.0.0] — 2026-01-01\n### B\n- b\n");
+    expect(entries.map((e) => [e.version, e.date])).toEqual([
+      ["1.1.0", "2026-02-01"],
+      ["1.0.0", "2026-01-01"],
+    ]);
+  });
+
+  it("fails on a release heading it can't read", () => {
+    expect(() => parse("## [1.0.0]\n### A\n- a\n")).toThrow(/line 1.*## \[1\.0\.0\]/);
+    expect(() => parse("# Changelog\n\n## Notes\n")).toThrow(/line 3/);
+  });
+
+  it("skips a release with nothing for users and warns about it", () => {
+    const onWarning = vi.fn();
+    const entries = parse(
+      "## [1.1.0] - 2026-02-01\n### Internal\n- CI only\n## [1.0.0] - 2026-01-01\n### A\n- a\n",
+      onWarning,
+    );
+    expect(entries.map((e) => e.version)).toEqual(["1.0.0"]);
+    expect(onWarning).toHaveBeenCalledOnce();
+    expect(onWarning.mock.calls[0][0]).toMatch(/1\.1\.0/);
   });
 
   it("returns an empty array for a changelog with only Unreleased", () => {
-    const entries = parseChangelog("# Changelog\n\n## [Unreleased]\n\n### Added\n- x\n");
-    expect(entries).toEqual([]);
+    expect(parse("# Changelog\n\n## [Unreleased]\n\n### Added\n- x\n")).toEqual([]);
   });
 });
 
 describe("the real CHANGELOG.md", () => {
   const changelog = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "CHANGELOG.md"), "utf-8");
-  const entries = parseChangelog(changelog);
+  const entries = parse(changelog);
 
-  it("yields release notes for every released version", () => {
-    expect(entries.length).toBeGreaterThan(0);
-    for (const entry of entries) {
-      const items = entry.groups.flatMap((g) => g.items);
-      expect(items.length, `release ${entry.version} has no release notes`).toBeGreaterThan(0);
+  // Released versions that have at least one non-Internal `###` section.
+  const userFacingVersions = changelog
+    .split(/^## /m)
+    .filter((section) => /^\[\d/.test(section))
+    .filter((section) => /^###\s+(?!Internal\b)/im.test(section))
+    .map((section) => section.match(/^\[([^\]]+)\]/)![1]);
+
+  it("yields release notes for every released version with user-facing sections", () => {
+    expect(userFacingVersions.length).toBeGreaterThan(0);
+    for (const version of userFacingVersions) {
+      const entry = entries.find((e) => e.version === version);
+      expect(entry, `release ${version} has no release notes`).toBeDefined();
+      expect(entry!.groups.flatMap(itemsOf).length, `release ${version} has no bullets`).toBeGreaterThan(0);
     }
   });
 
-  it("includes the topic sections of 0.3.0", () => {
+  it("reads the topic sections of 0.3.0", () => {
     const entry = entries.find((e) => e.version === "0.3.0");
     expect(entry).toBeDefined();
-    const titles = entry!.groups.map((g) => g.title);
-    expect(titles).toContain("Commit signing");
-    expect(titles).toContain("Undo and redo");
-    const signing = entry!.groups.find((g) => g.title === "Commit signing")!;
-    expect(signing.items.length).toBeGreaterThanOrEqual(2);
+    expect(entry!.groups.length).toBeGreaterThanOrEqual(8);
+    expect(entry!.groups.some((g) => itemsOf(g).length > 0)).toBe(true);
   });
 });
 

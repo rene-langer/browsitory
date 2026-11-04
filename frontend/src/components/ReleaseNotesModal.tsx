@@ -9,13 +9,17 @@ export type ReleaseNotesKind = "added" | "changed" | "fixed" | "removed" | "depr
 export interface ReleaseNotesItem {
   kind?: ReleaseNotesKind;
   text: string;
+  /** Indented bullets under this one. */
+  children?: ReleaseNotesItem[];
 }
+
+/** A paragraph or a bullet list, in changelog order. */
+export type ReleaseNotesBlock = { paragraph: string } | { items: ReleaseNotesItem[] };
 
 /** One `### Heading` of a release: a topic ("Commit signing") or a kind ("Fixed"). */
 export interface ReleaseNotesGroup {
   title: string;
-  intro?: string[];
-  items: ReleaseNotesItem[];
+  blocks: ReleaseNotesBlock[];
 }
 
 /** The shape `scripts/generateReleaseNotes.mjs` writes to `src/generated/releaseNotes.json`. */
@@ -34,17 +38,47 @@ const KIND_LABELS: Record<ReleaseNotesKind, string> = {
   security: "Security",
 };
 
+// `code`, or **bold** (which may hold code). Matched left to right, so a code span wins over
+// a bold marker that starts inside it; markers without a partner stay as text.
+const INLINE = /`([^`]+)`|\*\*(.+?)\*\*/g;
+
 /** Renders the changelog's inline `code` and **bold** markup; everything else stays text. */
 function renderInline(text: string): ReactNode[] {
-  return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/).map((part, index) => {
-    if (part.length > 2 && part.startsWith("`") && part.endsWith("`")) {
-      return <code key={index}>{part.slice(1, -1)}</code>;
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(INLINE)) {
+    const start = match.index;
+    if (start > last) nodes.push(text.slice(last, start));
+    if (match[1] !== undefined) {
+      nodes.push(<code key={start}>{match[1]}</code>);
+    } else {
+      nodes.push(<strong key={start}>{renderInline(match[2])}</strong>);
     }
-    if (part.length > 4 && part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    }
-    return part;
-  });
+    last = start + match[0].length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+function ItemList({ items }: { items: ReleaseNotesItem[] }) {
+  return (
+    <ul>
+      {items.map((item, index) => (
+        <li key={index}>
+          {item.kind !== undefined && (
+            <>
+              <span className={`${styles.kind} ${styles[item.kind]}`}>
+                {KIND_LABELS[item.kind]}
+                <span className={styles.srOnly}>:</span>
+              </span>{" "}
+            </>
+          )}
+          <span>{renderInline(item.text)}</span>
+          {item.children !== undefined && item.children.length > 0 && <ItemList items={item.children} />}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export function ReleaseNotesModal({
@@ -71,21 +105,15 @@ export function ReleaseNotesModal({
               {entry.groups.map((group) => (
                 <div key={group.title} className={styles.group}>
                   <h4>{group.title}</h4>
-                  {group.intro?.map((paragraph, index) => (
-                    <p key={index} className={styles.intro}>
-                      {renderInline(paragraph)}
-                    </p>
-                  ))}
-                  <ul>
-                    {group.items.map((item, index) => (
-                      <li key={index}>
-                        {item.kind !== undefined && (
-                          <span className={`${styles.kind} ${styles[item.kind]}`}>{KIND_LABELS[item.kind]}</span>
-                        )}
-                        <span>{renderInline(item.text)}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  {group.blocks.map((block, index) =>
+                    "paragraph" in block ? (
+                      <p key={index} className={styles.paragraph}>
+                        {renderInline(block.paragraph)}
+                      </p>
+                    ) : (
+                      <ItemList key={index} items={block.items} />
+                    ),
+                  )}
                 </div>
               ))}
             </section>
