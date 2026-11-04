@@ -1807,7 +1807,7 @@ mod tests {
         let error = git2::Error::new(
             git2::ErrorCode::Locked,
             git2::ErrorClass::Os,
-            &format!("failed remove - '{}' is locked", file.display()),
+            format!("failed remove - '{}' is locked", file.display()),
         );
         let mapped: crate::branch::BranchError =
             held_open(Some(dir.path()), HeldDuring::Switch)(error);
