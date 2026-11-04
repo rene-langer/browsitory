@@ -838,3 +838,119 @@ fn discarding_a_file_open_in_another_program_is_refused() {
     discard_file(&repo, "f.txt").unwrap();
     assert_eq!(read(dir.path(), "f.txt"), "v1\n");
 }
+
+/// HEAD has `rel` (three lines); the folder `file` on the way to it was replaced by an untracked
+/// file `file` (#154, #213).
+fn tracked_below_a_file(rel: &str, file: &str) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), rel, "one\ntwo\nthree\n");
+    common::commit_all(&repo, "base");
+    std::fs::remove_dir_all(dir.path().join(file)).unwrap();
+    std::fs::write(dir.path().join(file), "now a file\n").unwrap();
+    (dir, repo)
+}
+
+/// The file `file` is untouched and nothing below it was made.
+fn assert_file_untouched(dir: &std::path::Path, file: &str) {
+    let meta = std::fs::symlink_metadata(dir.join(file)).unwrap();
+    assert!(meta.is_file(), "{file} is no longer a file");
+    assert_eq!(read(dir, file), "now a file\n");
+}
+
+/// #213: two levels up (`a` a file for `a/b/c`), Discard names the file in the way and touches
+/// nothing, tracked or not. (No git twin: `git restore` would delete `a` to put the folder back,
+/// which the user didn't pick, #154.)
+#[test]
+fn discarding_below_a_folder_that_is_now_a_file_two_levels_up_names_the_file() {
+    let (dir, repo) = tracked_below_a_file("a/b/c", "a");
+    let err = discard_file(&repo, "a/b/c").unwrap_err();
+    assert!(
+        matches!(err, StageError::FolderIsNowAFile { ref parent, .. } if parent == "a"),
+        "{err:?}"
+    );
+    assert_file_untouched(dir.path(), "a");
+    assert_eq!(index_paths(&repo), vec!["a/b/c".to_string()]);
+
+    // Not tracked: there is no `a/b/c`, so nothing to delete (as for any untracked file that is
+    // already gone), and `a` is left alone.
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "other.txt", "x\n");
+    common::commit_all(&repo, "base");
+    std::fs::write(dir.path().join("a"), "now a file\n").unwrap();
+    discard_file(&repo, "a/b/c").unwrap();
+    assert_file_untouched(dir.path(), "a");
+    assert_eq!(index_paths(&repo), vec!["other.txt".to_string()]);
+}
+
+/// The first unstaged hunk of `rel`.
+fn first_hunk(repo: &git2::Repository, rel: &str) -> git_core::diff::DiffHunk {
+    git_core::diff::working_diff(repo, rel, false, &Default::default())
+        .unwrap()
+        .remove(0)
+}
+
+/// #213: Discard hunk and Discard lines, one or two levels below a folder that is now a file,
+/// name the file in the way and write nothing (they would recreate the folder over it).
+#[test]
+fn discarding_a_hunk_or_lines_below_a_folder_that_is_now_a_file_names_the_file() {
+    for (rel, file) in [("d/f", "d"), ("a/b/c", "a")] {
+        let (dir, repo) = tracked_below_a_file(rel, file);
+        let hunk = first_hunk(&repo, rel);
+        let err = git_core::stage::discard_hunk(&repo, rel, hunk.old_start, hunk.new_start, 3)
+            .unwrap_err();
+        assert!(
+            matches!(err, StageError::FolderIsNowAFile { ref parent, .. } if parent == file),
+            "{rel}: {err:?}"
+        );
+        assert_file_untouched(dir.path(), file);
+
+        let expected: Vec<String> = hunk.lines.iter().map(|l| l.content.clone()).collect();
+        let err = git_core::stage::discard_lines(
+            &repo,
+            rel,
+            hunk.old_start,
+            hunk.new_start,
+            3,
+            &[0],
+            &expected,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, StageError::FolderIsNowAFile { ref parent, .. } if parent == file),
+            "{rel}: {err:?}"
+        );
+        assert_file_untouched(dir.path(), file);
+        assert_eq!(index_paths(&repo), vec![rel.to_string()]);
+    }
+}
+
+/// #213: staging the deletion's lines below a folder that is now a file only changes the index
+/// (as `git add -p` would); the file in the way is untouched.
+#[test]
+fn staging_lines_below_a_folder_that_is_now_a_file_leaves_the_file() {
+    for (rel, file) in [("d/f", "d"), ("a/b/c", "a")] {
+        let (dir, repo) = tracked_below_a_file(rel, file);
+        let hunk = first_hunk(&repo, rel);
+        let expected: Vec<String> = hunk.lines.iter().map(|l| l.content.clone()).collect();
+        git_core::stage::stage_lines(
+            &repo,
+            rel,
+            hunk.old_start,
+            hunk.new_start,
+            3,
+            &[0],
+            &expected,
+        )
+        .unwrap();
+        assert_file_untouched(dir.path(), file);
+        let staged = repo
+            .index()
+            .unwrap()
+            .get_path(std::path::Path::new(rel), 0)
+            .expect("still staged, one line shorter");
+        assert_eq!(
+            repo.find_blob(staged.id).unwrap().content(),
+            b"two\nthree\n"
+        );
+    }
+}

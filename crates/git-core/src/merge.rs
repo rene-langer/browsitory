@@ -80,6 +80,8 @@ pub enum NotStagedReason {
     NotARepository,
     /// A repository whose branch has no commit yet.
     NoCommit,
+    /// A linked worktree whose main repository (its `commondir`) is gone.
+    MainRepositoryGone,
     /// A repository whose checked-out commit Browsitory can't read; what it can't read.
     Unsupported(&'static str),
 }
@@ -87,6 +89,10 @@ pub enum NotStagedReason {
 impl NotStagedReason {
     fn message(&self, path: &str) -> String {
         match self {
+            Self::MainRepositoryGone => format!(
+                "'{path}' is a linked worktree whose main repository is gone. Repair it with \
+                 git (`git worktree repair`), then try again."
+            ),
             Self::NotARepository => format!(
                 "'{path}' is a folder, not a repository. Only a repository can be marked \
                  resolved as a folder."
@@ -752,7 +758,11 @@ fn nested_head(
     let mut content = read(&git, "HEAD", SMALL_GIT_FILE_LIMIT)?.ok_or_else(not_a_repository)?;
     // A linked worktree's branches are in its repository's common folder.
     let common = match read(&git, "commondir", SMALL_GIT_FILE_LIMIT)? {
-        Some(bytes) => resolve(&git, String::from_utf8_lossy(&bytes).trim())?,
+        Some(bytes) => match git.resolve(Path::new(String::from_utf8_lossy(&bytes).trim()))? {
+            Resolved::Held(common) => common,
+            Resolved::NotFound => return Err(refuse(NotStagedReason::MainRepositoryGone)),
+            Resolved::Refused(why) => return Err(refuse(NotStagedReason::Unsupported(why))),
+        },
         None => git,
     };
     // git reads at most 5 refs, HEAD included (`SYMREF_MAXDEPTH`): HEAD and 4 symbolic refs.
@@ -777,11 +787,7 @@ fn nested_head(
         if !name.starts_with("refs/") {
             return Err(refuse(NotStagedReason::Unsupported("HEAD outside refs/")));
         }
-        // A name git itself would refuse (`check_refname_format`): empty, `.` or `..` parts.
-        if name
-            .split('/')
-            .any(|part| part.is_empty() || part == "." || part == ".." || part.contains('\\'))
-        {
+        if !git_accepts_refname(name) {
             return Err(refuse(NotStagedReason::Unsupported(
                 "a malformed HEAD or ref",
             )));
@@ -815,6 +821,23 @@ fn nested_head(
     Err(refuse(NotStagedReason::Unsupported(
         "symbolic refs nested too deeply",
     )))
+}
+
+/// Whether git's `check_refname_format` accepts `name` (without `REFNAME_ALLOW_ONELEVEL` or
+/// `REFNAME_REFSPEC_PATTERN`): no control character, space, `~ ^ : ? * [ \`, no `..` or `@{`,
+/// no part empty, starting with `.` or ending with `.lock`, not `@` alone and no trailing `.`
+/// (#213). Only such a name is used as a path below the git folder: `:` would open an NTFS
+/// alternate data stream on Windows.
+fn git_accepts_refname(name: &str) -> bool {
+    let bad_char = |c: char| c.is_ascii_control() || " ~^:?*[\\".contains(c);
+    name != "@"
+        && !name.contains("..")
+        && !name.contains("@{")
+        && !name.ends_with('.')
+        && !name.chars().any(bad_char)
+        && name
+            .split('/')
+            .all(|part| !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock"))
 }
 
 /// A full hexadecimal SHA-1 object id (git2 would also take a prefix).

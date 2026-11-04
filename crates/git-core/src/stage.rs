@@ -717,6 +717,14 @@ fn apply_selection(
         let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
         refuse_beyond_symlink(workdir, path)?;
         ensure_no_symlinked_parent(workdir, checked_relative(path)?)?;
+        // Reverting the hunk would recreate the folder over that file, as `discard_file`
+        // refuses to (#154, #213).
+        if let Some(parent) = crate::worktree_guard::file_in_place_of_folder(workdir, path)? {
+            return Err(StageError::FolderIsNowAFile {
+                path: path.to_string(),
+                parent,
+            });
+        }
     }
     let all_changed: Vec<u32>;
     let line_indices = match selection {

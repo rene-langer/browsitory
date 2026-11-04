@@ -1506,6 +1506,25 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
 /// so it can't be renamed or replaced while held.
 pub(super) struct Folder(File);
 
+/// A file's volume serial number and file ID.
+#[derive(PartialEq, Eq)]
+pub(super) struct Identity(FileIdInfo);
+
+/// The identity of the folder at `path` (links followed); `None` when it isn't one or can't be
+/// looked at (a file system without file IDs).
+pub(super) fn identity_of(path: &Path) -> Option<Identity> {
+    let file = OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .ok()?;
+    if !file.metadata().ok()?.is_dir() {
+        return None;
+    }
+    file_id(&file).ok().map(Identity)
+}
+
 impl Folder {
     /// Opens the folder `path` by path (links on the way followed), held as `walk` holds the
     /// work tree root. `None` when it is missing or not a folder.
@@ -1566,6 +1585,25 @@ impl Folder {
 
     pub(super) fn stat(&self) -> io::Result<super::FileStat> {
         Ok(super::FileStat::of(&self.0.metadata()?))
+    }
+
+    /// The folder's volume serial number and file ID.
+    pub(super) fn identity(&self) -> io::Result<Identity> {
+        Ok(Identity(file_id(&self.0)?))
+    }
+
+    /// Whether this folder is `root` or below it, physically: its normalised final path
+    /// (junctions and links resolved, as the handle was opened) starts with `root`'s, compared
+    /// component by component without case.
+    pub(super) fn is_within(&self, root: &Folder) -> io::Result<bool> {
+        let fold = |path: PathBuf| -> Vec<String> {
+            path.components()
+                .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+                .collect()
+        };
+        let inside = fold(final_path(&self.0)?);
+        let root = fold(final_path(&root.0)?);
+        Ok(inside.len() >= root.len() && inside[..root.len()] == root[..])
     }
 
     /// See `worktree_guard::HeldFolder::kind`.
