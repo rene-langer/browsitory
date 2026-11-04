@@ -26,6 +26,9 @@ the desktop build, two jobs publish the same files:
 Both jobs run in the GitHub environment `marketplace` (deployment tags restricted to
 `release/*`), and all three secrets are **environment** secrets there: `AZURE_CLIENT_ID`,
 `AZURE_TENANT_ID`, `OVSX_PAT`. Each job skips with a notice while its secret is empty.
+The owner is a required reviewer on `marketplace`, so both publish jobs wait for the owner's
+approval before they start: open the release run's page in Actions and use **Review
+deployments**, or find the run with `gh run view` and approve it there.
 
 **Pre-release switch:** `VSIX_PRE_RELEASE` at the top of `release.yml` (`"true"` now). Set it to
 `"false"` to package and publish stable releases. Packaging reads it too, because `vsce publish
@@ -52,6 +55,9 @@ Owner setup (once):
    [dry run](#dry-run) to get it before the first release, and add the id to publisher
    `browsitory` as **Contributor**. Until then, the publish step fails; if a release gets there
    first, add the id and re-run the failed job. Later releases need nothing.
+5. Add yourself as a **required reviewer** on the `marketplace` environment (Settings →
+   Environments → `marketplace` → Deployment protection rules). Every job in that environment
+   (both publish jobs and both credential jobs of the dry run) then waits for your approval.
 
 ### Package checks
 
@@ -62,7 +68,8 @@ itself and checks:
 - identity: publisher `browsitory`, name `browsitory`, the expected version and target, and the
   pre-release flag;
 - listing metadata: icon, repository link, licence;
-- files: only the expected ones (no source maps, tests or sources), a non-empty
+- files: only the expected ones (no source maps, tests or sources; the package does not ship
+  the compiled code's `.js.map` files), a non-empty
   `THIRD_PARTY_NOTICES.md` (any content), and exactly one sidecar, an executable binary for the
   package's target.
 
@@ -98,12 +105,18 @@ gh run watch "$(gh run list --workflow release.yml --event workflow_dispatch --l
 To run it again on a newer `main`, delete the tag first (it is not a version, so moving it is
 safe): `git push origin :refs/tags/release/dry-run && git tag -d release/dry-run`, then repeat.
 
+`dry-run-marketplace` and `dry-run-open-vsx` run in the `marketplace` environment, so they
+wait for the owner's approval before they start. Approve them on the run's page in Actions
+(**Review deployments**); `gh run view` shows the run and its link.
+
 What the jobs mean:
 
 - **dry-run-guard** fails if `dry_run` is not `true` or the ref is not a `release/` tag.
 - **dry-run-marketplace** signs in to Entra ID through OIDC (`azure/login`) and prints a notice
   with the Entra app's **Marketplace member id**. Then `vsce verify-pat browsitory
-  --azure-credential` checks that the app has a role on publisher `browsitory`. If it fails with
+  --azure-credential` checks that the sign-in works and that the app has some role on publisher
+  `browsitory`. Any role passes, even Reader, so also check the publisher's **Members** page:
+  publishing needs **Contributor** (or higher). If it fails with
   a 403 (or "verification has failed"), add the printed id to the publisher as
   **Contributor** at <https://marketplace.visualstudio.com/manage/publishers/browsitory>, then
   re-run the job. A failure in `azure/login` means the federated credential or the
@@ -111,5 +124,7 @@ What the jobs mean:
 - **dry-run-open-vsx** runs `ovsx verify-pat browsitory` with `OVSX_PAT`. It fails if the token
   is invalid or cannot publish to the namespace.
 
-All three green means the first real release can publish to both registries. Delete the tag
+All three green means both sign-ins work, the Entra app holds some role on the Marketplace
+publisher, and the Open VSX token can publish to its namespace. It does not prove the
+Marketplace role is Contributor; check that on the publisher's Members page. Delete the tag
 afterwards if you like; it is not needed for releases.

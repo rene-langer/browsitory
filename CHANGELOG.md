@@ -12,8 +12,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   target, pre-release flag, icon, repository link, the file list, and that the bundled sidecar
   is an executable for the right platform (#271). Pull requests also install the linux-x64
   package into a real VSCode and check that it activates and its sidecar opens a repository.
-- Fixed: the extension package no longer ships the compiled code's source maps
-  (`dist/*.js.map`); the new check found them.
+- Changed: the extension package no longer ships source maps. The compiled code's
+  `dist/*.js.map` files are left out on purpose; the new check found them.
 - Added: a manual dry run of the release workflow. It checks the Visual Studio Marketplace and
   Open VSX credentials and prints the Entra app's Marketplace member id, without building or
   publishing anything. See `docs/RELEASING.md`.

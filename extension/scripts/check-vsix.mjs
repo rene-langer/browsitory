@@ -42,6 +42,7 @@ const REQUIRED_NON_EMPTY = [
   "extension/package.json",
   "extension/dist/extension.js",
   "extension/webview/assets/vscode-main.js",
+  "extension/webview/assets/vscode-main.css",
   "extension/icon.png",
   "extension/THIRD_PARTY_NOTICES.md",
 ];

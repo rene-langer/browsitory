@@ -60,14 +60,52 @@ async function main(): Promise<void> {
   const hostDir = path.join(root, "host");
   const repoPath = path.join(root, "repo");
 
-  // Keeps the developer's git config, gpg agent and Browsitory config out of the test. The
-  // same variables reach VSCode, the extension host and the sidecar it spawns.
+  let passed = false;
+  try {
+    await smokeTest({ vsixPath, root, extensionsDir, userDataDir, configDir, hostDir, repoPath });
+    passed = true;
+  } finally {
+    // On CI a failed run keeps its temp root (logs, VSCode user data) for debugging; the runner
+    // is thrown away afterwards. Everywhere else it is always removed.
+    if (passed || !process.env["CI"]) fs.rmSync(root, { recursive: true, force: true });
+    else console.error(`kept ${root} for debugging`);
+  }
+  console.log("VSIX smoke test passed");
+}
+
+interface SmokePaths {
+  vsixPath: string;
+  root: string;
+  extensionsDir: string;
+  userDataDir: string;
+  configDir: string;
+  hostDir: string;
+  repoPath: string;
+}
+
+async function smokeTest({
+  vsixPath,
+  root,
+  extensionsDir,
+  userDataDir,
+  configDir,
+  hostDir,
+  repoPath,
+}: SmokePaths): Promise<void> {
+  // Keeps the developer's home, git config, gpg agent and Browsitory config out of the test,
+  // like crates/test-support does for the Rust tests. The same variables reach the VSCode CLI,
+  // VSCode, the extension host and the sidecar it spawns (whose libgit2 reads $HOME). The CI
+  // job runs on Linux; on Windows, USERPROFILE/APPDATA would be the matching variables.
+  const home = path.join(root, "home");
   const isolatedEnv = {
+    HOME: home,
+    XDG_CONFIG_HOME: path.join(home, ".config"),
     GIT_CONFIG_GLOBAL: path.join(root, "gitconfig"),
     GIT_CONFIG_NOSYSTEM: "1",
     GNUPGHOME: path.join(root, "gnupg"),
     BROWSITORY_CONFIG_DIR: configDir,
   };
+  fs.mkdirSync(isolatedEnv.XDG_CONFIG_HOME, { recursive: true });
   fs.writeFileSync(isolatedEnv.GIT_CONFIG_GLOBAL, "");
   fs.mkdirSync(isolatedEnv.GNUPGHOME, { mode: 0o700 });
   createRepository(repoPath, { ...process.env, ...isolatedEnv });
@@ -100,6 +138,7 @@ async function main(): Promise<void> {
   const runCli = (...args: string[]) =>
     execFileSync(cli, [...profileArgs, ...args], {
       encoding: "utf8",
+      env: { ...process.env, ...isolatedEnv },
       shell: process.platform === "win32",
     });
 
@@ -134,9 +173,6 @@ async function main(): Promise<void> {
       BROWSITORY_VSIX_SMOKE_COMMIT: COMMIT_MESSAGE,
     },
   });
-
-  fs.rmSync(root, { recursive: true, force: true });
-  console.log("VSIX smoke test passed");
 }
 
 main().catch((error) => {

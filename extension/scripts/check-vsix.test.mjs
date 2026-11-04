@@ -225,6 +225,11 @@ test("reports a wrong version, target, identity or pre-release flag", () => {
   assert.match(renamedProblems, /package\.json repository/);
 });
 
+test("reports a missing webview stylesheet", () => {
+  const files = packageFiles().filter((file) => file.name !== "extension/webview/assets/vscode-main.css");
+  assert.match(check(files).join("\n"), /missing extension\/webview\/assets\/vscode-main\.css/);
+});
+
 test("reports a missing icon file", () => {
   const files = packageFiles().filter((file) => file.name !== "extension/icon.png");
   assert.match(check(files).join("\n"), /missing extension\/icon\.png/);

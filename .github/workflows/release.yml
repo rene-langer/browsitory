@@ -297,8 +297,8 @@ jobs:
           id="$(az rest -u https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
             --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id -o tsv)"
           echo "::notice::Marketplace member id of the Entra app: $id. If it isn't a member yet, add this id to publisher browsitory as Contributor, then re-run this job."
-      # Passes once the Entra app has any role on publisher `browsitory`; publishing needs
-      # Contributor or higher.
+      # Passes once the Entra app has any role on publisher `browsitory`, even Reader;
+      # publishing needs Contributor or higher.
       - name: Check the Entra sign-in reaches the Marketplace
         if: env.HAS_AZURE == 'true'
         run: pnpm --dir extension exec vsce verify-pat browsitory --azure-credential
@@ -431,7 +431,8 @@ jobs:
           id="$(az rest -u https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
             --resource 499b84ac-1321-427f-aa17-267ca6975798 --query id -o tsv)"
           echo "::notice::Marketplace member id of the Entra app: $id. Add it to publisher browsitory as Contributor if it isn't a member yet."
-      # Fails with a 403 until the Entra app has a role on publisher `browsitory`.
+      # Fails with a 403 until the Entra app has a role on publisher `browsitory`. Any role
+      # passes, even Reader; publishing needs Contributor (see the publisher's Members page).
       - name: Check the Entra app can reach publisher browsitory
         run: pnpm --dir extension exec vsce verify-pat browsitory --azure-credential
 
