@@ -80,9 +80,6 @@ pub enum StashError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
-    /// Windows: a checkout stopped at a file another program holds open (#303).
-    #[error(transparent)]
-    HeldOpen(#[from] crate::HeldOpen),
 }
 
 /// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
@@ -1009,11 +1006,7 @@ pub fn apply_stash(
             (ErrorCode::NotFound, ErrorClass::Odb) if error.message().contains("null OID") => {
                 StashError::SymlinkReplacedByDirectory
             }
-            // A file another program holds open: say so, not libgit2's raw error (#303).
-            _ => crate::worktree_guard::held_open::<StashError>(
-                repo.workdir(),
-                crate::HeldDuring::StashApply,
-            )(error),
+            _ => StashError::Git(error),
         })?;
     let mut files = Vec::new();
     let repo_index = repo.index()?;

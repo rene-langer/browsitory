@@ -1116,8 +1116,6 @@ pub enum HeldDuring {
     Switch,
     /// A hard reset.
     Reset,
-    /// Applying or popping a stash.
-    StashApply,
     /// A fast-forward merge.
     FastForward,
     /// A rebase abort putting the original branch back.
@@ -1137,10 +1135,6 @@ impl HeldDuring {
             }
             HeldDuring::Reset => {
                 "Some files were already reset. Close it, then try again to finish."
-            }
-            HeldDuring::StashApply => {
-                "Some of the stash's changes were already applied. Close it, then try again to \
-                 finish."
             }
             HeldDuring::FastForward | HeldDuring::SubmoduleUpdate => {
                 "Some files were already updated. Close it, then try again to finish."
@@ -1712,11 +1706,6 @@ mod tests {
             message(HeldDuring::Reset),
             "'f.txt' is open in another program. Some files were already reset. Close it, then \
              try again to finish."
-        );
-        assert_eq!(
-            message(HeldDuring::StashApply),
-            "'f.txt' is open in another program. Some of the stash's changes were already \
-             applied. Close it, then try again to finish."
         );
         for during in [HeldDuring::FastForward, HeldDuring::SubmoduleUpdate] {
             assert_eq!(

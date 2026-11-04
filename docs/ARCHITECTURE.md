@@ -1154,13 +1154,14 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   for any error type with `From<HeldOpen>`) report `HeldOpen { path, during }`, whose message
   says the files before it may already be written and how to finish: "'f.txt' is open in
   another program. Some files were already switched. Close it, then try again to finish." It
-  covers branch switch and commit checkout, hard reset, stash apply and pop, merge
-  fast-forward, rebase abort ("… put back. Close it, then abort again to finish."), clone
-  ("Close it, then try again.": the clone's folder is removed, kind `FileInUse`) and submodule
-  update. Each of these finishes when tried again, since libgit2's safe checkout accepts a
-  file already at its target. Merge abort, cherry-pick and revert, rebase start and pull
-  fast-forward still show libgit2's error: their retry refuses or skips the files already
-  written (#321).
+  covers branch switch and commit checkout, hard reset, merge fast-forward, rebase abort
+  ("… put back. Close it, then abort again to finish."), clone ("Close it, then try again.":
+  the clone's folder is removed, kind `FileInUse`) and submodule update. Each of these finishes when tried again: a forced checkout rewrites everything, and
+  a safe one against a tree accepts a file already at its target. Stash apply and pop, merge
+  abort, cherry-pick and revert, rebase start and pull fast-forward still show libgit2's
+  error: their retry refuses or skips the files already written (#321). Stash apply's
+  checkout compares with the index, which it doesn't update, so a written file whose size
+  changed counts as a local change (`WouldOverwrite`).
 - `replace_beneath` (undo/redo restores) goes through the same temporary file + rename (#251):
   both walkers share `swap_in` with `write_beneath` (Unix `swap_in_file` / `swap_in`: create,
   fill, `sync_all`, `renameat`, `unlinkat` of the temporary entry on any error, best-effort
