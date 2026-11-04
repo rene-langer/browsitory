@@ -256,12 +256,14 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   `git stash pop` fails on it too. `apply_stash` refuses first with
   `StashError::UntrackedBelowTrackedFile` when an untracked-tree file has a proper prefix that is
   a stage-0 index path; nothing is written and the stash is kept. libgit2's merge compares exact
-  case; where `worktree_guard::folds_case` holds (`core.ignorecase`, or always on macOS and
-  Windows, like the case-collision walker) the check folds case (`fold_name`), so `d/x` is
-  refused over the indexed file `D` too (#234). A wrong `core.ignorecase = false` there still
-  refuses: the safe direction. On a case-insensitive drive `d` is `D`, and `git
-  stash pop` fails there as well; with `core.ignorecase` on a case-sensitive drive git pops it.
-  This also covers a file `d` committed after the stash was made. Once the deletion of `d` is
+  case. Where `worktree_guard::folds_case` holds (the repository sets `core.ignorecase`, or
+  always on macOS and Windows, like the case-collision walker), the check folds case
+  (`fold_name`, whole path components only), so `d/x` is refused over the indexed file `D` too
+  (#234). On a case-insensitive drive `d` is `D`, and `git stash pop` fails there as well. On a
+  case-sensitive drive with `core.ignorecase` set, git pops it; Browsitory refuses on purpose,
+  since the setting may be right (a Linux casefold folder or a vfat mount). A wrong
+  `core.ignorecase = false` on macOS or Windows still refuses. Both are the safe direction. When
+  two index paths fold together, the first in index order is reported. This also covers a file `d` committed after the stash was made. Once the deletion of `d` is
   committed, the stash applies.
 - libgit2's stash apply fails with "odb: cannot read object: null OID cannot exist" for a stashed
   file whose directory is a symlink in HEAD; `apply_stash` maps it to

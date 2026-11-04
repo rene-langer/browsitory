@@ -1920,8 +1920,9 @@ fn a_case_only_variant_of_a_tracked_file_does_not_block_a_stash_when_ignorecase_
 #[test]
 fn git_pops_a_case_only_variant_under_ignorecase_on_a_case_sensitive_drive() {
     // git with `core.ignorecase` on a case-sensitive drive: nothing is in the way, so the pop
-    // succeeds. On a case-insensitive drive it can't (see the next test); only there does the
-    // refusal above matter.
+    // succeeds. On a case-insensitive drive it can't (see the next test). Browsitory refuses
+    // whenever the repository says names fold, on purpose: a Linux casefold folder or a vfat
+    // mount folds names too, and refusing is the safe direction.
     let (twin, _twin_repo) = file_replaced_by_case_variant_folder(true);
     assert!(git_stash_push(twin.path(), true));
     assert_eq!(top_level(twin.path()), ["D"]);
@@ -1930,6 +1931,101 @@ fn git_pops_a_case_only_variant_under_ignorecase_on_a_case_sensitive_drive() {
 
     assert_eq!(top_level(twin.path()), ["d"]);
     assert_eq!(read(twin.path(), "d/x"), "x\n");
+}
+
+/// A stash with the untracked files `untracked` (base: HEAD with `a`), with `core.ignorecase`
+/// on; then `committed` are committed as files, so the index has them when the stash is applied.
+fn stash_untracked_then_commit(
+    untracked: &[&str],
+    committed: &[&str],
+) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, mut repo) = init_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    write_file(dir.path(), "a", "a\n");
+    commit_all(&repo, "base");
+    for path in untracked {
+        write_file(dir.path(), path, "untracked\n");
+    }
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    for path in committed {
+        write_file(dir.path(), path, "committed\n");
+    }
+    commit_all(&repo, "later");
+    (dir, repo)
+}
+
+#[test]
+fn a_folded_name_only_blocks_at_a_whole_path_component() {
+    // `Dx` and `D2` merely start like `d`; `dx` merely starts like `D`. None is in the way.
+    for (untracked, committed) in [(&["d/x"][..], &["Dx", "D2"][..]), (&["dx/y"], &["D"])] {
+        let (dir, mut repo) = stash_untracked_then_commit(untracked, committed);
+
+        assert_eq!(
+            git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap(),
+            StashApplyOutcome::Applied,
+            "{untracked:?} over {committed:?}"
+        );
+        assert_eq!(read(dir.path(), untracked[0]), "untracked\n");
+    }
+}
+
+#[test]
+fn a_folded_tracked_file_blocks_files_at_any_depth_below_it() {
+    for (committed, file) in [("D/E", "D/E"), ("D", "D")] {
+        let (dir, mut repo) = stash_untracked_then_commit(&["d/e/x"], &[committed]);
+
+        let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                StashError::UntrackedBelowTrackedFile { ref untracked, file: ref blocking }
+                    if untracked == "d/e/x" && blocking == file
+            ),
+            "{error:?}"
+        );
+        assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+        assert_eq!(read(dir.path(), committed), "committed\n");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn of_two_index_files_that_fold_together_the_first_in_index_order_is_reported() {
+    // Only a case-sensitive drive holds both `D` and `d`; the index has `D` first. (libgit2's
+    // `add_all` keeps one of them while `core.ignorecase` is on, so commit them with it off,
+    // through a fresh repository: an open one keeps its index's case mode.)
+    let (dir, repo) = stash_untracked_then_commit(&["d/x"], &[]);
+    let set_ignore_case = |on| {
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", on)
+            .unwrap()
+    };
+    set_ignore_case(false);
+    write_file(dir.path(), "D", "committed\n");
+    write_file(dir.path(), "d", "committed\n");
+    commit_all(&git2::Repository::open(dir.path()).unwrap(), "both");
+    set_ignore_case(true);
+    drop(repo);
+    let mut repo = git2::Repository::open(dir.path()).unwrap();
+    let paths: Vec<Vec<u8>> = repo.index().unwrap().iter().map(|e| e.path).collect();
+    // With `core.ignorecase` the index iterates case-insensitively.
+    assert_eq!(paths, [b"a".to_vec(), b"D".to_vec(), b"d".to_vec()]);
+
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            StashError::UntrackedBelowTrackedFile { ref untracked, ref file }
+                if untracked == "d/x" && file == "D"
+        ),
+        "{error:?}"
+    );
 }
 
 #[cfg(any(target_os = "macos", windows))]
