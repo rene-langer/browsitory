@@ -1,6 +1,6 @@
 # Documentation screenshots
 
-This folder makes the screenshots in `docs/assets/`. It builds a fixed demo repository and
+This folder makes the screenshots in `docs/guide/assets/`. It builds a fixed demo repository and
 drives the desktop app with the E2E harness (tauri-driver and WebdriverIO), so the pictures can
 be made again after the UI changes.
 
@@ -32,7 +32,7 @@ Then look at every changed image before you commit it.
   webview data already live in temp folders in the E2E harness. Nothing reads or writes your
   own settings, keys or Browsitory data.
 - `capture.docs.ts` opens the demo from the repository picker, sets a 1280×800 window and the
-  light theme, and saves each screen to `docs/assets/<name>.png`. The last shot uses the dark
+  light theme, and saves each screen to `docs/guide/assets/<name>.png`. The last shot uses the dark
   theme.
 
 ## Shots

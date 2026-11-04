@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { expandSidebarSection } from "../support/sidebar";
 import { DEMO_REPO_PATH, startConflict } from "./demoRepo";
 
-// Captures the documentation screenshots into docs/assets/ (see ./README.md). Run it with
+// Captures the documentation screenshots into docs/guide/assets/ (see ./README.md). Run it with
 // `pnpm screenshots`, never as part of the E2E suite: it asserts nothing beyond "the screen it
 // shows has loaded".
 //
@@ -13,7 +13,7 @@ import { DEMO_REPO_PATH, startConflict } from "./demoRepo";
 // rest of the E2E suite.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ASSETS = path.resolve(__dirname, "../../docs/assets");
+const ASSETS = path.resolve(__dirname, "../../docs/guide/assets");
 const WINDOW = { width: 1280, height: 800 };
 
 async function click(selector: string): Promise<void> {

@@ -1,0 +1,97 @@
+# The user guide site (https://rene-langer.github.io/browsitory/), built from docs/guide/.
+# Build-only tools, pinned in docs/requirements.txt. Build locally:
+#   python3 -m venv .venv && .venv/bin/pip install --require-hashes -r docs/requirements.txt
+#   .venv/bin/mkdocs build --strict      # or: .venv/bin/mkdocs serve
+# CI: .github/workflows/docs.yml.
+site_name: Browsitory user guide
+site_url: https://rene-langer.github.io/browsitory/
+site_description: How to use Browsitory, a Git client for the desktop and VSCode.
+repo_url: https://github.com/rene-langer/browsitory
+repo_name: rene-langer/browsitory
+edit_uri: edit/main/docs/guide/
+copyright: Browsitory is MIT-licensed.
+
+docs_dir: docs/guide
+site_dir: site
+# Any warning (a broken link, a missing page, a page not in the nav) fails the build.
+strict: true
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: warn
+  links:
+    not_found: warn
+    absolute_links: warn
+    unrecognized_links: warn
+    anchors: warn
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.footer
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark theme
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep orange
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light theme
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: README.md
+  - Get started:
+      - install.md
+      - opening-repositories.md
+      - main-window.md
+  - Repositories:
+      - tabs.md
+      - workspaces.md
+  - Everyday work:
+      - staging-and-committing.md
+      - conflicts.md
+      - history.md
+      - file-history.md
+      - search.md
+      - compare.md
+      - undo-redo.md
+  - Branches and sharing:
+      - branches-and-remotes.md
+      - pull-requests.md
+      - tags.md
+      - stashes.md
+  - Changing history:
+      - rebase.md
+      - rewriting-commits.md
+      - reflog.md
+  - More:
+      - worktrees-and-submodules.md
+      - signing.md
+      - hooks.md
+      - external-tools.md
+      - command-palette.md
+      - troubleshooting.md

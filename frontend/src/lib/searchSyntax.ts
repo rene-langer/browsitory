@@ -1,4 +1,4 @@
-/** Rows of the commit search syntax help — also the source of the user guide's table. */
+/** Rows of the commit search syntax help. docs/guide/search.md has the same table; keep them in step. */
 export const SEARCH_SYNTAX: { syntax: string; meaning: string }[] = [
   { syntax: "word", meaning: "Message contains it, or SHA starts with it" },
   { syntax: '"two words"', meaning: "Exact phrase" },

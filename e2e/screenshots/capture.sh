@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuilds the documentation screenshots in docs/assets/. Linux only (tauri-driver needs
+# Rebuilds the documentation screenshots in docs/guide/assets/. Linux only (tauri-driver needs
 # WebKitWebDriver). See e2e/screenshots/README.md.
 #
 #   e2e/screenshots/capture.sh              # build, then capture
@@ -24,8 +24,8 @@ screen=(-s "-screen 0 1600x1000x24")
 
 # Lossless size reduction, if optipng is installed.
 if command -v optipng >/dev/null; then
-  optipng -quiet -o2 -strip all docs/assets/*.png
+  optipng -quiet -o2 -strip all docs/guide/assets/*.png
 else
   echo "optipng not found: the PNGs are not optimised" >&2
 fi
-ls -l docs/assets/*.png
+ls -l docs/guide/assets/*.png
