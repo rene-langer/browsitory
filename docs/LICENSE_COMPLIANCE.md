@@ -330,7 +330,7 @@ notices of everything Browsitory ships (#301, #202). It is generated; never edit
   nothing. `renovate.json`'s `gitIgnoredAuthors` lists the bot, so Renovate still rebases the
   branch; a rebase drops the bot's commit, and the workflow regenerates once more on
   Renovate's new commit. A dispatched run has no labels, so its `changelog` job ignores
-  `skip-changelog` (not needed: lockfiles, manifests and this file need no CHANGELOG.md
+  `skip-changelog` (not needed: lockfiles, manifests and this file need no changelog
   entry). If the workflow fails (for example on a `native-libraries.md` version mismatch,
   below), fix and regenerate by hand.
 - **Regenerate** by hand after any other dependency change, then commit the result:
