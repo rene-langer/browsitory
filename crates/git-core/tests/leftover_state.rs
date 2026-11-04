@@ -5,7 +5,9 @@
 //! in progress is never cleared: the commit finishes it and amend is refused, as in git.
 mod common;
 
-use git_core::commit::{amend_head, commit, CommitError};
+#[cfg(unix)]
+use git_core::commit::commit;
+use git_core::commit::{amend_head, CommitError};
 use git_core::hooks::HookOptions;
 use git_core::pick::{cherry_pick, revert, PickOutcome};
 use git_core::repo::{head_info, OperationKind};
