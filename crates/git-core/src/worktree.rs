@@ -17,6 +17,12 @@ pub enum WorktreeError {
     Locked,
     #[error("git operation failed")]
     Git,
+    /// A relative destination in a repository without a working folder (#231).
+    #[error(
+        "Enter the worktree's full path: this repository has no working folder to start a \
+         relative path from."
+    )]
+    RelativePath,
     #[error("Can't create the folder '{}': {reason}", path.display())]
     CreateFolder { path: PathBuf, reason: String },
     /// libgit2 failed to add the worktree; what it had written was removed again (#245).
@@ -123,6 +129,16 @@ pub fn create_worktree_with(
     start_point: Option<&str>,
     probe: impl FnOnce(&Path) -> std::io::Result<bool>,
 ) -> Result<(), WorktreeError> {
+    // A relative destination starts from the open worktree's top folder, as with
+    // `git worktree add` run there, never from the app's working directory (#231).
+    let resolved;
+    let path = if path.is_absolute() {
+        path
+    } else {
+        let workdir = repo.workdir().ok_or(WorktreeError::RelativePath)?;
+        resolved = workdir.join(path);
+        resolved.as_path()
+    };
     crate::repo::check_branch_not_rebased(repo, branch)?;
     if let Some(held) = crate::repo::branch_held(
         repo,
@@ -422,34 +438,78 @@ fn single_component(name: &str) -> Option<&str> {
     }
 }
 
+/// Removes the linked worktree at `path`: its folder and its entry. Like `git worktree remove`,
+/// a worktree whose folder is gone loses just its entry, and a locked one is refused either way.
+/// Other worktrees' state (a missing folder, a broken entry) never stops the removal (#252).
 pub fn remove_worktree(repo: &Repository, path: &Path) -> Result<(), WorktreeError> {
-    let target_path = canonical_path(path)?;
+    let target_path = comparable_path(path);
     if target_path == main_worktree_path(repo)? {
         return Err(WorktreeError::MainWorktree);
     }
 
     for name in repo.worktrees()?.iter().flatten().flatten() {
-        let worktree = repo.find_worktree(name)?;
-        if canonical_path(worktree.path())? != target_path {
+        // An entry that can't be read can't be the one asked for.
+        let Ok(worktree) = repo.find_worktree(name) else {
+            continue;
+        };
+        if comparable_path(worktree.path()) != target_path {
             continue;
         }
         if matches!(worktree.is_locked()?, WorktreeLockStatus::Locked(_)) {
             return Err(WorktreeError::Locked);
         }
-        let linked_repo = Repository::open(&target_path)?;
-        if !crate::status::status(&linked_repo)
-            .map_err(|_| WorktreeError::Git)?
-            .is_empty()
-        {
-            return Err(WorktreeError::Dirty);
+        let folder_present = match std::fs::symlink_metadata(&target_path) {
+            Ok(_) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(_) => return Err(WorktreeError::Git),
+        };
+        if folder_present {
+            let linked_repo = Repository::open(&target_path)?;
+            if !crate::status::status(&linked_repo)
+                .map_err(|_| WorktreeError::Git)?
+                .is_empty()
+            {
+                return Err(WorktreeError::Dirty);
+            }
         }
         let mut options = git2::WorktreePruneOptions::new();
-        options.valid(true).working_tree(true);
+        options.valid(true).working_tree(folder_present);
         worktree.prune(Some(&mut options))?;
         return Ok(());
     }
 
     Err(WorktreeError::Git)
+}
+
+/// `path` spelled so that two spellings of one folder compare equal, even once it is gone: the
+/// nearest existing ancestor resolved (links, `.`, `..`), the missing rest appended as written
+/// without `.` and `..`.
+fn comparable_path(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    let mut rest = Vec::new();
+    let mut base = path;
+    loop {
+        if let Ok(canonical) = base.canonicalize() {
+            let mut resolved = canonical;
+            for component in rest.into_iter().rev() {
+                match component {
+                    std::path::Component::CurDir => {}
+                    std::path::Component::ParentDir => {
+                        resolved.pop();
+                    }
+                    other => resolved.push(other),
+                }
+            }
+            return resolved;
+        }
+        let (Some(parent), Some(last)) = (base.parent(), base.components().next_back()) else {
+            return path.to_path_buf();
+        };
+        rest.push(last);
+        base = parent;
+    }
 }
 
 pub fn prune_worktrees(repo: &Repository) -> Result<(), WorktreeError> {

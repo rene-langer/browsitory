@@ -4807,6 +4807,28 @@ mod tests {
         assert!(!linked.exists());
     }
 
+    /// #252: a worktree whose folder is gone is removed by name, and doesn't stop another one
+    /// from being removed.
+    #[test]
+    fn removes_worktrees_by_name_when_one_folder_is_missing() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        let kept = dir.path().join("kept");
+        let gone = dir.path().join("gone");
+        git_core::worktree::create_worktree(&repo, "kept", &kept, "kept", Some("HEAD")).unwrap();
+        git_core::worktree::create_worktree(&repo, "gone", &gone, "gone", Some("HEAD")).unwrap();
+        std::fs::remove_dir_all(&gone).unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        handle.remove_worktree("kept".into()).unwrap();
+        assert!(!kept.exists());
+        handle.remove_worktree("gone".into()).unwrap();
+
+        assert_eq!(handle.list_worktrees().unwrap().len(), 1);
+    }
+
     #[test]
     fn create_then_switch_branch_round_trips_through_the_worker() {
         let (dir, repo) = init_repo();

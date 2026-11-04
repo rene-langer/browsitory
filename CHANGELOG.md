@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Worktree paths
+
+- Fixed: when the folder of one worktree had been deleted, removing any worktree failed with
+  "git operation failed". Other worktrees no longer get in the way. Removing a worktree whose
+  folder is gone now works too, as `git worktree remove` does: it drops the worktree from the
+  list and frees its branch. A locked worktree is still kept (#252).
+- Fixed: a relative worktree path (for example `../feature`) was taken from the app's own
+  working folder, which you can't see, and could create folders there. It now starts from the
+  top folder of the open repository, as `git worktree add` run there does (#231).
+
 ### Operations that stop part-way can be tried again
 
 - Fixed: when a cherry-pick, revert, rebase start, pull or stash apply (or pop) stopped
