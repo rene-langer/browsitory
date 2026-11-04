@@ -50,6 +50,10 @@ jobs:
             echo "error: tag '$GITHUB_REF_NAME' is not release/MAJOR.MINOR.PATCH" >&2
             exit 1
           fi
+      - name: No unfolded changelog fragments
+        # Every VSIX ships CHANGELOG.md, so all changelog.d/ fragments must be folded
+        # into it before tagging (scripts/fold-changelog.py; see docs/RELEASING.md).
+        run: python3 scripts/fold-changelog.py --check
       - name: Install Tauri system dependencies (Linux)
         run: |
           sudo apt-get update
