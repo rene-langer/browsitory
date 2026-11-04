@@ -1113,8 +1113,9 @@ fn refuse_untracked_file_over_folder(repo: &Repository, index: usize) -> Result<
 /// it checks out as `d~Updated upstream` while reporting success, and a pop would drop the
 /// stash (#206). Typically the stash itself recorded the swap (the untracked `d/x` with the
 /// file `d` deleted); the deletion is applied only after the untracked files. libgit2's merge
-/// compares exact case; with `core.ignorecase` paths compare as the walker's `fold_name` folds
-/// them, so `d/x` is refused over the indexed file `D` too (on such a drive `d` is `D`; #234).
+/// compares exact case; where case folding matters (`folds_case`: `core.ignorecase`, or always
+/// on macOS and Windows, like the case-collision walker) paths compare as `fold_name` folds them,
+/// so `d/x` is refused over the indexed file `D` too (on such a drive `d` is `D`; #234).
 fn refuse_untracked_below_tracked_file(repo: &Repository, index: usize) -> Result<(), StashError> {
     let Some(id) = repo
         .reflog("refs/stash")
@@ -1126,7 +1127,7 @@ fn refuse_untracked_below_tracked_file(repo: &Repository, index: usize) -> Resul
     let Ok(untracked) = repo.find_commit(id)?.parent(2) else {
         return Ok(());
     };
-    let ignore_case = repo.config()?.get_bool("core.ignorecase").unwrap_or(false);
+    let ignore_case = crate::worktree_guard::folds_case(repo);
     let fold = |path: &[u8]| {
         let folded = if ignore_case {
             crate::worktree_guard::fold_name(path)
