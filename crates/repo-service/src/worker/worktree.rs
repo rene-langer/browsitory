@@ -36,10 +36,14 @@ pub(super) fn remove(
     name: String,
     reply: Sender<Result<(), String>>,
 ) {
-    let current_workdir = repo
-        .workdir()
-        .and_then(|path| path.canonicalize().ok())
-        .ok_or_else(|| "cannot determine the open worktree".to_string());
+    // A bare repository has no open worktree to protect.
+    let current_workdir = match repo.workdir() {
+        None => Ok(None),
+        Some(path) => path
+            .canonicalize()
+            .map(Some)
+            .map_err(|_| "cannot determine the open worktree".to_string()),
+    };
     let mut result = current_workdir.and_then(|current_workdir| {
         git_core::worktree::list_worktrees(repo)
             .and_then(|worktrees| {
@@ -50,10 +54,10 @@ pub(super) fn remove(
             })
             .map_err(|error| error.to_string())
             .and_then(|worktree| {
-                if worktree.path == current_workdir {
+                if current_workdir.as_ref() == Some(&worktree.path) {
                     return Err("cannot remove the currently open worktree".to_string());
                 }
-                git_core::worktree::remove_worktree(repo, &worktree.path)
+                git_core::worktree::remove_worktree_named(repo, &worktree.name, &worktree.path)
                     .map_err(|error| error.to_string())
             })
     });

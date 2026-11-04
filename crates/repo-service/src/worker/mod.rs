@@ -4807,6 +4807,91 @@ mod tests {
         assert!(!linked.exists());
     }
 
+    /// #252: a worktree whose folder is gone is removed by name, and doesn't stop another one
+    /// from being removed.
+    #[test]
+    fn removes_worktrees_by_name_when_one_folder_is_missing() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        let kept = dir.path().join("kept");
+        let gone = dir.path().join("gone");
+        git_core::worktree::create_worktree(&repo, "kept", &kept, "kept", Some("HEAD")).unwrap();
+        git_core::worktree::create_worktree(&repo, "gone", &gone, "gone", Some("HEAD")).unwrap();
+        std::fs::remove_dir_all(&gone).unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+
+        handle.remove_worktree("kept".into()).unwrap();
+        assert!(!kept.exists());
+        handle.remove_worktree("gone".into()).unwrap();
+
+        assert_eq!(handle.list_worktrees().unwrap().len(), 1);
+    }
+
+    /// Two entries can name one folder (an old one whose folder was deleted by hand, and a new
+    /// one made there): Remove acts on the entry with that name, never the other one.
+    #[test]
+    fn removes_the_named_entry_when_two_name_the_same_folder() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "file.txt", "v1");
+        commit_all(&repo, "initial commit");
+        let folder = dir.path().join("shared");
+        git_core::worktree::create_worktree(&repo, "a-old", &folder, "a-old", Some("HEAD"))
+            .unwrap();
+        std::fs::remove_dir_all(&folder).unwrap();
+        git_core::worktree::create_worktree(&repo, "b-new", &folder, "b-new", Some("HEAD"))
+            .unwrap();
+        let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+        let handle = worker.handle();
+        let names = |handle: &super::WorkerHandle| -> Vec<String> {
+            handle
+                .list_worktrees()
+                .unwrap()
+                .into_iter()
+                .map(|worktree| worktree.name)
+                .collect()
+        };
+        assert!(names(&handle).contains(&"b-new".to_string()));
+        assert!(names(&handle).contains(&"a-old".to_string()));
+
+        // The old entry's folder is the new worktree now: it is kept.
+        assert!(handle.remove_worktree("a-old".into()).is_err());
+        assert!(folder.join("file.txt").is_file());
+
+        handle.remove_worktree("b-new".into()).unwrap();
+        assert!(!folder.exists());
+        assert!(!names(&handle).contains(&"b-new".to_string()));
+        handle.remove_worktree("a-old".into()).unwrap();
+        assert_eq!(names(&handle), ["main"]);
+    }
+
+    /// A bare repository with linked worktrees: they are listed and removed by name.
+    #[test]
+    fn removes_a_worktree_of_a_bare_repository() {
+        let dir = TempDir::new().unwrap();
+        let bare = dir.path().join("bare.git");
+        let repo = Repository::init_bare(&bare).unwrap();
+        {
+            let signature = git2::Signature::now("Test User", "test@example.com").unwrap();
+            let tree = repo.treebuilder(None).unwrap().write().unwrap();
+            let tree = repo.find_tree(tree).unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+                .unwrap();
+        }
+        let linked = dir.path().join("linked");
+        git_core::worktree::create_worktree(&repo, "linked", &linked, "feature", Some("HEAD"))
+            .unwrap();
+        let worker = Worker::spawn(bare).unwrap();
+        let handle = worker.handle();
+        assert_eq!(handle.list_worktrees().unwrap().len(), 2);
+
+        handle.remove_worktree("linked".into()).unwrap();
+
+        assert!(!linked.exists());
+        assert_eq!(handle.list_worktrees().unwrap().len(), 1);
+    }
+
     #[test]
     fn create_then_switch_branch_round_trips_through_the_worker() {
         let (dir, repo) = init_repo();
