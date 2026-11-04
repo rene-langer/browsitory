@@ -47,7 +47,7 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
       {...overrides}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Pull Requests" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pull requests" }));
   return result;
 }
 
@@ -376,11 +376,11 @@ describe("PullRequestPanel", () => {
     );
   });
 
-  it("shows an icon and the total open pull-request count on the outer Pull Requests header", () => {
+  it("shows an icon and the total open pull-request count on the outer Pull requests header", () => {
     renderPanel({
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
     });
-    const header = screen.getByRole("button", { name: "Pull Requests" });
+    const header = screen.getByRole("button", { name: "Pull requests" });
     expect(header).toHaveTextContent("1");
     expect(header.querySelector("svg")).toBeInTheDocument();
   });
@@ -390,7 +390,7 @@ describe("PullRequestPanel", () => {
 
     const githubHeader = screen.getByRole("button", { name: /github: acme\/widget \(origin\)/i });
     const bitbucketHeader = screen.getByRole("button", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
-    const outerHeader = screen.getByRole("button", { name: "Pull Requests" });
+    const outerHeader = screen.getByRole("button", { name: "Pull requests" });
 
     // ArrowDown from the last repo card wraps around to the first, proving the nested
     // AccordionGroup (not some ambient/absent outer one) owns the wrapping.

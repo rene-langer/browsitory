@@ -72,12 +72,12 @@ export function WorkspaceEditor({
   };
 
   return (
-    <Panel title={existing === undefined ? "New Workspace" : "Edit Workspace"}>
+    <Panel title={existing === undefined ? "New workspace" : "Edit workspace"}>
       {error !== null && <InlineError message={error} onDismiss={() => setError(null)} />}
       {root === null ? (
         <div className={styles.actions}>
           <button type="button" onClick={handleChooseRoot}>
-            Choose Root Folder
+            Choose root folder
           </button>
           <button type="button" onClick={onCancel}>
             Cancel

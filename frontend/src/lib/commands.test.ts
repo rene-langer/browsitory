@@ -813,7 +813,7 @@ describe("buildCommands", () => {
           "Submodules",
           "Reflog",
           "Tags",
-          "Pull Requests",
+          "Pull requests",
         ]) {
           expect(ids).toContain(`go-to:${title}`);
         }
@@ -845,7 +845,7 @@ describe("buildCommands", () => {
     expect(goToCommands.map((c) => c.label).sort()).toEqual(
       [
         "Go to Branches",
-        "Go to Pull Requests",
+        "Go to Pull requests",
         "Go to Reflog",
         "Go to Stashes",
         "Go to Submodules",

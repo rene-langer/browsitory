@@ -15,7 +15,7 @@ describe("WorkspaceEditor", () => {
   describe("create mode", () => {
     it("shows a root-picker button before any root is chosen", () => {
       render(<WorkspaceEditor client={fakeClient()} onSave={vi.fn()} onCancel={vi.fn()} />);
-      expect(screen.getByText("Choose Root Folder")).toBeInTheDocument();
+      expect(screen.getByText("Choose root folder")).toBeInTheDocument();
       expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     });
 
@@ -28,7 +28,7 @@ describe("WorkspaceEditor", () => {
       render(<WorkspaceEditor client={client} onSave={vi.fn()} onCancel={vi.fn()} />);
       expect(scanReposInRoot).not.toHaveBeenCalled();
 
-      fireEvent.click(screen.getByText("Choose Root Folder"));
+      fireEvent.click(screen.getByText("Choose root folder"));
 
       await waitFor(() => expect(scanReposInRoot).toHaveBeenCalledWith("/projects/root"));
       await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
@@ -46,7 +46,7 @@ describe("WorkspaceEditor", () => {
       const onSave = vi.fn().mockResolvedValue(undefined);
       render(<WorkspaceEditor client={client} onSave={onSave} onCancel={vi.fn()} />);
 
-      fireEvent.click(screen.getByText("Choose Root Folder"));
+      fireEvent.click(screen.getByText("Choose root folder"));
       await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
 
       fireEvent.click(screen.getByLabelText("/projects/root/b"));
@@ -63,7 +63,7 @@ describe("WorkspaceEditor", () => {
       });
       render(<WorkspaceEditor client={client} onSave={vi.fn()} onCancel={vi.fn()} />);
 
-      fireEvent.click(screen.getByText("Choose Root Folder"));
+      fireEvent.click(screen.getByText("Choose root folder"));
       await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(1));
       fireEvent.click(screen.getByLabelText("/projects/root/a"));
 
@@ -74,10 +74,10 @@ describe("WorkspaceEditor", () => {
       const client = fakeClient({ pickRepoFolder: vi.fn().mockResolvedValue(null) });
       render(<WorkspaceEditor client={client} onSave={vi.fn()} onCancel={vi.fn()} />);
 
-      fireEvent.click(screen.getByText("Choose Root Folder"));
+      fireEvent.click(screen.getByText("Choose root folder"));
 
       await waitFor(() => expect(client.pickRepoFolder).toHaveBeenCalled());
-      expect(screen.getByText("Choose Root Folder")).toBeInTheDocument();
+      expect(screen.getByText("Choose root folder")).toBeInTheDocument();
     });
   });
 
@@ -135,7 +135,7 @@ describe("WorkspaceEditor", () => {
       expect(screen.getByLabelText("/projects/root/a")).toBeChecked();
       expect(screen.getByLabelText("/projects/root/c")).not.toBeChecked();
       expect(screen.getByLabelText("Workspace name")).toHaveValue("Services");
-      expect(screen.queryByText("Choose Root Folder")).not.toBeInTheDocument();
+      expect(screen.queryByText("Choose root folder")).not.toBeInTheDocument();
     });
 
     it("save calls onSave with the immutable existing root", async () => {

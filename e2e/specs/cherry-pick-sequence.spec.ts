@@ -63,7 +63,7 @@ describe("Browsitory cherry-pick sequence", () => {
     expect(git("log", "--format=%s", `${startTip}..HEAD`)).toBe("e2e: seq one");
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git", "browsitory", "sequence.json"))).toBe(true);
 
-    await jsClick("li*=Uncommitted Changes");
+    await jsClick("li*=Uncommitted changes");
     const conflicted = await $("span*=seq-shared.txt (Conflicted)");
     await conflicted.waitForExist({ timeout: 10000 });
     await conflicted.scrollIntoView({ block: "center" });

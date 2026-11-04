@@ -95,7 +95,7 @@ export function ReleaseNotesModal({
   const shown = entries.filter((entry) => entry.groups.length > 0);
   return (
     <Overlay onClose={onClose} ariaLabel="Release notes">
-      <Panel title="Release Notes" ariaLabel="Release notes">
+      <Panel title="Release notes" ariaLabel="Release notes">
         {shown.length === 0 ? (
           <p className={styles.empty}>No release notes yet.</p>
         ) : (

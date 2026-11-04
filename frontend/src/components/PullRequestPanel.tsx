@@ -319,7 +319,7 @@ export function PullRequestPanel({
 }) {
   if (forgeRepositories.length === 0) {
     return (
-      <AccordionSection title="Pull Requests" storageKey="sidebar-pull-requests" icon={GitPullRequest}>
+      <AccordionSection title="Pull requests" storageKey="sidebar-pull-requests" icon={GitPullRequest}>
         <p className={styles.empty}>
           No supported GitHub or Bitbucket remotes. Add one under Remotes to see its pull requests here.
         </p>
@@ -338,7 +338,7 @@ export function PullRequestPanel({
   return (
     <>
       <AccordionSection
-        title="Pull Requests"
+        title="Pull requests"
         storageKey="sidebar-pull-requests"
         icon={GitPullRequest}
         count={

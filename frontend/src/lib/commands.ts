@@ -55,7 +55,7 @@ const SIDEBAR_SECTIONS = [
   "Submodules",
   "Reflog",
   "Tags",
-  "Pull Requests",
+  "Pull requests",
 ] as const;
 
 function defaultPanelVisibility(): Record<SidebarPanelId, boolean> {
@@ -76,7 +76,7 @@ function sidebarSectionPanelId(title: (typeof SIDEBAR_SECTIONS)[number]): Sideba
       return "reflog";
     case "Tags":
       return "tags";
-    case "Pull Requests":
+    case "Pull requests":
       return "pullRequests";
     case "Branches":
       return null;
