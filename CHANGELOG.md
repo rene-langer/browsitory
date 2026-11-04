@@ -6,6 +6,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Worktree paths
+
+- Fixed: when the folder of one worktree had been deleted, removing any worktree failed with
+  "git operation failed". Other worktrees no longer get in the way. Removing a worktree whose
+  folder is gone now works too, as `git worktree remove` does: it drops the worktree from the
+  list and frees its branch. A locked worktree is still kept (#252).
+- Fixed: if a worktree's folder had been replaced, for example by another repository cloned to
+  the same place, Remove could delete that folder. Browsitory now deletes a folder only when it
+  still belongs to the worktree, as `git worktree remove` does. Otherwise it keeps the folder
+  and says so: "The folder '…' is no longer this worktree. Move it away or delete it, then
+  remove the worktree again." (#252)
+- Fixed: one worktree with a broken entry, or with a file where its folder's parent was, no
+  longer hides the whole worktree list. When two worktree entries point to the same folder,
+  both are listed, and Remove acts on the one you chose (#252).
+- Fixed: worktrees of a bare repository can now be listed and removed (#252).
+- Fixed: a relative worktree path (for example `../feature`) was taken from the app's own
+  working folder, which you can't see, and could create folders there. It now starts from the
+  top folder of the open repository, as `git worktree add` run there does. In a bare
+  repository, enter the full path (#231).
+- Changed: a worktree can no longer be created inside the repository's `.git` folder, where
+  git keeps its own data. git allows this, but nothing good comes of it. On Windows, a path
+  like `C:feature` or `\feature`, which depends on the app's current drive or folder, is
+  refused with a request for the full path (#231).
+
 ### Operations that stop part-way can be tried again
 
 - Fixed: when a cherry-pick, revert, rebase start, pull or stash apply (or pop) stopped

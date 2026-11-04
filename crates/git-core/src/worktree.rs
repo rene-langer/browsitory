@@ -17,6 +17,31 @@ pub enum WorktreeError {
     Locked,
     #[error("git operation failed")]
     Git,
+    /// A relative destination in a repository without a working folder (#231).
+    #[error(
+        "Enter the worktree's full path: this repository has no working folder to start a \
+         relative path from."
+    )]
+    RelativePath,
+    /// A Windows path tied to a drive or a root but not both (`C:feature`, `\feature`): it
+    /// would depend on the app's current drive or folder (#231).
+    #[error(
+        "Enter the worktree's full path, with the drive and the folders from its top (for \
+         example C:\\work\\feature)."
+    )]
+    PartlyAnchoredPath,
+    /// The destination is inside the repository's git folder (#231).
+    #[error("A worktree can't be inside the repository's .git folder. Choose another folder.")]
+    InsideGitFolder,
+    /// The folder at a worktree's place doesn't point back at the worktree's entry: it was
+    /// replaced (by another repository, another worktree or a plain folder), so it is never
+    /// deleted (#252).
+    #[error(
+        "The folder '{}' is no longer this worktree. Move it away or delete it, then remove \
+         the worktree again.",
+        path.display()
+    )]
+    NotThisWorktree { path: PathBuf },
     #[error("Can't create the folder '{}': {reason}", path.display())]
     CreateFolder { path: PathBuf, reason: String },
     /// libgit2 failed to add the worktree; what it had written was removed again (#245).
@@ -73,25 +98,85 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeInfo>, WorktreeEr
         is_prunable: false,
     }];
 
+    // One entry's state (a missing or unreadable folder, a broken entry) never fails the list
+    // (#252). Two entries can name one folder (an old one whose folder was deleted by hand and a
+    // newer one made there); both are listed, as `git worktree list` does.
     for name in repo.worktrees()?.iter().flatten().flatten() {
-        let worktree = repo.find_worktree(name)?;
-        let path = display_path(worktree.path())?;
-        if worktrees.iter().any(|existing| existing.path == path) {
+        let Ok(worktree) = repo.find_worktree(name) else {
+            continue;
+        };
+        let path = display_path(worktree.path());
+        if path == worktrees[0].path {
             continue;
         }
+        let head = if folder_points_back(repo, name, &path) {
+            Repository::open(&path)
+                .map(|worktree_repo| head_identity(&worktree_repo))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
         worktrees.push(WorktreeInfo {
             name: name.to_string(),
-            head: Repository::open(&path)
-                .map(|worktree_repo| head_identity(&worktree_repo))
-                .unwrap_or_default(),
+            head,
             path,
             is_main: false,
-            is_locked: matches!(worktree.is_locked()?, WorktreeLockStatus::Locked(_)),
-            is_prunable: worktree.is_prunable(None)?,
+            is_locked: matches!(worktree.is_locked(), Ok(WorktreeLockStatus::Locked(_))),
+            is_prunable: worktree.is_prunable(None).unwrap_or(false),
         });
     }
 
     Ok(worktrees)
+}
+
+/// How a destination path, as entered, is tied to the file system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Anchoring {
+    Absolute,
+    Relative,
+    /// Tied to a drive or a root but not both (Windows `C:feature`, `\feature`).
+    Partial,
+}
+
+fn anchoring(path: &Path) -> Anchoring {
+    if path.is_absolute() {
+        Anchoring::Absolute
+    } else if path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        )
+    }) {
+        Anchoring::Partial
+    } else {
+        Anchoring::Relative
+    }
+}
+
+/// The folder a new worktree goes to, given `path` as entered (#231). A relative path starts
+/// from the open worktree's top folder, as with `git worktree add` run there, never from the
+/// app's working directory. Refused: a relative path in a bare repository, a Windows path tied
+/// to a drive or a root but not both, and a folder inside the repository's git folder (which
+/// git allows, but where git keeps its own data).
+#[doc(hidden)]
+pub fn resolve_destination(repo: &Repository, path: &Path) -> Result<PathBuf, WorktreeError> {
+    let resolved = match anchoring(path) {
+        Anchoring::Absolute => path.to_path_buf(),
+        Anchoring::Partial => return Err(WorktreeError::PartlyAnchoredPath),
+        Anchoring::Relative => repo
+            .workdir()
+            .ok_or(WorktreeError::RelativePath)?
+            .join(path),
+    };
+    let destination = comparable_path(&resolved);
+    let inside_git_folder = [repo.path(), repo.commondir()]
+        .into_iter()
+        .filter_map(|git_dir| git_dir.canonicalize().ok())
+        .any(|git_dir| destination.starts_with(git_dir));
+    if inside_git_folder {
+        return Err(WorktreeError::InsideGitFolder);
+    }
+    Ok(resolved)
 }
 
 pub fn create_worktree(
@@ -123,6 +208,8 @@ pub fn create_worktree_with(
     start_point: Option<&str>,
     probe: impl FnOnce(&Path) -> std::io::Result<bool>,
 ) -> Result<(), WorktreeError> {
+    let resolved = resolve_destination(repo, path)?;
+    let path = resolved.as_path();
     crate::repo::check_branch_not_rebased(repo, branch)?;
     if let Some(held) = crate::repo::branch_held(
         repo,
@@ -265,7 +352,16 @@ fn destination_written_by(admin: &Path, path: &Path) -> bool {
     String::from_utf8_lossy(&bytes)
         .trim()
         .strip_prefix("gitdir:")
-        .is_some_and(|target| same_path(Path::new(target.trim()), admin))
+        // A relative `gitdir:` (`git worktree add --relative-paths`) starts from the folder.
+        .is_some_and(|target| same_path(&path.join(target.trim()), admin))
+}
+
+/// The folder `path` is the worktree of the entry `name`: its `.git` file points back at
+/// `<commondir>/worktrees/<name>`, as `git worktree remove` checks before deleting anything.
+fn folder_points_back(repo: &Repository, name: &str, path: &Path) -> bool {
+    single_component(name).is_some_and(|name| {
+        destination_written_by(&repo.commondir().join("worktrees").join(name), path)
+    })
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -422,34 +518,131 @@ fn single_component(name: &str) -> Option<&str> {
     }
 }
 
+/// Removes the linked worktree at `path`: its folder and its entry. Like `git worktree remove`,
+/// a worktree whose folder is gone loses just its entry, and a locked one is refused either way.
+/// Other worktrees' state (a missing folder, a broken entry) never stops the removal (#252).
+///
+/// When two entries name the folder, the one the folder points back at is taken; prefer
+/// [`remove_worktree_named`], which says which entry.
 pub fn remove_worktree(repo: &Repository, path: &Path) -> Result<(), WorktreeError> {
-    let target_path = canonical_path(path)?;
+    let target_path = comparable_path(path);
     if target_path == main_worktree_path(repo)? {
         return Err(WorktreeError::MainWorktree);
     }
 
+    let mut matching = Vec::new();
     for name in repo.worktrees()?.iter().flatten().flatten() {
-        let worktree = repo.find_worktree(name)?;
-        if canonical_path(worktree.path())? != target_path {
+        // An entry that can't be read can't be the one asked for.
+        let Ok(worktree) = repo.find_worktree(name) else {
             continue;
+        };
+        if comparable_path(worktree.path()) == target_path {
+            matching.push((name.to_string(), worktree));
         }
-        if matches!(worktree.is_locked()?, WorktreeLockStatus::Locked(_)) {
-            return Err(WorktreeError::Locked);
+    }
+    let chosen = matching
+        .iter()
+        .position(|(name, _)| folder_points_back(repo, name, path))
+        .unwrap_or(0);
+    if matching.is_empty() {
+        return Err(WorktreeError::Git);
+    }
+    let (name, worktree) = matching.swap_remove(chosen);
+    remove_entry(repo, &name, &worktree, path)
+}
+
+/// [`remove_worktree`] of the entry `name`, which must name the folder `path`.
+pub fn remove_worktree_named(
+    repo: &Repository,
+    name: &str,
+    path: &Path,
+) -> Result<(), WorktreeError> {
+    let target_path = comparable_path(path);
+    if target_path == main_worktree_path(repo)? {
+        return Err(WorktreeError::MainWorktree);
+    }
+    let worktree = repo.find_worktree(name).map_err(|_| WorktreeError::Git)?;
+    if comparable_path(worktree.path()) != target_path {
+        return Err(WorktreeError::Git);
+    }
+    remove_entry(repo, name, &worktree, path)
+}
+
+/// Removes the entry `name` and, when its folder `path` is there and points back at the
+/// entry, the folder. A folder that doesn't point back is never deleted (#252).
+fn remove_entry(
+    repo: &Repository,
+    name: &str,
+    worktree: &git2::Worktree,
+    path: &Path,
+) -> Result<(), WorktreeError> {
+    if matches!(worktree.is_locked()?, WorktreeLockStatus::Locked(_)) {
+        return Err(WorktreeError::Locked);
+    }
+    let folder_present = match std::fs::symlink_metadata(path) {
+        Ok(_) => true,
+        // A file where a parent folder was: the folder is gone too.
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            false
         }
-        let linked_repo = Repository::open(&target_path)?;
+        Err(_) => return Err(WorktreeError::Git),
+    };
+    if folder_present {
+        // libgit2 deletes whatever folder is at the entry's place, even another repository;
+        // `git worktree remove` first checks the folder's `.git` points back, and so does this.
+        if !folder_points_back(repo, name, path) {
+            return Err(WorktreeError::NotThisWorktree {
+                path: path.to_path_buf(),
+            });
+        }
+        let linked_repo = Repository::open(path)?;
         if !crate::status::status(&linked_repo)
             .map_err(|_| WorktreeError::Git)?
             .is_empty()
         {
             return Err(WorktreeError::Dirty);
         }
-        let mut options = git2::WorktreePruneOptions::new();
-        options.valid(true).working_tree(true);
-        worktree.prune(Some(&mut options))?;
-        return Ok(());
     }
+    let mut options = git2::WorktreePruneOptions::new();
+    options.valid(true).working_tree(folder_present);
+    worktree.prune(Some(&mut options))?;
+    Ok(())
+}
 
-    Err(WorktreeError::Git)
+/// `path` spelled so that two spellings of one folder compare equal, even once it is gone: the
+/// nearest existing ancestor resolved (links, `.`, `..`), the missing rest appended as written
+/// without `.` and `..`.
+fn comparable_path(path: &Path) -> PathBuf {
+    if let Ok(canonical) = path.canonicalize() {
+        return canonical;
+    }
+    let mut rest = Vec::new();
+    let mut base = path;
+    loop {
+        if let Ok(canonical) = base.canonicalize() {
+            let mut resolved = canonical;
+            for component in rest.into_iter().rev() {
+                match component {
+                    std::path::Component::CurDir => {}
+                    std::path::Component::ParentDir => {
+                        resolved.pop();
+                    }
+                    other => resolved.push(other),
+                }
+            }
+            return resolved;
+        }
+        let (Some(parent), Some(last)) = (base.parent(), base.components().next_back()) else {
+            return path.to_path_buf();
+        };
+        rest.push(last);
+        base = parent;
+    }
 }
 
 pub fn prune_worktrees(repo: &Repository) -> Result<(), WorktreeError> {
@@ -471,22 +664,23 @@ pub fn prune_worktrees(repo: &Repository) -> Result<(), WorktreeError> {
 
 fn main_worktree_path(repo: &Repository) -> Result<PathBuf, WorktreeError> {
     let main_repo = Repository::open(repo.commondir())?;
-    let Some(path) = main_repo.workdir() else {
-        return Err(WorktreeError::Git);
-    };
-    canonical_path(path)
+    match main_repo.workdir() {
+        Some(path) => canonical_path(path),
+        // A bare repository with linked worktrees: its own folder is the main row, as in
+        // `git worktree list`.
+        None if main_repo.is_bare() => canonical_path(repo.commondir()),
+        None => Err(WorktreeError::Git),
+    }
 }
 
 fn canonical_path(path: &Path) -> Result<PathBuf, WorktreeError> {
     path.canonicalize().map_err(|_| WorktreeError::Git)
 }
 
-fn display_path(path: &Path) -> Result<PathBuf, WorktreeError> {
-    match path.canonicalize() {
-        Ok(path) => Ok(path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path.to_path_buf()),
-        Err(_) => Err(WorktreeError::Git),
-    }
+/// The path resolved, or as recorded when it can't be (gone, a file in place of a parent
+/// folder, no access): one entry's folder never fails the list (#252).
+fn display_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn head_identity(repo: &Repository) -> String {
@@ -502,6 +696,40 @@ fn head_identity(repo: &Repository) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plain_relative_path_is_relative() {
+        for path in ["feature", "a/b", "../feature", "./x", ".git/x"] {
+            assert_eq!(anchoring(Path::new(path)), Anchoring::Relative, "{path}");
+        }
+        assert_eq!(anchoring(&std::env::temp_dir()), Anchoring::Absolute);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_rooted_path_is_absolute_on_unix() {
+        assert_eq!(anchoring(Path::new("/work/feature")), Anchoring::Absolute);
+    }
+
+    /// `C:feature` depends on drive C's current folder, `\feature` on the current drive.
+    #[cfg(windows)]
+    #[test]
+    fn a_path_tied_to_a_drive_or_a_root_but_not_both_is_refused_on_windows() {
+        for path in [r"C:feature", r"\feature", "/feature", r"C:..\feature"] {
+            assert_eq!(anchoring(Path::new(path)), Anchoring::Partial, "{path}");
+        }
+        for path in [r"C:\work\feature", r"\\server\share\feature"] {
+            assert_eq!(anchoring(Path::new(path)), Anchoring::Absolute, "{path}");
+        }
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        for path in [r"C:feature", r"\feature"] {
+            assert!(matches!(
+                resolve_destination(&repo, Path::new(path)),
+                Err(WorktreeError::PartlyAnchoredPath)
+            ));
+        }
+    }
 
     /// Git never writes these names into a tree, but a raw name that isn't exactly one plain
     /// component must never reach the remove helper, not even aliased by `Path::components`.
