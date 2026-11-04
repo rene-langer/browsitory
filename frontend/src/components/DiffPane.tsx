@@ -524,7 +524,7 @@ export interface CommitHooksControls {
   onCancel: () => void;
 }
 
-const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
+const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
 const noop = () => {};
 const noAmend = async () => false;
 
@@ -1280,7 +1280,8 @@ function UncommittedDiffPane({
                   : "Abort merge"
             }
             // A pending squash merge pre-fills the message too, but there is no merge to abort.
-            initialMessage={mergeMessage ?? headInfo.squashMessage ?? undefined}
+            // A leftover's message belongs to a commit already made: the next commit is the user's own.
+            initialMessage={(headInfo.operationLeftover ? null : mergeMessage) ?? headInfo.squashMessage ?? undefined}
             // A terminal rebase's step writes MERGE_MSG (and a merge step MERGE_HEAD) too; only the
             // terminal ends it (#263).
             showAbort={mergeMessage !== null && headInfo.terminalRebase === null}
@@ -1303,12 +1304,12 @@ function UncommittedDiffPane({
             messageSettings={commitMessageSettings}
             loadRecentAuthors={loadRecentAuthors}
             amend={{
+              // A leftover merge/pick/revert doesn't block amend: the backend clears it first (#240).
               available:
                 headInfo.headId !== null &&
-                headInfo.operation === null &&
+                (headInfo.operationLeftover || (headInfo.operation === null && mergeMessage === null)) &&
                 headInfo.sequence === null &&
-                headInfo.terminalRebase === null &&
-                mergeMessage === null,
+                headInfo.terminalRebase === null,
               on: amendMode,
               headMessage,
               pushed: headInfo.headPushed,

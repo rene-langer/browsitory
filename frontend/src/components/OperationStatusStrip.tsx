@@ -32,10 +32,13 @@ import styles from "./OperationStatusStrip.module.css";
  * `MERGE_MSG` suggests, with no buttons: it is continued or aborted in the terminal (#263).
  * When none of these is shown, a `git bisect` started in a terminal shows as information only:
  * it blocks nothing, and it is ended in the terminal (#250).
+ * A merge, cherry-pick or revert whose commit already landed but whose state stayed behind (D7-A)
+ * says so, with Abort: the next commit or amend clears it too (#240).
  */
 export function OperationStatusStrip({
   merging,
   operation,
+  operationLeftover = false,
   rebaseProgress,
   rebase = null,
   sequence = null,
@@ -52,6 +55,8 @@ export function OperationStatusStrip({
 }: {
   merging: boolean;
   operation: OperationKind | null;
+  /** `operation` was already committed; only git's state files stayed behind (#240). */
+  operationLeftover?: boolean;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   /** The stored rebase with its health (`HeadInfo.rebase`). */
   rebase?: RebaseInfo | null;
@@ -150,16 +155,26 @@ export function OperationStatusStrip({
     operation === "CherryPick" ? "Abort cherry-pick" : operation === "Revert" ? "Abort revert" : "Abort merge";
   // A terminal sequence's paused step: its Abort ends the whole sequence, as git's `--abort`.
   const terminalStep = terminalSequence !== null && (operation === "CherryPick" || operation === "Revert");
+  // The operation's commit already landed; only git's state files stayed behind (#240).
+  const leftover = operationLeftover && rebaseProgress === null && !terminalStep;
+  const leftoverLabel =
+    operation === "CherryPick" ? "Cherry-pick already committed" : operation === "Revert" ? "Revert already committed" : "Merge already committed";
   const label =
     rebaseProgress !== null
       ? `Rebasing, step ${rebaseProgress.currentStep} of ${rebaseProgress.totalSteps}`
       : terminalStep
         ? terminalSequenceLabel({ ...terminalSequence, pausedOnConflict: true })
-        : mergeLabel;
+        : leftover
+          ? leftoverLabel
+          : mergeLabel;
   return (
     <div role="status" aria-label="Operation status" className={styles.strip}>
       <strong>{label}</strong>
-      <span>{reason ?? "No conflicts remaining"}</span>
+      <span>
+        {leftover
+          ? "Git's state for it was left behind. Your next commit or amend clears it, and so does Abort."
+          : (reason ?? "No conflicts remaining")}
+      </span>
       <span className={styles.spacer} />
       <button
         type="button"

@@ -9,6 +9,7 @@ const DIVERGED_HEAD: HeadInfo = {
   detachedAt: null,
   headPushed: false,
   operation: null,
+  operationLeftover: false,
   squashMessage: null,
   commitHooks: [],
   sequence: null,

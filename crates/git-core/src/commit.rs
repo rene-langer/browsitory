@@ -50,6 +50,9 @@ pub enum CommitError {
     /// The cherry-pick was already committed but its CHERRY_PICK_HEAD can't be removed (#226).
     #[error("This cherry-pick was already committed, but git's cherry-pick state can't be cleared. Check the permissions of the .git folder, then commit again.")]
     LeftoverPickState,
+    /// The revert was already committed but its REVERT_HEAD can't be removed (#232).
+    #[error("This revert was already committed, but git's revert state can't be cleared. Check the permissions of the .git folder, then commit again.")]
+    LeftoverRevertState,
 }
 
 /// A person as typed or listed in the UI: an amend author override, or a recent author.
@@ -645,6 +648,11 @@ pub fn commit_with(
         // A terminal `git cherry-pick A B C` keeps the rest of its todo (#241).
         clear_commit_state(repo).map_err(|_| CommitError::LeftoverPickState)?;
     }
+    // And a revert whose commit already landed (#232): its REVERT_HEAD and MERGE_MSG must not
+    // make this commit look like the revert (`prepare-commit-msg … merge`).
+    if revert_already_committed(repo) {
+        clear_commit_state(repo).map_err(|_| CommitError::LeftoverRevertState)?;
+    }
 
     let pick_author = if picking_now(repo) {
         repo.find_reference("CHERRY_PICK_HEAD")
@@ -839,6 +847,89 @@ fn pick_already_committed(repo: &git2::Repository) -> bool {
     )
 }
 
+/// A revert is in progress and HEAD is already its commit: one parent, a message that names the
+/// reverted commit as git's revert message does ("This reverts commit <full id>"), and exactly
+/// the revert's result on every path it changes cleanly onto HEAD's parent, at least one
+/// (`pick::commit_carries_revert`). The author can't tell (a revert is authored by the user), so
+/// the message line takes its place: a commit that undoes the same change by hand is not the
+/// revert's commit. Not recognised (the state stays and the commit finishes the revert, as
+/// before): a revert of a merge commit (the mainline used isn't recorded), a message hook that
+/// dropped the line, and any error while checking.
+fn revert_already_committed(repo: &git2::Repository) -> bool {
+    if !matches!(
+        repo.state(),
+        git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence
+    ) {
+        return false;
+    }
+    let Some(reverted) = repo
+        .find_reference("REVERT_HEAD")
+        .ok()
+        .and_then(|r| r.peel_to_commit().ok())
+    else {
+        return false;
+    };
+    let Ok(head) = repo.head().and_then(|head| head.peel_to_commit()) else {
+        return false;
+    };
+    if head.parent_count() != 1 || reverted.parent_count() != 1 {
+        return false;
+    }
+    let names_it = String::from_utf8_lossy(head.message_bytes())
+        .contains(&format!("This reverts commit {}", reverted.id()));
+    names_it
+        && matches!(
+            crate::pick::commit_carries_revert(repo, &head, &reverted),
+            Ok(Some(changes)) if changes > 0
+        )
+}
+
+/// A merge is in progress and every one of its `MERGE_HEAD` commits is already in HEAD's
+/// history (`merge_already_committed`). Reads MERGE_HEAD from the file, so `&Repository` is
+/// enough; an unreadable file counts as "not a leftover".
+fn merge_leftover(repo: &git2::Repository) -> bool {
+    if repo.state() != git2::RepositoryState::Merge {
+        return false;
+    }
+    let Ok(text) = std::fs::read_to_string(repo.path().join("MERGE_HEAD")) else {
+        return false;
+    };
+    let Ok(heads) = text
+        .split_whitespace()
+        .map(git2::Oid::from_str)
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return false;
+    };
+    merge_already_committed(repo, head_commit_id(repo), &heads)
+}
+
+/// The merge, cherry-pick or revert git shows as paused is a leftover: its commit already landed
+/// (HEAD carries it) and only its state files stayed behind, as when the cleanup after the
+/// commit failed (D7-A). git has no such notion: it takes any `MERGE_HEAD`, `CHERRY_PICK_HEAD`
+/// or `REVERT_HEAD` for an operation in progress. Browsitory clears a leftover before the next
+/// commit or amend, and never state that HEAD doesn't carry (#240).
+pub(crate) fn leftover_operation(repo: &git2::Repository) -> bool {
+    merge_leftover(repo) || pick_already_committed(repo) || revert_already_committed(repo)
+}
+
+/// Clears a leftover (`leftover_operation`) as `git commit` does after the operation's own
+/// commit. `Ok(false)`: there was none. A leftover that can't be cleared is the matching
+/// `Leftover…State` error.
+fn clear_leftover(repo: &git2::Repository) -> Result<bool, CommitError> {
+    let error = if merge_leftover(repo) {
+        CommitError::LeftoverMergeState
+    } else if pick_already_committed(repo) {
+        CommitError::LeftoverPickState
+    } else if revert_already_committed(repo) {
+        CommitError::LeftoverRevertState
+    } else {
+        return Ok(false);
+    };
+    clear_commit_state(repo).map_err(|_| error)?;
+    Ok(true)
+}
+
 /// `MERGE_HEAD`'s commits, in order.
 fn merge_heads(repo: &mut git2::Repository) -> Result<Vec<git2::Oid>, git2::Error> {
     // A terminal `rebase --rebase-merges` writes MERGE_HEAD without a final newline, which
@@ -926,7 +1017,10 @@ pub fn amend_head(
         None => None,
     };
     crate::repo::check_no_terminal_rebase(repo)?;
-    if !crate::repo::no_operation(repo) {
+    // `git commit --amend` refuses during a merge or cherry-pick. A leftover of one whose commit
+    // already landed (HEAD is that commit) is cleared first instead, as the next commit does
+    // (#240); an operation still in progress is refused.
+    if !crate::repo::no_operation(repo) && !clear_leftover(repo)? {
         return Err(CommitError::OperationInProgress);
     }
     let head = match repo.head() {

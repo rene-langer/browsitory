@@ -508,6 +508,7 @@ describe("tauriRepoClient rebase wiring", () => {
       detachedAt: "abc",
       headPushed: false,
       operation: "CherryPick",
+      operationLeftover: false,
       squashMessage: null,
       commitHooks: [],
       sequence: null,

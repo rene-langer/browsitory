@@ -63,6 +63,30 @@ describe("OperationStatusStrip", () => {
     expect(onAbortMerge).toHaveBeenCalled();
   });
 
+  it.each([
+    ["CherryPick", "Cherry-pick already committed", "Abort cherry-pick"],
+    ["Revert", "Revert already committed", "Abort revert"],
+    ["Merge", "Merge already committed", "Abort merge"],
+  ] as const)("says a leftover %s was already committed (#240)", (operation, label, abort) => {
+    const onAbortMerge = vi.fn();
+    render(
+      <OperationStatusStrip
+        merging
+        operation={operation}
+        operationLeftover
+        rebaseProgress={null}
+        conflictCount={0}
+        onAbortMerge={onAbortMerge}
+        onAbortRebase={noop}
+      />,
+    );
+    const strip = screen.getByRole("status");
+    expect(within(strip).getByText(label)).toBeInTheDocument();
+    expect(strip).toHaveTextContent("Git's state for it was left behind. Your next commit or amend clears it, and so does Abort.");
+    fireEvent.click(within(strip).getByRole("button", { name: abort }));
+    expect(onAbortMerge).toHaveBeenCalled();
+  });
+
   it("shows sequence progress with Continue and Abort", () => {
     const onContinueSequence = vi.fn();
     const onAbortSequence = vi.fn();

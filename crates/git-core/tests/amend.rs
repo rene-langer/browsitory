@@ -85,13 +85,29 @@ fn amend_refuses_unborn_head() {
 
 #[test]
 fn amend_refuses_during_a_merge() {
-    let (_dir, repo) = repo_with_two_commits();
-    let oid = repo.head().unwrap().target().unwrap();
-    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{oid}\n")).unwrap();
+    let (dir, repo) = repo_with_two_commits();
+    let first = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .parent_id(0)
+        .unwrap();
+    // A side commit, not in HEAD's history: a merge in progress. (A MERGE_HEAD that HEAD already
+    // contains is a leftover of a committed merge, which amend clears, #240.)
+    let side = common::commit_tree(&repo, &[("s.txt", "s\n", 0o100644)], &[first], "side");
+    std::fs::write(repo.path().join("MERGE_HEAD"), format!("{side}\n")).unwrap();
     assert!(matches!(
         amend_head(&repo, "x", None, git_core::hooks::HookOptions::default()),
         Err(CommitError::OperationInProgress)
     ));
+    // git refuses too: "You are in the middle of a merge -- cannot amend."
+    let git = test_support::git_command(dir.path())
+        .args(["commit", "--amend", "-m", "x"])
+        .output()
+        .unwrap();
+    assert!(!git.status.success());
+    assert!(repo.path().join("MERGE_HEAD").exists());
 }
 
 #[test]

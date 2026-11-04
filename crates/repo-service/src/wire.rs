@@ -564,6 +564,9 @@ pub struct HeadInfoDto {
     pub detached_at: Option<String>,
     pub head_pushed: bool,
     pub operation: Option<git_core::repo::OperationKind>,
+    /// `operation` was already committed; only git's state files stayed behind (#240). The next
+    /// commit or amend clears them, and the commit box isn't pre-filled with the old message.
+    pub operation_leftover: bool,
     pub squash_message: Option<String>,
     pub commit_hooks: Vec<String>,
     pub sequence: Option<SequenceProgressDto>,
@@ -674,6 +677,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             detached_at: info.detached_at,
             head_pushed: info.head_pushed,
             operation: info.operation,
+            operation_leftover: info.operation_leftover,
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),

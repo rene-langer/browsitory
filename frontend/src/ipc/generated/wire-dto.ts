@@ -65,7 +65,12 @@ export type GitTools = { diffTool: GitToolInfo | null, mergeTool: GitToolInfo | 
 
 export type GraphCommit = { id: string, shortId: string, summary: string, authorName: string, authorEmail: string, timestamp: number, parentIds: Array<string>, branchRefs: Array<string>, remoteBranchRefs: Array<string>, tags: Array<string>, };
 
-export type HeadInfo = { headId: string | null, detachedAt: string | null, headPushed: boolean, operation: OperationKind | null, squashMessage: string | null, commitHooks: Array<string>, sequence: SequenceProgress | null, rebase: RebaseInfo | null, 
+export type HeadInfo = { headId: string | null, detachedAt: string | null, headPushed: boolean, operation: OperationKind | null, 
+/**
+ * `operation` was already committed; only git's state files stayed behind (#240). The next
+ * commit or amend clears them, and the commit box isn't pre-filled with the old message.
+ */
+operationLeftover: boolean, squashMessage: string | null, commitHooks: Array<string>, sequence: SequenceProgress | null, rebase: RebaseInfo | null, 
 /**
  * A `git bisect` started in a terminal: `{ "startedFrom": "main" }`, or `null`.
  */

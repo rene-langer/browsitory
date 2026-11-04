@@ -1799,6 +1799,7 @@ mod tests {
             detached_at: None,
             head_pushed: true,
             operation: Some(git_core::repo::OperationKind::CherryPick),
+            operation_leftover: true,
             squash_message: None,
             commit_hooks: vec!["pre-commit".into()],
             sequence: None,
@@ -1809,13 +1810,14 @@ mod tests {
         });
         assert_eq!(
             serde_json::to_value(dto).unwrap(),
-            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null, "rebase": null, "bisect": null, "terminalSequence": null, "terminalRebase": null})
+            serde_json::json!({"headId": "abc", "detachedAt": null, "headPushed": true, "operation": "CherryPick", "operationLeftover": true, "squashMessage": null, "commitHooks": ["pre-commit"], "sequence": null, "rebase": null, "bisect": null, "terminalSequence": null, "terminalRebase": null})
         );
         let dto = HeadInfoDto::from(git_core::repo::HeadInfo {
             head_id: Some("abc".into()),
             detached_at: None,
             head_pushed: false,
             operation: None,
+            operation_leftover: false,
             squash_message: Some("Squashed commit of the following:\n".into()),
             commit_hooks: vec![],
             sequence: None,
@@ -1914,6 +1916,7 @@ mod tests {
                 detached_at: None,
                 head_pushed: false,
                 operation: None,
+                operation_leftover: false,
                 squash_message: None,
                 commit_hooks: vec![],
                 sequence,
@@ -2217,6 +2220,7 @@ mod tests {
             detached_at: None,
             head_pushed: false,
             operation: Some(git_core::repo::OperationKind::CherryPick),
+            operation_leftover: false,
             squash_message: None,
             commit_hooks: vec![],
             sequence: None,
@@ -2264,6 +2268,7 @@ mod tests {
                 detached_at: None,
                 head_pushed: false,
                 operation: None,
+                operation_leftover: false,
                 squash_message: None,
                 commit_hooks: vec![],
                 sequence: None,
@@ -2307,6 +2312,7 @@ mod tests {
                 detached_at: None,
                 head_pushed: false,
                 operation: None,
+                operation_leftover: false,
                 squash_message: None,
                 commit_hooks: vec![],
                 sequence: None,
@@ -2355,6 +2361,7 @@ mod tests {
                 detached_at: None,
                 head_pushed: false,
                 operation: None,
+                operation_leftover: false,
                 squash_message: None,
                 commit_hooks: vec![],
                 sequence: None,
