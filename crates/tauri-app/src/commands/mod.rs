@@ -26,6 +26,8 @@ mod submodule;
 mod tag;
 mod tools;
 mod undo;
+#[cfg(test)]
+mod wire_snapshots;
 mod worktree;
 
 pub use branch::{create_branch, delete_branch, list_branches, rename_branch, switch_branch};

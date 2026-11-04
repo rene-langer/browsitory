@@ -1505,6 +1505,18 @@ only `error`.
     `params` are the checked `TransferProgress`/`HookProgress`); and `read_file_version`'s
     `{ text }`, which only the extension host reads. The desktop app's `list_open_repos` returns
     a tuple, which `tauriRepoClient.ts` reshapes, so only its entries are compared.
+- Wire snapshots (#306): `wire_snapshots_are_current` in
+  `crates/tauri-app/src/commands/wire_snapshots.rs` and
+  `crates/vscode-sidecar/src/dispatch/wire_snapshots.rs` builds every output DTO from the same
+  domain values (`crates/test-support/wire_fixtures.rs`, included by both with `#[path]`) and
+  compares the exact bytes each transport sends with `crates/*/tests/wire/dto-snapshots.txt`,
+  one `<dto>/<case> <json>` line per case. The fixtures cover every enum variant (an
+  exhaustive `match` fails to compile when one is added) and both `None` and `Some` of every
+  optional field. Tauri sends `serde_json::to_string` of the value (errors go through a
+  `Value` first); the sidecar always goes through `serde_json::Value`, which sorts keys.
+  `shared_dtos_match_across_transports` (sidecar) requires every shared case in both files and
+  pins the cases whose bytes differ in `cross-transport-differences.txt`. Input-only DTOs are
+  not snapshotted. Regenerate with `UPDATE_TRANSPORT_METHODS=1`, desktop app first.
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
   native-method routing, process-loss recovery, webview security, and deterministic disposal.
 - E2E: `tauri-driver` + WebdriverIO (`e2e/`) driving

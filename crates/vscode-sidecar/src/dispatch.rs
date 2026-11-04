@@ -4164,6 +4164,9 @@ fn create_pull_request(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[cfg(test)]
+mod wire_snapshots;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
