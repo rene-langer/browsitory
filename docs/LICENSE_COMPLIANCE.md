@@ -67,6 +67,7 @@ the Notes column. CI checks the full transitive trees automatically (see "Automa
 | @tauri-apps/plugin-updater | MIT OR Apache-2.0 | frontend half of `tauri-plugin-updater`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-updater license`, verified 2026-08-26. |
 | @tauri-apps/plugin-log | MIT OR Apache-2.0 | frontend half of `tauri-plugin-log`; `tauriRepoClient.ts` and `main.tsx` log IPC/uncaught failures into the same rotated file as the Rust backend. Source: `npm info @tauri-apps/plugin-log license`, verified 2026-08-28. |
 | shiki 4.5.0 | MIT | `frontend` — syntax highlighting in diffs, using its JavaScript regex engine (no WebAssembly, so no CSP change) and CSS-variables theme. Languages load on demand. Source: [npm](https://www.npmjs.com/package/shiki/v/4.5.0); verified with `npm info shiki@4.5.0 license` on 2026-10-16. |
+| tm-grammars 1.32.22 | MIT | `frontend`, dev only, pinned exactly. The TextMate grammar collection Shiki's `@shikijs/langs` is built from; `scripts/generate-third-party-notices.py` reads its per-grammar metadata and `NOTICE` to list the shipped grammars' upstream licences. Nothing of it is bundled. Keep it on the release `@shikijs/langs` was built from: the generator fails when a shipped grammar differs between the two. No dependencies. Source: [npm](https://www.npmjs.com/package/tm-grammars/v/1.32.22); verified with `npm info tm-grammars@1.32.22 license` on 2026-11-04. |
 
 ## JavaScript, `extension/` (`npm info <package> license`)
 
@@ -93,6 +94,7 @@ licence is outside the policy.
 | Tool | License | Notes |
 |---|---|---|
 | cargo-deny | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and runs `cargo deny check licenses`. The exact version is pinned in that job's `CARGO_DENY_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-deny@0.20.2` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
+| cargo-about | MIT OR Apache-2.0 | `ci.yml`'s `licenses` job installs it with `taiki-e/install-action` and `scripts/generate-third-party-notices.py --check` runs `cargo about generate --format json` (configuration: `about.toml`) to collect the licence texts of the shipped Rust crates for `THIRD_PARTY_NOTICES.md`. Only its output, licence texts copied from the crates, ships. The exact version is pinned in that job's `CARGO_ABOUT_VERSION` (Renovate updates it). Owner approved it as a build-only tool on 2026-11-04 (#301). Licence verified with `cargo info cargo-about@0.9.3` on 2026-11-04; re-check it when a Renovate PR bumps the version. |
 | cargo-mutants | MIT | `ci.yml`'s `mutants` job (pull requests only, informational) installs it with `taiki-e/install-action` and runs `cargo mutants` on the changed code. The exact version is pinned in that job's `MUTANTS_VERSION` (Renovate updates it). Licence verified with `cargo info cargo-mutants@27.1.0` on 2026-11-03; re-check it when a Renovate PR bumps the version. |
 | Swatinem/rust-cache v2 | LGPL-3.0 | A GitHub Action. `ci.yml`'s cargo jobs run it to cache `~/.cargo` and the dependency build output in `target/` (#308). LGPL-3.0 is weak copyleft: it only covers changes to the action itself, which we neither make nor distribute, and it runs on the CI runner only, so nothing of it is built into or shipped with Browsitory. The owner accepted it as a build-only tool (2026-11-03). Never add it as a dependency. Pinned to the `v2` major tag like the other actions (Renovate updates it). Source: the repository's `LICENSE` and `package.json` (`"license": "LGPL-3.0"`), checked for v2.9.3 on 2026-11-03. |
 | ovsx 1.3.0 | EPL-2.0 | `release.yml`'s `publish-vsix-open-vsx` job runs it as `npx --yes ovsx@1.3.0 publish` to upload the already-built `.vsix` files to Open VSX. EPL-2.0 is weak copyleft: it only covers changes to ovsx itself, which we neither make nor distribute. Never add it as a dependency. Source: `npm info ovsx@1.3.0 license`, verified 2026-11-02. |
@@ -145,14 +147,12 @@ other GPL/AGPL/SSPL dependency is acceptable without a new, equally explicit dec
 here. `deny.toml` scopes this exception to the `libgit2-sys` crate alone (see "Rust
 exceptions").
 
-Every VSCode extension package (`.vsix`) bundles the `vscode-sidecar` binary, which links
-libgit2 statically. So the package ships `extension/THIRD_PARTY_NOTICES.md` next to `LICENSE`:
-libgit2's full `COPYING` (GPL-2.0 text, the linking exception, and the licences of the code
-libgit2 bundles), plus the licence texts of the other native libraries the sidecar links:
-libssh2 (static), OpenSSL (static, Linux and macOS packages only) and zlib (static, or the
+The desktop app and every VSCode extension package (`.vsix`, through its `vscode-sidecar`
+binary) link libgit2 statically. Both ship `THIRD_PARTY_NOTICES.md` (see "Third-party
+notices" below), which carries libgit2's full `COPYING` (GPL-2.0 text, the linking exception,
+and the licences of the code libgit2 bundles), plus the licence texts of the other native
+libraries: libssh2 (static), OpenSSL (static, Linux and macOS only) and zlib (static, or the
 build machine's system zlib where `libz-sys` finds one).
-When a `libgit2-sys`, `libssh2-sys`, `openssl-src` or `libz-sys` update changes a version or a
-licence text, update that file in the same PR.
 
 ## Unicode-3.0
 
@@ -193,9 +193,23 @@ routine update doesn't break CI; a new crate under the same licence still fails)
 | Crate | License | Why it's acceptable |
 |---|---|---|
 | libgit2-sys | GPL-2.0-only WITH GCC-exception-2.0 (vendored libgit2) | The one exception, see "The one exception" below. `libgit2-sys` declares only `MIT OR Apache-2.0` (its binding), so `deny.toml` clarifies the real licence from `libgit2/COPYING`, pinned by that file's hash. If the file changes, the clarification stops matching, the exception goes unused and the check fails, so someone re-reads the licence. `git2` vendors nothing and needs no entry. |
-| option-ext | MPL-2.0 | **Ships** in the desktop app and in the VSCode sidecar, through `directories` (our `config` crate) and `dirs` (Tauri). MPL-2.0 is file-level copyleft: we use it unmodified and say where its source is in `extension/THIRD_PARTY_NOTICES.md` (source of every version: <https://crates.io/crates/option-ext>, <https://github.com/soc/option-ext>). The desktop app has no notices file; this row is its record. Owner decision 2026-11-03 (#273). |
+| option-ext | MPL-2.0 | **Ships** in the desktop app and in the VSCode sidecar, through `directories` (our `config` crate) and `dirs` (Tauri). MPL-2.0 is file-level copyleft: we use it unmodified and say where its source is in `THIRD_PARTY_NOTICES.md`, which ships with both (source of every version: <https://crates.io/crates/option-ext>, <https://github.com/soc/option-ext>). Owner decision 2026-11-03 (#273). |
 | cssparser, cssparser-macros, selectors, dtoa-short | MPL-2.0 | Build time only on our targets: Tauri's build and code generation (`tauri-build`, `tauri-codegen`) through `dom_query`. Not linked into anything we ship. Owner decision 2026-11-03 (#273). |
 | target-lexicon | Apache-2.0 WITH LLVM-exception | Build time only (`system-deps`, used by the Linux GTK bindings' build scripts). The LLVM exception only adds permissions to Apache-2.0. Owner decision 2026-11-03 (#273). |
+
+## Syntax highlighting grammars
+
+The diff view's syntax highlighting bundles TextMate grammars from Shiki (`@shikijs/langs`,
+built from `tm-grammars`). Each grammar keeps its upstream licence, so
+`scripts/generate-third-party-notices.py` works out which grammars ship (the loaders in
+`frontend/src/lib/highlight.ts` plus the grammars they import) and copies their licence texts
+from `tm-grammars`' `NOTICE` into `THIRD_PARTY_NOTICES.md`. It fails on a shipped grammar
+whose licence is not allowed and has no entry below. Almost all shipped grammars are MIT.
+
+| Grammar | License | Decision |
+|---|---|---|
+| yaml, toml | TextMate bundle permission notice ("Permission to copy, use, modify, sell and distribute this software is granted …", from the READMEs of textmate/yaml.tmbundle and textmate/toml.tmbundle) | Accepted per grammar, owner decision 2026-11-04 (#301). The notice text ships in `THIRD_PARTY_NOTICES.md` (`scripts/notices/grammars/textmate-bundle-license.txt`). Recorded in `GRAMMAR_EXCEPTIONS` in the generator, by exact grammar name. |
+| glsl (and cpp, cpp-macro) | none (polym0rph/GLSL.tmbundle has no licence) | Not shipped, owner decision 2026-11-04 (#301). Shiki's `cpp` grammar embeds `glsl`, so `cpp` and `cpp-macro` are left out too (`frontend/src/lib/excludedGrammars.ts`); C++ files use the C grammar. `frontend/vite.grammars.ts` keeps them out of both builds and fails a build that still contains one. |
 
 ## JavaScript dev-tree exceptions
 
@@ -270,6 +284,50 @@ python3 scripts/check-dependency-licenses.py --summary
 When a check fails, the new package's licence is outside the policy. Replace the dependency,
 or ask the owner for a decision and record it as an exception (`deny.toml` or the script)
 and in the tables above, in the same PR.
+
+## Third-party notices
+
+`THIRD_PARTY_NOTICES.md` at the repository root carries the licence texts and copyright
+notices of everything Browsitory ships (#301, #202). It is generated; never edit it by hand.
+
+- **Where it ships:** every desktop installer as a Tauri resource (`bundle.resources` in
+  `crates/tauri-app/tauri.conf.json`), in Tauri's resource folder: next to the executable on
+  Windows, `/usr/lib/Browsitory/` for the `.deb` and `.rpm` packages, `usr/lib/Browsitory/`
+  inside the AppImage, and `Contents/Resources/` in the macOS `.app` (Tauri's `resource_dir`
+  documentation; Tauri doesn't promise these paths stay the same). It is also next to the
+  bundles from `scripts/build-dist.*`, on the draft GitHub Release (`release.yml`'s `publish-vsix-release`), and in every `.vsix` at its
+  root (`extension/scripts/package-vsix.mjs` copies it there; `package.json` lists it). Both
+  frontend builds also put it at their root as `third-party-notices.md`
+  (`frontend/vite.notices.ts`), and the app shows it under "Third-party licences" (command
+  palette, and a button in the release notes dialog). It is loaded only when opened, so it
+  adds nothing to the script bundle.
+- **What it contains:**
+  1. `scripts/notices/native-libraries.md`, kept by hand: the C libraries vendored by the
+     `-sys` crates (libgit2 with its linking exception, libssh2, OpenSSL, zlib), which
+     cargo-about can't see, and the MPL-2.0 source notice for option-ext.
+  2. Every Rust crate linked into `tauri-app` or `vscode-sidecar` on any platform we ship
+     (`cargo tree -e normal,no-proc-macro` over `about.toml`'s targets), with the licence
+     texts cargo-about finds in the crate (`about.toml`). Build scripts, proc macros and their
+     dependencies (such as the build-only MPL-2.0 crates above) are left out.
+  3. The production npm trees of `frontend/` and `extension/` (`pnpm licenses list --prod`),
+     without `@types/*`, with each package's own licence files.
+  4. The syntax highlighting grammars the app bundles, with their upstream licence texts (see
+     "Syntax highlighting grammars" above).
+- **Regenerate** after any dependency change (Renovate PRs too), then commit the result:
+
+  ```bash
+  cargo install cargo-about --locked --features cli --version <CARGO_ABOUT_VERSION from ci.yml>   # once
+  pnpm --dir frontend install --frozen-lockfile && pnpm --dir extension install --frozen-lockfile
+  python3 scripts/generate-third-party-notices.py
+  ```
+
+- **Checked in CI:** the `licenses` job (and `release.yml`'s `verify` job, before a release
+  builds anything) runs `scripts/generate-third-party-notices.py --check`
+  (unit tests in `scripts/test_generate_third_party_notices.py`). It fails, naming the command
+  above, when the file no longer matches the dependency trees. It also fails when a
+  `libgit2-sys`, `libssh2-sys`, `openssl-src` or `libz-sys` version in `Cargo.lock` differs
+  from the one `scripts/notices/native-libraries.md` names. Then check that library's licence
+  text and version, update that file, and regenerate.
 
 ## Process
 

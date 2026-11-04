@@ -9,7 +9,11 @@ Semantic versioning. Pushing a `release/MAJOR.MINOR.PATCH` tag (no `v` prefix) t
 `.github/workflows/release.yml`: builds standalone distributables for Linux/macOS/Windows
 (`tauri-apps/tauri-action`, same build as `scripts/build-dist.*`) and publishes a draft GitHub
 Release. The workflow stamps the version into `crates/tauri-app/tauri.conf.json` at build time.
-`cargo test --workspace` and the frontend test suite must pass on the tagged commit first.
+Every installer carries `THIRD_PARTY_NOTICES.md` (a Tauri resource), and
+`publish-vsix-release` also attaches it to the draft release. It is generated, so a release
+needs no extra step for it (see `docs/LICENSE_COMPLIANCE.md`). The `verify` job runs first on
+the tagged commit: `cargo test --workspace`, the frontend test suite, and
+`scripts/generate-third-party-notices.py --check`, so a stale notices file stops the release.
 
 ### Publishing the extension
 

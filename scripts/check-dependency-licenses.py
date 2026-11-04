@@ -28,6 +28,7 @@ import argparse
 import fnmatch
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -369,13 +370,18 @@ def registry_license(name: str, version: str, urlopen=urllib.request.urlopen, sl
     raise AssertionError("unreachable")
 
 
-def pnpm_licenses(project: str, prod: bool) -> dict:
-    cmd = ["pnpm", "licenses", "list", "--json"]
+def pnpm_licenses(project: str, prod: bool, run=subprocess.run, which=shutil.which) -> dict:
+    # shutil.which finds pnpm.cmd on Windows, which subprocess can't run by bare name.
+    pnpm = which("pnpm")
+    if pnpm is None:
+        raise CheckError("pnpm not found on PATH")
+    cmd = [pnpm, "licenses", "list", "--json"]
     if prod:
         cmd.append("--prod")
     if project in IGNORE_WORKSPACE:
         cmd.append("--ignore-workspace")
-    out = subprocess.run(cmd, cwd=ROOT / project, check=True, capture_output=True, text=True).stdout
+    # pnpm writes UTF-8; the locale's default (cp1252 on Windows) would garble author names.
+    out = run(cmd, cwd=ROOT / project, check=True, capture_output=True, text=True, encoding="utf-8").stdout
     return json.loads(out) if out.strip() else {}
 
 

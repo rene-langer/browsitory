@@ -5,7 +5,7 @@ describe("languageForPath", () => {
   it.each([
     ["src/a.ts", "typescript"], ["App.tsx", "tsx"], ["x.mjs", "javascript"], ["lib.rs", "rust"],
     ["Cargo.toml", "toml"], ["a.yml", "yaml"], ["README.md", "markdown"], ["run.sh", "shellscript"],
-    ["dir.with.dots/file.PY", "python"],
+    ["dir.with.dots/file.PY", "python"], ["main.cpp", "c"], ["x.hpp", "c"], ["y.cc", "c"],
   ])("%s → %s", (path, lang) => expect(languageForPath(path)).toBe(lang));
 
   it("returns null for unknown or extensionless files", () => {

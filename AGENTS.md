@@ -102,6 +102,11 @@ wait for approval on the Dependency Dashboard like other 0.x dependencies. Advis
 update fixes one, drop its ignore from `.cargo/audit.toml` in the same PR and close the
 matching RUSTSEC issue.
 
+Any change to the shipped Rust or npm trees (including Renovate PRs) also changes the generated
+`THIRD_PARTY_NOTICES.md`: CI's `licenses` job fails until it is regenerated with
+`python3 scripts/generate-third-party-notices.py` (needs cargo-about and `pnpm install` in
+`frontend/` and `extension/`) and committed on the PR branch.
+
 ## Versioning & releases
 
 Semantic versioning; a `release/MAJOR.MINOR.PATCH` tag (no `v` prefix) triggers
@@ -123,7 +128,8 @@ an exception on your own: ask the owner. Before adding a dependency: verify its 
 (`cargo info <crate>` / `npm info <package> license`) and add a row to
 `docs/LICENSE_COMPLIANCE.md` in the same commit. CI's `licenses` job then checks the whole
 tree it pulls in (`deny.toml`, `scripts/check-dependency-licenses.py`); keep their allow-lists
-in sync with this one.
+(and `about.toml`'s) in sync with this one. The shipped licence texts live in the generated
+`THIRD_PARTY_NOTICES.md`; never edit it by hand (see `docs/LICENSE_COMPLIANCE.md`).
 
 ## Testing conventions
 

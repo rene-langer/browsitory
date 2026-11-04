@@ -12,6 +12,8 @@
   color: var(--color-text-muted);
 }
 
-.closeButton {
+.footer {
+  display: flex;
+  gap: var(--space-2);
   margin-top: var(--space-3);
 }

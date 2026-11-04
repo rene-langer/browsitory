@@ -1,6 +1,7 @@
 # Build a standalone Browsitory distributable for Windows.
 #
-# Produces .msi and .exe (NSIS) installers via `cargo tauri build`.
+# Produces .msi and .exe (NSIS) installers via `cargo tauri build`. Every installer carries
+# THIRD_PARTY_NOTICES.md as a Tauri resource (tauri.conf.json); a copy is also put next to them.
 #
 # Usage: scripts\build-dist.ps1 [extra cargo-tauri build args]
 $ErrorActionPreference = "Stop"
@@ -25,8 +26,20 @@ Write-Host "==> Building distributable"
 Push-Location "$repoRoot\crates\tauri-app"
 try {
     cargo tauri build @args
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Pop-Location
 }
 
-Write-Host "==> Done. Bundles in target\release\bundle\"
+# `--target <triple>` (or `--target=<triple>`) moves the bundles to target\<triple>\release\.
+$bundleDir = "target\release\bundle"
+for ($i = 0; $i -lt $args.Count; $i++) {
+    if ($args[$i] -eq "--target" -and $i + 1 -lt $args.Count) {
+        $bundleDir = "target\$($args[$i + 1])\release\bundle"
+    } elseif ($args[$i] -like "--target=*") {
+        $bundleDir = "target\$($args[$i].Substring(9))\release\bundle"
+    }
+}
+Copy-Item "$repoRoot\THIRD_PARTY_NOTICES.md" "$repoRoot\$bundleDir\"
+
+Write-Host "==> Done. Bundles and THIRD_PARTY_NOTICES.md in $bundleDir\"

@@ -1,7 +1,16 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import styles from "./Overlay.module.css";
 
-export function Overlay({ onClose, children }: { onClose?: () => void; children: ReactNode }) {
+export function Overlay({
+  onClose,
+  ariaLabel,
+  children,
+}: {
+  onClose?: () => void;
+  /** The `<dialog>`'s accessible name. Give one whenever the overlay is a dialog of its own. */
+  ariaLabel?: string;
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDialogElement>(null);
   const openedViaShowModal = useRef(false);
   // React StrictMode (dev only) double-invokes a fresh mount's effect: setup, then its
@@ -45,7 +54,7 @@ export function Overlay({ onClose, children }: { onClose?: () => void; children:
   };
 
   return (
-    <dialog ref={ref} className={styles.overlay} onClose={handleClose}>
+    <dialog ref={ref} className={styles.overlay} aria-label={ariaLabel} onClose={handleClose}>
       {children}
     </dialog>
   );

@@ -32,6 +32,7 @@ export async function packageVsix({
   extensionRoot,
   frontendDist,
   sidecarPath,
+  noticesPath,
   outputPath,
   preRelease = false,
   run = runCommand,
@@ -39,7 +40,7 @@ export async function packageVsix({
   if (!supportedTargets.has(target)) {
     throw new Error(`unsupported VSIX target: ${target}`);
   }
-  for (const [name, value] of Object.entries({ extensionRoot, frontendDist, sidecarPath, outputPath })) {
+  for (const [name, value] of Object.entries({ extensionRoot, frontendDist, sidecarPath, noticesPath, outputPath })) {
     if (typeof value !== "string" || value.length === 0) {
       throw new Error(`${name} is required`);
     }
@@ -48,16 +49,21 @@ export async function packageVsix({
   await assertClassicScriptBundle(frontendDist);
   const binDirectory = path.join(extensionRoot, "bin");
   const webviewDirectory = path.join(extensionRoot, "webview");
+  // The generated THIRD_PARTY_NOTICES.md lives at the repository root (it ships with the
+  // desktop app too); package.json's "files" lists the copy staged here.
+  const noticesCopy = path.join(extensionRoot, "THIRD_PARTY_NOTICES.md");
   const sidecarName = target === "win32-x64" ? "vscode-sidecar.exe" : "vscode-sidecar";
   try {
     await Promise.all([
       rm(binDirectory, { recursive: true, force: true }),
       rm(webviewDirectory, { recursive: true, force: true }),
+      rm(noticesCopy, { force: true }),
     ]);
     await mkdir(binDirectory, { recursive: true });
     await mkdir(path.dirname(outputPath), { recursive: true });
     await cp(frontendDist, webviewDirectory, { recursive: true });
     await copyFile(sidecarPath, path.join(binDirectory, sidecarName));
+    await copyFile(noticesPath, noticesCopy);
     // `vsce publish --pre-release` refuses a package that wasn't packaged as a pre-release.
     const vsceArguments = ["exec", "vsce", "package", "--target", target, "--out", outputPath];
     if (preRelease) vsceArguments.push("--pre-release");
@@ -67,6 +73,7 @@ export async function packageVsix({
     await Promise.all([
       rm(binDirectory, { recursive: true, force: true }),
       rm(webviewDirectory, { recursive: true, force: true }),
+      rm(noticesCopy, { force: true }),
     ]);
   }
 }
@@ -100,6 +107,7 @@ export function parseOptions(args) {
     preRelease,
     extensionRoot,
     frontendDist: path.resolve(extensionRoot, "..", "frontend", "dist-vscode"),
+    noticesPath: path.resolve(extensionRoot, "..", "THIRD_PARTY_NOTICES.md"),
   };
 }
 

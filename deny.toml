@@ -44,7 +44,7 @@ exceptions = [
     # entry below and docs/LICENSE_COMPLIANCE.md, "The one exception").
     { crate = "libgit2-sys", allow = ["GPL-2.0-only WITH GCC-exception-2.0"] },
     # Linked into the app and the sidecar through `directories`/`dirs`. Used unmodified; the
-    # source location is in extension/THIRD_PARTY_NOTICES.md.
+    # source location is in THIRD_PARTY_NOTICES.md.
     { crate = "option-ext", allow = ["MPL-2.0"] },
     # Build time only on our targets (tauri-build/tauri-codegen through dom_query).
     { crate = "cssparser", allow = ["MPL-2.0"] },
