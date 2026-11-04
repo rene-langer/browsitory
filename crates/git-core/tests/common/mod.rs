@@ -293,3 +293,16 @@ impl Drop for ReadOnlyGitDir {
         let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
     }
 }
+
+/// Windows: opens `path` as an editor that keeps the file open, sharing read and write but not
+/// delete, so libgit2 can't replace it (#268, #303). Closed when dropped.
+#[cfg(windows)]
+#[allow(dead_code)]
+pub fn hold_open_without_share_delete(path: &Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x1 | 0x2)
+        .open(path)
+        .unwrap()
+}

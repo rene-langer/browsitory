@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Files open in another program, in branch switches and other checkouts (Windows)
+
+- Fixed: on Windows, a branch switch or commit checkout, a hard reset, a stash apply or pop, a
+  fast-forward merge, a rebase abort, a clone and a submodule update showed libgit2's raw
+  "could not remove … being used by another process" error when another program kept a file
+  open. They now name the file, say that some files were already changed, and say how to
+  finish, for example "'f.txt' is open in another program. Some files were already switched.
+  Close it, then try again to finish." (#303). Merge abort, cherry-pick, revert, rebase start
+  and pull still show the raw error (#321).
+
 ### Internal: typed sidecar params
 
 - Changed: each method in the VSCode sidecar's `methods!` table now names its params struct,

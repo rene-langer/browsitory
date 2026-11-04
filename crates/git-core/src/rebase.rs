@@ -23,6 +23,9 @@ pub enum RebaseError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Windows: a checkout stopped at a file another program holds open (#303).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
     #[error(
         "Another merge, cherry-pick or revert is in progress. Finish or abort it before \
          continuing the rebase."
@@ -1024,7 +1027,12 @@ fn restore_original_branch(
     )?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
-    repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+    // A file another program holds open: say so, not libgit2's raw error (#303).
+    repo.checkout_tree(tree.as_object(), Some(&mut checkout))
+        .map_err(crate::worktree_guard::held_open::<RebaseError>(
+            repo.workdir(),
+            crate::HeldDuring::RebaseAbort,
+        ))?;
     repo.set_head(branch_ref)?;
     crate::commit::clear_operation_files(repo)?;
     Ok(())

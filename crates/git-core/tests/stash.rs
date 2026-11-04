@@ -2647,3 +2647,39 @@ fn stash_all_reverting_a_path_that_head_has_as_a_folder_keeps_the_index_valid() 
     );
     assert_eq!(read(dir.path(), "f"), "local\n");
 }
+
+/// Windows: applying a stash whose checkout stops at a file another program keeps open says
+/// so, not libgit2's raw error, and keeps the stash; once the file is closed, applying again
+/// finishes it (#303).
+#[cfg(windows)]
+#[test]
+fn applying_a_stash_with_a_file_open_in_another_program_says_so_and_finishes_when_tried_again() {
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "1\n");
+    write_file(dir.path(), "z.txt", "1\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "a.txt", "stashed\n");
+    write_file(dir.path(), "z.txt", "stashed\n");
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    let editor = common::hold_open_without_share_delete(&dir.path().join("z.txt"));
+
+    let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::HeldOpen(ref held) if held.path == "z.txt"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'z.txt' is open in another program. Some of the stash's changes were already applied. \
+         Close it, then try again to finish."
+    );
+    assert_eq!(read(dir.path(), "z.txt"), "1\n");
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+    drop(editor);
+    let outcome = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap();
+    assert_eq!(outcome, StashApplyOutcome::Applied);
+    assert_eq!(read(dir.path(), "a.txt"), "stashed\n");
+    assert_eq!(read(dir.path(), "z.txt"), "stashed\n");
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+}

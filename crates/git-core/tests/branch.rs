@@ -308,3 +308,45 @@ fn list_branches_counts_commits_ahead_and_behind_the_tracking_ref() {
     assert_eq!(branch.upstream.as_deref(), Some("origin/main"));
     assert_eq!((branch.ahead, branch.behind), (Some(2), Some(1)));
 }
+
+/// Windows: a switch whose checkout stops at a file another program keeps open says so, not
+/// libgit2's raw error, and leaves HEAD where it was; once the file is closed, switching again
+/// finishes it (#303).
+#[cfg(windows)]
+#[test]
+fn switching_with_a_file_open_in_another_program_says_so_and_finishes_when_tried_again() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "1\n");
+    write_file(dir.path(), "z.txt", "1\n");
+    commit_all(&repo, "base");
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    git_core::branch::create_branch(&repo, "side", "HEAD").unwrap();
+    write_file(dir.path(), "a.txt", "2\n");
+    write_file(dir.path(), "z.txt", "2\n");
+    commit_all(&repo, "side");
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+    let editor = common::hold_open_without_share_delete(&dir.path().join("z.txt"));
+
+    let error = git_core::branch::switch_branch(&repo, "side").unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            git_core::branch::BranchError::HeldOpen(ref held) if held.path == "z.txt"
+        ),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'z.txt' is open in another program. Some files were already switched. Close it, then \
+         try again to finish."
+    );
+    assert_eq!(repo.head().unwrap().shorthand(), Some(main.as_str()));
+    assert_eq!(common::read(dir.path(), "z.txt"), "1\n");
+    drop(editor);
+    git_core::branch::switch_branch(&repo, "side").unwrap();
+    assert_eq!(repo.head().unwrap().shorthand(), Some("side"));
+    assert_eq!(common::read(dir.path(), "a.txt"), "2\n");
+    assert_eq!(common::read(dir.path(), "z.txt"), "2\n");
+    assert!(repo.statuses(None).unwrap().is_empty());
+}
