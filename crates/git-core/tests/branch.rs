@@ -341,11 +341,11 @@ fn switching_with_a_file_open_in_another_program_says_so_and_finishes_when_tried
         "'z.txt' is open in another program. Some files were already switched. Close it, then \
          try again to finish."
     );
-    assert_eq!(repo.head().unwrap().shorthand(), Some(main.as_str()));
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some(main.as_str()));
     assert_eq!(common::read(dir.path(), "z.txt"), "1\n");
     drop(editor);
     git_core::branch::switch_branch(&repo, "side").unwrap();
-    assert_eq!(repo.head().unwrap().shorthand(), Some("side"));
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some("side"));
     assert_eq!(common::read(dir.path(), "a.txt"), "2\n");
     assert_eq!(common::read(dir.path(), "z.txt"), "2\n");
     assert!(repo.statuses(None).unwrap().is_empty());
