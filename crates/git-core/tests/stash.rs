@@ -1875,6 +1875,29 @@ fn a_case_only_variant_of_a_tracked_file_blocks_a_stashed_folder_when_ignorecase
     }
 }
 
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn a_case_only_variant_blocks_a_stashed_folder_on_macos_and_windows_even_if_ignorecase_is_off() {
+    // A repository copied from elsewhere can carry a wrong `core.ignorecase = false`; the drive
+    // still folds case, so `d` is `D` (#234).
+    let (dir, mut repo) = file_replaced_by_case_variant_folder(false);
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    let error = git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            StashError::UntrackedBelowTrackedFile { ref untracked, ref file }
+                if untracked == "d/x" && file == "D"
+        ),
+        "{error:?}"
+    );
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+    assert_eq!(top_level(dir.path()), ["D"]);
+    assert_eq!(read(dir.path(), "D"), "f\n");
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn a_case_only_variant_of_a_tracked_file_does_not_block_a_stash_when_ignorecase_is_off() {
