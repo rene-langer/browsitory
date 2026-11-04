@@ -1,8 +1,10 @@
 //! A libgit2 checkout that stopped part-way (#321): on Windows at a file another program holds
-//! open, on any platform at any other error. libgit2 has then written (or removed) the files
-//! before that one, and changed their entries in the repository's in-memory index, but not the
-//! index on disk, which it writes only once the checkout has finished. Trying the operation
-//! again doesn't finish it: the files it wrote now look like local changes.
+//! open, on any platform at a file or folder it may not write. libgit2 has then written (or
+//! removed) the files before that one, and changed their entries in the repository's in-memory
+//! index, but not the index on disk, which it writes only once the checkout has finished.
+//! Trying the operation again doesn't finish it: the files it wrote now look like local
+//! changes. (An error *while* writing a file, such as a full disk, leaves that file truncated;
+//! it isn't recorded, so it isn't put back.)
 //!
 //! [`Written`] records, through libgit2's progress callback, each path the checkout wrote or
 //! removed. [`roll_back`] puts those paths back as the index on disk has them, so the operation
@@ -91,12 +93,18 @@ impl From<crate::CaseCollision> for Unfinished {
 /// After a checkout that stopped part-way: puts each path in `written` back as the index on
 /// disk has it, in the work tree and in the repository's in-memory index (re-read from disk).
 /// Only for an operation whose checkout started from that index, i.e. a safe checkout, which
-/// writes only files whose content matches it: so nothing of the user's own is lost. A path
-/// the index doesn't have (a file the checkout created) is removed, with any folders that
-/// emptied. Nothing is written through a symlink: links in the way are removed first, and the
-/// files are checked out from the index by libgit2 (so `core.autocrlf` and other filters apply).
+/// writes over a tracked file only when its content matches the index, so no uncommitted
+/// change to a tracked file is lost. A path the index doesn't have (a file the checkout
+/// created) is removed, with any folders that emptied. libgit2 also writes over an ignored file
+/// in the way of a file it creates (git treats ignored files as expendable too); that file is
+/// then removed, not brought back. Nothing is written through a symlink: links in the way are
+/// removed first, and the files are checked out from the index by libgit2 (so `core.autocrlf`
+/// and other filters apply).
 ///
-/// `Ok` when nothing was written. The caller holds the operation's locks.
+/// Every path is tried, also after one failed: the tracked files first, then the created ones
+/// (deepest first), then the tracked files once more if a created one was in their way. The
+/// first error is returned at the end. `Ok` when nothing was written. The caller holds the
+/// operation's locks.
 pub(crate) fn roll_back(repo: &Repository, written: &Written) -> Result<(), Unfinished> {
     let paths = written.paths();
     if paths.is_empty() {
@@ -110,22 +118,40 @@ pub(crate) fn roll_back(repo: &Repository, written: &Written) -> Result<(), Unfi
     let (tracked, created): (Vec<Vec<u8>>, Vec<Vec<u8>>) = paths
         .into_iter()
         .partition(|path| index.get_path(&path_from_bytes(path), 0).is_some());
-    // Created files first, deepest first, so a tracked file can come back where a created
-    // folder was. A folder that still holds tracked files is left alone.
+    let restore = || -> Result<(), Unfinished> {
+        if tracked.is_empty() {
+            return Ok(());
+        }
+        check_out_paths(repo, &GuardSource::Index(&index), &tracked, |checkout| {
+            repo.checkout_index(None, Some(checkout))
+        })
+    };
+    let restored = restore();
+    let mut first_error = None;
+    let mut removed_any = false;
+    // A folder that still holds tracked files is left alone.
     for path in created.iter().rev() {
         let mut below = path.clone();
         below.push(b'/');
         if index.find_prefix(&below).is_ok() {
             continue;
         }
-        crate::worktree_guard::remove_and_prune_beneath(workdir, &path_from_bytes(path))?;
+        match crate::worktree_guard::remove_and_prune_beneath(workdir, &path_from_bytes(path)) {
+            Ok(()) => removed_any = true,
+            Err(error) => {
+                first_error.get_or_insert(Unfinished::Io(error));
+            }
+        }
     }
-    if !tracked.is_empty() {
-        check_out_paths(repo, &GuardSource::Index(&index), &tracked, |checkout| {
-            repo.checkout_index(None, Some(checkout))
-        })?;
+    // A created file (or folder) may have stood where a tracked one comes back.
+    let restored = match restored {
+        Err(_) if removed_any => restore(),
+        other => other,
+    };
+    match (restored, first_error) {
+        (Err(error), _) | (Ok(()), Some(error)) => Err(error),
+        (Ok(()), None) => Ok(()),
     }
-    Ok(())
 }
 
 /// After an abort's forced checkout of `head_tree` that stopped part-way: finishes each path in
@@ -237,4 +263,61 @@ fn path_from_bytes(bytes: &[u8]) -> PathBuf {
 #[cfg(not(unix))]
 fn path_from_bytes(bytes: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// A repository with `c.txt` committed and staged; `c.txt` and `n/new.txt` as a stopped
+    /// checkout left them: `c.txt` removed, `n/new.txt` created in the folder `n`, which is
+    /// then read-only so `n/new.txt` can't be removed. Both are recorded as written.
+    /// `None` as root, who ignores the mode (loud, and fails on CI).
+    fn stopped_with_an_unremovable_created_file() -> Option<(tempfile::TempDir, Repository, Written)>
+    {
+        if unsafe { libc::geteuid() } == 0 {
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "running as root on CI: the read-only test would prove nothing"
+            );
+            eprintln!("SKIP: running as root, who ignores read-only folders");
+            return None;
+        }
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("c.txt"), "c\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("c.txt")).unwrap();
+        index.write().unwrap();
+        std::fs::remove_file(dir.path().join("c.txt")).unwrap();
+        std::fs::create_dir(dir.path().join("n")).unwrap();
+        std::fs::write(dir.path().join("n/new.txt"), "new\n").unwrap();
+        std::fs::set_permissions(dir.path().join("n"), std::fs::Permissions::from_mode(0o555))
+            .unwrap();
+        let written = Written::default();
+        written.push(b"c.txt".to_vec());
+        written.push(b"n/new.txt".to_vec());
+        Some((dir, repo, written))
+    }
+
+    /// A created file that can't be removed doesn't stop the tracked files from coming back
+    /// (#321 review): every path is tried, and the first error is returned at the end.
+    #[test]
+    fn roll_back_restores_tracked_files_even_when_a_created_one_cant_be_removed() {
+        let Some((dir, repo, written)) = stopped_with_an_unremovable_created_file() else {
+            return;
+        };
+
+        let result = roll_back(&repo, &written);
+
+        std::fs::set_permissions(dir.path().join("n"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("c.txt")).unwrap(),
+            "c\n"
+        );
+        assert!(dir.path().join("n/new.txt").exists());
+    }
 }

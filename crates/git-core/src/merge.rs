@@ -817,6 +817,8 @@ pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, 
 /// then in the index. A checkout that stops part-way (a file another program holds open, a
 /// read-only file) leaves the index with the paths it didn't reach, so aborting again
 /// finishes (#321): the paths it did reach are put back in full, in the work tree and the index.
+/// A file the operation added that can't be removed (Windows: held open) doesn't stop the rest;
+/// it stays in the index for the next abort.
 fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(), MergeError> {
     let touched = reset.touched;
     let head_tree = repo.head()?.peel_to_commit()?.tree()?;
@@ -830,6 +832,9 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
     )?;
     let written = crate::partial_checkout::Written::default();
     let mut to_checkout = Vec::new();
+    // The first file added by the operation that couldn't be removed. The rest of the abort
+    // still runs, so aborting again has as little left to do as possible.
+    let mut not_removed: Option<(String, std::io::Error)> = None;
     for path in touched {
         let rel = path_from_bytes(&path);
         if head_tree.get_path(&rel).is_ok() {
@@ -837,10 +842,15 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
         } else if let Ok(rel) = std::str::from_utf8(&path) {
             // Added by the operation: not in HEAD, so remove it, never through a link and never
             // a folder.
-            crate::worktree_guard::remove_beneath(workdir, rel)?;
-            written.push(path);
+            match crate::worktree_guard::remove_beneath(workdir, rel) {
+                Ok(_) => written.push(path.clone()),
+                Err(error) => {
+                    not_removed.get_or_insert((rel.to_string(), error));
+                }
+            }
         }
     }
+    let mut checked_out = Ok(());
     if !to_checkout.is_empty() {
         let mut checkout = git2::build::CheckoutBuilder::new();
         // Paths are literal file names, not globs (`[ab].txt` must not match `a.txt`).
@@ -849,16 +859,33 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
             checkout.path(path);
         }
         written.record(&mut checkout);
-        repo.checkout_head(Some(&mut checkout)).map_err(|error| {
-            let finished = crate::partial_checkout::roll_forward(repo, &head_tree, &written);
-            // Nothing put back yet: nothing changed, so it is the plain "try again".
-            let during = if written.is_empty() {
-                crate::HeldDuring::RolledBack
-            } else {
-                crate::HeldDuring::Abort
-            };
-            crate::partial_checkout::report::<MergeError>(repo, finished, during, error)
-        })?;
+        checked_out = repo.checkout_head(Some(&mut checkout));
+    }
+    let failed = match (not_removed, checked_out) {
+        (None, Ok(())) => None,
+        (Some(not_removed), _) => Some(Err(not_removed)),
+        (None, Err(error)) => Some(Ok(error)),
+    };
+    if let Some(failed) = failed {
+        let finished = crate::partial_checkout::roll_forward(repo, &head_tree, &written);
+        // Nothing put back yet: nothing changed, so it is the plain "try again".
+        let during = if written.is_empty() {
+            crate::HeldDuring::RolledBack
+        } else {
+            crate::HeldDuring::Abort
+        };
+        return Err(match failed {
+            Err((path, error)) => {
+                if finished.is_ok() && crate::worktree_guard::is_held_open(workdir, &path) {
+                    crate::HeldOpen { path, during }.into()
+                } else {
+                    MergeError::Io(error)
+                }
+            }
+            Ok(error) => {
+                crate::partial_checkout::report::<MergeError>(repo, finished, during, error)
+            }
+        });
     }
     let mut index = repo.index()?;
     index.read(true)?;

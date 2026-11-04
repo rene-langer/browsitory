@@ -1087,6 +1087,12 @@ fn quoted_in_message<'a>(workdir: &Path, message: &str, paths: &[&'a str]) -> Op
         .find(|rel| message.contains(&format!("'{base}/{}'", rel.replace('\\', "/"))))
 }
 
+/// Whether another program holds `rel` open so it can't be replaced or removed (Windows; see
+/// [`held_open_after_checkout`] for the probe). Always false elsewhere.
+pub(crate) fn is_held_open(workdir: &Path, rel: &str) -> bool {
+    held_open_among(workdir, [rel]).is_some()
+}
+
 #[cfg(windows)]
 fn held_open_among<'a>(
     workdir: &Path,

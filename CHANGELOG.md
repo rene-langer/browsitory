@@ -20,6 +20,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it but left the files it hadn't reached with the merge's changes. Aborting again now puts
   them back too. On Windows the message names the file: "'f.txt' is open in another program.
   Some files were already put back. Close it, then abort again to finish." (#321)
+- Fixed: on Windows, a rebase abort stopped by a file another program kept open said "Some
+  files were already put back" even when it hadn't changed anything yet. It now says only
+  "Close it, then try again." in that case (#321).
 
 ### Internal: notices on Renovate PRs
 

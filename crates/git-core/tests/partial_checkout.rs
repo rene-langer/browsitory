@@ -184,7 +184,15 @@ impl ReadOnly {
     fn new(dir: &Path) -> Option<Self> {
         use std::os::unix::fs::PermissionsExt;
         if unsafe { libc::geteuid() } == 0 {
-            eprintln!("SKIP: root writes read-only files");
+            // CI must never pass these tests without running them.
+            assert!(
+                std::env::var_os("CI").is_none(),
+                "running as root on CI: root writes read-only files, so this test would prove \
+                 nothing"
+            );
+            eprintln!(
+                "SKIP: running as root, who writes read-only files; this test proves nothing"
+            );
             return None;
         }
         let mut paths = Vec::new();
@@ -552,4 +560,81 @@ fn a_merge_abort_stopped_part_way_keeps_the_merge_to_abort_again() {
         status(&f.repo),
         vec![("u.txt".to_string(), git2::Status::WT_MODIFIED)]
     );
+}
+
+/// Windows: a merge abort that can't remove a file the merge added, because another program
+/// holds it open, names it (not an I/O error), puts back what it can, and finishes when
+/// aborted again once the file is closed (#321 review).
+#[cfg(windows)]
+#[test]
+fn a_merge_abort_at_a_held_file_the_merge_added_says_so_and_finishes_when_aborted_again() {
+    let f = paused_merge();
+    let editor = common::hold_open_without_share_delete(&f.dir.path().join("b.txt"));
+
+    let error = git_core::merge::abort_merge(&f.repo).unwrap_err();
+
+    drop(editor);
+    assert_eq!(
+        error.to_string(),
+        "'b.txt' is open in another program. Some files were already put back. Close it, then \
+         abort again to finish.",
+    );
+    assert!(
+        matches!(&error, git_core::merge::MergeError::HeldOpen(held) if held.path == "b.txt"),
+        "{error:?}"
+    );
+    assert!(git_core::merge::is_merging(&f.repo));
+
+    git_core::merge::abort_merge(&f.repo).unwrap();
+
+    assert!(!git_core::merge::is_merging(&f.repo));
+    assert_eq!(files(f.dir.path()), merge_aborted());
+    assert_eq!(
+        status(&f.repo),
+        vec![("u.txt".to_string(), git2::Status::WT_MODIFIED)]
+    );
+}
+
+/// Windows: a rebase abort whose checkout stops before it changed anything says so plainly,
+/// not "Some files were already put back" (#321 review), and finishes when aborted again.
+#[cfg(windows)]
+#[test]
+fn a_rebase_abort_stopped_before_writing_anything_says_so_plainly() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "base\n");
+    commit_all(&repo, "base");
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    git_core::branch::create_branch(&repo, "onto", "HEAD").unwrap();
+    write_file(dir.path(), "f.txt", "onto\n");
+    commit_all(&repo, "onto");
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+    write_file(dir.path(), "f.txt", "main\n");
+    commit_all(&repo, "main");
+    let main_tip = repo.head().unwrap().target().unwrap();
+    let plan = vec![RebasePlanEntry {
+        commit_id: main_tip.to_string(),
+        action: RebaseAction::Pick,
+        combined_message: None,
+    }];
+    let (state, result) = git_core::rebase::start_rebase(&repo, "onto", plan).unwrap();
+    assert!(
+        matches!(result, RebaseStepResult::Conflicted { .. }),
+        "{result:?}"
+    );
+    // The only file the abort has to put back.
+    let editor = common::hold_open_without_share_delete(&dir.path().join("f.txt"));
+
+    let error = git_core::rebase::abort_rebase(&repo, &state).unwrap_err();
+
+    drop(editor);
+    assert_eq!(
+        error.to_string(),
+        "'f.txt' is open in another program. Close it, then try again.",
+    );
+
+    let abort = git_core::rebase::abort_rebase(&repo, &state).unwrap();
+
+    assert!(abort.restored);
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some(main.as_str()));
+    assert_eq!(common::read(dir.path(), "f.txt"), "main\n");
 }
