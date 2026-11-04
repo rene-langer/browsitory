@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { thirdPartyNoticesPlugin } from "./vite.notices.ts";
+import { excludeGrammarsPlugin } from "./vite.grammars.ts";
 
 export default defineConfig({
   base: "./",
@@ -9,7 +10,7 @@ export default defineConfig({
     "import.meta.url": JSON.stringify(""),
     "import.meta.resolve": "undefined",
   },
-  plugins: [react(), thirdPartyNoticesPlugin()],
+  plugins: [react(), thirdPartyNoticesPlugin(), excludeGrammarsPlugin()],
   build: {
     outDir: "dist-vscode",
     emptyOutDir: true,

@@ -67,6 +67,7 @@ the Notes column. CI checks the full transitive trees automatically (see "Automa
 | @tauri-apps/plugin-updater | MIT OR Apache-2.0 | frontend half of `tauri-plugin-updater`, used by `UpdateBanner`. Source: `npm info @tauri-apps/plugin-updater license`, verified 2026-08-26. |
 | @tauri-apps/plugin-log | MIT OR Apache-2.0 | frontend half of `tauri-plugin-log`; `tauriRepoClient.ts` and `main.tsx` log IPC/uncaught failures into the same rotated file as the Rust backend. Source: `npm info @tauri-apps/plugin-log license`, verified 2026-08-28. |
 | shiki 4.5.0 | MIT | `frontend` — syntax highlighting in diffs, using its JavaScript regex engine (no WebAssembly, so no CSP change) and CSS-variables theme. Languages load on demand. Source: [npm](https://www.npmjs.com/package/shiki/v/4.5.0); verified with `npm info shiki@4.5.0 license` on 2026-10-16. |
+| tm-grammars 1.32.22 | MIT | `frontend`, dev only, pinned exactly. The TextMate grammar collection Shiki's `@shikijs/langs` is built from; `scripts/generate-third-party-notices.py` reads its per-grammar metadata and `NOTICE` to list the shipped grammars' upstream licences. Nothing of it is bundled. Keep it on the release `@shikijs/langs` was built from: the generator fails when a shipped grammar differs between the two. No dependencies. Source: [npm](https://www.npmjs.com/package/tm-grammars/v/1.32.22); verified with `npm info tm-grammars@1.32.22 license` on 2026-11-04. |
 
 ## JavaScript, `extension/` (`npm info <package> license`)
 
@@ -196,6 +197,20 @@ routine update doesn't break CI; a new crate under the same licence still fails)
 | cssparser, cssparser-macros, selectors, dtoa-short | MPL-2.0 | Build time only on our targets: Tauri's build and code generation (`tauri-build`, `tauri-codegen`) through `dom_query`. Not linked into anything we ship. Owner decision 2026-11-03 (#273). |
 | target-lexicon | Apache-2.0 WITH LLVM-exception | Build time only (`system-deps`, used by the Linux GTK bindings' build scripts). The LLVM exception only adds permissions to Apache-2.0. Owner decision 2026-11-03 (#273). |
 
+## Syntax highlighting grammars
+
+The diff view's syntax highlighting bundles TextMate grammars from Shiki (`@shikijs/langs`,
+built from `tm-grammars`). Each grammar keeps its upstream licence, so
+`scripts/generate-third-party-notices.py` works out which grammars ship (the loaders in
+`frontend/src/lib/highlight.ts` plus the grammars they import) and copies their licence texts
+from `tm-grammars`' `NOTICE` into `THIRD_PARTY_NOTICES.md`. It fails on a shipped grammar
+whose licence is not allowed and has no entry below. Almost all shipped grammars are MIT.
+
+| Grammar | License | Decision |
+|---|---|---|
+| yaml, toml | TextMate bundle permission notice ("Permission to copy, use, modify, sell and distribute this software is granted …", from the READMEs of textmate/yaml.tmbundle and textmate/toml.tmbundle) | Accepted per grammar, owner decision 2026-11-04 (#301). The notice text ships in `THIRD_PARTY_NOTICES.md` (`scripts/notices/grammars/textmate-bundle-license.txt`). Recorded in `GRAMMAR_EXCEPTIONS` in the generator, by exact grammar name. |
+| glsl (and cpp, cpp-macro) | none (polym0rph/GLSL.tmbundle has no licence) | Not shipped, owner decision 2026-11-04 (#301). Shiki's `cpp` grammar embeds `glsl`, so `cpp` and `cpp-macro` are left out too (`frontend/src/lib/excludedGrammars.ts`); C++ files use the C grammar. `frontend/vite.grammars.ts` keeps them out of both builds and fails a build that still contains one. |
+
 ## JavaScript dev-tree exceptions
 
 Recorded in `EXCEPTIONS` and `CLARIFICATIONS` in `scripts/check-dependency-licenses.py`; keep
@@ -296,6 +311,8 @@ notices of everything Browsitory ships (#301, #202). It is generated; never edit
      dependencies (such as the build-only MPL-2.0 crates above) are left out.
   3. The production npm trees of `frontend/` and `extension/` (`pnpm licenses list --prod`),
      without `@types/*`, with each package's own licence files.
+  4. The syntax highlighting grammars the app bundles, with their upstream licence texts (see
+     "Syntax highlighting grammars" above).
 - **Regenerate** after any dependency change (Renovate PRs too), then commit the result:
 
   ```bash

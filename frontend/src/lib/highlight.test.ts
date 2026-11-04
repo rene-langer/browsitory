@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { highlightLines } from "./highlight";
+import { highlightLines, withoutExcludedGrammars } from "./highlight";
 
 describe("highlightLines", () => {
   it("tokenizes per line with css-variable colors", async () => {
@@ -14,4 +14,26 @@ describe("highlightLines", () => {
     const b = await highlightLines("rust", "fn main() {}");
     expect(b).toBe(a);
   }, 20000);
+
+  it("loads Ruby without the C++ grammar it embeds, and keeps C++-free Ruby highlighting", async () => {
+    const lines = await highlightLines("ruby", "x = <<~CPP\n  int main() {}\nCPP\nputs x");
+    expect(lines).toHaveLength(4);
+    expect(lines[3].map((t) => t.content).join("")).toBe("puts x");
+  }, 20000);
+});
+
+describe("withoutExcludedGrammars", () => {
+  it("drops excluded grammars and the embedded references to them", () => {
+    const grammar = (name: string, embeddedLangs?: string[]) =>
+      ({ name, scopeName: `source.${name}`, patterns: [], repository: {}, embeddedLangs }) as never;
+    const result = withoutExcludedGrammars([
+      grammar("glsl"),
+      grammar("cpp-macro"),
+      grammar("cpp", ["glsl"]),
+      grammar("c"),
+      grammar("ruby", ["cpp", "c", "yaml"]),
+    ]);
+    expect(result.map((l) => l.name)).toEqual(["c", "ruby"]);
+    expect(result[1].embeddedLangs).toEqual(["c", "yaml"]);
+  });
 });

@@ -202,6 +202,68 @@ class RunTests(unittest.TestCase):
         self.assertEqual(seen["encoding"], "utf-8")
 
 
+class GrammarTests(unittest.TestCase):
+    MODULES = {
+        "ruby": "import cpp from './cpp.mjs'\nimport yaml from './yaml.mjs'\nconst lang = 1",
+        "cpp": "import glsl from './glsl.mjs'\n",
+        "glsl": "",
+        "yaml": "",
+        "rust": "",
+    }
+    HIGHLIGHT = 'a: () => import("shiki/langs/ruby.mjs"),\nb: () => import("shiki/langs/rust.mjs"),'
+
+    def test_shipped_set_follows_imports_and_stops_at_excluded_grammars(self):
+        shipped = gen.shipped_grammars(self.HIGHLIGHT, self.MODULES.__getitem__, {"cpp", "glsl"})
+        self.assertEqual(shipped, {"ruby", "yaml", "rust"})
+        self.assertIn("glsl", gen.shipped_grammars(self.HIGHLIGHT, self.MODULES.__getitem__, set()))
+
+    def test_excluded_grammars_reads_the_typescript_list(self):
+        source = gen.EXCLUDED_GRAMMARS_TS.read_text(encoding="utf-8")
+        self.assertEqual(gen.excluded_grammars(source), {"cpp", "cpp-macro", "glsl"})
+
+    def test_parse_notice_maps_each_file_to_its_section(self):
+        notice = (
+            "THIRD-PARTY SOFTWARE NOTICES\n"
+            "=====\nFiles:   c.json, rust.json\nLicense: https://x\nSPDX:    MIT\n"
+            + "-" * 30 + "\nMIT text\n"
+            "=====\nFiles:   ada.json\nLicense: https://y\nSPDX:    GPL-3.0\n" + "-" * 30 + "\nGPL text\n"
+        )
+        sections = gen.parse_grammar_notice(notice)
+        self.assertEqual(sections["rust"], ("MIT", "MIT text\n"))
+        self.assertEqual(sections["c"], sections["rust"])
+        self.assertEqual(sections["ada"][0], "GPL-3.0")
+
+    def entries(self, shipped, metadata, exceptions=None):
+        notice = {"rust": ("MIT", "MIT text"), "glsl": ("", "")}
+        exceptions = {"yaml": gen.GrammarException("TextMate", "t.txt", "r")} if exceptions is None else exceptions
+        return gen.grammar_entries(
+            shipped, metadata, notice, frozenset({"MIT"}), read_exception_text=lambda f: f"text of {f}", exceptions=exceptions
+        )
+
+    def test_allowed_and_excepted_grammars_pass(self):
+        entries, problems = self.entries({"rust", "yaml"}, {"rust": {"license": "MIT"}, "yaml": {}})
+        self.assertEqual(problems, [])
+        self.assertEqual(entries, [("rust", "MIT", "MIT text"), ("yaml", "TextMate", "text of t.txt")])
+
+    def test_an_unlicensed_or_unknown_grammar_fails(self):
+        _, problems = self.entries({"glsl", "mystery", "yaml"}, {"glsl": {"source": "https://g"}})
+        self.assertTrue(any("grammar glsl (https://g) is licensed nowhere" in p for p in problems), problems)
+        self.assertTrue(any("mystery has no tm-grammars metadata" in p for p in problems), problems)
+
+    def test_an_unused_exception_fails(self):
+        _, problems = self.entries({"rust"}, {"rust": {"license": "MIT"}})
+        self.assertEqual(problems, ["GRAMMAR_EXCEPTIONS entry yaml matches no shipped grammar; remove it"])
+
+    def test_drift_ignores_the_keys_shiki_adds(self):
+        upstream = {"name": "x", "patterns": [1]}
+        self.assertEqual(gen.grammar_drift({**upstream, "aliases": ["y"], "embeddedLangs": ["c"]}, upstream), [])
+        self.assertEqual(gen.grammar_drift({"name": "x", "patterns": [2]}, upstream), ["patterns"])
+
+    def test_shiki_grammar_reads_the_embedded_json(self):
+        module = 'const lang = Object.freeze(JSON.parse("{\\"name\\":\\"x\\"}"))'
+        self.assertEqual(gen.shiki_grammar(module), {"name": "x"})
+
+
 class MainTests(unittest.TestCase):
     def run_main(self, argv, content, current):
         with tempfile.TemporaryDirectory() as tmp:

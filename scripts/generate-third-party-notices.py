@@ -13,6 +13,11 @@ and in every VSCode extension package. It has three parts:
 3. The npm packages bundled into the shipped JavaScript: the production trees of `frontend/`
    and `extension/` (`pnpm licenses list --prod`), without `@types/*` type-only packages,
    with the licence files from each package.
+4. The TextMate grammars the syntax highlighting bundles: highlight.ts's Shiki languages plus
+   the grammars they import, minus frontend/src/lib/excludedGrammars.ts, with their upstream
+   licence texts from tm-grammars' NOTICE (frontend devDependency, pinned to the release
+   @shikijs/langs was built from; checked). A grammar under a licence outside the policy fails
+   unless GRAMMAR_EXCEPTIONS names it.
 
 Usage, from the repository root, after `pnpm install` in frontend/ and extension/:
 
@@ -176,10 +181,14 @@ def parse_cargo_tree(output: str, workspace: set[str]) -> set[tuple[str, str]]:
 
 
 def _run(cmd: list[str], run=subprocess.run) -> str:
+    return _run_in(cmd, ROOT, run)
+
+
+def _run_in(cmd: list[str], cwd: Path, run=subprocess.run) -> str:
     try:
         # cargo-about's JSON carries non-ASCII licence texts; never decode with the locale's
         # default (cp1252 on Windows).
-        return run(cmd, cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8").stdout
+        return run(cmd, cwd=cwd, check=True, capture_output=True, text=True, encoding="utf-8").stdout
     except FileNotFoundError as e:
         raise NoticesError(f"{cmd[0]} not found") from e
     except subprocess.CalledProcessError as e:
@@ -269,6 +278,194 @@ def run_pnpm_licenses(project: str) -> dict:
         raise NoticesError(f"`pnpm licenses list --prod` failed in {project}/: {e}") from e
 
 
+# --- Syntax highlighting grammars (Shiki, tm-grammars) ---------------------------------------
+
+FRONTEND = ROOT / "frontend"
+HIGHLIGHT_TS = FRONTEND / "src" / "lib" / "highlight.ts"
+EXCLUDED_GRAMMARS_TS = FRONTEND / "src" / "lib" / "excludedGrammars.ts"
+GRAMMAR_NOTICE_DIR = ROOT / "scripts" / "notices" / "grammars"
+
+
+@dataclass(frozen=True)
+class GrammarException:
+    license: str  # label shown in the notices
+    text_file: str  # in scripts/notices/grammars/
+    reason: str
+
+
+# Shipped grammars whose upstream licence is not on the allowed list. Each is an owner decision,
+# recorded in docs/LICENSE_COMPLIANCE.md ("Syntax highlighting grammars"); exact grammar names
+# only. An entry that matches no shipped grammar fails the generator.
+TEXTMATE_BUNDLE = GrammarException(
+    "TextMate bundle licence",
+    "textmate-bundle-license.txt",
+    "TextMate bundle permission notice; owner decision 2026-11-04 (#301)",
+)
+GRAMMAR_EXCEPTIONS: dict[str, GrammarException] = {
+    "yaml": TEXTMATE_BUNDLE,  # textmate/yaml.tmbundle
+    "toml": TEXTMATE_BUNDLE,  # textmate/toml.tmbundle
+}
+
+# Keys Shiki adds to a tm-grammars grammar when it builds @shikijs/langs.
+SHIKI_ADDED_KEYS = ("aliases", "embeddedLangs", "embeddedLangsLazy")
+
+
+def excluded_grammars(source: str) -> set[str]:
+    """The `name`s in excludedGrammars.ts's EXCLUDED_GRAMMARS array."""
+    block = re.search(r"EXCLUDED_GRAMMARS = \[(.*?)\] as const", source, re.DOTALL)
+    if block is None:
+        raise NoticesError(f"{EXCLUDED_GRAMMARS_TS.relative_to(ROOT)}: EXCLUDED_GRAMMARS not found")
+    return set(re.findall(r'name: "([\w.+-]+)"', block.group(1)))
+
+
+def grammar_imports(module_source: str) -> list[str]:
+    """The grammars a @shikijs/langs module imports (`import x from './name.mjs'`)."""
+    return re.findall(r"^import \w+ from '\./([\w.+-]+)\.mjs'", module_source, re.MULTILINE)
+
+
+def shipped_grammars(highlight_source: str, read_module, excluded: set[str]) -> set[str]:
+    """Every grammar the app bundles: highlight.ts's loaders plus what they import, without the
+    excluded ones (vite.grammars.ts cuts those imports)."""
+    roots = re.findall(r'import\("shiki/langs/([\w.+-]+)\.mjs"\)', highlight_source)
+    if not roots:
+        raise NoticesError(f"no shiki/langs imports found in {HIGHLIGHT_TS.relative_to(ROOT)}")
+    shipped: set[str] = set()
+    todo = [name for name in roots if name not in excluded]
+    while todo:
+        name = todo.pop()
+        if name in shipped:
+            continue
+        shipped.add(name)
+        todo += [dep for dep in grammar_imports(read_module(name)) if dep not in excluded]
+    return shipped
+
+
+def shiki_grammar(module_source: str) -> dict:
+    """The grammar JSON inside a @shikijs/langs module (`JSON.parse("...")`)."""
+    match = re.search(r'JSON\.parse\(("(?:[^"\\]|\\.)*")\)', module_source)
+    if match is None:
+        raise NoticesError("no JSON.parse(...) grammar found in a @shikijs/langs module")
+    return json.loads(json.loads(match.group(1)))
+
+
+def grammar_drift(shiki: dict, upstream: dict) -> list[str]:
+    """Top-level keys where Shiki's copy of a grammar differs from tm-grammars' copy."""
+    keys = (set(shiki) | set(upstream)) - set(SHIKI_ADDED_KEYS)
+    return sorted(k for k in keys if shiki.get(k) != upstream.get(k))
+
+
+def parse_grammar_notice(notice: str) -> dict[str, tuple[str, str]]:
+    """tm-grammars' NOTICE -> {grammar name: (SPDX id, licence text)}."""
+    sections: dict[str, tuple[str, str]] = {}
+    for block in re.split(r"^=+\n", notice, flags=re.MULTILINE)[1:]:
+        head, sep, text = block.partition("\n" + "-" * 20)
+        if not sep:
+            continue
+        files = re.search(r"^Files:\s+(.+)$", head, re.MULTILINE)
+        spdx = re.search(r"^SPDX:\s+(.+)$", head, re.MULTILINE)
+        if files is None:
+            continue
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        for file in files.group(1).split(","):
+            name = file.strip().removesuffix(".json")
+            sections[name] = (spdx.group(1).strip() if spdx else "", text)
+    return sections
+
+
+def grammar_entries(
+    shipped: set[str],
+    metadata: dict[str, dict],
+    notice: dict[str, tuple[str, str]],
+    allowed: frozenset[str],
+    read_exception_text=lambda name: (GRAMMAR_NOTICE_DIR / name).read_text(encoding="utf-8"),
+    exceptions: dict[str, GrammarException] | None = None,
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Shipped grammars -> ([(grammar, licence, text)], problems)."""
+    checker = _load_license_checker()
+    exceptions = GRAMMAR_EXCEPTIONS if exceptions is None else exceptions
+    entries, problems = [], []
+    for name in sorted(shipped):
+        meta = metadata.get(name)
+        if name in exceptions:
+            exc = exceptions[name]
+            entries.append((name, exc.license, read_exception_text(exc.text_file)))
+            continue
+        if meta is None:
+            problems.append(f"grammar {name} has no tm-grammars metadata entry")
+            continue
+        license_id = meta.get("license") or ""
+        if not license_id or not checker.satisfies(license_id, allowed):
+            problems.append(
+                f"grammar {name} ({meta.get('source', '?')}) is licensed {license_id or 'nowhere'}, which is "
+                "not an allowed licence and has no GRAMMAR_EXCEPTIONS entry; it needs an owner decision, "
+                "or add it to frontend/src/lib/excludedGrammars.ts"
+            )
+            continue
+        if name not in notice:
+            problems.append(f"grammar {name} has no section in tm-grammars' NOTICE")
+            continue
+        entries.append((name, license_id, notice[name][1]))
+    for name in sorted(set(exceptions) - shipped):
+        problems.append(f"GRAMMAR_EXCEPTIONS entry {name} matches no shipped grammar; remove it")
+    return entries, problems
+
+
+def grammar_sources(shipped: set[str], metadata: dict[str, dict]) -> list[str]:
+    lines = []
+    for name in sorted(shipped):
+        meta = metadata.get(name, {})
+        lines.append(f"- {meta.get('displayName', name)} (`{name}`): {meta.get('source', 'source unknown')}")
+    return lines
+
+
+def _node_json(script: str) -> object:
+    return json.loads(_run_in(["node", "--input-type=module", "-e", script], FRONTEND))
+
+
+def collect_grammars() -> tuple[list[tuple[str, str, str]], list[str]]:
+    """The shipped grammars' notice entries and their source list. Raises NoticesError."""
+    tm_dir = FRONTEND / "node_modules" / "tm-grammars"
+    shiki_dir = (FRONTEND / "node_modules" / "shiki").resolve()
+    langs_dir = shiki_dir.parent / "@shikijs" / "langs" / "dist"
+    if not tm_dir.is_dir() or not langs_dir.is_dir():
+        raise NoticesError("frontend/node_modules lacks tm-grammars or @shikijs/langs; run `pnpm install` in frontend/")
+
+    def read_module(name: str) -> str:
+        path = langs_dir / f"{name}.mjs"
+        if not path.is_file():
+            raise NoticesError(f"@shikijs/langs has no {name}.mjs")
+        return path.read_text(encoding="utf-8")
+
+    excluded = excluded_grammars(EXCLUDED_GRAMMARS_TS.read_text(encoding="utf-8"))
+    shipped = shipped_grammars(HIGHLIGHT_TS.read_text(encoding="utf-8"), read_module, excluded)
+
+    # The tm-grammars pin must be the release @shikijs/langs was built from (Shiki only asks
+    # for a version range): every shipped grammar must be identical in both.
+    tm_version = json.loads((tm_dir / "package.json").read_text(encoding="utf-8"))["version"]
+    langs_version = json.loads((langs_dir.parent / "package.json").read_text(encoding="utf-8"))["version"]
+    problems = []
+    for name in sorted(shipped):
+        upstream = tm_dir / "grammars" / f"{name}.json"
+        if not upstream.is_file():
+            problems.append(f"tm-grammars {tm_version} has no {name} grammar")
+            continue
+        drift = grammar_drift(shiki_grammar(read_module(name)), json.loads(upstream.read_text(encoding="utf-8")))
+        if drift:
+            problems.append(f"grammar {name} differs between @shikijs/langs {langs_version} and tm-grammars {tm_version} ({', '.join(drift)})")
+    if problems:
+        raise NoticesError(
+            "\n".join(problems)
+            + f"\nPin frontend's tm-grammars devDependency to the version @shikijs/langs {langs_version} was built from."
+        )
+
+    metadata = {g["name"]: g for g in _node_json('import { grammars } from "tm-grammars"; console.log(JSON.stringify(grammars))')}
+    notice = parse_grammar_notice((tm_dir / "NOTICE").read_text(encoding="utf-8"))
+    entries, problems = grammar_entries(shipped, metadata, notice, _load_license_checker().ALLOWED)
+    if problems:
+        raise NoticesError("\n".join(problems))
+    return entries, grammar_sources(shipped, metadata)
+
+
 # --- Native libraries (hand-maintained header) -------------------------------------------
 
 
@@ -314,16 +511,29 @@ RUST_INTRO = (
     "Browsitory uses it under the one shown."
 )
 NPM_INTRO = "JavaScript packages bundled into the app's user interface."
+GRAMMAR_INTRO = (
+    "TextMate grammars the app's syntax highlighting bundles (through Shiki's `@shikijs/langs`, "
+    "built from `tm-grammars`), each with its upstream source and licence:"
+)
 FOOTER = f"<!-- Generated by scripts/generate-third-party-notices.py. Do not edit; run `{REGENERATE}`. -->"
 
 
-def render(header: str, rust: list[LicenseGroup], npm: list[LicenseGroup]) -> str:
+def render(
+    header: str,
+    rust: list[LicenseGroup],
+    npm: list[LicenseGroup],
+    grammars: list[LicenseGroup] | None = None,
+    grammar_source_lines: list[str] | None = None,
+) -> str:
     parts = [
         normalize_text(header),
         render_section("Rust crates", RUST_INTRO, rust).rstrip(),
         render_section("JavaScript packages", NPM_INTRO, npm).rstrip(),
-        FOOTER,
     ]
+    if grammars:
+        intro = GRAMMAR_INTRO + "\n\n" + "\n".join(grammar_source_lines or [])
+        parts.append(render_section("Syntax highlighting grammars", intro, grammars).rstrip())
+    parts.append(FOOTER)
     return "\n\n".join(parts) + "\n"
 
 
@@ -348,7 +558,8 @@ def generate() -> str:
     unused = sorted(set(NPM_FALLBACK_TEXTS) - used_fallbacks)
     if unused:
         raise NoticesError(f"NPM_FALLBACK_TEXTS entries match no package without a licence file: {', '.join(unused)}")
-    return render(header, group_by_text(rust), group_by_text(npm))
+    grammars, grammar_source_lines = collect_grammars()
+    return render(header, group_by_text(rust), group_by_text(npm), group_by_text(grammars), grammar_source_lines)
 
 
 def main(argv: list[str] | None = None, generate_fn=generate) -> int:
