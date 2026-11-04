@@ -56,8 +56,9 @@ pub struct HeadInfo {
     pub detached_at: Option<String>,
     pub head_pushed: bool,
     pub operation: Option<OperationKind>,
-    /// `operation`'s commit already landed and only git's state files stayed behind
-    /// (`commit::leftover_operation`, #240). The next commit or amend clears them; Abort does too.
+    /// `operation`'s changes are already in HEAD and only git's state files are left: its own
+    /// commit's cleanup failed, or a duplicate pick stopped as empty (`commit::leftover_operation`,
+    /// #240). The next commit or amend clears them; Abort does too.
     pub operation_leftover: bool,
     /// A pending squash merge's message (`SQUASH_MSG`), which pre-fills the commit box.
     pub squash_message: Option<String>,

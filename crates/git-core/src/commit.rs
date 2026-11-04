@@ -635,7 +635,11 @@ pub fn commit_with(
     // A merge whose commit already landed but whose state could not be cleared (D7-A): every
     // MERGE_HEAD is already in HEAD's history. Committing "the merge" again would make a second
     // merge commit, so the leftover state is cleared and this is an ordinary commit (#183).
-    if is_merging && merge_already_committed(repo, head_before, &merge_parent_ids) {
+    // Never with conflict stages in the index: that merge is still being resolved.
+    if is_merging
+        && !index_conflicted(repo)
+        && merge_already_committed(repo, head_before, &merge_parent_ids)
+    {
         clear_commit_state(repo).map_err(|_| CommitError::LeftoverMergeState)?;
         is_merging = false;
         merge_parent_ids.clear();
@@ -799,24 +803,36 @@ fn merge_already_committed(
         })
 }
 
-/// A cherry-pick is in progress and HEAD is already its commit (decision D3-A): one parent,
-/// the picked commit's author (name, email and time), and exactly the pick's result on every
-/// path it changes cleanly, at least one (`pick::commit_carries_pick` with `Coverage::Exact`).
-/// The message isn't compared, since hooks may rewrite it.
+/// The index has conflict stages (or can't be read): an operation paused there is still being
+/// resolved, never a leftover, whatever HEAD looks like.
+/// Read from disk if it changed there (a terminal may have written it).
+fn index_conflicted(repo: &git2::Repository) -> bool {
+    repo.index()
+        .and_then(|mut index| index.read(false).map(|()| index.has_conflicts()))
+        .unwrap_or(true)
+}
+
+/// A cherry-pick is in progress and HEAD already carries its change (decision D3-A): no conflict
+/// stages in the index, one parent, the picked commit's author (name, email and time), and
+/// exactly the pick's result on every path it changes cleanly, at least one
+/// (`pick::commit_carries_pick` with `Coverage::Exact`). The message isn't compared, since hooks
+/// may rewrite it. This is a heuristic, not a proof.
 ///
-/// A paused pick's HEAD is the commit the pick applies to. To be taken for the pick it would
-/// need the picked author with the same second and the pick's exact content on every path the
-/// pick changes cleanly onto HEAD's parent, so the pick could only have paused on paths that
-/// also conflict there: a look-alike commit that contrived is accepted as a risk. Not
-/// recognised (the state stays, the commit
-/// takes the picked author as before): a pick with no clean change, and a merge commit picked
-/// with a mainline (which parent was used isn't recorded). An error while checking counts as
-/// "not a leftover", so the check never blocks a commit.
+/// Two cases match, and both are treated alike on purpose. One is the pick's own commit whose
+/// state wasn't cleared (D7-A). The other is the common duplicate pick: `git cherry-pick X` run
+/// again in a terminal once HEAD is X's pick stops as empty ("The previous cherry-pick is now
+/// empty") and leaves CHERRY_PICK_HEAD. Clearing it then is what `git cherry-pick --skip` does;
+/// a terminal sequence keeps its todo (`clear_commit_state`), so `--continue` goes on with the
+/// next step. Not recognised (the state stays, the commit takes the picked author as before): a
+/// pick with no clean change, and a merge commit picked with a mainline (which parent was used
+/// isn't recorded). An error while checking counts as "not a leftover", so the check never
+/// blocks a commit.
 fn pick_already_committed(repo: &git2::Repository) -> bool {
     if !matches!(
         repo.state(),
         git2::RepositoryState::CherryPick | git2::RepositoryState::CherryPickSequence
-    ) {
+    ) || index_conflicted(repo)
+    {
         return false;
     }
     let Some(picked) = repo
@@ -847,19 +863,23 @@ fn pick_already_committed(repo: &git2::Repository) -> bool {
     )
 }
 
-/// A revert is in progress and HEAD is already its commit: one parent, a message that names the
-/// reverted commit as git's revert message does ("This reverts commit <full id>"), and exactly
-/// the revert's result on every path it changes cleanly onto HEAD's parent, at least one
-/// (`pick::commit_carries_revert`). The author can't tell (a revert is authored by the user), so
-/// the message line takes its place: a commit that undoes the same change by hand is not the
-/// revert's commit. Not recognised (the state stays and the commit finishes the revert, as
-/// before): a revert of a merge commit (the mainline used isn't recorded), a message hook that
-/// dropped the line, and any error while checking.
+/// A revert is in progress and HEAD already carries it: no conflict stages in the index, one
+/// parent, a message that names the reverted commit as git's revert message does ("This reverts
+/// commit <full id>"), and exactly the revert's result on every path it changes cleanly onto
+/// HEAD's parent, at least one (`pick::commit_carries_revert`). A heuristic like
+/// `pick_already_committed`: the author can't tell (a revert is authored by the user), so the
+/// message line takes its place, and a commit that undoes the same change by hand is not taken
+/// for the revert. It matches the revert's own commit (D7-A) and a duplicate `git revert X` that
+/// stopped as empty, treated like `git revert --skip`. Not recognised (the state stays and the
+/// commit finishes the revert, as before): a revert of a merge commit (the mainline used isn't
+/// recorded), a message hook that dropped the line, and any error while checking. The message
+/// is checked before the in-memory revert, so a paused revert costs little.
 fn revert_already_committed(repo: &git2::Repository) -> bool {
     if !matches!(
         repo.state(),
         git2::RepositoryState::Revert | git2::RepositoryState::RevertSequence
-    ) {
+    ) || index_conflicted(repo)
+    {
         return false;
     }
     let Some(reverted) = repo
@@ -884,11 +904,11 @@ fn revert_already_committed(repo: &git2::Repository) -> bool {
         )
 }
 
-/// A merge is in progress and every one of its `MERGE_HEAD` commits is already in HEAD's
-/// history (`merge_already_committed`). Reads MERGE_HEAD from the file, so `&Repository` is
-/// enough; an unreadable file counts as "not a leftover".
+/// A merge is in progress, the index has no conflict stages, and every one of its `MERGE_HEAD`
+/// commits is already in HEAD's history (`merge_already_committed`). Reads MERGE_HEAD from the
+/// file, so `&Repository` is enough; an unreadable file counts as "not a leftover".
 fn merge_leftover(repo: &git2::Repository) -> bool {
-    if repo.state() != git2::RepositoryState::Merge {
+    if repo.state() != git2::RepositoryState::Merge || index_conflicted(repo) {
         return false;
     }
     let Ok(text) = std::fs::read_to_string(repo.path().join("MERGE_HEAD")) else {
@@ -904,11 +924,15 @@ fn merge_leftover(repo: &git2::Repository) -> bool {
     merge_already_committed(repo, head_commit_id(repo), &heads)
 }
 
-/// The merge, cherry-pick or revert git shows as paused is a leftover: its commit already landed
-/// (HEAD carries it) and only its state files stayed behind, as when the cleanup after the
-/// commit failed (D7-A). git has no such notion: it takes any `MERGE_HEAD`, `CHERRY_PICK_HEAD`
-/// or `REVERT_HEAD` for an operation in progress. Browsitory clears a leftover before the next
-/// commit or amend, and never state that HEAD doesn't carry (#240).
+/// The merge, cherry-pick or revert git shows as paused is a leftover: HEAD already carries its
+/// change and only its state files are left, as when the cleanup after the operation's own
+/// commit failed (D7-A) or a duplicate pick/revert stopped as empty. git has no such notion: it
+/// takes any `MERGE_HEAD`, `CHERRY_PICK_HEAD` or `REVERT_HEAD` for an operation in progress.
+/// Browsitory clears a leftover before the next commit or amend (for a duplicate pick, the
+/// outcome of `--skip`), never state the index still has conflicts for, and never state HEAD
+/// doesn't carry by the checks above (#240). The merge check is a history walk; the pick and
+/// revert checks compare cheap fields (author and time, or the message line) before they do an
+/// in-memory pick or revert, so `head_info` can call this on every refresh while one is paused.
 pub(crate) fn leftover_operation(repo: &git2::Repository) -> bool {
     merge_leftover(repo) || pick_already_committed(repo) || revert_already_committed(repo)
 }

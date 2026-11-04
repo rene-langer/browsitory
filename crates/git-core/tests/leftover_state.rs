@@ -367,6 +367,132 @@ fn amend_after_a_leftover_revert_ends_like_git_commit_amend() {
     assert_eq!(run(false), git);
 }
 
+// ---- an empty re-pick looks the same, and is treated like `git cherry-pick --skip` ------------
+
+fn git(dir: &Path, args: &[&str]) -> std::process::Output {
+    test_support::git_command(dir).args(args).output().unwrap()
+}
+
+/// Picks F with Browsitory (HEAD is its pick), then runs `git cherry-pick <args>` in a terminal,
+/// which stops on F because its change is already in HEAD ("The previous cherry-pick is now
+/// empty") and leaves CHERRY_PICK_HEAD. Returns F and the pick commit.
+fn repick_in_a_terminal(
+    dir: &Path,
+    repo: &git2::Repository,
+    more: &[&str],
+) -> (git2::Oid, git2::Oid) {
+    let foreign = foreign_commit(repo);
+    let PickOutcome::Committed { commit_id } =
+        cherry_pick(repo, &foreign.to_string(), None, HookOptions::default()).unwrap()
+    else {
+        panic!("F should pick cleanly")
+    };
+    let foreign_id = foreign.to_string();
+    let mut args = vec!["cherry-pick", foreign_id.as_str()];
+    args.extend_from_slice(more);
+    let output = git(dir, &args);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(repo.path().join("CHERRY_PICK_HEAD").exists(), "{output:?}");
+    (foreign, git2::Oid::from_str(&commit_id).unwrap())
+}
+
+#[test]
+fn an_empty_re_pick_is_cleared_by_the_next_commit() {
+    let (dir, repo, _) = repo_with_x();
+    let (_, pick) = repick_in_a_terminal(dir.path(), &repo, &[]);
+    assert!(head_info(&repo).unwrap().operation_leftover);
+    common::write_file(dir.path(), "after.txt", "after\n");
+    stage(&repo, "after.txt");
+    let mut repo = repo;
+
+    git_core::commit::commit(&mut repo, "mine", HookOptions::default()).unwrap();
+
+    let head = head(&repo);
+    assert_eq!(head.author().name().unwrap(), "Test User");
+    assert_eq!(head.parent_ids().collect::<Vec<_>>(), [pick]);
+    no_state_files(&repo);
+}
+
+/// `git cherry-pick F B` stops on F (empty, not the last step). An amend clears only the
+/// pick's own files: `.git/sequencer` keeps B, and `git cherry-pick --continue` applies it, as
+/// after `git cherry-pick --skip`.
+#[test]
+fn an_empty_re_pick_in_a_terminal_sequence_keeps_the_remaining_steps() {
+    let (dir, repo, _) = repo_with_x();
+    let parent = head(&repo).id();
+    let b = common::commit_tree(
+        &repo,
+        &[
+            ("a.txt", "two\n", 0o100644),
+            ("b.txt", "b\n", 0o100644),
+            ("e.txt", "e\n", 0o100644),
+        ],
+        &[parent],
+        "B",
+    );
+    let b_id = b.to_string();
+    repick_in_a_terminal(dir.path(), &repo, &[b_id.as_str()]);
+    assert!(repo.path().join("sequencer/todo").exists());
+    assert!(head_info(&repo).unwrap().operation_leftover);
+
+    amend_head(&repo, "reworded", None, HookOptions::default()).unwrap();
+    assert!(!repo.path().join("CHERRY_PICK_HEAD").exists());
+    assert!(
+        repo.path().join("sequencer/todo").exists(),
+        "B is still to do"
+    );
+    let amended = head(&repo).id();
+
+    let output = git(dir.path(), &["cherry-pick", "--continue"]);
+    assert!(output.status.success(), "{output:?}");
+    let head = head(&repo);
+    assert_eq!(head.summary().unwrap(), Some("B"));
+    assert_eq!(head.parent_ids().collect::<Vec<_>>(), [amended]);
+    assert!(!repo.path().join("sequencer").exists());
+    no_state_files(&repo);
+}
+
+// ---- conflicts: never a leftover ---------------------------------------------------------------
+
+/// A merge paused on a conflict, then HEAD moved to MERGE_HEAD's commit in a terminal: MERGE_HEAD
+/// is in HEAD's history, but the index still has conflict stages, so the merge is still in
+/// progress. Amend and commit refuse and keep MERGE_HEAD and MERGE_MSG.
+#[test]
+fn a_conflicted_merge_is_never_a_leftover() {
+    let (dir, repo, _) = repo_with_x();
+    let base = head(&repo).parent_id(0).unwrap();
+    let side = common::commit_tree(
+        &repo,
+        &[("a.txt", "side\n", 0o100644), ("b.txt", "b\n", 0o100644)],
+        &[base],
+        "side",
+    );
+    repo.reference("refs/heads/side", side, true, "test")
+        .unwrap();
+    let output = git(dir.path(), &["merge", "side"]);
+    assert!(!output.status.success(), "{output:?}");
+    let side_id = side.to_string();
+    let output = git(dir.path(), &["update-ref", "HEAD", side_id.as_str()]);
+    assert!(output.status.success(), "{output:?}");
+    let mut index = repo.index().unwrap();
+    index.read(false).unwrap();
+    assert!(index.has_conflicts());
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+
+    assert!(!head_info(&repo).unwrap().operation_leftover);
+    assert!(matches!(
+        amend_head(&repo, "x", None, HookOptions::default()),
+        Err(CommitError::OperationInProgress)
+    ));
+    let mut repo = repo;
+    assert!(git_core::commit::commit(&mut repo, "x", HookOptions::default()).is_err());
+
+    assert_eq!(head(&repo).id(), side);
+    assert!(repo.path().join("MERGE_HEAD").exists());
+    assert!(repo.path().join("MERGE_MSG").exists());
+    assert_eq!(repo.state(), git2::RepositoryState::Merge);
+}
+
 // ---- head_info ----------------------------------------------------------------------------------
 
 #[test]

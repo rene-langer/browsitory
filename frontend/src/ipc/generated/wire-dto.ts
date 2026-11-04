@@ -67,7 +67,7 @@ export type GraphCommit = { id: string, shortId: string, summary: string, author
 
 export type HeadInfo = { headId: string | null, detachedAt: string | null, headPushed: boolean, operation: OperationKind | null, 
 /**
- * `operation` was already committed; only git's state files stayed behind (#240). The next
+ * `operation`'s changes are already in HEAD; only git's state files are left (#240). The next
  * commit or amend clears them, and the commit box isn't pre-filled with the old message.
  */
 operationLeftover: boolean, squashMessage: string | null, commitHooks: Array<string>, sequence: SequenceProgress | null, rebase: RebaseInfo | null, 

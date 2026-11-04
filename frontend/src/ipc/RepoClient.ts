@@ -149,7 +149,7 @@ export interface HeadInfo {
   headPushed: boolean;
   operation: OperationKind | null;
   /**
-   * `operation` was already committed; only git's state files stayed behind (#240). Abort, the
+   * `operation`'s changes are already in HEAD; only git's state files are left (#240). Abort, the
    * next commit or an amend clears them. The commit box isn't pre-filled with the old message,
    * and amend is available.
    */

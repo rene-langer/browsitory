@@ -60,6 +60,7 @@ import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
 import {
   abortToast,
+  leftoverReason,
   pickToast,
   rebaseAbortSwitchTarget,
   rebaseAbortToast,
@@ -403,6 +404,8 @@ function RepoWorkspace({
           : "A revert is in progress."
       : appState.state.headInfo.terminalRebase !== null
         ? terminalRebaseReason(appState.state.headInfo.terminalRebase)
+      : appState.state.mergeMessage !== null && appState.state.headInfo.operationLeftover && appState.state.headInfo.operation !== null
+        ? leftoverReason(appState.state.headInfo.operation)
       : appState.state.mergeMessage !== null
         ? appState.state.headInfo.operation === "CherryPick"
           ? "A cherry-pick is in progress."

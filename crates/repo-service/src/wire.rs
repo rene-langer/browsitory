@@ -564,7 +564,7 @@ pub struct HeadInfoDto {
     pub detached_at: Option<String>,
     pub head_pushed: bool,
     pub operation: Option<git_core::repo::OperationKind>,
-    /// `operation` was already committed; only git's state files stayed behind (#240). The next
+    /// `operation`'s changes are already in HEAD; only git's state files are left (#240). The next
     /// commit or amend clears them, and the commit box isn't pre-filled with the old message.
     pub operation_leftover: bool,
     pub squash_message: Option<String>,
