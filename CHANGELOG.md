@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Internal: typed sidecar params
+
+- Changed: each method in the VSCode sidecar's `methods!` table now names its params struct,
+  and the macro reads the request's params into it (#306). Handlers take the typed struct
+  instead of raw JSON. Error messages for bad params are unchanged, and methods that take no
+  params still ignore them. New tests pin more of the error text through the sidecar binary.
+
 ### Internal: enum wire fields
 
 - Changed: wire fields that hold one of a fixed set of names (status kind, diff line origin,

@@ -57,8 +57,15 @@ fn test_delay_before_dispatch(method: &str) {
 /// names for the transport parity check (#306), which compares it with
 /// `frontend/src/ipc/generated/sidecar-methods.json`. The arms name the request's `params`,
 /// `repos` and `stdout` through the idents given first (macro hygiene).
+///
+/// An arm names its handler's params type first, as in `get_status(RepoPathParams, repos)`:
+/// `call_handler!` reads the request's `params` into that type before calling the handler. A
+/// handler written with no arguments, as in `list_recent_repos()`, ignores the request's
+/// `params`, whatever they are.
 macro_rules! methods {
-    (|$params:ident, $repos:ident, $stdout:ident| { $($name:literal => $call:expr),* $(,)? }) => {
+    (|$params:ident, $repos:ident, $stdout:ident| {
+        $($name:literal => $handler:ident($($args:tt)*)),* $(,)?
+    }) => {
         pub fn dispatch(
             method: &str,
             $params: Value,
@@ -67,7 +74,7 @@ macro_rules! methods {
         ) -> Result<Value, String> {
             test_delay_before_dispatch(method);
             match method {
-                $($name => $call,)*
+                $($name => call_handler!($params, $handler($($args)*)),)*
                 other => Err(format!("unknown method: {other}")),
             }
         }
@@ -77,140 +84,162 @@ macro_rules! methods {
     };
 }
 
+/// One `methods!` arm. The params are read with `serde_json::from_value`, and a failure answers
+/// with its `to_string()`. That text is the wire error (pinned by
+/// `tests/wire/dispatch-responses.txt` and `tests/params_errors.rs`). It names the params struct
+/// (`invalid type: null, expected struct RepoPathParams`), so renaming one changes the wire.
+macro_rules! call_handler {
+    ($params:ident, $handler:ident()) => {
+        $handler()
+    };
+    ($params:ident, $handler:ident($params_type:ty $(, $arg:ident)*)) => {
+        $handler(
+            serde_json::from_value::<$params_type>($params).map_err(|error| error.to_string())?
+            $(, $arg)*
+        )
+    };
+}
+
 methods!(|params, repos, stdout| {
-    "open_repo" => open_repo(params, repos),
-    "close_repo" => close_repo(params, repos),
-    "get_status" => get_status(params, repos),
-    "get_commit_graph" => get_commit_graph(params, repos),
-    "get_working_diff" => get_working_diff(params, repos),
-    "get_commit_diff" => get_commit_diff(params, repos),
-    "get_file_history" => get_file_history(params, repos),
-    "search_commits" => search_commits(params, repos),
-    "cancel_search" => cancel_search(params, repos),
-    "get_commit_rename_diff" => get_commit_rename_diff(params, repos),
-    "get_range_files" => get_range_files(params, repos),
-    "get_range_diff" => get_range_diff(params, repos),
-    "get_working_tree_compare_files" => get_working_tree_compare_files(params, repos),
-    "get_working_tree_compare_diff" => get_working_tree_compare_diff(params, repos),
-    "get_branch_compare_range" => get_branch_compare_range(params, repos),
+    "open_repo" => open_repo(OpenRepoParams, repos),
+    "close_repo" => close_repo(RepoPathParams, repos),
+    "get_status" => get_status(RepoPathParams, repos),
+    "get_commit_graph" => get_commit_graph(GetCommitGraphParams, repos),
+    "get_working_diff" => get_working_diff(GetWorkingDiffParams, repos),
+    "get_commit_diff" => get_commit_diff(GetCommitDiffParams, repos),
+    "get_file_history" => get_file_history(GetFileHistoryParams, repos),
+    "search_commits" => search_commits(SearchCommitsParams, repos),
+    "cancel_search" => cancel_search(RepoPathParams, repos),
+    "get_commit_rename_diff" => get_commit_rename_diff(GetCommitRenameDiffParams, repos),
+    "get_range_files" => get_range_files(GetRangeFilesParams, repos),
+    "get_range_diff" => get_range_diff(GetRangeDiffParams, repos),
+    "get_working_tree_compare_files" => get_working_tree_compare_files(GetCommitFilesParams, repos),
+    "get_working_tree_compare_diff" => get_working_tree_compare_diff(
+        GetWorkingTreeCompareDiffParams, repos
+    ),
+    "get_branch_compare_range" => get_branch_compare_range(GetBranchCompareRangeParams, repos),
     "list_recent_repos" => list_recent_repos(),
     "list_open_repos" => list_open_repos_handler(),
-    "persist_open_repos" => persist_open_repos(params),
-    "scan_repos_in_root" => scan_repos_in_root(params),
+    "persist_open_repos" => persist_open_repos(PersistOpenReposParams),
+    "scan_repos_in_root" => scan_repos_in_root(ScanReposInRootParams),
     "list_workspaces" => list_workspaces_handler(),
-    "save_workspace" => save_workspace(params),
-    "update_workspace" => update_workspace(params),
-    "delete_workspace" => delete_workspace(params),
-    "get_graph_branch_selection" => get_graph_branch_selection(params),
-    "set_graph_branch_selection" => set_graph_branch_selection(params),
+    "save_workspace" => save_workspace(SaveWorkspaceParams),
+    "update_workspace" => update_workspace(UpdateWorkspaceParams),
+    "delete_workspace" => delete_workspace(DeleteWorkspaceParams),
+    "get_graph_branch_selection" => get_graph_branch_selection(RepoPathParams),
+    "set_graph_branch_selection" => set_graph_branch_selection(SetGraphBranchSelectionParams),
     "get_diff_settings" => get_diff_settings(),
-    "set_diff_settings" => set_diff_settings(params),
+    "set_diff_settings" => set_diff_settings(SetDiffSettingsParams),
     "get_external_tool_settings" => get_external_tool_settings(),
-    "set_external_tool_settings" => set_external_tool_settings(params),
-    "get_git_tools" => get_git_tools(params, repos),
-    "get_file_sides" => get_file_sides(params, repos),
-    "list_recent_authors" => list_recent_authors(params, repos),
+    "set_external_tool_settings" => set_external_tool_settings(SetExternalToolSettingsParams),
+    "get_git_tools" => get_git_tools(RepoPathParams, repos),
+    "get_file_sides" => get_file_sides(FileSidesParams, repos),
+    "list_recent_authors" => list_recent_authors(RepoPathParams, repos),
     "get_commit_message_settings" => get_commit_message_settings(),
-    "set_commit_message_settings" => set_commit_message_settings(params),
-    "mark_resolved" => mark_resolved(params, repos),
-    "resolve_whole_file" => resolve_whole_file(params, repos),
-    "read_file_version" => read_file_version(params, repos),
-    "repo_workdir" => repo_workdir(params, repos),
-    "check_merge_target" => check_merge_target(params, repos),
-    "get_graph_remote_branch_selection" => get_graph_remote_branch_selection(params),
-    "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(params),
-    "get_commit_files" => get_commit_files(params, repos),
-    "get_commit_message" => get_commit_message(params, repos),
-    "get_commit_signature" => get_commit_signature(params, repos),
-    "stage_file" => stage_file(params, repos),
-    "unstage_file" => unstage_file(params, repos),
-    "stage_hunk" => stage_hunk(params, repos),
-    "unstage_hunk" => unstage_hunk(params, repos),
-    "discard_hunk" => discard_hunk(params, repos),
-    "stage_lines" => stage_lines(params, repos),
-    "unstage_lines" => unstage_lines(params, repos),
-    "discard_lines" => discard_lines(params, repos),
-    "discard_file" => discard_file(params, repos),
-    "discard_all_unstaged" => discard_all_unstaged(params, repos),
-    "ignore_path" => ignore_path(params, repos),
-    "commit" => commit(params, repos, stdout),
-    "list_branches" => list_branches(params, repos),
-    "create_branch" => create_branch(params, repos),
-    "switch_branch" => switch_branch(params, repos, stdout),
-    "delete_branch" => delete_branch(params, repos),
-    "rename_branch" => rename_branch(params, repos),
-    "list_worktrees" => list_worktrees(params, repos),
-    "create_worktree" => create_worktree(params, repos),
-    "remove_worktree" => remove_worktree(params, repos),
-    "prune_worktrees" => prune_worktrees(params, repos),
-    "list_submodules" => list_submodules(params, repos),
-    "init_submodule" => init_submodule(params, repos),
-    "update_submodule" => update_submodule(params, repos),
-    "list_reflog_refs" => list_reflog_refs(params, repos),
-    "get_reflog" => get_reflog(params, repos),
-    "restore_reflog_entry" => restore_reflog_entry(params, repos),
-    "list_remotes" => list_remotes(params, repos),
-    "list_remote_branches" => list_remote_branches(params, repos),
-    "get_current_upstream" => get_current_upstream(params, repos),
-    "get_remote_upstreams" => get_remote_upstreams(params, repos),
-    "add_remote" => add_remote(params, repos),
-    "rename_remote" => rename_remote(params, repos),
-    "update_remote_urls" => update_remote_urls(params, repos),
-    "remove_remote" => remove_remote(params, repos),
-    "save_https_credential" => save_https_credential(params, repos),
-    "forget_https_credential" => forget_https_credential(params, repos),
-    "set_remote_auth_mode" => set_remote_auth_mode(params, repos),
-    "set_current_upstream" => set_current_upstream(params, repos),
-    "clear_current_upstream" => clear_current_upstream(params, repos),
-    "list_tags" => list_tags(params, repos),
-    "create_tag" => create_tag(params, repos),
-    "delete_tag" => delete_tag(params, repos),
-    "fetch_remote" => fetch_remote(params, repos, stdout),
-    "cancel_transfer" => cancel_transfer(params, repos),
-    "push_current_branch" => push_current_branch(params, repos, stdout),
-    "force_push_current_branch" => force_push_current_branch(params, repos, stdout),
-    "get_head_info" => get_head_info(params, repos),
-    "amend_commit" => amend_commit(params, repos, stdout),
-    "get_undo_state" => get_undo_state(params, repos),
-    "undo_last" => undo_last(params, repos),
-    "redo_last" => redo_last(params, repos),
-    "cherry_pick" => cherry_pick(params, repos, stdout),
-    "revert_commit" => revert_commit(params, repos, stdout),
-    "cherry_pick_many" => cherry_pick_many(params, repos, stdout),
-    "revert_many" => revert_many(params, repos, stdout),
-    "continue_sequence" => continue_sequence(params, repos, stdout),
-    "abort_sequence" => abort_sequence(params, repos),
-    "reset_to_commit" => reset_to_commit(params, repos),
-    "checkout_commit" => checkout_commit(params, repos, stdout),
-    "push_tags" => push_tags(params, repos, stdout),
-    "fetch_all_remotes" => fetch_all_remotes(params, repos, stdout),
-    "push_branch" => push_branch(params, repos, stdout),
-    "delete_remote_branch" => delete_remote_branch(params, repos, stdout),
-    "pull_current_upstream" => pull_current_upstream(params, repos, stdout),
-    "list_stashes" => list_stashes(params, repos),
-    "save_stash" => save_stash(params, repos),
-    "apply_stash" => apply_stash(params, repos),
-    "pop_stash" => pop_stash(params, repos),
-    "get_stash_files" => get_stash_files(params, repos),
-    "drop_stash" => drop_stash(params, repos),
-    "get_blame" => get_blame(params, repos),
-    "start_merge" => start_merge(params, repos, stdout),
-    "get_merge_options" => get_merge_options(params, repos),
-    "set_merge_options" => set_merge_options(params),
-    "get_conflict_hunks" => get_conflict_hunks(params, repos),
-    "resolve_conflict" => resolve_conflict(params, repos),
-    "abort_merge" => abort_merge(params, repos),
-    "get_merge_message" => get_merge_message(params, repos),
-    "resolve_add_delete_conflict" => resolve_add_delete_conflict(params, repos),
-    "commits_since" => commits_since(params, repos),
-    "start_rebase" => start_rebase(params, repos),
-    "rebase_continue" => rebase_continue(params, repos),
-    "abort_rebase" => abort_rebase(params, repos),
-    "detect_forge_repository" => detect_forge_repository(params, repos),
-    "save_forge_token" => save_forge_token(params, repos),
-    "forget_forge_token" => forget_forge_token(params, repos),
-    "list_pull_requests" => list_pull_requests(params, repos),
-    "create_pull_request" => create_pull_request(params, repos),
+    "set_commit_message_settings" => set_commit_message_settings(SetCommitMessageSettingsParams),
+    "mark_resolved" => mark_resolved(MarkResolvedParams, repos),
+    "resolve_whole_file" => resolve_whole_file(ResolveWholeFileParams, repos),
+    "read_file_version" => read_file_version(ReadFileVersionParams, repos),
+    "repo_workdir" => repo_workdir(RepoPathParams, repos),
+    "check_merge_target" => check_merge_target(RepoFileParams, repos),
+    "get_graph_remote_branch_selection" => get_graph_remote_branch_selection(RepoPathParams),
+    "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(
+        SetGraphRemoteBranchSelectionParams
+    ),
+    "get_commit_files" => get_commit_files(GetCommitFilesParams, repos),
+    "get_commit_message" => get_commit_message(GetCommitFilesParams, repos),
+    "get_commit_signature" => get_commit_signature(GetCommitFilesParams, repos),
+    "stage_file" => stage_file(RepoFilePathParams, repos),
+    "unstage_file" => unstage_file(RepoFilePathParams, repos),
+    "stage_hunk" => stage_hunk(HunkParams, repos),
+    "unstage_hunk" => unstage_hunk(HunkParams, repos),
+    "discard_hunk" => discard_hunk(HunkParams, repos),
+    "stage_lines" => stage_lines(LinesParams, repos),
+    "unstage_lines" => unstage_lines(LinesParams, repos),
+    "discard_lines" => discard_lines(LinesParams, repos),
+    "discard_file" => discard_file(RepoFilePathParams, repos),
+    "discard_all_unstaged" => discard_all_unstaged(DiscardAllParams, repos),
+    "ignore_path" => ignore_path(IgnorePathParams, repos),
+    "commit" => commit(CommitMessageParams, repos, stdout),
+    "list_branches" => list_branches(RepoPathParams, repos),
+    "create_branch" => create_branch(CreateBranchParams, repos),
+    "switch_branch" => switch_branch(SwitchBranchParams, repos, stdout),
+    "delete_branch" => delete_branch(DeleteBranchParams, repos),
+    "rename_branch" => rename_branch(RenameBranchParams, repos),
+    "list_worktrees" => list_worktrees(RepoPathParams, repos),
+    "create_worktree" => create_worktree(CreateWorktreeParams, repos),
+    "remove_worktree" => remove_worktree(WorktreeNameParams, repos),
+    "prune_worktrees" => prune_worktrees(RepoPathParams, repos),
+    "list_submodules" => list_submodules(RepoPathParams, repos),
+    "init_submodule" => init_submodule(RepoFilePathParams, repos),
+    "update_submodule" => update_submodule(UpdateSubmoduleParams, repos),
+    "list_reflog_refs" => list_reflog_refs(RepoPathParams, repos),
+    "get_reflog" => get_reflog(GetReflogParams, repos),
+    "restore_reflog_entry" => restore_reflog_entry(RestoreReflogEntryParams, repos),
+    "list_remotes" => list_remotes(RepoPathParams, repos),
+    "list_remote_branches" => list_remote_branches(RemoteNameParams, repos),
+    "get_current_upstream" => get_current_upstream(RepoPathParams, repos),
+    "get_remote_upstreams" => get_remote_upstreams(GetRemoteUpstreamsParams, repos),
+    "add_remote" => add_remote(AddRemoteParams, repos),
+    "rename_remote" => rename_remote(RenameRemoteParams, repos),
+    "update_remote_urls" => update_remote_urls(UpdateRemoteUrlsParams, repos),
+    "remove_remote" => remove_remote(RemoveRemoteParams, repos),
+    "save_https_credential" => save_https_credential(SaveHttpsCredentialParams, repos),
+    "forget_https_credential" => forget_https_credential(RemoteNameParams, repos),
+    "set_remote_auth_mode" => set_remote_auth_mode(SetRemoteAuthModeParams, repos),
+    "set_current_upstream" => set_current_upstream(SetCurrentUpstreamParams, repos),
+    "clear_current_upstream" => clear_current_upstream(RepoPathParams, repos),
+    "list_tags" => list_tags(RepoPathParams, repos),
+    "create_tag" => create_tag(CreateTagParams, repos),
+    "delete_tag" => delete_tag(DeleteTagParams, repos),
+    "fetch_remote" => fetch_remote(FetchRemoteParams, repos, stdout),
+    "cancel_transfer" => cancel_transfer(CancelTransferParams, repos),
+    "push_current_branch" => push_current_branch(PushParams, repos, stdout),
+    "force_push_current_branch" => force_push_current_branch(PushParams, repos, stdout),
+    "get_head_info" => get_head_info(RepoPathParams, repos),
+    "amend_commit" => amend_commit(CommitMessageParams, repos, stdout),
+    "get_undo_state" => get_undo_state(RepoPathParams, repos),
+    "undo_last" => undo_last(RepoPathParams, repos),
+    "redo_last" => redo_last(RepoPathParams, repos),
+    "cherry_pick" => cherry_pick(PickParams, repos, stdout),
+    "revert_commit" => revert_commit(PickParams, repos, stdout),
+    "cherry_pick_many" => cherry_pick_many(CommitIdsParams, repos, stdout),
+    "revert_many" => revert_many(CommitIdsParams, repos, stdout),
+    "continue_sequence" => continue_sequence(ContinueSequenceParams, repos, stdout),
+    "abort_sequence" => abort_sequence(AbortSequenceParams, repos),
+    "reset_to_commit" => reset_to_commit(ResetParams, repos),
+    "checkout_commit" => checkout_commit(CommitIdParams, repos, stdout),
+    "push_tags" => push_tags(PushTagsParams, repos, stdout),
+    "fetch_all_remotes" => fetch_all_remotes(FetchAllRemotesParams, repos, stdout),
+    "push_branch" => push_branch(PushBranchParams, repos, stdout),
+    "delete_remote_branch" => delete_remote_branch(DeleteRemoteBranchParams, repos, stdout),
+    "pull_current_upstream" => pull_current_upstream(RepoPathParams, repos, stdout),
+    "list_stashes" => list_stashes(RepoPathParams, repos),
+    "save_stash" => save_stash(SaveStashParams, repos),
+    "apply_stash" => apply_stash(StashApplyParams, repos),
+    "pop_stash" => pop_stash(StashApplyParams, repos),
+    "get_stash_files" => get_stash_files(StashFilesParams, repos),
+    "drop_stash" => drop_stash(StashIndexParams, repos),
+    "get_blame" => get_blame(GetBlameParams, repos),
+    "start_merge" => start_merge(StartMergeParams, repos, stdout),
+    "get_merge_options" => get_merge_options(RepoPathParams, repos),
+    "set_merge_options" => set_merge_options(SetMergeOptionsParams),
+    "get_conflict_hunks" => get_conflict_hunks(RepoFilePathParams, repos),
+    "resolve_conflict" => resolve_conflict(ResolveConflictParams, repos),
+    "abort_merge" => abort_merge(RepoPathParams, repos),
+    "get_merge_message" => get_merge_message(RepoPathParams, repos),
+    "resolve_add_delete_conflict" => resolve_add_delete_conflict(
+        ResolveAddDeleteConflictParams, repos
+    ),
+    "commits_since" => commits_since(CommitsSinceParams, repos),
+    "start_rebase" => start_rebase(StartRebaseParams, repos),
+    "rebase_continue" => rebase_continue(RepoPathParams, repos),
+    "abort_rebase" => abort_rebase(RepoPathParams, repos),
+    "detect_forge_repository" => detect_forge_repository(RepoPathParams, repos),
+    "save_forge_token" => save_forge_token(ForgeTokenParams, repos),
+    "forget_forge_token" => forget_forge_token(ForgetForgeTokenParams, repos),
+    "list_pull_requests" => list_pull_requests(ListPullRequestsParams, repos),
+    "create_pull_request" => create_pull_request(CreatePullRequestParams, repos),
 });
 
 /// Locks `repos` only long enough to clone out a `WorkerHandle` (a cheap channel `Sender`
@@ -234,9 +263,7 @@ struct OpenRepoParams {
     path: String,
 }
 
-fn open_repo(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: OpenRepoParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn open_repo(params: OpenRepoParams, repos: &Repos) -> Result<Value, String> {
     // `WorkerRegistry::open` doesn't hold its lock across `Worker::spawn`, and evicts a dead
     // worker (its thread having exited, e.g. from a panic inside a `Command` match arm) before
     // deciding whether to reuse or respawn — a plain `contains_key`/`Entry::Vacant` fast path
@@ -253,17 +280,13 @@ struct RepoPathParams {
     repo_path: String,
 }
 
-fn close_repo(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn close_repo(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     // Drops the worker only when no other spelling of the repository is still open.
     repos.close(&params.repo_path);
     Ok(Value::Null)
 }
 
-fn get_status(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_status(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let entries: Vec<StatusEntryDto> = worker_handle(repos, &params.repo_path)?
         .get_status()?
         .into_iter()
@@ -280,9 +303,7 @@ struct GetCommitGraphParams {
     selected_branches: Option<Vec<String>>,
 }
 
-fn get_commit_graph(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetCommitGraphParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_commit_graph(params: GetCommitGraphParams, repos: &Repos) -> Result<Value, String> {
     let commits: Vec<GraphCommitDto> = worker_handle(repos, &params.repo_path)?
         .get_commit_graph(params.limit, params.selected_branches)?
         .into_iter()
@@ -303,9 +324,7 @@ struct GetWorkingDiffParams {
     old_path: Option<String>,
 }
 
-fn get_working_diff(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetWorkingDiffParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_working_diff(params: GetWorkingDiffParams, repos: &Repos) -> Result<Value, String> {
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
         .get_working_diff(
             params.path,
@@ -328,9 +347,7 @@ struct GetCommitDiffParams {
     opts: DiffOptionsDto,
 }
 
-fn get_commit_diff(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetCommitDiffParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_commit_diff(params: GetCommitDiffParams, repos: &Repos) -> Result<Value, String> {
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
         .get_commit_diff(params.commit_id, params.path, params.opts.into())?
         .into_iter()
@@ -347,9 +364,7 @@ struct GetFileHistoryParams {
     limit: usize,
 }
 
-fn get_file_history(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetFileHistoryParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_file_history(params: GetFileHistoryParams, repos: &Repos) -> Result<Value, String> {
     let entries: Vec<FileHistoryEntryDto> = worker_handle(repos, &params.repo_path)?
         .get_file_history(params.path, params.limit)?
         .into_iter()
@@ -367,9 +382,7 @@ struct SearchCommitsParams {
     cursor: Option<String>,
 }
 
-fn search_commits(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: SearchCommitsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn search_commits(params: SearchCommitsParams, repos: &Repos) -> Result<Value, String> {
     let page = worker_handle(repos, &params.repo_path)?.search_commits(
         params.query,
         params.refs,
@@ -381,9 +394,7 @@ fn search_commits(params: Value, repos: &Repos) -> Result<Value, String> {
 /// Stops the repo's in-flight search, if any. Every request runs on its own thread (see
 /// `main.rs`), and the cancel goes through the worker's side channel, so it never waits for the
 /// search it stops.
-fn cancel_search(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn cancel_search(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.cancel_search();
     Ok(Value::Null)
 }
@@ -398,9 +409,10 @@ struct GetCommitRenameDiffParams {
     opts: DiffOptionsDto,
 }
 
-fn get_commit_rename_diff(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetCommitRenameDiffParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_commit_rename_diff(
+    params: GetCommitRenameDiffParams,
+    repos: &Repos,
+) -> Result<Value, String> {
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
         .get_commit_rename_diff(
             params.commit_id,
@@ -422,9 +434,7 @@ struct GetRangeFilesParams {
     to_id: String,
 }
 
-fn get_range_files(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetRangeFilesParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_range_files(params: GetRangeFilesParams, repos: &Repos) -> Result<Value, String> {
     let files: Vec<ChangedFileDto> = worker_handle(repos, &params.repo_path)?
         .get_range_files(params.from_id, params.to_id)?
         .into_iter()
@@ -444,9 +454,7 @@ struct GetRangeDiffParams {
     opts: DiffOptionsDto,
 }
 
-fn get_range_diff(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetRangeDiffParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_range_diff(params: GetRangeDiffParams, repos: &Repos) -> Result<Value, String> {
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
         .get_range_diff(
             params.from_id,
@@ -461,9 +469,10 @@ fn get_range_diff(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(hunks).map_err(|error| error.to_string())
 }
 
-fn get_working_tree_compare_files(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetCommitFilesParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_working_tree_compare_files(
+    params: GetCommitFilesParams,
+    repos: &Repos,
+) -> Result<Value, String> {
     let files: Vec<ChangedFileDto> = worker_handle(repos, &params.repo_path)?
         .get_working_tree_compare_files(params.commit_id)?
         .into_iter()
@@ -482,9 +491,10 @@ struct GetWorkingTreeCompareDiffParams {
     opts: DiffOptionsDto,
 }
 
-fn get_working_tree_compare_diff(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetWorkingTreeCompareDiffParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_working_tree_compare_diff(
+    params: GetWorkingTreeCompareDiffParams,
+    repos: &Repos,
+) -> Result<Value, String> {
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
         .get_working_tree_compare_diff(
             params.commit_id,
@@ -505,9 +515,10 @@ struct GetBranchCompareRangeParams {
     ref_name: String,
 }
 
-fn get_branch_compare_range(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetBranchCompareRangeParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_branch_compare_range(
+    params: GetBranchCompareRangeParams,
+    repos: &Repos,
+) -> Result<Value, String> {
     let range =
         worker_handle(repos, &params.repo_path)?.get_branch_compare_range(params.ref_name)?;
     serde_json::to_value(CompareRangeDto::from(range)).map_err(|error| error.to_string())
@@ -555,9 +566,7 @@ struct PersistOpenReposParams {
     active_path: Option<String>,
 }
 
-fn persist_open_repos(params: Value) -> Result<Value, String> {
-    let params: PersistOpenReposParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn persist_open_repos(params: PersistOpenReposParams) -> Result<Value, String> {
     let entries: Vec<config::OpenRepoEntry> = params
         .entries
         .into_iter()
@@ -576,9 +585,7 @@ struct ScanReposInRootParams {
     root: String,
 }
 
-fn scan_repos_in_root(params: Value) -> Result<Value, String> {
-    let params: ScanReposInRootParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn scan_repos_in_root(params: ScanReposInRootParams) -> Result<Value, String> {
     let paths =
         config::scan_repos_in_root(Path::new(&params.root)).map_err(|error| error.to_string())?;
     let paths: Vec<String> = paths
@@ -601,9 +608,7 @@ struct SaveWorkspaceParams {
     members: Vec<String>,
 }
 
-fn save_workspace(params: Value) -> Result<Value, String> {
-    let params: SaveWorkspaceParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn save_workspace(params: SaveWorkspaceParams) -> Result<Value, String> {
     let members: Vec<PathBuf> = params.members.into_iter().map(PathBuf::from).collect();
     let id = config::save_workspace(&params.name, Path::new(&params.root), &members)
         .map_err(|error| error.to_string())?;
@@ -617,9 +622,7 @@ struct UpdateWorkspaceParams {
     members: Vec<String>,
 }
 
-fn update_workspace(params: Value) -> Result<Value, String> {
-    let params: UpdateWorkspaceParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn update_workspace(params: UpdateWorkspaceParams) -> Result<Value, String> {
     let members: Vec<PathBuf> = params.members.into_iter().map(PathBuf::from).collect();
     config::update_workspace(&params.id, &params.name, &members)
         .map_err(|error| error.to_string())?;
@@ -631,16 +634,12 @@ struct DeleteWorkspaceParams {
     id: String,
 }
 
-fn delete_workspace(params: Value) -> Result<Value, String> {
-    let params: DeleteWorkspaceParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn delete_workspace(params: DeleteWorkspaceParams) -> Result<Value, String> {
     config::delete_workspace(&params.id).map_err(|error| error.to_string())?;
     Ok(Value::Null)
 }
 
-fn get_graph_branch_selection(params: Value) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_graph_branch_selection(params: RepoPathParams) -> Result<Value, String> {
     let selection = config::get_graph_branch_selection(Path::new(&params.repo_path))
         .map_err(|error| error.to_string())?;
     serde_json::to_value(selection).map_err(|error| error.to_string())
@@ -653,17 +652,13 @@ struct SetGraphBranchSelectionParams {
     selected_branches: Vec<String>,
 }
 
-fn set_graph_branch_selection(params: Value) -> Result<Value, String> {
-    let params: SetGraphBranchSelectionParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn set_graph_branch_selection(params: SetGraphBranchSelectionParams) -> Result<Value, String> {
     config::set_graph_branch_selection(Path::new(&params.repo_path), &params.selected_branches)
         .map_err(|error| error.to_string())?;
     Ok(Value::Null)
 }
 
-fn get_graph_remote_branch_selection(params: Value) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_graph_remote_branch_selection(params: RepoPathParams) -> Result<Value, String> {
     let selection = config::get_graph_remote_branch_selection(Path::new(&params.repo_path))
         .map_err(|error| error.to_string())?;
     serde_json::to_value(selection).map_err(|error| error.to_string())
@@ -676,9 +671,9 @@ struct SetGraphRemoteBranchSelectionParams {
     selected_branches: Vec<String>,
 }
 
-fn set_graph_remote_branch_selection(params: Value) -> Result<Value, String> {
-    let params: SetGraphRemoteBranchSelectionParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn set_graph_remote_branch_selection(
+    params: SetGraphRemoteBranchSelectionParams,
+) -> Result<Value, String> {
     config::set_graph_remote_branch_selection(
         Path::new(&params.repo_path),
         &params.selected_branches,
@@ -694,23 +689,17 @@ struct GetCommitFilesParams {
     commit_id: String,
 }
 
-fn get_commit_files(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetCommitFilesParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_commit_files(params: GetCommitFilesParams, repos: &Repos) -> Result<Value, String> {
     let files = worker_handle(repos, &params.repo_path)?.get_commit_files(params.commit_id)?;
     serde_json::to_value(files).map_err(|error| error.to_string())
 }
 
-fn get_commit_message(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetCommitFilesParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_commit_message(params: GetCommitFilesParams, repos: &Repos) -> Result<Value, String> {
     let message = worker_handle(repos, &params.repo_path)?.get_commit_message(params.commit_id)?;
     serde_json::to_value(message).map_err(|error| error.to_string())
 }
 
-fn get_commit_signature(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetCommitFilesParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_commit_signature(params: GetCommitFilesParams, repos: &Repos) -> Result<Value, String> {
     let signature =
         worker_handle(repos, &params.repo_path)?.get_commit_signature(params.commit_id)?;
     serde_json::to_value(CommitSignatureDto::from(signature)).map_err(|error| error.to_string())
@@ -723,16 +712,12 @@ struct RepoFilePathParams {
     path: String,
 }
 
-fn stage_file(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoFilePathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn stage_file(params: RepoFilePathParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.stage_file(params.path)?;
     Ok(Value::Null)
 }
 
-fn unstage_file(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoFilePathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn unstage_file(params: RepoFilePathParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.unstage_file(params.path)?;
     Ok(Value::Null)
 }
@@ -747,8 +732,7 @@ struct HunkParams {
     context_lines: u32,
 }
 
-fn stage_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: HunkParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn stage_hunk(params: HunkParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.stage_hunk(
         params.path,
         params.old_start,
@@ -758,8 +742,7 @@ fn stage_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-fn unstage_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: HunkParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn unstage_hunk(params: HunkParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.unstage_hunk(
         params.path,
         params.old_start,
@@ -769,8 +752,7 @@ fn unstage_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-fn discard_hunk(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: HunkParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn discard_hunk(params: HunkParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.discard_hunk(
         params.path,
         params.old_start,
@@ -793,8 +775,7 @@ struct LinesParams {
     expected_lines: Vec<String>,
 }
 
-fn stage_lines(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: LinesParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn stage_lines(params: LinesParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.stage_lines(
         params.path,
         params.old_start,
@@ -806,8 +787,7 @@ fn stage_lines(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-fn unstage_lines(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: LinesParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn unstage_lines(params: LinesParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.unstage_lines(
         params.path,
         params.old_start,
@@ -819,8 +799,7 @@ fn unstage_lines(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-fn discard_lines(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: LinesParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn discard_lines(params: LinesParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.discard_lines(
         params.path,
         params.old_start,
@@ -832,9 +811,7 @@ fn discard_lines(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-fn discard_file(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoFilePathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn discard_file(params: RepoFilePathParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.discard_file(params.path)?;
     Ok(Value::Null)
 }
@@ -847,9 +824,7 @@ struct DiscardAllParams {
     paths: Vec<String>,
 }
 
-fn discard_all_unstaged(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: DiscardAllParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn discard_all_unstaged(params: DiscardAllParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.discard_all_unstaged(params.paths)?;
     Ok(Value::Null)
 }
@@ -861,9 +836,7 @@ struct IgnorePathParams {
     pattern: String,
 }
 
-fn ignore_path(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: IgnorePathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn ignore_path(params: IgnorePathParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.ignore_path(params.pattern)?;
     Ok(Value::Null)
 }
@@ -878,9 +851,7 @@ fn get_diff_settings() -> Result<Value, String> {
     serde_json::to_value(DiffSettingsDto::from(settings)).map_err(|error| error.to_string())
 }
 
-fn set_diff_settings(params: Value) -> Result<Value, String> {
-    let params: SetDiffSettingsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn set_diff_settings(params: SetDiffSettingsParams) -> Result<Value, String> {
     config::set_diff_settings(&params.settings.into()).map_err(|error| error.to_string())?;
     Ok(Value::Null)
 }
@@ -895,9 +866,7 @@ fn get_external_tool_settings() -> Result<Value, String> {
     serde_json::to_value(ExternalToolSettingsDto::from(settings)).map_err(|error| error.to_string())
 }
 
-fn set_external_tool_settings(params: Value) -> Result<Value, String> {
-    let params: SetExternalToolSettingsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn set_external_tool_settings(params: SetExternalToolSettingsParams) -> Result<Value, String> {
     git_core::launch::check_tool_commands(
         params.settings.editor.as_deref(),
         params.settings.terminal.as_deref(),
@@ -907,9 +876,7 @@ fn set_external_tool_settings(params: Value) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-fn get_git_tools(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_git_tools(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let tools = worker_handle(repos, &params.repo_path)?.get_git_tools()?;
     serde_json::to_value(GitToolsDto::from(tools)).map_err(|error| error.to_string())
 }
@@ -930,16 +897,12 @@ struct ResolveWholeFileParams {
     side: ConflictSideDto,
 }
 
-fn resolve_whole_file(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: ResolveWholeFileParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn resolve_whole_file(params: ResolveWholeFileParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.resolve_whole_file(params.path, params.side.into())?;
     Ok(Value::Null)
 }
 
-fn mark_resolved(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: MarkResolvedParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn mark_resolved(params: MarkResolvedParams, repos: &Repos) -> Result<Value, String> {
     let outcome =
         worker_handle(repos, &params.repo_path)?.mark_resolved(params.path, params.force)?;
     serde_json::to_value(MarkResolvedOutcomeDto::from(outcome)).map_err(|error| error.to_string())
@@ -976,10 +939,8 @@ struct ReadFileVersionParams {
 /// Internal: not on `RepoClient`. Called by the extension host's `browsitory-file:` content
 /// provider (diff and merge editor sides). Contents are lossy UTF-8, capped at
 /// `MAX_FILE_VERSION_BYTES`; `text: null` when the path doesn't exist in that version.
-fn read_file_version(params: Value, repos: &Repos) -> Result<Value, String> {
+fn read_file_version(params: ReadFileVersionParams, repos: &Repos) -> Result<Value, String> {
     use git_core::tools::FileVersion;
-    let params: ReadFileVersionParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let version = match params.version {
         FileVersionDto::Head => FileVersion::Head,
         FileVersionDto::Index => FileVersion::Index,
@@ -1002,18 +963,14 @@ struct RepoFileParams {
 /// Internal: not on `RepoClient`. Called by the extension host before it opens VSCode's merge
 /// editor, with the same checks as the desktop merge tool: `null`, or an error saying why the
 /// path can't be merged there.
-fn check_merge_target(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoFileParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn check_merge_target(params: RepoFileParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.check_merge_target(params.path)?;
     Ok(Value::Null)
 }
 
 /// Internal: not on `RepoClient`. The work tree root for the extension host's native launch
 /// methods (the repo path may be a subdirectory of it).
-fn repo_workdir(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn repo_workdir(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let workdir = worker_handle(repos, &params.repo_path)?.workdir()?;
     Ok(Value::String(workdir.to_string_lossy().into_owned()))
 }
@@ -1035,9 +992,7 @@ struct CommitMessageParams {
     author: Option<SignatureInputDto>,
 }
 
-fn list_recent_authors(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_recent_authors(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let authors: Vec<SignatureInputDto> = worker_handle(repos, &params.repo_path)?
         .list_recent_authors()?
         .into_iter()
@@ -1054,9 +1009,7 @@ struct FileSidesParams {
     source: DiffSourceDto,
 }
 
-fn get_file_sides(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: FileSidesParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_file_sides(params: FileSidesParams, repos: &Repos) -> Result<Value, String> {
     let sides = worker_handle(repos, &params.repo_path)?
         .get_file_sides(params.path, params.source.into())?;
     serde_json::to_value(FileSidesDto::from(sides)).map_err(|error| error.to_string())
@@ -1073,9 +1026,7 @@ fn get_commit_message_settings() -> Result<Value, String> {
         .map_err(|error| error.to_string())
 }
 
-fn set_commit_message_settings(params: Value) -> Result<Value, String> {
-    let params: SetCommitMessageSettingsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn set_commit_message_settings(params: SetCommitMessageSettingsParams) -> Result<Value, String> {
     config::set_commit_message_settings(&params.settings.into())
         .map_err(|error| error.to_string())?;
     Ok(Value::Null)
@@ -1117,12 +1068,10 @@ fn spawn_hook_relay<W: std::io::Write + Send + 'static>(
 }
 
 fn commit(
-    params: Value,
+    params: CommitMessageParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: CommitMessageParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_hook_relay(params.repo_path.clone(), event_rx, Arc::clone(stdout));
     let outcome = worker_handle(repos, &params.repo_path)?.commit(
@@ -1134,9 +1083,7 @@ fn commit(
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
-fn list_branches(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_branches(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let branches: Vec<BranchInfoDto> = worker_handle(repos, &params.repo_path)?
         .list_branches()?
         .into_iter()
@@ -1153,9 +1100,7 @@ struct CreateBranchParams {
     start_point: String,
 }
 
-fn create_branch(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CreateBranchParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn create_branch(params: CreateBranchParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.create_branch(params.name, params.start_point)?;
     Ok(Value::Null)
 }
@@ -1169,12 +1114,10 @@ struct SwitchBranchParams {
 
 /// `post-checkout` is relayed as `hookProgress` with `source: "Checkout"` (#185).
 fn switch_branch<W: std::io::Write + Send + 'static>(
-    params: Value,
+    params: SwitchBranchParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, String> {
-    let params: SwitchBranchParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let events = hook_relay(&params.repo_path, out);
     worker_handle(repos, &params.repo_path)?.switch_branch(params.name, events)?;
     Ok(Value::Null)
@@ -1188,9 +1131,7 @@ struct DeleteBranchParams {
     force: bool,
 }
 
-fn delete_branch(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: DeleteBranchParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn delete_branch(params: DeleteBranchParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.delete_branch(params.name, params.force)?;
     Ok(Value::Null)
 }
@@ -1203,16 +1144,12 @@ struct RenameBranchParams {
     new_name: String,
 }
 
-fn rename_branch(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RenameBranchParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn rename_branch(params: RenameBranchParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.rename_branch(params.old_name, params.new_name)?;
     Ok(Value::Null)
 }
 
-fn list_worktrees(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_worktrees(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let worktrees: Vec<WorktreeInfoDto> = worker_handle(repos, &params.repo_path)?
         .list_worktrees()?
         .into_iter()
@@ -1231,9 +1168,7 @@ struct CreateWorktreeParams {
     start_point: Option<String>,
 }
 
-fn create_worktree(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CreateWorktreeParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn create_worktree(params: CreateWorktreeParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.create_worktree(
         params.name,
         PathBuf::from(params.path),
@@ -1250,23 +1185,17 @@ struct WorktreeNameParams {
     name: String,
 }
 
-fn remove_worktree(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: WorktreeNameParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn remove_worktree(params: WorktreeNameParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.remove_worktree(params.name)?;
     Ok(Value::Null)
 }
 
-fn prune_worktrees(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn prune_worktrees(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.prune_worktrees()?;
     Ok(Value::Null)
 }
 
-fn list_submodules(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_submodules(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let submodules: Vec<SubmoduleInfoDto> = worker_handle(repos, &params.repo_path)?
         .list_submodules()?
         .into_iter()
@@ -1275,9 +1204,7 @@ fn list_submodules(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(submodules).map_err(|error| error.to_string())
 }
 
-fn init_submodule(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoFilePathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn init_submodule(params: RepoFilePathParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.init_submodule(params.path)?;
     Ok(Value::Null)
 }
@@ -1290,16 +1217,12 @@ struct UpdateSubmoduleParams {
     recursive: bool,
 }
 
-fn update_submodule(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: UpdateSubmoduleParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn update_submodule(params: UpdateSubmoduleParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.update_submodule(params.path, params.recursive)?;
     Ok(Value::Null)
 }
 
-fn list_reflog_refs(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_reflog_refs(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let refs = worker_handle(repos, &params.repo_path)?.list_reflog_refs()?;
     serde_json::to_value(refs).map_err(|error| error.to_string())
 }
@@ -1311,9 +1234,7 @@ struct GetReflogParams {
     reference: String,
 }
 
-fn get_reflog(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetReflogParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_reflog(params: GetReflogParams, repos: &Repos) -> Result<Value, String> {
     let entries: Vec<ReflogEntryDto> = worker_handle(repos, &params.repo_path)?
         .get_reflog(params.reference)?
         .into_iter()
@@ -1330,17 +1251,13 @@ struct RestoreReflogEntryParams {
     new_id: String,
 }
 
-fn restore_reflog_entry(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RestoreReflogEntryParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn restore_reflog_entry(params: RestoreReflogEntryParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?
         .restore_reflog_entry(params.reference, params.new_id)?;
     Ok(Value::Null)
 }
 
-fn list_remotes(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_remotes(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let worker = worker_handle(repos, &params.repo_path)?;
     let remotes: Result<Vec<RemoteInfoDto>, String> = worker
         .list_remotes()?
@@ -1360,17 +1277,13 @@ struct RemoteNameParams {
     remote_name: String,
 }
 
-fn list_remote_branches(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RemoteNameParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_remote_branches(params: RemoteNameParams, repos: &Repos) -> Result<Value, String> {
     let branches =
         worker_handle(repos, &params.repo_path)?.list_remote_branches(params.remote_name)?;
     serde_json::to_value(branches).map_err(|error| error.to_string())
 }
 
-fn get_current_upstream(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_current_upstream(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let upstream = worker_handle(repos, &params.repo_path)?
         .get_current_upstream()?
         .map(UpstreamInfoDto::from);
@@ -1384,9 +1297,7 @@ struct GetRemoteUpstreamsParams {
     name: String,
 }
 
-fn get_remote_upstreams(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetRemoteUpstreamsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_remote_upstreams(params: GetRemoteUpstreamsParams, repos: &Repos) -> Result<Value, String> {
     let upstreams: Vec<UpstreamInfoDto> = worker_handle(repos, &params.repo_path)?
         .get_remote_upstreams(params.name)?
         .into_iter()
@@ -1404,9 +1315,7 @@ struct AddRemoteParams {
     push_url: Option<String>,
 }
 
-fn add_remote(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: AddRemoteParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn add_remote(params: AddRemoteParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.add_remote(
         params.name,
         params.fetch_url,
@@ -1423,9 +1332,7 @@ struct RenameRemoteParams {
     new_name: String,
 }
 
-fn rename_remote(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RenameRemoteParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn rename_remote(params: RenameRemoteParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.rename_remote(params.old_name, params.new_name)?;
     Ok(Value::Null)
 }
@@ -1439,9 +1346,7 @@ struct UpdateRemoteUrlsParams {
     push_url: Option<String>,
 }
 
-fn update_remote_urls(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: UpdateRemoteUrlsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn update_remote_urls(params: UpdateRemoteUrlsParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.update_remote_urls(
         params.name,
         params.fetch_url,
@@ -1458,9 +1363,7 @@ struct RemoveRemoteParams {
     clear_upstreams: bool,
 }
 
-fn remove_remote(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RemoveRemoteParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn remove_remote(params: RemoveRemoteParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.remove_remote(params.name, params.clear_upstreams)?;
     Ok(Value::Null)
 }
@@ -1474,9 +1377,10 @@ struct SaveHttpsCredentialParams {
     token: String,
 }
 
-fn save_https_credential(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: SaveHttpsCredentialParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn save_https_credential(
+    params: SaveHttpsCredentialParams,
+    repos: &Repos,
+) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.save_https_credential(
         params.remote_name,
         params.username,
@@ -1485,9 +1389,7 @@ fn save_https_credential(params: Value, repos: &Repos) -> Result<Value, String> 
     Ok(Value::Null)
 }
 
-fn forget_https_credential(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RemoteNameParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn forget_https_credential(params: RemoteNameParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.forget_https_credential(params.remote_name)?;
     Ok(Value::Null)
 }
@@ -1501,9 +1403,7 @@ struct SetRemoteAuthModeParams {
     username: Option<String>,
 }
 
-fn set_remote_auth_mode(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: SetRemoteAuthModeParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn set_remote_auth_mode(params: SetRemoteAuthModeParams, repos: &Repos) -> Result<Value, String> {
     let mode = match params.mode {
         RemoteAuthModeDto::HttpsToken => git_core::remote::RemoteAuthMode::HttpsToken {
             username: params
@@ -1525,24 +1425,18 @@ struct SetCurrentUpstreamParams {
     remote_branch: String,
 }
 
-fn set_current_upstream(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: SetCurrentUpstreamParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn set_current_upstream(params: SetCurrentUpstreamParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?
         .set_current_upstream(params.remote_name, params.remote_branch)?;
     Ok(Value::Null)
 }
 
-fn clear_current_upstream(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn clear_current_upstream(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.clear_current_upstream()?;
     Ok(Value::Null)
 }
 
-fn list_tags(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_tags(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let tags: Vec<TagInfoDto> = worker_handle(repos, &params.repo_path)?
         .list_tags()?
         .into_iter()
@@ -1559,9 +1453,7 @@ struct CreateTagParams {
     message: Option<String>,
 }
 
-fn create_tag(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CreateTagParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn create_tag(params: CreateTagParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.create_tag(params.name, params.message)?;
     Ok(Value::Null)
 }
@@ -1573,9 +1465,7 @@ struct DeleteTagParams {
     name: String,
 }
 
-fn delete_tag(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: DeleteTagParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn delete_tag(params: DeleteTagParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.delete_tag(params.name)?;
     Ok(Value::Null)
 }
@@ -1625,12 +1515,10 @@ struct FetchRemoteParams {
 }
 
 fn fetch_remote(
-    params: Value,
+    params: FetchRemoteParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: FetchRemoteParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.fetch_remote(
@@ -1650,12 +1538,10 @@ struct FetchAllRemotesParams {
 }
 
 fn fetch_all_remotes(
-    params: Value,
+    params: FetchAllRemotesParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: FetchAllRemotesParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id =
@@ -1676,12 +1562,10 @@ struct PushBranchParams {
 }
 
 fn push_branch(
-    params: Value,
+    params: PushBranchParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: PushBranchParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.push_branch(
@@ -1706,12 +1590,10 @@ struct DeleteRemoteBranchParams {
 }
 
 fn delete_remote_branch(
-    params: Value,
+    params: DeleteRemoteBranchParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: DeleteRemoteBranchParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.delete_remote_branch(
@@ -1736,9 +1618,7 @@ struct CancelTransferParams {
 /// on the relay the original fetch/push/pull already started — as that operation's terminal
 /// `Completed` notification, carrying `errorKind: "Cancelled"`. Unknown or already-finished IDs
 /// are a no-op, so the extension can fire this without racing the transfer it is cancelling.
-fn cancel_transfer(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CancelTransferParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn cancel_transfer(params: CancelTransferParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.cancel_transfer(&params.operation_id);
     Ok(Value::Null)
 }
@@ -1754,11 +1634,10 @@ struct PushParams {
 }
 
 fn push_current_branch(
-    params: Value,
+    params: PushParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: PushParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.push_current_branch(
@@ -1770,11 +1649,10 @@ fn push_current_branch(
 }
 
 fn force_push_current_branch(
-    params: Value,
+    params: PushParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: PushParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.force_push_current_branch(
@@ -1808,41 +1686,31 @@ struct ResetParams {
     mode: ResetModeDto,
 }
 
-fn get_head_info(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_head_info(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let info = worker_handle(repos, &params.repo_path)?.get_head_info()?;
     serde_json::to_value(HeadInfoDto::from(info)).map_err(|error| error.to_string())
 }
 
-fn get_undo_state(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_undo_state(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let result = worker_handle(repos, &params.repo_path)?.get_undo_state()?;
     serde_json::to_value(UndoStateDto::from(result)).map_err(|error| error.to_string())
 }
 
-fn undo_last(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn undo_last(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let result = worker_handle(repos, &params.repo_path)?.undo()?;
     serde_json::to_value(UndoOutcomeDto::from(result)).map_err(|error| error.to_string())
 }
 
-fn redo_last(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn redo_last(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let result = worker_handle(repos, &params.repo_path)?.redo()?;
     serde_json::to_value(UndoOutcomeDto::from(result)).map_err(|error| error.to_string())
 }
 
 fn amend_commit(
-    params: Value,
+    params: CommitMessageParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: CommitMessageParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_hook_relay(params.repo_path.clone(), event_rx, Arc::clone(stdout));
     let outcome = worker_handle(repos, &params.repo_path)?.amend_commit(
@@ -1871,11 +1739,10 @@ struct PickParams {
 /// A clean pick's `prepare-commit-msg`/`post-commit` are relayed as `hookProgress` with
 /// `source: "Pick"` (#183).
 fn cherry_pick<W: std::io::Write + Send + 'static>(
-    params: Value,
+    params: PickParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, String> {
-    let params: PickParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
     let events = hook_relay(&params.repo_path, out);
     let outcome = worker_handle(repos, &params.repo_path)?.cherry_pick(
         params.commit_id,
@@ -1886,11 +1753,10 @@ fn cherry_pick<W: std::io::Write + Send + 'static>(
 }
 
 fn revert_commit<W: std::io::Write + Send + 'static>(
-    params: Value,
+    params: PickParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, String> {
-    let params: PickParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
     let events = hook_relay(&params.repo_path, out);
     let outcome = worker_handle(repos, &params.repo_path)?.revert_commit(
         params.commit_id,
@@ -1909,12 +1775,10 @@ struct CommitIdsParams {
 }
 
 fn cherry_pick_many<W: std::io::Write + Send + 'static>(
-    params: Value,
+    params: CommitIdsParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, String> {
-    let params: CommitIdsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let events = hook_relay(&params.repo_path, out);
     let outcome =
         worker_handle(repos, &params.repo_path)?.cherry_pick_many(params.commit_ids, events)?;
@@ -1922,12 +1786,10 @@ fn cherry_pick_many<W: std::io::Write + Send + 'static>(
 }
 
 fn revert_many<W: std::io::Write + Send + 'static>(
-    params: Value,
+    params: CommitIdsParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, String> {
-    let params: CommitIdsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let events = hook_relay(&params.repo_path, out);
     let outcome =
         worker_handle(repos, &params.repo_path)?.revert_many(params.commit_ids, events)?;
@@ -1945,12 +1807,10 @@ struct ContinueSequenceParams {
 
 /// The step Continue commits runs the commit hooks, relayed as `hookProgress` (#133).
 fn continue_sequence<W: std::io::Write + Send + 'static>(
-    params: Value,
+    params: ContinueSequenceParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, String> {
-    let params: ContinueSequenceParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_hook_relay(params.repo_path.clone(), event_rx, Arc::clone(out));
     let outcome =
@@ -1958,16 +1818,13 @@ fn continue_sequence<W: std::io::Write + Send + 'static>(
     serde_json::to_value(SequenceOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
-fn abort_sequence(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: AbortSequenceParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn abort_sequence(params: AbortSequenceParams, repos: &Repos) -> Result<Value, String> {
     let confirmed = params.confirmed.map(git_core::pick::ConfirmedAbort::from);
     let abort = worker_handle(repos, &params.repo_path)?.abort_sequence(confirmed)?;
     serde_json::to_value(SequenceAbortDto::from(abort)).map_err(|error| error.to_string())
 }
 
-fn reset_to_commit(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: ResetParams = serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn reset_to_commit(params: ResetParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?
         .reset_to_commit(params.commit_id, params.mode.into())?;
     Ok(Value::Null)
@@ -1975,12 +1832,10 @@ fn reset_to_commit(params: Value, repos: &Repos) -> Result<Value, String> {
 
 /// `post-checkout` is relayed as `hookProgress` with `source: "Checkout"` (#185).
 fn checkout_commit<W: std::io::Write + Send + 'static>(
-    params: Value,
+    params: CommitIdParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, String> {
-    let params: CommitIdParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let events = hook_relay(&params.repo_path, out);
     worker_handle(repos, &params.repo_path)?.checkout_commit(params.commit_id, events)?;
     Ok(Value::Null)
@@ -1997,12 +1852,10 @@ struct PushTagsParams {
 }
 
 fn push_tags(
-    params: Value,
+    params: PushTagsParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: PushTagsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.push_tags(
@@ -2015,21 +1868,17 @@ fn push_tags(
 }
 
 fn pull_current_upstream(
-    params: Value,
+    params: RepoPathParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
 ) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let outcome = worker_handle(repos, &params.repo_path)?.pull_current_upstream(event_tx)?;
     serde_json::to_value(PullOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
-fn list_stashes(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_stashes(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let stashes: Vec<StashEntryDto> = worker_handle(repos, &params.repo_path)?
         .list_stashes()?
         .into_iter()
@@ -2045,9 +1894,7 @@ struct SaveStashParams {
     options: StashOptionsDto,
 }
 
-fn save_stash(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: SaveStashParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn save_stash(params: SaveStashParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.save_stash(params.options.into())?;
     Ok(Value::Null)
 }
@@ -2071,9 +1918,7 @@ struct StashApplyParams {
     restore_index: bool,
 }
 
-fn apply_stash(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: StashApplyParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn apply_stash(params: StashApplyParams, repos: &Repos) -> Result<Value, String> {
     let outcome = worker_handle(repos, &params.repo_path)?.apply_stash(
         params.index,
         params.commit_id,
@@ -2082,9 +1927,7 @@ fn apply_stash(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(StashApplyOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
-fn pop_stash(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: StashApplyParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn pop_stash(params: StashApplyParams, repos: &Repos) -> Result<Value, String> {
     let outcome = worker_handle(repos, &params.repo_path)?.pop_stash(
         params.index,
         params.commit_id,
@@ -2100,16 +1943,12 @@ struct StashFilesParams {
     commit_id: String,
 }
 
-fn get_stash_files(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: StashFilesParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_stash_files(params: StashFilesParams, repos: &Repos) -> Result<Value, String> {
     let files = worker_handle(repos, &params.repo_path)?.get_stash_files(params.commit_id)?;
     serde_json::to_value(StashFilesDto::from(files)).map_err(|error| error.to_string())
 }
 
-fn drop_stash(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: StashIndexParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn drop_stash(params: StashIndexParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.drop_stash(params.index, params.commit_id)?;
     Ok(Value::Null)
 }
@@ -2122,9 +1961,7 @@ struct GetBlameParams {
     path: String,
 }
 
-fn get_blame(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: GetBlameParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_blame(params: GetBlameParams, repos: &Repos) -> Result<Value, String> {
     let lines: Vec<BlameLineDto> = worker_handle(repos, &params.repo_path)?
         .get_blame(params.commit_id, params.path)?
         .into_iter()
@@ -2144,12 +1981,10 @@ struct StartMergeParams {
 /// A fast-forward's or squash's `post-merge` is relayed as `hookProgress` with
 /// `source: "Merge"` (#185).
 fn start_merge<W: std::io::Write + Send + 'static>(
-    params: Value,
+    params: StartMergeParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
 ) -> Result<Value, String> {
-    let params: StartMergeParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
     let events = hook_relay(&params.repo_path, out);
     let outcome = worker_handle(repos, &params.repo_path)?.start_merge(
         params.branch_name,
@@ -2160,9 +1995,7 @@ fn start_merge<W: std::io::Write + Send + 'static>(
 }
 
 /// The remembered merge options for the repo, else the defaults from its `merge.ff`.
-fn get_merge_options(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_merge_options(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let options = match config::get_merge_preference(Path::new(&params.repo_path))
         .map_err(|error| error.to_string())?
     {
@@ -2179,9 +2012,7 @@ struct SetMergeOptionsParams {
     options: MergeOptionsDto,
 }
 
-fn set_merge_options(params: Value) -> Result<Value, String> {
-    let params: SetMergeOptionsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn set_merge_options(params: SetMergeOptionsParams) -> Result<Value, String> {
     config::set_merge_preference(
         Path::new(&params.repo_path),
         params.options.fast_forward.into(),
@@ -2191,9 +2022,7 @@ fn set_merge_options(params: Value) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-fn get_conflict_hunks(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoFilePathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_conflict_hunks(params: RepoFilePathParams, repos: &Repos) -> Result<Value, String> {
     let segments: Vec<ConflictSegmentDto> = worker_handle(repos, &params.repo_path)?
         .get_conflict_hunks(params.path)?
         .into_iter()
@@ -2210,24 +2039,18 @@ struct ResolveConflictParams {
     resolved_content: String,
 }
 
-fn resolve_conflict(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: ResolveConflictParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn resolve_conflict(params: ResolveConflictParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?
         .resolve_conflict(params.path, params.resolved_content)?;
     Ok(Value::Null)
 }
 
-fn abort_merge(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn abort_merge(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.abort_merge()?;
     Ok(Value::Null)
 }
 
-fn get_merge_message(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn get_merge_message(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let message = worker_handle(repos, &params.repo_path)?.get_merge_message()?;
     serde_json::to_value(message).map_err(|error| error.to_string())
 }
@@ -2240,9 +2063,10 @@ struct ResolveAddDeleteConflictParams {
     choice: FileConflictChoiceDto,
 }
 
-fn resolve_add_delete_conflict(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: ResolveAddDeleteConflictParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn resolve_add_delete_conflict(
+    params: ResolveAddDeleteConflictParams,
+    repos: &Repos,
+) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?
         .resolve_add_delete_conflict(params.path, params.choice.into())?;
     Ok(Value::Null)
@@ -2255,9 +2079,7 @@ struct CommitsSinceParams {
     onto: String,
 }
 
-fn commits_since(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CommitsSinceParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn commits_since(params: CommitsSinceParams, repos: &Repos) -> Result<Value, String> {
     let commits: Vec<RebasePlanCommitDto> = worker_handle(repos, &params.repo_path)?
         .commits_since(params.onto)?
         .into_iter()
@@ -2274,9 +2096,7 @@ struct StartRebaseParams {
     plan: Vec<RebasePlanEntryDto>,
 }
 
-fn start_rebase(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: StartRebaseParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn start_rebase(params: StartRebaseParams, repos: &Repos) -> Result<Value, String> {
     let result = worker_handle(repos, &params.repo_path)?.start_rebase(
         params.onto,
         params.plan.into_iter().map(Into::into).collect(),
@@ -2284,23 +2104,17 @@ fn start_rebase(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(RebaseStepResultDto::from(result)).map_err(|error| error.to_string())
 }
 
-fn rebase_continue(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn rebase_continue(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let result = worker_handle(repos, &params.repo_path)?.rebase_continue()?;
     serde_json::to_value(RebaseStepResultDto::from(result)).map_err(|error| error.to_string())
 }
 
-fn abort_rebase(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn abort_rebase(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let abort = worker_handle(repos, &params.repo_path)?.abort_rebase()?;
     serde_json::to_value(RebaseAbortDto::from(abort)).map_err(|error| error.to_string())
 }
 
-fn detect_forge_repository(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: RepoPathParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn detect_forge_repository(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
     let repositories: Vec<ForgeRepositoryDto> = worker_handle(repos, &params.repo_path)?
         .detect_forge_repository()?
         .into_iter()
@@ -2318,9 +2132,7 @@ struct ForgeTokenParams {
     token: String,
 }
 
-fn save_forge_token(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: ForgeTokenParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn save_forge_token(params: ForgeTokenParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?.save_forge_token(
         params.provider.into(),
         params.account,
@@ -2337,9 +2149,7 @@ struct ForgetForgeTokenParams {
     account: String,
 }
 
-fn forget_forge_token(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: ForgetForgeTokenParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn forget_forge_token(params: ForgetForgeTokenParams, repos: &Repos) -> Result<Value, String> {
     worker_handle(repos, &params.repo_path)?
         .forget_forge_token(params.provider.into(), params.account)?;
     Ok(Value::Null)
@@ -2353,9 +2163,7 @@ struct ListPullRequestsParams {
     account: String,
 }
 
-fn list_pull_requests(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: ListPullRequestsParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn list_pull_requests(params: ListPullRequestsParams, repos: &Repos) -> Result<Value, String> {
     let list = worker_handle(repos, &params.repo_path)?
         .list_pull_requests(params.remote_name, params.account)?;
     serde_json::to_value(PullRequestListDto::from(list)).map_err(|error| error.to_string())
@@ -2370,9 +2178,7 @@ struct CreatePullRequestParams {
     pull_request: CreatePullRequestDto,
 }
 
-fn create_pull_request(params: Value, repos: &Repos) -> Result<Value, String> {
-    let params: CreatePullRequestParams =
-        serde_json::from_value(params).map_err(|error| error.to_string())?;
+fn create_pull_request(params: CreatePullRequestParams, repos: &Repos) -> Result<Value, String> {
     let created = worker_handle(repos, &params.repo_path)?.create_pull_request(
         params.remote_name,
         params.account,
@@ -2389,6 +2195,13 @@ mod tests {
     use super::*;
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
     use repo_service::worker::HookSource;
+
+    /// A handler's typed params, written as the request's JSON.
+    macro_rules! params {
+        ($($json:tt)+) => {
+            serde_json::from_value(serde_json::json!($($json)+)).expect("well-formed params")
+        };
+    }
 
     /// #306: the TypeScript shape of the sidecar's own wire DTOs (the shared ones are in
     /// `repo_service::wire`), checked in as `frontend/src/ipc/generated/sidecar-dto.ts` and
@@ -2429,7 +2242,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         git2::Repository::init(dir.path()).unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
-        open_repo(serde_json::json!({ "path": opened(dir.path()) }), repos).unwrap();
+        open_repo(params!({ "path": opened(dir.path()) }), repos).unwrap();
         dir
     }
 
@@ -2441,9 +2254,9 @@ mod tests {
             format!("{}{}", path.display(), std::path::MAIN_SEPARATOR)
         });
         let plain = dir.path().to_str().unwrap().to_string();
-        open_repo(serde_json::json!({ "path": plain }), &repos).unwrap();
+        open_repo(params!({ "path": plain }), &repos).unwrap();
 
-        let status = get_status(serde_json::json!({ "repoPath": plain }), &repos).unwrap();
+        let status = get_status(params!({ "repoPath": plain }), &repos).unwrap();
 
         assert_eq!(status, serde_json::json!([]));
         assert_eq!(repos.len(), 1);
@@ -2456,16 +2269,16 @@ mod tests {
         let dir = repo_opened_as(&repos, |path| path.to_str().unwrap().to_string());
         let plain = dir.path().to_str().unwrap().to_string();
         let sub = dir.path().join("sub").to_str().unwrap().to_string();
-        open_repo(serde_json::json!({ "path": sub }), &repos).unwrap();
+        open_repo(params!({ "path": sub }), &repos).unwrap();
 
-        close_repo(serde_json::json!({ "repoPath": sub }), &repos).unwrap();
+        close_repo(params!({ "repoPath": sub }), &repos).unwrap();
 
-        assert!(get_status(serde_json::json!({ "repoPath": plain }), &repos).is_ok());
+        assert!(get_status(params!({ "repoPath": plain }), &repos).is_ok());
         assert_eq!(
-            get_status(serde_json::json!({ "repoPath": sub }), &repos).unwrap_err(),
+            get_status(params!({ "repoPath": sub }), &repos).unwrap_err(),
             format!("repo not open: {sub}")
         );
-        close_repo(serde_json::json!({ "repoPath": plain }), &repos).unwrap();
+        close_repo(params!({ "repoPath": plain }), &repos).unwrap();
         assert!(repos.is_empty());
     }
 
@@ -2846,7 +2659,7 @@ mod tests {
         let (repos, buffer) = relay_fixture(dir.path(), "post-checkout");
 
         switch_branch(
-            serde_json::json!({ "repoPath": path, "name": "feature" }),
+            params!({ "repoPath": path, "name": "feature" }),
             &repos,
             &buffer,
         )
@@ -2885,7 +2698,7 @@ mod tests {
         let (repos, buffer) = relay_fixture(dir.path(), "post-merge");
 
         let outcome = start_merge(
-            serde_json::json!({
+            params!({
                 "repoPath": path,
                 "branchName": "ahead",
                 "options": { "fastForward": "Allow", "squash": false }
@@ -2924,7 +2737,7 @@ mod tests {
         let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
 
         let outcome = cherry_pick_many(
-            serde_json::json!({ "repoPath": path, "commitIds": [ids[0]] }),
+            params!({ "repoPath": path, "commitIds": [ids[0]] }),
             &repos,
             &buffer,
         )
@@ -2966,8 +2779,7 @@ mod tests {
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
         let buffer: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
 
-        let failed =
-            continue_sequence(serde_json::json!({ "repoPath": path }), &repos, &buffer).unwrap();
+        let failed = continue_sequence(params!({ "repoPath": path }), &repos, &buffer).unwrap();
 
         assert_eq!(failed["kind"], "HookFailed");
         assert_eq!(failed["hook"], "commit-msg");
@@ -2989,7 +2801,7 @@ mod tests {
             .starts_with("continue-"));
 
         let completed = continue_sequence(
-            serde_json::json!({ "repoPath": path, "noVerify": true }),
+            params!({ "repoPath": path, "noVerify": true }),
             &repos,
             &buffer,
         )
