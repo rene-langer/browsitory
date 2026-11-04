@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Internal: wire snapshots
+
+- Added: tests that pin the exact bytes each transport sends for every wire DTO, with every
+  enum variant and both null and set optional fields (#306). The desktop app's and the VSCode
+  sidecar's snapshots are checked in under `crates/*/tests/wire/`, and a third test compares
+  the DTOs both transports share. Today they differ only in field order: the sidecar's
+  answers go through `serde_json::Value`, which sorts keys. For the sidecar, tests also run
+  the real binary and the real notification writers and compare their lines with the
+  snapshots, and pin the error line of every method called with missing or wrong params. The
+  desktop app now names its `hook-progress` event in one constant. The wire format is
+  unchanged.
+
 ### DTO types generated from Rust
 
 - Added: the frontend type check now fails when a wire DTO in the desktop app or the VSCode

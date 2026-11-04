@@ -1,0 +1,186 @@
+# Generated: the VSCode sidecar's wire bytes, one `<dto>/<case> <json>` line per case (#306).
+# Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar wire_snapshots
+StatusEntry/New {"kind":"New","oldPath":null,"path":"src/lib.rs","staged":false}
+StatusEntry/Modified {"kind":"Modified","oldPath":null,"path":"src/lib.rs","staged":false}
+StatusEntry/Deleted {"kind":"Deleted","oldPath":null,"path":"src/lib.rs","staged":false}
+StatusEntry/Renamed {"kind":"Renamed","oldPath":null,"path":"src/lib.rs","staged":false}
+StatusEntry/TypeChange {"kind":"TypeChange","oldPath":null,"path":"src/lib.rs","staged":false}
+StatusEntry/Conflicted {"kind":"Conflicted","oldPath":null,"path":"src/lib.rs","staged":false}
+StatusEntry/staged-rename {"kind":"Renamed","oldPath":"src/old.rs","path":"src/new.rs","staged":true}
+GraphCommit/plain {"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Add the graph","tags":["v1.0.0"],"timestamp":1700000000}
+GraphCommit/escapes {"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Say \"hi\" \\ tab\there, café 😀\u0001","tags":["v1.0.0"],"timestamp":1700000000}
+GraphCommit/root-commit {"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":[],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":[],"remoteBranchRefs":[],"shortId":"0123456","summary":"Initial commit","tags":[],"timestamp":-1}
+DiffHunk/every-origin {"lines":[{"content":"Add line\n","origin":"Add"},{"content":"Remove line\n","origin":"Remove"},{"content":"Context line\n","origin":"Context"}],"newLines":2,"newStart":1,"oldLines":2,"oldStart":1}
+DiffHunk/empty {"lines":[],"newLines":0,"newStart":0,"oldLines":0,"oldStart":0}
+FileHistoryEntry/no-old-path {"commit":{"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Edit","tags":["v1.0.0"],"timestamp":1700000000},"oldPath":null,"path":"a.txt"}
+FileHistoryEntry/renamed {"commit":{"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Rename","tags":["v1.0.0"],"timestamp":1700000000},"oldPath":"a.txt","path":"b.txt"}
+SearchPage/more {"commits":[{"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Match","tags":["v1.0.0"],"timestamp":1700000000}],"nextCursor":"cursor-1","scanned":500}
+SearchPage/exhausted {"commits":[],"nextCursor":null,"scanned":0}
+ChangedFile/plain {"oldPath":null,"path":"a.txt"}
+ChangedFile/renamed {"oldPath":"a.txt","path":"b.txt"}
+CompareRange/plain {"fromId":"1111111111111111111111111111111111111111","toId":"2222222222222222222222222222222222222222"}
+OpenRepoEntry/loose {"path":"/repos/app","workspaceId":null}
+OpenRepoEntry/in-workspace {"path":"/repos/lib","workspaceId":"ws-1"}
+Workspace/members {"id":"ws-1","memberPaths":["/repos/app","/repos/lib"],"name":"Work","rootPath":"/repos"}
+Workspace/empty {"id":"ws-2","memberPaths":[],"name":"Empty","rootPath":"/empty"}
+DiffSettings/plain {"contextLines":5,"ignoreWhitespace":true,"syntaxHighlight":false}
+ExternalToolSettings/unset {"editor":null,"terminal":null}
+ExternalToolSettings/set {"editor":"code -w","terminal":"wt"}
+CommitMessageSettings/plain {"bodyRuler":72,"showRuler":true,"summaryLimit":50}
+GitTools/diff-tool-System {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"System","viaMergeTool":true},"mergeTool":null}
+GitTools/diff-tool-Xdg {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"Xdg","viaMergeTool":true},"mergeTool":null}
+GitTools/diff-tool-Global {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"Global","viaMergeTool":true},"mergeTool":null}
+GitTools/diff-tool-Local {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"Local","viaMergeTool":true},"mergeTool":null}
+GitTools/diff-tool-Worktree {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"Worktree","viaMergeTool":true},"mergeTool":null}
+GitTools/diff-tool-Other {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"Other","viaMergeTool":true},"mergeTool":null}
+GitTools/merge-tool-minimal {"diffTool":null,"mergeTool":{"command":null,"name":"vimdiff","problem":null,"source":"Global","viaMergeTool":false}}
+GitTools/none {"diffTool":null,"mergeTool":null}
+MarkResolvedOutcome/Resolved "Resolved"
+MarkResolvedOutcome/MarkersRemain "MarkersRemain"
+FileSides/old-Missing {"new":{"kind":"Missing"},"old":{"kind":"Missing"}}
+FileSides/old-TooLarge {"new":{"kind":"Missing"},"old":{"kind":"TooLarge","size":99000000}}
+FileSides/old-Loaded-png {"new":{"kind":"Missing"},"old":{"base64":"iVBORw0KGgoAAA==","kind":"Loaded","mime":"image/png","size":10}}
+FileSides/old-Loaded-not-an-image {"new":{"kind":"Missing"},"old":{"base64":"aGVsbG8=","kind":"Loaded","mime":null,"size":5}}
+FileSides/new-Missing {"new":{"kind":"Missing"},"old":{"kind":"Missing"}}
+FileSides/new-TooLarge {"new":{"kind":"TooLarge","size":99000000},"old":{"kind":"Missing"}}
+FileSides/new-Loaded-png {"new":{"base64":"iVBORw0KGgoAAA==","kind":"Loaded","mime":"image/png","size":10},"old":{"kind":"Missing"}}
+FileSides/new-Loaded-not-an-image {"new":{"base64":"aGVsbG8=","kind":"Loaded","mime":null,"size":5},"old":{"kind":"Missing"}}
+CommitOutcome/Committed {"commitId":"3333333333333333333333333333333333333333","kind":"Committed"}
+CommitOutcome/HookFailed {"hook":"pre-commit","kind":"HookFailed","output":"lint failed\n"}
+HookProgress/Started-Commit {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Commit"}
+HookProgress/Started-Checkout {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Checkout"}
+HookProgress/Started-Merge {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Merge"}
+HookProgress/Started-Pick {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Pick"}
+HookProgress/Finished-Commit {"hook":"pre-commit","operationId":"op-1","phase":"Finished","repoPath":"/repos/app","source":"Commit"}
+BranchInfo/tracking {"ahead":2,"behind":0,"isCurrent":true,"name":"main","upstream":"origin/main"}
+BranchInfo/local-only {"ahead":null,"behind":null,"isCurrent":false,"name":"topic","upstream":null}
+WorktreeInfo/main {"head":"4444444444444444444444444444444444444444","isLocked":false,"isMain":true,"isPrunable":false,"name":"app","path":"/repos/app"}
+WorktreeInfo/unknown-head {"head":null,"isLocked":true,"isMain":false,"isPrunable":true,"name":"gone","path":"/repos/gone"}
+SubmoduleInfo/initialized {"gitlinkId":"5555555555555555555555555555555555555555","headId":"6666666666666666666666666666666666666666","initialized":true,"path":"vendor/lib","url":"https://example.com/lib.git"}
+SubmoduleInfo/unknown {"gitlinkId":null,"headId":null,"initialized":false,"path":"vendor/other","url":null}
+ReflogEntry/with-summary {"committerEmail":"ada@example.com","committerName":"Ada Lovelace","message":"commit: Add","newId":"8888888888888888888888888888888888888888","oldId":"7777777777777777777777777777777777777777","reference":"HEAD","summary":"Add","timestamp":1700000100}
+ReflogEntry/no-summary {"committerEmail":"ada@example.com","committerName":"Ada Lovelace","message":"commit: Add","newId":"8888888888888888888888888888888888888888","oldId":"7777777777777777777777777777777777777777","reference":"HEAD","summary":null,"timestamp":1700000100}
+RemoteInfo/no-auth {"authMode":null,"authUsername":null,"fetchUrl":"https://example.com/app.git","name":"origin","prune":false,"pushUrl":null}
+RemoteInfo/HttpsToken {"authMode":"HttpsToken","authUsername":"ada","fetchUrl":"https://example.com/app.git","name":"origin","prune":true,"pushUrl":"https://push.example.com/app.git"}
+RemoteInfo/SshAgent {"authMode":"SshAgent","authUsername":null,"fetchUrl":"https://example.com/app.git","name":"origin","prune":false,"pushUrl":null}
+UpstreamInfo/known {"ahead":1,"behind":3,"localBranch":"main","pushBranch":"main","remoteBranch":"main","remoteName":"origin"}
+UpstreamInfo/unknown {"ahead":null,"behind":null,"localBranch":"topic","pushBranch":null,"remoteBranch":"topic","remoteName":"origin"}
+TagInfo/annotated {"annotated":true,"commitId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","message":"Release 1.0.0\n","name":"v1.0.0","taggerName":"Ada Lovelace","targetId":"9999999999999999999999999999999999999999","timestamp":1700000200}
+TagInfo/lightweight {"annotated":false,"commitId":null,"message":null,"name":"tree-tag","taggerName":null,"targetId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","timestamp":null}
+TransferProgress/Started-Fetch {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"Fetch","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Started-FetchAll {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Started-Pull {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"Pull","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Started-PushBranch {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Started-ForcePushBranch {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"ForcePushBranch","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Started-PushTags {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"PushTags","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Started-DeleteRemoteBranch {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteBranch","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Started-Clone {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"Clone","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Progress-Fetch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Fetch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/Progress-Fetch-Updating {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Fetch","operationId":"op-2","phase":"Updating","receivedBytes":4096,"total":10}
+TransferProgress/Progress-Fetch-RunningHook {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Fetch","operationId":"op-2","phase":"RunningHook","receivedBytes":4096,"total":10}
+TransferProgress/Progress-FetchAll-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/Progress-Pull-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Pull","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/Progress-PushBranch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/Progress-ForcePushBranch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"ForcePushBranch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/Progress-PushTags-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"PushTags","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/Progress-DeleteRemoteBranch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteBranch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/Progress-Clone-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Clone","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/RemoteFailed-NonFastForward {"current":0,"errorKind":"NonFastForward","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/RemoteFailed-RejectedRemoteRef {"current":0,"errorKind":"RejectedRemoteRef","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/RemoteFailed-StaleLease {"current":0,"errorKind":"StaleLease","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/RemoteFailed-MissingCredential {"current":0,"errorKind":"MissingCredential","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/RemoteFailed-CredentialStoreFailure {"current":0,"errorKind":"CredentialStoreFailure","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/RemoteFailed-SshAgentFailure {"current":0,"errorKind":"SshAgentFailure","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/RemoteFailed-TransferFailed {"current":0,"errorKind":"TransferFailed","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/RemoteFailed-Cancelled {"current":0,"errorKind":"Cancelled","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/RemoteFailed-HookFailed {"current":0,"errorKind":"HookFailed","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
+TransferProgress/Completed-ok {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"Pull","operationId":"op-2","phase":"Completed","receivedBytes":0,"total":0}
+TransferProgress/Completed-NonFastForward {"current":0,"errorKind":"NonFastForward","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+TransferProgress/Completed-RejectedRemoteRef {"current":0,"errorKind":"RejectedRemoteRef","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+TransferProgress/Completed-StaleLease {"current":0,"errorKind":"StaleLease","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+TransferProgress/Completed-MissingCredential {"current":0,"errorKind":"MissingCredential","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+TransferProgress/Completed-CredentialStoreFailure {"current":0,"errorKind":"CredentialStoreFailure","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+TransferProgress/Completed-SshAgentFailure {"current":0,"errorKind":"SshAgentFailure","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+TransferProgress/Completed-TransferFailed {"current":0,"errorKind":"TransferFailed","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+TransferProgress/Completed-Cancelled {"current":0,"errorKind":"Cancelled","hookOutput":null,"message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+TransferProgress/Completed-HookFailed {"current":0,"errorKind":"HookFailed","hookOutput":"rejected\n","message":null,"operation":"PushBranch","operationId":"op-2","phase":"Failed","receivedBytes":0,"total":0}
+SequenceProgress/CherryPick {"currentCommit":"cccccccccccccccccccccccccccccccccccccccc","currentStep":2,"kind":"CherryPick","totalSteps":3}
+SequenceProgress/Revert {"currentCommit":"cccccccccccccccccccccccccccccccccccccccc","currentStep":2,"kind":"Revert","totalSteps":3}
+RebaseInfo/Paused {"branch":"topic","currentStep":1,"health":{"kind":"Paused"},"onto":"dddddddddddddddddddddddddddddddddddddddd","totalSteps":4}
+RebaseInfo/Diverged-HeadMoved {"branch":"topic","currentStep":1,"health":{"kind":"Diverged","reason":"HeadMoved"},"onto":"dddddddddddddddddddddddddddddddddddddddd","totalSteps":4}
+RebaseInfo/Diverged-BranchMoved {"branch":"topic","currentStep":1,"health":{"kind":"Diverged","reason":"BranchMoved"},"onto":"dddddddddddddddddddddddddddddddddddddddd","totalSteps":4}
+RebaseInfo/Diverged-BranchMissing {"branch":"topic","currentStep":1,"health":{"kind":"Diverged","reason":"BranchMissing"},"onto":"dddddddddddddddddddddddddddddddddddddddd","totalSteps":4}
+RebaseInfo/Diverged-OtherOperation {"branch":"topic","currentStep":1,"health":{"kind":"Diverged","reason":"OtherOperation"},"onto":"dddddddddddddddddddddddddddddddddddddddd","totalSteps":4}
+TerminalSequence/CherryPick {"commitsToRemove":2,"kind":"CherryPick","pausedOnConflict":true,"rewinds":true,"startedAt":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","startedAtSummary":"Start here"}
+TerminalSequence/Revert {"commitsToRemove":2,"kind":"Revert","pausedOnConflict":true,"rewinds":true,"startedAt":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","startedAtSummary":"Start here"}
+TerminalSequence/undamaged {"commitsToRemove":0,"kind":"CherryPick","pausedOnConflict":false,"rewinds":false,"startedAt":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","startedAtSummary":"Start here"}
+TerminalRebase/Rebase {"branch":"topic","currentStep":1,"kind":"Rebase","onto":"ffffffffffffffffffffffffffffffffffffffff","totalSteps":2}
+TerminalRebase/Am {"branch":"topic","currentStep":1,"kind":"Am","onto":"ffffffffffffffffffffffffffffffffffffffff","totalSteps":2}
+TerminalRebase/unknown {"branch":"","currentStep":0,"kind":"Am","onto":"","totalSteps":0}
+HeadInfo/empty {"bisect":null,"commitHooks":[],"detachedAt":null,"headId":null,"headPushed":false,"operation":null,"rebase":null,"sequence":null,"squashMessage":null,"terminalRebase":null,"terminalSequence":null}
+HeadInfo/everything {"bisect":{"startedFrom":"main"},"commitHooks":["pre-commit","commit-msg"],"detachedAt":"v1.0.0","headId":"1212121212121212121212121212121212121212","headPushed":true,"operation":"Merge","rebase":{"branch":"topic","currentStep":1,"health":{"kind":"Paused"},"onto":"dddddddddddddddddddddddddddddddddddddddd","totalSteps":4},"sequence":{"currentCommit":"cccccccccccccccccccccccccccccccccccccccc","currentStep":2,"kind":"Revert","totalSteps":3},"squashMessage":"Squashed commit of the following:\n","terminalRebase":{"branch":"topic","currentStep":1,"kind":"Rebase","onto":"ffffffffffffffffffffffffffffffffffffffff","totalSteps":2},"terminalSequence":{"commitsToRemove":2,"kind":"CherryPick","pausedOnConflict":true,"rewinds":true,"startedAt":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","startedAtSummary":"Start here"}}
+HeadInfo/operation-Merge {"bisect":null,"commitHooks":[],"detachedAt":null,"headId":null,"headPushed":false,"operation":"Merge","rebase":null,"sequence":null,"squashMessage":null,"terminalRebase":null,"terminalSequence":null}
+HeadInfo/operation-CherryPick {"bisect":null,"commitHooks":[],"detachedAt":null,"headId":null,"headPushed":false,"operation":"CherryPick","rebase":null,"sequence":null,"squashMessage":null,"terminalRebase":null,"terminalSequence":null}
+HeadInfo/operation-Revert {"bisect":null,"commitHooks":[],"detachedAt":null,"headId":null,"headPushed":false,"operation":"Revert","rebase":null,"sequence":null,"squashMessage":null,"terminalRebase":null,"terminalSequence":null}
+RebaseAbort/restored {"restored":true}
+RebaseAbort/not-restored {"restored":false}
+SequenceOutcome/Completed {"applied":2,"kind":"Completed","skipped":["1313131313131313131313131313131313131313"]}
+SequenceOutcome/Conflicted {"files":["a.txt"],"kind":"Conflicted","progress":{"currentCommit":"cccccccccccccccccccccccccccccccccccccccc","currentStep":2,"kind":"CherryPick","totalSteps":3}}
+SequenceOutcome/HookFailed {"hook":"prepare-commit-msg","kind":"HookFailed","output":"no ticket\n","progress":{"currentCommit":"cccccccccccccccccccccccccccccccccccccccc","currentStep":2,"kind":"CherryPick","totalSteps":3}}
+SequenceOutcome/Stopped {"kept":"Kept commit","kind":"Stopped","progress":{"currentCommit":"cccccccccccccccccccccccccccccccccccccccc","currentStep":2,"kind":"CherryPick","totalSteps":3}}
+SequenceAbort/rewound {"rewound":true}
+SequenceAbort/not-rewound {"rewound":false}
+PickOutcome/Committed {"commitId":"1414141414141414141414141414141414141414","kind":"Committed"}
+PickOutcome/Conflicted {"files":["a.txt","b.txt"],"kind":"Conflicted"}
+PickOutcome/HookFailed {"hook":"prepare-commit-msg","kind":"HookFailed","output":"no ticket\n"}
+UndoState/both {"redo":"Discard","undo":"Commit"}
+UndoState/none {"redo":null,"undo":null}
+CommitSignature/status-Unsigned {"detail":null,"format":null,"key":null,"signer":null,"status":"unsigned"}
+CommitSignature/status-Good {"detail":null,"format":null,"key":null,"signer":null,"status":"good"}
+CommitSignature/status-GoodUntrusted {"detail":null,"format":null,"key":null,"signer":null,"status":"goodUntrusted"}
+CommitSignature/status-Bad {"detail":null,"format":null,"key":null,"signer":null,"status":"bad"}
+CommitSignature/status-UnknownKey {"detail":null,"format":null,"key":null,"signer":null,"status":"unknownKey"}
+CommitSignature/status-Expired {"detail":null,"format":null,"key":null,"signer":null,"status":"expired"}
+CommitSignature/status-ExpiredKey {"detail":null,"format":null,"key":null,"signer":null,"status":"expiredKey"}
+CommitSignature/status-RevokedKey {"detail":null,"format":null,"key":null,"signer":null,"status":"revokedKey"}
+CommitSignature/status-Error {"detail":null,"format":null,"key":null,"signer":null,"status":"error"}
+CommitSignature/format-OpenPgp {"detail":"gpg: Good signature\n","format":"openpgp","key":"ABCDEF0123456789","signer":"Ada Lovelace <ada@example.com>","status":"good"}
+CommitSignature/format-Ssh {"detail":"gpg: Good signature\n","format":"ssh","key":"ABCDEF0123456789","signer":"Ada Lovelace <ada@example.com>","status":"good"}
+UndoOutcome/Done {"kind":"Done","label":"Commit"}
+UndoOutcome/Nothing {"kind":"Nothing"}
+UndoOutcome/RepositoryChanged {"kind":"RepositoryChanged","label":"Commit"}
+UndoOutcome/BranchHeld {"kind":"BranchHeld","label":"Switch","message":"main is checked out in another worktree"}
+UndoOutcome/OperationInProgress {"kind":"OperationInProgress"}
+PullOutcome/UpToDate {"kind":"UpToDate"}
+PullOutcome/FastForwarded {"kind":"FastForwarded","upstreamRef":"refs/remotes/origin/main"}
+PullOutcome/Diverged {"kind":"Diverged","upstreamRef":"refs/remotes/origin/main"}
+StashEntry/plain {"commitId":"1515151515151515151515151515151515151515","index":0,"message":"WIP on main: Add"}
+StashApplyOutcome/Applied {"kind":"Applied"}
+StashApplyOutcome/Conflicted {"files":["a.txt"],"kind":"Conflicted"}
+StashFiles/with-untracked {"tracked":["a.txt"],"untracked":["new.txt"],"untrackedCommitId":"1616161616161616161616161616161616161616"}
+StashFiles/tracked-only {"tracked":["a.txt"],"untracked":[],"untrackedCommitId":null}
+BlameLine/plain {"authorName":"Ada Lovelace","commitId":"1717171717171717171717171717171717171717","content":"fn main() {}\n","lineNumber":1,"shortId":"1717171","timestamp":1700000300}
+MergeOutcome/UpToDate {"kind":"UpToDate"}
+MergeOutcome/FastForwarded {"kind":"FastForwarded"}
+MergeOutcome/Merged {"kind":"Merged"}
+MergeOutcome/Squashed {"kind":"Squashed"}
+MergeOutcome/Conflicted {"files":["a.txt"],"kind":"Conflicted"}
+MergeOptions/Allow-squash-false {"fastForward":"Allow","squash":false}
+MergeOptions/Never-squash-true {"fastForward":"Never","squash":true}
+MergeOptions/Only-squash-false {"fastForward":"Only","squash":false}
+ConflictSegment/Clean {"content":"same\n","kind":"Clean"}
+ConflictSegment/Conflict {"kind":"Conflict","ours":"ours\n","theirs":"theirs\n"}
+RebasePlanCommit/plain {"authorName":"Ada Lovelace","id":"1818181818181818181818181818181818181818","shortId":"1818181","summary":"Add","timestamp":1700000400}
+RebaseStepResult/Conflicted {"files":["a.txt"],"kind":"Conflicted"}
+RebaseStepResult/PausedForEdit {"kind":"PausedForEdit"}
+RebaseStepResult/Advanced {"kind":"Advanced"}
+RebaseStepResult/Done {"kind":"Done"}
+ForgeRepository/GitHub {"host":"example.com","name":"app","owner":"ada","provider":"GitHub","remoteName":"origin"}
+ForgeRepository/Bitbucket {"host":"example.com","name":"app","owner":"ada","provider":"Bitbucket","remoteName":"origin"}
+PullRequest/plain {"author":"ada","id":"PR_1","number":42,"sourceBranch":"topic","state":"open","targetBranch":"main","title":"Add the graph","url":"https://example.com/ada/app/pull/42"}
+PullRequestList/truncated {"pullRequests":[{"author":"ada","id":"PR_1","number":42,"sourceBranch":"topic","state":"open","targetBranch":"main","title":"Add the graph","url":"https://example.com/ada/app/pull/42"}],"truncated":true}
+PullRequestList/empty {"pullRequests":[],"truncated":false}
+SignatureInput/plain {"email":"ada@example.com","name":"Ada Lovelace"}
+OpenRepos/loose {"activePath":"/repos/app","entries":[{"path":"/repos/app","workspaceId":null}]}
+OpenRepos/in-workspace {"activePath":"/repos/lib","entries":[{"path":"/repos/lib","workspaceId":"ws-1"}]}
+OpenRepos/none {"activePath":null,"entries":[]}

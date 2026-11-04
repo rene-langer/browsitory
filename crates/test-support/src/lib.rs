@@ -264,6 +264,52 @@ pub fn json_name_list(names: &[&str]) -> String {
     format!("[\n{}\n]\n", lines.join(",\n"))
 }
 
+/// A wire snapshot file (#306): `header` (each line starting with `#`), then one line per case,
+/// `<case> <json>`, in the given order. The JSON is the exact bytes a transport sends, so the
+/// file compares them byte for byte and a change shows up as a one-line diff. Panics on a
+/// repeated case name, a case name with whitespace, or JSON that spans lines.
+pub fn wire_snapshot_file(header: &str, cases: &[(String, String)]) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = String::new();
+    for line in header.lines() {
+        assert!(
+            line.starts_with('#'),
+            "header line {line:?} must start with #"
+        );
+        out.push_str(line);
+        out.push('\n');
+    }
+    for (case, json) in cases {
+        assert!(seen.insert(case.as_str()), "case {case} is listed twice");
+        assert!(
+            !case.is_empty() && !case.contains(char::is_whitespace),
+            "case name {case:?} must be one word"
+        );
+        assert!(!json.contains('\n'), "case {case}: JSON must be one line");
+        out.push_str(case);
+        out.push(' ');
+        out.push_str(json);
+        out.push('\n');
+    }
+    out
+}
+
+/// The `(case, json)` lines of a wire snapshot file written by [`wire_snapshot_file`], in file
+/// order (`#` lines skipped, CRLF read as LF). Panics when the file is missing or malformed.
+pub fn read_wire_snapshot(path: &Path) -> Vec<(String, String)> {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|err| panic!("read {path:?}: {err}"));
+    text.replace("\r\n", "\n")
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.is_empty())
+        .map(|line| {
+            let (case, json) = line
+                .split_once(' ')
+                .unwrap_or_else(|| panic!("{}: malformed line {line:?}", path.display()));
+            (case.to_string(), json.to_string())
+        })
+        .collect()
+}
+
 /// The repository root (the parent of `crates/`), for tests that read checked-in files.
 pub fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
