@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use common::{commit_all, init_repo, write_file};
 use git_core::worktree::{
-    create_worktree, list_worktrees, prune_worktrees, remove_worktree, roll_back_destination,
-    WorktreeError,
+    create_worktree, list_worktrees, prune_worktrees, remove_worktree, remove_worktree_named,
+    resolve_destination, roll_back_destination, WorktreeError,
 };
 
 #[test]
@@ -890,17 +890,18 @@ fn a_locked_worktree_whose_folder_is_missing_is_not_removed() {
 }
 
 /// #231: a relative destination starts from the top folder of the open worktree, as with
-/// `git worktree add` run there, never from the app's working directory.
+/// `git worktree add` run there, never from the app's working directory. Each resolution is
+/// checked before anything is created, so a regression can't write outside the temp folder.
 #[test]
 fn a_relative_destination_is_resolved_against_the_repository() {
     let (parent, repo, kept, _gone) = repo_with_a_missing_worktree();
-    let cwd = std::env::current_dir().unwrap();
+    let expected = parent.path().join("rel").join("wt");
+    let resolved = resolve_destination(&repo, Path::new("../rel/wt")).unwrap();
+    assert_eq!(comparable(&resolved), comparable(&expected));
 
     create_worktree(&repo, "rel", Path::new("../rel/wt"), "rel", Some("HEAD")).unwrap();
 
-    let expected = parent.path().join("rel").join("wt");
     assert!(expected.join("file.txt").is_file());
-    assert!(!cwd.join("../rel/wt").exists());
     let expected = expected.canonicalize().unwrap();
     assert!(list_worktrees(&repo)
         .unwrap()
@@ -909,6 +910,8 @@ fn a_relative_destination_is_resolved_against_the_repository() {
 
     // From a linked worktree, it is that worktree's top folder.
     let linked_repo = git2::Repository::open(&kept).unwrap();
+    let resolved = resolve_destination(&linked_repo, Path::new("inner")).unwrap();
+    assert_eq!(comparable(&resolved), comparable(&kept.join("inner")));
     create_worktree(
         &linked_repo,
         "inner",
@@ -918,7 +921,6 @@ fn a_relative_destination_is_resolved_against_the_repository() {
     )
     .unwrap();
     assert!(kept.join("inner").join("file.txt").is_file());
-    assert!(!cwd.join("inner").exists());
 
     // git does the same, run from the top folder.
     let (twin, root) = cli_repo_with_a_missing_worktree();
@@ -933,19 +935,46 @@ fn a_relative_destination_is_resolved_against_the_repository() {
     assert!(twin.path().join("kept").join("inner").is_dir());
 }
 
-/// A bare repository has no top folder to start a relative destination from.
-#[test]
-fn a_relative_destination_in_a_bare_repository_is_refused() {
+/// `path` with its existing part resolved, so two spellings of one folder compare equal.
+fn comparable(path: &Path) -> PathBuf {
+    let mut missing = Vec::new();
+    let mut base = path.to_path_buf();
+    while !base.exists() {
+        missing.push(base.file_name().unwrap().to_owned());
+        base.pop();
+    }
+    let mut resolved = base.canonicalize().unwrap();
+    for part in missing.into_iter().rev() {
+        resolved.push(part);
+    }
+    resolved
+}
+
+fn bare_repo() -> (tempfile::TempDir, git2::Repository) {
     let dir = tempfile::TempDir::new().unwrap();
     let repo = git2::Repository::init_bare(dir.path().join("bare.git")).unwrap();
     {
         let signature = git2::Signature::now("Test User", "test@example.com").unwrap();
-        let tree = repo.treebuilder(None).unwrap().write().unwrap();
-        let tree = repo.find_tree(tree).unwrap();
+        let mut builder = repo.treebuilder(None).unwrap();
+        let blob = repo.blob(b"initial").unwrap();
+        builder.insert("file.txt", blob, 0o100644).unwrap();
+        let tree = repo.find_tree(builder.write().unwrap()).unwrap();
         repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
             .unwrap();
     }
+    (dir, repo)
+}
 
+/// A bare repository has no top folder to start a relative destination from.
+#[test]
+fn a_relative_destination_in_a_bare_repository_is_refused() {
+    let (_dir, repo) = bare_repo();
+
+    let resolved = resolve_destination(&repo, Path::new("rel-wt"));
+    assert!(
+        matches!(resolved, Err(WorktreeError::RelativePath)),
+        "{resolved:?}"
+    );
     let result = create_worktree(&repo, "rel", Path::new("rel-wt"), "rel", Some("HEAD"));
 
     assert!(
@@ -958,5 +987,252 @@ fn a_relative_destination_in_a_bare_repository_is_refused() {
          relative path from."
     );
     assert!(!has_branch(&repo, "rel"));
-    assert!(!std::env::current_dir().unwrap().join("rel-wt").exists());
+}
+
+/// Every file below `root` (`.git` included) with its bytes, sorted.
+fn snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else {
+                let bytes = std::fs::read(&path).unwrap();
+                out.push((path.strip_prefix(root).unwrap().to_path_buf(), bytes));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
+}
+
+/// What can be at a removed worktree's old place by the time Remove is clicked.
+#[derive(Clone, Copy, Debug)]
+enum Replacement {
+    /// An unrelated repository, made with `git init` and committed to.
+    UnrelatedRepository,
+    /// A plain folder without `.git`.
+    PlainFolder,
+    /// A folder whose `.git` file points at another worktree's entry.
+    OtherWorktreesGitFile,
+}
+
+fn replace_folder(folder: &Path, other_worktree: &Path, replacement: Replacement) {
+    std::fs::remove_dir_all(folder).unwrap();
+    std::fs::create_dir(folder).unwrap();
+    std::fs::write(folder.join("keep.txt"), "precious").unwrap();
+    match replacement {
+        Replacement::UnrelatedRepository => {
+            let unrelated = git2::Repository::init(folder).unwrap();
+            let mut index = unrelated.index().unwrap();
+            index.add_path(Path::new("keep.txt")).unwrap();
+            index.write().unwrap();
+            let tree = unrelated.find_tree(index.write_tree().unwrap()).unwrap();
+            let signature = git2::Signature::now("Test User", "test@example.com").unwrap();
+            unrelated
+                .commit(Some("HEAD"), &signature, &signature, "own", &tree, &[])
+                .unwrap();
+        }
+        Replacement::PlainFolder => {}
+        Replacement::OtherWorktreesGitFile => {
+            std::fs::copy(other_worktree.join(".git"), folder.join(".git")).unwrap();
+        }
+    }
+}
+
+/// A folder at a worktree's place that isn't that worktree (it doesn't point back at the
+/// worktree's entry) is never deleted, not even when it's clean; like `git worktree remove`
+/// (even with `-f -f`), the removal is refused and the entry kept.
+#[test]
+fn a_folder_that_is_no_longer_the_worktree_is_never_deleted() {
+    for replacement in [
+        Replacement::UnrelatedRepository,
+        Replacement::PlainFolder,
+        Replacement::OtherWorktreesGitFile,
+    ] {
+        let (parent, repo, kept, _gone) = repo_with_a_missing_worktree();
+        let other = parent.path().join("other");
+        create_worktree(&repo, "other", &other, "other", Some("HEAD")).unwrap();
+        replace_folder(&kept, &other, replacement);
+        let before = snapshot(&kept);
+
+        let by_path = remove_worktree(&repo, &kept);
+        let by_name = remove_worktree_named(&repo, "kept", &kept);
+
+        for result in [by_path, by_name] {
+            assert!(
+                matches!(&result, Err(WorktreeError::NotThisWorktree { path }) if path == &kept),
+                "{replacement:?}: {result:?}"
+            );
+        }
+        assert_eq!(snapshot(&kept), before, "{replacement:?}");
+        assert_eq!(linked_names(&repo), ["gone", "kept", "other"]);
+        assert!(other.join("file.txt").is_file());
+
+        // git refuses too, even forced.
+        let (twin, root) = cli_repo_with_a_missing_worktree();
+        let output = git(&root, &["worktree", "add", "-q", "../other", "-b", "other"]);
+        assert!(output.status.success(), "{output:?}");
+        let twin_kept = twin.path().join("kept");
+        replace_folder(&twin_kept, &twin.path().join("other"), replacement);
+        let twin_before = snapshot(&twin_kept);
+        let output = git(&root, &["worktree", "remove", "-f", "-f", "../kept"]);
+        assert!(!output.status.success(), "{replacement:?}: {output:?}");
+        assert_eq!(snapshot(&twin_kept), twin_before);
+    }
+}
+
+/// The message says what to do.
+#[test]
+fn a_folder_that_is_no_longer_the_worktree_is_named() {
+    let error = WorktreeError::NotThisWorktree {
+        path: PathBuf::from("/work/feature"),
+    };
+    assert_eq!(
+        error.to_string(),
+        "The folder '/work/feature' is no longer this worktree. Move it away or delete it, then \
+         remove the worktree again."
+    );
+}
+
+/// A file where a parent folder of a worktree was (ENOTDIR) doesn't break the list, and that
+/// worktree can be removed by name like one whose folder is gone. (`git worktree list` lists it
+/// as prunable.)
+#[test]
+fn a_file_in_place_of_a_worktrees_parent_folder_does_not_break_the_list() {
+    let (parent, repo, kept, _gone) = repo_with_a_missing_worktree();
+    let nested = parent.path().join("p").join("q");
+    create_worktree(&repo, "q", &nested, "q", Some("HEAD")).unwrap();
+    std::fs::remove_dir_all(parent.path().join("p")).unwrap();
+    std::fs::write(parent.path().join("p"), "a file").unwrap();
+
+    let listed = list_worktrees(&repo).unwrap();
+    let q = listed.iter().find(|worktree| worktree.name == "q").unwrap();
+    assert!(q.is_prunable);
+
+    remove_worktree_named(&repo, "q", &q.path).unwrap();
+    remove_worktree(&repo, &kept).unwrap();
+    assert_eq!(linked_names(&repo), ["gone"]);
+    assert_eq!(
+        std::fs::read_to_string(parent.path().join("p")).unwrap(),
+        "a file"
+    );
+
+    // git lists it too.
+    let (twin, root) = cli_repo_with_a_missing_worktree();
+    let output = git(&root, &["worktree", "add", "-q", "../p/q", "-b", "q"]);
+    assert!(output.status.success(), "{output:?}");
+    std::fs::remove_dir_all(twin.path().join("p")).unwrap();
+    std::fs::write(twin.path().join("p"), "a file").unwrap();
+    assert_eq!(cli_worktree_names(&root), ["repo", "gone", "kept", "q"]);
+}
+
+/// Two entries can name one folder: an old one whose folder was deleted by hand, and a newer
+/// one made at the same place. Removing by name removes that entry, never the other.
+#[test]
+fn removing_by_name_picks_that_entry_when_two_name_the_same_folder() {
+    let (parent, repo, _kept, _gone) = repo_with_a_missing_worktree();
+    let folder = parent.path().join("shared");
+    create_worktree(&repo, "a-old", &folder, "a-old", Some("HEAD")).unwrap();
+    std::fs::remove_dir_all(&folder).unwrap();
+    create_worktree(&repo, "b-new", &folder, "b-new", Some("HEAD")).unwrap();
+    assert_eq!(linked_names(&repo), ["a-old", "b-new", "gone", "kept"]);
+
+    // The old entry's folder is now the new worktree's: removing the old one keeps it.
+    let result = remove_worktree_named(&repo, "a-old", &folder);
+    assert!(
+        matches!(result, Err(WorktreeError::NotThisWorktree { .. })),
+        "{result:?}"
+    );
+    assert!(folder.join("file.txt").is_file());
+
+    remove_worktree_named(&repo, "b-new", &folder).unwrap();
+    assert!(!folder.exists());
+    assert!(linked_names(&repo).contains(&"a-old".to_string()));
+    assert!(!linked_names(&repo).contains(&"b-new".to_string()));
+
+    // Now the old entry's folder is gone, so it can go too.
+    remove_worktree_named(&repo, "a-old", &folder).unwrap();
+    assert!(!linked_names(&repo).contains(&"a-old".to_string()));
+}
+
+/// A bare repository with linked worktrees (a "bare hub") lists them and removes them, as
+/// `git worktree remove` does there.
+#[test]
+fn worktrees_of_a_bare_repository_are_listed_and_removed() {
+    let (dir, repo) = bare_repo();
+    let linked = dir.path().join("linked");
+    create_worktree(&repo, "linked", &linked, "feature", Some("HEAD")).unwrap();
+
+    let listed = list_worktrees(&repo).unwrap();
+    let main = listed.iter().find(|worktree| worktree.is_main).unwrap();
+    assert_eq!(main.path, repo.path().canonicalize().unwrap());
+    assert!(matches!(
+        remove_worktree(&repo, &main.path),
+        Err(WorktreeError::MainWorktree)
+    ));
+    let entry = listed
+        .iter()
+        .find(|worktree| worktree.name == "linked")
+        .unwrap();
+
+    remove_worktree_named(&repo, "linked", &entry.path).unwrap();
+
+    assert!(!linked.exists());
+    assert_eq!(list_worktrees(&repo).unwrap().len(), 1);
+
+    // git does the same.
+    let twin = tempfile::TempDir::new().unwrap();
+    let output = git(twin.path(), &["init", "-q", "--bare", "bare.git"]);
+    assert!(output.status.success(), "{output:?}");
+    let bare = twin.path().join("bare.git");
+    let output = git(
+        &bare,
+        &["worktree", "add", "-q", "../linked", "-b", "feature"],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let output = git(&bare, &["worktree", "remove", "../linked"]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(!twin.path().join("linked").exists());
+}
+
+/// git lets `git worktree add .git/x` put a worktree inside the repository's git folder;
+/// Browsitory refuses it (where git keeps its own data, never a working folder). A worktree
+/// inside the main work tree is allowed, as in git.
+#[test]
+fn a_destination_inside_the_git_folder_is_refused() {
+    let (parent, repo, kept, _gone) = repo_with_a_missing_worktree();
+    let root = parent.path().join("repo");
+    let linked_repo = git2::Repository::open(&kept).unwrap();
+
+    for (repo, path) in [
+        (&repo, root.join(".git").join("x")),
+        (&repo, PathBuf::from(".git/x")),
+        (&repo, root.join(".git").join("worktrees").join("y")),
+        (&linked_repo, root.join(".git").join("x")),
+    ] {
+        let result = create_worktree(repo, "x", &path, "x", Some("HEAD"));
+        assert!(
+            matches!(result, Err(WorktreeError::InsideGitFolder)),
+            "{path:?}: {result:?}"
+        );
+        assert!(!has_branch(repo, "x"));
+    }
+    assert!(!root.join(".git").join("x").exists());
+    assert_eq!(
+        WorktreeError::InsideGitFolder.to_string(),
+        "A worktree can't be inside the repository's .git folder. Choose another folder."
+    );
+
+    create_worktree(&repo, "sub", Path::new("sub/x"), "sub", Some("HEAD")).unwrap();
+    assert!(root.join("sub").join("x").join("file.txt").is_file());
+
+    // git allows both.
+    let (_twin, twin_root) = cli_repo_with_a_missing_worktree();
+    let output = git(&twin_root, &["worktree", "add", "-q", ".git/x", "-b", "x"]);
+    assert!(output.status.success(), "{output:?}");
+    let output = git(&twin_root, &["worktree", "add", "-q", "sub/x", "-b", "sub"]);
+    assert!(output.status.success(), "{output:?}");
 }
