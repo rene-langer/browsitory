@@ -570,6 +570,8 @@ fn a_checkout_failure_in_a_nested_folder_is_rolled_back() {
 
 /// Checked-out files and folders whose names aren't UTF-8 (possible on Linux) are removed like
 /// any others, and so is the destination (#262).
+// Linux only, not all of Unix: macOS (APFS) refuses a name that isn't UTF-8 (EILSEQ), so the
+// checkout would fail on `a\x80` itself.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_checked_out_file_with_a_non_utf8_name_is_rolled_back() {
@@ -588,8 +590,46 @@ fn a_checked_out_file_with_a_non_utf8_name_is_rolled_back() {
 
     let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
 
+    // The checkout stops at its first failure, so a failure on the too-long name (sorted last)
+    // means `a\x80` and `b\xff/c` were written, and the rollback had them to remove.
+    let Err(WorktreeError::AddFailed { ref reason }) = result else {
+        panic!("expected AddFailed, got {result:?}");
+    };
+    assert!(reason.contains(&long), "{reason}");
     assert_add_failed_and_nothing_left(result, &repo, &linked);
     assert!(!has_branch(&repo, "newb"));
+}
+
+/// The rollback itself, on files that are certainly there: a file and a folder whose names
+/// aren't UTF-8 are removed, and so is the folder (#262).
+#[cfg(target_os = "linux")]
+#[test]
+fn rolling_back_removes_files_and_folders_whose_names_are_not_utf8() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let (dir, repo, _) = committed_repo();
+    branch_with_entries(
+        &repo,
+        &[(b"a\x80", Entry::File), (b"b\xff", Entry::Folder("c"))],
+    );
+    let bad = repo.find_branch("bad", git2::BranchType::Local).unwrap();
+    let tree = bad.get().peel_to_tree().unwrap();
+    let linked = dir.path().join("wt");
+    half_made_worktree(&repo, &linked);
+    let file = linked.join(OsStr::from_bytes(b"a\x80"));
+    let folder = linked.join(OsStr::from_bytes(b"b\xff"));
+    std::fs::write(&file, "unwritable").unwrap();
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::write(folder.join("c"), "unwritable").unwrap();
+    assert!(file.is_file() && folder.join("c").is_file());
+
+    let error = roll_back_destination(&repo, &linked, &tree, "disk full".to_string());
+
+    assert!(
+        matches!(error, WorktreeError::AddFailed { .. }),
+        "{error:?}"
+    );
+    assert!(!linked.exists());
 }
 
 #[test]
