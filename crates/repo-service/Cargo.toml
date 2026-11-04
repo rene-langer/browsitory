@@ -19,13 +19,16 @@ license = "MIT"
 # too, not just documented at tauri-app's call site: no consumer's build-time toggle should be
 # able to silently redirect a user's real credentials or forge traffic.
 forge-fixture-override = []
-# Test-only: derives ts-rs's `TS` for the enums whose variant names cross the wire as strings
-# (#306), so `tauri-app`'s and `vscode-sidecar`'s tests can generate the frontend's DTO types.
-# Only those crates' dev-dependencies enable it; no build of the app or the sidecar does.
-ts = ["dep:ts-rs"]
+# Test-only: derives ts-rs's `TS` for the wire DTOs (`src/wire.rs`) and for the enums whose
+# variant names cross the wire as strings (#306), so `tauri-app`'s and `vscode-sidecar`'s tests
+# can generate the TypeScript of their own transport-specific DTOs, which use the shared ones.
+# This crate's own tests derive it without the feature (`cfg(test)`). Only those crates'
+# dev-dependencies enable it; no build of the app or the sidecar does.
+ts = ["dep:ts-rs", "git-core/ts"]
 
 [dependencies]
 git-core = { path = "../git-core" }
+config = { path = "../config" }
 git2 = "0.21"
 keyring = { version = "4.1.6", features = ["v1"] }
 # `rustls-no-provider`: rustls, with certificates checked against the OS trust store
@@ -40,5 +43,8 @@ url = "2.5"
 ts-rs = { version = "12", optional = true }
 
 [dev-dependencies]
+# `TS` for the wire DTOs in this crate's own tests (the bindings test in `src/wire.rs`).
+ts-rs = "12"
+git-core = { path = "../git-core", features = ["ts"] }
 test-support = { path = "../test-support" }
 tempfile = "3"

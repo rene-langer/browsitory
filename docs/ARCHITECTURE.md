@@ -7,7 +7,8 @@ browsitory/
 ├── crates/
 │   ├── git-core/        # git2-based service layer, UI-agnostic, unit-tested headlessly
 │   ├── config/          # repo registry + preferences: recent-repos list, backed by TOML
-│   ├── repo-service/    # transport-agnostic worker threads, credentials, forge/PR API access
+│   ├── repo-service/    # transport-agnostic worker threads, credentials, forge/PR API access,
+│   │                    #   and the wire DTOs both transports send (`wire`)
 │   ├── tauri-app/        # thin Tauri command adapter over repo-service
 │   └── vscode-sidecar/  # JSON-RPC-over-stdio adapter over repo-service, for the VSCode extension
 ├── extension/             # VSCode extension host, webview security, and sidecar lifecycle
@@ -27,6 +28,29 @@ everything else, as server-initiated notifications (`crates/vscode-sidecar/src/d
 `spawn_progress_relay`) rather than request/response calls. Target-specific VSIX packages each
 bundle the `extension/` host, the `frontend/dist-vscode` webview bundle, and exactly one matching
 sidecar binary.
+
+Dependency direction: `tauri-app` → `repo-service` ← `vscode-sidecar`, and `repo-service` →
+`git-core`, `config`. Neither transport depends on the other.
+
+### Wire DTOs
+
+The JSON shapes both transports send and receive are defined once, in `repo_service::wire`
+(`crates/repo-service/src/wire.rs`): about 70 DTOs, their `From` impls to and from the
+`git-core`, `config` and `repo-service` types, and the transfer and hook event payloads
+(`transfer_progress_dto`, `hook_progress_dto`). The Tauri commands and the sidecar handlers
+both map through these, so a mapping can't drift between the two. Only transport-specific types
+stay in the transport crates:
+
+- `tauri-app`: the clone and init types (`clone.rs`: `CloneRequestDto`, `HttpsInputDto`,
+  `CloneOutcomeDto`, `CloneErrorDto`; the VSCode extension has no clone), `MergeToolOutcomeDto`
+  (VSCode uses its own merge editor), the Tauri event names, and `list_open_repos`'s
+  `(entries, activePath)` tuple.
+- `vscode-sidecar`: `OpenReposDto` (`list_open_repos`'s object), `FileVersionDto` and
+  `read_file_version`'s `{ text }` (extension host only), and every method's params struct.
+
+Each transport keeps its own serialization path: Tauri sends `serde_json::to_string` of the
+value (fields in declaration order); the sidecar goes through `serde_json::Value` (fields
+sorted). The wire snapshots in "Testing strategy" pin both.
 
 ### VSCode host and sidecar lifecycle
 
@@ -1445,9 +1469,9 @@ only `error`.
   `frontend/src/ipc/RepoClient.ts`. That `Debug` output equals the variant names, which is
   what the generated DTO types below use for those fields.
 - `tauri-app`: now a thin Tauri command adapter over `repo-service`, so it doesn't need
-  delegation tests of its own. It keeps `crates/tauri-app/src/commands/mod.rs`'s inline tests
-  for the DTO serialization it's still responsible for (e.g. camelCase field names on structs
-  like `WorkspaceDto`/`OpenRepoEntryDto`).
+  delegation tests of its own. `crates/tauri-app/src/commands/mod.rs`'s inline tests still
+  check the serialization of DTOs as the desktop app sends them (e.g. camelCase field names on
+  `WorkspaceDto`/`OpenRepoEntryDto`), although those DTOs now live in `repo_service::wire`.
 - Hermetic git config: every Rust test binary (`git-core`, `repo-service`, `vscode-sidecar`,
   `tauri-app`) invokes `test_support::hermetic_git!()` (dev-only `crates/test-support`), which
   before `main` points libgit2's global/XDG/system search paths at an empty directory and sets
@@ -1483,19 +1507,26 @@ only `error`.
   with `UPDATE_TRANSPORT_METHODS=1` to rewrite it; never in CI). Intended differences between the transports are explicit, commented allow-lists in the
   parity test. A new operation must reach both transports, or be added to an allow-list with a
   reason.
-- DTO types (#306): each transport's wire DTOs derive ts-rs's `TS` in test builds only
-  (`#[cfg_attr(test, derive(ts_rs::TS))]`). Their test `dto_bindings_are_current` (in
-  `crates/tauri-app/src/commands/mod.rs` and `crates/vscode-sidecar/src/dispatch.rs`) writes
-  `frontend/src/ipc/generated/tauri-dto.ts` and `sidecar-dto.ts` and fails when the checked-in
-  file is out of date (`UPDATE_TRANSPORT_METHODS=1` rewrites it). It also fails when a listed
-  DTO uses a type that isn't listed. `frontend/src/ipc/dtoContract.ts` then requires each
+- DTO types (#306): the wire DTOs derive ts-rs's `TS` in test builds only. The shared ones in
+  `repo_service::wire` use `#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]`: that
+  crate's own tests derive it, and its `ts` feature, enabled only by the transports'
+  dev-dependencies, lets their tests use the shared types too. ts-rs is never a normal
+  dependency of the app or the sidecar (`cargo tree -e normal` shows it absent). The
+  transport-specific DTOs use `#[cfg_attr(test, ...)]`. Three tests write the generated files
+  and fail when a checked-in one is out of date (`UPDATE_TRANSPORT_METHODS=1` rewrites it):
+  `wire_bindings_are_current` (`crates/repo-service/src/wire.rs`) writes
+  `frontend/src/ipc/generated/wire-dto.ts`, and `dto_bindings_are_current`
+  (`crates/tauri-app/src/commands/mod.rs`, `crates/vscode-sidecar/src/dispatch.rs`) writes the
+  transport-specific `tauri-dto.ts` and `sidecar-dto.ts`. They also fail when a listed DTO uses
+  a type that is neither listed nor imported (`sidecar-dto.ts` imports `OpenRepoEntry` from
+  `wire-dto.ts`). `frontend/src/ipc/dtoContract.ts` then requires each
   generated type to equal its hand-written type in `RepoClient.ts`, so `pnpm build` fails when a
   Rust field is renamed, retyped or made optional. The few intended differences are written out
-  there. `dtoContract.test.ts` checks that every generated type is compared.
+  there. `dtoContract.test.ts` checks that every generated type is compared, and that no type
+  name is generated in two files.
   - String fields with a union type: a wire field that Rust sends as a string holds an enum's
     `Debug` output (its variant name), and uses `ts(as = "<enum>")` with the `git-core`/
-    `repo-service` enum it comes from (their `ts` feature, enabled only by the transports'
-    dev-dependencies). The few literals the DTO code adds itself (`TransferProgress.phase`'s
+    `repo-service` enum it comes from (their `ts` feature, enabled only by dev-dependencies). The few literals the DTO code adds itself (`TransferProgress.phase`'s
     `"Starting"` …) are written in a `ts(type = "...")` next to that enum.
   - ts-rs reads the serde attributes, but it can't tell a `skip_serializing_if` field (sent
     only sometimes) from one that is always sent: mark it `ts(optional)`. On input, serde reads
@@ -1508,7 +1539,8 @@ only `error`.
 - Wire snapshots (#306): `wire_snapshots_are_current` in
   `crates/tauri-app/src/commands/wire_snapshots.rs` and
   `crates/vscode-sidecar/src/dispatch/wire_snapshots.rs` builds every output DTO from the same
-  domain values (`crates/test-support/wire_fixtures.rs`, included by both with `#[path]`) and
+  domain values (`crates/test-support/wire_fixtures.rs`, included by both with `#[path]`),
+  through the same `From` impls and helpers the commands and handlers call, and
   compares the exact bytes with `crates/*/tests/wire/dto-snapshots.txt`, one
   `<dto>/<case> <json>` line per case. The fixtures cover every enum variant and both `None`
   and `Some` of every optional field: a fieldless enum's list and a data-carrying enum's
@@ -1530,7 +1562,9 @@ only `error`.
     params, with `BROWSITORY_CONFIG_DIR` set to an empty temp dir.
   - `shared_dtos_match_across_transports` (sidecar) requires every case of a shared DTO in both
     transports (transport-only DTOs are listed with reasons) and pins the cases whose bytes
-    differ in `cross-transport-differences.txt`.
+    differ in `cross-transport-differences.txt`. Both transports build the shared DTOs with the
+    same `repo_service::wire` code, so these differences come only from the serialization path
+    (`key-order`).
   - Not covered: input-only DTOs, JSON-RPC envelopes other than those above, and the Tauri
     encoding path itself. Regenerate with `UPDATE_TRANSPORT_METHODS=1`, desktop app first.
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,

@@ -2,6 +2,7 @@
 // ts-rs generates (#306), so a new Rust DTO can't skip the contract.
 import { describe, expect, it } from "vitest";
 import contract from "./dtoContract.ts?raw";
+import wireBindings from "./generated/wire-dto.ts?raw";
 import tauriBindings from "./generated/tauri-dto.ts?raw";
 import sidecarBindings from "./generated/sidecar-dto.ts?raw";
 
@@ -25,6 +26,7 @@ function exportedTypes(source: string): string[] {
 
 describe("dtoContract.ts", () => {
   it.each([
+    ["Wire", wireBindings],
     ["Tauri", tauriBindings],
     ["Sidecar", sidecarBindings],
   ])("compares every type in the %s bindings", (side, bindings) => {
@@ -32,5 +34,11 @@ describe("dtoContract.ts", () => {
       (name) => !(name in NOT_COMPARED) && !new RegExp(`\\b${side}\\.${name}\\b`).test(contract),
     );
     expect(unchecked).toEqual([]);
+  });
+
+  it("finds each generated type in one file only", () => {
+    // A transport-specific type with a shared type's name would hide which one is compared.
+    const all = [wireBindings, tauriBindings, sidecarBindings].flatMap(exportedTypes);
+    expect(all.filter((name, index) => all.indexOf(name) !== index)).toEqual([]);
   });
 });

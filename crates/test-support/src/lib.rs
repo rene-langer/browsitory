@@ -47,40 +47,62 @@ pub use ts_rs as __ts_rs;
 /// `export type` per type, sorted by TypeScript name (#306). 64-bit integers become `number`,
 /// as the frontend reads them. Panics when a listed type uses a type that isn't listed, or when
 /// two types share a TypeScript name, so the file is always complete and self-contained.
+///
+/// `import "./module" { A, B };` before the types makes the file import `A` and `B` (declared
+/// in another generated file) instead of declaring them; each import must be used.
 #[macro_export]
 macro_rules! ts_declarations {
-    ($header:expr; $($ty:ty),* $(,)?) => {{
+    ($header:expr; $($ty:ty),* $(,)?) => {
+        $crate::ts_declarations!($header; import "" {}; $($ty),*)
+    };
+    ($header:expr; import $module:literal { $($import:ty),* $(,)? }; $($ty:ty),* $(,)?) => {{
         use $crate::__ts_rs::TS as _;
         let cfg = $crate::__ts_rs::Config::new().with_large_int("number");
+        let imports: Vec<String> = vec![$(<$import>::name(&cfg)),*];
         let mut declarations: Vec<(String, String)> = Vec::new();
         let mut used: Vec<String> = Vec::new();
         $(
             declarations.push((<$ty>::name(&cfg), <$ty>::decl(&cfg)));
             used.extend(<$ty>::dependencies(&cfg).into_iter().map(|dep| dep.ts_name));
         )*
-        $crate::join_ts_declarations($header, declarations, used)
+        $crate::join_ts_declarations($header, ($module, imports), declarations, used)
     }};
 }
 
 #[doc(hidden)]
 pub fn join_ts_declarations(
     header: &str,
+    (module, mut imports): (&str, Vec<String>),
     mut declarations: Vec<(String, String)>,
     used: Vec<String>,
 ) -> String {
     declarations.sort();
+    imports.sort();
     for pair in declarations.windows(2) {
         assert_ne!(pair[0].0, pair[1].0, "two types are named {}", pair[0].0);
+    }
+    for name in &imports {
+        assert!(
+            !declarations.iter().any(|(declared, _)| declared == name),
+            "{name} is both imported and declared"
+        );
+        assert!(used.contains(name), "{name} is imported but not used");
     }
     // Matches TypeScript names, not Rust types: an unlisted Rust type that a `ts(rename)` gives
     // the name of a listed one would pass here (and then fail the frontend's `dtoContract.ts`).
     for name in used {
         assert!(
-            declarations.iter().any(|(declared, _)| *declared == name),
+            imports.contains(&name) || declarations.iter().any(|(declared, _)| *declared == name),
             "{name} is used by a listed type but not listed itself"
         );
     }
     let mut out = header.to_string();
+    if !imports.is_empty() {
+        out.push_str(&format!(
+            "\nimport type {{ {} }} from \"{module}\";\n",
+            imports.join(", ")
+        ));
+    }
     for (_, declaration) in declarations {
         out.push_str("\nexport ");
         out.push_str(&declaration);
@@ -325,4 +347,54 @@ pub fn git(dir: &Path, args: &[&str]) -> std::process::Output {
         .args(args)
         .output()
         .unwrap_or_else(|err| panic!("run git {args:?}: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::join_ts_declarations;
+
+    fn declarations() -> Vec<(String, String)> {
+        vec![(
+            "OpenRepos".to_string(),
+            "type OpenRepos = { entries: Array<OpenRepoEntry>, };".to_string(),
+        )]
+    }
+
+    #[test]
+    fn imports_the_listed_types_before_the_declarations() {
+        let file = join_ts_declarations(
+            "// header\n",
+            ("./wire-dto", vec!["OpenRepoEntry".to_string()]),
+            declarations(),
+            vec!["OpenRepoEntry".to_string()],
+        );
+        assert_eq!(
+            file,
+            "// header\n\
+             \nimport type { OpenRepoEntry } from \"./wire-dto\";\n\
+             \nexport type OpenRepos = { entries: Array<OpenRepoEntry>, };\n"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "OpenRepoEntry is used by a listed type but not listed itself")]
+    fn refuses_a_used_type_that_is_neither_declared_nor_imported() {
+        join_ts_declarations(
+            "",
+            ("", Vec::new()),
+            declarations(),
+            vec!["OpenRepoEntry".to_string()],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Workspace is imported but not used")]
+    fn refuses_an_unused_import() {
+        join_ts_declarations(
+            "",
+            ("./wire-dto", vec!["Workspace".to_string()]),
+            Vec::new(),
+            Vec::new(),
+        );
+    }
 }

@@ -2,19 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
-use git_core::blame::BlameLine;
-use git_core::branch::BranchInfo;
-use git_core::diff::DiffHunk;
-use git_core::forge::{ForgeProvider, ForgeRepository};
-use git_core::graph::GraphCommit;
-use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
-use git_core::rebase::{RebaseAction, RebasePlanCommit, RebasePlanEntry, RebaseStepResult};
-use git_core::reflog::ReflogEntry;
-use git_core::remote::TagInfo;
-use git_core::stash::StashEntry;
-use git_core::status::StatusEntry;
-use git_core::submodule::SubmoduleInfo;
-use git_core::worktree::WorktreeInfo;
+use repo_service::wire::*;
 use repo_service::worker::{HookEvent, TransferEvent, WorkerRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -260,30 +248,6 @@ fn close_repo(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "StatusEntry"))]
-#[serde(rename_all = "camelCase")]
-struct StatusEntryDto {
-    path: String,
-    /// A staged rename's old path; always present (`null` otherwise).
-    old_path: Option<String>,
-    staged: bool,
-    #[cfg_attr(test, ts(as = "git_core::status::StatusKind"))]
-    kind: String,
-}
-
-impl From<StatusEntry> for StatusEntryDto {
-    fn from(entry: StatusEntry) -> Self {
-        Self {
-            path: entry.path,
-            old_path: entry.old_path,
-            staged: entry.staged,
-            kind: format!("{:?}", entry.kind),
-        }
-    }
-}
-
 fn get_status(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -303,40 +267,6 @@ struct GetCommitGraphParams {
     selected_branches: Option<Vec<String>>,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "GraphCommit"))]
-#[serde(rename_all = "camelCase")]
-struct GraphCommitDto {
-    id: String,
-    short_id: String,
-    summary: String,
-    author_name: String,
-    author_email: String,
-    timestamp: i64,
-    parent_ids: Vec<String>,
-    branch_refs: Vec<String>,
-    remote_branch_refs: Vec<String>,
-    tags: Vec<String>,
-}
-
-impl From<GraphCommit> for GraphCommitDto {
-    fn from(c: GraphCommit) -> Self {
-        Self {
-            id: c.id,
-            short_id: c.short_id,
-            summary: c.summary,
-            author_name: c.author_name,
-            author_email: c.author_email,
-            timestamp: c.timestamp,
-            parent_ids: c.parent_ids,
-            branch_refs: c.branch_refs,
-            remote_branch_refs: c.remote_branch_refs,
-            tags: c.tags,
-        }
-    }
-}
-
 fn get_commit_graph(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: GetCommitGraphParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -346,46 +276,6 @@ fn get_commit_graph(params: Value, repos: &Repos) -> Result<Value, String> {
         .map(GraphCommitDto::from)
         .collect();
     serde_json::to_value(commits).map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "DiffLine"))]
-struct DiffLineDto {
-    #[cfg_attr(test, ts(as = "git_core::diff::DiffLineOrigin"))]
-    origin: String,
-    content: String,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "DiffHunk"))]
-#[serde(rename_all = "camelCase")]
-struct DiffHunkDto {
-    old_start: u32,
-    old_lines: u32,
-    new_start: u32,
-    new_lines: u32,
-    lines: Vec<DiffLineDto>,
-}
-
-impl From<DiffHunk> for DiffHunkDto {
-    fn from(hunk: DiffHunk) -> Self {
-        Self {
-            old_start: hunk.old_start,
-            old_lines: hunk.old_lines,
-            new_start: hunk.new_start,
-            new_lines: hunk.new_lines,
-            lines: hunk
-                .lines
-                .into_iter()
-                .map(|line| DiffLineDto {
-                    origin: format!("{:?}", line.origin),
-                    content: line.content,
-                })
-                .collect(),
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -436,17 +326,6 @@ fn get_commit_diff(params: Value, repos: &Repos) -> Result<Value, String> {
     serde_json::to_value(hunks).map_err(|error| error.to_string())
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "FileHistoryEntry"))]
-#[serde(rename_all = "camelCase")]
-struct FileHistoryEntryDto {
-    commit: GraphCommitDto,
-    path: String,
-    // Serialized as `null` (not omitted) — the TS type is `string | null`.
-    old_path: Option<String>,
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GetFileHistoryParams {
@@ -461,11 +340,7 @@ fn get_file_history(params: Value, repos: &Repos) -> Result<Value, String> {
     let entries: Vec<FileHistoryEntryDto> = worker_handle(repos, &params.repo_path)?
         .get_file_history(params.path, params.limit)?
         .into_iter()
-        .map(|e| FileHistoryEntryDto {
-            commit: GraphCommitDto::from(e.commit),
-            path: e.path,
-            old_path: e.old_path,
-        })
+        .map(FileHistoryEntryDto::from)
         .collect();
     serde_json::to_value(entries).map_err(|error| error.to_string())
 }
@@ -479,17 +354,6 @@ struct SearchCommitsParams {
     cursor: Option<String>,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "SearchPage"))]
-#[serde(rename_all = "camelCase")]
-struct SearchPageDto {
-    commits: Vec<GraphCommitDto>,
-    // Serialized as `null` (not omitted) — the TS type is `string | null`.
-    next_cursor: Option<String>,
-    scanned: usize,
-}
-
 fn search_commits(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: SearchCommitsParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -498,12 +362,7 @@ fn search_commits(params: Value, repos: &Repos) -> Result<Value, String> {
         params.refs,
         params.cursor,
     )?;
-    serde_json::to_value(SearchPageDto {
-        commits: page.commits.into_iter().map(GraphCommitDto::from).collect(),
-        next_cursor: page.next_cursor,
-        scanned: page.scanned,
-    })
-    .map_err(|error| error.to_string())
+    serde_json::to_value(SearchPageDto::from(page)).map_err(|error| error.to_string())
 }
 
 /// Stops the repo's in-flight search, if any. Every request runs on its own thread (see
@@ -540,33 +399,6 @@ fn get_commit_rename_diff(params: Value, repos: &Repos) -> Result<Value, String>
         .map(DiffHunkDto::from)
         .collect();
     serde_json::to_value(hunks).map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "ChangedFile"))]
-#[serde(rename_all = "camelCase")]
-struct ChangedFileDto {
-    path: String,
-    old_path: Option<String>,
-}
-
-impl From<git_core::diff::ChangedFile> for ChangedFileDto {
-    fn from(f: git_core::diff::ChangedFile) -> Self {
-        ChangedFileDto {
-            path: f.path,
-            old_path: f.old_path,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "CompareRange"))]
-#[serde(rename_all = "camelCase")]
-struct CompareRangeDto {
-    from_id: String,
-    to_id: String,
 }
 
 #[derive(Deserialize)]
@@ -665,11 +497,7 @@ fn get_branch_compare_range(params: Value, repos: &Repos) -> Result<Value, Strin
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let range =
         worker_handle(repos, &params.repo_path)?.get_branch_compare_range(params.ref_name)?;
-    serde_json::to_value(CompareRangeDto {
-        from_id: range.from_id,
-        to_id: range.to_id,
-    })
-    .map_err(|error| error.to_string())
+    serde_json::to_value(CompareRangeDto::from(range)).map_err(|error| error.to_string())
 }
 
 fn list_recent_repos() -> Result<Value, String> {
@@ -679,24 +507,6 @@ fn list_recent_repos() -> Result<Value, String> {
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
     serde_json::to_value(paths).map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "OpenRepoEntry"))]
-#[serde(rename_all = "camelCase")]
-struct OpenRepoEntryDto {
-    path: String,
-    workspace_id: Option<String>,
-}
-
-impl From<config::OpenRepoEntry> for OpenRepoEntryDto {
-    fn from(entry: config::OpenRepoEntry) -> Self {
-        Self {
-            path: entry.path.to_string_lossy().into_owned(),
-            workspace_id: entry.workspace_id,
-        }
-    }
 }
 
 /// `list_open_repos`'s answer. (The desktop app's command returns an `(entries, activePath)`
@@ -710,21 +520,19 @@ struct OpenReposDto {
     active_path: Option<String>,
 }
 
-fn list_open_repos_handler() -> Result<Value, String> {
-    let (entries, active) = config::list_open_repos().map_err(|error| error.to_string())?;
-    let open = OpenReposDto {
-        entries: entries.into_iter().map(OpenRepoEntryDto::from).collect(),
-        active_path: active.map(|p| p.to_string_lossy().into_owned()),
-    };
-    serde_json::to_value(open).map_err(|error| error.to_string())
+/// `config::list_open_repos`'s `(entries, active path)`.
+impl From<(Vec<config::OpenRepoEntry>, Option<PathBuf>)> for OpenReposDto {
+    fn from((entries, active): (Vec<config::OpenRepoEntry>, Option<PathBuf>)) -> Self {
+        Self {
+            entries: entries.into_iter().map(OpenRepoEntryDto::from).collect(),
+            active_path: active.map(|p| p.to_string_lossy().into_owned()),
+        }
+    }
 }
 
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-struct OpenRepoEntryInput {
-    path: String,
-    workspace_id: Option<String>,
+fn list_open_repos_handler() -> Result<Value, String> {
+    let open = config::list_open_repos().map_err(|error| error.to_string())?;
+    serde_json::to_value(OpenReposDto::from(open)).map_err(|error| error.to_string())
 }
 
 #[derive(Deserialize)]
@@ -765,32 +573,6 @@ fn scan_repos_in_root(params: Value) -> Result<Value, String> {
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
     serde_json::to_value(paths).map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "Workspace"))]
-#[serde(rename_all = "camelCase")]
-struct WorkspaceDto {
-    id: String,
-    name: String,
-    root_path: String,
-    member_paths: Vec<String>,
-}
-
-impl From<config::Workspace> for WorkspaceDto {
-    fn from(workspace: config::Workspace) -> Self {
-        Self {
-            id: workspace.id,
-            name: workspace.name,
-            root_path: workspace.root_path.to_string_lossy().into_owned(),
-            member_paths: workspace
-                .member_paths
-                .into_iter()
-                .map(|p| p.to_string_lossy().into_owned())
-                .collect(),
-        }
-    }
 }
 
 fn list_workspaces_handler() -> Result<Value, String> {
@@ -1073,54 +855,6 @@ fn ignore_path(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-#[derive(Deserialize, Clone, Copy)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "DiffOptions"))]
-#[serde(rename_all = "camelCase")]
-struct DiffOptionsDto {
-    ignore_whitespace: bool,
-    context_lines: u32,
-}
-
-impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
-    fn from(dto: DiffOptionsDto) -> Self {
-        git_core::diff::DiffOptions {
-            ignore_whitespace: dto.ignore_whitespace,
-            context_lines: dto.context_lines,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "DiffSettings"))]
-#[serde(rename_all = "camelCase")]
-struct DiffSettingsDto {
-    ignore_whitespace: bool,
-    context_lines: u32,
-    syntax_highlight: bool,
-}
-
-impl From<config::DiffSettings> for DiffSettingsDto {
-    fn from(s: config::DiffSettings) -> Self {
-        DiffSettingsDto {
-            ignore_whitespace: s.ignore_whitespace,
-            context_lines: s.context_lines,
-            syntax_highlight: s.syntax_highlight,
-        }
-    }
-}
-
-impl From<DiffSettingsDto> for config::DiffSettings {
-    fn from(d: DiffSettingsDto) -> Self {
-        config::DiffSettings {
-            ignore_whitespace: d.ignore_whitespace,
-            context_lines: d.context_lines,
-            syntax_highlight: d.syntax_highlight,
-        }
-    }
-}
-
 #[derive(Deserialize)]
 struct SetDiffSettingsParams {
     settings: DiffSettingsDto,
@@ -1136,32 +870,6 @@ fn set_diff_settings(params: Value) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     config::set_diff_settings(&params.settings.into()).map_err(|error| error.to_string())?;
     Ok(Value::Null)
-}
-
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "ExternalToolSettings"))]
-struct ExternalToolSettingsDto {
-    editor: Option<String>,
-    terminal: Option<String>,
-}
-
-impl From<config::ExternalToolSettings> for ExternalToolSettingsDto {
-    fn from(settings: config::ExternalToolSettings) -> Self {
-        Self {
-            editor: settings.editor,
-            terminal: settings.terminal,
-        }
-    }
-}
-
-impl From<ExternalToolSettingsDto> for config::ExternalToolSettings {
-    fn from(dto: ExternalToolSettingsDto) -> Self {
-        Self {
-            editor: dto.editor,
-            terminal: dto.terminal,
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -1186,91 +894,11 @@ fn set_external_tool_settings(params: Value) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "GitConfigSource"))]
-enum GitConfigSourceDto {
-    System,
-    Xdg,
-    Global,
-    Local,
-    Worktree,
-    Other,
-}
-
-impl From<git_core::tools::ConfigSource> for GitConfigSourceDto {
-    fn from(source: git_core::tools::ConfigSource) -> Self {
-        use git_core::tools::ConfigSource;
-        match source {
-            ConfigSource::System => Self::System,
-            ConfigSource::Xdg => Self::Xdg,
-            ConfigSource::Global => Self::Global,
-            ConfigSource::Local => Self::Local,
-            ConfigSource::Worktree => Self::Worktree,
-            ConfigSource::Other => Self::Other,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "GitToolInfo"))]
-#[serde(rename_all = "camelCase")]
-struct GitToolDto {
-    name: String,
-    command: Option<String>,
-    source: GitConfigSourceDto,
-    via_merge_tool: bool,
-    problem: Option<String>,
-}
-
-impl From<git_core::tools::GitToolInfo> for GitToolDto {
-    fn from(info: git_core::tools::GitToolInfo) -> Self {
-        Self {
-            name: info.name,
-            command: info.command,
-            source: info.source.into(),
-            via_merge_tool: info.via_merge_tool,
-            problem: info.problem,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "GitTools"))]
-#[serde(rename_all = "camelCase")]
-struct GitToolsDto {
-    diff_tool: Option<GitToolDto>,
-    merge_tool: Option<GitToolDto>,
-}
-
 fn get_git_tools(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let tools = worker_handle(repos, &params.repo_path)?.get_git_tools()?;
-    serde_json::to_value(GitToolsDto {
-        diff_tool: tools.diff_tool.map(Into::into),
-        merge_tool: tools.merge_tool.map(Into::into),
-    })
-    .map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "MarkResolvedOutcome"))]
-enum MarkResolvedOutcomeDto {
-    Resolved,
-    MarkersRemain,
-}
-
-impl From<git_core::merge::MarkResolvedOutcome> for MarkResolvedOutcomeDto {
-    fn from(outcome: git_core::merge::MarkResolvedOutcome) -> Self {
-        match outcome {
-            git_core::merge::MarkResolvedOutcome::Resolved => Self::Resolved,
-            git_core::merge::MarkResolvedOutcome::MarkersRemain => Self::MarkersRemain,
-        }
-    }
+    serde_json::to_value(GitToolsDto::from(tools)).map_err(|error| error.to_string())
 }
 
 #[derive(Deserialize)]
@@ -1279,14 +907,6 @@ struct MarkResolvedParams {
     repo_path: String,
     path: String,
     force: bool,
-}
-
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "ConflictSide"))]
-enum ConflictSideDto {
-    Ours,
-    Theirs,
 }
 
 #[derive(Deserialize)]
@@ -1300,11 +920,7 @@ struct ResolveWholeFileParams {
 fn resolve_whole_file(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: ResolveWholeFileParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let side = match params.side {
-        ConflictSideDto::Ours => git_core::merge::ConflictSide::Ours,
-        ConflictSideDto::Theirs => git_core::merge::ConflictSide::Theirs,
-    };
-    worker_handle(repos, &params.repo_path)?.resolve_whole_file(params.path, side)?;
+    worker_handle(repos, &params.repo_path)?.resolve_whole_file(params.path, params.side.into())?;
     Ok(Value::Null)
 }
 
@@ -1406,29 +1022,8 @@ struct CommitMessageParams {
     author: Option<SignatureInputDto>,
 }
 
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "Trailer"))]
-struct TrailerDto {
-    key: String,
-    value: String,
-}
-
 fn trailers(dtos: Vec<TrailerDto>) -> Vec<git_core::commit::Trailer> {
-    dtos.into_iter()
-        .map(|dto| git_core::commit::Trailer {
-            key: dto.key,
-            value: dto.value,
-        })
-        .collect()
-}
-
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "SignatureInput"))]
-struct SignatureInputDto {
-    name: String,
-    email: String,
+    dtos.into_iter().map(Into::into).collect()
 }
 
 fn list_recent_authors(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -1437,64 +1032,9 @@ fn list_recent_authors(params: Value, repos: &Repos) -> Result<Value, String> {
     let authors: Vec<SignatureInputDto> = worker_handle(repos, &params.repo_path)?
         .list_recent_authors()?
         .into_iter()
-        .map(|a| SignatureInputDto {
-            name: a.name,
-            email: a.email,
-        })
+        .map(SignatureInputDto::from)
         .collect();
     serde_json::to_value(authors).map_err(|error| error.to_string())
-}
-
-/// Which two sides of a diff (`RepoClient`'s `DiffSource`).
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "DiffSource"))]
-#[serde(tag = "kind")]
-enum DiffSourceDto {
-    Unstaged,
-    /// `oldPath` (optional, default `null`): a staged rename's HEAD-side path.
-    #[serde(rename_all = "camelCase")]
-    Staged {
-        #[serde(default)]
-        old_path: Option<String>,
-    },
-    #[serde(rename_all = "camelCase")]
-    Commit {
-        commit_id: String,
-        old_path: Option<String>,
-    },
-    /// `toId: null` is the working tree.
-    #[serde(rename_all = "camelCase")]
-    Range {
-        from_id: String,
-        to_id: Option<String>,
-        old_path: Option<String>,
-    },
-}
-
-impl From<DiffSourceDto> for git_core::tools::DiffSource {
-    fn from(dto: DiffSourceDto) -> Self {
-        match dto {
-            DiffSourceDto::Unstaged => Self::Unstaged,
-            DiffSourceDto::Staged { old_path } => Self::Staged { old_path },
-            DiffSourceDto::Commit {
-                commit_id,
-                old_path,
-            } => Self::Commit {
-                commit_id,
-                old_path,
-            },
-            DiffSourceDto::Range {
-                from_id,
-                to_id,
-                old_path,
-            } => Self::Range {
-                from_id,
-                to_id,
-                old_path,
-            },
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -1505,65 +1045,12 @@ struct FileSidesParams {
     source: DiffSourceDto,
 }
 
-/// One side for the image preview; `mime` is sniffed from the bytes (`null`: not an image).
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "FileSide"))]
-#[serde(tag = "kind")]
-enum FileSideDto {
-    Missing,
-    TooLarge {
-        size: u64,
-    },
-    Loaded {
-        size: u64,
-        base64: String,
-        mime: Option<&'static str>,
-    },
-}
-
-impl From<git_core::diff::FileSide> for FileSideDto {
-    fn from(side: git_core::diff::FileSide) -> Self {
-        match side {
-            git_core::diff::FileSide::Missing => Self::Missing,
-            git_core::diff::FileSide::TooLarge { size } => Self::TooLarge { size },
-            git_core::diff::FileSide::Loaded { bytes } => Self::Loaded {
-                size: bytes.len() as u64,
-                mime: git_core::diff::sniff_image_mime(&bytes),
-                base64: repo_service::base64::encode(&bytes),
-            },
-        }
-    }
-}
-
 fn get_file_sides(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: FileSidesParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let sides = worker_handle(repos, &params.repo_path)?
         .get_file_sides(params.path, params.source.into())?;
-    serde_json::to_value(FileSidesDto {
-        old: sides.old.into(),
-        new: sides.new.into(),
-    })
-    .map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "FileSides"))]
-struct FileSidesDto {
-    old: FileSideDto,
-    new: FileSideDto,
-}
-
-#[derive(Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "CommitMessageSettings"))]
-#[serde(rename_all = "camelCase")]
-struct CommitMessageSettingsDto {
-    summary_limit: u32,
-    body_ruler: u32,
-    show_ruler: bool,
+    serde_json::to_value(FileSidesDto::from(sides)).map_err(|error| error.to_string())
 }
 
 #[derive(Deserialize)]
@@ -1572,93 +1059,17 @@ struct SetCommitMessageSettingsParams {
 }
 
 fn get_commit_message_settings() -> Result<Value, String> {
-    let s = config::get_commit_message_settings().map_err(|error| error.to_string())?;
-    serde_json::to_value(CommitMessageSettingsDto {
-        summary_limit: s.summary_limit,
-        body_ruler: s.body_ruler,
-        show_ruler: s.show_ruler,
-    })
-    .map_err(|error| error.to_string())
+    let settings = config::get_commit_message_settings().map_err(|error| error.to_string())?;
+    serde_json::to_value(CommitMessageSettingsDto::from(settings))
+        .map_err(|error| error.to_string())
 }
 
 fn set_commit_message_settings(params: Value) -> Result<Value, String> {
     let params: SetCommitMessageSettingsParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    config::set_commit_message_settings(&config::CommitMessageSettings {
-        summary_limit: params.settings.summary_limit,
-        body_ruler: params.settings.body_ruler,
-        show_ruler: params.settings.show_ruler,
-    })
-    .map_err(|error| error.to_string())?;
+    config::set_commit_message_settings(&params.settings.into())
+        .map_err(|error| error.to_string())?;
     Ok(Value::Null)
-}
-
-/// A commit/amend result: a failing gate hook is data the UI renders, not an error.
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "CommitOutcome"))]
-#[serde(tag = "kind")]
-enum CommitOutcomeDto {
-    Committed {
-        #[serde(rename = "commitId")]
-        commit_id: String,
-    },
-    HookFailed {
-        hook: String,
-        output: String,
-    },
-}
-
-impl From<git_core::commit::CommitOutcome> for CommitOutcomeDto {
-    fn from(outcome: git_core::commit::CommitOutcome) -> Self {
-        match outcome {
-            git_core::commit::CommitOutcome::Committed { commit_id } => {
-                Self::Committed { commit_id }
-            }
-            git_core::commit::CommitOutcome::HookFailed { hook, output } => {
-                Self::HookFailed { hook, output }
-            }
-        }
-    }
-}
-
-/// Payload of the `hookProgress` notification (commit/amend/Continue, checkout, merge and pick
-/// hooks). `source` (`"Commit" | "Checkout" | "Merge" | "Pick"`) tells the UI where to show it
-/// (#185).
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "HookProgress"))]
-#[serde(rename_all = "camelCase")]
-struct HookProgressDto {
-    repo_path: String,
-    operation_id: String,
-    hook: String,
-    #[cfg_attr(test, ts(type = r#""Started" | "Finished""#))]
-    phase: &'static str,
-    #[cfg_attr(test, ts(as = "repo_service::worker::HookSource"))]
-    source: String,
-}
-
-fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
-    let (operation_id, hook, phase, source) = match event {
-        HookEvent::Started {
-            operation_id,
-            hook,
-            source,
-        } => (operation_id, hook, "Started", source),
-        HookEvent::Finished {
-            operation_id,
-            hook,
-            source,
-        } => (operation_id, hook, "Finished", source),
-    };
-    HookProgressDto {
-        repo_path: repo_path.to_string(),
-        operation_id,
-        hook,
-        phase,
-        source: format!("{:?}", source),
-    }
 }
 
 /// A hook event channel relayed as `hookProgress` notifications for `repo_path`.
@@ -1712,31 +1123,6 @@ fn commit(
         event_tx,
     )?;
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "BranchInfo"))]
-#[serde(rename_all = "camelCase")]
-struct BranchInfoDto {
-    name: String,
-    is_current: bool,
-    // Nulls are part of the wire contract: no `skip_serializing_if`.
-    upstream: Option<String>,
-    ahead: Option<usize>,
-    behind: Option<usize>,
-}
-
-impl From<BranchInfo> for BranchInfoDto {
-    fn from(branch: BranchInfo) -> Self {
-        Self {
-            name: branch.name,
-            is_current: branch.is_current,
-            upstream: branch.upstream,
-            ahead: branch.ahead,
-            behind: branch.behind,
-        }
-    }
 }
 
 fn list_branches(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -1815,32 +1201,6 @@ fn rename_branch(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "WorktreeInfo"))]
-#[serde(rename_all = "camelCase")]
-struct WorktreeInfoDto {
-    name: String,
-    path: String,
-    head: Option<String>,
-    is_main: bool,
-    is_locked: bool,
-    is_prunable: bool,
-}
-
-impl From<WorktreeInfo> for WorktreeInfoDto {
-    fn from(worktree: WorktreeInfo) -> Self {
-        Self {
-            name: worktree.name,
-            path: worktree.path.to_string_lossy().into_owned(),
-            head: (!worktree.head.is_empty()).then_some(worktree.head),
-            is_main: worktree.is_main,
-            is_locked: worktree.is_locked,
-            is_prunable: worktree.is_prunable,
-        }
-    }
-}
-
 fn list_worktrees(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -1895,30 +1255,6 @@ fn prune_worktrees(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "SubmoduleInfo"))]
-#[serde(rename_all = "camelCase")]
-struct SubmoduleInfoDto {
-    path: String,
-    url: Option<String>,
-    gitlink_id: Option<String>,
-    initialized: bool,
-    head_id: Option<String>,
-}
-
-impl From<SubmoduleInfo> for SubmoduleInfoDto {
-    fn from(submodule: SubmoduleInfo) -> Self {
-        Self {
-            path: submodule.path,
-            url: submodule.url,
-            gitlink_id: submodule.gitlink_id,
-            initialized: submodule.initialized,
-            head_id: submodule.head_id,
-        }
-    }
-}
-
 fn list_submodules(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -1950,36 +1286,6 @@ fn update_submodule(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?.update_submodule(params.path, params.recursive)?;
     Ok(Value::Null)
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "ReflogEntry"))]
-#[serde(rename_all = "camelCase")]
-struct ReflogEntryDto {
-    reference: String,
-    old_id: String,
-    new_id: String,
-    committer_name: String,
-    committer_email: String,
-    timestamp: i64,
-    message: String,
-    summary: Option<String>,
-}
-
-impl From<ReflogEntry> for ReflogEntryDto {
-    fn from(entry: ReflogEntry) -> Self {
-        Self {
-            reference: entry.reference,
-            old_id: entry.old_id,
-            new_id: entry.new_id,
-            committer_name: entry.committer_name,
-            committer_email: entry.committer_email,
-            timestamp: entry.timestamp,
-            message: entry.message,
-            summary: entry.summary,
-        }
-    }
 }
 
 fn list_reflog_refs(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -2023,60 +1329,6 @@ fn restore_reflog_entry(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "RemoteAuthMode"))]
-enum RemoteAuthModeDto {
-    HttpsToken,
-    SshAgent,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "RemoteInfo"))]
-#[serde(rename_all = "camelCase")]
-struct RemoteInfoDto {
-    name: String,
-    fetch_url: String,
-    push_url: Option<String>,
-    auth_mode: Option<RemoteAuthModeDto>,
-    auth_username: Option<String>,
-    /// Effective git-config prune default for this remote (the UI's Prune toggle fallback).
-    prune: bool,
-}
-
-impl
-    From<(
-        git_core::remote::RemoteInfo,
-        Option<git_core::remote::RemoteAuthMode>,
-    )> for RemoteInfoDto
-{
-    fn from(
-        (remote, profile): (
-            git_core::remote::RemoteInfo,
-            Option<git_core::remote::RemoteAuthMode>,
-        ),
-    ) -> Self {
-        let (auth_mode, auth_username) = match profile {
-            Some(git_core::remote::RemoteAuthMode::HttpsToken { username }) => {
-                (Some(RemoteAuthModeDto::HttpsToken), Some(username))
-            }
-            Some(git_core::remote::RemoteAuthMode::SshAgent) => {
-                (Some(RemoteAuthModeDto::SshAgent), None)
-            }
-            None => (None, None),
-        };
-        Self {
-            name: remote.name,
-            fetch_url: remote.fetch_url,
-            push_url: remote.push_url,
-            auth_mode,
-            auth_username,
-            prune: remote.prune,
-        }
-    }
-}
-
 fn list_remotes(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -2105,33 +1357,6 @@ fn list_remote_branches(params: Value, repos: &Repos) -> Result<Value, String> {
     let branches =
         worker_handle(repos, &params.repo_path)?.list_remote_branches(params.remote_name)?;
     serde_json::to_value(branches).map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "UpstreamInfo"))]
-#[serde(rename_all = "camelCase")]
-struct UpstreamInfoDto {
-    local_branch: String,
-    remote_name: String,
-    remote_branch: String,
-    ahead: Option<usize>,
-    behind: Option<usize>,
-    /// Where Push lands under `push.default`; null = ask with the Push to… dialog.
-    push_branch: Option<String>,
-}
-
-impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
-    fn from(upstream: git_core::remote::UpstreamInfo) -> Self {
-        Self {
-            local_branch: upstream.local_branch,
-            remote_name: upstream.remote_name,
-            remote_branch: upstream.remote_branch,
-            ahead: upstream.ahead,
-            behind: upstream.behind,
-            push_branch: upstream.push_branch,
-        }
-    }
 }
 
 fn get_current_upstream(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -2306,34 +1531,6 @@ fn clear_current_upstream(params: Value, repos: &Repos) -> Result<Value, String>
     Ok(Value::Null)
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "TagInfo"))]
-#[serde(rename_all = "camelCase")]
-struct TagInfoDto {
-    name: String,
-    target_id: String,
-    commit_id: Option<String>,
-    annotated: bool,
-    message: Option<String>,
-    tagger_name: Option<String>,
-    timestamp: Option<i64>,
-}
-
-impl From<TagInfo> for TagInfoDto {
-    fn from(tag: TagInfo) -> Self {
-        Self {
-            name: tag.name,
-            target_id: tag.target_id,
-            commit_id: tag.commit_id,
-            annotated: tag.annotated,
-            message: tag.message,
-            tagger_name: tag.tagger_name,
-            timestamp: tag.timestamp,
-        }
-    }
-}
-
 fn list_tags(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -2372,110 +1569,6 @@ fn delete_tag(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?.delete_tag(params.name)?;
     Ok(Value::Null)
-}
-
-#[derive(Clone, Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "TransferProgress"))]
-#[serde(rename_all = "camelCase")]
-struct TransferProgressDto {
-    operation_id: String,
-    #[cfg_attr(test, ts(as = "git_core::remote::TransferOperation"))]
-    operation: String,
-    #[cfg_attr(
-        test,
-        ts(
-            // `TransferPhase` (declared in the same generated file) plus the phases only the
-            // transfer relay emits.
-            type = r#"TransferPhase | "Starting" | "RemoteFailed" | "Completed" | "Failed""#
-        )
-    )]
-    phase: String,
-    #[cfg_attr(test, ts(as = "Option<git_core::remote::TransferErrorKind>"))]
-    error_kind: Option<String>,
-    current: usize,
-    total: usize,
-    received_bytes: usize,
-    message: Option<String>,
-    /// Only on `RemoteFailed`: the remote that failed during a Fetch all.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[cfg_attr(test, ts(optional))]
-    remote_name: Option<String>,
-    /// Local `pre-push` hook output on a `HookFailed` completion, `null` otherwise. Unlike
-    /// `message` this comes from the user's own script, not the remote.
-    hook_output: Option<String>,
-}
-
-fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
-    match event {
-        TransferEvent::Started {
-            operation_id,
-            operation,
-        } => TransferProgressDto {
-            operation_id,
-            operation: format!("{operation:?}"),
-            phase: "Starting".to_string(),
-            error_kind: None,
-            current: 0,
-            total: 0,
-            received_bytes: 0,
-            message: None,
-            remote_name: None,
-            hook_output: None,
-        },
-        TransferEvent::Progress(progress) => TransferProgressDto {
-            operation_id: progress.operation_id,
-            operation: format!("{:?}", progress.operation),
-            phase: format!("{:?}", progress.phase),
-            error_kind: None,
-            current: progress.current,
-            total: progress.total,
-            received_bytes: progress.received_bytes,
-            // Sideband and reference-update text comes from the remote — never safe to forward
-            // over IPC, even when it looks like ordinary progress output. Same redaction
-            // `crates/tauri-app/src/commands/mod.rs`'s `TransferProgressDto::from` applies.
-            message: None,
-            remote_name: None,
-            hook_output: None,
-        },
-        TransferEvent::RemoteFailed {
-            operation_id,
-            remote_name,
-            error,
-        } => TransferProgressDto {
-            operation_id,
-            // Only Fetch all reports per-remote failures.
-            operation: format!("{:?}", git_core::remote::TransferOperation::FetchAll),
-            phase: "RemoteFailed".to_string(),
-            error_kind: Some(format!("{error:?}")),
-            current: 0,
-            total: 0,
-            received_bytes: 0,
-            message: None,
-            remote_name: Some(remote_name),
-            hook_output: None,
-        },
-        TransferEvent::Completed {
-            operation_id,
-            operation,
-            error,
-            hook_output,
-        } => {
-            let failed = error.is_some();
-            TransferProgressDto {
-                operation_id,
-                operation: format!("{operation:?}"),
-                phase: if failed { "Failed" } else { "Completed" }.to_string(),
-                error_kind: error.map(|kind| format!("{kind:?}")),
-                current: 0,
-                total: 0,
-                received_bytes: 0,
-                message: None,
-                remote_name: None,
-                hook_output,
-            }
-        }
-    }
 }
 
 /// Drains `event_rx` on a dedicated thread, writing each event as a `transferProgress` JSON-RPC
@@ -2683,421 +1776,12 @@ fn force_push_current_branch(
     Ok(Value::String(operation_id))
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "HeadInfo"))]
-#[serde(rename_all = "camelCase")]
-struct HeadInfoDto {
-    head_id: Option<String>,
-    detached_at: Option<String>,
-    head_pushed: bool,
-    #[cfg_attr(test, ts(as = "Option<git_core::repo::OperationKind>"))]
-    operation: Option<String>,
-    squash_message: Option<String>,
-    commit_hooks: Vec<String>,
-    sequence: Option<SequenceProgressDto>,
-    rebase: Option<RebaseInfoDto>,
-    bisect: Option<BisectDto>,
-    terminal_sequence: Option<TerminalSequenceDto>,
-    terminal_rebase: Option<TerminalRebaseDto>,
-}
-
-/// Same wire shape as the Tauri app's `TerminalRebaseDto` (#263).
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "TerminalRebase"))]
-#[serde(rename_all = "camelCase")]
-struct TerminalRebaseDto {
-    #[cfg_attr(test, ts(as = "git_core::repo::TerminalRebaseKind"))]
-    kind: String,
-    branch: String,
-    onto: String,
-    current_step: usize,
-    total_steps: usize,
-}
-
-impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
-    fn from(rebase: git_core::repo::TerminalRebase) -> Self {
-        Self {
-            kind: format!("{:?}", rebase.kind),
-            branch: rebase.branch,
-            onto: rebase.onto,
-            current_step: rebase.current_step,
-            total_steps: rebase.total_steps,
-        }
-    }
-}
-
-/// Same wire shape as the Tauri app's `ConfirmedAbortDto`: what the user confirmed before aborting a terminal cherry-pick (`RepoClient.abortSequence`'s
-/// `confirmed`): `{ "headId", "startedAt", "rewinds", "commitsToRemove", "pausedOnConflict" }`, as last shown by
-/// `HeadInfo.terminalSequence` (#281 review).
-#[derive(Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "ConfirmedAbort"))]
-#[serde(rename_all = "camelCase")]
-struct ConfirmedAbortDto {
-    head_id: String,
-    started_at: String,
-    rewinds: bool,
-    commits_to_remove: usize,
-    paused_on_conflict: bool,
-}
-
-impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
-    fn from(dto: ConfirmedAbortDto) -> Self {
-        Self {
-            head_id: dto.head_id,
-            started_at: dto.started_at,
-            rewinds: dto.rewinds,
-            commits_to_remove: dto.commits_to_remove,
-            paused_on_conflict: dto.paused_on_conflict,
-        }
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AbortSequenceParams {
     repo_path: String,
     #[serde(default)]
     confirmed: Option<ConfirmedAbortDto>,
-}
-
-/// Same wire shape as the Tauri app's `TerminalSequenceDto` (#258).
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "TerminalSequence"))]
-#[serde(rename_all = "camelCase")]
-struct TerminalSequenceDto {
-    #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
-    kind: String,
-    paused_on_conflict: bool,
-    started_at: String,
-    started_at_summary: String,
-    rewinds: bool,
-    commits_to_remove: usize,
-}
-
-impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
-    fn from(sequence: git_core::pick::TerminalSequence) -> Self {
-        Self {
-            kind: format!("{:?}", sequence.kind),
-            paused_on_conflict: sequence.paused_on_conflict,
-            started_at: sequence.started_at,
-            started_at_summary: sequence.started_at_summary,
-            rewinds: sequence.rewinds,
-            commits_to_remove: sequence.commits_to_remove,
-        }
-    }
-}
-
-/// Same wire shape as the Tauri app's `BisectDto`: `{ "startedFrom": "main" }`.
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "BisectInfo"))]
-#[serde(rename_all = "camelCase")]
-struct BisectDto {
-    started_from: String,
-}
-
-impl From<git_core::repo::HeadInfo> for HeadInfoDto {
-    fn from(info: git_core::repo::HeadInfo) -> Self {
-        Self {
-            head_id: info.head_id,
-            detached_at: info.detached_at,
-            head_pushed: info.head_pushed,
-            operation: info.operation.map(|kind| format!("{:?}", kind)),
-            squash_message: info.squash_message,
-            commit_hooks: info.commit_hooks,
-            sequence: info.sequence.map(SequenceProgressDto::from),
-            rebase: info.rebase.map(RebaseInfoDto::from),
-            bisect: info.bisect.map(|bisect| BisectDto {
-                started_from: bisect.started_from,
-            }),
-            terminal_sequence: info.terminal_sequence.map(TerminalSequenceDto::from),
-            terminal_rebase: info.terminal_rebase.map(TerminalRebaseDto::from),
-        }
-    }
-}
-
-/// Same wire shape as the Tauri app's `RebaseInfoDto`.
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "RebaseInfo"))]
-#[serde(rename_all = "camelCase")]
-struct RebaseInfoDto {
-    branch: String,
-    onto: String,
-    current_step: usize,
-    total_steps: usize,
-    health: RebaseHealthDto,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "RebaseHealth"))]
-#[serde(tag = "kind", content = "reason")]
-enum RebaseHealthDto {
-    Paused,
-    Diverged(#[cfg_attr(test, ts(as = "git_core::rebase::RebaseDivergence"))] String),
-}
-
-impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
-    fn from(info: git_core::repo::RebaseInfo) -> Self {
-        use git_core::rebase::RebaseHealth;
-        Self {
-            branch: info.branch,
-            onto: info.onto,
-            current_step: info.current_step,
-            total_steps: info.total_steps,
-            health: match info.health {
-                RebaseHealth::Paused => RebaseHealthDto::Paused,
-                RebaseHealth::Diverged(reason) => {
-                    RebaseHealthDto::Diverged(format!("{:?}", reason))
-                }
-            },
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "SequenceProgress"))]
-#[serde(rename_all = "camelCase")]
-struct SequenceProgressDto {
-    #[cfg_attr(test, ts(as = "git_core::pick::SequenceKind"))]
-    kind: String,
-    current_step: usize,
-    total_steps: usize,
-    current_commit: String,
-}
-
-impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
-    fn from(progress: git_core::pick::SequenceProgress) -> Self {
-        Self {
-            kind: format!("{:?}", progress.kind),
-            current_step: progress.current_step,
-            total_steps: progress.total_steps,
-            current_commit: progress.current_commit,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "SequenceOutcome"))]
-#[serde(tag = "kind")]
-enum SequenceOutcomeDto {
-    Completed {
-        applied: usize,
-        skipped: Vec<String>,
-    },
-    Conflicted {
-        files: Vec<String>,
-        progress: SequenceProgressDto,
-    },
-    /// A commit hook failed (Continue's, #133, or a clean step's `prepare-commit-msg`, #183);
-    /// the step is paused.
-    HookFailed {
-        hook: String,
-        output: String,
-        progress: SequenceProgressDto,
-    },
-    /// Cancel during a step's post-commit: that commit (`kept`, its summary) stands and the
-    /// sequence stopped before `progress.currentCommit` (#183, D9-A).
-    Stopped {
-        kept: String,
-        progress: SequenceProgressDto,
-    },
-}
-
-impl From<git_core::pick::SequenceOutcome> for SequenceOutcomeDto {
-    fn from(outcome: git_core::pick::SequenceOutcome) -> Self {
-        match outcome {
-            git_core::pick::SequenceOutcome::Completed { applied, skipped } => {
-                Self::Completed { applied, skipped }
-            }
-            git_core::pick::SequenceOutcome::Conflicted { files, progress } => Self::Conflicted {
-                files,
-                progress: progress.into(),
-            },
-            git_core::pick::SequenceOutcome::HookFailed {
-                hook,
-                output,
-                progress,
-            } => Self::HookFailed {
-                hook,
-                output,
-                progress: progress.into(),
-            },
-            git_core::pick::SequenceOutcome::Stopped { kept, progress } => Self::Stopped {
-                kept,
-                progress: progress.into(),
-            },
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "SequenceAbort"))]
-struct SequenceAbortDto {
-    rewound: bool,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "PickOutcome"))]
-#[serde(tag = "kind")]
-enum PickOutcomeDto {
-    Committed {
-        #[serde(rename = "commitId")]
-        commit_id: String,
-    },
-    Conflicted {
-        files: Vec<String>,
-    },
-    /// `prepare-commit-msg` failed; the pick stays staged and in progress (#183).
-    HookFailed {
-        hook: String,
-        output: String,
-    },
-}
-
-impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
-    fn from(outcome: git_core::pick::PickOutcome) -> Self {
-        match outcome {
-            git_core::pick::PickOutcome::Committed { commit_id } => Self::Committed { commit_id },
-            git_core::pick::PickOutcome::Conflicted { files } => Self::Conflicted { files },
-            git_core::pick::PickOutcome::HookFailed { hook, output } => {
-                Self::HookFailed { hook, output }
-            }
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "UndoState"))]
-struct UndoStateDto {
-    undo: Option<String>,
-    redo: Option<String>,
-}
-
-impl From<repo_service::worker::UndoState> for UndoStateDto {
-    fn from(state: repo_service::worker::UndoState) -> Self {
-        Self {
-            undo: state.undo,
-            redo: state.redo,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "SignatureStatus"))]
-#[serde(rename_all = "camelCase")]
-enum SignatureStatusDto {
-    Unsigned,
-    Good,
-    GoodUntrusted,
-    Bad,
-    UnknownKey,
-    Expired,
-    ExpiredKey,
-    RevokedKey,
-    Error,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "SignatureFormat"))]
-#[serde(rename_all = "lowercase")]
-enum SignatureFormatDto {
-    Openpgp,
-    Ssh,
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "CommitSignature"))]
-struct CommitSignatureDto {
-    status: SignatureStatusDto,
-    format: Option<SignatureFormatDto>,
-    signer: Option<String>,
-    key: Option<String>,
-    detail: Option<String>,
-}
-
-impl From<git_core::signing::CommitSignature> for CommitSignatureDto {
-    fn from(signature: git_core::signing::CommitSignature) -> Self {
-        use git_core::signing::{SignatureFormat, SignatureStatus};
-        Self {
-            status: match signature.status {
-                SignatureStatus::Unsigned => SignatureStatusDto::Unsigned,
-                SignatureStatus::Good => SignatureStatusDto::Good,
-                SignatureStatus::GoodUntrusted => SignatureStatusDto::GoodUntrusted,
-                SignatureStatus::Bad => SignatureStatusDto::Bad,
-                SignatureStatus::UnknownKey => SignatureStatusDto::UnknownKey,
-                SignatureStatus::Expired => SignatureStatusDto::Expired,
-                SignatureStatus::ExpiredKey => SignatureStatusDto::ExpiredKey,
-                SignatureStatus::RevokedKey => SignatureStatusDto::RevokedKey,
-                SignatureStatus::Error => SignatureStatusDto::Error,
-            },
-            format: signature.format.map(|format| match format {
-                SignatureFormat::OpenPgp => SignatureFormatDto::Openpgp,
-                SignatureFormat::Ssh => SignatureFormatDto::Ssh,
-            }),
-            signer: signature.signer,
-            key: signature.key,
-            detail: signature.detail,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "UndoOutcome"))]
-#[serde(tag = "kind")]
-enum UndoOutcomeDto {
-    Done { label: String },
-    Nothing,
-    RepositoryChanged { label: String },
-    BranchHeld { label: String, message: String },
-    OperationInProgress,
-}
-
-impl From<repo_service::worker::UndoOutcome> for UndoOutcomeDto {
-    fn from(outcome: repo_service::worker::UndoOutcome) -> Self {
-        use repo_service::worker::UndoOutcome;
-        match outcome {
-            UndoOutcome::Done { label } => Self::Done { label },
-            UndoOutcome::Nothing => Self::Nothing,
-            UndoOutcome::RepositoryChanged { label } => Self::RepositoryChanged { label },
-            UndoOutcome::BranchHeld { label, message } => Self::BranchHeld { label, message },
-            UndoOutcome::OperationInProgress => Self::OperationInProgress,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "ResetMode"))]
-#[serde(rename_all = "lowercase")]
-enum ResetModeDto {
-    Soft,
-    Mixed,
-    Hard,
-}
-
-impl From<ResetModeDto> for git_core::reset::ResetMode {
-    fn from(dto: ResetModeDto) -> Self {
-        match dto {
-            ResetModeDto::Soft => Self::Soft,
-            ResetModeDto::Mixed => Self::Mixed,
-            ResetModeDto::Hard => Self::Hard,
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -3270,10 +1954,7 @@ fn abort_sequence(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let confirmed = params.confirmed.map(git_core::pick::ConfirmedAbort::from);
     let abort = worker_handle(repos, &params.repo_path)?.abort_sequence(confirmed)?;
-    serde_json::to_value(SequenceAbortDto {
-        rewound: abort.rewound,
-    })
-    .map_err(|error| error.to_string())
+    serde_json::to_value(SequenceAbortDto::from(abort)).map_err(|error| error.to_string())
 }
 
 fn reset_to_commit(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -3324,30 +2005,6 @@ fn push_tags(
     Ok(Value::String(operation_id))
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "PullOutcome"))]
-#[serde(tag = "kind", rename_all_fields = "camelCase")]
-enum PullOutcomeDto {
-    UpToDate,
-    FastForwarded { upstream_ref: String },
-    Diverged { upstream_ref: String },
-}
-
-impl From<git_core::remote::PullOutcome> for PullOutcomeDto {
-    fn from(outcome: git_core::remote::PullOutcome) -> Self {
-        match outcome {
-            git_core::remote::PullOutcome::UpToDate => PullOutcomeDto::UpToDate,
-            git_core::remote::PullOutcome::FastForwarded { upstream_ref } => {
-                PullOutcomeDto::FastForwarded { upstream_ref }
-            }
-            git_core::remote::PullOutcome::Diverged { upstream_ref } => {
-                PullOutcomeDto::Diverged { upstream_ref }
-            }
-        }
-    }
-}
-
 fn pull_current_upstream(
     params: Value,
     repos: &Repos,
@@ -3361,26 +2018,6 @@ fn pull_current_upstream(
     serde_json::to_value(PullOutcomeDto::from(outcome)).map_err(|error| error.to_string())
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "StashEntry"))]
-#[serde(rename_all = "camelCase")]
-struct StashEntryDto {
-    index: usize,
-    message: String,
-    commit_id: String,
-}
-
-impl From<StashEntry> for StashEntryDto {
-    fn from(entry: StashEntry) -> Self {
-        Self {
-            index: entry.index,
-            message: entry.message,
-            commit_id: entry.commit_id,
-        }
-    }
-}
-
 fn list_stashes(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -3390,28 +2027,6 @@ fn list_stashes(params: Value, repos: &Repos) -> Result<Value, String> {
         .map(StashEntryDto::from)
         .collect();
     serde_json::to_value(stashes).map_err(|error| error.to_string())
-}
-
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "StashOptions"))]
-#[serde(rename_all = "camelCase")]
-struct StashOptionsDto {
-    message: Option<String>,
-    keep_index: bool,
-    include_untracked: bool,
-    paths: Vec<String>,
-}
-
-impl From<StashOptionsDto> for git_core::stash::StashOptions {
-    fn from(dto: StashOptionsDto) -> Self {
-        Self {
-            message: dto.message,
-            keep_index: dto.keep_index,
-            include_untracked: dto.include_untracked,
-            paths: dto.paths,
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -3447,24 +2062,6 @@ struct StashApplyParams {
     restore_index: bool,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "StashApplyOutcome"))]
-#[serde(tag = "kind")]
-enum StashApplyOutcomeDto {
-    Applied,
-    Conflicted { files: Vec<String> },
-}
-
-impl From<git_core::stash::StashApplyOutcome> for StashApplyOutcomeDto {
-    fn from(outcome: git_core::stash::StashApplyOutcome) -> Self {
-        match outcome {
-            git_core::stash::StashApplyOutcome::Applied => Self::Applied,
-            git_core::stash::StashApplyOutcome::Conflicted { files } => Self::Conflicted { files },
-        }
-    }
-}
-
 fn apply_stash(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: StashApplyParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -3494,26 +2091,11 @@ struct StashFilesParams {
     commit_id: String,
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "StashFiles"))]
-#[serde(rename_all = "camelCase")]
-struct StashFilesDto {
-    tracked: Vec<String>,
-    untracked: Vec<String>,
-    untracked_commit_id: Option<String>,
-}
-
 fn get_stash_files(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: StashFilesParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let files = worker_handle(repos, &params.repo_path)?.get_stash_files(params.commit_id)?;
-    serde_json::to_value(StashFilesDto {
-        tracked: files.tracked,
-        untracked: files.untracked,
-        untracked_commit_id: files.untracked_commit_id,
-    })
-    .map_err(|error| error.to_string())
+    serde_json::to_value(StashFilesDto::from(files)).map_err(|error| error.to_string())
 }
 
 fn drop_stash(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -3521,32 +2103,6 @@ fn drop_stash(params: Value, repos: &Repos) -> Result<Value, String> {
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     worker_handle(repos, &params.repo_path)?.drop_stash(params.index, params.commit_id)?;
     Ok(Value::Null)
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "BlameLine"))]
-#[serde(rename_all = "camelCase")]
-struct BlameLineDto {
-    line_number: usize,
-    content: String,
-    commit_id: String,
-    short_id: String,
-    author_name: String,
-    timestamp: i64,
-}
-
-impl From<BlameLine> for BlameLineDto {
-    fn from(line: BlameLine) -> Self {
-        Self {
-            line_number: line.line_number,
-            content: line.content,
-            commit_id: line.commit_id,
-            short_id: line.short_id,
-            author_name: line.author_name,
-            timestamp: line.timestamp,
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -3566,76 +2122,6 @@ fn get_blame(params: Value, repos: &Repos) -> Result<Value, String> {
         .map(BlameLineDto::from)
         .collect();
     serde_json::to_value(lines).map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "MergeOutcome"))]
-#[serde(tag = "kind")]
-enum MergeOutcomeDto {
-    UpToDate,
-    FastForwarded,
-    Merged,
-    Squashed,
-    Conflicted { files: Vec<String> },
-}
-
-impl From<MergeOutcome> for MergeOutcomeDto {
-    fn from(outcome: MergeOutcome) -> Self {
-        match outcome {
-            MergeOutcome::UpToDate => MergeOutcomeDto::UpToDate,
-            MergeOutcome::FastForwarded => MergeOutcomeDto::FastForwarded,
-            MergeOutcome::Merged => MergeOutcomeDto::Merged,
-            MergeOutcome::Squashed => MergeOutcomeDto::Squashed,
-            MergeOutcome::Conflicted { files } => MergeOutcomeDto::Conflicted { files },
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "FastForwardMode"))]
-enum FastForwardDto {
-    Allow,
-    Never,
-    Only,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "MergeOptions"))]
-#[serde(rename_all = "camelCase")]
-struct MergeOptionsDto {
-    fast_forward: FastForwardDto,
-    squash: bool,
-}
-
-impl From<MergeOptionsDto> for git_core::merge::MergeOptions {
-    fn from(dto: MergeOptionsDto) -> Self {
-        use git_core::merge::FastForward;
-        Self {
-            fast_forward: match dto.fast_forward {
-                FastForwardDto::Allow => FastForward::Allow,
-                FastForwardDto::Never => FastForward::Never,
-                FastForwardDto::Only => FastForward::Only,
-            },
-            squash: dto.squash,
-        }
-    }
-}
-
-impl From<git_core::merge::MergeOptions> for MergeOptionsDto {
-    fn from(options: git_core::merge::MergeOptions) -> Self {
-        use git_core::merge::FastForward;
-        Self {
-            fast_forward: match options.fast_forward {
-                FastForward::Allow => FastForwardDto::Allow,
-                FastForward::Never => FastForwardDto::Never,
-                FastForward::Only => FastForwardDto::Only,
-            },
-            squash: options.squash,
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -3671,14 +2157,7 @@ fn get_merge_options(params: Value, repos: &Repos) -> Result<Value, String> {
     let options = match config::get_merge_preference(Path::new(&params.repo_path))
         .map_err(|error| error.to_string())?
     {
-        Some(preference) => MergeOptionsDto {
-            fast_forward: match preference.fast_forward {
-                config::MergeFastForward::Allow => FastForwardDto::Allow,
-                config::MergeFastForward::Never => FastForwardDto::Never,
-                config::MergeFastForward::Only => FastForwardDto::Only,
-            },
-            squash: preference.squash,
-        },
+        Some(preference) => MergeOptionsDto::from(preference),
         None => MergeOptionsDto::from(worker_handle(repos, &params.repo_path)?.merge_defaults()?),
     };
     serde_json::to_value(options).map_err(|error| error.to_string())
@@ -3694,38 +2173,13 @@ struct SetMergeOptionsParams {
 fn set_merge_options(params: Value) -> Result<Value, String> {
     let params: SetMergeOptionsParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
-    let fast_forward = match params.options.fast_forward {
-        FastForwardDto::Allow => config::MergeFastForward::Allow,
-        FastForwardDto::Never => config::MergeFastForward::Never,
-        FastForwardDto::Only => config::MergeFastForward::Only,
-    };
     config::set_merge_preference(
         Path::new(&params.repo_path),
-        fast_forward,
+        params.options.fast_forward.into(),
         params.options.squash,
     )
     .map_err(|error| error.to_string())?;
     Ok(Value::Null)
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "ConflictSegment"))]
-#[serde(tag = "kind")]
-enum ConflictSegmentDto {
-    Clean { content: String },
-    Conflict { ours: String, theirs: String },
-}
-
-impl From<ConflictSegment> for ConflictSegmentDto {
-    fn from(segment: ConflictSegment) -> Self {
-        match segment {
-            ConflictSegment::Clean { content } => ConflictSegmentDto::Clean { content },
-            ConflictSegment::Conflict { ours, theirs } => {
-                ConflictSegmentDto::Conflict { ours, theirs }
-            }
-        }
-    }
 }
 
 fn get_conflict_hunks(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -3770,25 +2224,6 @@ fn get_merge_message(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "FileConflictChoice"))]
-enum FileConflictChoiceDto {
-    Ours,
-    Theirs,
-    Delete,
-}
-
-impl From<FileConflictChoiceDto> for FileConflictChoice {
-    fn from(dto: FileConflictChoiceDto) -> Self {
-        match dto {
-            FileConflictChoiceDto::Ours => FileConflictChoice::Ours,
-            FileConflictChoiceDto::Theirs => FileConflictChoice::Theirs,
-            FileConflictChoiceDto::Delete => FileConflictChoice::Delete,
-        }
-    }
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ResolveAddDeleteConflictParams {
     repo_path: String,
@@ -3802,30 +2237,6 @@ fn resolve_add_delete_conflict(params: Value, repos: &Repos) -> Result<Value, St
     worker_handle(repos, &params.repo_path)?
         .resolve_add_delete_conflict(params.path, params.choice.into())?;
     Ok(Value::Null)
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "RebasePlanCommit"))]
-#[serde(rename_all = "camelCase")]
-struct RebasePlanCommitDto {
-    id: String,
-    short_id: String,
-    summary: String,
-    author_name: String,
-    timestamp: i64,
-}
-
-impl From<RebasePlanCommit> for RebasePlanCommitDto {
-    fn from(c: RebasePlanCommit) -> Self {
-        Self {
-            id: c.id,
-            short_id: c.short_id,
-            summary: c.summary,
-            author_name: c.author_name,
-            timestamp: c.timestamp,
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -3844,74 +2255,6 @@ fn commits_since(params: Value, repos: &Repos) -> Result<Value, String> {
         .map(RebasePlanCommitDto::from)
         .collect();
     serde_json::to_value(commits).map_err(|error| error.to_string())
-}
-
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "RebaseAction"))]
-#[serde(tag = "kind")]
-enum RebaseActionDto {
-    Pick,
-    Reword { message: String },
-    Edit,
-    Squash,
-    Fixup,
-    Drop,
-}
-
-impl From<RebaseActionDto> for RebaseAction {
-    fn from(dto: RebaseActionDto) -> Self {
-        match dto {
-            RebaseActionDto::Pick => RebaseAction::Pick,
-            RebaseActionDto::Reword { message } => RebaseAction::Reword { message },
-            RebaseActionDto::Edit => RebaseAction::Edit,
-            RebaseActionDto::Squash => RebaseAction::Squash,
-            RebaseActionDto::Fixup => RebaseAction::Fixup,
-            RebaseActionDto::Drop => RebaseAction::Drop,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "RebasePlanEntry"))]
-#[serde(rename_all = "camelCase")]
-struct RebasePlanEntryDto {
-    commit_id: String,
-    action: RebaseActionDto,
-    combined_message: Option<String>,
-}
-
-impl From<RebasePlanEntryDto> for RebasePlanEntry {
-    fn from(dto: RebasePlanEntryDto) -> Self {
-        RebasePlanEntry {
-            commit_id: dto.commit_id,
-            action: dto.action.into(),
-            combined_message: dto.combined_message,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "RebaseStepResult"))]
-#[serde(tag = "kind")]
-enum RebaseStepResultDto {
-    Conflicted { files: Vec<String> },
-    PausedForEdit,
-    Advanced,
-    Done,
-}
-
-impl From<RebaseStepResult> for RebaseStepResultDto {
-    fn from(result: RebaseStepResult) -> Self {
-        match result {
-            RebaseStepResult::Conflicted { files } => RebaseStepResultDto::Conflicted { files },
-            RebaseStepResult::PausedForEdit => RebaseStepResultDto::PausedForEdit,
-            RebaseStepResult::Advanced => RebaseStepResultDto::Advanced,
-            RebaseStepResult::Done => RebaseStepResultDto::Done,
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -3943,67 +2286,7 @@ fn abort_rebase(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
     let abort = worker_handle(repos, &params.repo_path)?.abort_rebase()?;
-    serde_json::to_value(RebaseAbortDto {
-        restored: abort.restored,
-    })
-    .map_err(|error| error.to_string())
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "RebaseAbort"))]
-struct RebaseAbortDto {
-    restored: bool,
-}
-
-#[derive(Clone, Copy, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "ForgeProvider"))]
-enum ForgeProviderDto {
-    GitHub,
-    Bitbucket,
-}
-
-impl From<ForgeProvider> for ForgeProviderDto {
-    fn from(provider: ForgeProvider) -> Self {
-        match provider {
-            ForgeProvider::GitHub => ForgeProviderDto::GitHub,
-            ForgeProvider::Bitbucket => ForgeProviderDto::Bitbucket,
-        }
-    }
-}
-
-impl From<ForgeProviderDto> for ForgeProvider {
-    fn from(dto: ForgeProviderDto) -> Self {
-        match dto {
-            ForgeProviderDto::GitHub => ForgeProvider::GitHub,
-            ForgeProviderDto::Bitbucket => ForgeProvider::Bitbucket,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "ForgeRepository"))]
-#[serde(rename_all = "camelCase")]
-struct ForgeRepositoryDto {
-    provider: ForgeProviderDto,
-    host: String,
-    owner: String,
-    name: String,
-    remote_name: String,
-}
-
-impl From<ForgeRepository> for ForgeRepositoryDto {
-    fn from(repository: ForgeRepository) -> Self {
-        Self {
-            provider: repository.provider.into(),
-            host: repository.host,
-            owner: repository.owner,
-            name: repository.name,
-            remote_name: repository.remote_name,
-        }
-    }
+    serde_json::to_value(RebaseAbortDto::from(abort)).map_err(|error| error.to_string())
 }
 
 fn detect_forge_repository(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -4053,58 +2336,6 @@ fn forget_forge_token(params: Value, repos: &Repos) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "PullRequest"))]
-#[serde(rename_all = "camelCase")]
-struct PullRequestDto {
-    id: String,
-    number: u64,
-    title: String,
-    url: String,
-    author: String,
-    source_branch: String,
-    target_branch: String,
-    state: String,
-}
-
-impl From<repo_service::pull_requests::PullRequest> for PullRequestDto {
-    fn from(pull_request: repo_service::pull_requests::PullRequest) -> Self {
-        Self {
-            id: pull_request.id,
-            number: pull_request.number,
-            title: pull_request.title,
-            url: pull_request.url,
-            author: pull_request.author,
-            source_branch: pull_request.source_branch,
-            target_branch: pull_request.target_branch,
-            state: pull_request.state,
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "PullRequestList"))]
-#[serde(rename_all = "camelCase")]
-struct PullRequestListDto {
-    pull_requests: Vec<PullRequestDto>,
-    truncated: bool,
-}
-
-impl From<repo_service::pull_requests::PullRequestList> for PullRequestListDto {
-    fn from(list: repo_service::pull_requests::PullRequestList) -> Self {
-        Self {
-            pull_requests: list
-                .pull_requests
-                .into_iter()
-                .map(PullRequestDto::from)
-                .collect(),
-            truncated: list.truncated,
-        }
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ListPullRequestsParams {
@@ -4122,34 +2353,12 @@ fn list_pull_requests(params: Value, repos: &Repos) -> Result<Value, String> {
 }
 
 #[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS))]
-#[cfg_attr(test, ts(rename = "CreatePullRequest"))]
-#[serde(rename_all = "camelCase")]
-struct CreatePullRequestInputDto {
-    title: String,
-    description: Option<String>,
-    source_branch: String,
-    target_branch: String,
-}
-
-impl From<CreatePullRequestInputDto> for repo_service::pull_requests::CreatePullRequest {
-    fn from(dto: CreatePullRequestInputDto) -> Self {
-        Self {
-            title: dto.title,
-            description: dto.description,
-            source_branch: dto.source_branch,
-            target_branch: dto.target_branch,
-        }
-    }
-}
-
-#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreatePullRequestParams {
     repo_path: String,
     remote_name: String,
     account: String,
-    pull_request: CreatePullRequestInputDto,
+    pull_request: CreatePullRequestDto,
 }
 
 fn create_pull_request(params: Value, repos: &Repos) -> Result<Value, String> {
@@ -4172,101 +2381,19 @@ mod tests {
     use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase, TransferProgress};
     use repo_service::worker::HookSource;
 
-    /// #306: the TypeScript shape of every wire DTO in this file, checked in as
-    /// `frontend/src/ipc/generated/sidecar-dto.ts` and checked against `RepoClient.ts` by
-    /// `frontend/src/ipc/dtoContract.ts`. Regenerate with
+    /// #306: the TypeScript shape of the sidecar's own wire DTOs (the shared ones are in
+    /// `repo_service::wire`), checked in as `frontend/src/ipc/generated/sidecar-dto.ts` and
+    /// checked against `RepoClient.ts` by `frontend/src/ipc/dtoContract.ts`. Regenerate with
     /// `UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar dto_bindings_are_current`.
     #[test]
     fn dto_bindings_are_current() {
         let bindings = test_support::ts_declarations!(
-            "// Generated from the VSCode sidecar's wire DTOs (crates/vscode-sidecar/src/dispatch.rs) by ts-rs.\n\
+            "// Generated from the VSCode sidecar's own wire DTOs (crates/vscode-sidecar/src/dispatch.rs) by ts-rs.\n\
+             // The shared ones are in wire-dto.ts.\n\
              // Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar dto_bindings_are_current\n";
-            git_core::diff::DiffLineOrigin,
-            git_core::pick::SequenceKind,
-            git_core::rebase::RebaseDivergence,
-            git_core::remote::TransferErrorKind,
-            git_core::remote::TransferOperation,
-            git_core::remote::TransferPhase,
-            git_core::repo::OperationKind,
-            git_core::repo::TerminalRebaseKind,
-            git_core::status::StatusKind,
-            repo_service::worker::HookSource,
-            StatusEntryDto,
-            GraphCommitDto,
-            DiffLineDto,
-            DiffHunkDto,
-            FileHistoryEntryDto,
-            SearchPageDto,
-            ChangedFileDto,
-            CompareRangeDto,
-            OpenRepoEntryDto,
-            OpenRepoEntryInput,
-            WorkspaceDto,
-            DiffOptionsDto,
-            DiffSettingsDto,
-            ExternalToolSettingsDto,
-            GitConfigSourceDto,
-            GitToolDto,
-            GitToolsDto,
-            MarkResolvedOutcomeDto,
-            ConflictSideDto,
+            import "./wire-dto" { OpenRepoEntryDto };
             FileVersionDto,
-            TrailerDto,
-            SignatureInputDto,
-            DiffSourceDto,
-            FileSideDto,
-            CommitMessageSettingsDto,
-            CommitOutcomeDto,
-            HookProgressDto,
-            BranchInfoDto,
-            WorktreeInfoDto,
-            SubmoduleInfoDto,
-            ReflogEntryDto,
-            RemoteAuthModeDto,
-            RemoteInfoDto,
-            UpstreamInfoDto,
-            TagInfoDto,
-            TransferProgressDto,
-            HeadInfoDto,
-            TerminalRebaseDto,
-            ConfirmedAbortDto,
-            TerminalSequenceDto,
-            BisectDto,
-            FileSidesDto,
             OpenReposDto,
-            RebaseAbortDto,
-            RebaseInfoDto,
-            RebaseHealthDto,
-            SequenceProgressDto,
-            SequenceOutcomeDto,
-            SequenceAbortDto,
-            PickOutcomeDto,
-            UndoStateDto,
-            SignatureStatusDto,
-            SignatureFormatDto,
-            CommitSignatureDto,
-            UndoOutcomeDto,
-            ResetModeDto,
-            PullOutcomeDto,
-            StashEntryDto,
-            StashOptionsDto,
-            StashApplyOutcomeDto,
-            StashFilesDto,
-            BlameLineDto,
-            MergeOutcomeDto,
-            FastForwardDto,
-            MergeOptionsDto,
-            ConflictSegmentDto,
-            FileConflictChoiceDto,
-            RebasePlanCommitDto,
-            RebaseActionDto,
-            RebasePlanEntryDto,
-            RebaseStepResultDto,
-            ForgeProviderDto,
-            ForgeRepositoryDto,
-            PullRequestDto,
-            PullRequestListDto,
-            CreatePullRequestInputDto,
         );
         test_support::assert_generated_file(
             &test_support::repo_root().join("frontend/src/ipc/generated/sidecar-dto.ts"),
