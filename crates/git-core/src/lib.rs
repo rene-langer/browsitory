@@ -10,6 +10,7 @@ pub mod hooks;
 pub mod launch;
 mod line_patch;
 pub mod merge;
+mod partial_checkout;
 pub mod pick;
 pub mod process;
 pub mod rebase;

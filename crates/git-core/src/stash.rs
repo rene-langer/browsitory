@@ -80,6 +80,10 @@ pub enum StashError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Windows: a stash apply (or pop) stopped at a file another program holds open; what its
+    /// checkout had written was put back and the stash is kept (#321).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
 }
 
 /// Refuses when `stash@{index}` is not the stash `expected` names: the caller's list is stale
@@ -994,9 +998,18 @@ pub fn apply_stash(
         options.reinstantiate_index();
     }
     // Default (safe) checkout strategy: refuses to overwrite a locally modified file, like
-    // `branch::switch_branch`'s `checkout_tree(..., None)`.
-    repo.stash_apply(index, Some(&mut options))
-        .map_err(|error| match (error.code(), error.class()) {
+    // `branch::switch_branch`'s `checkout_tree(..., None)`. A checkout that stops part-way (a
+    // file another program holds open, a read-only file) is rolled back, so the apply can be
+    // tried again (#321): libgit2 checks out from the index, which it writes only at the end.
+    let written = crate::partial_checkout::Written::default();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    written.record(&mut checkout);
+    options.checkout_options(checkout);
+    let applied = repo.stash_apply(index, Some(&mut options));
+    let repo: &Repository = repo;
+    applied.map_err(|error| {
+        let restored = crate::partial_checkout::roll_back(repo, &written);
+        match (error.code(), error.class()) {
             (ErrorCode::Uncommitted, _) => StashError::StagedChanges,
             (ErrorCode::Conflict, ErrorClass::Checkout) => StashError::WouldOverwrite,
             (ErrorCode::Conflict, _) => StashError::IndexConflict,
@@ -1006,8 +1019,14 @@ pub fn apply_stash(
             (ErrorCode::NotFound, ErrorClass::Odb) if error.message().contains("null OID") => {
                 StashError::SymlinkReplacedByDirectory
             }
-            _ => StashError::Git(error),
-        })?;
+            _ => crate::partial_checkout::report(
+                repo,
+                restored,
+                crate::HeldDuring::RolledBack,
+                error,
+            ),
+        }
+    })?;
     let mut files = Vec::new();
     let repo_index = repo.index()?;
     if repo_index.has_conflicts() {

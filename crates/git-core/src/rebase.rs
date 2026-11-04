@@ -398,7 +398,21 @@ pub fn start_rebase(
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&onto_tree)],
     )?;
-    repo.checkout_tree(onto_commit.as_object(), None)?;
+    // A checkout that stops part-way (a file another program holds open, a read-only file) is
+    // rolled back, so the rebase can be started again (#321).
+    let written = crate::partial_checkout::Written::default();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    written.record(&mut checkout);
+    repo.checkout_tree(onto_commit.as_object(), Some(&mut checkout))
+        .map_err(|error| {
+            let restored = crate::partial_checkout::roll_back(repo, &written);
+            crate::partial_checkout::report::<RebaseError>(
+                repo,
+                restored,
+                crate::HeldDuring::RolledBack,
+                error,
+            )
+        })?;
     repo.set_head_detached(onto_commit.id())?;
 
     let mut state = RebaseState {
