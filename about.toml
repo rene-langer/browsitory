@@ -1,0 +1,54 @@
+# cargo-about configuration (#301, #202). scripts/generate-third-party-notices.py runs
+# `cargo about generate --format json` with this file to list the Rust crates linked into the
+# desktop app and the VSCode sidecar, with their licence texts, for THIRD_PARTY_NOTICES.md.
+# The licence policy itself is checked by cargo-deny (deny.toml); keep both lists in sync.
+
+# Every platform we ship (same list as deny.toml), so a Windows- or macOS-only crate is listed
+# even when the notices are generated on Linux.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+
+# Build scripts, proc macros used only at build time and test crates are not shipped.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# The licences a shipped crate may use, in order of preference: for `MIT OR Apache-2.0` the
+# notices carry the first one listed here.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "MIT-0",
+    "Zlib",
+    "Unicode-3.0",
+    "BlueOak-1.0.0",
+]
+
+# Owner decision (deny.toml's exceptions; docs/LICENSE_COMPLIANCE.md): used unmodified, its
+# source location is in the notices file's hand-maintained part.
+[option-ext]
+accepted = ["MPL-2.0"]
+
+# Build time only (tauri-macros > tauri-codegen > tauri-utils > dom_query; deny.toml's
+# exceptions). cargo-about can't tell a proc macro's dependencies from the shipped ones, so
+# it needs to accept them; the generator then keeps only what `cargo tree -e
+# normal,no-proc-macro` says the shipped binaries link.
+[cssparser]
+accepted = ["MPL-2.0"]
+
+[cssparser-macros]
+accepted = ["MPL-2.0"]
+
+[selectors]
+accepted = ["MPL-2.0"]
+
+[dtoa-short]
+accepted = ["MPL-2.0"]

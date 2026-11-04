@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Third-party licences
+
+- Added: the app now lists the licences and copyright notices of the open source code it
+  includes. Open "Third-party licences" from the command palette or from the release notes
+  dialog. The same text ships as `THIRD_PARTY_NOTICES.md` with every desktop installer and
+  every VSCode extension package, and is attached to each GitHub Release (#301, #202).
+- Changed: `THIRD_PARTY_NOTICES.md` is now generated from the Rust and npm dependency trees
+  (`scripts/generate-third-party-notices.py`, using cargo-about), plus a hand-kept part for the
+  bundled C libraries. CI fails when it no longer matches the dependencies or `Cargo.lock`.
+
 ### Worktree add cleans up files with unusual names
 
 - Fixed: when adding a worktree failed part-way, files the checkout had already written were

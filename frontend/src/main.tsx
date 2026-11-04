@@ -5,11 +5,14 @@ import App from './App.tsx'
 import { UpdateBanner } from './components/UpdateBanner'
 import { installGlobalErrorLogging } from './lib/logger'
 import { tauriRepoClient } from './ipc/tauriRepoClient'
+import { thirdPartyNoticesLoader, thirdPartyNoticesUrl } from './lib/thirdPartyNotices'
 
 installGlobalErrorLogging(tauriRepoClient)
 
+const loadThirdPartyNotices = thirdPartyNoticesLoader(thirdPartyNoticesUrl(null, document.baseURI))
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App client={tauriRepoClient} updateBanner={<UpdateBanner />} />
+    <App client={tauriRepoClient} updateBanner={<UpdateBanner />} loadThirdPartyNotices={loadThirdPartyNotices} />
   </StrictMode>,
 )

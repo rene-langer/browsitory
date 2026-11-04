@@ -16,6 +16,8 @@ extension/node_modules
 extension/dist
 extension/bin
 extension/webview
+# Staged by extension/scripts/package-vsix.mjs from the root THIRD_PARTY_NOTICES.md
+extension/THIRD_PARTY_NOTICES.md
 extension/artifacts
 extension/*.vsix
 

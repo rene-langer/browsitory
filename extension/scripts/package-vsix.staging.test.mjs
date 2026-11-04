@@ -7,30 +7,34 @@ import { fileURLToPath } from "node:url";
 
 import { assertClassicScriptBundle, packageVsix, parseOptions } from "./package-vsix.mjs";
 
-test("stages only the selected sidecar and cleans generated assets", async (t) => {
+test("stages only the selected sidecar and the notices, and cleans generated assets", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "browsitory-vsix-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const extensionRoot = path.join(root, "extension");
   const frontendDist = path.join(root, "frontend", "dist-vscode");
   const sidecarPath = path.join(root, "vscode-sidecar");
+  const noticesPath = path.join(root, "THIRD_PARTY_NOTICES.md");
   const outputPath = path.join(root, "browsitory-linux-x64.vsix");
   await mkdir(path.join(frontendDist, "assets"), { recursive: true });
   await writeFile(path.join(frontendDist, "assets", "vscode-main.js"), "webview");
   await writeFile(sidecarPath, "sidecar");
+  await writeFile(noticesPath, "notices");
   const calls = [];
 
   await packageVsix({
-    target: "linux-x64", extensionRoot, frontendDist, sidecarPath, outputPath,
+    target: "linux-x64", extensionRoot, frontendDist, sidecarPath, noticesPath, outputPath,
     run: async (...args) => {
       calls.push(args);
       assert.equal(await readFile(path.join(extensionRoot, "bin", "vscode-sidecar"), "utf8"), "sidecar");
       assert.equal(await readFile(path.join(extensionRoot, "webview", "assets", "vscode-main.js"), "utf8"), "webview");
+      assert.equal(await readFile(path.join(extensionRoot, "THIRD_PARTY_NOTICES.md"), "utf8"), "notices");
     },
   });
 
   assert.deepEqual(calls, [["pnpm", ["exec", "vsce", "package", "--target", "linux-x64", "--out", outputPath], extensionRoot]]);
   await assert.rejects(readFile(path.join(extensionRoot, "bin", "vscode-sidecar")), { code: "ENOENT" });
   await assert.rejects(readFile(path.join(extensionRoot, "webview", "assets", "vscode-main.js")), { code: "ENOENT" });
+  await assert.rejects(readFile(path.join(extensionRoot, "THIRD_PARTY_NOTICES.md")), { code: "ENOENT" });
 });
 
 test("packages a pre-release when asked", async (t) => {
@@ -38,14 +42,16 @@ test("packages a pre-release when asked", async (t) => {
   t.after(() => rm(root, { recursive: true, force: true }));
   const frontendDist = path.join(root, "frontend", "dist-vscode");
   const sidecarPath = path.join(root, "vscode-sidecar");
+  const noticesPath = path.join(root, "THIRD_PARTY_NOTICES.md");
   const outputPath = path.join(root, "browsitory-win32-x64.vsix");
   await mkdir(path.join(frontendDist, "assets"), { recursive: true });
   await writeFile(path.join(frontendDist, "assets", "vscode-main.js"), "webview");
   await writeFile(sidecarPath, "sidecar");
+  await writeFile(noticesPath, "notices");
   const calls = [];
 
   await packageVsix({
-    target: "win32-x64", extensionRoot: path.join(root, "extension"), frontendDist, sidecarPath, outputPath,
+    target: "win32-x64", extensionRoot: path.join(root, "extension"), frontendDist, sidecarPath, noticesPath, outputPath,
     preRelease: true,
     run: async (...args) => calls.push(args),
   });
@@ -66,6 +72,7 @@ test("accepts pnpm's argument separator", () => {
   assert.equal(options.sidecarPath, "/tmp/vscode-sidecar");
   assert.equal(options.outputPath, "/tmp/browsitory.vsix");
   assert.equal(options.preRelease, false);
+  assert.equal(options.noticesPath, path.resolve(options.extensionRoot, "..", "THIRD_PARTY_NOTICES.md"));
 });
 
 test("reads the --pre-release flag anywhere in the arguments", () => {
@@ -104,13 +111,16 @@ test("manifest ships the listing page, icon and licence notices", async () => {
   assert.equal(manifest.repository?.directory, "extension");
   for (const file of ["icon.png", "README.md", "CHANGELOG.md", "LICENSE", "THIRD_PARTY_NOTICES.md"]) {
     assert.ok(manifest.files.includes(file), `package.json "files" must list ${file}`);
+  }
+  for (const file of ["icon.png", "README.md", "CHANGELOG.md", "LICENSE"]) {
     await readFile(path.join(extensionRoot, file));
   }
   // PNG IHDR: width and height are big-endian u32s at byte 16 and 20.
   const icon = await readFile(path.join(extensionRoot, "icon.png"));
   assert.equal(icon.readUInt32BE(16), 128, "icon width");
   assert.equal(icon.readUInt32BE(20), 128, "icon height");
-  const notices = await readFile(path.join(extensionRoot, "THIRD_PARTY_NOTICES.md"), "utf8");
+  // packageVsix copies the generated notices from the repository root into the package.
+  const notices = await readFile(parseOptions([]).noticesPath, "utf8");
   assert.match(notices, /libgit2/);
   assert.match(notices, /linking exception/i);
 });

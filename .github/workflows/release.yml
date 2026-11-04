@@ -187,6 +187,12 @@ jobs:
     needs: [build-release, build-vsix-release]
     runs-on: ubuntu-latest
     steps:
+      # For THIRD_PARTY_NOTICES.md: every installer and .vsix already carries it; the release
+      # page gets a copy too, so the licences can be read without installing anything.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: THIRD_PARTY_NOTICES.md
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v7
         with:
           pattern: browsitory-vsix-*
@@ -196,7 +202,9 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           draft: true
-          files: release-vsix/*.vsix
+          files: |
+            release-vsix/*.vsix
+            THIRD_PARTY_NOTICES.md
 
   # Publishes the four platform packages to the Visual Studio Marketplace, after the desktop
   # build and the draft GitHub Release succeeded. Signs in with Microsoft Entra ID through GitHub

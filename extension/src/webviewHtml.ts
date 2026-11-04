@@ -23,6 +23,11 @@ export function renderWebviewHtml(webview: Webview, assets: WebviewAssets): stri
     webview.cspSource +
     "; " +
     "style-src-attr 'unsafe-inline'; " +
+    // The "Third-party licences" dialog fetches third-party-notices.md from the webview's own
+    // files (localResourceRoots), nothing else.
+    "connect-src " +
+    webview.cspSource +
+    "; " +
     "script-src 'nonce-" +
     nonce +
     "';";

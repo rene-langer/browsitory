@@ -40,19 +40,24 @@ jobs:
         run: python3 scripts/check-license-compliance.py
 
   # Every licence in the full dependency trees, Rust and npm, against the policy in AGENTS.md
-  # and docs/LICENSE_COMPLIANCE.md (#273). Advisories stay in the `audit` job above.
+  # and docs/LICENSE_COMPLIANCE.md (#273). Advisories stay in the `audit` job above. Also checks
+  # that the generated THIRD_PARTY_NOTICES.md still matches those trees (#301, #202).
   licenses:
     runs-on: ubuntu-latest
     env:
       # renovate: datasource=crate depName=cargo-deny
       CARGO_DENY_VERSION: 0.20.2
+      # renovate: datasource=crate depName=cargo-about
+      CARGO_ABOUT_VERSION: 0.9.3
     steps:
       - uses: actions/checkout@v7
       - name: check-dependency-licenses.py unit tests
         run: python3 scripts/test_check_dependency_licenses.py
+      - name: generate-third-party-notices.py unit tests
+        run: python3 scripts/test_generate_third_party_notices.py
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny@${{ env.CARGO_DENY_VERSION }}
+          tool: cargo-deny@${{ env.CARGO_DENY_VERSION }},cargo-about@${{ env.CARGO_ABOUT_VERSION }}
       - name: Rust licences (cargo deny, all target platforms)
         run: cargo deny check licenses
       - uses: pnpm/action-setup@v6
@@ -80,6 +85,11 @@ jobs:
           cd extension/e2e && pnpm install --frozen-lockfile --ignore-scripts --ignore-workspace
       - name: npm licences (all four projects, production and dev, all platforms)
         run: python3 scripts/check-dependency-licenses.py --summary
+      # Fails when a dependency update changed the Rust or bundled npm trees, or a vendored C
+      # library's -sys crate version no longer matches scripts/notices/native-libraries.md. The
+      # error names the command that regenerates the file.
+      - name: THIRD_PARTY_NOTICES.md is current
+        run: python3 scripts/generate-third-party-notices.py --check
 
   changelog:
     if: github.event_name == 'pull_request'

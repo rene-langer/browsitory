@@ -1207,6 +1207,17 @@ describe("preferences and external tool commands", () => {
     expect(onOpenPreferences).toHaveBeenCalled();
   });
 
+  it("adds Third-party licences with the app commands", () => {
+    const onOpenThirdPartyLicences = vi.fn();
+    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, {
+      onOpenThirdPartyLicences,
+    });
+    const licences = commands.find((c) => c.label === "Third-party licences");
+    expect(licences?.keywords).toEqual(expect.arrayContaining(["licenses", "about", "open source"]));
+    licences!.run();
+    expect(onOpenThirdPartyLicences).toHaveBeenCalled();
+  });
+
   it("adds tool commands, with current-file ones only when there is a current file", () => {
     const toolCommands = tools();
     const without = build(makeAppState(), null, toolCommands).map((c) => c.label);

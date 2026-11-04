@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { thirdPartyNoticesPlugin } from "./vite.notices.ts";
 
 export default defineConfig({
   base: "./",
@@ -8,7 +9,7 @@ export default defineConfig({
     "import.meta.url": JSON.stringify(""),
     "import.meta.resolve": "undefined",
   },
-  plugins: [react()],
+  plugins: [react(), thirdPartyNoticesPlugin()],
   build: {
     outDir: "dist-vscode",
     emptyOutDir: true,
