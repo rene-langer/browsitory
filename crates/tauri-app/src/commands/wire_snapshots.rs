@@ -335,6 +335,13 @@ fn clone_errors() -> Vec<(String, CloneErrorDto)> {
                 folder: "docs".to_string(),
             }),
         ),
+        (
+            "FileInUse".into(),
+            CloneError::HeldOpen(git_core::HeldOpen {
+                path: "f.txt".to_string(),
+                during: git_core::HeldDuring::Clone,
+            }),
+        ),
     ];
     clone_errors.extend(fixtures::transfer_error_kinds().into_iter().map(|kind| {
         (
@@ -355,6 +362,7 @@ fn clone_errors() -> Vec<(String, CloneErrorDto)> {
         CloneError::Transfer { .. },
         CloneError::Io(_),
         CloneError::CaseCollision(_),
+        CloneError::HeldOpen(_),
     );
     let init_errors: Vec<(String, RepoError)> = vec![
         (

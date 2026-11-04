@@ -21,6 +21,9 @@ pub enum ResetError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Windows: a checkout stopped at a file another program holds open (#303).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
 }
 
 /// Moves the current branch (or detached HEAD) to `commit_id`. Soft keeps index + working tree,
@@ -52,7 +55,12 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
             )?;
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.force();
-            repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+            // A file another program holds open: say so, not libgit2's raw error (#303).
+            repo.checkout_tree(tree.as_object(), Some(&mut checkout))
+                .map_err(crate::worktree_guard::held_open::<ResetError>(
+                    repo.workdir(),
+                    crate::HeldDuring::Reset,
+                ))?;
         }
         move_head(repo, target.id())?;
         let mut index = repo.index()?;

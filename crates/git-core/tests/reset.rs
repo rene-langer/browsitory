@@ -232,3 +232,41 @@ fn hard_reset_never_deletes_through_a_symlinked_directory() {
 
     common::assert_outside_untouched(out.path());
 }
+
+/// Windows: a hard reset whose checkout stops at a file another program keeps open says so,
+/// not libgit2's raw error, and leaves HEAD where it was; once the file is closed, resetting
+/// again finishes it (#303).
+#[cfg(windows)]
+#[test]
+fn hard_reset_with_a_file_open_in_another_program_says_so_and_finishes_when_tried_again() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "1\n");
+    common::write_file(dir.path(), "z.txt", "1\n");
+    common::commit_all(&repo, "base");
+    let base = repo.head().unwrap().peel_to_commit().unwrap().id();
+    common::write_file(dir.path(), "a.txt", "2\n");
+    common::write_file(dir.path(), "z.txt", "2\n");
+    common::commit_all(&repo, "next");
+    let next = repo.head().unwrap().peel_to_commit().unwrap().id();
+    let editor = common::hold_open_without_share_delete(&dir.path().join("z.txt"));
+
+    let error = reset_to(&repo, &base.to_string(), ResetMode::Hard).unwrap_err();
+
+    assert!(
+        matches!(error, ResetError::HeldOpen(ref held) if held.path == "z.txt"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'z.txt' is open in another program. Some files were already reset. Close it, then try \
+         again to finish."
+    );
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id(), next);
+    assert_eq!(common::read(dir.path(), "z.txt"), "2\n");
+    drop(editor);
+    reset_to(&repo, &base.to_string(), ResetMode::Hard).unwrap();
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id(), base);
+    assert_eq!(common::read(dir.path(), "a.txt"), "1\n");
+    assert_eq!(common::read(dir.path(), "z.txt"), "1\n");
+    assert!(repo.statuses(None).unwrap().is_empty());
+}

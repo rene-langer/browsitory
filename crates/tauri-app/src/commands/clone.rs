@@ -76,6 +76,7 @@ impl From<CloneError> for CloneErrorDto {
             CloneError::Transfer { kind, .. } => format!("{kind:?}"),
             CloneError::Io(_) => "Io".to_string(),
             CloneError::CaseCollision(_) => "CaseCollision".to_string(),
+            CloneError::HeldOpen(_) => "FileInUse".to_string(),
         };
         Self {
             kind,
@@ -178,6 +179,13 @@ mod tests {
                     folder: "d".into(),
                 }),
                 "CaseCollision",
+            ),
+            (
+                CloneError::HeldOpen(git_core::HeldOpen {
+                    path: "f.txt".into(),
+                    during: git_core::HeldDuring::Clone,
+                }),
+                "FileInUse",
             ),
             (
                 CloneError::Transfer {

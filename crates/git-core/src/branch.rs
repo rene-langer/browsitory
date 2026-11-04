@@ -17,6 +17,9 @@ pub enum BranchError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Windows: a checkout stopped at a file another program holds open (#303).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
     /// The branch is being rebased in a terminal, in this or another worktree (#263).
     #[error(transparent)]
     BeingRebased(#[from] crate::repo::BranchBeingRebased),
@@ -108,7 +111,12 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&tree)],
     )?;
-    repo.checkout_tree(target.as_object(), None)?;
+    // A file another program holds open: say so, not libgit2's raw error (#303).
+    repo.checkout_tree(target.as_object(), None)
+        .map_err(crate::worktree_guard::held_open::<BranchError>(
+            repo.workdir(),
+            crate::HeldDuring::Switch,
+        ))?;
     repo.set_head(&branch_ref)?;
     Ok(())
 }
@@ -124,7 +132,12 @@ pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchE
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&tree)],
     )?;
-    repo.checkout_tree(target.as_object(), None)?;
+    // A file another program holds open: say so, not libgit2's raw error (#303).
+    repo.checkout_tree(target.as_object(), None)
+        .map_err(crate::worktree_guard::held_open::<BranchError>(
+            repo.workdir(),
+            crate::HeldDuring::Switch,
+        ))?;
     repo.set_head_detached(target.id())?;
     Ok(())
 }

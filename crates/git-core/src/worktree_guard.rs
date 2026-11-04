@@ -1106,6 +1106,151 @@ fn held_open_among<'a>(
     None
 }
 
+/// The operation whose libgit2 checkout of a whole tree stopped at a file another program holds
+/// open ([`HeldOpen`], #303). It decides what the message says about the files already
+/// written. Each of these finishes when tried again once the file is closed (a rebase abort
+/// when aborted again; a clone starts over, its folder removed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldDuring {
+    /// Switching to a branch, or checking out a commit.
+    Switch,
+    /// A hard reset.
+    Reset,
+    /// A fast-forward merge.
+    FastForward,
+    /// A rebase abort putting the original branch back.
+    RebaseAbort,
+    /// A clone's checkout.
+    Clone,
+    /// Updating a submodule.
+    SubmoduleUpdate,
+}
+
+impl HeldDuring {
+    /// What follows "'f.txt' is open in another program." in the message.
+    fn advice(self) -> &'static str {
+        match self {
+            HeldDuring::Switch => {
+                "Some files were already switched. Close it, then try again to finish."
+            }
+            HeldDuring::Reset => {
+                "Some files were already reset. Close it, then try again to finish."
+            }
+            HeldDuring::FastForward | HeldDuring::SubmoduleUpdate => {
+                "Some files were already updated. Close it, then try again to finish."
+            }
+            HeldDuring::RebaseAbort => {
+                "Some files were already put back. Close it, then abort again to finish."
+            }
+            HeldDuring::Clone => "Close it, then try again.",
+        }
+    }
+}
+
+/// Windows: a libgit2 checkout of a whole tree stopped at `path` (relative to the work tree),
+/// which another program keeps open so it can't be replaced (#303). The files before it may
+/// already be written; `during` says how to finish.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("'{path}' is open in another program. {}", during.advice())]
+pub struct HeldOpen {
+    pub path: String,
+    pub during: HeldDuring,
+}
+
+/// A `map_err` for a libgit2 checkout of a whole tree in `workdir` (#303): the file another
+/// program holds open, as [`HeldOpen`], else libgit2's error unchanged. With no path list, the
+/// file is the one libgit2's message quotes below `workdir` (see [`held_open_after_checkout`]
+/// for how it is checked, and its known misses). `None` for a bare repository.
+pub(crate) fn held_open<E>(
+    workdir: Option<&Path>,
+    during: HeldDuring,
+) -> impl FnOnce(git2::Error) -> E + '_
+where
+    E: From<git2::Error> + From<HeldOpen>,
+{
+    move |error| {
+        let held = workdir.and_then(|workdir| {
+            held_open_in(workdir, &error, |workdir, rel| {
+                held_open_among(workdir, [rel]).is_some()
+            })
+        });
+        match held {
+            Some(path) => HeldOpen { path, during }.into(),
+            None => error.into(),
+        }
+    }
+}
+
+/// [`held_open`]'s path: of the paths below `workdir` that `error` (an OS or file-system error)
+/// may quote, the longest one `is_held` says another program holds.
+fn held_open_in(
+    workdir: &Path,
+    error: &git2::Error,
+    is_held: impl Fn(&Path, &str) -> bool,
+) -> Option<String> {
+    if !matches!(
+        error.class(),
+        git2::ErrorClass::Os | git2::ErrorClass::Filesystem
+    ) {
+        return None;
+    }
+    quoted_candidates(workdir, error.message())
+        .into_iter()
+        .find(|rel| is_held(workdir, rel))
+}
+
+/// The paths, relative to `workdir` and with forward slashes, that libgit2's `message` may
+/// quote below `workdir`, longest first. libgit2 words these errors many ways (`could not
+/// remove '<p>': <reason>`, `failed remove - '<p>' is locked`, `could not find '<p>' to
+/// remove`, `could not open '<p>' for writing`, ...) and a file name may itself hold `'`, so
+/// every `'` after an opening `'<workdir>/` ends a candidate; the caller's probe decides which,
+/// if any, is the file. A candidate that isn't a plain path below `workdir` (`..`, `.`, empty
+/// components, a `:`, which no Windows name holds) is dropped, so nothing outside is probed.
+/// `workdir` is matched with and without a `\\?\` (`\\?\UNC\`) prefix, either way round.
+fn quoted_candidates(workdir: &Path, message: &str) -> Vec<String> {
+    let message = message.replace('\\', "/");
+    let mut candidates = Vec::new();
+    for base in base_spellings(workdir) {
+        let opening = format!("'{base}/");
+        for (at, _) in message.match_indices(&opening) {
+            let rest = &message[at + opening.len()..];
+            for (end, _) in rest.match_indices('\'') {
+                let rel = &rest[..end];
+                if plain_below(rel) {
+                    candidates.push(rel.to_string());
+                }
+            }
+        }
+    }
+    candidates.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    candidates.dedup();
+    candidates
+}
+
+/// `workdir` with forward slashes and no trailing slash, as written and with its `//?/`
+/// (`//?/UNC/`) long-path prefix removed or added.
+fn base_spellings(workdir: &Path) -> Vec<String> {
+    let base = workdir.to_string_lossy().replace('\\', "/");
+    let base = base.trim_end_matches('/').to_string();
+    let mut spellings = vec![base.clone()];
+    if let Some(unc) = base.strip_prefix("//?/UNC/") {
+        spellings.push(format!("//{unc}"));
+    } else if let Some(local) = base.strip_prefix("//?/") {
+        spellings.push(local.to_string());
+    } else if let Some(unc) = base.strip_prefix("//") {
+        spellings.push(format!("//?/UNC/{unc}"));
+    } else {
+        spellings.push(format!("//?/{base}"));
+    }
+    spellings
+}
+
+/// Whether `rel` (forward slashes) names a path below the work tree: no empty, `.` or `..`
+/// component, and no `:` (a drive or a stream; never part of a Windows file name).
+fn plain_below(rel: &str) -> bool {
+    !rel.contains(':') && rel.split('/').all(|part| !matches!(part, "" | "." | ".."))
+}
+
 /// Writes `bytes` to `rel` as a regular file. Returns `Ok(false)` and writes nothing when an
 /// ancestor is a symlink or `rel` is not a plain relative path.
 ///
@@ -1498,6 +1643,215 @@ mod tests {
         assert!(scan(dir.path(), &GuardSource::Tree(&tree), ALL)
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn quoted_candidates_find_the_path_in_every_libgit2_wording() {
+        let workdir = Path::new("C:/w/repo/");
+        let candidates = |message: &str| quoted_candidates(workdir, message);
+        // libgit2 1.9's wordings for a file it can't remove, open or find.
+        for message in [
+            "could not remove 'C:/w/repo/d/b.txt': The process cannot access the file",
+            r"could not remove 'C:\w\repo\d\b.txt': Der Prozess kann nicht zugreifen",
+            "could not remove 'C:/w/repo/d/b.txt'",
+            "failed remove - 'C:/w/repo/d/b.txt' is locked",
+            "could not find 'C:/w/repo/d/b.txt' to remove",
+            "could not open 'C:/w/repo/d/b.txt' for writing: Access is denied.",
+            "failed to remove file 'C:/w/repo/d/b.txt'",
+        ] {
+            assert_eq!(candidates(message), ["d/b.txt"], "{message}");
+        }
+        // A name holding `'` (and even `': `) gives every reading, longest first; the probe
+        // picks the one that exists.
+        assert_eq!(
+            candidates("could not remove 'C:/w/repo/it's.txt': in use"),
+            ["it's.txt", "it"]
+        );
+        assert_eq!(
+            candidates("failed remove - 'C:/w/repo/a' b.txt' is locked"),
+            ["a' b.txt", "a"]
+        );
+        // Outside the work tree, a sibling folder sharing its prefix, `..`, a stream or drive,
+        // no closing quote, or no path at all: nothing to probe.
+        for message in [
+            "could not remove 'C:/w/other/a.txt': x",
+            "could not remove 'C:/w/repo2/a.txt': x",
+            "could not remove 'C:/w/repo/../other/a.txt': x",
+            "could not remove 'C:/w/repo/./a.txt': x",
+            "could not remove 'C:/w/repo/d//a.txt': x",
+            "could not remove 'C:/w/repo/': x",
+            "could not remove 'C:/w/repo/a.txt",
+            "failed to write",
+        ] {
+            assert!(candidates(message).is_empty(), "{message}");
+        }
+    }
+
+    #[test]
+    fn quoted_candidates_match_a_long_path_prefix_either_way_round() {
+        let plain = Path::new(r"C:\w\repo");
+        let long = Path::new(r"\\?\C:\w\repo");
+        let unc = Path::new(r"\\server\share\repo");
+        let long_unc = Path::new(r"\\?\UNC\server\share\repo");
+        for (workdir, message) in [
+            (plain, r"could not remove '\\?\C:\w\repo\d\b.txt': x"),
+            (long, r"could not remove 'C:/w/repo/d/b.txt': x"),
+            (long, r"could not remove '\\?\C:\w\repo\d\b.txt': x"),
+            (
+                unc,
+                r"could not remove '\\?\UNC\server\share\repo\d\b.txt': x",
+            ),
+            (
+                long_unc,
+                r"could not remove '//server/share/repo/d/b.txt': x",
+            ),
+            (
+                long_unc,
+                r"could not remove '\\?\UNC\server\share\repo\d\b.txt': x",
+            ),
+        ] {
+            assert_eq!(
+                quoted_candidates(workdir, message),
+                ["d/b.txt"],
+                "{workdir:?} {message}"
+            );
+        }
+        assert!(quoted_candidates(unc, r"could not remove '\\other\share\repo\a': x").is_empty());
+    }
+
+    #[test]
+    fn held_open_in_names_the_longest_quoted_file_that_is_held() {
+        let workdir = Path::new("/w/repo");
+        let os_error = |message: &str| {
+            git2::Error::new(git2::ErrorCode::GenericError, git2::ErrorClass::Os, message)
+        };
+        let held = |_: &Path, rel: &str| matches!(rel, "d/f.txt" | "it" | "it's.txt");
+        assert_eq!(
+            held_open_in(
+                workdir,
+                &os_error("could not remove '/w/repo/d/f.txt': x"),
+                held
+            ),
+            Some("d/f.txt".to_string())
+        );
+        assert_eq!(
+            held_open_in(
+                workdir,
+                &os_error("failed remove - '/w/repo/d/f.txt' is locked"),
+                held
+            ),
+            Some("d/f.txt".to_string())
+        );
+        assert_eq!(
+            held_open_in(
+                workdir,
+                &os_error("could not remove '/w/repo/it's.txt': x"),
+                held
+            ),
+            Some("it's.txt".to_string())
+        );
+        assert_eq!(
+            held_open_in(
+                workdir,
+                &os_error("could not remove '/w/repo/g.txt': x"),
+                held
+            ),
+            None
+        );
+        // Only an OS or file-system error names a file in the way.
+        let checkout = git2::Error::new(
+            git2::ErrorCode::Conflict,
+            git2::ErrorClass::Checkout,
+            "could not remove '/w/repo/d/f.txt': x",
+        );
+        assert_eq!(held_open_in(workdir, &checkout, held), None);
+    }
+
+    /// Windows: the real probe finds nobody holding the file, so libgit2's error stays.
+    #[cfg(windows)]
+    #[test]
+    fn held_open_keeps_libgit2s_error_for_a_file_nobody_holds() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("f.txt"), "x").unwrap();
+        let message = format!(
+            "could not remove '{}': x",
+            dir.path().join("f.txt").display()
+        );
+        let error = git2::Error::new(
+            git2::ErrorCode::GenericError,
+            git2::ErrorClass::Os,
+            &message,
+        );
+        let mapped: crate::branch::BranchError =
+            held_open(Some(dir.path()), HeldDuring::Switch)(error);
+        assert!(
+            matches!(mapped, crate::branch::BranchError::Git(ref e) if e.message() == message),
+            "{mapped:?}"
+        );
+    }
+
+    /// Windows: a file another program holds without sharing delete is named.
+    #[cfg(windows)]
+    #[test]
+    fn held_open_names_a_file_another_program_holds() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        let file = dir.path().join("d").join("f.txt");
+        std::fs::write(&file, "x").unwrap();
+        let _editor = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2)
+            .open(&file)
+            .unwrap();
+        let error = git2::Error::new(
+            git2::ErrorCode::Locked,
+            git2::ErrorClass::Os,
+            format!("failed remove - '{}' is locked", file.display()),
+        );
+        let mapped: crate::branch::BranchError =
+            held_open(Some(dir.path()), HeldDuring::Switch)(error);
+        assert!(
+            matches!(mapped, crate::branch::BranchError::HeldOpen(ref held) if held.path == "d/f.txt"),
+            "{mapped:?}"
+        );
+    }
+
+    #[test]
+    fn held_open_messages_say_what_was_changed_and_how_to_finish() {
+        let message = |during| {
+            HeldOpen {
+                path: "f.txt".to_string(),
+                during,
+            }
+            .to_string()
+        };
+        assert_eq!(
+            message(HeldDuring::Switch),
+            "'f.txt' is open in another program. Some files were already switched. Close it, \
+             then try again to finish."
+        );
+        assert_eq!(
+            message(HeldDuring::Reset),
+            "'f.txt' is open in another program. Some files were already reset. Close it, then \
+             try again to finish."
+        );
+        for during in [HeldDuring::FastForward, HeldDuring::SubmoduleUpdate] {
+            assert_eq!(
+                message(during),
+                "'f.txt' is open in another program. Some files were already updated. Close \
+                 it, then try again to finish."
+            );
+        }
+        assert_eq!(
+            message(HeldDuring::RebaseAbort),
+            "'f.txt' is open in another program. Some files were already put back. Close it, \
+             then abort again to finish."
+        );
+        assert_eq!(
+            message(HeldDuring::Clone),
+            "'f.txt' is open in another program. Close it, then try again."
+        );
     }
 
     #[test]

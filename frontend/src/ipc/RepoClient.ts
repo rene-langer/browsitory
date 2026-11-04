@@ -335,6 +335,7 @@ export type CloneErrorKind =
   | "Io"
   | "InitFailed"
   | "CaseCollision"
+  | "FileInUse"
   | TransferErrorKind;
 
 /** Clone/init failure; the backend sends `{ kind, message }` so callers can branch on `kind`. */

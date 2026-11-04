@@ -1142,6 +1142,32 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   (`DELETE` on it or `FILE_DELETE_CHILD` on the folder); without it the system's access
   denied is reported. A crash between creating and renaming the temporary file leaves
   it behind as an untracked file.
+- libgit2's own checkouts hit the same held file on Windows and report it only as an OS error
+  (#268, #303). On windows-latest it reads, for a file the checkout writes over and for one it
+  deletes alike: "could not remove 'C:/Users/runneradmin/AppData/Local/Temp/.tmpJhLclX/z.txt':
+  The process cannot access the file because it is being used by another process." The
+  reason is in the system's language, and libgit2 words other failures differently (`failed
+  remove - '<p>' is locked`, `could not find '<p>' to remove`, ...). So `worktree_guard` reads
+  no wording: every `'` after an opening `'<work tree>/` (with or without a `\\?\` prefix) ends
+  a candidate path below the work tree (no `..`, `.`, empty part or `:`), and the longest
+  candidate the probe finds held is the file. The probe goes through the walker: it opens the file for
+  deleting, sharing everything, and closes it at once; a sharing violation means another
+  program holds it. Every other platform, and anything else, keeps libgit2's error. Checkouts
+  of a path list (`held_open_after_checkout`: undo/redo from the index, discard, taking a
+  whole side of a conflict) report the walker's `FileInUse` message; they also check each
+  listed path when the message quotes none. Whole-tree checkouts (`held_open`, a `map_err`
+  for any error type with `From<HeldOpen>`) report `HeldOpen { path, during }`, whose message
+  says the files before it may already be written and how to finish: "'f.txt' is open in
+  another program. Some files were already switched. Close it, then try again to finish." It
+  covers branch switch and commit checkout, hard reset, merge fast-forward, rebase abort
+  ("… put back. Close it, then abort again to finish."), clone ("Close it, then try again.":
+  the clone's folder is removed, kind `FileInUse`) and submodule update. Each of these
+  finishes when tried again: a forced checkout rewrites everything, and a safe one against a
+  tree accepts a file already at its target. Stash apply and pop, merge
+  abort, cherry-pick and revert, rebase start and pull fast-forward still show libgit2's
+  error: their retry refuses or skips the files already written (#321). Stash apply's
+  checkout compares with the index, which it doesn't update, so a written file whose size
+  changed counts as a local change (`WouldOverwrite`).
 - `replace_beneath` (undo/redo restores) goes through the same temporary file + rename (#251):
   both walkers share `swap_in` with `write_beneath` (Unix `swap_in_file` / `swap_in`: create,
   fill, `sync_all`, `renameat`, `unlinkat` of the temporary entry on any error, best-effort

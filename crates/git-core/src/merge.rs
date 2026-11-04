@@ -47,6 +47,9 @@ pub enum MergeError {
     FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Windows: a checkout stopped at a file another program holds open (#303).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
     /// Abort would reset a path the operation touched (staged) whose work-tree file was changed
     /// again since: both versions would be lost. git's `reset --merge` refuses the same way
     /// ("Entry '…' not uptodate"); nothing was changed.
@@ -182,7 +185,13 @@ pub fn start_merge(
         // Check out the target tree before moving the branch ref — a refused checkout
         // (modified/untracked files in the way) leaves the repo exactly as it was, matching
         // `branch::switch_branch`'s own ordering for the same reason.
-        repo.checkout_tree(their_commit.as_object(), None)?;
+        // A file another program holds open: say so, not libgit2's raw error (#303).
+        repo.checkout_tree(their_commit.as_object(), None).map_err(
+            crate::worktree_guard::held_open::<MergeError>(
+                repo.workdir(),
+                crate::HeldDuring::FastForward,
+            ),
+        )?;
         let mut head_ref = repo.head()?;
         head_ref.set_target(their_commit.id(), "merge: Fast-forward")?;
         return Ok(MergeOutcome::FastForwarded);
