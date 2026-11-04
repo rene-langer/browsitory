@@ -4,7 +4,8 @@
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "test": "tsc -p tsconfig.json && node out/runTests.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke:vsix": "tsc -p tsconfig.json && node out/runVsixSmoke.js"
   },
   "devDependencies": {
     "@types/mocha": "10.0.10",
