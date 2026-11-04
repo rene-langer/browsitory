@@ -44,6 +44,9 @@ pub enum SubmoduleError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Windows: a checkout stopped at a file another program holds open (#303).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,6 +143,14 @@ fn guarded_update(
     policy: CasePolicy,
 ) -> Result<(), SubmoduleError> {
     let name = submodule.name()?.to_string();
+    // A file another program holds open: say so, not libgit2's raw error (#303). Named from the
+    // superproject's work tree (`sub/f.txt`), which the submodule's lies in.
+    let held = || {
+        crate::worktree_guard::held_open::<SubmoduleError>(
+            repo.workdir(),
+            crate::HeldDuring::SubmoduleUpdate,
+        )
+    };
     let status = repo.submodule_status(&name, git2::SubmoduleIgnore::None)?;
     // libgit2 clones only into an empty folder; anything else it opens as a checked-out
     // submodule (and fails as it would, when that isn't one).
@@ -160,10 +171,11 @@ fn guarded_update(
             // file, so libgit2's safe checkout would take the missing files for deletions.
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.safe().recreate_missing(true);
-            sub.checkout_tree(commit.as_object(), Some(&mut checkout))?;
+            sub.checkout_tree(commit.as_object(), Some(&mut checkout))
+                .map_err(held())?;
             sub.set_head_detached(target)?;
         } else {
-            submodule.update(false, None)?;
+            submodule.update(false, None).map_err(held())?;
         }
         return Ok(());
     }
@@ -179,7 +191,7 @@ fn guarded_update(
     // must be recreated explicitly.
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.safe().recreate_missing(true);
-    sub.checkout_head(Some(&mut checkout))?;
+    sub.checkout_head(Some(&mut checkout)).map_err(held())?;
     Ok(())
 }
 

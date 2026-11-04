@@ -2234,3 +2234,43 @@ fn taking_a_whole_side_of_a_file_open_in_another_program_is_refused() {
         "line one\nfeature two\nline three\n"
     );
 }
+
+/// Windows: a fast-forward whose checkout stops at a file another program keeps open says so,
+/// not libgit2's raw error, and leaves the branch where it was; once the file is closed,
+/// merging again finishes it (#303).
+#[cfg(windows)]
+#[test]
+fn fast_forward_with_a_file_open_in_another_program_says_so_and_finishes_when_tried_again() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "1\n");
+    write_file(dir.path(), "z.txt", "1\n");
+    commit_all(&repo, "base");
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    let base = repo.head().unwrap().peel_to_commit().unwrap().id();
+    git_core::branch::create_branch(&repo, "side", "HEAD").unwrap();
+    write_file(dir.path(), "a.txt", "a longer line\n");
+    write_file(dir.path(), "z.txt", "a longer line\n");
+    commit_all(&repo, "side");
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+    let editor = hold_open_without_share_delete(&dir.path().join("z.txt"));
+
+    let error = git_core::merge::start_merge(&repo, "side", Default::default()).unwrap_err();
+
+    assert!(
+        matches!(error, MergeError::HeldOpen(ref held) if held.path == "z.txt"),
+        "{error:?}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "'z.txt' is open in another program. Some files were already updated. Close it, then \
+         try again to finish."
+    );
+    assert_eq!(repo.head().unwrap().peel_to_commit().unwrap().id(), base);
+    drop(editor);
+    assert_eq!(
+        git_core::merge::start_merge(&repo, "side", Default::default()).unwrap(),
+        MergeOutcome::FastForwarded
+    );
+    assert_eq!(common::read(dir.path(), "z.txt"), "a longer line\n");
+    assert!(repo.statuses(None).unwrap().is_empty());
+}

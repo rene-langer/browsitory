@@ -23,6 +23,9 @@ pub enum RebaseError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Windows: a checkout stopped at a file another program holds open (#303).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
     #[error(
         "Another merge, cherry-pick or revert is in progress. Finish or abort it before \
          continuing the rebase."
@@ -977,7 +980,17 @@ pub fn abort_rebase(repo: &Repository, state: &RebaseState) -> Result<RebaseAbor
     // says Paused), so it is aborted like one.
     let paused_here = at_expected || is_step_committed_by_hand(repo, state)?;
     if paused_here && branch_unmoved && !other_operation {
-        restore_original_branch(repo, &state.original_branch_ref, state.original_tip)?;
+        // A file another program holds open: say so, not libgit2's raw error (#303). Only
+        // here: `start_rebase`'s rollback reports the step's error instead.
+        restore_original_branch(repo, &state.original_branch_ref, state.original_tip).map_err(
+            |error| match error {
+                RebaseError::Git(error) => crate::worktree_guard::held_open::<RebaseError>(
+                    repo.workdir(),
+                    crate::HeldDuring::RebaseAbort,
+                )(error),
+                other => other,
+            },
+        )?;
         return Ok(RebaseAbort { restored: true });
     }
     if at_expected {

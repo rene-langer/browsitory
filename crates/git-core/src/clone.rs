@@ -53,6 +53,9 @@ pub enum CloneError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// Windows: a checkout stopped at a file another program holds open (#303).
+    #[error(transparent)]
+    HeldOpen(#[from] crate::HeldOpen),
 }
 
 /// User-typed clone URLs may point at a local repository, so unlike submodule URLs `file://`
@@ -208,6 +211,7 @@ pub(crate) fn clone_repo_with(
         cleanup(&opts.dest, state);
         return Err(match error {
             CheckoutFailure::Case(collision) => collision.into(),
+            CheckoutFailure::Held(held) => held.into(),
             CheckoutFailure::Git(error) => classify(error, false, cancel),
         });
     }
@@ -232,7 +236,14 @@ pub(crate) fn clone_repo_with(
 
 enum CheckoutFailure {
     Case(crate::CaseCollision),
+    Held(crate::HeldOpen),
     Git(git2::Error),
+}
+
+impl From<crate::HeldOpen> for CheckoutFailure {
+    fn from(held: crate::HeldOpen) -> Self {
+        Self::Held(held)
+    }
 }
 
 impl From<git2::Error> for CheckoutFailure {
@@ -275,7 +286,13 @@ fn checkout_clone(
             message: None,
         });
     });
-    repo.checkout_head(Some(&mut checkout))?;
+    // A file another program holds open (#303): named while it is still there, before the
+    // caller removes the clone.
+    repo.checkout_head(Some(&mut checkout))
+        .map_err(crate::worktree_guard::held_open::<CheckoutFailure>(
+            repo.workdir(),
+            crate::HeldDuring::Clone,
+        ))?;
     Ok(())
 }
 
@@ -428,6 +445,44 @@ mod tests {
         assert!(phases.0.contains(&TransferPhase::Updating));
         let repo = Repository::open(&dest).unwrap();
         assert!(crate::status::status(&repo).unwrap().is_empty());
+    }
+
+    /// Windows: the clone's checkout stopping at a file another program holds open is
+    /// `HeldOpen` with the clone's advice, named while the file is still there (#303).
+    #[cfg(windows)]
+    #[test]
+    fn a_held_file_stops_the_clone_checkout_with_held_open() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let src = source(false);
+        let parent = TempDir::new().unwrap();
+        let dest = parent.path().join("clone");
+        clone(src.path(), dest.clone(), &mut Phases::default(), &|| false).unwrap();
+        let repo = Repository::open(&dest).unwrap();
+        std::fs::write(dest.join("a.txt"), "changed\n").unwrap();
+        let _editor = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2)
+            .open(dest.join("a.txt"))
+            .unwrap();
+        let mut phases = Phases::default();
+        let reporter: RefCell<&mut dyn TransferReporter> = RefCell::new(&mut phases);
+
+        let failure = checkout_clone(&repo, &reporter, &|| false, CasePolicy::Always);
+
+        let Err(CheckoutFailure::Held(held)) = failure else {
+            panic!("expected HeldOpen");
+        };
+        assert_eq!(
+            held,
+            crate::HeldOpen {
+                path: "a.txt".to_string(),
+                during: crate::HeldDuring::Clone,
+            }
+        );
+        assert_eq!(
+            CloneError::from(held).to_string(),
+            "'a.txt' is open in another program. Close it, then try again."
+        );
     }
 
     #[test]

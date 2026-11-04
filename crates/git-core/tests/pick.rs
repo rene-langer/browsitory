@@ -1057,3 +1057,32 @@ fn a_leftover_of_a_mainline_pick_does_not_block_the_next_commit() {
     assert_eq!(head.parent_count(), 1);
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
 }
+
+/// Windows: a cherry-pick's checkout stopping at a file another program keeps open still
+/// reports libgit2's own error: retrying it doesn't finish a part-way checkout, so the
+/// "try again" message of #303 is left to #321.
+#[cfg(windows)]
+#[test]
+fn cherry_pick_onto_a_file_open_in_another_program_keeps_libgit2s_error() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "a.txt", "1\n");
+    common::commit_all(&repo, "base");
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    git_core::branch::create_branch(&repo, "side", "HEAD").unwrap();
+    common::write_file(dir.path(), "a.txt", "a longer line\n");
+    common::commit_all(&repo, "side");
+    let picked = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+    let editor = common::hold_open_without_share_delete(&dir.path().join("a.txt"));
+
+    let error = cherry_pick(&repo, &picked, None, Default::default()).unwrap_err();
+
+    drop(editor);
+    assert!(matches!(error, PickError::Git(_)), "{error:?}");
+}
