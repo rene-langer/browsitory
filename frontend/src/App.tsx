@@ -60,6 +60,7 @@ import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
 import {
   abortToast,
+  leftoverReason,
   pickToast,
   rebaseAbortSwitchTarget,
   rebaseAbortToast,
@@ -216,7 +217,9 @@ function RepoWorkspace({
         retry.kind === "commit" ? ((amending ? draft?.stashed : draft?.message) ?? "") : amending ? (draft?.message ?? "") : "";
       const message = current.trim() === "" ? retry.message : current;
       // While a merge/pick/squash message is seeded the box hides the chips and sends none.
-      const seeded = appState.state.mergeMessage !== null || appState.state.headInfo.squashMessage !== null;
+      const seeded =
+        (appState.state.mergeMessage !== null && !appState.state.headInfo.operationLeftover) ||
+        appState.state.headInfo.squashMessage !== null;
       const fromBox = current.trim() !== "";
       if (retry.kind === "amend") {
         // The amend-mode Author field and chips as they are now, like the message.
@@ -239,7 +242,15 @@ function RepoWorkspace({
       if (ok && retry.kind === "commit") clearCommittedDraft(message);
       return ok;
     },
-    [retryWithoutHooks, clearCommittedDraft, getCommitDraft, repoPath, appState.state.mergeMessage, appState.state.headInfo.squashMessage],
+    [
+      retryWithoutHooks,
+      clearCommittedDraft,
+      getCommitDraft,
+      repoPath,
+      appState.state.mergeMessage,
+      appState.state.headInfo.operationLeftover,
+      appState.state.headInfo.squashMessage,
+    ],
   );
   const panelVisibility = useSidebarPanelVisibility();
   const [focusCommitMessage, setFocusCommitMessage] = useState(false);
@@ -393,6 +404,8 @@ function RepoWorkspace({
           : "A revert is in progress."
       : appState.state.headInfo.terminalRebase !== null
         ? terminalRebaseReason(appState.state.headInfo.terminalRebase)
+      : appState.state.mergeMessage !== null && appState.state.headInfo.operationLeftover && appState.state.headInfo.operation !== null
+        ? leftoverReason(appState.state.headInfo.operation)
       : appState.state.mergeMessage !== null
         ? appState.state.headInfo.operation === "CherryPick"
           ? "A cherry-pick is in progress."
@@ -604,6 +617,7 @@ function RepoWorkspace({
       <OperationStatusStrip
         merging={appState.state.mergeMessage !== null}
         operation={appState.state.headInfo.operation}
+        operationLeftover={appState.state.headInfo.operationLeftover}
         rebaseProgress={appState.state.rebaseProgress}
         rebase={appState.state.headInfo.rebase}
         sequence={appState.state.headInfo.sequence}

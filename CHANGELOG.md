@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Leftover merge, cherry-pick and revert state
+
+Sometimes git's notes about a merge, cherry-pick or revert stay behind although its changes
+are already in the last commit: the .git folder couldn't be written right after the commit, or
+you cherry-picked a commit again in a terminal and git stopped because there was nothing left
+to apply. Browsitory now recognises these leftovers. A merge, cherry-pick or revert with
+unresolved conflicts is never one.
+
+- Fixed: "Amend last commit" was hidden, and amend refused, while such a leftover was there.
+  Amend now works and clears the leftover first. An operation that is really still in progress
+  still blocks amend, as in git (#240).
+- Fixed: after a cherry-pick in a terminal stopped because its changes were already there,
+  your next commit or amend ends it the way `git cherry-pick --skip` does. If more commits were
+  left to pick, `git cherry-pick --continue` goes on with them.
+- Fixed: after a leftover revert, the commit box was pre-filled with the revert's message and
+  the `prepare-commit-msg` hook was told the next commit was a merge. The next commit is now
+  your own: the box starts empty, the hook gets `message`, and the leftover is cleared
+  (#232). The same goes for a leftover cherry-pick or merge.
+- Changed: for a leftover, the status strip says "Cherry-pick already applied" (or revert, or
+  merge) instead of "Cherry-picking", that its changes are already in the last commit, and that
+  your next commit, an amend or Abort clears it. Disabled actions explain the same.
+
 ### Worktree paths
 
 - Fixed: when the folder of one worktree had been deleted, removing any worktree failed with

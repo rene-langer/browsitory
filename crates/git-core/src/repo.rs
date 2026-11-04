@@ -56,6 +56,10 @@ pub struct HeadInfo {
     pub detached_at: Option<String>,
     pub head_pushed: bool,
     pub operation: Option<OperationKind>,
+    /// `operation`'s changes are already in HEAD and only git's state files are left: its own
+    /// commit's cleanup failed, or a duplicate pick stopped as empty (`commit::leftover_operation`,
+    /// #240). The next commit or amend clears them; Abort does too.
+    pub operation_leftover: bool,
     /// A pending squash merge's message (`SQUASH_MSG`), which pre-fills the commit box.
     pub squash_message: Option<String>,
     /// Installed commit hooks that `--no-verify` skips (`pre-commit`, `commit-msg`); drives the
@@ -712,13 +716,15 @@ pub(crate) fn no_operation(repo: &git2::Repository) -> bool {
 /// stored sequence or rebase is filled in by `repo-service`.
 pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
     use git2::RepositoryState;
+    let operation = paused_operation(repo);
+    let operation_leftover = operation.is_some() && crate::commit::leftover_operation(repo);
     let mut names = crate::hooks::SKIPPABLE_COMMIT_HOOKS.to_vec();
-    if repo.state() == RepositoryState::Merge {
+    if repo.state() == RepositoryState::Merge && !operation_leftover {
         // The commit concluding a clean merge runs it (`commit::CommitHookSet::CleanMerge`).
+        // After a leftover merge the next commit is an ordinary one.
         names.push("pre-merge-commit");
     }
     let commit_hooks = crate::hooks::installed_hooks(repo, &names);
-    let operation = paused_operation(repo);
     let head = match repo.head() {
         Ok(head) => head,
         Err(error) if error.code() == git2::ErrorCode::UnbornBranch => {
@@ -727,6 +733,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
                 detached_at: None,
                 head_pushed: false,
                 operation,
+                operation_leftover,
                 squash_message: crate::merge::squash_message(repo),
                 commit_hooks,
                 sequence: None,
@@ -747,6 +754,7 @@ pub fn head_info(repo: &git2::Repository) -> Result<HeadInfo, RepoError> {
         detached_at,
         head_pushed,
         operation,
+        operation_leftover,
         squash_message: crate::merge::squash_message(repo),
         commit_hooks,
         sequence: None,

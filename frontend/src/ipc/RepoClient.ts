@@ -148,6 +148,12 @@ export interface HeadInfo {
   detachedAt: string | null;
   headPushed: boolean;
   operation: OperationKind | null;
+  /**
+   * `operation`'s changes are already in HEAD; only git's state files are left (#240). Abort, the
+   * next commit or an amend clears them. The commit box isn't pre-filled with the old message,
+   * and amend is available.
+   */
+  operationLeftover: boolean;
   /** A pending squash merge's message (`SQUASH_MSG`); pre-fills the commit box. */
   squashMessage: string | null;
   /** Installed commit hooks that `noVerify` skips (`pre-commit`, `commit-msg`). */

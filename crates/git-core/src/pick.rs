@@ -1215,6 +1215,35 @@ pub(crate) fn commit_carries_pick(
     }
     let parent = repo.find_commit(expected_parent)?;
     let applied = repo.cherrypick_commit(picked, &parent, 0, None)?;
+    carries_applied(repo, head, &parent, &applied, coverage)
+}
+
+/// The revert counterpart of `commit_carries_pick` with `Coverage::Exact`: `head` has a single
+/// parent and exactly the result of reverting `reverted` onto that parent on every path the
+/// revert changes cleanly. The author isn't compared (a revert is authored by whoever made it).
+pub(crate) fn commit_carries_revert(
+    repo: &Repository,
+    head: &Commit<'_>,
+    reverted: &Commit<'_>,
+) -> Result<Option<usize>, git2::Error> {
+    if head.parent_count() != 1 {
+        return Ok(None);
+    }
+    let parent = head.parent(0)?;
+    let applied = repo.revert_commit(reverted, &parent, 0, None)?;
+    carries_applied(repo, head, &parent, &applied, Coverage::Exact)
+}
+
+/// Whether `head` carries `applied` (an in-memory pick or revert onto `parent`) on every path it
+/// changes cleanly, compared as `coverage` says; `Some(n)` with the number of those paths.
+/// Conflicted paths are not compared.
+fn carries_applied(
+    repo: &Repository,
+    head: &Commit<'_>,
+    parent: &Commit<'_>,
+    applied: &git2::Index,
+    coverage: Coverage,
+) -> Result<Option<usize>, git2::Error> {
     let mut conflicted = std::collections::HashSet::new();
     for conflict in applied.conflicts()? {
         let conflict = conflict?;
@@ -1226,7 +1255,7 @@ pub(crate) fn commit_carries_pick(
         }
     }
     let (parent_tree, head_tree) = (parent.tree()?, head.tree()?);
-    let diff = repo.diff_tree_to_index(Some(&parent_tree), Some(&applied), None)?;
+    let diff = repo.diff_tree_to_index(Some(&parent_tree), Some(applied), None)?;
     let mut carried = 0;
     for delta in diff.deltas() {
         if delta.status() == git2::Delta::Conflicted {

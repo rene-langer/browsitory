@@ -118,7 +118,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     resolveConflict: unused,
     abortMerge: unused,
     getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
+    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
     amendCommit: async () => { throw new Error("unimplemented"); },
     getUndoState: async () => ({ undo: null, redo: null }),
     undo: async () => ({ kind: "Nothing" as const }),
@@ -534,7 +534,7 @@ describe("App", () => {
       // The paused rebase is stored on disk (`rebase.json`), so closing this tab no longer loses
       // it: a backgrounded tab mid-rebase is not kept busy.
       getHeadInfo: async () => ({
-        headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null,
+        headId: "h1", detachedAt: "h1", headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null,
         rebase: { branch: "main", onto: "o1", currentStep: 1, totalSteps: 3, health: { kind: "Paused" as const } },
         bisect: null, terminalSequence: null, terminalRebase: null,
       }),
@@ -726,6 +726,7 @@ describe("App", () => {
         detachedAt: null,
         headPushed: false,
         operation: "CherryPick",
+        operationLeftover: false,
         squashMessage: null,
         commitHooks: ["pre-commit"],
         sequence,
@@ -931,7 +932,7 @@ describe("App", () => {
       getCommitGraph: async () => [],
       listBranches: async () => [],
       listStashes: async () => [],
-      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       getCommitMessage: async () => "HEAD's message",
       commit,
     });
@@ -971,7 +972,7 @@ describe("App", () => {
         { name: "Ada", email: "ada@x.org" },
         { name: "Bob", email: "bob@x.org" },
       ],
-      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: ["commit-msg"], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
+      getHeadInfo: async () => ({ headId: "h1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: ["commit-msg"], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
       getCommitMessage: async () => "HEAD's message",
       amendCommit,
     });
@@ -1143,7 +1144,7 @@ describe("App", () => {
         getCommitFiles: async () => [],
         getCommitMessage: async () => "two",
         getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
-        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
+        getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
         ...overrides,
       });
     }
@@ -1197,7 +1198,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: { startedFrom: "main" }, terminalSequence: null, terminalRebase: null }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: { startedFrom: "main" }, terminalSequence: null, terminalRebase: null }),
             cherryPick,
           })}
         />,
@@ -1220,7 +1221,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 } }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 } }),
             getMergeMessage: async () => "t1",
           })}
         />,
@@ -1246,7 +1247,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: stored, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: stored, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
             continueSequence,
           })}
         />,
@@ -1271,7 +1272,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
             abortSequence,
             abortMerge,
           })}
@@ -1299,6 +1300,7 @@ describe("App", () => {
         detachedAt: null,
         headPushed: false,
         operation,
+        operationLeftover: false,
         squashMessage: null,
         commitHooks: [],
         sequence: null,
@@ -1418,7 +1420,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null }),
             abortRebase,
           })}
         />,
@@ -1437,7 +1439,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null }),
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null }),
             abortRebase,
             switchBranch,
           })}
@@ -1457,7 +1459,7 @@ describe("App", () => {
       render(
         <App
           client={pickClient({
-            getHeadInfo: async () => ({ headId: "c1", detachedAt: "c1", headPushed: false, operation: "CherryPick" as const, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null }),
+            getHeadInfo: async () => ({ headId: "c1", detachedAt: "c1", headPushed: false, operation: "CherryPick" as const, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase, bisect: null, terminalSequence: null, terminalRebase: null }),
             getMergeMessage: async () => "two",
             abortRebase,
           })}

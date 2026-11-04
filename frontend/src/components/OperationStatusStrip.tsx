@@ -9,6 +9,8 @@ import type {
 import {
   bisectLabel,
   conflictReason,
+  leftoverLabel,
+  leftoverText,
   rebaseInterruption,
   sequenceLabel,
   sequenceNoun,
@@ -32,10 +34,14 @@ import styles from "./OperationStatusStrip.module.css";
  * `MERGE_MSG` suggests, with no buttons: it is continued or aborted in the terminal (#263).
  * When none of these is shown, a `git bisect` started in a terminal shows as information only:
  * it blocks nothing, and it is ended in the terminal (#250).
+ * A merge, cherry-pick or revert whose changes are already in HEAD but whose state is left
+ * (D7-A, or a duplicate pick that stopped as empty) says so, with Abort: the next commit or
+ * amend clears it too (#240).
  */
 export function OperationStatusStrip({
   merging,
   operation,
+  operationLeftover = false,
   rebaseProgress,
   rebase = null,
   sequence = null,
@@ -52,6 +58,8 @@ export function OperationStatusStrip({
 }: {
   merging: boolean;
   operation: OperationKind | null;
+  /** `operation`'s changes are already in HEAD; only git's state files are left (#240). */
+  operationLeftover?: boolean;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
   /** The stored rebase with its health (`HeadInfo.rebase`). */
   rebase?: RebaseInfo | null;
@@ -150,16 +158,20 @@ export function OperationStatusStrip({
     operation === "CherryPick" ? "Abort cherry-pick" : operation === "Revert" ? "Abort revert" : "Abort merge";
   // A terminal sequence's paused step: its Abort ends the whole sequence, as git's `--abort`.
   const terminalStep = terminalSequence !== null && (operation === "CherryPick" || operation === "Revert");
+  // The operation's changes are already in HEAD; only git's state files are left (#240).
+  const leftover = operationLeftover && operation !== null && rebaseProgress === null && !terminalStep;
   const label =
     rebaseProgress !== null
       ? `Rebasing, step ${rebaseProgress.currentStep} of ${rebaseProgress.totalSteps}`
       : terminalStep
         ? terminalSequenceLabel({ ...terminalSequence, pausedOnConflict: true })
-        : mergeLabel;
+        : leftover
+          ? leftoverLabel(operation)
+          : mergeLabel;
   return (
     <div role="status" aria-label="Operation status" className={styles.strip}>
       <strong>{label}</strong>
-      <span>{reason ?? "No conflicts remaining"}</span>
+      <span>{leftover ? leftoverText(operation) : (reason ?? "No conflicts remaining")}</span>
       <span className={styles.spacer} />
       <button
         type="button"

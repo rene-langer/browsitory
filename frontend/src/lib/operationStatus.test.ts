@@ -3,6 +3,7 @@ import type { RebaseInfo, TerminalRebase, TerminalSequence } from "../ipc/RepoCl
 import {
   abortToast,
   conflictReason,
+  leftoverReason,
   pickToast,
   rebaseAbortSwitchTarget,
   rebaseAbortToast,
@@ -18,6 +19,14 @@ import {
 } from "./operationStatus";
 
 describe("operationStatus", () => {
+  it("explains what a leftover operation blocks (#240)", () => {
+    expect(leftoverReason("CherryPick")).toBe(
+      "This cherry-pick's changes are already in the last commit. Commit, amend or abort it first.",
+    );
+    expect(leftoverReason("Revert")).toBe("This revert's changes are already in the last commit. Commit, amend or abort it first.");
+    expect(leftoverReason("Merge")).toBe("This merge's changes are already in the last commit. Commit, amend or abort it first.");
+  });
+
   it("explains blocked steps by conflict count", () => {
     expect(conflictReason(0)).toBeUndefined();
     expect(conflictReason(1)).toBe("Resolve 1 conflict to continue");

@@ -1,5 +1,6 @@
 import type {
   BisectInfo,
+  OperationKind,
   PickOutcome,
   RebaseAbort,
   RebaseDivergence,
@@ -16,6 +17,31 @@ import type {
 export function conflictReason(conflictCount: number): string | undefined {
   if (conflictCount <= 0) return undefined;
   return `Resolve ${conflictCount} ${conflictCount === 1 ? "conflict" : "conflicts"} to continue`;
+}
+
+/**
+ * A leftover merge, cherry-pick or revert (`HeadInfo.operationLeftover`, #240): its changes are
+ * already in HEAD, either because its own commit was made and git's state stayed behind, or
+ * because a duplicate pick in a terminal stopped as empty.
+ */
+function leftoverNoun(kind: OperationKind): string {
+  return kind === "CherryPick" ? "cherry-pick" : kind === "Revert" ? "revert" : "merge";
+}
+
+/** The strip label of a leftover: "Cherry-pick already applied". */
+export function leftoverLabel(kind: OperationKind): string {
+  const noun = leftoverNoun(kind);
+  return `${noun.charAt(0).toUpperCase()}${noun.slice(1)} already applied`;
+}
+
+/** The strip text of a leftover. */
+export function leftoverText(kind: OperationKind): string {
+  return `This ${leftoverNoun(kind)}'s changes are already in the last commit. Git's state for it was left behind. Your next commit or amend clears it, and so does Abort.`;
+}
+
+/** Why repository actions are disabled while a leftover is there. */
+export function leftoverReason(kind: OperationKind): string {
+  return `This ${leftoverNoun(kind)}'s changes are already in the last commit. Commit, amend or abort it first.`;
 }
 
 /** "Cherry-picking 2/5" / "Reverting 2/5". */

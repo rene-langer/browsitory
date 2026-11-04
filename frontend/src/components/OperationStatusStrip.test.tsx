@@ -63,6 +63,32 @@ describe("OperationStatusStrip", () => {
     expect(onAbortMerge).toHaveBeenCalled();
   });
 
+  it.each([
+    ["CherryPick", "Cherry-pick already applied", "This cherry-pick's", "Abort cherry-pick"],
+    ["Revert", "Revert already applied", "This revert's", "Abort revert"],
+    ["Merge", "Merge already applied", "This merge's", "Abort merge"],
+  ] as const)("says a leftover %s is already applied (#240)", (operation, label, noun, abort) => {
+    const onAbortMerge = vi.fn();
+    render(
+      <OperationStatusStrip
+        merging
+        operation={operation}
+        operationLeftover
+        rebaseProgress={null}
+        conflictCount={0}
+        onAbortMerge={onAbortMerge}
+        onAbortRebase={noop}
+      />,
+    );
+    const strip = screen.getByRole("status");
+    expect(within(strip).getByText(label)).toBeInTheDocument();
+    expect(strip).toHaveTextContent(
+      `${noun} changes are already in the last commit. Git's state for it was left behind. Your next commit or amend clears it, and so does Abort.`,
+    );
+    fireEvent.click(within(strip).getByRole("button", { name: abort }));
+    expect(onAbortMerge).toHaveBeenCalled();
+  });
+
   it("shows sequence progress with Continue and Abort", () => {
     const onContinueSequence = vi.fn();
     const onAbortSequence = vi.fn();

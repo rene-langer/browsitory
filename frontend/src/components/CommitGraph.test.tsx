@@ -41,6 +41,7 @@ const NO_HEAD = {
   detachedAt: null,
   headPushed: false,
   operation: null,
+  operationLeftover: false,
   squashMessage: null,
   commitHooks: [] as string[], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null,
 } as const;
@@ -1275,7 +1276,7 @@ describe("CommitGraph — tag badges", () => {
         commits={tagged}
         selectedRow="uncommitted"
         pending={false}
-        headInfo={{ headId: null, detachedAt: null, headPushed: false, operation: null, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }}
+        headInfo={{ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }}
         currentBranch="main"
         {...handlers}
         {...overrides}

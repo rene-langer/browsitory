@@ -986,11 +986,43 @@ certificate.
   leftovers are cleared with `clear_commit_state`, so a terminal sequence's `.git/sequencer`
   and the rest of its todo stay, as after `git commit` (#241). If it can't be cleared, `CommitError::LeftoverPickState` refuses the
   commit. A paused pick's HEAD is the commit the pick applies to; it matches only if it has the
-  picked author to the second and the pick's exact content on every cleanly changed path (a
-  look-alike commit; accepted as a risk). Not recognised, so the commit takes the picked author
+  picked author to the second and the pick's exact content on every cleanly changed path. The
+  usual way that happens is a duplicate pick: `git cherry-pick X` run again in a terminal once
+  HEAD is X's pick stops as empty and leaves `CHERRY_PICK_HEAD`. That is deliberately treated
+  as a leftover too: clearing it is the outcome of `git cherry-pick --skip`, and a sequence's
+  todo stays, so `git cherry-pick --continue` goes on with the next step (tested with the git
+  CLI). Not recognised, so the commit takes the picked author
   as before: a pick with no clean change, a merge commit picked with a mainline (the parent used
-  isn't recorded), and any error while checking (it never blocks a commit). A leftover
-  `REVERT_HEAD` is not handled (the author is the user either way, #232).
+  isn't recorded), and any error while checking (it never blocks a commit). A leftover revert
+  is handled the same way (#232): HEAD is the revert's own commit when it has one parent, a
+  message that still says "This reverts commit <full id of REVERT_HEAD>", and exactly the
+  revert's result on every path the revert changes cleanly onto HEAD's parent, at least one
+  (`pick::commit_carries_revert`). The author can't tell (a revert is authored by the user), so
+  the message line stands in for it; a commit that undoes the same change by hand is not taken
+  for the revert. The commit then clears the leftover, so `prepare-commit-msg` gets `message`,
+  not `merge`; if it can't, `CommitError::LeftoverRevertState`. Not recognised: a revert of a
+  merge commit, and a message hook that removed the line.
+- Stale vs. live operation state (#240): git itself never calls `MERGE_HEAD`,
+  `CHERRY_PICK_HEAD` or `REVERT_HEAD` stale. While one exists, `git status` shows the operation
+  in progress, `git commit` pre-fills `MERGE_MSG` (hook source `merge`) and finishes it, and
+  `git commit --amend` refuses for a merge or cherry-pick (it amends with a `REVERT_HEAD` and
+  removes it). Browsitory calls the state a leftover only when HEAD already carries the
+  operation's change by the three checks above (`commit::leftover_operation`): a history walk
+  for a merge, heuristics for a pick (author, time and content) and a revert (message line and
+  content). The index must have no conflict stages: a paused operation with conflicts is never a
+  leftover, even when HEAD was moved onto `MERGE_HEAD` in a terminal, so nothing is cleared
+  before the commit or amend could succeed. Any other state is an operation in progress and
+  treated as git treats it. A leftover is never removed on its own: it
+  is reported as `HeadInfo.operation_leftover` (the strip says "… already applied" and that its
+  changes are already in the last commit, and keeps Abort; disabled actions give the same
+  reason; the commit box isn't pre-filled with `MERGE_MSG`, and amend is offered), and it is
+  cleared by Abort, by the next commit (above) or by `amend_head`, which clears it with
+  `clear_commit_state` before amending (the same `Leftover…State` errors if it can't). An amend
+  during an operation in progress is still `OperationInProgress`, also for a revert, where git
+  would amend. `head_info` lists no `pre-merge-commit` for a leftover merge: the next commit is
+  an ordinary one. Cost: `head_info` runs the check on every refresh, but only while git shows
+  a merge, cherry-pick or revert. The pick check compares author and time, and the revert check
+  the message line, before it does an in-memory pick or revert onto HEAD's parent.
 - A pull drops its cancel flag (`TransferOp::clear`) before `post-merge`, so a Cancel pressed
   during the fetch that came too late to stop the pull doesn't kill the hook at once; only a
   Cancel pressed while `post-merge` runs stops it.
