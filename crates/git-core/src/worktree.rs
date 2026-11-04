@@ -288,7 +288,7 @@ pub fn roll_back_destination(
 ) -> WorktreeError {
     let mut leaves = Vec::new();
     let mut folders = Vec::new();
-    tree_paths(repo, tree, "", &mut leaves, &mut folders);
+    tree_paths(repo, tree, Path::new(""), &mut leaves, &mut folders);
     for rel in &leaves {
         let _ = crate::worktree_guard::remove_and_prune_beneath(path, rel);
     }
@@ -303,30 +303,43 @@ pub fn roll_back_destination(
 }
 
 /// Collects the paths of `tree` below `prefix`: files, links and submodules on `leaves`,
-/// folders on `folders` (each before what it holds). The work tree walker takes UTF-8 paths,
-/// so an entry whose name isn't UTF-8 is skipped with what is below it; it stays in the
-/// folder, which is then kept and named.
+/// folders on `folders` (each before what it holds). On Unix a name is taken as raw bytes, so
+/// one that isn't UTF-8 is removed too (#262).
 fn tree_paths(
     repo: &Repository,
     tree: &git2::Tree<'_>,
-    prefix: &str,
-    leaves: &mut Vec<String>,
-    folders: &mut Vec<String>,
+    prefix: &Path,
+    leaves: &mut Vec<PathBuf>,
+    folders: &mut Vec<PathBuf>,
 ) {
     for entry in tree.iter() {
-        let Ok(name) = std::str::from_utf8(entry.name_bytes()) else {
+        let Some(name) = tree_entry_name(entry.name_bytes()) else {
             continue;
         };
-        let rel = format!("{prefix}{name}");
+        let rel = prefix.join(name);
         if entry.kind() == Some(git2::ObjectType::Tree) {
             folders.push(rel.clone());
             if let Ok(subtree) = repo.find_tree(entry.id()) {
-                tree_paths(repo, &subtree, &format!("{rel}/"), leaves, folders);
+                tree_paths(repo, &subtree, &rel, leaves, folders);
             }
         } else {
             leaves.push(rel);
         }
     }
+}
+
+/// A tree entry's name as one path component: its raw bytes on Unix.
+#[cfg(unix)]
+fn tree_entry_name(bytes: &[u8]) -> Option<&Path> {
+    use std::os::unix::ffi::OsStrExt;
+    Some(Path::new(std::ffi::OsStr::from_bytes(bytes)))
+}
+
+/// A tree entry's name as one path component. On Windows libgit2 converts a name from UTF-8 to
+/// write it, so a name that isn't UTF-8 was never written; it is skipped, not guessed at.
+#[cfg(not(unix))]
+fn tree_entry_name(bytes: &[u8]) -> Option<&Path> {
+    std::str::from_utf8(bytes).ok().map(Path::new)
 }
 
 /// [`WorktreeError::AddFailed`] once `path` is removed (or was never made), else

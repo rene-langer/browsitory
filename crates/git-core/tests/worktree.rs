@@ -568,29 +568,27 @@ fn a_checkout_failure_in_a_nested_folder_is_rolled_back() {
     create_worktree(&repo, "wt", &linked, "good", Some("HEAD")).unwrap();
 }
 
-/// The work tree walker takes UTF-8 paths, so a checked-out file whose name isn't UTF-8 is not
-/// removed: the folder is kept and named; the entry and the new branch still go.
+/// Checked-out files and folders whose names aren't UTF-8 (possible on Linux) are removed like
+/// any others, and so is the destination (#262).
 #[cfg(target_os = "linux")]
 #[test]
-fn a_checked_out_file_with_a_non_utf8_name_keeps_the_folder() {
+fn a_checked_out_file_with_a_non_utf8_name_is_rolled_back() {
     let (dir, repo, _) = committed_repo();
     let long = too_long_name();
-    // Sorted before the too-long name, so it is written before the checkout fails.
+    // Sorted before the too-long name, so they are written before the checkout fails.
     branch_with_entries(
         &repo,
-        &[(b"a\x80", Entry::File), (long.as_bytes(), Entry::File)],
+        &[
+            (b"a\x80", Entry::File),
+            (b"b\xff", Entry::Folder("c")),
+            (long.as_bytes(), Entry::File),
+        ],
     );
     let linked = dir.path().join("wt");
 
     let result = create_worktree(&repo, "wt", &linked, "newb", Some("bad"));
 
-    let Err(WorktreeError::AddFailedFolderLeft { ref path, .. }) = result else {
-        panic!("expected AddFailedFolderLeft, got {result:?}");
-    };
-    assert_eq!(path, &linked);
-    assert!(!linked.join("file.txt").exists());
-    assert!(!linked.join(".git").exists());
-    assert!(!repo.path().join("worktrees").join("wt").exists());
+    assert_add_failed_and_nothing_left(result, &repo, &linked);
     assert!(!has_branch(&repo, "newb"));
 }
 
