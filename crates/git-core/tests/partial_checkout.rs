@@ -170,29 +170,31 @@ fn fixture(main_work: bool) -> Fixture {
     }
 }
 
-/// Unix: makes the file `path` read-only until dropped. libgit2 then can't write it and stops
-/// there, as at a file another program holds open on Windows. `None` as root, who ignores the
-/// mode.
+/// Unix: makes the file `d/m.txt` and its folder `d` read-only until dropped. libgit2 then can
+/// neither write the file in place (Linux) nor replace it (macOS) and stops there, as at a file
+/// another program holds open on Windows. `None` as root, who ignores the mode.
 #[cfg(unix)]
 struct ReadOnly {
-    path: std::path::PathBuf,
-    mode: u32,
+    /// Each path with its mode before, the folder last (put back first).
+    paths: Vec<(std::path::PathBuf, u32)>,
 }
 
 #[cfg(unix)]
 impl ReadOnly {
-    fn new(path: &Path) -> Option<Self> {
+    fn new(dir: &Path) -> Option<Self> {
         use std::os::unix::fs::PermissionsExt;
         if unsafe { libc::geteuid() } == 0 {
             eprintln!("SKIP: root writes read-only files");
             return None;
         }
-        let mode = std::fs::metadata(path).unwrap().permissions().mode();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o444)).unwrap();
-        Some(Self {
-            path: path.to_path_buf(),
-            mode,
-        })
+        let mut paths = Vec::new();
+        for (rel, read_only) in [("d/m.txt", 0o444), ("d", 0o555)] {
+            let path = dir.join(rel);
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(read_only)).unwrap();
+            paths.push((path, mode));
+        }
+        Some(Self { paths })
     }
 }
 
@@ -200,7 +202,9 @@ impl ReadOnly {
 impl Drop for ReadOnly {
     fn drop(&mut self) {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(self.mode));
+        for (path, mode) in self.paths.iter().rev() {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(*mode));
+        }
     }
 }
 
@@ -213,10 +217,10 @@ enum Stopper {
 }
 
 /// Stops the next checkout at `d/m.txt`, after it wrote the files before it: Unix makes the
-/// file read-only, Windows holds it open without sharing delete. `None` as root.
+/// file and its folder read-only, Windows holds it open without sharing delete. `None` as root.
 fn stop_at_m(dir: &Path) -> Option<Stopper> {
     #[cfg(unix)]
-    return ReadOnly::new(&dir.join("d/m.txt")).map(Stopper::ReadOnly);
+    return ReadOnly::new(dir).map(Stopper::ReadOnly);
     #[cfg(windows)]
     return Some(Stopper::Held(common::hold_open_without_share_delete(
         &dir.join("d/m.txt"),
@@ -519,10 +523,10 @@ fn a_merge_abort_stopped_part_way_keeps_the_merge_to_abort_again() {
     }
     assert!(git_core::merge::is_merging(&f.repo));
     assert!(!f.dir.path().join("b.txt").exists());
-    // Unix: the files put back so far (`a.txt`, `c.txt`, and `b.txt`, which the merge added)
+    // Linux: the files put back so far (`a.txt`, `c.txt`, and `b.txt`, which the merge added)
     // are as HEAD has them; the rest of the merge, its conflict included, is still there to
-    // abort. (Where libgit2 stops on Windows, before or after writing them, isn't pinned.)
-    #[cfg(unix)]
+    // abort. (Where libgit2 stops elsewhere, before or after writing them, isn't pinned.)
+    #[cfg(target_os = "linux")]
     {
         let expected = vec![
             ("d/m.txt".to_string(), git2::Status::INDEX_MODIFIED),
