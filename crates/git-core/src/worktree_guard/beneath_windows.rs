@@ -1775,6 +1775,7 @@ mod tests {
     use super::*;
     use crate::worktree_guard::no_step;
     use std::ffi::OsStr;
+    use std::io::Read;
     use tempfile::TempDir;
 
     /// A junction `link` -> `target` (no privilege needed).
