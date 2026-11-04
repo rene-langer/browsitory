@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Internal: publishing checks for the extension
+
+- Added: CI checks every packaged `.vsix` before it can be published: publisher, name, version,
+  target, pre-release flag, icon, repository link, the file list, and that the bundled sidecar
+  is an executable for the right platform (#271). Pull requests also install the linux-x64
+  package into a real VSCode and check that it activates and its sidecar opens a repository.
+- Added: a manual dry run of the release workflow. It checks the Visual Studio Marketplace and
+  Open VSX credentials and prints the Entra app's Marketplace member id, without building or
+  publishing anything. See `docs/RELEASING.md`.
+
 ### Worktree add cleans up files with unusual names
 
 - Fixed: when adding a worktree failed part-way, files the checkout had already written were
