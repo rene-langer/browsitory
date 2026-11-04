@@ -1518,10 +1518,16 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `git add` wrote. With `core.filemode`/`core.symlinks` off the mode comes from stage 0, else
   2, 3, 1, as libgit2's `index_existing_and_best`. libgit2's `add_path` would `lstat` and open
   the path a second time, following a link and blocking on a FIFO swapped in meanwhile (#199).
-  A file or link it can't open is `MergeError::Unreadable`; before looking at a path that read
-  as absent, the folders are checked for links again. Only a folder at the path (a nested
-  repository, staged as a gitlink) still goes through `add_path`; a FIFO swapped for it in that
-  instant is a residual.
+  A file or link it can't open is `MergeError::Unreadable`. A path that read as absent is
+  judged again with `worktree_guard::probe_beneath`, through held folders, never by path:
+  missing (the deletion is staged), beyond a link, a FIFO, or a folder, which it holds open
+  (`HeldFolder`). A held folder is never reopened by path (#213): reads below it walk from its
+  handle like `read_beneath`. A nested repository is staged as a gitlink (`Index::add`, mode
+  160000) to the commit its HEAD names: `.git` (a folder, or a `gitdir:` file), HEAD, then a
+  loose ref or `packed-refs` (in `commondir` for a linked worktree), all read through the held
+  folder. A `gitdir:` that leads out of the folder is read the same way from the work tree root,
+  or, outside the work tree, from that git folder. A plain folder, an unborn HEAD or a `.git`
+  that is a link is `MergeError::FolderNotStaged`.
 - Work tree paths come from `WorkerHandle::workdir()` (captured at spawn), never from the raw
   repo path, which may be a subdirectory (`Repository::discover`).
 

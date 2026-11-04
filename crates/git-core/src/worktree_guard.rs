@@ -1356,6 +1356,50 @@ pub(crate) fn read_beneath(workdir: &Path, rel: &str) -> io::Result<Option<Leaf>
     beneath::read(workdir, Path::new(rel), &mut no_step)
 }
 
+/// What [`probe_beneath`] found at a path, judged without following a link at any component.
+pub(crate) enum Probe {
+    /// Missing, or a component on the way is a file.
+    Missing,
+    /// A component on the way is a link.
+    BeyondLink,
+    File,
+    Link,
+    /// A FIFO, socket or device.
+    Other,
+    /// A folder, now held open: what is read through it is in this folder, whatever happens to
+    /// its path meanwhile.
+    Folder(HeldFolder),
+}
+
+/// A work-tree folder held open by [`probe_beneath`]. Reads below it walk from its handle (as
+/// [`read_beneath`] walks from the work tree root), so a path swapped for a link, a FIFO or
+/// another folder after the probe is never looked at (#213).
+pub(crate) struct HeldFolder(beneath::Folder);
+
+impl HeldFolder {
+    /// [`read_beneath`] for `rel` below this folder.
+    pub(crate) fn read(&self, rel: &str) -> io::Result<Option<Leaf>> {
+        if !plain_relative(Path::new(rel)) {
+            return Ok(None);
+        }
+        self.0.read(Path::new(rel), &mut no_step)
+    }
+
+    /// The folder's own stat data, as git's index records it.
+    pub(crate) fn stat(&self) -> io::Result<FileStat> {
+        self.0.stat()
+    }
+}
+
+/// Says what is at `rel` and, for a folder, holds it open. Never opens a file, so a FIFO can't
+/// block it.
+pub(crate) fn probe_beneath(workdir: &Path, rel: &str) -> io::Result<Probe> {
+    if !plain_relative(Path::new(rel)) {
+        return Ok(Probe::Missing);
+    }
+    beneath::probe(workdir, Path::new(rel), &mut no_step)
+}
+
 /// Removes the file, link or empty folder `rel`, then the folders that emptied, up to (never
 /// including) the work tree. Does nothing beyond a link: a path below one doesn't exist for git.
 /// `rel` is a `Path`, so on Unix a name that isn't UTF-8 works too (#262).
@@ -2624,6 +2668,54 @@ mod tests {
         remove_and_prune_beneath(dir.path(), Path::new("d/f")).unwrap();
         assert!(!dir.path().join("d").exists());
         assert!(dir.path().join("a.txt").exists());
+    }
+
+    /// #213: reads below a probed folder stay in that folder after its path became a link to a
+    /// folder outside or another folder, and never open a FIFO.
+    #[test]
+    #[cfg(unix)]
+    fn a_held_folder_is_read_through_its_handle_after_its_path_is_swapped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let out = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("n/sub")).unwrap();
+        std::fs::write(dir.path().join("n/sub/f"), "held\n").unwrap();
+        std::fs::create_dir_all(out.path().join("sub")).unwrap();
+        std::fs::write(out.path().join("sub/f"), "OUTSIDE\n").unwrap();
+        let Probe::Folder(held) = probe_beneath(dir.path(), "n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        std::fs::rename(dir.path().join("n"), dir.path().join("moved")).unwrap();
+        std::os::unix::fs::symlink(out.path(), dir.path().join("n")).unwrap();
+        match held.read("sub/f").unwrap() {
+            Some(Leaf::File { bytes, .. }) => assert_eq!(bytes, b"held\n"),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            probe_beneath(dir.path(), "n").unwrap(),
+            Probe::Link
+        ));
+        assert!(matches!(
+            probe_beneath(dir.path(), "n/sub/f").unwrap(),
+            Probe::BeyondLink
+        ));
+        // A FIFO below the held folder is classified, never opened.
+        let fifo = dir.path().join("moved/sub/p");
+        let c_path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
+        assert_eq!(held.read("sub/p").unwrap(), None);
+        assert!(matches!(
+            probe_beneath(dir.path(), "moved/sub/p").unwrap(),
+            Probe::Other
+        ));
+        assert!(matches!(
+            probe_beneath(dir.path(), "moved/sub/f").unwrap(),
+            Probe::File
+        ));
+        assert!(matches!(
+            probe_beneath(dir.path(), "moved/missing").unwrap(),
+            Probe::Missing
+        ));
     }
 
     #[test]
