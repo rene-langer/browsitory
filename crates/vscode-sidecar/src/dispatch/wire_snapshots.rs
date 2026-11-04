@@ -1,7 +1,8 @@
 //! #306: byte-exact snapshots of the sidecar's wire output, checked in as
 //! `crates/vscode-sidecar/tests/wire/dto-snapshots.txt`. Each line is one DTO built from the
-//! shared domain values in `crates/test-support/wire_fixtures.rs` the way this file's handlers
-//! build it, serialized the way the sidecar sends it. A second test compares the cases both
+//! shared domain values in `crates/test-support/wire_fixtures.rs` through the same `From` impls
+//! and helpers the handlers call (`repo_service::wire`, plus `OpenReposDto` in `dispatch.rs`),
+//! serialized the way the sidecar sends it. A second test compares the cases both
 //! transports share with the desktop app's snapshots
 //! (`crates/tauri-app/src/commands/wire_snapshots.rs`).
 //! Regenerate with `UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar wire_snapshots`
@@ -52,34 +53,22 @@ fn snapshots() -> Vec<(String, String)> {
         GraphCommitDto::from,
     );
     s.add("DiffHunk", fixtures::diff_hunks(), DiffHunkDto::from);
-    // As `get_file_history` builds it.
-    s.add("FileHistoryEntry", fixtures::file_history_entries(), |e| {
-        FileHistoryEntryDto {
-            commit: GraphCommitDto::from(e.commit),
-            path: e.path,
-            old_path: e.old_path,
-        }
-    });
-    // As `search_commits` builds it.
-    s.add("SearchPage", fixtures::search_pages(), |page| {
-        SearchPageDto {
-            commits: page.commits.into_iter().map(GraphCommitDto::from).collect(),
-            next_cursor: page.next_cursor,
-            scanned: page.scanned,
-        }
-    });
+    s.add(
+        "FileHistoryEntry",
+        fixtures::file_history_entries(),
+        FileHistoryEntryDto::from,
+    );
+    s.add("SearchPage", fixtures::search_pages(), SearchPageDto::from);
     s.add(
         "ChangedFile",
         fixtures::changed_files(),
         ChangedFileDto::from,
     );
-    // As `get_branch_compare_range` builds it.
-    s.add("CompareRange", fixtures::compare_ranges(), |range| {
-        CompareRangeDto {
-            from_id: range.from_id,
-            to_id: range.to_id,
-        }
-    });
+    s.add(
+        "CompareRange",
+        fixtures::compare_ranges(),
+        CompareRangeDto::from,
+    );
     s.add(
         "OpenRepoEntry",
         fixtures::open_repo_entries(),
@@ -96,31 +85,18 @@ fn snapshots() -> Vec<(String, String)> {
         fixtures::external_tool_settings(),
         ExternalToolSettingsDto::from,
     );
-    // As `get_commit_message_settings` builds it.
     s.add(
         "CommitMessageSettings",
         fixtures::commit_message_settings(),
-        |settings| CommitMessageSettingsDto {
-            summary_limit: settings.summary_limit,
-            body_ruler: settings.body_ruler,
-            show_ruler: settings.show_ruler,
-        },
+        CommitMessageSettingsDto::from,
     );
-    // As `get_git_tools` builds it.
-    s.add("GitTools", fixtures::git_tools(), |tools| GitToolsDto {
-        diff_tool: tools.diff_tool.map(Into::into),
-        merge_tool: tools.merge_tool.map(Into::into),
-    });
+    s.add("GitTools", fixtures::git_tools(), GitToolsDto::from);
     s.add(
         "MarkResolvedOutcome",
         fixtures::mark_resolved_outcomes(),
         MarkResolvedOutcomeDto::from,
     );
-    // As `get_file_sides` builds it.
-    s.add("FileSides", fixtures::file_sides(), |sides| FileSidesDto {
-        old: sides.old.into(),
-        new: sides.new.into(),
-    });
+    s.add("FileSides", fixtures::file_sides(), FileSidesDto::from);
     s.add(
         "CommitOutcome",
         fixtures::commit_outcomes(),
@@ -166,23 +142,21 @@ fn snapshots() -> Vec<(String, String)> {
         TerminalRebaseDto::from,
     );
     s.add("HeadInfo", fixtures::head_infos(), HeadInfoDto::from);
-    // As `abort_rebase` builds it.
-    s.add("RebaseAbort", fixtures::rebase_aborts(), |abort| {
-        RebaseAbortDto {
-            restored: abort.restored,
-        }
-    });
+    s.add(
+        "RebaseAbort",
+        fixtures::rebase_aborts(),
+        RebaseAbortDto::from,
+    );
     s.add(
         "SequenceOutcome",
         fixtures::sequence_outcomes(),
         SequenceOutcomeDto::from,
     );
-    // As `abort_sequence` builds it.
-    s.add("SequenceAbort", fixtures::sequence_aborts(), |abort| {
-        SequenceAbortDto {
-            rewound: abort.rewound,
-        }
-    });
+    s.add(
+        "SequenceAbort",
+        fixtures::sequence_aborts(),
+        SequenceAbortDto::from,
+    );
     s.add(
         "PickOutcome",
         fixtures::pick_outcomes(),
@@ -210,14 +184,7 @@ fn snapshots() -> Vec<(String, String)> {
         fixtures::stash_apply_outcomes(),
         StashApplyOutcomeDto::from,
     );
-    // As `get_stash_files` builds it.
-    s.add("StashFiles", fixtures::stash_files(), |files| {
-        StashFilesDto {
-            tracked: files.tracked,
-            untracked: files.untracked,
-            untracked_commit_id: files.untracked_commit_id,
-        }
-    });
+    s.add("StashFiles", fixtures::stash_files(), StashFilesDto::from);
     s.add("BlameLine", fixtures::blame_lines(), BlameLineDto::from);
     s.add(
         "MergeOutcome",
@@ -259,28 +226,20 @@ fn snapshots() -> Vec<(String, String)> {
         fixtures::pull_request_lists(),
         PullRequestListDto::from,
     );
-    // As `list_recent_authors` builds it.
-    s.add("SignatureInput", fixtures::recent_authors(), |author| {
-        SignatureInputDto {
-            name: author.name,
-            email: author.email,
-        }
-    });
+    s.add(
+        "SignatureInput",
+        fixtures::recent_authors(),
+        SignatureInputDto::from,
+    );
 
-    // Sidecar only: `list_open_repos`, as `list_open_repos_handler` builds it.
+    // Sidecar only: `list_open_repos`.
     s.add("OpenRepos", fixtures::open_repo_entries(), |entry| {
-        let active_path = Some(entry.path.to_string_lossy().into_owned());
-        OpenReposDto {
-            entries: vec![OpenRepoEntryDto::from(entry)],
-            active_path,
-        }
+        let active = Some(entry.path.clone());
+        OpenReposDto::from((vec![entry], active))
     });
     s.0.push((
         "OpenRepos/none".to_string(),
-        wire(&OpenReposDto {
-            entries: Vec::new(),
-            active_path: None,
-        }),
+        wire(&OpenReposDto::from((Vec::new(), None))),
     ));
     s.0
 }

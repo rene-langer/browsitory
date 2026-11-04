@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Internal: one set of wire DTOs for both transports
+
+- Changed: the desktop app and the VSCode sidecar now share one set of wire DTOs and their
+  mappings, in the new `repo_service::wire` module (#306). Each transport had its own copy of
+  about 70 DTOs, which could drift apart. Only transport-specific types stay in the transport
+  crates (clone and init and the merge tool result for the desktop app; `list_open_repos`'s
+  object and `read_file_version` for the sidecar). The sidecar's handlers that built DTOs
+  inline now use the same `From` impls as the snapshot tests. The TypeScript bindings are now
+  `frontend/src/ipc/generated/wire-dto.ts` plus two small per-transport files. ts-rs stays a
+  test-only dependency. The wire format is unchanged: every wire snapshot file is byte for
+  byte the same.
+
 ### Internal: wire snapshots
 
 - Added: tests that pin the exact bytes each transport sends for every wire DTO, with every

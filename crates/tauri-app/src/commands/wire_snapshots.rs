@@ -1,7 +1,8 @@
 //! #306: byte-exact snapshots of the desktop app's wire output, checked in as
 //! `crates/tauri-app/tests/wire/dto-snapshots.txt`. Each line is one DTO built from the shared
-//! domain values in `crates/test-support/wire_fixtures.rs` through this crate's own `From` impls
-//! and event helpers, serialized the way Tauri sends it. The sidecar's snapshot test compares
+//! domain values in `crates/test-support/wire_fixtures.rs` through the `From` impls and helpers
+//! the commands use (`repo_service::wire`, plus this crate's desktop-only DTOs and event names),
+//! serialized the way Tauri sends it. The sidecar's snapshot test compares
 //! the cases both transports share (see `crates/vscode-sidecar/src/dispatch/wire_snapshots.rs`).
 //! Regenerate with `UPDATE_TRANSPORT_METHODS=1 cargo test -p tauri-app wire_snapshots`.
 
