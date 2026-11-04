@@ -1364,7 +1364,8 @@ pub(crate) enum Probe {
     BeyondLink,
     File,
     Link,
-    /// A FIFO, socket or device.
+    /// A FIFO, socket or device (never on Windows).
+    #[cfg_attr(windows, allow(dead_code))]
     Other,
     /// A folder, now held open: what is read through it is in this folder, whatever happens to
     /// its path meanwhile.
