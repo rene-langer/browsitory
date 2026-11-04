@@ -1825,6 +1825,100 @@ fn the_refused_stash_applies_after_the_deletion_is_committed() {
     assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
 }
 
+/// HEAD has the file `D`; the worktree swapped it for the folder `d` holding the untracked
+/// `d/x`, with `core.ignorecase` set to `ignore_case`. On a case-insensitive drive `d` is `D`'s
+/// name, so this is the folder-replaced-a-file stash of #206 (on Linux both names fit).
+fn file_replaced_by_case_variant_folder(
+    ignore_case: bool,
+) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", ignore_case)
+        .unwrap();
+    write_file(dir.path(), "D", "f\n");
+    commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("D")).unwrap();
+    write_file(dir.path(), "d/x", "x\n");
+    (dir, repo)
+}
+
+#[test]
+fn a_case_only_variant_of_a_tracked_file_blocks_a_stashed_folder_when_ignorecase_is_on() {
+    // On a case-insensitive drive the untracked `d/x` needs the folder `d`, where the index has
+    // the file `D`: libgit2's merge compares exact case and misses it (#234).
+    let (dir, mut repo) = file_replaced_by_case_variant_folder(true);
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    assert_eq!(top_level(dir.path()), ["D"]);
+
+    for restore_index in [false, true] {
+        for pop in [false, true] {
+            let error = if pop {
+                git_core::stash::pop_stash(&mut repo, 0, None, restore_index)
+            } else {
+                git_core::stash::apply_stash(&mut repo, 0, None, restore_index)
+            }
+            .unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    StashError::UntrackedBelowTrackedFile { ref untracked, ref file }
+                        if untracked == "d/x" && file == "D"
+                ),
+                "{error:?}"
+            );
+            assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+            assert_eq!(top_level(dir.path()), ["D"]);
+            assert_eq!(read(dir.path(), "D"), "f\n");
+            assert!(git_core::status::status(&repo).unwrap().is_empty());
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_case_only_variant_of_a_tracked_file_does_not_block_a_stash_when_ignorecase_is_off() {
+    // A case-sensitive drive: `d` and `D` are two names, so the pop creates `d/x` and deletes
+    // `D`, as stashed.
+    let (dir, mut repo) = file_replaced_by_case_variant_folder(false);
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, false).unwrap(),
+        StashApplyOutcome::Applied
+    );
+
+    assert_eq!(top_level(dir.path()), ["d"]);
+    assert_eq!(read(dir.path(), "d/x"), "x\n");
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn git_pops_a_case_only_variant_under_ignorecase_on_a_case_sensitive_drive() {
+    // git with `core.ignorecase` on a case-sensitive drive: nothing is in the way, so the pop
+    // succeeds. On a case-insensitive drive it can't (see the next test); only there does the
+    // refusal above matter.
+    let (twin, _twin_repo) = file_replaced_by_case_variant_folder(true);
+    assert!(git_stash_push(twin.path(), true));
+    assert_eq!(top_level(twin.path()), ["D"]);
+
+    assert!(git(twin.path(), &["stash", "pop"]).status.success());
+
+    assert_eq!(top_level(twin.path()), ["d"]);
+    assert_eq!(read(twin.path(), "d/x"), "x\n");
+}
+
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn git_cannot_pop_a_case_only_variant_on_a_case_insensitive_drive() {
+    // `d/x` needs the folder `d`, which is the tracked file `D` here, as in #206.
+    let (twin, _twin_repo) = file_replaced_by_case_variant_folder(true);
+    assert!(git_stash_push(twin.path(), true));
+
+    assert!(!git(twin.path(), &["stash", "pop"]).status.success());
+}
+
 /// HEAD has `a.txt` (edited in the worktree); the untracked folder `vendor/` holds a repository
 /// `vendor/lib` with one commit and, with `other`, the untracked file `vendor/other.txt`.
 fn nested_repo_in_untracked_folder(other: bool) -> (tempfile::TempDir, git2::Repository) {
