@@ -44,7 +44,7 @@
   "main": "./dist/extension.js",
   "license": "MIT",
   "files": [
-    "dist/**",
+    "dist/**/*.js",
     "bin/**",
     "webview/**",
     "icon.png",
