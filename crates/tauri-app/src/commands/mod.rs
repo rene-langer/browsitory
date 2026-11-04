@@ -1057,11 +1057,14 @@ fn hook_event_channel(app: AppHandle, repo_path: &str) -> mpsc::Sender<HookEvent
     event_tx
 }
 
+/// The Tauri event `hook_progress_dto` payloads are emitted as.
+const HOOK_PROGRESS_EVENT: &str = "hook-progress";
+
 /// Like `emit_transfer_events`: drains on its own thread until the worker drops its sender.
 fn emit_hook_events(app: AppHandle, repo_path: String, events: mpsc::Receiver<HookEvent>) {
     thread::spawn(move || {
         for event in events {
-            let _ = app.emit("hook-progress", hook_progress_dto(&repo_path, event));
+            let _ = app.emit(HOOK_PROGRESS_EVENT, hook_progress_dto(&repo_path, event));
         }
     });
 }

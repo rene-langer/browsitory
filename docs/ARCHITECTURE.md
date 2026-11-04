@@ -1509,14 +1509,30 @@ only `error`.
   `crates/tauri-app/src/commands/wire_snapshots.rs` and
   `crates/vscode-sidecar/src/dispatch/wire_snapshots.rs` builds every output DTO from the same
   domain values (`crates/test-support/wire_fixtures.rs`, included by both with `#[path]`) and
-  compares the exact bytes each transport sends with `crates/*/tests/wire/dto-snapshots.txt`,
-  one `<dto>/<case> <json>` line per case. The fixtures cover every enum variant (an
-  exhaustive `match` fails to compile when one is added) and both `None` and `Some` of every
-  optional field. Tauri sends `serde_json::to_string` of the value (errors go through a
-  `Value` first); the sidecar always goes through `serde_json::Value`, which sorts keys.
-  `shared_dtos_match_across_transports` (sidecar) requires every shared case in both files and
-  pins the cases whose bytes differ in `cross-transport-differences.txt`. Input-only DTOs are
-  not snapshotted. Regenerate with `UPDATE_TRANSPORT_METHODS=1`, desktop app first.
+  compares the exact bytes with `crates/*/tests/wire/dto-snapshots.txt`, one
+  `<dto>/<case> <json>` line per case. The fixtures cover every enum variant and both `None`
+  and `Some` of every optional field: a fieldless enum's list and a data-carrying enum's
+  `assert_every_variant!` patterns use an exhaustive `match`, so a new variant fails to compile,
+  and a pattern without a case fails the test. The desktop file also pins the Tauri event
+  names.
+  - Encoding: Tauri sends `serde_json::to_string` of the value (command errors go through a
+    `Value` first); the sidecar always goes through `serde_json::Value`, which sorts keys. The
+    snapshot tests model this in a `wire()` function. For the sidecar it is checked end to
+    end: `the_progress_relay_writes_the_snapshot_bytes` and
+    `the_hook_relay_writes_the_snapshot_bytes` run the real relays into a buffer, and
+    `crates/vscode-sidecar/tests/wire_dispatch.rs` compares the real binary's response lines
+    with snapshot lines (`get_status`) and pins `read_file_version`'s `{ text }`. The Tauri side
+    is not checked end to end (that would need a running webview).
+  - `crates/vscode-sidecar/tests/wire_dispatch.rs` also pins the response line of every
+    sidecar method called with no `params`, `{}` and `"x"`
+    (`tests/wire/dispatch-responses.txt`): the missing-field and wrong-type error of every
+    params struct, the JSON-RPC error encoding, and the answers of the methods that take no
+    params, with `BROWSITORY_CONFIG_DIR` set to an empty temp dir.
+  - `shared_dtos_match_across_transports` (sidecar) requires every case of a shared DTO in both
+    transports (transport-only DTOs are listed with reasons) and pins the cases whose bytes
+    differ in `cross-transport-differences.txt`.
+  - Not covered: input-only DTOs, JSON-RPC envelopes other than those above, and the Tauri
+    encoding path itself. Regenerate with `UPDATE_TRANSPORT_METHODS=1`, desktop app first.
 - `extension`: Vitest with fake child-process and VSCode boundaries for JSON-RPC framing,
   native-method routing, process-loss recovery, webview security, and deterministic disposal.
 - E2E: `tauri-driver` + WebdriverIO (`e2e/`) driving

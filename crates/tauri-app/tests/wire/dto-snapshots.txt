@@ -52,6 +52,7 @@ HookProgress/Started-Checkout {"repoPath":"/repos/app","operationId":"op-1","hoo
 HookProgress/Started-Merge {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Started","source":"Merge"}
 HookProgress/Started-Pick {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Started","source":"Pick"}
 HookProgress/Finished-Commit {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Finished","source":"Commit"}
+HookProgressEvent/all "hook-progress"
 BranchInfo/tracking {"name":"main","isCurrent":true,"upstream":"origin/main","ahead":2,"behind":0}
 BranchInfo/local-only {"name":"topic","isCurrent":false,"upstream":null,"ahead":null,"behind":null}
 WorktreeInfo/main {"name":"app","path":"/repos/app","head":"4444444444444444444444444444444444444444","isMain":true,"isLocked":false,"isPrunable":false}
@@ -75,10 +76,25 @@ TransferProgress/Started-ForcePushBranch {"operationId":"op-2","operation":"Forc
 TransferProgress/Started-PushTags {"operationId":"op-2","operation":"PushTags","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Started-DeleteRemoteBranch {"operationId":"op-2","operation":"DeleteRemoteBranch","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Started-Clone {"operationId":"op-2","operation":"Clone","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
-TransferProgress/Progress-Receiving {"operationId":"op-2","operation":"Fetch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
-TransferProgress/Progress-Updating {"operationId":"op-2","operation":"Fetch","phase":"Updating","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
-TransferProgress/Progress-RunningHook {"operationId":"op-2","operation":"Fetch","phase":"RunningHook","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
-TransferProgress/RemoteFailed {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"TransferFailed","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
+TransferProgress/Progress-Fetch-Receiving {"operationId":"op-2","operation":"Fetch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-Fetch-Updating {"operationId":"op-2","operation":"Fetch","phase":"Updating","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-Fetch-RunningHook {"operationId":"op-2","operation":"Fetch","phase":"RunningHook","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-FetchAll-Receiving {"operationId":"op-2","operation":"FetchAll","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-Pull-Receiving {"operationId":"op-2","operation":"Pull","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-PushBranch-Receiving {"operationId":"op-2","operation":"PushBranch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-ForcePushBranch-Receiving {"operationId":"op-2","operation":"ForcePushBranch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-PushTags-Receiving {"operationId":"op-2","operation":"PushTags","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-DeleteRemoteBranch-Receiving {"operationId":"op-2","operation":"DeleteRemoteBranch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-Clone-Receiving {"operationId":"op-2","operation":"Clone","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/RemoteFailed-NonFastForward {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"NonFastForward","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
+TransferProgress/RemoteFailed-RejectedRemoteRef {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"RejectedRemoteRef","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
+TransferProgress/RemoteFailed-StaleLease {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"StaleLease","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
+TransferProgress/RemoteFailed-MissingCredential {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"MissingCredential","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
+TransferProgress/RemoteFailed-CredentialStoreFailure {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"CredentialStoreFailure","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
+TransferProgress/RemoteFailed-SshAgentFailure {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"SshAgentFailure","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
+TransferProgress/RemoteFailed-TransferFailed {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"TransferFailed","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
+TransferProgress/RemoteFailed-Cancelled {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"Cancelled","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
+TransferProgress/RemoteFailed-HookFailed {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"HookFailed","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
 TransferProgress/Completed-ok {"operationId":"op-2","operation":"Pull","phase":"Completed","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Completed-NonFastForward {"operationId":"op-2","operation":"PushBranch","phase":"Failed","errorKind":"NonFastForward","current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Completed-RejectedRemoteRef {"operationId":"op-2","operation":"PushBranch","phase":"Failed","errorKind":"RejectedRemoteRef","current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
@@ -89,6 +105,43 @@ TransferProgress/Completed-SshAgentFailure {"operationId":"op-2","operation":"Pu
 TransferProgress/Completed-TransferFailed {"operationId":"op-2","operation":"PushBranch","phase":"Failed","errorKind":"TransferFailed","current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Completed-Cancelled {"operationId":"op-2","operation":"PushBranch","phase":"Failed","errorKind":"Cancelled","current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Completed-HookFailed {"operationId":"op-2","operation":"PushBranch","phase":"Failed","errorKind":"HookFailed","current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":"rejected\n"}
+TransferProgressEvent/Started-Fetch "transfer-progress"
+TransferProgressEvent/Started-FetchAll "transfer-progress"
+TransferProgressEvent/Started-Pull "transfer-progress"
+TransferProgressEvent/Started-PushBranch "transfer-progress"
+TransferProgressEvent/Started-ForcePushBranch "transfer-progress"
+TransferProgressEvent/Started-PushTags "transfer-progress"
+TransferProgressEvent/Started-DeleteRemoteBranch "transfer-progress"
+TransferProgressEvent/Started-Clone "transfer-progress"
+TransferProgressEvent/Progress-Fetch-Receiving "transfer-progress"
+TransferProgressEvent/Progress-Fetch-Updating "transfer-progress"
+TransferProgressEvent/Progress-Fetch-RunningHook "transfer-progress"
+TransferProgressEvent/Progress-FetchAll-Receiving "transfer-progress"
+TransferProgressEvent/Progress-Pull-Receiving "transfer-progress"
+TransferProgressEvent/Progress-PushBranch-Receiving "transfer-progress"
+TransferProgressEvent/Progress-ForcePushBranch-Receiving "transfer-progress"
+TransferProgressEvent/Progress-PushTags-Receiving "transfer-progress"
+TransferProgressEvent/Progress-DeleteRemoteBranch-Receiving "transfer-progress"
+TransferProgressEvent/Progress-Clone-Receiving "transfer-progress"
+TransferProgressEvent/RemoteFailed-NonFastForward "transfer-progress"
+TransferProgressEvent/RemoteFailed-RejectedRemoteRef "transfer-progress"
+TransferProgressEvent/RemoteFailed-StaleLease "transfer-progress"
+TransferProgressEvent/RemoteFailed-MissingCredential "transfer-progress"
+TransferProgressEvent/RemoteFailed-CredentialStoreFailure "transfer-progress"
+TransferProgressEvent/RemoteFailed-SshAgentFailure "transfer-progress"
+TransferProgressEvent/RemoteFailed-TransferFailed "transfer-progress"
+TransferProgressEvent/RemoteFailed-Cancelled "transfer-progress"
+TransferProgressEvent/RemoteFailed-HookFailed "transfer-progress"
+TransferProgressEvent/Completed-ok "transfer-complete"
+TransferProgressEvent/Completed-NonFastForward "transfer-complete"
+TransferProgressEvent/Completed-RejectedRemoteRef "transfer-complete"
+TransferProgressEvent/Completed-StaleLease "transfer-complete"
+TransferProgressEvent/Completed-MissingCredential "transfer-complete"
+TransferProgressEvent/Completed-CredentialStoreFailure "transfer-complete"
+TransferProgressEvent/Completed-SshAgentFailure "transfer-complete"
+TransferProgressEvent/Completed-TransferFailed "transfer-complete"
+TransferProgressEvent/Completed-Cancelled "transfer-complete"
+TransferProgressEvent/Completed-HookFailed "transfer-complete"
 SequenceProgress/CherryPick {"kind":"CherryPick","currentStep":2,"totalSteps":3,"currentCommit":"cccccccccccccccccccccccccccccccccccccccc"}
 SequenceProgress/Revert {"kind":"Revert","currentStep":2,"totalSteps":3,"currentCommit":"cccccccccccccccccccccccccccccccccccccccc"}
 RebaseInfo/Paused {"branch":"topic","onto":"dddddddddddddddddddddddddddddddddddddddd","currentStep":1,"totalSteps":4,"health":{"kind":"Paused"}}
@@ -178,9 +231,19 @@ CloneErrorPayload/clone-CredentialBearingUrl {"kind":"CredentialBearingUrl","mes
 CloneErrorPayload/clone-DestNotEmpty {"kind":"DestNotEmpty","message":"Destination already exists and isn't empty."}
 CloneErrorPayload/clone-BranchNotFound {"kind":"BranchNotFound","message":"Branch not found on remote."}
 CloneErrorPayload/clone-Cancelled {"kind":"Cancelled","message":"Clone cancelled."}
-CloneErrorPayload/clone-Transfer {"kind":"MissingCredential","message":"Credentials are needed."}
 CloneErrorPayload/clone-Io {"kind":"Io","message":"disk full"}
 CloneErrorPayload/clone-CaseCollision {"kind":"CaseCollision","message":"'Docs' is a symbolic link and 'docs' a folder whose names differ only in case. On this file system they are the same name, so Browsitory won't check them out. Rename one of them in the repository."}
+CloneErrorPayload/clone-Transfer-NonFastForward {"kind":"NonFastForward","message":"The transfer failed."}
+CloneErrorPayload/clone-Transfer-RejectedRemoteRef {"kind":"RejectedRemoteRef","message":"The transfer failed."}
+CloneErrorPayload/clone-Transfer-StaleLease {"kind":"StaleLease","message":"The transfer failed."}
+CloneErrorPayload/clone-Transfer-MissingCredential {"kind":"MissingCredential","message":"The transfer failed."}
+CloneErrorPayload/clone-Transfer-CredentialStoreFailure {"kind":"CredentialStoreFailure","message":"The transfer failed."}
+CloneErrorPayload/clone-Transfer-SshAgentFailure {"kind":"SshAgentFailure","message":"The transfer failed."}
+CloneErrorPayload/clone-Transfer-TransferFailed {"kind":"TransferFailed","message":"The transfer failed."}
+CloneErrorPayload/clone-Transfer-Cancelled {"kind":"Cancelled","message":"The transfer failed."}
+CloneErrorPayload/clone-Transfer-HookFailed {"kind":"HookFailed","message":"The transfer failed."}
+CloneErrorPayload/init-Open {"kind":"InitFailed","message":"failed to open repository: could not open"}
 CloneErrorPayload/init-AlreadyRepository {"kind":"AlreadyRepository","message":"This folder is already a Git repository."}
-CloneErrorPayload/init-other {"kind":"InitFailed","message":"read-only"}
+CloneErrorPayload/init-Init {"kind":"InitFailed","message":"failed to create repository: could not create"}
+CloneErrorPayload/init-Io {"kind":"InitFailed","message":"read-only"}
 CloneErrorPayload/task-failed {"kind":"Io","message":"task panicked"}

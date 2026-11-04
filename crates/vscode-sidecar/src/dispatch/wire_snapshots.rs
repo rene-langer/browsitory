@@ -14,6 +14,7 @@ use serde::Serialize;
 use super::*;
 
 #[path = "../../../test-support/wire_fixtures.rs"]
+#[macro_use]
 mod fixtures;
 
 use fixtures::Cases;
@@ -298,10 +299,13 @@ fn sidecar_snapshot_path() -> PathBuf {
     test_support::repo_root().join("crates/vscode-sidecar/tests/wire/dto-snapshots.txt")
 }
 
-/// DTOs only the desktop app sends: clone and init (desktop only), the merge tool outcome (the
-/// sidecar hands the merge tool to VSCode instead), and `list_open_repos`'s tuple (the sidecar
-/// answers `OpenRepos`).
+/// What only the desktop app sends: its event names, clone and init (desktop only), the merge
+/// tool outcome (the sidecar hands the merge tool to VSCode instead), and `list_open_repos`'s
+/// tuple (the sidecar answers `OpenRepos`).
 const DESKTOP_ONLY: &[&str] = &[
+    // Tauri event names; the sidecar's notification methods are pinned by the relay tests below.
+    "TransferProgressEvent",
+    "HookProgressEvent",
     "CloneOutcome",
     "CloneErrorPayload",
     "MergeToolOutcome",
@@ -315,8 +319,8 @@ fn dto_of(case: &str) -> &str {
     case.split_once('/').map_or(case, |(dto, _)| dto)
 }
 
-/// Compares the two checked-in snapshot files, which their own tests keep equal to each
-/// transport's output. Every case of a shared DTO must exist in both. Where the bytes of a
+/// Compares the desktop app's checked-in snapshot file (its own test keeps it equal to that
+/// transport's output) with this transport's snapshots. Every case of a shared DTO must exist in both. Where the bytes of a
 /// shared case differ, `crates/vscode-sidecar/tests/wire/cross-transport-differences.txt` lists
 /// it as `key-order` (same JSON value, other field order) or `value` (a different value). That
 /// file pins today's differences; it is regenerated like the snapshots.
@@ -327,10 +331,9 @@ fn shared_dtos_match_across_transports() {
     )
     .into_iter()
     .collect();
-    let sidecar: BTreeMap<String, String> =
-        test_support::read_wire_snapshot(&sidecar_snapshot_path())
-            .into_iter()
-            .collect();
+    // This transport's side comes from `snapshots()` itself, which `wire_snapshots_are_current`
+    // keeps equal to its file.
+    let sidecar: BTreeMap<String, String> = snapshots().into_iter().collect();
 
     for dto in DESKTOP_ONLY {
         assert!(
@@ -385,4 +388,69 @@ fn shared_dtos_match_across_transports() {
             .join("crates/vscode-sidecar/tests/wire/cross-transport-differences.txt"),
         &differences,
     );
+}
+
+/// The lines a relay writes to `out` once every event is sent and its sender dropped.
+fn relayed_lines(
+    relay: impl FnOnce(Arc<Mutex<Vec<u8>>>) -> std::thread::JoinHandle<()>,
+) -> Vec<String> {
+    let out = Arc::new(Mutex::new(Vec::new()));
+    relay(Arc::clone(&out)).join().unwrap();
+    let bytes = out.lock().unwrap().clone();
+    String::from_utf8(bytes)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Checks `wire()` against the real writer: every transfer event through
+/// `spawn_progress_relay` is its snapshot line inside the notification, byte for byte.
+#[test]
+fn the_progress_relay_writes_the_snapshot_bytes() {
+    let snapshots: BTreeMap<String, String> = snapshots().into_iter().collect();
+    let events = fixtures::transfer_events();
+    let names: Vec<String> = events.iter().map(|(name, _)| name.clone()).collect();
+    let lines = relayed_lines(|out| {
+        let (event_tx, event_rx) = mpsc::channel();
+        for (_, event) in events {
+            event_tx.send(event).unwrap();
+        }
+        drop(event_tx);
+        spawn_progress_relay(event_rx, out)
+    });
+    assert_eq!(lines.len(), names.len());
+    for (name, line) in names.iter().zip(&lines) {
+        let params = &snapshots[&format!("TransferProgress/{name}")];
+        assert_eq!(
+            *line,
+            format!(r#"{{"jsonrpc":"2.0","method":"transferProgress","params":{params}}}"#),
+            "{name}"
+        );
+    }
+}
+
+/// Same for `spawn_hook_relay` and the hook events.
+#[test]
+fn the_hook_relay_writes_the_snapshot_bytes() {
+    let snapshots: BTreeMap<String, String> = snapshots().into_iter().collect();
+    let events = fixtures::hook_events();
+    let names: Vec<String> = events.iter().map(|(name, _)| name.clone()).collect();
+    let lines = relayed_lines(|out| {
+        let (event_tx, event_rx) = mpsc::channel();
+        for (_, event) in events {
+            event_tx.send(event).unwrap();
+        }
+        drop(event_tx);
+        spawn_hook_relay(fixtures::HOOK_REPO_PATH.to_string(), event_rx, out)
+    });
+    assert_eq!(lines.len(), names.len());
+    for (name, line) in names.iter().zip(&lines) {
+        let params = &snapshots[&format!("HookProgress/{name}")];
+        assert_eq!(
+            *line,
+            format!(r#"{{"jsonrpc":"2.0","method":"hookProgress","params":{params}}}"#),
+            "{name}"
+        );
+    }
 }

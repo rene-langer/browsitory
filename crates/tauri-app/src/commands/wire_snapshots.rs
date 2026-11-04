@@ -11,6 +11,7 @@ use super::clone::{CloneErrorDto, CloneOutcomeDto};
 use super::*;
 
 #[path = "../../../test-support/wire_fixtures.rs"]
+#[macro_use]
 mod fixtures;
 
 use fixtures::Cases;
@@ -104,6 +105,11 @@ fn snapshots() -> Vec<(String, String)> {
     s.add("HookProgress", fixtures::hook_events(), |event| {
         hook_progress_dto(fixtures::HOOK_REPO_PATH, event)
     });
+    // The Tauri event they are all emitted as.
+    s.0.push((
+        "HookProgressEvent/all".to_string(),
+        wire(&HOOK_PROGRESS_EVENT),
+    ));
     s.add("BranchInfo", fixtures::branches(), BranchInfoDto::from);
     s.add("WorktreeInfo", fixtures::worktrees(), WorktreeInfoDto::from);
     s.add(
@@ -122,6 +128,12 @@ fn snapshots() -> Vec<(String, String)> {
     s.add("TransferProgress", fixtures::transfer_events(), |event| {
         transfer_event_payload(event).1
     });
+    // The Tauri event each one is emitted as.
+    s.add(
+        "TransferProgressEvent",
+        fixtures::transfer_events(),
+        |event| transfer_event_payload(event).0,
+    );
     s.add(
         "SequenceProgress",
         fixtures::sequence_progresses(),
@@ -253,15 +265,16 @@ fn snapshots() -> Vec<(String, String)> {
 
 fn merge_tool_outcomes() -> Cases<git_core::tools::MergeToolOutcome> {
     use git_core::tools::MergeToolOutcome;
-    [MergeToolOutcome::Resolved, MergeToolOutcome::Unresolved]
+    let cases: Cases<_> = [MergeToolOutcome::Resolved, MergeToolOutcome::Unresolved]
         .into_iter()
-        .map(|outcome| {
-            match outcome {
-                MergeToolOutcome::Resolved | MergeToolOutcome::Unresolved => {}
-            }
-            (format!("{outcome:?}"), outcome)
-        })
-        .collect()
+        .map(|outcome| (format!("{outcome:?}"), outcome))
+        .collect();
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        MergeToolOutcome::Resolved,
+        MergeToolOutcome::Unresolved,
+    );
+    cases
 }
 
 fn clone_outcomes() -> Cases<repo_service::clone::ServiceCloneOutcome> {
@@ -288,52 +301,78 @@ fn clone_outcomes() -> Cases<repo_service::clone::ServiceCloneOutcome> {
 fn clone_errors() -> Vec<(String, CloneErrorDto)> {
     use git_core::clone::CloneError;
     use git_core::repo::RepoError;
-    let clone_errors = vec![
-        ("InvalidUrl", CloneError::InvalidUrl),
-        ("CredentialBearingUrl", CloneError::CredentialBearingUrl),
-        ("DestNotEmpty", CloneError::DestNotEmpty),
-        ("BranchNotFound", CloneError::BranchNotFound),
-        ("Cancelled", CloneError::Cancelled),
+    let mut clone_errors: Vec<(String, CloneError)> = vec![
+        ("InvalidUrl".into(), CloneError::InvalidUrl),
         (
-            "Transfer",
-            CloneError::Transfer {
-                kind: git_core::remote::TransferErrorKind::MissingCredential,
-                message: "Credentials are needed.".to_string(),
-            },
+            "CredentialBearingUrl".into(),
+            CloneError::CredentialBearingUrl,
         ),
-        ("Io", CloneError::Io(std::io::Error::other("disk full"))),
+        ("DestNotEmpty".into(), CloneError::DestNotEmpty),
+        ("BranchNotFound".into(), CloneError::BranchNotFound),
+        ("Cancelled".into(), CloneError::Cancelled),
         (
-            "CaseCollision",
+            "Io".into(),
+            CloneError::Io(std::io::Error::other("disk full")),
+        ),
+        (
+            "CaseCollision".into(),
             CloneError::CaseCollision(git_core::CaseCollision {
                 link: "Docs".to_string(),
                 folder: "docs".to_string(),
             }),
         ),
     ];
-    for (_, error) in &clone_errors {
-        match error {
-            CloneError::InvalidUrl
-            | CloneError::CredentialBearingUrl
-            | CloneError::DestNotEmpty
-            | CloneError::BranchNotFound
-            | CloneError::Cancelled
-            | CloneError::Transfer { .. }
-            | CloneError::Io(_)
-            | CloneError::CaseCollision(_) => {}
-        }
-    }
+    clone_errors.extend(fixtures::transfer_error_kinds().into_iter().map(|kind| {
+        (
+            format!("Transfer-{kind:?}"),
+            CloneError::Transfer {
+                kind,
+                message: "The transfer failed.".to_string(),
+            },
+        )
+    }));
+    assert_every_variant!(
+        clone_errors.iter().map(|(_, error)| error),
+        CloneError::InvalidUrl,
+        CloneError::CredentialBearingUrl,
+        CloneError::DestNotEmpty,
+        CloneError::BranchNotFound,
+        CloneError::Cancelled,
+        CloneError::Transfer { .. },
+        CloneError::Io(_),
+        CloneError::CaseCollision(_),
+    );
+    let init_errors: Vec<(String, RepoError)> = vec![
+        (
+            "Open".into(),
+            RepoError::Open(git2::Error::from_str("could not open")),
+        ),
+        ("AlreadyRepository".into(), RepoError::AlreadyRepository),
+        (
+            "Init".into(),
+            RepoError::Init(git2::Error::from_str("could not create")),
+        ),
+        (
+            "Io".into(),
+            RepoError::Io(std::io::Error::other("read-only")),
+        ),
+    ];
+    assert_every_variant!(
+        init_errors.iter().map(|(_, error)| error),
+        RepoError::Open(_),
+        RepoError::AlreadyRepository,
+        RepoError::Init(_),
+        RepoError::Io(_),
+    );
     let mut out: Vec<(String, CloneErrorDto)> = clone_errors
         .into_iter()
         .map(|(case, error)| (format!("clone-{case}"), CloneErrorDto::from(error)))
         .collect();
-    out.push((
-        "init-AlreadyRepository".to_string(),
-        CloneErrorDto::from(RepoError::AlreadyRepository),
-    ));
-    out.push((
-        "init-other".to_string(),
-        CloneErrorDto::from(RepoError::Io(std::io::Error::other("read-only"))),
-    ));
+    out.extend(
+        init_errors
+            .into_iter()
+            .map(|(case, error)| (format!("init-{case}"), CloneErrorDto::from(error))),
+    );
     out.push((
         "task-failed".to_string(),
         CloneErrorDto {

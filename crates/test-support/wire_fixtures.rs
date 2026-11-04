@@ -47,6 +47,30 @@ macro_rules! every {
     }};
 }
 
+/// Fails unless `values` (references) hold a value matching each pattern. Its `match` stops
+/// compiling when the enum gains a variant the patterns miss, so a new data-carrying variant
+/// needs a pattern here and then a case, or the snapshot test fails.
+macro_rules! assert_every_variant {
+    ($values:expr, $($pat:pat),+ $(,)?) => {{
+        let names = [$(stringify!($pat)),+];
+        let mut hit = vec![false; names.len()];
+        for value in $values {
+            match value {
+                $($pat => {})+
+            }
+            // A pattern can be `None`, which clippy would rather see as `is_none()`.
+            #[allow(clippy::redundant_pattern_matching)]
+            let matched = [$(matches!(value, $pat)),+];
+            for (slot, matched) in hit.iter_mut().zip(matched) {
+                *slot |= matched;
+            }
+        }
+        for (name, hit) in names.iter().zip(&hit) {
+            assert!(*hit, "no wire snapshot case for {name}");
+        }
+    }};
+}
+
 pub fn status_kinds() -> Vec<StatusKind> {
     every!(StatusKind {
         New,
@@ -465,11 +489,12 @@ pub fn file_sides() -> Cases<git_core::diff::FileSides> {
                 },
             ),
         ];
-        for (_, side) in &cases {
-            match side {
-                FileSide::Missing | FileSide::TooLarge { .. } | FileSide::Loaded { .. } => {}
-            }
-        }
+        assert_every_variant!(
+            cases.iter().map(|(_, side)| side),
+            FileSide::Missing,
+            FileSide::TooLarge { .. },
+            FileSide::Loaded { .. },
+        );
         cases
     };
     side_cases()
@@ -512,11 +537,11 @@ pub fn commit_outcomes() -> Cases<git_core::commit::CommitOutcome> {
             },
         ),
     ];
-    for (_, outcome) in &cases {
-        match outcome {
-            CommitOutcome::Committed { .. } | CommitOutcome::HookFailed { .. } => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        CommitOutcome::Committed { .. },
+        CommitOutcome::HookFailed { .. },
+    );
     cases
 }
 
@@ -543,11 +568,11 @@ pub fn hook_events() -> Cases<HookEvent> {
             source: HookSource::Commit,
         },
     ));
-    for (_, event) in &cases {
-        match event {
-            HookEvent::Started { .. } | HookEvent::Finished { .. } => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, event)| event),
+        HookEvent::Started { .. },
+        HookEvent::Finished { .. },
+    );
     cases
 }
 
@@ -675,11 +700,12 @@ pub fn remotes() -> Cases<(
             (remote(None, false), Some(RemoteAuthMode::SshAgent)),
         ),
     ];
-    for (_, (_, mode)) in &cases {
-        match mode {
-            None | Some(RemoteAuthMode::HttpsToken { .. }) | Some(RemoteAuthMode::SshAgent) => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, (_, mode))| mode),
+        None,
+        Some(RemoteAuthMode::HttpsToken { .. }),
+        Some(RemoteAuthMode::SshAgent),
+    );
     cases
 }
 
@@ -739,9 +765,9 @@ pub fn tags() -> Cases<git_core::remote::TagInfo> {
     ]
 }
 
-/// Every operation `Started`, every phase as `Progress` (with remote text that must not reach
-/// the wire), a `RemoteFailed`, and `Completed` with each error kind, without one, and with
-/// hook output.
+/// Every operation `Started` and as `Progress`, every phase as `Progress` (with remote text
+/// that must not reach the wire), `RemoteFailed` and `Completed` with each error kind, and
+/// `Completed` without one and with hook output.
 pub fn transfer_events() -> Cases<TransferEvent> {
     let mut cases: Cases<_> = transfer_operations()
         .into_iter()
@@ -755,12 +781,12 @@ pub fn transfer_events() -> Cases<TransferEvent> {
             )
         })
         .collect();
-    cases.extend(transfer_phases().into_iter().map(|phase| {
+    let progress = |operation: TransferOperation, phase: TransferPhase| {
         case(
-            format!("Progress-{phase:?}"),
+            format!("Progress-{operation:?}-{phase:?}"),
             TransferEvent::Progress(git_core::remote::TransferProgress {
                 operation_id: "op-2".to_string(),
-                operation: TransferOperation::Fetch,
+                operation,
                 phase,
                 current: 3,
                 total: 10,
@@ -768,15 +794,28 @@ pub fn transfer_events() -> Cases<TransferEvent> {
                 message: some("remote: secret sideband text"),
             }),
         )
+    };
+    cases.extend(
+        transfer_phases()
+            .into_iter()
+            .map(|phase| progress(TransferOperation::Fetch, phase)),
+    );
+    cases.extend(
+        transfer_operations()
+            .into_iter()
+            .filter(|operation| *operation != TransferOperation::Fetch)
+            .map(|operation| progress(operation, TransferPhase::Receiving)),
+    );
+    cases.extend(transfer_error_kinds().into_iter().map(|error| {
+        case(
+            format!("RemoteFailed-{error:?}"),
+            TransferEvent::RemoteFailed {
+                operation_id: "op-2".to_string(),
+                remote_name: "backup".to_string(),
+                error,
+            },
+        )
     }));
-    cases.push(case(
-        "RemoteFailed",
-        TransferEvent::RemoteFailed {
-            operation_id: "op-2".to_string(),
-            remote_name: "backup".to_string(),
-            error: TransferErrorKind::TransferFailed,
-        },
-    ));
     cases.push(case(
         "Completed-ok",
         TransferEvent::Completed {
@@ -797,14 +836,13 @@ pub fn transfer_events() -> Cases<TransferEvent> {
             },
         )
     }));
-    for (_, event) in &cases {
-        match event {
-            TransferEvent::Started { .. }
-            | TransferEvent::Progress(_)
-            | TransferEvent::RemoteFailed { .. }
-            | TransferEvent::Completed { .. } => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, event)| event),
+        TransferEvent::Started { .. },
+        TransferEvent::Progress(_),
+        TransferEvent::RemoteFailed { .. },
+        TransferEvent::Completed { .. },
+    );
     cases
 }
 
@@ -842,11 +880,11 @@ pub fn rebase_infos() -> Cases<git_core::repo::RebaseInfo> {
             rebase_info(RebaseHealth::Diverged(reason)),
         )
     }));
-    for (_, info) in &cases {
-        match info.health {
-            RebaseHealth::Paused | RebaseHealth::Diverged(_) => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, info)| &info.health),
+        RebaseHealth::Paused,
+        RebaseHealth::Diverged(_),
+    );
     cases
 }
 
@@ -1005,14 +1043,13 @@ pub fn sequence_outcomes() -> Cases<git_core::pick::SequenceOutcome> {
             },
         ),
     ];
-    for (_, outcome) in &cases {
-        match outcome {
-            SequenceOutcome::Completed { .. }
-            | SequenceOutcome::Conflicted { .. }
-            | SequenceOutcome::HookFailed { .. }
-            | SequenceOutcome::Stopped { .. } => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        SequenceOutcome::Completed { .. },
+        SequenceOutcome::Conflicted { .. },
+        SequenceOutcome::HookFailed { .. },
+        SequenceOutcome::Stopped { .. },
+    );
     cases
 }
 
@@ -1049,13 +1086,12 @@ pub fn pick_outcomes() -> Cases<git_core::pick::PickOutcome> {
             },
         ),
     ];
-    for (_, outcome) in &cases {
-        match outcome {
-            PickOutcome::Committed { .. }
-            | PickOutcome::Conflicted { .. }
-            | PickOutcome::HookFailed { .. } => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        PickOutcome::Committed { .. },
+        PickOutcome::Conflicted { .. },
+        PickOutcome::HookFailed { .. },
+    );
     cases
 }
 
@@ -1147,15 +1183,14 @@ pub fn undo_outcomes() -> Cases<repo_service::worker::UndoOutcome> {
         ),
         case("OperationInProgress", UndoOutcome::OperationInProgress),
     ];
-    for (_, outcome) in &cases {
-        match outcome {
-            UndoOutcome::Done { .. }
-            | UndoOutcome::Nothing
-            | UndoOutcome::RepositoryChanged { .. }
-            | UndoOutcome::BranchHeld { .. }
-            | UndoOutcome::OperationInProgress => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        UndoOutcome::Done { .. },
+        UndoOutcome::Nothing,
+        UndoOutcome::RepositoryChanged { .. },
+        UndoOutcome::BranchHeld { .. },
+        UndoOutcome::OperationInProgress,
+    );
     cases
 }
 
@@ -1176,13 +1211,12 @@ pub fn pull_outcomes() -> Cases<git_core::remote::PullOutcome> {
             },
         ),
     ];
-    for (_, outcome) in &cases {
-        match outcome {
-            PullOutcome::UpToDate
-            | PullOutcome::FastForwarded { .. }
-            | PullOutcome::Diverged { .. } => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        PullOutcome::UpToDate,
+        PullOutcome::FastForwarded { .. },
+        PullOutcome::Diverged { .. },
+    );
     cases
 }
 
@@ -1208,11 +1242,11 @@ pub fn stash_apply_outcomes() -> Cases<git_core::stash::StashApplyOutcome> {
             },
         ),
     ];
-    for (_, outcome) in &cases {
-        match outcome {
-            StashApplyOutcome::Applied | StashApplyOutcome::Conflicted { .. } => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        StashApplyOutcome::Applied,
+        StashApplyOutcome::Conflicted { .. },
+    );
     cases
 }
 
@@ -1265,15 +1299,14 @@ pub fn merge_outcomes() -> Cases<git_core::merge::MergeOutcome> {
             },
         ),
     ];
-    for (_, outcome) in &cases {
-        match outcome {
-            MergeOutcome::UpToDate
-            | MergeOutcome::FastForwarded
-            | MergeOutcome::Merged
-            | MergeOutcome::Squashed
-            | MergeOutcome::Conflicted { .. } => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        MergeOutcome::UpToDate,
+        MergeOutcome::FastForwarded,
+        MergeOutcome::Merged,
+        MergeOutcome::Squashed,
+        MergeOutcome::Conflicted { .. },
+    );
     cases
 }
 
@@ -1311,11 +1344,11 @@ pub fn conflict_segments() -> Cases<git_core::merge::ConflictSegment> {
             },
         ),
     ];
-    for (_, segment) in &cases {
-        match segment {
-            ConflictSegment::Clean { .. } | ConflictSegment::Conflict { .. } => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, segment)| segment),
+        ConflictSegment::Clean { .. },
+        ConflictSegment::Conflict { .. },
+    );
     cases
 }
 
@@ -1345,14 +1378,13 @@ pub fn rebase_step_results() -> Cases<git_core::rebase::RebaseStepResult> {
         case("Advanced", RebaseStepResult::Advanced),
         case("Done", RebaseStepResult::Done),
     ];
-    for (_, result) in &cases {
-        match result {
-            RebaseStepResult::Conflicted { .. }
-            | RebaseStepResult::PausedForEdit
-            | RebaseStepResult::Advanced
-            | RebaseStepResult::Done => {}
-        }
-    }
+    assert_every_variant!(
+        cases.iter().map(|(_, result)| result),
+        RebaseStepResult::Conflicted { .. },
+        RebaseStepResult::PausedForEdit,
+        RebaseStepResult::Advanced,
+        RebaseStepResult::Done,
+    );
     cases
 }
 
