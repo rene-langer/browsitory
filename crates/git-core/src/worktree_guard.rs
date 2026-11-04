@@ -1200,11 +1200,12 @@ pub(crate) fn read_beneath(workdir: &Path, rel: &str) -> io::Result<Option<Leaf>
 
 /// Removes the file, link or empty folder `rel`, then the folders that emptied, up to (never
 /// including) the work tree. Does nothing beyond a link: a path below one doesn't exist for git.
-pub(crate) fn remove_and_prune_beneath(workdir: &Path, rel: &str) -> io::Result<()> {
-    if !plain_relative(Path::new(rel)) {
+/// `rel` is a `Path`, so on Unix a name that isn't UTF-8 works too (#262).
+pub(crate) fn remove_and_prune_beneath(workdir: &Path, rel: &Path) -> io::Result<()> {
+    if !plain_relative(rel) {
         return Ok(());
     }
-    beneath::remove_and_prune(workdir, Path::new(rel), &mut no_step)
+    beneath::remove_and_prune(workdir, rel, &mut no_step)
 }
 
 /// Replaces whatever is at `rel` (a file, link or empty folder) with `content`. A link that
@@ -2253,7 +2254,7 @@ mod tests {
         assert_eq!(std::fs::read(dir.path().join("d/f")).unwrap(), b"inside");
         assert_outside_dir_untouched(out.path());
         // Pruning stops at the work tree.
-        remove_and_prune_beneath(dir.path(), "d/f").unwrap();
+        remove_and_prune_beneath(dir.path(), Path::new("d/f")).unwrap();
         assert!(!dir.path().join("d").exists());
         assert!(dir.path().join("a.txt").exists());
     }

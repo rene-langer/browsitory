@@ -288,7 +288,7 @@ pub fn roll_back_destination(
 ) -> WorktreeError {
     let mut leaves = Vec::new();
     let mut folders = Vec::new();
-    tree_paths(repo, tree, "", &mut leaves, &mut folders);
+    tree_paths(repo, tree, Path::new(""), &mut leaves, &mut folders);
     for rel in &leaves {
         let _ = crate::worktree_guard::remove_and_prune_beneath(path, rel);
     }
@@ -303,30 +303,61 @@ pub fn roll_back_destination(
 }
 
 /// Collects the paths of `tree` below `prefix`: files, links and submodules on `leaves`,
-/// folders on `folders` (each before what it holds). The work tree walker takes UTF-8 paths,
-/// so an entry whose name isn't UTF-8 is skipped with what is below it; it stays in the
-/// folder, which is then kept and named.
+/// folders on `folders` (each before what it holds). On Unix a name is taken as raw bytes, so
+/// one that isn't UTF-8 is removed too (#262).
 fn tree_paths(
     repo: &Repository,
     tree: &git2::Tree<'_>,
-    prefix: &str,
-    leaves: &mut Vec<String>,
-    folders: &mut Vec<String>,
+    prefix: &Path,
+    leaves: &mut Vec<PathBuf>,
+    folders: &mut Vec<PathBuf>,
 ) {
     for entry in tree.iter() {
-        let Ok(name) = std::str::from_utf8(entry.name_bytes()) else {
+        let Some(name) = tree_entry_name(entry.name_bytes()) else {
             continue;
         };
-        let rel = format!("{prefix}{name}");
+        let rel = prefix.join(name);
         if entry.kind() == Some(git2::ObjectType::Tree) {
             folders.push(rel.clone());
             if let Ok(subtree) = repo.find_tree(entry.id()) {
-                tree_paths(repo, &subtree, &format!("{rel}/"), leaves, folders);
+                tree_paths(repo, &subtree, &rel, leaves, folders);
             }
         } else {
             leaves.push(rel);
         }
     }
+}
+
+/// A tree entry's name as one plain path component, or `None` to skip it. Git never writes an
+/// empty name, `.`, `..`, or one holding `/` or NUL into a tree, but such a raw name is skipped
+/// here rather than left for `Path::components` to split or drop: only a name that is exactly
+/// one normal component, spelled as given, is joined onto the destination.
+fn tree_entry_name(bytes: &[u8]) -> Option<&Path> {
+    if matches!(bytes, b"" | b"." | b"..") || bytes.contains(&b'/') || bytes.contains(&0) {
+        return None;
+    }
+    let name = raw_name(bytes)?;
+    let mut components = name.components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(only)), None) if only == name.as_os_str() => Some(name),
+        _ => None,
+    }
+}
+
+/// The name's raw bytes on Unix, so a name that isn't UTF-8 is removed too (#262).
+#[cfg(unix)]
+fn raw_name(bytes: &[u8]) -> Option<&Path> {
+    use std::os::unix::ffi::OsStrExt;
+    Some(Path::new(std::ffi::OsStr::from_bytes(bytes)))
+}
+
+/// On Windows a name that isn't UTF-8 is skipped, not guessed at: libgit2 never wrote it.
+/// Every path it writes goes through `git_win32_path_from_utf8` (`src/util/win32/path_w32.c`),
+/// whose `git_utf8_to_16` (`src/util/win32/utf-conv.c`) calls `MultiByteToWideChar` with
+/// `MB_ERR_INVALID_CHARS` and fails on invalid UTF-8.
+#[cfg(not(unix))]
+fn raw_name(bytes: &[u8]) -> Option<&Path> {
+    std::str::from_utf8(bytes).ok().map(Path::new)
 }
 
 /// [`WorktreeError::AddFailed`] once `path` is removed (or was never made), else
@@ -466,4 +497,55 @@ fn head_identity(repo: &Repository) -> String {
         return head.shorthand().unwrap_or_default().to_string();
     }
     head.target().map(|oid| oid.to_string()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Git never writes these names into a tree, but a raw name that isn't exactly one plain
+    /// component must never reach the remove helper, not even aliased by `Path::components`.
+    #[test]
+    fn a_tree_entry_name_that_is_not_one_plain_component_is_skipped() {
+        for name in [
+            &b""[..],
+            b".",
+            b"..",
+            b"/x",
+            b"/",
+            b"a/b",
+            b"a/",
+            b"a/.",
+            b"./a",
+            b"a\0b",
+        ] {
+            assert_eq!(tree_entry_name(name), None, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn a_plain_tree_entry_name_is_kept() {
+        for name in ["file.txt", "...", ".git-like", "caf\u{e9}"] {
+            assert_eq!(tree_entry_name(name.as_bytes()), Some(Path::new(name)));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_tree_entry_name_that_is_not_utf8_is_kept_on_unix() {
+        use std::os::unix::ffi::OsStrExt;
+        assert_eq!(
+            tree_entry_name(b"a\x80"),
+            Some(Path::new(std::ffi::OsStr::from_bytes(b"a\x80")))
+        );
+    }
+
+    /// On Windows a backslash or a drive prefix would also split or anchor the path.
+    #[cfg(windows)]
+    #[test]
+    fn a_tree_entry_name_with_a_windows_separator_or_prefix_is_skipped() {
+        for name in [&b"a\\b"[..], b"\\x", b"C:", b"C:x"] {
+            assert_eq!(tree_entry_name(name), None, "{name:?}");
+        }
+    }
 }

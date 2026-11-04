@@ -707,7 +707,7 @@ fn flatten_tree(repo: &Repository, id: &str) -> Result<TreeFiles, UndoError> {
 /// acts through a symlinked directory: a path below one does not exist for git (#114), and the
 /// folders are held open while acting, so a swap meanwhile can't redirect it (#149).
 fn remove_existing(workdir: &Path, rel: &str) -> io::Result<()> {
-    crate::worktree_guard::remove_and_prune_beneath(workdir, rel)
+    crate::worktree_guard::remove_and_prune_beneath(workdir, Path::new(rel))
 }
 
 /// Writes the blob as `rel`, replacing what is there whole (#251). A symlink that replaced a
