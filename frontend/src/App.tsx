@@ -1393,7 +1393,14 @@ function AppContent({
           lastSeenVersion === null
             ? -1
             : allReleaseNotes.findIndex((entry) => entry.version === lastSeenVersion);
-        const entries = seenIndex === -1 ? allReleaseNotes.slice(0, 1) : allReleaseNotes.slice(0, seenIndex);
+        const entries = (seenIndex === -1 ? allReleaseNotes.slice(0, 1) : allReleaseNotes.slice(0, seenIndex)).filter(
+          (entry) => entry.groups.length > 0,
+        );
+        if (entries.length === 0) {
+          // Only developer-only releases since the last one seen: nothing to show users.
+          await client.setLastSeenVersion(appVersion);
+          return;
+        }
         setReleaseNotesView({ mode: "auto", entries });
       } catch (error) {
         console.error("Release notes version check failed", error);

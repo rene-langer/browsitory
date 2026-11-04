@@ -231,15 +231,44 @@ describe("parseChangelog", () => {
     expect(() => parse("# Changelog\n\n## Notes\n")).toThrow(/line 3/);
   });
 
-  it("skips a release with nothing for users and warns about it", () => {
+  it("keeps a release with nothing for users, with no groups, and warns about it", () => {
     const onWarning = vi.fn();
     const entries = parse(
       "## [1.1.0] - 2026-02-01\n### Internal\n- CI only\n## [1.0.0] - 2026-01-01\n### A\n- a\n",
       onWarning,
     );
-    expect(entries.map((e) => e.version)).toEqual(["1.0.0"]);
+    expect(entries.map((e) => [e.version, e.groups.length])).toEqual([
+      ["1.1.0", 0],
+      ["1.0.0", 1],
+    ]);
     expect(onWarning).toHaveBeenCalledOnce();
     expect(onWarning.mock.calls[0][0]).toMatch(/1\.1\.0/);
+  });
+
+  it("treats any Unreleased heading as unreleased, even with a date", () => {
+    const entries = parse("## [Unreleased] - 2026-01-01\n### A\n- not yet\n## [1.0.0] - 2026-01-01\n### B\n- b\n");
+    expect(entries.map((e) => e.version)).toEqual(["1.0.0"]);
+  });
+
+  it("attaches a wrapped line at the sub-bullet's indent to the sub-item", () => {
+    const [entry] = parse(["## [1.0.0] - 2026-01-01", "### Topic", "- Parent", "  - Fixed: sub", "  wraps."].join("\n"));
+    expect(itemsOf(entry.groups[0])).toEqual([{ text: "Parent", children: [{ kind: "fixed", text: "sub wraps." }] }]);
+  });
+
+  it("starts a list at an indented bullet after a paragraph", () => {
+    const [entry] = parse(["## [1.0.0] - 2026-01-01", "### Topic", "Intro", "  - sub"].join("\n"));
+    expect(entry.groups[0].blocks).toEqual([{ paragraph: "Intro" }, { items: [{ text: "sub" }] }]);
+  });
+
+  it("fails on a code fence that is never closed", () => {
+    expect(() => parse("## [1.0.0] - 2026-01-01\n### A\n- a\n```\n## [0.9.0] - 2025-01-01\n")).toThrow(
+      /line 4.*code fence/,
+    );
+  });
+
+  it("does not glue text after a code fence onto the bullet before it", () => {
+    const [entry] = parse(["## [1.0.0] - 2026-01-01", "### Topic", "- Bullet", "```", "code", "```", "After."].join("\n"));
+    expect(entry.groups[0].blocks).toEqual([{ items: [{ text: "Bullet" }] }, { paragraph: "After." }]);
   });
 
   it("returns an empty array for a changelog with only Unreleased", () => {

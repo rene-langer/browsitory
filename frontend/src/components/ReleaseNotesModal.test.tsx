@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ReleaseNotesModal, type ReleaseNotesEntry, type ReleaseNotesItem } from "./ReleaseNotesModal";
 
@@ -85,6 +85,34 @@ describe("ReleaseNotesModal", () => {
       "Security: six",
       "plain",
     ]);
+  });
+
+  it("gives the kind label a colon that only screen readers get", () => {
+    renderItems([{ kind: "fixed", text: "three" }]);
+
+    const label = within(screen.getByRole("listitem")).getByText("Fixed", { exact: false });
+    expect(label).toHaveTextContent(/^Fixed:$/);
+    const colon = within(label).getByText(":");
+    expect(colon).not.toBe(label);
+    expect(colon.className).toMatch(/srOnly/);
+  });
+
+  it("leaves out releases with nothing for users", () => {
+    render(
+      <ReleaseNotesModal
+        entries={[{ version: "0.7.0", date: "2026-10-01", groups: [] }, ...ENTRIES]}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("0.7.0", { exact: false })).not.toBeInTheDocument();
+    expect(screen.getByText("0.6.0", { exact: false })).toBeInTheDocument();
+  });
+
+  it("shows the fallback when no release has notes for users", () => {
+    render(<ReleaseNotesModal entries={[{ version: "0.7.0", date: "2026-10-01", groups: [] }]} onClose={vi.fn()} />);
+
+    expect(screen.getByText("No release notes yet.")).toBeInTheDocument();
   });
 
   it("renders sub-items as a nested list", () => {

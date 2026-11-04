@@ -19,7 +19,7 @@ const KIND_PREFIXES = {
 const INTERNAL_HEADING = /^Internal\b/i;
 const INTERNAL_BULLET = /^Internal:\s*/i;
 
-const UNRELEASED = /^##\s+\[?Unreleased\]?\s*$/i;
+const UNRELEASED = /^##\s+\[?Unreleased\b/i;
 const RELEASE = /^##\s+\[([^\]]+)\]\s*[-–—]\s*(\S+)\s*$/;
 const FENCE = /^\s*(```|~~~)/;
 
@@ -44,8 +44,9 @@ function appendText(item, text) {
  * ("### Commit signing") or a Keep a Changelog heading ("### Fixed"). Repeated headings in
  * one release are merged. A group holds blocks in changelog order: paragraphs and bullet
  * lists. Indented lines continue the bullet above them, and indented bullets become its
- * sub-items. Code fences are skipped. A release with nothing for users is skipped with a
- * warning; a `## ` heading that is neither `[Unreleased]` nor a release throws.
+ * sub-items. Code fences are skipped. A release with nothing for users is kept with no
+ * groups and a warning; a `## ` heading that is neither `[Unreleased]` nor a release, or a
+ * code fence that is never closed, throws.
  */
 export function parseChangelog(markdown, { onWarning = console.warn } = {}) {
   const entries = [];
@@ -58,6 +59,7 @@ export function parseChangelog(markdown, { onWarning = console.warn } = {}) {
   let subIndent = 0;
   let afterBlank = false;
   let inFence = false;
+  let fenceLine = 0; // the line that opened the current code fence
 
   function flushParagraph() {
     if (paragraph.length > 0) group.blocks.push({ paragraph: paragraph.join(" ") });
@@ -81,6 +83,10 @@ export function parseChangelog(markdown, { onWarning = console.warn } = {}) {
     const line = lines[index].replace(/\r$/, "");
 
     if (FENCE.test(line)) {
+      // A fence ends the paragraph or bullet before it, like a blank line.
+      if (group !== null) flushParagraph();
+      afterBlank = true;
+      fenceLine = inFence ? 0 : index + 1;
       inFence = !inFence;
       continue;
     }
@@ -127,7 +133,8 @@ export function parseChangelog(markdown, { onWarning = console.warn } = {}) {
     afterBlank = false;
 
     const bullet = line.match(/^(\s*)[-*+]\s+(.+)$/);
-    if (bullet !== null && bullet[1].length === 0) {
+    // A top-level bullet, or an indented one with no bullet above it to nest under.
+    if (bullet !== null && (bullet[1].length === 0 || item === null)) {
       flushParagraph();
       if (list === null) {
         const last = group.blocks[group.blocks.length - 1];
@@ -152,7 +159,7 @@ export function parseChangelog(markdown, { onWarning = console.warn } = {}) {
     const indent = line.length - line.trimStart().length;
     if (item !== null && indent > 0) {
       // A wrapped line: it continues the sub-item it is indented under, or the bullet.
-      appendText(subItem !== null && indent > subIndent ? subItem : item, text);
+      appendText(subItem !== null && indent >= subIndent ? subItem : item, text);
       continue;
     }
     if (item !== null && !wasAfterBlank) {
@@ -163,21 +170,22 @@ export function parseChangelog(markdown, { onWarning = console.warn } = {}) {
     closeList();
     paragraph.push(text);
   }
+  if (inFence) {
+    throw new Error(`CHANGELOG.md line ${fenceLine}: this code fence is never closed.`);
+  }
   closeGroup();
 
-  const released = [];
   for (const entry of entries) {
     for (const g of entry.groups) {
       g.blocks = g.blocks.filter((block) => !("items" in block) || block.items.length > 0);
     }
     entry.groups = entry.groups.filter((g) => g.blocks.length > 0);
+    // Kept with no groups, so the app can still find it as the last-seen version.
     if (entry.groups.length === 0) {
-      onWarning(`CHANGELOG.md: release ${entry.version} has no release notes for users; leaving it out.`);
-    } else {
-      released.push(entry);
+      onWarning(`CHANGELOG.md: release ${entry.version} has no release notes for users.`);
     }
   }
-  return released;
+  return entries;
 }
 
 export function isMainModule(moduleUrl, entryPoint) {

@@ -91,13 +91,15 @@ export function ReleaseNotesModal({
   /** Shows the "Third-party licences" button; absent where the app can't show them. */
   onOpenThirdPartyLicences?: () => void;
 }) {
+  // A release with only developer-only changes has no groups; it isn't shown.
+  const shown = entries.filter((entry) => entry.groups.length > 0);
   return (
     <Overlay onClose={onClose} ariaLabel="Release notes">
       <Panel title="Release Notes" ariaLabel="Release notes">
-        {entries.length === 0 ? (
+        {shown.length === 0 ? (
           <p className={styles.empty}>No release notes yet.</p>
         ) : (
-          entries.map((entry) => (
+          shown.map((entry) => (
             <section key={entry.version} className={styles.entry}>
               <h3>
                 {entry.version} <span className={styles.date}>{entry.date}</span>
