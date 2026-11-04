@@ -1,15 +1,20 @@
 # Regenerates THIRD_PARTY_NOTICES.md on Renovate pull requests (#325). A dependency update
-# changes the generated file, and ci.yml's `licenses` job fails until it is regenerated. This
-# job runs the generator on the Renovate branch and, if the file changed, commits it there.
+# changes the generated file, and ci.yml's `licenses` job fails until it is regenerated.
 #
-# A push made with GITHUB_TOKEN starts no new workflow runs, so the job then dispatches ci.yml
-# on the branch (workflow_dispatch is the one event GITHUB_TOKEN may start). That run checks
-# the new head commit, and its checks show on the pull request. No extra secret is needed.
+# Two jobs, so that no job both runs code from the pull request and holds a write token:
+# - `generate` (read-only, no secrets) runs the generator on the Renovate branch: that runs
+#   package code (cargo metadata, cargo-about, Node imports from node_modules). It uploads only
+#   THIRD_PARTY_NOTICES.md, and only if it changed.
+# - `push` (contents: write, actions: write) starts from a fresh checkout of the same head
+#   commit, checks the uploaded file, copies it in, commits it and pushes. It runs no package
+#   code. A push made with GITHUB_TOKEN starts no workflow run, so it then dispatches ci.yml on
+#   the branch (workflow_dispatch is the one event GITHUB_TOKEN may start). That run checks the
+#   new head commit, and its checks show on the pull request. No extra secret is needed.
 #
 # No loop: the bot's push starts no pull_request run, so this workflow doesn't run again, and
 # a run that finds the file current commits and dispatches nothing. renovate.json lists the bot
-# in `gitIgnoredAuthors`, so Renovate keeps rebasing the branch (and drops the bot's commit;
-# this job then runs again on Renovate's new commit).
+# in `gitIgnoredAuthors`, so Renovate keeps rebasing the branch; a rebase drops the bot's
+# commit, and this workflow then regenerates once more on Renovate's new commit.
 name: Renovate notices
 
 on:
@@ -25,27 +30,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  regenerate:
-    # Only Renovate's own pull requests from a branch in this repository: never forks, never
-    # other authors, never a branch outside renovate/.
+  generate:
+    # Only Renovate's own pull requests from a branch in this repository, and only when Renovate
+    # itself triggered the event: never forks, never other authors, never a branch outside
+    # renovate/, never a push (or reopen) by someone else on a Renovate branch.
     if: >-
       github.event.pull_request.user.login == 'renovate[bot]' &&
+      github.event.sender.login == 'renovate[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'renovate/')
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # push the regenerated file to the Renovate branch
-      actions: write # dispatch ci.yml on that branch
-    env:
-      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
     steps:
-      # The pull request's head commit, not the merge commit. No stored credentials: only the
-      # push and dispatch steps below get the token.
+      # The pull request's head commit, not the merge commit. This job has a read-only token
+      # and no secrets.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-      # The same cargo-about version as ci.yml's `licenses` job (one pin, which Renovate updates).
+      # The cargo-about version pinned in the branch's own ci.yml, the one its `licenses` job
+      # checks with (a Renovate PR may bump it). Read from the branch, which is fine here: this
+      # job can't write anything.
       - name: Read CARGO_ABOUT_VERSION from ci.yml
         run: |
           version="$(sed -n 's/^ *CARGO_ABOUT_VERSION: *\([0-9][0-9.]*\) *$/\1/p' .github/workflows/ci.yml)"
@@ -85,15 +91,68 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             git diff --stat -- THIRD_PARTY_NOTICES.md
           fi
-      # A normal push of one new commit on top of the head this run checked out. If Renovate
-      # pushed in the meantime, the push is rejected (no force) and this job fails; Renovate's
-      # push has already started a new run.
-      - name: Commit and push
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.changes.outputs.changed == 'true'
+        with:
+          name: third-party-notices
+          path: THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
+          retention-days: 1
+
+  push:
+    needs: generate
+    if: needs.generate.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the regenerated file to the Renovate branch
+      actions: write # dispatch ci.yml on that branch
+    env:
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      # A fresh checkout of the same head commit; nothing from the `generate` job's workspace
+      # but the one uploaded file reaches this job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: third-party-notices
+          path: ${{ runner.temp }}/notices
+      # A regular file (no symlink), under 4 MiB (the current file is about 0.4 MiB), UTF-8 text
+      # without NUL bytes. Anything else stops the job.
+      - name: Check the regenerated file
+        env:
+          NOTICES: ${{ runner.temp }}/notices/THIRD_PARTY_NOTICES.md
+        run: |
+          if [ ! -f "$NOTICES" ] || [ -L "$NOTICES" ]; then
+            echo "::error::The artifact holds no regular THIRD_PARTY_NOTICES.md"
+            exit 1
+          fi
+          size="$(stat -c %s "$NOTICES")"
+          if [ "$size" -ge 4194304 ]; then
+            echo "::error::THIRD_PARTY_NOTICES.md is $size bytes, over the 4 MiB limit"
+            exit 1
+          fi
+          python3 -I -c 'import sys; d = open(sys.argv[1], "rb").read(); d.decode("utf-8"); sys.exit(b"\0" in d)' "$NOTICES" \
+            || { echo "::error::THIRD_PARTY_NOTICES.md is not UTF-8 text"; exit 1; }
+          cp -- "$NOTICES" THIRD_PARTY_NOTICES.md
+      # One new commit on top of the head `generate` checked. Before pushing, the branch tip must
+      # still be that head; if Renovate pushed in the meantime, stop (Renovate's push started a
+      # new run). The push is never forced, so a later move is rejected as non-fast-forward.
+      # The token reaches git through GIT_CONFIG_* environment variables, not the command line.
+      - name: Commit and push
+        id: push
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
+          if git diff --quiet -- THIRD_PARTY_NOTICES.md; then
+            echo "THIRD_PARTY_NOTICES.md matches the branch already; nothing to commit." >> "$GITHUB_STEP_SUMMARY"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- THIRD_PARTY_NOTICES.md
@@ -101,13 +160,42 @@ jobs:
             -m "Generated by the Renovate notices workflow (#325): $RUN_URL"
           auth="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)"
           echo "::add-mask::$auth"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
-            push origin "HEAD:refs/heads/$HEAD_REF"
-      # The push above starts no workflow run, so start CI on the new head commit.
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          tip="$(git ls-remote origin "refs/heads/$HEAD_REF" | cut -f1)"
+          if [ "$tip" != "$HEAD_SHA" ]; then
+            echo "::notice::The branch moved on (now ${tip:-gone}, expected $HEAD_SHA); not pushing. The new commit's own run regenerates the file."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git push origin "HEAD:refs/heads/$HEAD_REF"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # The push above starts no workflow run, so start CI on the branch. The run checks the
+      # branch tip at dispatch time; if Renovate pushed again in between, it checks Renovate's
+      # newer commit instead (which has its own pull_request run, and this workflow runs again).
       - name: Run CI on the new commit
-        if: steps.changes.outputs.changed == 'true'
+        if: steps.push.outputs.pushed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUSHED_SHA: ${{ steps.push.outputs.sha }}
         run: |
+          # A little earlier than now, in case the runner's clock is ahead of GitHub's.
+          since="$(date -u -d '-30 seconds' +%Y-%m-%dT%H:%M:%SZ)"
           gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF"
-          echo "Committed the regenerated THIRD_PARTY_NOTICES.md to \`$HEAD_REF\` and started CI on it." >> "$GITHUB_STEP_SUMMARY"
+          run_sha=""
+          for _ in $(seq 1 12); do
+            sleep 5
+            run_sha="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch "$HEAD_REF" \
+              --event workflow_dispatch --limit 5 --json headSha,createdAt \
+              --jq "[.[] | select(.createdAt >= \"$since\")][0].headSha // \"\"")"
+            [ -n "$run_sha" ] && break
+          done
+          if [ -z "$run_sha" ]; then
+            echo "::warning::Could not find the dispatched CI run within a minute; check the Actions tab."
+          elif [ "$run_sha" != "$PUSHED_SHA" ]; then
+            echo "::warning::The dispatched CI run checks $run_sha, not the pushed commit $PUSHED_SHA: the branch moved on. Its own pull_request run covers the newer commit."
+          else
+            echo "Committed the regenerated THIRD_PARTY_NOTICES.md to \`$HEAD_REF\` ($PUSHED_SHA) and started CI on it." >> "$GITHUB_STEP_SUMMARY"
+          fi

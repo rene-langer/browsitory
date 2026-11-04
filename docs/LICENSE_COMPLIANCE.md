@@ -317,15 +317,22 @@ notices of everything Browsitory ships (#301, #202). It is generated; never edit
      "Syntax highlighting grammars" above).
 - **On Renovate PRs it is regenerated for you** (#325). `.github/workflows/renovate-notices.yml`
   runs only on pull requests opened by `renovate[bot]` from a `renovate/` branch in this
-  repository. It installs the `CARGO_ABOUT_VERSION` from `ci.yml`, runs the generator, and, if
-  the file changed, commits it to the branch as `github-actions[bot]` (a normal push, never a
-  force push). Only that job may write: `contents: write` to push and `actions: write` to start
-  `ci.yml` on the branch with `workflow_dispatch`. A push made with `GITHUB_TOKEN` starts no
-  workflow run, so that dispatched run is what checks the new commit; its checks show on the
-  PR as `(workflow_dispatch)`. A run that finds the file current commits nothing.
-  `renovate.json`'s `gitIgnoredAuthors` lists the bot, so Renovate still rebases the branch;
-  the workflow then runs again on Renovate's new commit. If the workflow fails (for example
-  on a `native-libraries.md` version mismatch, below), fix and regenerate by hand.
+  repository, and only for events Renovate itself caused (a push or reopen by someone else
+  skips it). Its `generate` job, read-only and without secrets, installs the
+  `CARGO_ABOUT_VERSION` from the branch's `ci.yml`, runs the generator and, if the file
+  changed, uploads only `THIRD_PARTY_NOTICES.md`. Its `push` job, the only one that may write
+  (`contents: write`, `actions: write`), runs no package code: it checks out the same head
+  commit afresh, checks the uploaded file (a regular UTF-8 text file under 4 MiB), commits it
+  as `github-actions[bot]` and pushes it, never forced, and only if the branch tip is still
+  that head. A push made with `GITHUB_TOKEN` starts no workflow run, so the job then starts
+  `ci.yml` on the branch with `workflow_dispatch`; that run checks the new commit, and its
+  checks show on the PR as `(workflow_dispatch)`. A run that finds the file current commits
+  nothing. `renovate.json`'s `gitIgnoredAuthors` lists the bot, so Renovate still rebases the
+  branch; a rebase drops the bot's commit, and the workflow regenerates once more on
+  Renovate's new commit. A dispatched run has no labels, so its `changelog` job ignores
+  `skip-changelog` (not needed: lockfiles, manifests and this file need no CHANGELOG.md
+  entry). If the workflow fails (for example on a `native-libraries.md` version mismatch,
+  below), fix and regenerate by hand.
 - **Regenerate** by hand after any other dependency change, then commit the result:
 
   ```bash
