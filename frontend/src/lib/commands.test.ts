@@ -813,7 +813,7 @@ describe("buildCommands", () => {
           "Submodules",
           "Reflog",
           "Tags",
-          "Pull requests",
+          "Pull Requests",
         ]) {
           expect(ids).toContain(`go-to:${title}`);
         }
@@ -853,6 +853,11 @@ describe("buildCommands", () => {
         "Go to Worktrees",
       ].sort(),
     );
+  });
+
+  it("keeps the go-to id of a renamed section, so palette recents survive the rename (#320)", () => {
+    const command = buildCommands(makeAppState()).find((c) => c.label === "Go to Pull requests");
+    expect(command?.id).toBe("go-to:Pull Requests");
   });
 
   it("no longer emits a separate 'Go to Remotes' command (folded into Branches)", () => {
@@ -1216,6 +1221,19 @@ describe("preferences and external tool commands", () => {
     expect(licences?.keywords).toEqual(expect.arrayContaining(["licenses", "about", "open source"]));
     licences!.run();
     expect(onOpenThirdPartyLicences).toHaveBeenCalled();
+  });
+
+  it("adds Open user guide with the app commands (#320)", () => {
+    const onOpenUserGuide = vi.fn();
+    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, {
+      onOpenUserGuide,
+    });
+    const guide = commands.find((c) => c.label === "Open user guide");
+    expect(guide?.id).toBe("open-user-guide");
+    expect(guide?.keywords).toEqual(expect.arrayContaining(["help", "documentation", "manual"]));
+    expect(commandGroup("open-user-guide")).toBe("General");
+    guide!.run();
+    expect(onOpenUserGuide).toHaveBeenCalled();
   });
 
   it("adds tool commands, with current-file ones only when there is a current file", () => {

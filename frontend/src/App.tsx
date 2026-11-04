@@ -1,3 +1,4 @@
+import { USER_GUIDE_URL } from "./lib/links";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Moon, Settings, Sparkles, Sun } from "lucide-react";
 import { BranchTree } from "./components/BranchTree";
@@ -1350,13 +1351,24 @@ function AppContent({
     () => (loadThirdPartyNotices === undefined ? undefined : () => setLicencesOpen(true)),
     [loadThirdPartyNotices],
   );
+  // Opens in the browser (the VSCode extension too), never in this window. Failures show in the
+  // same app-level banner as the tab menu's tools.
+  const openUserGuide = useCallback(() => {
+    setTabToolError(null);
+    client
+      .openExternalUrl(USER_GUIDE_URL)
+      .catch((error: unknown) =>
+        setTabToolError(`Couldn't open the user guide: ${error instanceof Error ? error.message : String(error)}`),
+      );
+  }, [client]);
   const appCommands = useMemo<AppCommands>(
     () => ({
       ...(client.supportsCloneAndInit ? { onCloneRepository: startClone, onNewRepository: startNewRepository } : {}),
       onOpenPreferences: openPreferences,
       onOpenThirdPartyLicences: openLicences,
+      onOpenUserGuide: openUserGuide,
     }),
-    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences, openLicences],
+    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences, openLicences, openUserGuide],
   );
   const tabMenuItems = useCallback(
     (path: string) => {
@@ -1582,6 +1594,7 @@ function AppContent({
         <ReleaseNotesModal
           entries={releaseNotesView.entries}
           onClose={closeReleaseNotes}
+          onOpenUserGuide={openUserGuide}
           onOpenThirdPartyLicences={
             openLicences === undefined
               ? undefined

@@ -334,6 +334,29 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
   });
 
+  it("opens the user guide site from the palette through the client (#320)", async () => {
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      openExternalUrl,
+    });
+    const { container } = render(<App client={client} />);
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    const input = await screen.findByRole("combobox", { name: "Command palette" });
+    fireEvent.change(input, { target: { value: "Open user guide" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Open user guide" }));
+
+    await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith("https://rene-langer.github.io/browsitory/"));
+  });
+
   describe("palette discard commands", () => {
     function discardClient(overrides: Partial<RepoClient> = {}) {
       return fakeClient({

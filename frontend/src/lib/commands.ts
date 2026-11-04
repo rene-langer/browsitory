@@ -11,6 +11,8 @@ export interface AppCommands {
   onOpenPreferences?: () => void;
   /** Opens the third-party licences dialog ("Third-party licences"). */
   onOpenThirdPartyLicences?: () => void;
+  /** Opens the user guide site in the browser ("Open user guide"). */
+  onOpenUserGuide?: () => void;
 }
 
 /**
@@ -57,6 +59,18 @@ const SIDEBAR_SECTIONS = [
   "Tags",
   "Pull requests",
 ] as const;
+
+// Command ids are stored in the palette's recent list (RECENT_KEY), so a section's go-to id
+// must not change when its title does. "Pull requests" was "Pull Requests" until #320.
+const GO_TO_COMMAND_IDS: Record<(typeof SIDEBAR_SECTIONS)[number], string> = {
+  Branches: "go-to:Branches",
+  Stashes: "go-to:Stashes",
+  Worktrees: "go-to:Worktrees",
+  Submodules: "go-to:Submodules",
+  Reflog: "go-to:Reflog",
+  Tags: "go-to:Tags",
+  "Pull requests": "go-to:Pull Requests",
+};
 
 function defaultPanelVisibility(): Record<SidebarPanelId, boolean> {
   return Object.fromEntries(SIDEBAR_PANEL_IDS.map((id) => [id, true])) as Record<SidebarPanelId, boolean>;
@@ -219,6 +233,14 @@ export function buildCommands(
         label: "Preferences…",
         keywords: ["preferences", "settings", "options", "editor", "terminal", "tools"],
         run: appCommands.onOpenPreferences,
+      });
+    }
+    if (appCommands.onOpenUserGuide !== undefined) {
+      commands.push({
+        id: "open-user-guide",
+        label: "Open user guide",
+        keywords: ["help", "user guide", "documentation", "docs", "manual"],
+        run: appCommands.onOpenUserGuide,
       });
     }
     if (appCommands.onOpenThirdPartyLicences !== undefined) {
@@ -755,7 +777,7 @@ export function buildCommands(
     const panelId = sidebarSectionPanelId(title);
     if (panelId !== null && !panelVisibility[panelId]) continue;
     commands.push({
-      id: `go-to:${title}`,
+      id: GO_TO_COMMAND_IDS[title],
       label: `Go to ${title}`,
       keywords: ["go", "navigate", title.toLowerCase()],
       run: () => goToSidebarSection(title),

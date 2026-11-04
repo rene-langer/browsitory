@@ -321,7 +321,7 @@ export function PullRequestPanel({
     return (
       <AccordionSection title="Pull requests" storageKey="sidebar-pull-requests" icon={GitPullRequest}>
         <p className={styles.empty}>
-          No supported GitHub or Bitbucket remotes. Add one under Remotes to see its pull requests here.
+          No supported GitHub or Bitbucket remotes. Add one in the Branches section (Add remote) to see its pull requests here.
         </p>
       </AccordionSection>
     );
