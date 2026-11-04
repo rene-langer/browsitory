@@ -13,6 +13,9 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::*;
+use repo_service::wire::{
+    RebaseInfoDto, SequenceProgressDto, TerminalRebaseDto, TerminalSequenceDto,
+};
 
 #[path = "../../../test-support/wire_fixtures.rs"]
 #[macro_use]

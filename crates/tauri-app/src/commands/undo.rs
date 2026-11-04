@@ -1,4 +1,5 @@
-use super::{repo_worker, AppState, UndoOutcomeDto, UndoStateDto};
+use super::{repo_worker, AppState};
+use repo_service::wire::{UndoOutcomeDto, UndoStateDto};
 use tauri::State;
 
 #[tauri::command]

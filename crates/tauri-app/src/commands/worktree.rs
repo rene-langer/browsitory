@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use tauri::State;
 
-use super::{repo_worker, AppState, WorktreeInfoDto};
+use super::{repo_worker, AppState};
+use repo_service::wire::WorktreeInfoDto;
 
 #[tauri::command]
 pub async fn list_worktrees(

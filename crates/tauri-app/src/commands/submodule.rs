@@ -1,6 +1,7 @@
 use tauri::State;
 
-use super::{repo_worker, AppState, SubmoduleInfoDto};
+use super::{repo_worker, AppState};
+use repo_service::wire::SubmoduleInfoDto;
 
 #[tauri::command]
 pub async fn list_submodules(

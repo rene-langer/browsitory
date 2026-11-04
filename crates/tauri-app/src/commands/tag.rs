@@ -1,6 +1,7 @@
 use tauri::State;
 
-use super::{repo_worker, AppState, TagInfoDto};
+use super::{repo_worker, AppState};
+use repo_service::wire::TagInfoDto;
 
 #[tauri::command]
 pub async fn list_tags(

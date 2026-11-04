@@ -1,6 +1,7 @@
-use super::{
-    hook_event_channel, repo_worker, AppState, ConflictSegmentDto, ConflictSideDto,
-    FileConflictChoiceDto, MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto,
+use super::{hook_event_channel, repo_worker, AppState};
+use repo_service::wire::{
+    ConflictSegmentDto, ConflictSideDto, FileConflictChoiceDto, MarkResolvedOutcomeDto,
+    MergeOptionsDto, MergeOutcomeDto,
 };
 use std::path::Path;
 use tauri::{AppHandle, State};

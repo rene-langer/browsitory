@@ -2,7 +2,20 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
-use repo_service::wire::*;
+use repo_service::wire::{
+    hook_progress_dto, to_trailers, transfer_progress_dto, BlameLineDto, BranchInfoDto,
+    ChangedFileDto, CommitMessageSettingsDto, CommitOutcomeDto, CommitSignatureDto,
+    CompareRangeDto, ConfirmedAbortDto, ConflictSegmentDto, ConflictSideDto, CreatePullRequestDto,
+    DiffHunkDto, DiffOptionsDto, DiffSettingsDto, DiffSourceDto, ExternalToolSettingsDto,
+    FileConflictChoiceDto, FileHistoryEntryDto, FileSidesDto, ForgeProviderDto, ForgeRepositoryDto,
+    GitToolsDto, GraphCommitDto, HeadInfoDto, MarkResolvedOutcomeDto, MergeOptionsDto,
+    MergeOutcomeDto, OpenRepoEntryDto, OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto,
+    PullRequestDto, PullRequestListDto, RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto,
+    RebaseStepResultDto, ReflogEntryDto, RemoteAuthModeDto, RemoteInfoDto, ResetModeDto,
+    SearchPageDto, SequenceAbortDto, SequenceOutcomeDto, SignatureInputDto, StashApplyOutcomeDto,
+    StashEntryDto, StashFilesDto, StashOptionsDto, StatusEntryDto, SubmoduleInfoDto, TagInfoDto,
+    TrailerDto, UndoOutcomeDto, UndoStateDto, UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
+};
 use repo_service::worker::{HookEvent, TransferEvent, WorkerRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1022,10 +1035,6 @@ struct CommitMessageParams {
     author: Option<SignatureInputDto>,
 }
 
-fn trailers(dtos: Vec<TrailerDto>) -> Vec<git_core::commit::Trailer> {
-    dtos.into_iter().map(Into::into).collect()
-}
-
 fn list_recent_authors(params: Value, repos: &Repos) -> Result<Value, String> {
     let params: RepoPathParams =
         serde_json::from_value(params).map_err(|error| error.to_string())?;
@@ -1119,7 +1128,7 @@ fn commit(
     let outcome = worker_handle(repos, &params.repo_path)?.commit(
         params.message,
         params.no_verify,
-        trailers(params.trailers),
+        to_trailers(params.trailers),
         event_tx,
     )?;
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())
@@ -1843,7 +1852,7 @@ fn amend_commit(
             name: a.name,
             email: a.email,
         }),
-        trailers(params.trailers),
+        to_trailers(params.trailers),
         event_tx,
     )?;
     serde_json::to_value(CommitOutcomeDto::from(outcome)).map_err(|error| error.to_string())

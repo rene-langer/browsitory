@@ -140,7 +140,7 @@ impl From<SequenceKind> for Kind {
 }
 
 /// Which operation a multi-commit sequence runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum SequenceKind {
     CherryPick,

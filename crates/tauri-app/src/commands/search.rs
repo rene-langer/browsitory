@@ -3,7 +3,8 @@ use std::future::Future;
 use git_core::search::SearchPage;
 use tauri::State;
 
-use super::{repo_worker, AppState, SearchPageDto};
+use super::{repo_worker, AppState};
+use repo_service::wire::SearchPageDto;
 
 #[tauri::command]
 pub async fn search_commits(

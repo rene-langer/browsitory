@@ -7,7 +7,10 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
-use repo_service::wire::*;
+use repo_service::wire::{
+    hook_progress_dto, transfer_progress_dto, CommitMessageSettingsDto, DiffSettingsDto,
+    OpenRepoEntryDto, OpenRepoEntryInput, TransferProgressDto, WorkspaceDto,
+};
 use repo_service::worker::{HookEvent, TransferEvent, WorkerHandle, WorkerRegistry};
 
 mod branch;
@@ -110,13 +113,6 @@ fn emit_hook_events(app: AppHandle, repo_path: String, events: mpsc::Receiver<Ho
             let _ = app.emit(HOOK_PROGRESS_EVENT, hook_progress_dto(&repo_path, event));
         }
     });
-}
-
-pub(crate) fn trailers_from(dtos: Option<Vec<TrailerDto>>) -> Vec<git_core::commit::Trailer> {
-    dtos.unwrap_or_default()
-        .into_iter()
-        .map(Into::into)
-        .collect()
 }
 
 /// Desktop only: the VSCode extension hands conflicts to VSCode's merge editor instead.
@@ -891,17 +887,18 @@ mod tests {
 
     use repo_service::worker::{HookEvent, HookSource, TransferEvent};
 
-    use super::{hook_progress_dto, ChangedFileDto, CommitOutcomeDto, CompareRangeDto};
-    use super::{
-        transfer_event_payload, BranchInfoDto, CommitSignatureDto, DiffOptionsDto, DiffSettingsDto,
-        FileHistoryEntryDto, ForgeProviderDto, GraphCommitDto, HeadInfoDto, OpenRepoEntryDto,
-        OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, ReflogEntryDto, RemoteAuthModeDto,
-        RemoteInfoDto, ResetModeDto, SearchPageDto, SubmoduleInfoDto, UndoOutcomeDto, UndoStateDto,
-        UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
-    };
-    use super::{CommitMessageSettingsDto, FileSidesDto, SignatureInputDto, TrailerDto};
-    use super::{
-        MergeOptionsDto, MergeOutcomeDto, StashApplyOutcomeDto, StashFilesDto, StashOptionsDto,
+    use super::transfer_event_payload;
+    use repo_service::wire::{
+        hook_progress_dto, BranchInfoDto, ChangedFileDto, CommitMessageSettingsDto,
+        CommitOutcomeDto, CommitSignatureDto, CompareRangeDto, ConfirmedAbortDto, ConflictSideDto,
+        DiffOptionsDto, DiffSettingsDto, FileHistoryEntryDto, FileSidesDto, ForgeProviderDto,
+        GraphCommitDto, HeadInfoDto, MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto,
+        OpenRepoEntryInput, PickOutcomeDto, PullOutcomeDto, RebaseAbortDto, ReflogEntryDto,
+        RemoteAuthModeDto, RemoteInfoDto, ResetModeDto, SearchPageDto, SequenceAbortDto,
+        SequenceOutcomeDto, SignatureInputDto, StashApplyOutcomeDto, StashFilesDto,
+        StashOptionsDto, StatusEntryDto, SubmoduleInfoDto, TagInfoDto, TrailerDto,
+        TransferProgressPhaseDto, UndoOutcomeDto, UndoStateDto, UpstreamInfoDto, WorkspaceDto,
+        WorktreeInfoDto,
     };
 
     #[test]
@@ -915,10 +912,10 @@ mod tests {
             tagger_name: None,
             timestamp: None,
         };
-        let json = serde_json::to_value(super::TagInfoDto::from(tag(Some("abc")))).unwrap();
+        let json = serde_json::to_value(TagInfoDto::from(tag(Some("abc")))).unwrap();
         assert_eq!(json["targetId"], "tagobj");
         assert_eq!(json["commitId"], "abc");
-        let json = serde_json::to_value(super::TagInfoDto::from(tag(None))).unwrap();
+        let json = serde_json::to_value(TagInfoDto::from(tag(None))).unwrap();
         assert_eq!(json["commitId"], serde_json::Value::Null);
     }
 
@@ -967,7 +964,6 @@ mod tests {
                 value: "A <a@x>".into()
             }
         );
-        assert!(super::trailers_from(None).is_empty());
         let author: SignatureInputDto =
             serde_json::from_value(serde_json::json!({ "name": "Ada", "email": "a@x" })).unwrap();
         assert_eq!(git_core::commit::SignatureInput::from(author).email, "a@x");
@@ -1019,7 +1015,7 @@ mod tests {
     #[test]
     fn status_entry_dto_always_serializes_old_path() {
         use git_core::status::{StatusEntry, StatusKind};
-        let plain = super::StatusEntryDto::from(StatusEntry {
+        let plain = StatusEntryDto::from(StatusEntry {
             path: "a.txt".into(),
             old_path: None,
             staged: false,
@@ -1029,7 +1025,7 @@ mod tests {
             serde_json::to_value(plain).unwrap(),
             serde_json::json!({"path": "a.txt", "oldPath": null, "staged": false, "kind": "Modified"})
         );
-        let renamed = super::StatusEntryDto::from(StatusEntry {
+        let renamed = StatusEntryDto::from(StatusEntry {
             path: "new.txt".into(),
             old_path: Some("old.txt".into()),
             staged: true,
@@ -1043,8 +1039,8 @@ mod tests {
 
     #[test]
     fn diff_source_dto_parses_every_variant() {
-        use super::DiffSourceDto;
         use git_core::tools::DiffSource;
+        use repo_service::wire::DiffSourceDto;
         let parse = |v: serde_json::Value| {
             DiffSource::from(serde_json::from_value::<DiffSourceDto>(v).unwrap())
         };
@@ -1096,9 +1092,8 @@ mod tests {
 
     #[test]
     fn tool_outcome_and_settings_dtos_serialize_for_the_frontend() {
-        use super::{
-            ExternalToolSettingsDto, GitToolsDto, MarkResolvedOutcomeDto, MergeToolOutcomeDto,
-        };
+        use super::MergeToolOutcomeDto;
+        use repo_service::wire::{ExternalToolSettingsDto, GitToolsDto, MarkResolvedOutcomeDto};
         assert_eq!(
             serde_json::to_value(MergeToolOutcomeDto::from(
                 git_core::tools::MergeToolOutcome::Resolved
@@ -1625,7 +1620,10 @@ mod tests {
 
         assert_eq!(progress.message, None);
         assert_eq!(completed.message, None);
-        assert_eq!(completed.error_kind.as_deref(), Some("TransferFailed"));
+        assert_eq!(
+            completed.error_kind,
+            Some(TransferErrorKind::TransferFailed)
+        );
     }
 
     #[test]
@@ -1638,9 +1636,9 @@ mod tests {
         });
 
         assert_eq!(event_name, "transfer-complete");
-        assert_eq!(failed.phase, "Failed");
-        assert_eq!(failed.operation, "Fetch");
-        assert_eq!(failed.error_kind.as_deref(), Some("TransferFailed"));
+        assert_eq!(failed.phase, TransferProgressPhaseDto::Failed);
+        assert_eq!(failed.operation, TransferOperation::Fetch);
+        assert_eq!(failed.error_kind, Some(TransferErrorKind::TransferFailed));
         assert_eq!(failed.message, None);
     }
 
@@ -1656,7 +1654,7 @@ mod tests {
         });
 
         assert_eq!(event_name, "transfer-complete");
-        assert_eq!(cancelled.error_kind.as_deref(), Some("Cancelled"));
+        assert_eq!(cancelled.error_kind, Some(TransferErrorKind::Cancelled));
         assert_eq!(cancelled.message, None);
     }
 
@@ -1669,7 +1667,10 @@ mod tests {
             hook_output: None,
         });
 
-        assert_eq!(failed.error_kind.as_deref(), Some("MissingCredential"));
+        assert_eq!(
+            failed.error_kind,
+            Some(TransferErrorKind::MissingCredential)
+        );
         assert_eq!(failed.message, None);
     }
 
@@ -1682,8 +1683,8 @@ mod tests {
             hook_output: None,
         });
 
-        assert_eq!(failed.operation, "PushBranch");
-        assert_eq!(failed.error_kind.as_deref(), Some("NonFastForward"));
+        assert_eq!(failed.operation, TransferOperation::PushBranch);
+        assert_eq!(failed.error_kind, Some(TransferErrorKind::NonFastForward));
         assert_eq!(failed.message, None);
     }
 
@@ -1832,17 +1833,16 @@ mod tests {
     #[test]
     fn sequence_outcome_stopped_serializes_the_kept_commit_and_progress() {
         use git_core::pick::{SequenceKind, SequenceOutcome, SequenceProgress};
-        let stopped =
-            serde_json::to_value(super::SequenceOutcomeDto::from(SequenceOutcome::Stopped {
-                kept: "f one".into(),
-                progress: SequenceProgress {
-                    kind: SequenceKind::CherryPick,
-                    current_step: 2,
-                    total_steps: 3,
-                    current_commit: "c2".into(),
-                },
-            }))
-            .unwrap();
+        let stopped = serde_json::to_value(SequenceOutcomeDto::from(SequenceOutcome::Stopped {
+            kept: "f one".into(),
+            progress: SequenceProgress {
+                kind: SequenceKind::CherryPick,
+                current_step: 2,
+                total_steps: 3,
+                current_commit: "c2".into(),
+            },
+        }))
+        .unwrap();
         assert_eq!(stopped["kind"], "Stopped");
         assert_eq!(stopped["kept"], "f one");
         assert_eq!(stopped["progress"]["currentStep"], 2);
@@ -1852,18 +1852,16 @@ mod tests {
     #[test]
     fn sequence_outcome_hook_failed_serializes_with_hook_output_and_progress() {
         use git_core::pick::{SequenceKind, SequenceOutcome, SequenceProgress};
-        let failed = serde_json::to_value(super::SequenceOutcomeDto::from(
-            SequenceOutcome::HookFailed {
-                hook: "commit-msg".into(),
-                output: "x".into(),
-                progress: SequenceProgress {
-                    kind: SequenceKind::CherryPick,
-                    current_step: 2,
-                    total_steps: 3,
-                    current_commit: "abc".into(),
-                },
+        let failed = serde_json::to_value(SequenceOutcomeDto::from(SequenceOutcome::HookFailed {
+            hook: "commit-msg".into(),
+            output: "x".into(),
+            progress: SequenceProgress {
+                kind: SequenceKind::CherryPick,
+                current_step: 2,
+                total_steps: 3,
+                current_commit: "abc".into(),
             },
-        ))
+        }))
         .unwrap();
         assert_eq!(
             failed,
@@ -1885,13 +1883,12 @@ mod tests {
             total_steps: 5,
             current_commit: "abc".into(),
         };
-        let conflicted = serde_json::to_value(super::SequenceOutcomeDto::from(
-            SequenceOutcome::Conflicted {
+        let conflicted =
+            serde_json::to_value(SequenceOutcomeDto::from(SequenceOutcome::Conflicted {
                 files: vec!["a.txt".into()],
                 progress: progress.clone(),
-            },
-        ))
-        .unwrap();
+            }))
+            .unwrap();
         assert_eq!(
             conflicted,
             serde_json::json!({
@@ -1900,13 +1897,12 @@ mod tests {
                 "progress": { "kind": "CherryPick", "currentStep": 2, "totalSteps": 5, "currentCommit": "abc" }
             })
         );
-        let completed = serde_json::to_value(super::SequenceOutcomeDto::from(
-            SequenceOutcome::Completed {
+        let completed =
+            serde_json::to_value(SequenceOutcomeDto::from(SequenceOutcome::Completed {
                 applied: 2,
                 skipped: vec!["s".into()],
-            },
-        ))
-        .unwrap();
+            }))
+            .unwrap();
         assert_eq!(
             completed,
             serde_json::json!({ "kind": "Completed", "applied": 2, "skipped": ["s"] })
@@ -1942,21 +1938,18 @@ mod tests {
     #[test]
     fn sequence_abort_dto_and_conflict_side_input() {
         assert_eq!(
-            serde_json::to_value(super::SequenceAbortDto::from(
-                git_core::pick::SequenceAbort { rewound: false }
-            ))
+            serde_json::to_value(SequenceAbortDto::from(git_core::pick::SequenceAbort {
+                rewound: false
+            }))
             .unwrap(),
             serde_json::json!({ "rewound": false })
         );
-        let side: super::ConflictSideDto =
-            serde_json::from_value(serde_json::json!("Theirs")).unwrap();
+        let side: ConflictSideDto = serde_json::from_value(serde_json::json!("Theirs")).unwrap();
         assert_eq!(
             git_core::merge::ConflictSide::from(side),
             git_core::merge::ConflictSide::Theirs
         );
-        assert!(
-            serde_json::from_value::<super::ConflictSideDto>(serde_json::json!("Base")).is_err()
-        );
+        assert!(serde_json::from_value::<ConflictSideDto>(serde_json::json!("Base")).is_err());
     }
 
     #[test]
@@ -2177,69 +2170,6 @@ mod tests {
     }
 
     #[test]
-    fn force_push_and_stale_lease_names_reach_the_wire() {
-        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
-            operation_id: "force-push-1".into(),
-            operation: TransferOperation::ForcePushBranch,
-            error: Some(TransferErrorKind::StaleLease),
-            hook_output: None,
-        });
-
-        assert_eq!(failed.operation, "ForcePushBranch");
-        assert_eq!(failed.error_kind.as_deref(), Some("StaleLease"));
-    }
-
-    fn expected_transfer_phase_wire_value(phase: TransferPhase) -> &'static str {
-        match phase {
-            TransferPhase::Receiving => "Receiving",
-            TransferPhase::Updating => "Updating",
-            TransferPhase::RunningHook => "RunningHook",
-        }
-    }
-
-    #[test]
-    fn transfer_phase_wire_values_match_the_typescript_union() {
-        for phase in [
-            TransferPhase::Receiving,
-            TransferPhase::Updating,
-            TransferPhase::RunningHook,
-        ] {
-            let (_, progress) = transfer_event_payload(TransferEvent::Progress(TransferProgress {
-                operation_id: "fetch-42".into(),
-                operation: TransferOperation::Fetch,
-                phase,
-                current: 0,
-                total: 0,
-                received_bytes: 0,
-                message: None,
-            }));
-
-            assert_eq!(progress.phase, expected_transfer_phase_wire_value(phase));
-        }
-
-        let (_, started) = transfer_event_payload(TransferEvent::Started {
-            operation_id: "fetch-42".into(),
-            operation: TransferOperation::Fetch,
-        });
-        let (_, completed) = transfer_event_payload(TransferEvent::Completed {
-            operation_id: "fetch-42".into(),
-            operation: TransferOperation::Fetch,
-            error: None,
-            hook_output: None,
-        });
-        let (_, failed) = transfer_event_payload(TransferEvent::Completed {
-            operation_id: "fetch-42".into(),
-            operation: TransferOperation::Fetch,
-            error: Some(TransferErrorKind::TransferFailed),
-            hook_output: None,
-        });
-        assert_eq!(
-            [started.phase, completed.phase, failed.phase],
-            ["Starting", "Completed", "Failed"]
-        );
-    }
-
-    #[test]
     fn two_open_repos_have_independent_worker_state() {
         use repo_service::worker::Worker;
         use std::collections::HashMap;
@@ -2306,7 +2236,7 @@ mod tests {
 
     #[test]
     fn confirmed_abort_dto_deserializes_camel_case() {
-        let dto: super::ConfirmedAbortDto = serde_json::from_value(serde_json::json!({
+        let dto: ConfirmedAbortDto = serde_json::from_value(serde_json::json!({
             "headId": "h",
             "startedAt": "s",
             "rewinds": true,
@@ -2482,7 +2412,7 @@ mod tests {
     #[test]
     fn rebase_abort_dto_serializes_restored() {
         assert_eq!(
-            serde_json::to_value(super::RebaseAbortDto::from(git_core::rebase::RebaseAbort {
+            serde_json::to_value(RebaseAbortDto::from(git_core::rebase::RebaseAbort {
                 restored: false
             }))
             .unwrap(),

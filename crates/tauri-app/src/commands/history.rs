@@ -1,7 +1,7 @@
-use super::{
-    emit_hook_events, hook_event_channel, repo_worker, trailers_from, AppState, CommitOutcomeDto,
-    ConfirmedAbortDto, HeadInfoDto, PickOutcomeDto, ResetModeDto, SequenceAbortDto,
-    SequenceOutcomeDto, SignatureInputDto, TrailerDto,
+use super::{emit_hook_events, hook_event_channel, repo_worker, AppState};
+use repo_service::wire::{
+    to_trailers, CommitOutcomeDto, ConfirmedAbortDto, HeadInfoDto, PickOutcomeDto, ResetModeDto,
+    SequenceAbortDto, SequenceOutcomeDto, SignatureInputDto, TrailerDto,
 };
 use tauri::{AppHandle, State};
 
@@ -38,7 +38,7 @@ pub async fn amend_commit(
                     message,
                     no_verify,
                     author.map(Into::into),
-                    trailers_from(trailers),
+                    to_trailers(trailers.unwrap_or_default()),
                     event_tx,
                 )
             })

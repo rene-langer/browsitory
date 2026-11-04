@@ -48,6 +48,14 @@ stay in the transport crates:
 - `vscode-sidecar`: `OpenReposDto` (`list_open_repos`'s object), `FileVersionDto` and
   `read_file_version`'s `{ text }` (extension host only), and every method's params struct.
 
+A wire field that holds one of a fixed set of names carries the enum itself, never a string:
+the `git-core` enums (`StatusKind`, `DiffLineOrigin`, `TransferOperation`, `TransferErrorKind`,
+`OperationKind`, `TerminalRebaseKind`, `SequenceKind`, `RebaseDivergence`) and
+`repo-service`'s `HookSource` derive `Serialize` themselves and go on the wire as their variant
+names. Where the payload adds names of its own, `wire.rs` has a small enum
+(`TransferProgressPhaseDto`: `TransferPhase` plus `Starting`, `RemoteFailed`, `Completed`,
+`Failed`; `HookProgressPhaseDto`).
+
 Each transport keeps its own serialization path: Tauri sends `serde_json::to_string` of the
 value (fields in declaration order); the sidecar goes through `serde_json::Value` (fields
 sorted). The wire snapshots in "Testing strategy" pin both.
@@ -563,7 +571,9 @@ certificate.
 
 - `git-core::pick` is a pure state machine: `cherry_pick_many`/`revert_many`/`continue_sequence`
   take and return a `SequenceState` (`SequenceRun { outcome, state }`, `state: Some` = "keep
-  this", `None` = "no sequence any more"); `git-core` has no persistence and no serde.
+  this", `None` = "no sequence any more"); `git-core` has no persistence. Its only serde is the
+  file formats in `rebase_file.rs`/`sequence_file.rs` and `Serialize` on the few enums the wire
+  DTOs carry (see "Wire DTOs").
 - git's own terminal sequences (`git cherry-pick A B C`, `git revert A B`) keep their remaining
   list in `.git/sequencer/todo`. Wherever Browsitory finishes or clears a pick after a commit
   (the Commit button's `commit_with` and its leftover handling, a single `cherry_pick`/`revert`
@@ -1463,11 +1473,8 @@ only `error`.
 - `git-core`/`config`: `cargo test`, real temp-dir repos/files, no mocks.
 - `repo-service`: inline unit tests next to the code they cover (worker, credential store, and
   forge/PR API logic), including `crates/repo-service/src/worker/mod.rs`'s tests, which spawn a
-  real worker thread against a real temp-dir repo — no mocks. It also owns the DTO wire-format
-  contract: `crates/repo-service/src/lib.rs`'s `wire_format_tests` module pins the `StatusKind`
-  and `DiffLineOrigin` `Debug` output against the matching unions in
-  `frontend/src/ipc/RepoClient.ts`. That `Debug` output equals the variant names, which is
-  what the generated DTO types below use for those fields.
+  real worker thread against a real temp-dir repo — no mocks. The wire format of its DTOs is
+  pinned by the wire snapshots and the generated DTO types below.
 - `tauri-app`: now a thin Tauri command adapter over `repo-service`, so it doesn't need
   delegation tests of its own. `crates/tauri-app/src/commands/mod.rs`'s inline tests still
   check the serialization of DTOs as the desktop app sends them (e.g. camelCase field names on
@@ -1524,10 +1531,9 @@ only `error`.
   Rust field is renamed, retyped or made optional. The few intended differences are written out
   there. `dtoContract.test.ts` checks that every generated type is compared, and that no type
   name is generated in two files.
-  - String fields with a union type: a wire field that Rust sends as a string holds an enum's
-    `Debug` output (its variant name), and uses `ts(as = "<enum>")` with the `git-core`/
-    `repo-service` enum it comes from (their `ts` feature, enabled only by dev-dependencies). The few literals the DTO code adds itself (`TransferProgress.phase`'s
-    `"Starting"` …) are written in a `ts(type = "...")` next to that enum.
+  - Fields with a fixed set of names hold the `Serialize` enum itself (see "Wire DTOs"), so
+    ts-rs generates their string-literal union. The `git-core`/`repo-service` enums derive
+    `TS` behind the same `ts` feature (enabled only by dev-dependencies).
   - ts-rs reads the serde attributes, but it can't tell a `skip_serializing_if` field (sent
     only sometimes) from one that is always sent: mark it `ts(optional)`. On input, serde reads
     any missing `Option` field as `None`; the generated types describe what the frontend sends.

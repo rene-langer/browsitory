@@ -8,10 +8,8 @@ use std::path::PathBuf;
 use git_core::launch::{self, EditorTarget};
 use tauri::State;
 
-use super::{
-    off_runtime, repo_worker, AppState, DiffSourceDto, ExternalToolSettingsDto, FileSidesDto,
-    GitToolsDto, MergeToolOutcomeDto,
-};
+use super::{off_runtime, repo_worker, AppState, MergeToolOutcomeDto};
+use repo_service::wire::{DiffSourceDto, ExternalToolSettingsDto, FileSidesDto, GitToolsDto};
 
 /// The repository's work tree root. A stored path, so it skips the repository's gate: Open in
 /// editor, Reveal and Open terminal answer at once even while a long hook holds it (#181).

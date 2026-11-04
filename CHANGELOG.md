@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Internal: enum wire fields
+
+- Changed: wire fields that hold one of a fixed set of names (status kind, diff line origin,
+  transfer operation, phase and error kind, head operation, hook source and phase, rebase
+  divergence reason, sequence kind, terminal rebase kind) now carry an enum instead of a
+  string built from its `Debug` output (#306). The `git-core` and `repo-service` enums derive
+  `Serialize` themselves; the transfer and hook progress phases get small enums in
+  `repo_service::wire`. The generated TypeScript names the two new phase types. The
+  commit trailer helper is shared by both transports. The wire format is unchanged: every wire
+  snapshot file is byte for byte the same.
+
 ### Internal: one set of wire DTOs for both transports
 
 - Changed: the desktop app and the VSCode sidecar now share one set of wire DTOs and their

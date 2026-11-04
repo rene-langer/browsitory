@@ -21,10 +21,8 @@ use std::sync::mpsc;
 
 use tauri::{AppHandle, State};
 
-use super::{
-    emit_transfer_events, repo_worker, AppState, PullOutcomeDto, RemoteAuthModeDto, RemoteInfoDto,
-    UpstreamInfoDto,
-};
+use super::{emit_transfer_events, repo_worker, AppState};
+use repo_service::wire::{PullOutcomeDto, RemoteAuthModeDto, RemoteInfoDto, UpstreamInfoDto};
 
 #[tauri::command]
 pub async fn list_remote_branches(

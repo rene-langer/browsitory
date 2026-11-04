@@ -19,8 +19,8 @@ license = "MIT"
 # too, not just documented at tauri-app's call site: no consumer's build-time toggle should be
 # able to silently redirect a user's real credentials or forge traffic.
 forge-fixture-override = []
-# Test-only: derives ts-rs's `TS` for the wire DTOs (`src/wire.rs`) and for the enums whose
-# variant names cross the wire as strings (#306), so `tauri-app`'s and `vscode-sidecar`'s tests
+# Test-only: derives ts-rs's `TS` for the wire DTOs (`src/wire.rs`) and for the enums they
+# carry (#306), so `tauri-app`'s and `vscode-sidecar`'s tests
 # can generate the TypeScript of their own transport-specific DTOs, which use the shared ones.
 # This crate's own tests derive it without the feature (`cfg(test)`). Only those crates'
 # dev-dependencies enable it; no build of the app or the sidecar does.
