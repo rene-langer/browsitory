@@ -276,6 +276,10 @@ class GrammarTests(unittest.TestCase):
         )
         self.assertEqual(problems, ["grammar rust has an empty licence text in tm-grammars' NOTICE"])
 
+    @unittest.skipUnless(
+        (gen.FRONTEND / "node_modules" / "tm-grammars" / "NOTICE").is_file(),
+        "needs `pnpm install` in frontend/ (CI installs it before running these tests)",
+    )
     def test_the_real_notice_gives_every_shipped_grammar_a_complete_text(self):
         notice = gen.parse_grammar_notice((gen.FRONTEND / "node_modules" / "tm-grammars" / "NOTICE").read_text(encoding="utf-8"))
         haml = notice["haml"][1]

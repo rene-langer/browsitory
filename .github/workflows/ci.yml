@@ -53,8 +53,6 @@ jobs:
       - uses: actions/checkout@v7
       - name: check-dependency-licenses.py unit tests
         run: python3 scripts/test_check_dependency_licenses.py
-      - name: generate-third-party-notices.py unit tests
-        run: python3 scripts/test_generate_third_party_notices.py
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny@${{ env.CARGO_DENY_VERSION }},cargo-about@${{ env.CARGO_ABOUT_VERSION }}
@@ -83,6 +81,9 @@ jobs:
           pnpm --dir extension install --frozen-lockfile --ignore-scripts
           pnpm --dir e2e install --frozen-lockfile --ignore-scripts
           cd extension/e2e && pnpm install --frozen-lockfile --ignore-scripts --ignore-workspace
+      # After the installs: one test reads frontend/node_modules/tm-grammars.
+      - name: generate-third-party-notices.py unit tests
+        run: python3 scripts/test_generate_third_party_notices.py
       - name: npm licences (all four projects, production and dev, all platforms)
         run: python3 scripts/check-dependency-licenses.py --summary
       # Fails when a dependency update changed the Rust or bundled npm trees, or a vendored C
