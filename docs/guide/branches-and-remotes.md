@@ -8,7 +8,7 @@ right-click a branch, a remote folder, or a remote branch to bring up its action
 
 - a local branch: checkout, rename, delete, merge, **Push to…**, **Isolate branch**, and for the
   current branch **Set upstream…** and **Push to ⟨remote⟩**;
-- a remote branch: checkout, set as upstream, or **Delete ⟨remote⟩/⟨branch⟩…**;
+- a remote branch: checkout, **Set as upstream for current branch**, or **Delete ⟨remote⟩/⟨branch⟩…**;
 - a remote: fetch, **Push current branch here**, edit, manage credentials, or remove.
 
 The **+** button in the section header opens **New branch…**, **Add remote…** and **Show all
@@ -18,7 +18,7 @@ available from that commit's row in the graph.
 **Upstream.** The bottom of the section says which remote branch the current branch tracks
 ("main tracks origin/main."). **Pull** pulls from it. **Clear upstream** removes the setting
 (after asking); the branches themselves don't change. To set an upstream, use **Set upstream…**
-in the current branch's menu, or **Set as upstream** on a remote branch.
+in the current branch's menu, or **Set as upstream for current branch** on a remote branch.
 
 **From the keyboard.** Tab to a branch, a remote branch or a remote folder and press the Menu key
 or Shift+F10 (Fn+Shift+F10 on most Mac keyboards), or use its **…** button, to open the same menu.

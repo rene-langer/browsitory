@@ -519,7 +519,13 @@ export class SidecarBridge {
         }
         case "open_external_url": {
           const url = requireStringParam(request, "url");
-          result = await this.dependencies.openExternal(url);
+          // `openExternal` resolves to false when nothing opened the link (for example the user
+          // declined VSCode's "open external website" prompt). Report that as a failure, like
+          // the desktop app's opener does, so the webview can say so.
+          if (!(await this.dependencies.openExternal(url))) {
+            throw new Error(`VSCode did not open ${url}.`);
+          }
+          result = null;
           break;
         }
         case "get_app_version": {

@@ -262,11 +262,29 @@ describe("SidecarBridge", () => {
     expect(update).toHaveBeenCalledWith("lastSeenVersion", "1.2.3");
     expect(postToWebview.mock.calls.map(([message]) => message)).toEqual([
       { jsonrpc: "2.0", id: 1, result: "/repos/a" },
-      { jsonrpc: "2.0", id: 2, result: true },
+      { jsonrpc: "2.0", id: 2, result: null },
       { jsonrpc: "2.0", id: 3, result: "1.2.3" },
       { jsonrpc: "2.0", id: 4, result: "0.9.0" },
       { jsonrpc: "2.0", id: 5, result: null },
     ]);
+  });
+
+  it("fails open_external_url when VSCode doesn't open the link (#320)", async () => {
+    const { bridge, postToWebview, openExternal } = createBridge({ externalResult: false });
+
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "open_external_url",
+      params: { url: "https://rene-langer.github.io/browsitory/" },
+    });
+
+    expect(openExternal).toHaveBeenCalledWith("https://rene-langer.github.io/browsitory/");
+    expect(postToWebview).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 7,
+      error: { code: -32000, message: "VSCode did not open https://rene-langer.github.io/browsitory/." },
+    });
   });
 
   it("returns null when the native folder picker is cancelled", async () => {

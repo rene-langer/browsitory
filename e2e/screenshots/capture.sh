@@ -4,7 +4,19 @@
 #
 #   e2e/screenshots/capture.sh              # build, then capture
 #   e2e/screenshots/capture.sh --no-build   # capture with the existing E2E build
+#
+# The demo repository and the temp HOME live in /tmp/browsitory-screenshots, which is removed
+# when the script exits. Set KEEP=1 to keep it, for example to look at the demo repository.
 set -euo pipefail
+
+# The E2E build bakes /tmp paths into the app, and demoRepo.ts uses os.tmpdir(): keep them equal.
+export TMPDIR=/tmp
+cleanup() {
+  if [[ "${KEEP:-}" != "1" ]]; then
+    rm -rf -- /tmp/browsitory-screenshots
+  fi
+}
+trap cleanup EXIT
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"

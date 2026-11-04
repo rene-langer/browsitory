@@ -60,6 +60,16 @@ describe("PullRequestPanel", () => {
     expect(screen.queryByRole("button", { name: /create pull request/i })).not.toBeInTheDocument();
   });
 
+  it("points to Add remote in the Branches section when no remote is supported (#320)", () => {
+    renderPanel({ forgeRepositories: [] });
+
+    expect(
+      screen.getByText(
+        "No supported GitHub or Bitbucket remotes. Add one in the Branches section (Add remote) to see its pull requests here.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("shows account/token save-forget controls and a creation form for a supported repository", () => {
     renderPanel();
 

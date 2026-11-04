@@ -1594,7 +1594,12 @@ function AppContent({
         <ReleaseNotesModal
           entries={releaseNotesView.entries}
           onClose={closeReleaseNotes}
-          onOpenUserGuide={openUserGuide}
+          // Close the dialog first: a failure shows in the app-level banner, which the overlay
+          // would cover.
+          onOpenUserGuide={() => {
+            closeReleaseNotes();
+            openUserGuide();
+          }}
           onOpenThirdPartyLicences={
             openLicences === undefined
               ? undefined

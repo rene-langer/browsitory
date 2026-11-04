@@ -18,7 +18,9 @@ e2e/screenshots/capture.sh --no-build   # reuse an E2E build you already have
 The build is the E2E build from `AGENTS.md`: the frontend with `VITE_E2E_REPO_PATH`, then
 `cargo build` with the `custom-protocol` and `forge-fixture-override` features. The capture runs
 `pnpm screenshots` in `e2e/` under `dbus-run-session -- xvfb-run`, on a 24-bit virtual screen,
-so the window never opens on your desktop.
+so the window never opens on your desktop. When it exits, the script removes
+`/tmp/browsitory-screenshots` (the demo repository and the temp HOME); run it with `KEEP=1` to
+keep that folder.
 
 Then look at every changed image before you commit it.
 

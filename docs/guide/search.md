@@ -19,7 +19,7 @@ Press ↓ in the field to move into the results.
 | `before:YYYY-MM-DD` | Committed on or before that day |
 | `branch:NAME` | Only commits reachable from NAME |
 
-- Terms combine with AND, and case is ignored except in `path:`.
+- Terms combine with AND. Case is ignored except in `path:`.
 - Quote text with spaces or a colon (`"fix: crash"`). An unquoted `word:` that is not one of the
   keys above is an error, so a conventional-commit prefix like `fix:` needs quotes.
 - Dates are whole days in the commit's own timezone, inclusive.

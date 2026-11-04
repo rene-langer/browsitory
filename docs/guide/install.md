@@ -23,8 +23,9 @@ warn you the first time:
 - **Windows:** if SmartScreen stops the installer, choose **More info**, then **Run anyway**.
 
 **Updates.** The desktop app checks for new versions by itself and offers to restart when one
-is ready (see [The main window](main-window.md)). On Linux this works for the AppImage; if you
-installed the `.deb` or `.rpm`, install the new package from the releases page.
+is ready (see [The main window](main-window.md)). This works for every installer, including
+the Linux `.AppImage`, `.deb` and `.rpm`. A `.deb` or `.rpm` update installs the new package for
+the whole system, so Linux asks for your password when you restart to update.
 
 ## VSCode extension
 

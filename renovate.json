@@ -22,8 +22,10 @@
     "schedule": ["at any time"]
   },
   "pip-compile": {
-    "description": "The user guide site's build tools: docs/requirements.in, locked with hashes in docs/requirements.txt",
-    "managerFilePatterns": ["/^docs/requirements\\.in$/"]
+    "managerFilePatterns": ["/^docs/requirements\\.txt$/"]
+  },
+  "pip_requirements": {
+    "enabled": false
   },
   "packageRules": [
     {
@@ -40,11 +42,6 @@
       "matchManagers": ["pip-compile"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "Python docs tools (non-major)"
-    },
-    {
-      "description": "docs/requirements.txt is pip-compile's lock file: pip-compile updates it, not pip_requirements",
-      "matchManagers": ["pip_requirements"],
-      "enabled": false
     },
     {
       "matchManagers": ["github-actions"],
