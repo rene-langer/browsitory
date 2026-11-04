@@ -9,7 +9,7 @@ use git_core::hooks::{HookError, HookInvocation, HookOutcome, HookReporter};
 /// Which kind of command a hook runs for, so the UI can show it in the right place (#185):
 /// `Commit` in the commit box and the sequence panel (commit, amend, Continue), the others in
 /// the "Hook status" strip.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 pub enum HookSource {
     /// A commit, an amend or a sequence's Continue.

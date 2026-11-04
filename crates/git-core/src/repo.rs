@@ -42,7 +42,7 @@ pub fn init_repo(path: &Path) -> Result<(), RepoError> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum OperationKind {
     Merge,
@@ -79,7 +79,7 @@ pub struct HeadInfo {
 }
 
 /// Which command a terminal rebase folder belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum TerminalRebaseKind {
     /// `git rebase` (`rebase-merge`, or `rebase-apply` with the apply backend).

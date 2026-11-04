@@ -20,8 +20,8 @@ forge-fixture-override = ["repo-service/forge-fixture-override"]
 
 [dev-dependencies]
 ts-rs = "12"
-# `ts`: the DTO binding test (#306) needs `TS` on the enums behind string wire fields.
-git-core = { path = "../git-core", features = ["ts"] }
+# `ts`: the DTO binding test (#306) needs `TS` on the shared wire DTOs; repo-service's `ts`
+# also enables git-core's, for the git-core enums those DTOs carry.
 repo-service = { path = "../repo-service", features = ["ts"] }
 test-support = { path = "../test-support" }
 git2 = "0.21"

@@ -80,7 +80,9 @@ terminalSequence: TerminalSequence | null,
  */
 terminalRebase: TerminalRebase | null, };
 
-export type HookProgress = { repoPath: string, operationId: string, hook: string, phase: "Started" | "Finished", source: HookSource, };
+export type HookProgress = { repoPath: string, operationId: string, hook: string, phase: HookProgressPhase, source: HookSource, };
+
+export type HookProgressPhase = "Started" | "Finished";
 
 export type HookSource = "Commit" | "Checkout" | "Merge" | "Pick";
 
@@ -180,9 +182,7 @@ export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "StaleL
 
 export type TransferOperation = "Fetch" | "FetchAll" | "Pull" | "PushBranch" | "ForcePushBranch" | "PushTags" | "DeleteRemoteBranch" | "Clone";
 
-export type TransferPhase = "Receiving" | "Updating" | "RunningHook";
-
-export type TransferProgress = { operationId: string, operation: TransferOperation, phase: TransferPhase | "Starting" | "RemoteFailed" | "Completed" | "Failed", errorKind: TransferErrorKind | null, current: number, total: number, receivedBytes: number, message: string | null, 
+export type TransferProgress = { operationId: string, operation: TransferOperation, phase: TransferProgressPhase, errorKind: TransferErrorKind | null, current: number, total: number, receivedBytes: number, message: string | null, 
 /**
  * Only on `RemoteFailed`: the remote that failed during a Fetch all.
  */
@@ -192,6 +192,8 @@ remoteName?: string,
  * `message` this comes from the user's own script, not the remote.
  */
 hookOutput: string | null, };
+
+export type TransferProgressPhase = "Starting" | "Receiving" | "Updating" | "RunningHook" | "RemoteFailed" | "Completed" | "Failed";
 
 export type UndoOutcome = { "kind": "Done", label: string, } | { "kind": "Nothing" } | { "kind": "RepositoryChanged", label: string, } | { "kind": "BranchHeld", label: string, message: string, } | { "kind": "OperationInProgress" };
 

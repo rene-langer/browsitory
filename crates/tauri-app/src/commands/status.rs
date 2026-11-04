@@ -1,6 +1,7 @@
-use super::{
-    emit_hook_events, repo_worker, AppState, BlameLineDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
+use super::{emit_hook_events, repo_worker, AppState};
+use repo_service::wire::{
+    to_trailers, BlameLineDto, CommitOutcomeDto, CommitSignatureDto, DiffHunkDto, DiffOptionsDto,
+    FileHistoryEntryDto, GraphCommitDto, StatusEntryDto, TrailerDto,
 };
 use std::path::Path;
 use tauri::{AppHandle, State};
@@ -361,7 +362,7 @@ pub async fn commit(
     repo_path: String,
     message: String,
     no_verify: bool,
-    trailers: Option<Vec<super::TrailerDto>>,
+    trailers: Option<Vec<TrailerDto>>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<CommitOutcomeDto, String> {
@@ -369,7 +370,14 @@ pub async fn commit(
     emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(CommitOutcomeDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.commit(message, no_verify, super::trailers_from(trailers), event_tx))
+            .call(move |w| {
+                w.commit(
+                    message,
+                    no_verify,
+                    to_trailers(trailers.unwrap_or_default()),
+                    event_tx,
+                )
+            })
             .await?,
     ))
 }

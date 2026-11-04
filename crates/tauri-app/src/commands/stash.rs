@@ -1,8 +1,7 @@
 use tauri::State;
 
-use super::{
-    repo_worker, AppState, StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StashOptionsDto,
-};
+use super::{repo_worker, AppState};
+use repo_service::wire::{StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StashOptionsDto};
 
 #[tauri::command]
 pub async fn list_stashes(

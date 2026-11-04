@@ -1,6 +1,6 @@
-use super::{
-    repo_worker, AppState, RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto,
-    RebaseStepResultDto,
+use super::{repo_worker, AppState};
+use repo_service::wire::{
+    RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto, RebaseStepResultDto,
 };
 use tauri::State;
 

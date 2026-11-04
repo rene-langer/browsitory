@@ -1,6 +1,6 @@
-use super::{
-    repo_worker, AppState, CreatePullRequestDto, ForgeProviderDto, ForgeRepositoryDto,
-    PullRequestDto, PullRequestListDto,
+use super::{repo_worker, AppState};
+use repo_service::wire::{
+    CreatePullRequestDto, ForgeProviderDto, ForgeRepositoryDto, PullRequestDto, PullRequestListDto,
 };
 use tauri::State;
 

@@ -11,9 +11,10 @@
 //! test below writes `frontend/src/ipc/generated/wire-dto.ts` from them.
 
 use git_core::diff::DiffHunk;
+use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase};
 use serde::{Deserialize, Serialize};
 
-use crate::worker::{HookEvent, TransferEvent};
+use crate::worker::{HookEvent, HookSource, TransferEvent};
 
 #[derive(Clone, Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
@@ -21,24 +22,9 @@ use crate::worker::{HookEvent, TransferEvent};
 #[serde(rename_all = "camelCase")]
 pub struct TransferProgressDto {
     pub operation_id: String,
-    #[cfg_attr(
-        any(test, feature = "ts"),
-        ts(as = "git_core::remote::TransferOperation")
-    )]
-    pub operation: String,
-    #[cfg_attr(any(test, feature = "ts"),
-        ts(
-            // `TransferPhase` (declared in the same generated file) plus the phases only the
-            // transfer relay emits.
-            type = r#"TransferPhase | "Starting" | "RemoteFailed" | "Completed" | "Failed""#
-        )
-    )]
-    pub phase: String,
-    #[cfg_attr(
-        any(test, feature = "ts"),
-        ts(as = "Option<git_core::remote::TransferErrorKind>")
-    )]
-    pub error_kind: Option<String>,
+    pub operation: TransferOperation,
+    pub phase: TransferProgressPhaseDto,
+    pub error_kind: Option<TransferErrorKind>,
     pub current: usize,
     pub total: usize,
     pub received_bytes: usize,
@@ -52,12 +38,37 @@ pub struct TransferProgressDto {
     pub hook_output: Option<String>,
 }
 
+/// `TransferProgress.phase`: git-core's `TransferPhase` plus the phases only the transfer relay
+/// (`transfer_progress_dto`) emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "TransferProgressPhase"))]
+pub enum TransferProgressPhaseDto {
+    Starting,
+    Receiving,
+    Updating,
+    RunningHook,
+    RemoteFailed,
+    Completed,
+    Failed,
+}
+
+impl From<TransferPhase> for TransferProgressPhaseDto {
+    fn from(phase: TransferPhase) -> Self {
+        match phase {
+            TransferPhase::Receiving => Self::Receiving,
+            TransferPhase::Updating => Self::Updating,
+            TransferPhase::RunningHook => Self::RunningHook,
+        }
+    }
+}
+
 impl From<git_core::remote::TransferProgress> for TransferProgressDto {
     fn from(progress: git_core::remote::TransferProgress) -> Self {
         Self {
             operation_id: progress.operation_id,
-            operation: format!("{:?}", progress.operation),
-            phase: format!("{:?}", progress.phase),
+            operation: progress.operation,
+            phase: progress.phase.into(),
             error_kind: None,
             current: progress.current,
             total: progress.total,
@@ -80,8 +91,7 @@ pub struct StatusEntryDto {
     /// A staged rename's old path; always present (`null` otherwise).
     pub old_path: Option<String>,
     pub staged: bool,
-    #[cfg_attr(any(test, feature = "ts"), ts(as = "git_core::status::StatusKind"))]
-    pub kind: String,
+    pub kind: git_core::status::StatusKind,
 }
 
 impl From<git_core::status::StatusEntry> for StatusEntryDto {
@@ -90,7 +100,7 @@ impl From<git_core::status::StatusEntry> for StatusEntryDto {
             path: entry.path,
             old_path: entry.old_path,
             staged: entry.staged,
-            kind: format!("{:?}", entry.kind),
+            kind: entry.kind,
         }
     }
 }
@@ -553,11 +563,7 @@ pub struct HeadInfoDto {
     pub head_id: Option<String>,
     pub detached_at: Option<String>,
     pub head_pushed: bool,
-    #[cfg_attr(
-        any(test, feature = "ts"),
-        ts(as = "Option<git_core::repo::OperationKind>")
-    )]
-    pub operation: Option<String>,
+    pub operation: Option<git_core::repo::OperationKind>,
     pub squash_message: Option<String>,
     pub commit_hooks: Vec<String>,
     pub sequence: Option<SequenceProgressDto>,
@@ -578,11 +584,7 @@ pub struct HeadInfoDto {
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "TerminalRebase"))]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalRebaseDto {
-    #[cfg_attr(
-        any(test, feature = "ts"),
-        ts(as = "git_core::repo::TerminalRebaseKind")
-    )]
-    pub kind: String,
+    pub kind: git_core::repo::TerminalRebaseKind,
     pub branch: String,
     pub onto: String,
     pub current_step: usize,
@@ -592,7 +594,7 @@ pub struct TerminalRebaseDto {
 impl From<git_core::repo::TerminalRebase> for TerminalRebaseDto {
     fn from(rebase: git_core::repo::TerminalRebase) -> Self {
         Self {
-            kind: format!("{:?}", rebase.kind),
+            kind: rebase.kind,
             branch: rebase.branch,
             onto: rebase.onto,
             current_step: rebase.current_step,
@@ -635,8 +637,7 @@ impl From<ConfirmedAbortDto> for git_core::pick::ConfirmedAbort {
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "TerminalSequence"))]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSequenceDto {
-    #[cfg_attr(any(test, feature = "ts"), ts(as = "git_core::pick::SequenceKind"))]
-    pub kind: String,
+    pub kind: git_core::pick::SequenceKind,
     pub paused_on_conflict: bool,
     pub started_at: String,
     pub started_at_summary: String,
@@ -647,7 +648,7 @@ pub struct TerminalSequenceDto {
 impl From<git_core::pick::TerminalSequence> for TerminalSequenceDto {
     fn from(sequence: git_core::pick::TerminalSequence) -> Self {
         Self {
-            kind: format!("{:?}", sequence.kind),
+            kind: sequence.kind,
             paused_on_conflict: sequence.paused_on_conflict,
             started_at: sequence.started_at,
             started_at_summary: sequence.started_at_summary,
@@ -672,7 +673,7 @@ impl From<git_core::repo::HeadInfo> for HeadInfoDto {
             head_id: info.head_id,
             detached_at: info.detached_at,
             head_pushed: info.head_pushed,
-            operation: info.operation.map(|kind| format!("{:?}", kind)),
+            operation: info.operation,
             squash_message: info.squash_message,
             commit_hooks: info.commit_hooks,
             sequence: info.sequence.map(SequenceProgressDto::from),
@@ -706,13 +707,7 @@ pub struct RebaseInfoDto {
 #[serde(tag = "kind", content = "reason")]
 pub enum RebaseHealthDto {
     Paused,
-    Diverged(
-        #[cfg_attr(
-            any(test, feature = "ts"),
-            ts(as = "git_core::rebase::RebaseDivergence")
-        )]
-        String,
-    ),
+    Diverged(git_core::rebase::RebaseDivergence),
 }
 
 impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
@@ -725,9 +720,7 @@ impl From<git_core::repo::RebaseInfo> for RebaseInfoDto {
             total_steps: info.total_steps,
             health: match info.health {
                 RebaseHealth::Paused => RebaseHealthDto::Paused,
-                RebaseHealth::Diverged(reason) => {
-                    RebaseHealthDto::Diverged(format!("{:?}", reason))
-                }
+                RebaseHealth::Diverged(reason) => RebaseHealthDto::Diverged(reason),
             },
         }
     }
@@ -753,8 +746,7 @@ impl From<git_core::rebase::RebaseAbort> for RebaseAbortDto {
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "SequenceProgress"))]
 #[serde(rename_all = "camelCase")]
 pub struct SequenceProgressDto {
-    #[cfg_attr(any(test, feature = "ts"), ts(as = "git_core::pick::SequenceKind"))]
-    pub kind: String,
+    pub kind: git_core::pick::SequenceKind,
     pub current_step: usize,
     pub total_steps: usize,
     pub current_commit: String,
@@ -763,7 +755,7 @@ pub struct SequenceProgressDto {
 impl From<git_core::pick::SequenceProgress> for SequenceProgressDto {
     fn from(progress: git_core::pick::SequenceProgress) -> Self {
         Self {
-            kind: format!("{:?}", progress.kind),
+            kind: progress.kind,
             current_step: progress.current_step,
             total_steps: progress.total_steps,
             current_commit: progress.current_commit,
@@ -899,10 +891,17 @@ pub struct HookProgressDto {
     pub repo_path: String,
     pub operation_id: String,
     pub hook: String,
-    #[cfg_attr(any(test, feature = "ts"), ts(type = r#""Started" | "Finished""#))]
-    pub phase: &'static str,
-    #[cfg_attr(any(test, feature = "ts"), ts(as = "crate::worker::HookSource"))]
-    pub source: String,
+    pub phase: HookProgressPhaseDto,
+    pub source: HookSource,
+}
+
+/// `HookProgress.phase`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "HookProgressPhase"))]
+pub enum HookProgressPhaseDto {
+    Started,
+    Finished,
 }
 
 /// The payload of a hook event for `repo_path`: the desktop app's `hook-progress` event and
@@ -913,19 +912,19 @@ pub fn hook_progress_dto(repo_path: &str, event: HookEvent) -> HookProgressDto {
             operation_id,
             hook,
             source,
-        } => (operation_id, hook, "Started", source),
+        } => (operation_id, hook, HookProgressPhaseDto::Started, source),
         HookEvent::Finished {
             operation_id,
             hook,
             source,
-        } => (operation_id, hook, "Finished", source),
+        } => (operation_id, hook, HookProgressPhaseDto::Finished, source),
     };
     HookProgressDto {
         repo_path: repo_path.to_string(),
         operation_id,
         hook,
         phase,
-        source: format!("{:?}", source),
+        source,
     }
 }
 
@@ -1149,6 +1148,11 @@ impl From<TrailerDto> for git_core::commit::Trailer {
             value: dto.value,
         }
     }
+}
+
+/// The trailers a commit or amend request carries, for the worker.
+pub fn to_trailers(dtos: Vec<TrailerDto>) -> Vec<git_core::commit::Trailer> {
+    dtos.into_iter().map(Into::into).collect()
 }
 
 /// A person: the amend author override (in) and a recent author (out).
@@ -1637,8 +1641,7 @@ impl From<git_core::rebase::RebaseStepResult> for RebaseStepResultDto {
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "DiffLine"))]
 pub struct DiffLineDto {
-    #[cfg_attr(any(test, feature = "ts"), ts(as = "git_core::diff::DiffLineOrigin"))]
-    pub origin: String,
+    pub origin: git_core::diff::DiffLineOrigin,
     pub content: String,
 }
 
@@ -1665,7 +1668,7 @@ impl From<DiffHunk> for DiffHunkDto {
                 .lines
                 .into_iter()
                 .map(|l| DiffLineDto {
-                    origin: format!("{:?}", l.origin),
+                    origin: l.origin,
                     content: l.content,
                 })
                 .collect(),
@@ -1891,8 +1894,8 @@ pub fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             operation,
         } => TransferProgressDto {
             operation_id,
-            operation: format!("{operation:?}"),
-            phase: "Starting".to_string(),
+            operation,
+            phase: TransferProgressPhaseDto::Starting,
             error_kind: None,
             current: 0,
             total: 0,
@@ -1909,9 +1912,9 @@ pub fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
         } => TransferProgressDto {
             operation_id,
             // Only Fetch all reports per-remote failures.
-            operation: format!("{:?}", git_core::remote::TransferOperation::FetchAll),
-            phase: "RemoteFailed".to_string(),
-            error_kind: Some(format!("{error:?}")),
+            operation: TransferOperation::FetchAll,
+            phase: TransferProgressPhaseDto::RemoteFailed,
+            error_kind: Some(error),
             current: 0,
             total: 0,
             received_bytes: 0,
@@ -1928,9 +1931,13 @@ pub fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
             let failed = error.is_some();
             TransferProgressDto {
                 operation_id,
-                operation: format!("{operation:?}"),
-                phase: if failed { "Failed" } else { "Completed" }.to_string(),
-                error_kind: error.map(|kind| format!("{kind:?}")),
+                operation,
+                phase: if failed {
+                    TransferProgressPhaseDto::Failed
+                } else {
+                    TransferProgressPhaseDto::Completed
+                },
+                error_kind: error,
                 current: 0,
                 total: 0,
                 received_bytes: 0,
@@ -1960,12 +1967,12 @@ mod ts_bindings {
             git_core::rebase::RebaseDivergence,
             git_core::remote::TransferErrorKind,
             git_core::remote::TransferOperation,
-            git_core::remote::TransferPhase,
             git_core::repo::OperationKind,
             git_core::repo::TerminalRebaseKind,
             git_core::status::StatusKind,
             crate::worker::HookSource,
             TransferProgressDto,
+            TransferProgressPhaseDto,
             StatusEntryDto,
             BranchInfoDto,
             WorktreeInfoDto,
@@ -2000,6 +2007,7 @@ mod ts_bindings {
             ConflictSideDto,
             CommitOutcomeDto,
             HookProgressDto,
+            HookProgressPhaseDto,
             PickOutcomeDto,
             UndoStateDto,
             SignatureStatusDto,

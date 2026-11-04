@@ -1,4 +1,5 @@
-use super::{hook_event_channel, repo_worker, AppState, BranchInfoDto};
+use super::{hook_event_channel, repo_worker, AppState};
+use repo_service::wire::BranchInfoDto;
 use tauri::{AppHandle, State};
 #[tauri::command]
 pub async fn list_branches(

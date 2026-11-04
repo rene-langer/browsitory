@@ -1,4 +1,5 @@
-use super::{repo_worker, AppState, ChangedFileDto, CompareRangeDto, DiffHunkDto, DiffOptionsDto};
+use super::{repo_worker, AppState};
+use repo_service::wire::{ChangedFileDto, CompareRangeDto, DiffHunkDto, DiffOptionsDto};
 use tauri::State;
 
 #[tauri::command]

@@ -213,18 +213,4 @@ mod tests {
         assert!(request.recurse_submodules);
         assert!(request.https.is_none());
     }
-
-    #[test]
-    fn clone_progress_reports_its_operation_name() {
-        let dto = crate::commands::TransferProgressDto::from(git_core::remote::TransferProgress {
-            operation_id: "c".into(),
-            operation: git_core::remote::TransferOperation::Clone,
-            phase: git_core::remote::TransferPhase::Receiving,
-            current: 1,
-            total: 2,
-            received_bytes: 3,
-            message: None,
-        });
-        assert_eq!(dto.operation, "Clone");
-    }
 }

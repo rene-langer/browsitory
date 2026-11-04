@@ -6,7 +6,7 @@ pub enum StatusError {
     Read(#[from] git2::Error),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum StatusKind {
     New,

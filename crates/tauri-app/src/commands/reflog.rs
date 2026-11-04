@@ -1,6 +1,7 @@
 use tauri::State;
 
-use super::{repo_worker, AppState, ReflogEntryDto};
+use super::{repo_worker, AppState};
+use repo_service::wire::ReflogEntryDto;
 
 #[tauri::command]
 pub async fn list_reflog_refs(

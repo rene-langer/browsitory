@@ -26,7 +26,7 @@ pub enum HeadState {
     Detached(String),
 }
 
-// git-core stays serde-free; repo-service persists a mirror type (`StoredSnapshot`).
+// No serde here; repo-service persists a mirror type (`StoredSnapshot`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoSnapshot {
     pub head: HeadState,

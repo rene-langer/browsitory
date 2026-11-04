@@ -20,7 +20,7 @@ pub enum DiffError {
     Io(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum DiffLineOrigin {
     Add,

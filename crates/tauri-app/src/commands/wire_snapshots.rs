@@ -10,6 +10,19 @@ use serde::Serialize;
 
 use super::clone::{CloneErrorDto, CloneOutcomeDto};
 use super::*;
+use repo_service::wire::{
+    hook_progress_dto, BlameLineDto, BranchInfoDto, ChangedFileDto, CommitMessageSettingsDto,
+    CommitOutcomeDto, CommitSignatureDto, CompareRangeDto, ConflictSegmentDto, DiffHunkDto,
+    DiffSettingsDto, ExternalToolSettingsDto, FileHistoryEntryDto, FileSidesDto,
+    ForgeRepositoryDto, GitToolsDto, GraphCommitDto, HeadInfoDto, MarkResolvedOutcomeDto,
+    MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto,
+    PullRequestDto, PullRequestListDto, RebaseAbortDto, RebaseInfoDto, RebasePlanCommitDto,
+    RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto, SearchPageDto, SequenceAbortDto,
+    SequenceOutcomeDto, SequenceProgressDto, SignatureInputDto, StashApplyOutcomeDto,
+    StashEntryDto, StashFilesDto, StatusEntryDto, SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto,
+    TerminalSequenceDto, UndoOutcomeDto, UndoStateDto, UpstreamInfoDto, WorkspaceDto,
+    WorktreeInfoDto,
+};
 
 #[path = "../../../test-support/wire_fixtures.rs"]
 #[macro_use]
