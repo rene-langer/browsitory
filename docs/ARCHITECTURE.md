@@ -1567,6 +1567,16 @@ only `error`.
     (`tests/wire/dispatch-responses.txt`): the missing-field and wrong-type error of every
     params struct, the JSON-RPC error encoding, and the answers of the methods that take no
     params, with `BROWSITORY_CONFIG_DIR` set to an empty temp dir.
+  - Sidecar params: each arm of the `methods!` table names its handler's params struct, as in
+    `"get_status" => get_status(RepoPathParams, repos)`. The macro reads the request's `params`
+    into it with `serde_json::from_value` and answers a failure with the error's text, so
+    handlers take the typed struct. That text names the struct (`expected struct
+    RepoPathParams`), so renaming a params struct changes the wire. An arm with no params type,
+    as in `list_recent_repos()`, ignores the request's `params`. `tests/params_errors.rs` pins
+    more of this through the binary: wrong field types, a later or nested missing field, an
+    unknown enum value, extra fields and positional arrays (accepted), and methods without
+    params accepting anything. The params structs are not shared with the Tauri commands and
+    have no generated TypeScript.
   - `shared_dtos_match_across_transports` (sidecar) requires every case of a shared DTO in both
     transports (transport-only DTOs are listed with reasons) and pins the cases whose bytes
     differ in `cross-transport-differences.txt`. Both transports build the shared DTOs with the
