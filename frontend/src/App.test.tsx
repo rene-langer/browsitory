@@ -4,6 +4,15 @@ import App from "./App";
 import styles from "./App.module.css";
 import type { CommitOutcome, HookProgress, OperationKind, RepoClient, SequenceOutcome, TerminalSequence } from "./ipc/RepoClient";
 import { publishTransportStatus } from "./ipc/transportStatus";
+import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
+
+// The generated release notes, which App reads once at import. Tests swap the contents of this
+// array in place; by default it holds the real notes.
+const releaseNotes = vi.hoisted(() => [] as ReleaseNotesEntry[]);
+vi.mock("./generated/releaseNotes.json", async (importOriginal) => {
+  releaseNotes.push(...(await importOriginal<{ default: ReleaseNotesEntry[] }>()).default);
+  return { default: releaseNotes };
+});
 
 function unused(): never {
   throw new Error("not used in this test");
@@ -2127,5 +2136,72 @@ describe("App external tools", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Open terminal here" }));
     expect(await screen.findByText("Couldn't find the program 'kitty'.")).toBeInTheDocument();
     expect(openTerminal).toHaveBeenCalledWith("/repos/a");
+  });
+});
+
+describe("App release notes on a new version", () => {
+  const notes = (version: string, text: string): ReleaseNotesEntry => ({
+    version,
+    date: "2026-01-01",
+    groups: [{ title: "Topic", blocks: [{ items: [{ text }] }] }],
+  });
+  const internalOnly = (version: string): ReleaseNotesEntry => ({ version, date: "2026-01-01", groups: [] });
+
+  async function withReleaseNotes(entries: ReleaseNotesEntry[], run: () => Promise<void>) {
+    const saved = releaseNotes.splice(0, releaseNotes.length, ...entries);
+    try {
+      await run();
+    } finally {
+      releaseNotes.splice(0, releaseNotes.length, ...saved);
+    }
+  }
+
+  it("shows every release after a last-seen release that had nothing for users", async () => {
+    await withReleaseNotes(
+      [
+        notes("0.5.0", "Notes for 0.5.0"),
+        notes("0.4.0", "Notes for 0.4.0"),
+        internalOnly("0.3.5"),
+        notes("0.3.0", "Notes for 0.3.0"),
+      ],
+      async () => {
+        render(
+          <App client={fakeClient({ getAppVersion: async () => "0.5.0", getLastSeenVersion: async () => "0.3.5" })} />,
+        );
+        const dialog = await screen.findByRole("dialog", { name: "Release notes" });
+        expect(within(dialog).getByText("Notes for 0.5.0")).toBeInTheDocument();
+        expect(within(dialog).getByText("Notes for 0.4.0")).toBeInTheDocument();
+        expect(within(dialog).queryByText("Notes for 0.3.0")).toBeNull();
+      },
+    );
+  });
+
+  it("on a fresh install shows the newest release that has notes", async () => {
+    await withReleaseNotes(
+      [internalOnly("0.5.0"), notes("0.4.0", "Notes for 0.4.0"), notes("0.3.0", "Notes for 0.3.0")],
+      async () => {
+        render(<App client={fakeClient({ getAppVersion: async () => "0.5.0", getLastSeenVersion: async () => null })} />);
+        const dialog = await screen.findByRole("dialog", { name: "Release notes" });
+        expect(within(dialog).getByText("Notes for 0.4.0")).toBeInTheDocument();
+        expect(within(dialog).queryByText("Notes for 0.3.0")).toBeNull();
+      },
+    );
+  });
+
+  it("records the new version without opening when the new releases have nothing for users", async () => {
+    const setLastSeenVersion = vi.fn(async () => {});
+    await withReleaseNotes([internalOnly("0.3.5"), notes("0.3.0", "Notes for 0.3.0")], async () => {
+      render(
+        <App
+          client={fakeClient({
+            getAppVersion: async () => "0.3.5",
+            getLastSeenVersion: async () => "0.3.0",
+            setLastSeenVersion,
+          })}
+        />,
+      );
+      await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.3.5"));
+      expect(screen.queryByRole("dialog", { name: "Release notes" })).toBeNull();
+    });
   });
 });
