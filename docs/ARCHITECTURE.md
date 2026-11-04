@@ -1292,8 +1292,10 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   emptied folders pruned), then the tree's folders deepest first while empty (a file the
   checkout never wrote stops the pruning of its folder), then `.git`, then the destination if it
   is empty; then the entry (`remove_dir_all`), which frees the branch; then the new branch; then
-  the parent folders. A tree path that isn't UTF-8 is skipped (the walker takes `&str`), so such
-  a file stays and its folder is kept. Every libgit2 error of the add is
+  the parent folders. Tree paths go to the walker as raw bytes on Unix, so a name that isn't
+  UTF-8 (possible on Linux) is removed like any other (#262); on Windows a tree name is always
+  UTF-8, and one that isn't is skipped. A raw name that isn't exactly one plain component
+  (empty, `.`, `..`, holding `/` or NUL; git never writes these) is skipped too. Every libgit2 error of the add is
   `WorktreeError::AddFailed` ("Couldn't create the worktree: {reason}.", `reason` = libgit2's
   message); when anything is left in the destination (which didn't exist when the call
   started), it is kept and the error is `AddFailedFolderLeft`, naming the folder. git does it

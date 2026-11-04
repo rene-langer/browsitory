@@ -16,6 +16,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Close it, then try again to finish." (#303). Merge abort, cherry-pick, revert, rebase start
   and pull still show the raw error (#321).
 
+### Worktree add cleans up files with unusual names
+
+- Fixed: when adding a worktree failed part-way, files the checkout had already written were
+  not removed if their names weren't valid UTF-8 (possible on Linux). The new folder was then
+  kept and you had to delete it by hand. Those files are now removed like any other, and so is
+  the folder (#262).
+
 ### Internal: typed sidecar params
 
 - Changed: each method in the VSCode sidecar's `methods!` table now names its params struct,

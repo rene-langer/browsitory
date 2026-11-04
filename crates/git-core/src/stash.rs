@@ -492,7 +492,7 @@ fn save_path_limited_stash(
         // Removes the file and the folders the stash emptied, like git's clean -d; never a
         // symlink's target, never through one, and through held folders so a swap meanwhile
         // can't redirect it (#149).
-        crate::worktree_guard::remove_and_prune_beneath(&workdir, path)?;
+        crate::worktree_guard::remove_and_prune_beneath(&workdir, std::path::Path::new(path))?;
     }
     // 2. A tracked file replaced by a symlink (typechange) must be removed before its checkout:
     //    a forced checkout writes the file's content *through* the symlink, overwriting its
