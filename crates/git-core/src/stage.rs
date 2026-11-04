@@ -178,8 +178,17 @@ pub(crate) fn ensure_no_symlinked_parent(workdir: &Path, rel: &Path) -> Result<(
         match current.symlink_metadata() {
             Ok(meta) if meta.file_type().is_symlink() => return Err(StageError::InvalidPath),
             Ok(_) => {}
-            // Nothing below a missing folder exists either; the write will create it.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            // Nothing below a missing folder exists either; the write will create it. The same
+            // below a file where a folder should be (ENOTDIR, `a` a file for `a/b`): git counts
+            // the path as missing too (#213).
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                return Ok(())
+            }
             Err(e) => return Err(e.into()),
         }
     }

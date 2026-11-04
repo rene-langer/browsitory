@@ -677,19 +677,19 @@ fn mark_resolved_reports_a_file_it_cannot_read() {
     assert!(repo.index().unwrap().has_conflicts());
 }
 
-/// `sub/shared.txt` conflicts (merge of `feature` into the checked-out branch).
-fn make_conflicted_repo_in_sub() -> (tempfile::TempDir, git2::Repository) {
+/// `rel` conflicts (merge of `feature` into the checked-out branch).
+fn make_conflicted_repo_at(rel: &str) -> (tempfile::TempDir, git2::Repository) {
     let (dir, repo) = init_repo();
-    write_file(dir.path(), "sub/shared.txt", "base\n");
+    write_file(dir.path(), rel, "base\n");
     commit_all(&repo, "base");
     let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
         .name
         .clone();
     git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
-    write_file(dir.path(), "sub/shared.txt", "feature\n");
+    write_file(dir.path(), rel, "feature\n");
     commit_all(&repo, "feature");
     git_core::branch::switch_branch(&repo, &main_branch).unwrap();
-    write_file(dir.path(), "sub/shared.txt", "main\n");
+    write_file(dir.path(), rel, "main\n");
     commit_all(&repo, "main");
     git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
         .unwrap();
@@ -707,37 +707,42 @@ fn index_entries(repo: &git2::Repository, path: &str) -> Vec<(u32, git2::Oid, i3
         .collect()
 }
 
-/// #213: a file where a folder on the way should be. `git add sub/shared.txt` (the twin) and
-/// Mark resolved must leave the index the same: what git does there is what Mark resolved does.
+/// #213: a file where a folder on the way should be, right above the conflicted file or two
+/// levels up. `git add <path>` (the twin) and Mark resolved must leave the index the same: what
+/// git does there is what Mark resolved does.
 #[test]
 fn mark_resolved_matches_git_add_when_a_folder_on_the_way_is_a_file() {
-    let run = |use_git: bool| {
-        let (dir, repo) = make_conflicted_repo_in_sub();
-        std::fs::remove_dir_all(dir.path().join("sub")).unwrap();
-        std::fs::write(dir.path().join("sub"), "a file\n").unwrap();
-        let ok = if use_git {
-            test_support::git(dir.path(), &["add", "sub/shared.txt"])
-                .status
-                .success()
-        } else {
-            git_core::merge::mark_resolved(&repo, "sub/shared.txt", false).is_ok()
+    for (rel, file) in [("sub/shared.txt", "sub"), ("a/b/c.txt", "a")] {
+        let run = |use_git: bool| {
+            let (dir, repo) = make_conflicted_repo_at(rel);
+            std::fs::remove_dir_all(dir.path().join(file)).unwrap();
+            std::fs::write(dir.path().join(file), "a file\n").unwrap();
+            let ok = if use_git {
+                test_support::git(dir.path(), &["add", rel])
+                    .status
+                    .success()
+            } else {
+                let result = git_core::merge::mark_resolved(&repo, rel, false);
+                assert!(result.is_ok(), "{rel}: {result:?}");
+                true
+            };
+            (ok, index_entries(&repo, rel))
         };
-        (ok, index_entries(&repo, "sub/shared.txt"))
-    };
-    let git = run(true);
-    let ours = run(false);
-    // git sees no file there (`lstat` fails with ENOTDIR, which git counts as removed) and
-    // stages the deletion.
-    assert_eq!(git, (true, Vec::new()));
-    assert_eq!(ours.0, git.0, "succeeds or refuses as git does");
-    // The ids differ between the two runs (timestamps), so compare modes and stages.
-    let shape = |entries: &[(u32, git2::Oid, i32)]| -> Vec<(u32, i32)> {
-        entries
-            .iter()
-            .map(|(mode, _, stage)| (*mode, *stage))
-            .collect()
-    };
-    assert_eq!(shape(&ours.1), shape(&git.1));
+        let git = run(true);
+        let ours = run(false);
+        // git sees no file there (`lstat` fails with ENOTDIR, which git counts as removed) and
+        // stages the deletion.
+        assert_eq!(git, (true, Vec::new()), "{rel}");
+        assert_eq!(ours.0, git.0, "{rel}: succeeds or refuses as git does");
+        // The ids differ between the two runs (timestamps), so compare modes and stages.
+        let shape = |entries: &[(u32, git2::Oid, i32)]| -> Vec<(u32, i32)> {
+            entries
+                .iter()
+                .map(|(mode, _, stage)| (*mode, *stage))
+                .collect()
+        };
+        assert_eq!(shape(&ours.1), shape(&git.1), "{rel}");
+    }
 }
 
 /// A folder swapped for a link after the read is refused as one, never looked through (#199).
@@ -2693,6 +2698,131 @@ fn mark_resolved_reads_the_branch_of_a_linked_worktree_from_its_common_folder() 
     }
 }
 
+/// Replaces `shared.txt`'s `.git` folder (a nested repository) with a `gitdir:` file holding
+/// `target`.
+fn gitdir_file_at_shared(dir: &Path, target: &str) {
+    std::fs::remove_dir_all(dir.join("shared.txt/.git")).unwrap();
+    std::fs::write(dir.join("shared.txt/.git"), format!("gitdir: {target}\n")).unwrap();
+}
+
+/// #213: a relative `gitdir:` that climbs out of the work tree with `..` is refused, never
+/// opened by path; only an absolute `gitdir:` outside the work tree is.
+#[test]
+fn mark_resolved_refuses_a_relative_gitdir_that_leaves_the_work_tree() {
+    let elsewhere = tempfile::TempDir::new().unwrap();
+    let (dir, _repo) = make_conflicted_repo();
+    nested_repo_at_shared(dir.path());
+    let git_dir = elsewhere.path().join("nested.git");
+    std::fs::rename(dir.path().join("shared.txt/.git"), &git_dir).unwrap();
+    std::fs::create_dir(dir.path().join("shared.txt/.git")).unwrap();
+    // From `shared.txt`: `..` is the work tree root, one more `..` its parent, the temp folder
+    // both are in.
+    assert_eq!(dir.path().parent(), elsewhere.path().parent());
+    let name = elsewhere.path().file_name().unwrap().to_str().unwrap();
+    gitdir_file_at_shared(dir.path(), &format!("../../{name}/nested.git"));
+    assert_not_staged(
+        dir.path(),
+        NotStagedReason::Unsupported("a relative git folder path that leaves the work tree"),
+    );
+}
+
+/// #213: a `gitdir:` with very many components is refused before holding a folder for each.
+#[test]
+fn mark_resolved_refuses_a_gitdir_path_that_is_too_deep() {
+    let (dir, _repo) = make_conflicted_repo();
+    nested_repo_at_shared(dir.path());
+    gitdir_file_at_shared(dir.path(), &"x/".repeat(200));
+    assert_not_staged(
+        dir.path(),
+        NotStagedReason::Unsupported("a git folder path that is too deep"),
+    );
+}
+
+/// #213: a loose ref that exists but isn't a plain file (a link, a folder, or a link on the way
+/// to it), or a ref name that isn't a plain path, isn't reported as "no commit".
+#[test]
+fn mark_resolved_reports_a_ref_that_is_not_a_plain_file_as_unsupported() {
+    let (dir, _repo) = make_conflicted_repo();
+    let head = nested_repo_at_shared(dir.path());
+    let branch = nested_branch(dir.path());
+    std::fs::remove_file(dir.path().join("shared.txt/.git").join(&branch)).unwrap();
+    std::fs::create_dir(dir.path().join("shared.txt/.git").join(&branch)).unwrap();
+    // Even with the branch in `packed-refs`: git would refuse the folder too.
+    write_in_git_dir(dir.path(), "packed-refs", &format!("{head} {branch}\n"));
+    assert_not_staged(
+        dir.path(),
+        NotStagedReason::Unsupported("a ref that isn't a regular file"),
+    );
+
+    let (dir, _repo) = make_conflicted_repo();
+    nested_repo_at_shared(dir.path());
+    write_in_git_dir(dir.path(), "HEAD", "ref: refs/heads/../../config\n");
+    assert_not_staged(
+        dir.path(),
+        NotStagedReason::Unsupported("a malformed HEAD or ref"),
+    );
+}
+
+/// #213 (Unix): a loose ref that is a link, or below a linked `refs/heads`, isn't followed and
+/// isn't "no commit".
+#[cfg(unix)]
+#[test]
+fn mark_resolved_does_not_follow_a_linked_ref() {
+    let outside = tempfile::TempDir::new().unwrap();
+    let (dir, _repo) = make_conflicted_repo();
+    let head = nested_repo_at_shared(dir.path());
+    let branch = nested_branch(dir.path());
+    let loose = dir.path().join("shared.txt/.git").join(&branch);
+    std::fs::write(outside.path().join("ref"), format!("{head}\n")).unwrap();
+    std::fs::remove_file(&loose).unwrap();
+    std::os::unix::fs::symlink(outside.path().join("ref"), &loose).unwrap();
+    assert_not_staged(
+        dir.path(),
+        NotStagedReason::Unsupported("a ref that isn't a regular file"),
+    );
+
+    let (dir, _repo) = make_conflicted_repo();
+    nested_repo_at_shared(dir.path());
+    let branch = nested_branch(dir.path());
+    let heads = dir.path().join("shared.txt/.git/refs/heads");
+    let name = Path::new(&branch).file_name().unwrap();
+    std::fs::create_dir_all(outside.path().join("heads")).unwrap();
+    std::fs::write(outside.path().join("heads").join(name), format!("{head}\n")).unwrap();
+    std::fs::remove_dir_all(&heads).unwrap();
+    std::os::unix::fs::symlink(outside.path().join("heads"), &heads).unwrap();
+    assert_not_staged(
+        dir.path(),
+        NotStagedReason::Unsupported("a ref that isn't a regular file"),
+    );
+}
+
+/// #213 (Windows): a `gitdir:` naming a network share or a device is refused before anything
+/// is opened, so no share is contacted (and no credentials are sent to its host).
+#[cfg(windows)]
+#[test]
+fn mark_resolved_refuses_a_gitdir_on_a_network_share_or_device() {
+    for target in [
+        r"\\host.invalid\share\nested.git",
+        r"//host.invalid/share/nested.git",
+        r"\\?\UNC\host.invalid\share\nested.git",
+        r"\\.\pipe\nested.git",
+        r"\\?\C:\nested.git",
+    ] {
+        let (dir, _repo) = make_conflicted_repo();
+        nested_repo_at_shared(dir.path());
+        gitdir_file_at_shared(dir.path(), target);
+        let started = std::time::Instant::now();
+        assert_not_staged(
+            dir.path(),
+            NotStagedReason::Unsupported("a network or device path"),
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{target}"
+        );
+    }
+}
+
 /// Runs `f` on its own thread; `None` when it didn't finish within 5 seconds.
 #[cfg(unix)]
 fn within_5s<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
@@ -2735,10 +2865,14 @@ fn mark_resolved_does_not_follow_a_linked_git_folder_of_a_nested_repository() {
 #[cfg(unix)]
 #[test]
 fn mark_resolved_does_not_block_on_a_fifo_in_a_nested_repository() {
-    // A FIFO isn't a file: as if the HEAD (no repository) or the branch (unborn) were missing.
+    // A FIFO HEAD is as if there were no HEAD (no repository); a FIFO branch is a ref that isn't
+    // a file, never "no commit".
     let cases = [
         ("HEAD", NotStagedReason::NotARepository),
-        ("branch", NotStagedReason::NoCommit),
+        (
+            "branch",
+            NotStagedReason::Unsupported("a ref that isn't a regular file"),
+        ),
     ];
     for (fifo_at, reason) in cases {
         let (dir, repo) = make_conflicted_repo();

@@ -719,7 +719,7 @@ fn nested_head(
     path: &str,
     folder: &crate::worktree_guard::HeldFolder,
 ) -> Result<git2::Oid, MergeError> {
-    use crate::worktree_guard::{HeldFolder, Leaf};
+    use crate::worktree_guard::{HeldFolder, Kind, Leaf, Resolved};
     let refuse = |reason| MergeError::FolderNotStaged(path.to_string(), reason);
     let read = |dir: &HeldFolder, name: &str, limit| match dir.read(name, limit) {
         Ok(Some(Leaf::File { bytes, .. })) => Ok(Some(bytes)),
@@ -730,6 +730,12 @@ fn nested_head(
         Err(error) => Err(MergeError::Io(error)),
     };
     let not_a_repository = || refuse(NotStagedReason::NotARepository);
+    let resolve = |from: &HeldFolder, target: &str| match from.resolve(Path::new(target))? {
+        Resolved::Held(folder) => Ok(folder),
+        // A missing folder (a `gitdir:` whose git folder is gone), a link or not a folder.
+        Resolved::NotFound => Err(not_a_repository()),
+        Resolved::Refused(why) => Err(refuse(NotStagedReason::Unsupported(why))),
+    };
     let git = match read(folder, ".git", SMALL_GIT_FILE_LIMIT)? {
         Some(bytes) => {
             let text = String::from_utf8_lossy(&bytes);
@@ -738,20 +744,15 @@ fn nested_head(
                 .strip_prefix("gitdir:")
                 .map(str::trim)
                 .ok_or_else(not_a_repository)?;
-            folder.resolve(Path::new(target))?
+            resolve(folder, target)?
         }
-        // A folder; a link, FIFO or nothing gives `None`.
-        None => folder.resolve(Path::new(".git"))?,
-    }
-    .ok_or_else(not_a_repository)?;
+        // A folder; a link, FIFO or nothing gives `NotFound`.
+        None => resolve(folder, ".git")?,
+    };
     let mut content = read(&git, "HEAD", SMALL_GIT_FILE_LIMIT)?.ok_or_else(not_a_repository)?;
     // A linked worktree's branches are in its repository's common folder.
     let common = match read(&git, "commondir", SMALL_GIT_FILE_LIMIT)? {
-        Some(bytes) => {
-            let text = String::from_utf8_lossy(&bytes);
-            git.resolve(Path::new(text.trim()))?
-                .ok_or_else(not_a_repository)?
-        }
+        Some(bytes) => resolve(&git, String::from_utf8_lossy(&bytes).trim())?,
         None => git,
     };
     // git reads at most 5 refs, HEAD included (`SYMREF_MAXDEPTH`): HEAD and 4 symbolic refs.
@@ -776,8 +777,24 @@ fn nested_head(
         if !name.starts_with("refs/") {
             return Err(refuse(NotStagedReason::Unsupported("HEAD outside refs/")));
         }
+        // A name git itself would refuse (`check_refname_format`): empty, `.` or `..` parts.
+        if name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == ".." || part.contains('\\'))
+        {
+            return Err(refuse(NotStagedReason::Unsupported(
+                "a malformed HEAD or ref",
+            )));
+        }
         match read(&common, name, SMALL_GIT_FILE_LIMIT)? {
             Some(next) => content = next,
+            // Not a regular file, yet not absent either: a link, a folder, a FIFO, or a link on
+            // the way to it. Never "no commit".
+            None if common.kind(name)? != Kind::Missing => {
+                return Err(refuse(NotStagedReason::Unsupported(
+                    "a ref that isn't a regular file",
+                )))
+            }
             None => {
                 let packed = read(&common, "packed-refs", PACKED_REFS_LIMIT)?.unwrap_or_default();
                 let id = String::from_utf8_lossy(&packed)

@@ -17,7 +17,7 @@ use std::path::Path;
 
 #[cfg(test)]
 use super::no_step;
-use super::{Content, HeldFolder, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
+use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
 
 /// The folders from the work tree root down to the leaf's parent, each held open.
 pub(super) struct Beneath {
@@ -643,6 +643,25 @@ impl Folder {
     pub(super) fn stat(&self) -> io::Result<super::FileStat> {
         Ok(file_stat(&fstat(self.0.as_raw_fd())?))
     }
+
+    /// See `worktree_guard::HeldFolder::kind`.
+    pub(super) fn kind(&self, rel: &Path, step: StepFn<'_>) -> io::Result<Kind> {
+        let root = self.0.try_clone()?;
+        let at = match walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, step)? {
+            Walk::Found(at) => at,
+            Walk::Link => return Ok(Kind::BeyondLink),
+            Walk::Missing | Walk::NotDir => return Ok(Kind::Missing),
+        };
+        Ok(match stat_at(at.parent(), at.leaf())? {
+            None => Kind::Missing,
+            Some(stat) => match file_type(&stat) {
+                libc::S_IFREG => Kind::File,
+                libc::S_IFLNK => Kind::Link,
+                libc::S_IFDIR => Kind::Folder,
+                _ => Kind::Other,
+            },
+        })
+    }
 }
 
 /// See `worktree_guard::probe_beneath`.
@@ -672,10 +691,7 @@ pub(super) fn probe(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<
             Ok(fd) => {
                 let mut chain: Vec<Folder> = at.dirs.into_iter().map(Folder).collect();
                 chain.push(Folder(fd));
-                return Ok(Probe::Folder(HeldFolder {
-                    chain,
-                    root: workdir.to_path_buf(),
-                }));
+                return Ok(Probe::Folder(HeldFolder::in_work_tree(chain, workdir)?));
             }
             // Swapped since the `fstatat`: classified again.
             Err(error) if gone(&error) => {}

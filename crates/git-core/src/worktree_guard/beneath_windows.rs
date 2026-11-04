@@ -50,7 +50,7 @@ use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 
 use super::reparse::{self, leaf_action, LeafAction, FILE_ATTRIBUTE_DIRECTORY};
-use super::{Content, HeldFolder, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
+use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
 const FILE_READ_ATTRIBUTES: u32 = 0x0080;
@@ -1567,6 +1567,24 @@ impl Folder {
     pub(super) fn stat(&self) -> io::Result<super::FileStat> {
         Ok(super::FileStat::of(&self.0.metadata()?))
     }
+
+    /// See `worktree_guard::HeldFolder::kind`.
+    pub(super) fn kind(&self, rel: &Path, step: StepFn<'_>) -> io::Result<Kind> {
+        let root = self.0.try_clone()?;
+        let at = match walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, step) {
+            Ok(Walk::Found(at)) => at,
+            Ok(Walk::Link) => return Ok(Kind::BeyondLink),
+            Ok(Walk::Missing | Walk::NotDir) => return Ok(Kind::Missing),
+            Err(error) if missing(&error) => return Ok(Kind::Missing),
+            Err(error) => return Err(error),
+        };
+        Ok(match open_leaf(&at, Purpose::Read)? {
+            None => Kind::Missing,
+            Some((_, Found::Link)) => Kind::Link,
+            Some((_, Found::Dir)) => Kind::Folder,
+            Some((_, Found::File { .. })) => Kind::File,
+        })
+    }
 }
 
 /// See `worktree_guard::probe_beneath`. Windows has no FIFOs; a device can't be in a folder.
@@ -1604,10 +1622,7 @@ pub(super) fn probe(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<
         }
         let mut chain: Vec<Folder> = at.dirs.into_iter().map(Folder).collect();
         chain.push(Folder(dir));
-        return Ok(Probe::Folder(HeldFolder {
-            chain,
-            root: workdir.to_path_buf(),
-        }));
+        return Ok(Probe::Folder(HeldFolder::in_work_tree(chain, workdir)?));
     }
     Err(io::Error::other(
         "the working tree kept changing while it was being read",
