@@ -298,7 +298,7 @@ fn mark_resolved_does_not_block_on_a_fifo() {
     let finished = rx.recv_timeout(std::time::Duration::from_secs(5));
     if finished.is_err() {
         // Unblock the stuck reader so the test process can exit.
-        let _ = std::fs::OpenOptions::new().write(true).open(&fifo);
+        unblock_fifo(&fifo);
     }
     assert_eq!(
         finished,
@@ -410,7 +410,7 @@ fn mark_resolved_does_not_block_on_a_fifo_swapped_in_after_the_check() {
     let finished = rx.recv_timeout(std::time::Duration::from_secs(5));
     if finished.is_err() {
         // Unblock the stuck reader so the test process can exit.
-        let _ = std::fs::OpenOptions::new().write(true).open(&fifo);
+        unblock_fifo(&fifo);
     }
     assert_eq!(
         finished,
@@ -675,6 +675,69 @@ fn mark_resolved_reports_a_file_it_cannot_read() {
         "'shared.txt' can't be read safely; check its permissions and try again."
     );
     assert!(repo.index().unwrap().has_conflicts());
+}
+
+/// `sub/shared.txt` conflicts (merge of `feature` into the checked-out branch).
+fn make_conflicted_repo_in_sub() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "sub/shared.txt", "base\n");
+    commit_all(&repo, "base");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), "sub/shared.txt", "feature\n");
+    commit_all(&repo, "feature");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), "sub/shared.txt", "main\n");
+    commit_all(&repo, "main");
+    git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+        .unwrap();
+    (dir, repo)
+}
+
+/// `path`'s index entries as `git ls-files -s` lists them: (mode, id, stage).
+fn index_entries(repo: &git2::Repository, path: &str) -> Vec<(u32, git2::Oid, i32)> {
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    index
+        .iter()
+        .filter(|entry| entry.path == path.as_bytes())
+        .map(|entry| (entry.mode, entry.id, ((entry.flags >> 12) & 3) as i32))
+        .collect()
+}
+
+/// #213: a file where a folder on the way should be. `git add sub/shared.txt` (the twin) and
+/// Mark resolved must leave the index the same: what git does there is what Mark resolved does.
+#[test]
+fn mark_resolved_matches_git_add_when_a_folder_on_the_way_is_a_file() {
+    let run = |use_git: bool| {
+        let (dir, repo) = make_conflicted_repo_in_sub();
+        std::fs::remove_dir_all(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub"), "a file\n").unwrap();
+        let ok = if use_git {
+            test_support::git(dir.path(), &["add", "sub/shared.txt"])
+                .status
+                .success()
+        } else {
+            git_core::merge::mark_resolved(&repo, "sub/shared.txt", false).is_ok()
+        };
+        (ok, index_entries(&repo, "sub/shared.txt"))
+    };
+    let git = run(true);
+    let ours = run(false);
+    // git sees no file there (`lstat` fails with ENOTDIR, which git counts as removed) and
+    // stages the deletion.
+    assert_eq!(git, (true, Vec::new()));
+    assert_eq!(ours.0, git.0, "succeeds or refuses as git does");
+    // The ids differ between the two runs (timestamps), so compare modes and stages.
+    let shape = |entries: &[(u32, git2::Oid, i32)]| -> Vec<(u32, i32)> {
+        entries
+            .iter()
+            .map(|(mode, _, stage)| (*mode, *stage))
+            .collect()
+    };
+    assert_eq!(shape(&ours.1), shape(&git.1));
 }
 
 /// A folder swapped for a link after the read is refused as one, never looked through (#199).
@@ -2378,35 +2441,256 @@ fn mark_resolved_follows_a_gitdir_file_of_a_nested_repository() {
     assert_eq!(staged_entry(&repo, "shared.txt"), (0o160000, head));
 }
 
-/// A nested repository with no commit yet, and a folder of plain files, aren't staged: git
-/// stages a folder only as a repository's commit (#213).
-#[test]
-fn mark_resolved_refuses_a_folder_without_a_commit_checked_out() {
-    let (dir, repo) = make_conflicted_repo();
-    std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
-    git2::Repository::init(dir.path().join("shared.txt")).unwrap();
+use git_core::merge::NotStagedReason;
+
+/// Mark resolved on `shared.txt` refuses to stage the folder there for `reason`; nothing staged.
+fn assert_not_staged(dir: &Path, reason: NotStagedReason) -> String {
+    let repo = git2::Repository::open(dir).unwrap();
     let error = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap_err();
     assert!(
-        matches!(error, git_core::merge::MergeError::FolderNotStaged(ref p) if p == "shared.txt"),
+        matches!(error, MergeError::FolderNotStaged(ref p, r) if p == "shared.txt" && r == reason),
         "{error:?}"
     );
-    assert_eq!(
-        error.to_string(),
-        "'shared.txt' is a folder. Only a repository with a commit checked out can be marked \
-         resolved as a folder."
-    );
     assert!(repo.index().unwrap().has_conflicts());
+    error.to_string()
+}
 
-    let (dir, repo) = make_conflicted_repo();
+/// A nested repository with no commit yet, and a folder of plain files, aren't staged: git
+/// stages a folder only as a repository's commit (#213). Each says why.
+#[test]
+fn mark_resolved_refuses_a_folder_without_a_commit_checked_out() {
+    let (dir, _repo) = make_conflicted_repo();
+    std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+    git2::Repository::init(dir.path().join("shared.txt")).unwrap();
+    assert_eq!(
+        assert_not_staged(dir.path(), NotStagedReason::NoCommit),
+        "'shared.txt' is a repository without a commit checked out. Commit in it first, then \
+         try again."
+    );
+
+    let (dir, _repo) = make_conflicted_repo();
     std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
     write_file(dir.path(), "shared.txt/a.txt", "a\n");
     write_file(dir.path(), "shared.txt/b/c.txt", "c\n");
-    let error = git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap_err();
-    assert!(
-        matches!(error, git_core::merge::MergeError::FolderNotStaged(ref p) if p == "shared.txt"),
-        "{error:?}"
+    assert_eq!(
+        assert_not_staged(dir.path(), NotStagedReason::NotARepository),
+        "'shared.txt' is a folder, not a repository. Only a repository can be marked resolved \
+         as a folder."
     );
-    assert!(repo.index().unwrap().has_conflicts());
+}
+
+/// Writes `content` to the file `rel` inside `shared.txt`'s git folder.
+fn write_in_git_dir(dir: &Path, rel: &str, content: &str) {
+    let path = dir.join("shared.txt/.git").join(rel);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, content).unwrap();
+}
+
+/// The branch the nested repository at `shared.txt` has checked out (`refs/heads/…`).
+fn nested_branch(dir: &Path) -> String {
+    let head = std::fs::read_to_string(dir.join("shared.txt/.git/HEAD")).unwrap();
+    head.trim().strip_prefix("ref: ").unwrap().to_string()
+}
+
+/// `packed-refs` as git writes it, with a comment, a peeled tag (`^` line) and CRLF line ends,
+/// is read for the branch (#213).
+#[test]
+fn mark_resolved_reads_packed_refs_with_peeled_lines_comments_and_crlf() {
+    let (dir, _repo) = make_conflicted_repo();
+    let head = nested_repo_at_shared(dir.path());
+    let branch = nested_branch(dir.path());
+    std::fs::remove_file(dir.path().join("shared.txt/.git").join(&branch)).unwrap();
+    let other = "1111111111111111111111111111111111111111";
+    write_in_git_dir(
+        dir.path(),
+        "packed-refs",
+        &format!(
+            "# pack-refs with: peeled fully-peeled sorted \r\n{other} refs/heads/a\r\n\
+             {other} refs/tags/v1\r\n^{other}\r\n{head} {branch}\r\n"
+        ),
+    );
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(staged_entry(&repo, "shared.txt"), (0o160000, head));
+}
+
+/// A branch neither loose nor in `packed-refs` is an unborn branch: no commit (#213).
+#[test]
+fn mark_resolved_reports_a_branch_missing_from_loose_and_packed_refs_as_no_commit() {
+    let (dir, _repo) = make_conflicted_repo();
+    let head = nested_repo_at_shared(dir.path());
+    let branch = nested_branch(dir.path());
+    std::fs::remove_file(dir.path().join("shared.txt/.git").join(&branch)).unwrap();
+    write_in_git_dir(
+        dir.path(),
+        "packed-refs",
+        &format!("{head} refs/heads/other\n"),
+    );
+    assert_not_staged(dir.path(), NotStagedReason::NoCommit);
+}
+
+/// Symbolic refs are followed as deep as git follows them (HEAD and 4 more), no deeper (#213).
+#[test]
+fn mark_resolved_follows_symbolic_refs_up_to_gits_depth() {
+    let chain = |links: usize| {
+        let (dir, repo) = make_conflicted_repo();
+        let head = nested_repo_at_shared(dir.path());
+        write_in_git_dir(dir.path(), "HEAD", "ref: refs/heads/l1\n");
+        for n in 1..links {
+            write_in_git_dir(
+                dir.path(),
+                &format!("refs/heads/l{n}"),
+                &format!("ref: refs/heads/l{}\n", n + 1),
+            );
+        }
+        write_in_git_dir(
+            dir.path(),
+            &format!("refs/heads/l{links}"),
+            &format!("{head}\n"),
+        );
+        drop(repo);
+        (dir, head)
+    };
+    let (dir, head) = chain(4);
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    assert_eq!(staged_entry(&repo, "shared.txt"), (0o160000, head));
+
+    let (dir, _) = chain(5);
+    assert_not_staged(
+        dir.path(),
+        NotStagedReason::Unsupported("symbolic refs nested too deeply"),
+    );
+}
+
+/// Only a full 40-digit hexadecimal id is taken (git2 would take a prefix); a SHA-256 id, the
+/// reftable stub and a per-worktree ref say they aren't supported, never "no commit" (#213).
+#[test]
+fn mark_resolved_says_which_repository_formats_it_cannot_read() {
+    let cases: [(&str, &str, &str); 7] = [
+        (
+            "HEAD",
+            "0123456789abcdef0123456789abcdef0123456\n",
+            "a malformed HEAD or ref",
+        ),
+        (
+            "HEAD",
+            "0123456789abcdef0123456789abcdef0123456z\n",
+            "a malformed HEAD or ref",
+        ),
+        (
+            "HEAD",
+            &format!("{}\n", "ab".repeat(32)),
+            "SHA-256 object ids",
+        ),
+        ("HEAD", "ref: refs/heads/.invalid\n", "reftable refs"),
+        (
+            "HEAD",
+            "ref: refs/worktree/x\n",
+            "HEAD on a per-worktree ref",
+        ),
+        ("HEAD", "ref: HEAD\n", "HEAD outside refs/"),
+        (
+            "HEAD",
+            &"0".repeat(5000),
+            "a file in its git folder is too large",
+        ),
+    ];
+    for (file, content, what) in cases {
+        let (dir, _repo) = make_conflicted_repo();
+        nested_repo_at_shared(dir.path());
+        write_in_git_dir(dir.path(), file, content);
+        assert_not_staged(dir.path(), NotStagedReason::Unsupported(what));
+    }
+    let (dir, _repo) = make_conflicted_repo();
+    nested_repo_at_shared(dir.path());
+    let branch = nested_branch(dir.path());
+    write_in_git_dir(dir.path(), &branch, "0123\n");
+    assert_eq!(
+        assert_not_staged(
+            dir.path(),
+            NotStagedReason::Unsupported("a malformed HEAD or ref")
+        ),
+        "Browsitory can't read which commit the repository 'shared.txt' has checked out (a \
+         malformed HEAD or ref). Stage it with git."
+    );
+    let (dir, _repo) = make_conflicted_repo();
+    nested_repo_at_shared(dir.path());
+    write_in_git_dir(dir.path(), "HEAD", &format!("{}\n", "ab".repeat(32)));
+    assert_eq!(
+        assert_not_staged(
+            dir.path(),
+            NotStagedReason::Unsupported("SHA-256 object ids")
+        ),
+        "Browsitory can't read which commit the repository 'shared.txt' has checked out \
+         (SHA-256 object ids). Stage it with git."
+    );
+}
+
+/// An oversized `.git` file is refused unread past its limit (#213).
+#[test]
+fn mark_resolved_refuses_an_oversized_gitdir_file() {
+    let (dir, _repo) = make_conflicted_repo();
+    nested_repo_at_shared(dir.path());
+    std::fs::remove_dir_all(dir.path().join("shared.txt/.git")).unwrap();
+    std::fs::write(
+        dir.path().join("shared.txt/.git"),
+        format!("gitdir: {}\n", "a/".repeat(4000)),
+    )
+    .unwrap();
+    assert_not_staged(
+        dir.path(),
+        NotStagedReason::Unsupported("a file in its git folder is too large"),
+    );
+}
+
+/// A `gitdir:` to a folder that is gone (a submodule's, after the repository moved) is no
+/// repository, not an I/O error (#213).
+#[test]
+fn mark_resolved_refuses_a_gitdir_file_whose_folder_is_gone() {
+    let gone = tempfile::TempDir::new().unwrap();
+    for target in [
+        gone.path().join("missing.git").display().to_string(),
+        "../.git/modules/missing".to_string(),
+    ] {
+        let (dir, _repo) = make_conflicted_repo();
+        nested_repo_at_shared(dir.path());
+        std::fs::remove_dir_all(dir.path().join("shared.txt/.git")).unwrap();
+        std::fs::write(
+            dir.path().join("shared.txt/.git"),
+            format!("gitdir: {target}\n"),
+        )
+        .unwrap();
+        assert_not_staged(dir.path(), NotStagedReason::NotARepository);
+    }
+}
+
+/// A linked worktree of another repository: its `.git` names `<repo>/.git/worktrees/<name>`,
+/// whose `commondir` holds the branch (#213). libgit2 writes it absolute, git relative
+/// (`../..`); both are read.
+#[test]
+fn mark_resolved_reads_the_branch_of_a_linked_worktree_from_its_common_folder() {
+    for relative in [false, true] {
+        let (main_dir, main) = init_repo();
+        write_file(main_dir.path(), "m.txt", "m\n");
+        commit_all(&main, "main");
+        let (dir, repo) = make_conflicted_repo();
+        std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+        main.worktree("wt", &dir.path().join("shared.txt"), None)
+            .unwrap();
+        let head = main.head().unwrap().target().unwrap();
+        let commondir = main_dir.path().join(".git/worktrees/wt/commondir");
+        if relative {
+            std::fs::write(&commondir, "../..\n").unwrap();
+        } else {
+            assert!(Path::new(std::fs::read_to_string(&commondir).unwrap().trim()).is_absolute());
+        }
+        // The branch is only in the common folder.
+        assert!(main_dir.path().join(".git/refs/heads/wt").is_file());
+        git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        assert_eq!(staged_entry(&repo, "shared.txt"), (0o160000, head));
+    }
 }
 
 /// Runs `f` on its own thread; `None` when it didn't finish within 5 seconds.
@@ -2442,12 +2726,8 @@ fn mark_resolved_does_not_follow_a_linked_git_folder_of_a_nested_repository() {
         dir.path().join("shared.txt/.git"),
     )
     .unwrap();
-    let result = git_core::merge::mark_resolved(&repo, "shared.txt", false);
-    assert!(
-        matches!(result, Err(git_core::merge::MergeError::FolderNotStaged(_))),
-        "{result:?}"
-    );
-    assert!(repo.index().unwrap().has_conflicts());
+    drop(repo);
+    assert_not_staged(dir.path(), NotStagedReason::NotARepository);
 }
 
 /// A FIFO inside the nested repository (here its HEAD, then its branch) is never opened for
@@ -2455,7 +2735,12 @@ fn mark_resolved_does_not_follow_a_linked_git_folder_of_a_nested_repository() {
 #[cfg(unix)]
 #[test]
 fn mark_resolved_does_not_block_on_a_fifo_in_a_nested_repository() {
-    for fifo_at in ["HEAD", "branch"] {
+    // A FIFO isn't a file: as if the HEAD (no repository) or the branch (unborn) were missing.
+    let cases = [
+        ("HEAD", NotStagedReason::NotARepository),
+        ("branch", NotStagedReason::NoCommit),
+    ];
+    for (fifo_at, reason) in cases {
         let (dir, repo) = make_conflicted_repo();
         nested_repo_at_shared(dir.path());
         let git_dir = dir.path().join("shared.txt/.git");
@@ -2477,11 +2762,16 @@ fn mark_resolved_does_not_block_on_a_fifo_in_a_nested_repository() {
         });
         if finished.is_none() {
             // Unblock the stuck reader so the test process can exit.
-            let _ = std::fs::OpenOptions::new().write(true).open(&fifo);
+            unblock_fifo(&fifo);
         }
-        assert!(
-            matches!(finished, Some(Err(_))),
-            "{fifo_at}: blocked on or staged a FIFO: {finished:?}"
+        assert_eq!(
+            finished,
+            Some(Err(MergeError::FolderNotStaged(
+                "shared.txt".into(),
+                reason
+            )
+            .to_string())),
+            "{fifo_at}: blocked on or staged a FIFO"
         );
         let repo = git2::Repository::open(dir.path()).unwrap();
         assert!(repo.index().unwrap().has_conflicts());
@@ -2507,7 +2797,7 @@ fn mark_resolved_does_not_block_on_a_fifo_swapped_in_for_a_folder() {
         .map_err(|error| error.to_string())
     });
     if finished.is_none() {
-        let _ = std::fs::OpenOptions::new().write(true).open(&folder);
+        unblock_fifo(&folder);
     }
     assert_eq!(
         finished,
@@ -2536,6 +2826,163 @@ fn mark_resolved_does_not_stage_a_link_swapped_in_for_a_folder() {
         std::fs::remove_dir_all(&folder).unwrap();
         std::os::unix::fs::symlink(&target, &folder).unwrap();
     });
-    assert!(result.is_err(), "{result:?}");
+    assert!(
+        matches!(result, Err(MergeError::Unreadable(ref p)) if p == "shared.txt"),
+        "{result:?}"
+    );
+    assert!(repo.index().unwrap().has_conflicts());
+}
+
+/// Opens the FIFO `path` for writing without blocking, retrying for 5 seconds, so a reader
+/// stuck on it wakes up. Never blocks the test itself (a blocking open would wait forever if
+/// nothing reads).
+#[cfg(unix)]
+fn unblock_fifo(path: &Path) {
+    use std::os::unix::fs::OpenOptionsExt;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let writer = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path);
+        if writer.is_ok() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// Runs Mark resolved on `shared.txt` in `dir` on its own thread, with `swap` run once the
+/// folder there is held and before anything in it is read; `None` when it didn't finish within
+/// 5 seconds (`fifo` is then unblocked).
+#[cfg(unix)]
+fn mark_resolved_swapping_the_held_folder(
+    dir: &Path,
+    fifo: Option<std::path::PathBuf>,
+    swap: impl FnMut() + Send + 'static,
+) -> Option<Result<git_core::merge::MarkResolvedOutcome, String>> {
+    let root = dir.to_path_buf();
+    let mut swap = swap;
+    let finished = within_5s(move || {
+        let repo = git2::Repository::open(&root).unwrap();
+        git_core::merge::mark_resolved_with_pauses(
+            &repo,
+            "shared.txt",
+            false,
+            &mut || {},
+            &mut swap,
+        )
+        .map_err(|error| error.to_string())
+    });
+    if let (None, Some(fifo)) = (&finished, fifo) {
+        unblock_fifo(&fifo);
+    }
+    finished
+}
+
+/// #213: once the folder is held, swapping its path for a FIFO changes nothing: the commit staged
+/// is the held repository's, read through its handle, and the FIFO is never opened.
+#[cfg(unix)]
+#[test]
+fn a_fifo_swapped_in_for_the_held_folder_is_never_opened() {
+    let (dir, repo) = make_conflicted_repo();
+    let head = nested_repo_at_shared(dir.path());
+    drop(repo);
+    let folder = dir.path().join("shared.txt");
+    let moved = dir.path().join("moved");
+    let (from, to) = (folder.clone(), moved.clone());
+    let finished =
+        mark_resolved_swapping_the_held_folder(dir.path(), Some(folder.clone()), move || {
+            std::fs::rename(&from, &to).unwrap();
+            mkfifo(&from);
+        });
+    assert_eq!(
+        finished,
+        Some(Ok(git_core::merge::MarkResolvedOutcome::Resolved))
+    );
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert_eq!(staged_entry(&repo, "shared.txt"), (0o160000, head));
+}
+
+/// #213: once the folder is held, swapping its path for a link to a repository outside stages
+/// neither the link nor that repository's commit: the held repository's commit is staged.
+#[cfg(unix)]
+#[test]
+fn a_link_swapped_in_for_the_held_folder_is_never_followed() {
+    let (outside_dir, outside) = init_repo();
+    write_file(outside_dir.path(), "o.txt", "o\n");
+    commit_all(&outside, "outside");
+    let outside_head = outside.head().unwrap().target().unwrap();
+    let (dir, repo) = make_conflicted_repo();
+    let head = nested_repo_at_shared(dir.path());
+    drop(repo);
+    let folder = dir.path().join("shared.txt");
+    let moved = dir.path().join("moved");
+    let target = outside_dir.path().to_path_buf();
+    let finished = mark_resolved_swapping_the_held_folder(dir.path(), None, move || {
+        std::fs::rename(&folder, &moved).unwrap();
+        std::os::unix::fs::symlink(&target, &folder).unwrap();
+    });
+    assert_eq!(
+        finished,
+        Some(Ok(git_core::merge::MarkResolvedOutcome::Resolved))
+    );
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert_ne!(head, outside_head);
+    assert_eq!(staged_entry(&repo, "shared.txt"), (0o160000, head));
+}
+
+/// #213: once the folder is held, a different repository moved in at its path isn't read.
+#[cfg(unix)]
+#[test]
+fn another_repository_swapped_in_for_the_held_folder_is_not_read() {
+    let (dir, repo) = make_conflicted_repo();
+    let head = nested_repo_at_shared(dir.path());
+    drop(repo);
+    let (other_dir, other) = init_repo();
+    write_file(other_dir.path(), "x.txt", "x\n");
+    commit_all(&other, "other");
+    let other_head = other.head().unwrap().target().unwrap();
+    drop(other);
+    let folder = dir.path().join("shared.txt");
+    let moved = dir.path().join("moved");
+    let other_path = other_dir.path().to_path_buf();
+    let finished = mark_resolved_swapping_the_held_folder(dir.path(), None, move || {
+        std::fs::rename(&folder, &moved).unwrap();
+        std::fs::rename(&other_path, &folder).unwrap();
+    });
+    assert_eq!(
+        finished,
+        Some(Ok(git_core::merge::MarkResolvedOutcome::Resolved))
+    );
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert_ne!(head, other_head);
+    assert_eq!(staged_entry(&repo, "shared.txt"), (0o160000, head));
+}
+
+/// #213: once the folder is held, its HEAD swapped for a FIFO is never opened; the folder is
+/// refused as one without a repository.
+#[cfg(unix)]
+#[test]
+fn a_fifo_swapped_in_for_the_held_repositorys_head_is_never_opened() {
+    let (dir, repo) = make_conflicted_repo();
+    nested_repo_at_shared(dir.path());
+    drop(repo);
+    let head = dir.path().join("shared.txt/.git/HEAD");
+    let fifo = head.clone();
+    let finished =
+        mark_resolved_swapping_the_held_folder(dir.path(), Some(head.clone()), move || {
+            std::fs::remove_file(&fifo).unwrap();
+            mkfifo(&fifo);
+        });
+    assert_eq!(
+        finished,
+        Some(Err(MergeError::FolderNotStaged(
+            "shared.txt".into(),
+            NotStagedReason::NotARepository
+        )
+        .to_string()))
+    );
+    let repo = git2::Repository::open(dir.path()).unwrap();
     assert!(repo.index().unwrap().has_conflicts());
 }

@@ -44,7 +44,7 @@
 
 use std::ffi::{c_void, OsStr, OsString};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
@@ -1496,7 +1496,10 @@ pub(super) fn clear_hazard(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::
 
 /// See `worktree_guard::read_beneath`.
 pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<Leaf>> {
-    read_walked(walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step))
+    read_walked(
+        walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step),
+        u64::MAX,
+    )
 }
 
 /// A folder held open by its handle (see `worktree_guard::HeldFolder`), without sharing delete,
@@ -1504,10 +1507,61 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
 pub(super) struct Folder(File);
 
 impl Folder {
-    /// [`read`] below this folder, walked from its handle, never from a path.
-    pub(super) fn read(&self, rel: &Path, step: StepFn<'_>) -> io::Result<Option<Leaf>> {
+    /// Opens the folder `path` by path (links on the way followed), held as `walk` holds the
+    /// work tree root. `None` when it is missing or not a folder.
+    pub(super) fn open(path: &Path) -> io::Result<Option<Folder>> {
+        let opened = OpenOptions::new()
+            .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path);
+        match opened {
+            Ok(dir) if dir.metadata()?.is_dir() => Ok(Some(Folder(dir))),
+            Ok(_) => Ok(None),
+            Err(error) if missing(&error) || error.raw_os_error() == Some(ERROR_DIRECTORY) => {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    pub(super) fn try_clone(&self) -> io::Result<Folder> {
+        Ok(Folder(self.0.try_clone()?))
+    }
+
+    /// The folder `name` directly in this one, held as `walk` holds a folder on the way.
+    /// `None` when it is missing, a link (junction, …) or not a folder.
+    pub(super) fn child(&self, name: &OsStr) -> io::Result<Option<Folder>> {
+        let dir = match open_dir_in(&self.0, name) {
+            Ok(dir) => dir,
+            Err(error) if missing(&error) || error.raw_os_error() == Some(ERROR_DIRECTORY) => {
+                return Ok(None)
+            }
+            Err(error) => return Err(error),
+        };
+        if !in_parent(&dir, &self.0)? {
+            return Err(redirected());
+        }
+        let info = attribute_tag(&dir)?;
+        if leaf_action(info.file_attributes, info.reparse_tag) == LeafAction::Refuse {
+            return Ok(None);
+        }
+        Ok(Some(Folder(dir)))
+    }
+
+    /// [`read`] below this folder, walked from its handle, never from a path; a file over
+    /// `limit` bytes is `worktree_guard::TooLarge`.
+    pub(super) fn read(
+        &self,
+        rel: &Path,
+        limit: u64,
+        step: StepFn<'_>,
+    ) -> io::Result<Option<Leaf>> {
         let root = self.0.try_clone()?;
-        read_walked(walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, step))
+        read_walked(
+            walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, step),
+            limit,
+        )
     }
 
     pub(super) fn stat(&self) -> io::Result<super::FileStat> {
@@ -1533,17 +1587,7 @@ pub(super) fn probe(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<
             Some((_, Found::File { .. })) => return Ok(Probe::File),
             Some((_, Found::Dir)) => {}
         }
-        // Held as `walk` holds a folder on the way: listed, not sharing delete, opened as
-        // itself, and a folder only.
-        let dir = match nt_open(
-            at.parent_file(),
-            at.leaf_name(),
-            FILE_LIST_DIRECTORY,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            FILE_OPEN,
-            FILE_DIRECTORY_FILE | FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT,
-            0,
-        ) {
+        let dir = match open_dir_in(at.parent_file(), at.leaf_name()) {
             Ok(dir) => dir,
             // Swapped since it was classified: classified again.
             Err(error) if missing(&error) || error.raw_os_error() == Some(ERROR_DIRECTORY) => {
@@ -1558,15 +1602,35 @@ pub(super) fn probe(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<
         if leaf_action(info.file_attributes, info.reparse_tag) == LeafAction::Refuse {
             return Ok(Probe::Link);
         }
-        return Ok(Probe::Folder(HeldFolder(Folder(dir))));
+        let mut chain: Vec<Folder> = at.dirs.into_iter().map(Folder).collect();
+        chain.push(Folder(dir));
+        return Ok(Probe::Folder(HeldFolder {
+            chain,
+            root: workdir.to_path_buf(),
+        }));
     }
     Err(io::Error::other(
         "the working tree kept changing while it was being read",
     ))
 }
 
-/// [`read`] after the walk.
-fn read_walked(walked: io::Result<Walk<Beneath>>) -> io::Result<Option<Leaf>> {
+/// Opens the folder `name` in the held folder `parent` as `walk` holds a folder on the way:
+/// listed, not sharing delete (so it can't be renamed or replaced while held), opened as itself,
+/// and a folder only (`ERROR_DIRECTORY` otherwise).
+fn open_dir_in(parent: &File, name: &OsStr) -> io::Result<File> {
+    nt_open(
+        parent,
+        name,
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        FILE_OPEN,
+        FILE_DIRECTORY_FILE | FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT,
+        0,
+    )
+}
+
+/// [`read`] after the walk; a file over `limit` bytes is `worktree_guard::TooLarge`.
+fn read_walked(walked: io::Result<Walk<Beneath>>, limit: u64) -> io::Result<Option<Leaf>> {
     let at = match walked {
         Ok(Walk::Found(at)) => at,
         Ok(_) => return Ok(None),
@@ -1585,12 +1649,11 @@ fn read_walked(walked: io::Result<Walk<Beneath>>) -> io::Result<Option<Leaf>> {
         Found::Link => Ok(link_target(&leaf).ok().map(Leaf::Link)),
         Found::File { .. } => {
             drop(leaf);
-            let Some(mut file) = open_leaf_for_reading(&at)? else {
+            let Some(file) = open_leaf_for_reading(&at)? else {
                 return Ok(None);
             };
             let stat = super::FileStat::of(&file.metadata()?);
-            let mut bytes = Vec::new();
-            file.read_to_end(&mut bytes)?;
+            let bytes = super::read_capped(file, limit)?;
             Ok(Some(Leaf::File {
                 bytes,
                 executable: false,

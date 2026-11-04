@@ -1372,23 +1372,116 @@ pub(crate) enum Probe {
     Folder(HeldFolder),
 }
 
-/// A work-tree folder held open by [`probe_beneath`]. Reads below it walk from its handle (as
-/// [`read_beneath`] walks from the work tree root), so a path swapped for a link, a FIFO or
-/// another folder after the probe is never looked at (#213).
-pub(crate) struct HeldFolder(beneath::Folder);
+/// A folder held open by [`probe_beneath`] (or [`HeldFolder::resolve`]), with every folder above
+/// it up to the root it was reached from. Reads below it walk from its handle (as
+/// [`read_beneath`] walks from the work tree root), and `..` goes to the held folder above, so a
+/// path swapped for a link, a FIFO or another folder after the probe is never looked at (#213).
+pub(crate) struct HeldFolder {
+    /// From `root` (`chain[0]`) down to this folder (the last), each held.
+    chain: Vec<beneath::Folder>,
+    /// Where `chain[0]` was opened by path: the work tree root, or a folder outside it.
+    root: PathBuf,
+}
+
+/// A file [`HeldFolder::read`] found larger than the caller's limit.
+#[derive(Debug)]
+pub(crate) struct TooLarge;
+
+impl std::fmt::Display for TooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the file is larger than expected")
+    }
+}
+
+impl std::error::Error for TooLarge {}
+
+/// Whether `error` is [`TooLarge`]'s.
+pub(crate) fn is_too_large(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|source| source.is::<TooLarge>())
+}
+
+/// Reads `file` to its end, at most `limit` bytes; more is [`TooLarge`].
+#[cfg(any(unix, windows))]
+fn read_capped(file: impl io::Read, limit: u64) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    io::Read::read_to_end(
+        &mut io::Read::take(file, limit.saturating_add(1)),
+        &mut bytes,
+    )?;
+    if bytes.len() as u64 > limit {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, TooLarge));
+    }
+    Ok(bytes)
+}
 
 impl HeldFolder {
-    /// [`read_beneath`] for `rel` below this folder.
-    pub(crate) fn read(&self, rel: &str) -> io::Result<Option<Leaf>> {
+    fn last(&self) -> &beneath::Folder {
+        &self.chain[self.chain.len() - 1]
+    }
+
+    /// [`read_beneath`] for `rel` below this folder, at most `limit` bytes: a larger file is an
+    /// error for which [`is_too_large`] is true.
+    pub(crate) fn read(&self, rel: &str, limit: u64) -> io::Result<Option<Leaf>> {
         if !plain_relative(Path::new(rel)) {
             return Ok(None);
         }
-        self.0.read(Path::new(rel), &mut no_step)
+        self.last().read(Path::new(rel), limit, &mut no_step)
     }
 
     /// The folder's own stat data, as git's index records it.
     pub(crate) fn stat(&self) -> io::Result<FileStat> {
-        self.0.stat()
+        self.last().stat()
+    }
+
+    /// The folder `target` names, relative to this one or absolute, held. Resolved one component
+    /// at a time from held handles: a name is opened in the folder held before it (never a link),
+    /// `..` is the held folder above. Only leaving the root this folder was reached from (the
+    /// work tree, by `..` or an absolute path outside it) opens a folder by path, once: links on
+    /// the way to it are followed, as for the work tree itself, and everything below it is held
+    /// again. `None` when a component is missing, a link or not a folder.
+    pub(crate) fn resolve(&self, target: &Path) -> io::Result<Option<HeldFolder>> {
+        let (mut chain, mut root, rest) = if target.is_absolute() {
+            match target.strip_prefix(&self.root) {
+                Ok(inside) => (vec![self.chain[0].try_clone()?], self.root.clone(), inside),
+                Err(_) => match beneath::Folder::open(target)? {
+                    Some(folder) => (vec![folder], target.to_path_buf(), Path::new("")),
+                    None => return Ok(None),
+                },
+            }
+        } else {
+            let chain = self
+                .chain
+                .iter()
+                .map(beneath::Folder::try_clone)
+                .collect::<io::Result<Vec<_>>>()?;
+            (chain, self.root.clone(), target)
+        };
+        for component in rest.components() {
+            match component {
+                Component::Normal(name) => match chain[chain.len() - 1].child(name)? {
+                    Some(folder) => chain.push(folder),
+                    None => return Ok(None),
+                },
+                Component::CurDir => {}
+                Component::ParentDir if chain.len() > 1 => {
+                    chain.pop();
+                }
+                Component::ParentDir => {
+                    let Some(parent) = root.parent() else {
+                        return Ok(None);
+                    };
+                    root = parent.to_path_buf();
+                    match beneath::Folder::open(&root)? {
+                        Some(folder) => chain = vec![folder],
+                        None => return Ok(None),
+                    }
+                }
+                Component::RootDir | Component::Prefix(_) => return Ok(None),
+            }
+        }
+        Ok(Some(HeldFolder { chain, root }))
     }
 }
 
@@ -2687,10 +2780,7 @@ mod tests {
         };
         std::fs::rename(dir.path().join("n"), dir.path().join("moved")).unwrap();
         std::os::unix::fs::symlink(out.path(), dir.path().join("n")).unwrap();
-        match held.read("sub/f").unwrap() {
-            Some(Leaf::File { bytes, .. }) => assert_eq!(bytes, b"held\n"),
-            other => panic!("{other:?}"),
-        }
+        assert_eq!(read_held(&held, "sub/f"), "held\n");
         assert!(matches!(
             probe_beneath(dir.path(), "n").unwrap(),
             Probe::Link
@@ -2704,7 +2794,7 @@ mod tests {
         let c_path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
         // SAFETY: a valid NUL-terminated path.
         assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
-        assert_eq!(held.read("sub/p").unwrap(), None);
+        assert_eq!(held.read("sub/p", u64::MAX).unwrap(), None);
         assert!(matches!(
             probe_beneath(dir.path(), "moved/sub/p").unwrap(),
             Probe::Other
@@ -2717,6 +2807,114 @@ mod tests {
             probe_beneath(dir.path(), "moved/missing").unwrap(),
             Probe::Missing
         ));
+    }
+
+    /// The regular file `rel` below `held`, as text.
+    #[cfg(any(unix, windows))]
+    fn read_held(held: &HeldFolder, rel: &str) -> String {
+        match held.read(rel, u64::MAX).unwrap() {
+            Some(Leaf::File { bytes, .. }) => String::from_utf8(bytes).unwrap(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// #213: `..` out of a held folder is the held folder above, not its name: the parent
+    /// swapped for a link to a folder outside after the probe is never looked through.
+    #[test]
+    #[cfg(unix)]
+    fn resolving_up_from_a_held_folder_goes_through_the_held_parent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let out = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("a/n")).unwrap();
+        std::fs::create_dir_all(dir.path().join("a/x")).unwrap();
+        std::fs::write(dir.path().join("a/x/f"), "held\n").unwrap();
+        std::fs::create_dir_all(out.path().join("x")).unwrap();
+        std::fs::write(out.path().join("x/f"), "OUTSIDE\n").unwrap();
+        let Probe::Folder(held) = probe_beneath(dir.path(), "a/n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        std::fs::rename(dir.path().join("a"), dir.path().join("moved")).unwrap();
+        std::os::unix::fs::symlink(out.path(), dir.path().join("a")).unwrap();
+        let x = held.resolve(Path::new("../x")).unwrap().expect("a/x");
+        assert_eq!(read_held(&x, "f"), "held\n");
+        // An absolute path inside the work tree starts from the held work tree root, whose
+        // `a` is now the link: refused, not followed.
+        assert!(held.resolve(&dir.path().join("a/x")).unwrap().is_none());
+        assert_eq!(
+            read_held(
+                &held.resolve(&dir.path().join("moved/x")).unwrap().unwrap(),
+                "f"
+            ),
+            "held\n"
+        );
+        // A name that is a link, or missing, is no folder.
+        assert!(held.resolve(Path::new("../../a")).unwrap().is_none());
+        assert!(held.resolve(Path::new("missing")).unwrap().is_none());
+    }
+
+    /// #213: a folder outside the work tree is opened by path once; what is read below it then
+    /// comes through that handle, also after its path is swapped for a link.
+    #[test]
+    #[cfg(unix)]
+    fn a_folder_outside_the_work_tree_is_held_once_resolved() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let out = tempfile::TempDir::new().unwrap();
+        let other = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("n")).unwrap();
+        std::fs::create_dir_all(out.path().join("git/refs")).unwrap();
+        std::fs::write(out.path().join("git/refs/f"), "held\n").unwrap();
+        std::fs::create_dir_all(other.path().join("refs")).unwrap();
+        std::fs::write(other.path().join("refs/f"), "OTHER\n").unwrap();
+        let Probe::Folder(held) = probe_beneath(dir.path(), "n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        let git = held.resolve(&out.path().join("git")).unwrap().unwrap();
+        std::fs::rename(out.path().join("git"), out.path().join("moved")).unwrap();
+        std::os::unix::fs::symlink(other.path(), out.path().join("git")).unwrap();
+        assert_eq!(read_held(&git, "refs/f"), "held\n");
+        // `..` from it, above its root, is opened by path (here the moved folder's parent).
+        let refs = git.resolve(Path::new("../moved/refs")).unwrap().unwrap();
+        assert_eq!(read_held(&refs, "f"), "held\n");
+        assert!(held.resolve(&out.path().join("gone")).unwrap().is_none());
+    }
+
+    /// #213: a read through a held folder stops past its limit.
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn a_held_folder_read_is_capped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("n")).unwrap();
+        std::fs::write(dir.path().join("n/f"), "12345").unwrap();
+        let Probe::Folder(held) = probe_beneath(dir.path(), "n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        assert!(matches!(
+            held.read("f", 5).unwrap(),
+            Some(Leaf::File { ref bytes, .. }) if bytes == b"12345"
+        ));
+        let error = held.read("f", 4).unwrap_err();
+        assert!(is_too_large(&error), "{error:?}");
+    }
+
+    /// #213: Windows holds a probed folder without sharing delete, so it can't be renamed or
+    /// deleted while held (nor a folder above it); its stat data comes from the held handle.
+    #[test]
+    #[cfg(windows)]
+    fn a_held_folder_cannot_be_renamed_or_deleted_and_has_stat_data() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("a/n")).unwrap();
+        let Probe::Folder(held) = probe_beneath(dir.path(), "a/n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        assert!(std::fs::rename(dir.path().join("a/n"), dir.path().join("a/m")).is_err());
+        assert!(std::fs::remove_dir(dir.path().join("a/n")).is_err());
+        assert!(std::fs::rename(dir.path().join("a"), dir.path().join("b")).is_err());
+        let stat = held.stat().unwrap();
+        let meta = std::fs::metadata(dir.path().join("a/n")).unwrap();
+        assert_eq!(stat, FileStat::of(&meta));
+        assert_ne!(stat.mtime, (0, 0));
+        drop(held);
+        std::fs::rename(dir.path().join("a/n"), dir.path().join("a/m")).unwrap();
     }
 
     #[test]

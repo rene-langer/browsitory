@@ -36,14 +36,10 @@ pub enum MergeError {
     /// swapped for a link at that moment (#199).
     #[error("'{0}' can't be read safely; check its permissions and try again.")]
     Unreadable(String),
-    /// Mark resolved on a folder that isn't a repository with a commit checked out (a folder of
-    /// plain files, a repository without a commit, or one whose `.git` is a link): git stages a
-    /// folder only as a nested repository's commit (#213).
-    #[error(
-        "'{0}' is a folder. Only a repository with a commit checked out can be marked resolved \
-         as a folder."
-    )]
-    FolderNotStaged(String),
+    /// Mark resolved on a folder that can't be staged as a nested repository's commit, which is
+    /// the only way git stages a folder (#213). Nothing was staged.
+    #[error("{}", .1.message(.0))]
+    FolderNotStaged(String, NotStagedReason),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
     /// The file to write is read-only; nothing was written (#209).
@@ -74,6 +70,37 @@ pub enum MergeError {
     /// rebase's, which only the terminal ends (#263). Nothing was changed.
     #[error(transparent)]
     TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
+}
+
+/// Why Mark resolved didn't stage a folder (`MergeError::FolderNotStaged`, #213).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotStagedReason {
+    /// No repository: a folder of plain files, a `.git` that is a link or missing its git
+    /// folder (a `gitdir:` to a folder that is gone), or no HEAD.
+    NotARepository,
+    /// A repository whose branch has no commit yet.
+    NoCommit,
+    /// A repository whose checked-out commit Browsitory can't read; what it can't read.
+    Unsupported(&'static str),
+}
+
+impl NotStagedReason {
+    fn message(&self, path: &str) -> String {
+        match self {
+            Self::NotARepository => format!(
+                "'{path}' is a folder, not a repository. Only a repository can be marked \
+                 resolved as a folder."
+            ),
+            Self::NoCommit => format!(
+                "'{path}' is a repository without a commit checked out. Commit in it first, \
+                 then try again."
+            ),
+            Self::Unsupported(what) => format!(
+                "Browsitory can't read which commit the repository '{path}' has checked out \
+                 ({what}). Stage it with git."
+            ),
+        }
+    }
 }
 
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
@@ -574,6 +601,19 @@ pub fn mark_resolved_with_pause(
     force: bool,
     after_check: &mut dyn FnMut(),
 ) -> Result<MarkResolvedOutcome, MergeError> {
+    mark_resolved_with_pauses(repo, path, force, after_check, &mut || {})
+}
+
+/// `mark_resolved_with_pause` with a second test seam: `folder_held` runs once a folder at the
+/// path is held and before anything in it is read, so a test can swap the folder then (#213).
+#[doc(hidden)]
+pub fn mark_resolved_with_pauses(
+    repo: &Repository,
+    path: &str,
+    force: bool,
+    after_check: &mut dyn FnMut(),
+    folder_held: &mut dyn FnMut(),
+) -> Result<MarkResolvedOutcome, MergeError> {
     use crate::worktree_guard::Leaf;
     if !crate::launch::is_safe_relative(path) {
         return Err(MergeError::NoConflict(path.to_string()));
@@ -644,8 +684,8 @@ pub fn mark_resolved_with_pause(
                 Probe::File | Probe::Link => return Err(MergeError::Unreadable(path.to_string())),
                 Probe::Other => return Err(MergeError::NotAFile(path.to_string())),
                 Probe::Folder(folder) => {
-                    let head = nested_head(workdir, path, &folder)?
-                        .ok_or_else(|| MergeError::FolderNotStaged(path.to_string()))?;
+                    folder_held();
+                    let head = nested_head(path, &folder)?;
                     let stat = folder.stat()?;
                     index.remove_path(Path::new(path))?;
                     index.add(&staged_entry(path, head, MODE_GITLINK, &stat))?;
@@ -660,171 +700,114 @@ pub fn mark_resolved_with_pause(
 /// Git's file mode for a gitlink (a nested repository's commit).
 const MODE_GITLINK: u32 = 0o160000;
 
+/// The most [`nested_head`] reads of a small git file (`.git`, HEAD, `commondir`, a loose ref).
+const SMALL_GIT_FILE_LIMIT: u64 = 4096;
+/// The most [`nested_head`] reads of `packed-refs`.
+const PACKED_REFS_LIMIT: u64 = 64 << 20;
+
+/// Refs that live in each worktree's own git folder, not the common one (git's
+/// `is_per_worktree_ref`).
+const PER_WORKTREE_REFS: [&str; 3] = ["refs/worktree/", "refs/bisect/", "refs/rewritten/"];
+
 /// The commit a nested repository has checked out, as `git add` stages it for a folder (#213):
-/// HEAD, followed through symbolic refs to a loose ref or `packed-refs`. Everything in the
-/// folder is read through its held handle, never by path, no link followed and no FIFO opened:
-/// `.git` (a folder, or a `gitdir:` file), then HEAD and the refs. A `gitdir:` (or `commondir`)
-/// that leads out of the folder is read from the work tree root the same way, or, outside the
-/// work tree, from that folder. `None` when there is no commit to stage: not a repository, an
-/// unborn branch, a `.git` that is a link, or refs git2 can't read this way (reftable).
+/// HEAD, followed through symbolic refs to a loose ref or `packed-refs`. Everything is read
+/// through held folders (`HeldFolder::resolve`), never by path, no link followed and no FIFO
+/// opened: `.git` (a folder, or a `gitdir:` file), HEAD, `commondir` and the refs, each file
+/// size-capped. A `gitdir:` or `commondir` outside the work tree is opened by path once and
+/// then held.
 fn nested_head(
-    workdir: &Path,
     path: &str,
     folder: &crate::worktree_guard::HeldFolder,
-) -> std::io::Result<Option<git2::Oid>> {
-    use crate::worktree_guard::Leaf;
-    let held = GitFiles {
-        base: GitBase::Held(folder),
-        rel: Vec::new(),
+) -> Result<git2::Oid, MergeError> {
+    use crate::worktree_guard::{HeldFolder, Leaf};
+    let refuse = |reason| MergeError::FolderNotStaged(path.to_string(), reason);
+    let read = |dir: &HeldFolder, name: &str, limit| match dir.read(name, limit) {
+        Ok(Some(Leaf::File { bytes, .. })) => Ok(Some(bytes)),
+        Ok(_) => Ok(None),
+        Err(error) if crate::worktree_guard::is_too_large(&error) => Err(refuse(
+            NotStagedReason::Unsupported("a file in its git folder is too large"),
+        )),
+        Err(error) => Err(MergeError::Io(error)),
     };
-    let git = match folder.read(".git")? {
-        Some(Leaf::File { bytes, .. }) => {
-            let text = String::from_utf8_lossy(&bytes);
-            let Some(target) = text.trim().strip_prefix("gitdir:").map(str::trim) else {
-                return Ok(None);
-            };
-            match held.resolve(workdir, path, Path::new(target)) {
-                Some(git) => git,
-                None => return Ok(None),
-            }
-        }
-        Some(Leaf::Link(_)) => return Ok(None),
-        // A folder (anything else fails the reads below).
-        None => held.child(".git"),
-    };
-    let Some(mut content) = git.read("HEAD")? else {
-        return Ok(None);
-    };
-    // A linked worktree's branches are in its repository's common folder.
-    let common = match git.read("commondir")? {
+    let not_a_repository = || refuse(NotStagedReason::NotARepository);
+    let git = match read(folder, ".git", SMALL_GIT_FILE_LIMIT)? {
         Some(bytes) => {
             let text = String::from_utf8_lossy(&bytes);
-            match git.resolve(workdir, path, Path::new(text.trim())) {
-                Some(common) => common,
-                None => return Ok(None),
-            }
+            let target = text
+                .trim()
+                .strip_prefix("gitdir:")
+                .map(str::trim)
+                .ok_or_else(not_a_repository)?;
+            folder.resolve(Path::new(target))?
+        }
+        // A folder; a link, FIFO or nothing gives `None`.
+        None => folder.resolve(Path::new(".git"))?,
+    }
+    .ok_or_else(not_a_repository)?;
+    let mut content = read(&git, "HEAD", SMALL_GIT_FILE_LIMIT)?.ok_or_else(not_a_repository)?;
+    // A linked worktree's branches are in its repository's common folder.
+    let common = match read(&git, "commondir", SMALL_GIT_FILE_LIMIT)? {
+        Some(bytes) => {
+            let text = String::from_utf8_lossy(&bytes);
+            git.resolve(Path::new(text.trim()))?
+                .ok_or_else(not_a_repository)?
         }
         None => git,
     };
-    // Symbolic refs nest at most 5 deep in git.
+    // git reads at most 5 refs, HEAD included (`SYMREF_MAXDEPTH`): HEAD and 4 symbolic refs.
     for _ in 0..5 {
         let text = String::from_utf8_lossy(&content);
         let text = text.trim();
         let Some(name) = text.strip_prefix("ref:").map(str::trim) else {
-            return Ok(parse_oid(text));
+            return parse_oid(text).map_err(refuse);
         };
-        if !name.starts_with("refs/") {
-            return Ok(None);
+        // What git's reftable backend writes into HEAD so older git refuses the repository.
+        if name == "refs/heads/.invalid" {
+            return Err(refuse(NotStagedReason::Unsupported("reftable refs")));
         }
-        match common.read(name)? {
+        if PER_WORKTREE_REFS
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
+            return Err(refuse(NotStagedReason::Unsupported(
+                "HEAD on a per-worktree ref",
+            )));
+        }
+        if !name.starts_with("refs/") {
+            return Err(refuse(NotStagedReason::Unsupported("HEAD outside refs/")));
+        }
+        match read(&common, name, SMALL_GIT_FILE_LIMIT)? {
             Some(next) => content = next,
             None => {
-                let packed = common.read("packed-refs")?.unwrap_or_default();
-                return Ok(String::from_utf8_lossy(&packed).lines().find_map(|line| {
-                    let (id, ref_name) = line.split_once(' ')?;
-                    (ref_name.trim() == name).then(|| parse_oid(id)).flatten()
-                }));
+                let packed = read(&common, "packed-refs", PACKED_REFS_LIMIT)?.unwrap_or_default();
+                let id = String::from_utf8_lossy(&packed)
+                    .lines()
+                    .filter(|line| !line.starts_with('#') && !line.starts_with('^'))
+                    .find_map(|line| {
+                        let (id, ref_name) = line.split_once(' ')?;
+                        (ref_name.trim_end() == name).then(|| id.trim().to_string())
+                    });
+                return match id {
+                    Some(id) => parse_oid(&id).map_err(refuse),
+                    // An unborn branch.
+                    None => Err(refuse(NotStagedReason::NoCommit)),
+                };
             }
         }
     }
-    Ok(None)
+    Err(refuse(NotStagedReason::Unsupported(
+        "symbolic refs nested too deeply",
+    )))
 }
 
-/// A full hexadecimal object id (git2 would also take a prefix).
-fn parse_oid(text: &str) -> Option<git2::Oid> {
-    (text.len() == 40 && text.bytes().all(|b| b.is_ascii_hexdigit()))
-        .then(|| git2::Oid::from_str(text).ok())
-        .flatten()
-}
-
-/// Where [`nested_head`] reads from.
-#[derive(Clone)]
-enum GitBase<'a> {
-    /// The nested repository's folder, through its held handle.
-    Held(&'a crate::worktree_guard::HeldFolder),
-    /// A folder opened by path (the work tree, or a git folder outside it), read below without
-    /// following a link.
-    Root(std::path::PathBuf),
-}
-
-/// A folder below a [`GitBase`].
-#[derive(Clone)]
-struct GitFiles<'a> {
-    base: GitBase<'a>,
-    rel: Vec<std::ffi::OsString>,
-}
-
-impl GitFiles<'_> {
-    fn child(&self, name: &str) -> Self {
-        let mut rel = self.rel.clone();
-        rel.push(name.into());
-        Self {
-            base: self.base.clone(),
-            rel,
-        }
-    }
-
-    /// The file `name` (`/`-separated) in this folder; `None` unless a regular file.
-    fn read(&self, name: &str) -> std::io::Result<Option<Vec<u8>>> {
-        let mut full: std::path::PathBuf = self.rel.iter().collect();
-        full.push(name);
-        let Some(full) = full.to_str() else {
-            return Ok(None);
-        };
-        let leaf = match &self.base {
-            GitBase::Held(folder) => folder.read(full)?,
-            GitBase::Root(root) => crate::worktree_guard::read_beneath(root, full)?,
-        };
-        Ok(match leaf {
-            Some(crate::worktree_guard::Leaf::File { bytes, .. }) => Some(bytes),
-            _ => None,
-        })
-    }
-
-    /// The folder `target` names, relative to this one (or absolute), resolved lexically: the
-    /// reads below then refuse a link on the way. Leaving the held folder continues from the work
-    /// tree root (`path` is the held folder there); leaving the work tree, or an absolute path
-    /// outside it, reads from that folder by path. `None` for a path with no folder.
-    fn resolve(&self, workdir: &Path, path: &str, target: &Path) -> Option<Self> {
-        use std::path::Component;
-        let (mut at, rest) = if target.is_absolute() {
-            let Ok(inside) = target.strip_prefix(workdir) else {
-                return Some(Self {
-                    base: GitBase::Root(target.to_path_buf()),
-                    rel: Vec::new(),
-                });
-            };
-            let root = Self {
-                base: GitBase::Root(workdir.to_path_buf()),
-                rel: Vec::new(),
-            };
-            (root, inside)
-        } else {
-            (self.clone(), target)
-        };
-        for component in rest.components() {
-            match component {
-                Component::Normal(name) => at.rel.push(name.to_os_string()),
-                Component::CurDir => {}
-                Component::ParentDir => {
-                    if at.rel.pop().is_none() {
-                        at.base = match at.base {
-                            GitBase::Held(_) => {
-                                at.rel = Path::new(path)
-                                    .components()
-                                    .map(|c| c.as_os_str().to_os_string())
-                                    .collect();
-                                at.rel.pop();
-                                GitBase::Root(workdir.to_path_buf())
-                            }
-                            GitBase::Root(root) => GitBase::Root(root.parent()?.to_path_buf()),
-                        };
-                    }
-                }
-                Component::RootDir | Component::Prefix(_) => return None,
-            }
-        }
-        Some(at)
+/// A full hexadecimal SHA-1 object id (git2 would also take a prefix).
+fn parse_oid(text: &str) -> Result<git2::Oid, NotStagedReason> {
+    let hex = text.bytes().all(|b| b.is_ascii_hexdigit());
+    match text.len() {
+        40 if hex => git2::Oid::from_str(text)
+            .map_err(|_| NotStagedReason::Unsupported("a malformed HEAD or ref")),
+        64 if hex => Err(NotStagedReason::Unsupported("SHA-256 object ids")),
+        _ => Err(NotStagedReason::Unsupported("a malformed HEAD or ref")),
     }
 }
 
