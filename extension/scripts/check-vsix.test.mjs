@@ -117,6 +117,7 @@ function packageFiles({ version = "1.2.3", target = "linux-x64", preRelease = tr
     { name: "extension/webview/favicon.svg", data: "<svg/>" },
     { name: "extension/webview/assets/vscode-main.js", data: "main();" },
     { name: "extension/webview/assets/vscode-main.css", data: "body{}" },
+    { name: "extension/webview/third-party-notices.md", data: "# Notices\n" },
     { name: `extension/bin/${sidecar.name}`, data: sidecar.data, mode: 0o100755 },
     { name: "extension/icon.png", data: Buffer.from([0x89, 0x50, 0x4e, 0x47]) },
     { name: "extension/readme.md", data: "# Browsitory" },
@@ -223,6 +224,14 @@ test("reports a wrong version, target, identity or pre-release flag", () => {
   assert.match(renamedProblems, /package\.json publisher is "someone", expected "browsitory"/);
   assert.match(renamedProblems, /package\.json icon is null/);
   assert.match(renamedProblems, /package\.json repository/);
+});
+
+test("reports missing webview notices, but no other Markdown in the webview", () => {
+  const missing = packageFiles().filter((file) => file.name !== "extension/webview/third-party-notices.md");
+  assert.match(check(missing).join("\n"), /missing extension\/webview\/third-party-notices\.md/);
+
+  const stray = [...packageFiles(), { name: "extension/webview/notes.md", data: "x" }];
+  assert.match(check(stray).join("\n"), /extension\/webview\/notes\.md/);
 });
 
 test("reports a missing webview stylesheet", () => {
