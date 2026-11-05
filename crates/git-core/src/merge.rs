@@ -80,10 +80,13 @@ pub enum NotStagedReason {
     NotARepository,
     /// A repository whose branch has no commit yet.
     NoCommit,
-    /// A linked worktree whose main repository (its `commondir`) can't be found.
+    /// A linked worktree whose `commondir` names a folder that doesn't exist. (git writes it
+    /// as `../..` inside the git folder, so a moved main repository shows up as a missing or
+    /// outside git folder instead.)
     MainRepositoryGone,
-    /// A repository whose git folder (or main repository) is outside the work tree: never
-    /// opened (#213).
+    /// A repository whose git folder (or main repository) is outside the work tree, or at an
+    /// absolute path not spelled like the work tree root (a symlinked or case-folded spelling,
+    /// an 8.3 name, `\\?\`): never opened (#213).
     GitFolderOutside,
     /// A repository whose checked-out commit Browsitory can't read; what it can't read.
     Unsupported(&'static str),
@@ -93,18 +96,18 @@ impl NotStagedReason {
     fn message(&self, path: &str) -> String {
         match self {
             Self::MainRepositoryGone => format!(
-                "'{path}' is a linked worktree, but Browsitory can't find its main repository. \
-                 If the main repository was moved, run `git worktree repair` in it, then try \
-                 again."
+                "'{path}' is a linked worktree whose main repository can't be found: its git \
+                 folder's `commondir` names a folder that doesn't exist. Stage it with \
+                 `git add {path}` in a terminal once git can read it."
             ),
             Self::GitFolderOutside => format!(
-                "'{path}' is a repository whose git folder is outside the work tree, and \
-                 Browsitory doesn't open folders there. Stage it with `git add {path}` in a \
-                 terminal."
+                "'{path}' has its git folder outside the work tree, or at a path Browsitory \
+                 can't match to it. Stage it with `git add {path}` in a terminal."
             ),
             Self::NotARepository => format!(
-                "'{path}' is a folder, not a repository. Only a repository can be marked \
-                 resolved as a folder."
+                "'{path}' is a folder Browsitory can't read as a repository: it has no `.git`, \
+                 or its `.git` is a link or names a git folder that can't be found. To stage it \
+                 anyway, run `git add {path}` in a terminal."
             ),
             Self::NoCommit => format!(
                 "'{path}' is a repository without a commit checked out. Commit in it first, \
@@ -823,7 +826,16 @@ fn nested_head(
                 )))
             }
             None => {
-                let packed = read(&common, "packed-refs", PACKED_REFS_LIMIT)?.unwrap_or_default();
+                let packed = match read(&common, "packed-refs", PACKED_REFS_LIMIT)? {
+                    Some(packed) => packed,
+                    // A link, folder or FIFO there isn't "no packed refs": never "no commit".
+                    None if common.kind("packed-refs")? != Kind::Missing => {
+                        return Err(refuse(NotStagedReason::Unsupported(
+                            "a `packed-refs` that isn't a regular file",
+                        )))
+                    }
+                    None => Vec::new(),
+                };
                 let id = String::from_utf8_lossy(&packed)
                     .lines()
                     .filter(|line| !line.starts_with('#') && !line.starts_with('^'))

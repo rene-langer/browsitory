@@ -2961,7 +2961,7 @@ mod tests {
     /// tree (a symlinked one here).
     #[test]
     #[cfg(any(unix, windows))]
-    fn an_absolute_path_outside_the_work_tree_is_refused_unopened() {
+    fn an_absolute_path_not_below_the_opened_work_tree_root_is_outside() {
         let base = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(base.path().join("b/n")).unwrap();
         std::fs::create_dir_all(base.path().join("bc/git")).unwrap();
