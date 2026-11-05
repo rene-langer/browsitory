@@ -9,7 +9,7 @@
 // - `tauri-commands.json`: the desktop app's `generate_handler!` list
 //   (`crates/tauri-app/src/main.rs`, test `command_list_is_current`).
 // - `sidecar-methods.json`: the VSCode sidecar's dispatch table
-//   (`crates/vscode-sidecar/src/dispatch.rs`, test `method_list_is_current`).
+//   (`crates/vscode-sidecar/src/dispatch.rs`; test `method_list_is_current` in `dispatch/tests.rs`).
 // - `extension-native-methods.json`: the methods the VSCode extension host answers itself
 //   (`extension/src/sidecarBridge.ts`'s `NATIVE_METHODS`, test in `nativeMethods.test.ts`).
 // - `extension-host-sidecar-methods.json`: the sidecar methods the extension host calls itself
