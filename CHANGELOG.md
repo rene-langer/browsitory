@@ -356,6 +356,8 @@ bisects you start in a terminal, are now handled much more safely.
   "Stash…", "Stash <file>…", "Show stash: …", "Pop stash: …".
 - "Drop stash" in the command palette dropped the stash without asking; it now shows the stash
   and opens the Stashes section, where Drop asks first (#105).
+- Stashes moved out of the Branches sidebar section into their own "Stashes" accordion section, with
+  a confirmation before dropping one.
 
 ### Refs, remotes, fetch and push
 
@@ -517,6 +519,13 @@ bisects you start in a terminal, are now handled much more safely.
 - A saved graph branch selection naming a deleted or renamed branch no longer breaks the whole
   refresh; deleting or renaming a branch in the app now updates the selection, and deleting the
   only isolated branch shows all branches again (#97).
+- Each branch's context menu in the Branches tree gained "Isolate branch", a one-click way to filter
+  the commit graph down to just that branch; the tree's "+" menu gained "Show all branches" to clear
+  the filter.
+- The separate branch-switcher dropdown and Remotes accordion were replaced by a single,
+  always-expanded Branches tree: local branches and one folder per remote, with every mutating
+  action (create/rename/delete a branch, merge, add/edit/remove a remote, set upstream, manage
+  credentials, push/fetch) moved to right-click context menus and the command palette.
 
 ### Interface refresh
 
@@ -531,6 +540,11 @@ bisects you start in a terminal, are now handled much more safely.
 - The command palette and other overlays open near the top of the window.
 - Denser branch tree: folders and branches share one even 22px row height with no gaps between
   folders, a tighter indent, and each branch's "…" menu shows on hover or focus.
+- A gear popover in the sidebar lets each panel (Stashes, Worktrees, Submodules, Reflog, Tags, Pull
+  Requests) be shown or hidden, persisted globally (one `localStorage` setting shared across every
+  repo and open tab) — clutter from features a project doesn't use can be tucked away.
+- Every remaining sidebar section (Worktrees, Submodules, Reflog, Remotes, Tags, Pull Requests)
+  reskinned to the Phase 5 design system: consistent row styling, per-row icons, and empty states.
 
 ### Keyboard context menus
 
@@ -855,6 +869,9 @@ unresolved conflicts is never one.
   (Windows) or "Permission denied" (macOS, Linux) when the file was read-only, and Use ours /
   Use theirs (whole file) replaced the read-only file. They now say "'f.txt' is read-only. Make
   it writable, then try again." and change nothing (#209).
+- `config.toml` writes are now atomic (write-temp-then-rename) instead of an in-place `fs::write`,
+  which could interleave with a concurrent save and leave corrupt trailing bytes from the prior
+  write.
 
 ### Windows hardening
 
@@ -1066,6 +1083,19 @@ unresolved conflicts is never one.
 - Modal dialogs (release notes, command palette, repo picker) open scrolled to the top instead of
   to whichever control received focus. The command palette also fills its dialog width, and the
   empty-state header, empty-state text and Uncommitted Changes row match the rest of the UI.
+- The diff view now renders every changed file's diff expanded by default, instead of a file list
+  where each row had to be clicked to reveal its diff. Each file's header carries an inline
+  Stage/Unstage control and a Blame button, plus a per-file collapse chevron; a "Collapse
+  all"/"Expand all" toggle gives an overview of a large changeset.
+
+### Failure log
+
+- Failure logging: the backend now writes a rotated log file to the OS log directory
+  (`tauri-plugin-log`), with a panic hook covering worker-thread crashes. The frontend routes every
+  failed IPC call and any uncaught error/rejection into the same file via `@tauri-apps/plugin-log`,
+  so a bug report doesn't require a live dev session to diagnose.
+- HTTPS credential-store failures now retain a safe diagnostic in the application log while keeping
+  the on-screen message generic.
 
 ### Other fixes
 
@@ -1145,6 +1175,14 @@ unresolved conflicts is never one.
   browser-automation library) attaches to the webview's nested content frame for DOM assertions.
   One flow so far — open repo → stage a file → commit → see it in history — mirroring `e2e/`'s
   existing pattern. Wired into CI as a new `e2e-vscode` job that gates `build-vsix`.
+- The workspaces E2E spec's Edit/Delete steps now allow up to 45s for the picker to reload its
+  workspace list after a full app restart, matching the CI-runner contention already documented for
+  this suite's repo-scan wait — the previous 10s budget was flaking on `main`.
+- `abort_rebase_restores_the_original_branch_and_tip_exactly` no longer asserts against the
+  pre-rebase commit's OID, which only matched by coincidence when two independently-generated
+  committer timestamps landed in the same second; it was flaking on the `windows-latest` CI runner.
+  Also: the `rust` CI job's macOS/Windows legs now run on every pull request instead of only on
+  pushes to `main`, so a platform-specific regression like this one is caught before merge.
 
 ### Internal: wire DTOs and transport parity
 
@@ -1273,60 +1311,3 @@ Pull requests no longer conflict over `CHANGELOG.md`. Each one now adds its entr
 - Added: `scripts/fold-changelog.py` moves all fragments to the top of `## [Unreleased]`,
   newest first, and deletes them. With `--check` it fails while fragments are left; the release
   workflow runs that check, so a release always ships a complete `CHANGELOG.md`.
-
-## [0.2.0] - 2026-08-29
-
-### Added
-
-- Failure logging: the backend now writes a rotated log file to the OS log
-  directory (`tauri-plugin-log`), with a panic hook covering worker-thread
-  crashes. The frontend routes every failed IPC call and any uncaught
-  error/rejection into the same file via `@tauri-apps/plugin-log`, so a bug
-  report doesn't require a live dev session to diagnose.
-- A gear popover in the sidebar lets each panel (Stashes, Worktrees,
-  Submodules, Reflog, Tags, Pull Requests) be shown or hidden, persisted
-  globally (one `localStorage` setting shared across every repo and open
-  tab) — clutter from features a project doesn't use can be tucked
-  away.
-- Each branch's context menu in the Branches tree gained "Isolate branch",
-  a one-click way to filter the commit graph down to just that branch; the
-  tree's "+" menu gained "Show all branches" to clear the filter.
-
-### Changed
-
-- The diff view now renders every changed file's diff expanded by default,
-  instead of a file list where each row had to be
-  clicked to reveal its diff. Each file's header carries an inline
-  Stage/Unstage control and a Blame button, plus a per-file collapse
-  chevron; a "Collapse all"/"Expand all" toggle gives an overview of a
-  large changeset.
-- HTTPS credential-store failures now retain a safe diagnostic in the
-  application log while keeping the on-screen message generic.
-- Stashes moved out of the Branches sidebar section into their own
-  "Stashes" accordion section, with a confirmation before dropping one.
-- Every remaining sidebar section (Worktrees, Submodules, Reflog, Remotes,
-  Tags, Pull Requests) reskinned to the Phase 5 design system: consistent
-  row styling, per-row icons, and empty states.
-- The separate branch-switcher dropdown and Remotes accordion were
-  replaced by a single, always-expanded Branches tree: local branches and
-  one folder per remote, with every mutating action (create/rename/delete
-  a branch, merge, add/edit/remove a remote, set upstream, manage
-  credentials, push/fetch) moved to right-click context menus and the
-  command palette.
-
-### Fixed
-
-- `config.toml` writes are now atomic (write-temp-then-rename) instead of
-  an in-place `fs::write`, which could interleave with a concurrent save
-  and leave corrupt trailing bytes from the prior write.
-- The workspaces E2E spec's Edit/Delete steps now allow up to 45s for the
-  picker to reload its workspace list after a full app restart, matching
-  the CI-runner contention already documented for this suite's repo-scan
-  wait — the previous 10s budget was flaking on `main`.
-- `abort_rebase_restores_the_original_branch_and_tip_exactly` no longer
-  asserts against the pre-rebase commit's OID, which only matched by
-  coincidence when two independently-generated committer timestamps
-  landed in the same second; it was flaking on the `windows-latest` CI
-  runner. Also: the `rust` CI job's macOS/Windows legs now run on every
-  pull request instead of only on pushes to `main`, so a platform-specific
-  regression like this one is caught before merge.
