@@ -1633,7 +1633,7 @@ only `error`.
   file per area), which spawn a real worker thread against a real temp-dir repo — no mocks. The wire format of its DTOs is
   pinned by the wire snapshots and the generated DTO types below.
 - `tauri-app`: now a thin Tauri command adapter over `repo-service`, so it doesn't need
-  delegation tests of its own. `crates/tauri-app/src/commands/mod.rs`'s inline tests still
+  delegation tests of its own. Its tests (`crates/tauri-app/src/commands/tests/`) still
   check the serialization of DTOs as the desktop app sends them (e.g. camelCase field names on
   `WorkspaceDto`/`OpenRepoEntryDto`), although those DTOs now live in `repo_service::wire`.
 - Hermetic git config: every Rust test binary (`git-core`, `repo-service`, `vscode-sidecar`,
