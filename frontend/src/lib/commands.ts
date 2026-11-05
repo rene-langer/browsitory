@@ -147,7 +147,7 @@ function goToSidebarSection(title: string): void {
   // `RepoWorkspace` stays mounted simultaneously (inactive ones are only `display: none`), so a
   // document-wide lookup always resolves to whichever tab is first in document order. On any
   // other tab that silently expanded a hidden tab's accordion and scrolled an invisible element
-  // into view — a no-op from the user's side. `App.tsx` marks the visible workspace with
+  // into view — a no-op from the user's side. `RepoWorkspace.tsx` marks the visible workspace with
   // `data-active-repo="true"`.
   const workspace = document.querySelector(`[data-active-repo="true"]`);
   if (workspace === null) return;
@@ -253,7 +253,7 @@ export function buildCommands(
     }
   }
 
-  // Same guard App.tsx derives as `repositoryOperationDisabled` and gates every
+  // Same guard RepoWorkspace.tsx derives as `repositoryOperationDisabled` and gates every
   // sidebar mutation button behind. Mutating command families must be omitted
   // (not merely disabled) while it's true; navigation and the in-progress
   // escape hatches (merge-abort/rebase-continue/rebase-abort/refresh) stay.

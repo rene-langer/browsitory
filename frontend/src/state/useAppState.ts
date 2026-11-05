@@ -320,7 +320,7 @@ export interface UseAppStateResult {
   redo(): Promise<UndoOutcome | null>;
   refreshUndoState(): Promise<void>;
   // Clears `state.error` without waiting for the next successful action of the same kind — the
-  // global banner's dismiss control (issue #30/UX-002). See `App.tsx`'s `RepoWorkspace`.
+  // global banner's dismiss control (issue #30/UX-002). See `RepoWorkspace.tsx`.
   dismissError(): void;
 }
 

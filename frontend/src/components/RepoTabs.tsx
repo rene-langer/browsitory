@@ -67,7 +67,7 @@ export function RepoTabs({
     }
     // WAI-ARIA APG tabs pattern: Delete closes the focused tab — any tab, not just the active one.
     // This is the host-independent keyboard path for the mouse-only close button below; Ctrl/Cmd+W
-    // (App.tsx) can be swallowed by the Tauri/VSCode host first. Focus moves to the tab that takes
+    // (`useWorkspaceShortcuts.ts`) can be swallowed by the Tauri/VSCode host first. Focus moves to the tab that takes
     // this one's place (the next, else the previous) — the same neighbour `useOpenRepos.closeRepo`
     // activates when the closed tab was the active one — so it isn't dropped to <body>.
     if (event.key === "Delete") {
@@ -123,7 +123,7 @@ export function RepoTabs({
             tablist may only own `role="tab"` elements per WAI-ARIA — axe's `aria-required-children`
             flags a focusable close button here) and out of the Tab order; it stays clickable by
             mouse. Its keyboard equivalents are Delete on the focused tab (above), the palette's
-            "Close tab", and Ctrl/Cmd+W (App.tsx) where the host doesn't claim that key first. */}
+            "Close tab", and Ctrl/Cmd+W (`useWorkspaceShortcuts.ts`) where the host doesn't claim that key first. */}
         <button
           type="button"
           className={styles.closeButton}

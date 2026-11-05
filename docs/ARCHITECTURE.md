@@ -1747,8 +1747,8 @@ only `error`.
   tauri-app/custom-protocol` (the `custom-protocol` feature makes the binary load its embedded
   `frontend/dist` instead of the Vite dev server; plain `cargo build` stays in dev-server mode
   regardless of debug/release, so it can't be driven standalone). One flow per major feature
-  area, added where a flow spans backend+frontend in a way unit tests can't catch; `App.tsx`
-  reads a `VITE_E2E_REPO_PATH` build-time env var to auto-open a fixture repo, since
+  area, added where a flow spans backend+frontend in a way unit tests can't catch; `App`
+  (`frontend/src/state/useE2eAutoOpen.ts`) reads a `VITE_E2E_REPO_PATH` build-time env var to auto-open a fixture repo, since
   `RepoPicker`'s native folder dialog can't be driven through WebDriver. (Not Playwright:
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
