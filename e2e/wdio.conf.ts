@@ -438,7 +438,9 @@ export const config: WebdriverIO.Config = {
   // Ensure `tauri-driver` is running before the session starts so we can proxy the WebDriver
   // requests to it (127.0.0.1:4444, matching `hostname`/`port` above).
   beforeSession: async () => {
-    const driverPath = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
+    // TAURI_DRIVER_PATH: set by wdio.screenshots.conf.ts, which points HOME at a temp dir
+    // before this runs (so `os.homedir()` no longer finds ~/.cargo/bin).
+    const driverPath = process.env.TAURI_DRIVER_PATH ?? path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
     // Fresh webview storage per spec file (see E2E_DATA_HOME), wiped before the app launches.
     fs.rmSync(E2E_DATA_HOME, { recursive: true, force: true });
     fs.mkdirSync(E2E_DATA_HOME, { recursive: true });

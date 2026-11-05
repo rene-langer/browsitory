@@ -73,7 +73,7 @@ describe("CommitGraph", () => {
     expect(screen.getByRole("listbox", { name: "Commit history" })).toBeInTheDocument();
   });
 
-  it("renders the Uncommitted Changes row with a change-count badge", () => {
+  it("renders the Uncommitted changes row with a change-count badge", () => {
     render(
       <CommitGraph
         {...historyProps}
@@ -87,7 +87,7 @@ describe("CommitGraph", () => {
       />,
     );
 
-    expect(screen.getByText("Uncommitted Changes (2)")).toBeInTheDocument();
+    expect(screen.getByText("Uncommitted changes (2)")).toBeInTheDocument();
   });
 
   it("renders each commit's short id and summary", () => {
@@ -130,7 +130,7 @@ describe("CommitGraph", () => {
     expect(onSelectRow).toHaveBeenCalledWith({ commitId: "aaa111..." });
   });
 
-  it("ArrowDown moves from Uncommitted Changes to the first commit", () => {
+  it("ArrowDown moves from Uncommitted changes to the first commit", () => {
     const onSelectRow = vi.fn();
     render(
       <CommitGraph
@@ -234,7 +234,7 @@ describe("CommitGraph", () => {
     expect(screen.queryByText("Branch from here")).not.toBeInTheDocument();
   });
 
-  it("right-clicking the Uncommitted Changes row does not show the menu", () => {
+  it("right-clicking the Uncommitted changes row does not show the menu", () => {
     render(
       <CommitGraph
         {...historyProps}
@@ -248,7 +248,7 @@ describe("CommitGraph", () => {
       />,
     );
 
-    fireEvent.contextMenu(screen.getByText(/Uncommitted Changes/).closest("li")!);
+    fireEvent.contextMenu(screen.getByText(/Uncommitted changes/).closest("li")!);
 
     expect(screen.queryByText("Branch from here")).not.toBeInTheDocument();
   });
@@ -841,7 +841,7 @@ describe("CommitGraph", () => {
 
     fireEvent.click(row("D"));
     fireEvent.click(row("B"), { ctrlKey: true });
-    fireEvent.click(screen.getByText(/Uncommitted Changes/).closest("li")!);
+    fireEvent.click(screen.getByText(/Uncommitted changes/).closest("li")!);
 
     expect(screen.queryByRole("toolbar", { name: "Selected commits" })).not.toBeInTheDocument();
     expect(row("D")).toHaveAttribute("aria-selected", "false");
@@ -1009,7 +1009,7 @@ describe("CommitGraph — keyboard access", () => {
     expect(screen.getByRole("menuitem", { name: "Rebase onto here" })).toBeInTheDocument();
   });
 
-  it("Enter on the Uncommitted Changes row opens no menu", () => {
+  it("Enter on the Uncommitted changes row opens no menu", () => {
     const { list } = setup("uncommitted");
     fireEvent.keyDown(list, { key: "Enter" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
@@ -1109,7 +1109,7 @@ describe("CommitGraph history metadata and pagination", () => {
     expect(onLoadMore).toHaveBeenCalledTimes(1);
   });
 
-  it("draws a hollow working-tree node in the lane column of the Uncommitted Changes row", () => {
+  it("draws a hollow working-tree node in the lane column of the Uncommitted changes row", () => {
     render(<CommitGraph {...baseProps} />);
 
     expect(screen.getByTestId("working-tree-node")).toBeInTheDocument();

@@ -35,7 +35,7 @@ describe("Browsitory stash", () => {
   });
 
   it("saves a stash, sees it listed, applies it, and restores the file's dirty content", async () => {
-    const uncommittedRow = await $("li*=Uncommitted Changes");
+    const uncommittedRow = await $("li*=Uncommitted changes");
     await uncommittedRow.waitForExist({ timeout: 10000 });
     const stashButton = await $("button=Stash");
     await stashButton.waitForEnabled({ timeout: 10000 });

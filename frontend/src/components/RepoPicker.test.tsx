@@ -346,7 +346,7 @@ describe("RepoPicker workspaces", () => {
 
     fireEvent.click(screen.getByText("Open workspace root"));
 
-    expect(screen.getByText("New Workspace")).toBeInTheDocument();
+    expect(screen.getByText("New workspace")).toBeInTheDocument();
   });
 
   it("opens the selected members with the saved workspace id after creation", async () => {
@@ -373,7 +373,7 @@ describe("RepoPicker workspaces", () => {
     );
 
     fireEvent.click(screen.getByText("Open workspace root"));
-    fireEvent.click(screen.getByText("Choose Root Folder"));
+    fireEvent.click(screen.getByText("Choose root folder"));
     await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2));
     fireEvent.click(screen.getByText("Save"));
 
@@ -385,7 +385,7 @@ describe("RepoPicker workspaces", () => {
         memberPaths: ["/projects/root/a", "/projects/root/b"],
       }),
     );
-    expect(screen.queryByText("New Workspace")).not.toBeInTheDocument();
+    expect(screen.queryByText("New workspace")).not.toBeInTheDocument();
   });
 });
 

@@ -85,17 +85,20 @@ export function ReleaseNotesModal({
   entries,
   onClose,
   onOpenThirdPartyLicences,
+  onOpenUserGuide,
 }: {
   entries: ReleaseNotesEntry[];
   onClose: () => void;
   /** Shows the "Third-party licences" button; absent where the app can't show them. */
   onOpenThirdPartyLicences?: () => void;
+  /** Shows the "User guide" button, which opens the user guide site in the browser. */
+  onOpenUserGuide?: () => void;
 }) {
   // A release with only developer-only changes has no groups; it isn't shown.
   const shown = entries.filter((entry) => entry.groups.length > 0);
   return (
     <Overlay onClose={onClose} ariaLabel="Release notes">
-      <Panel title="Release Notes" ariaLabel="Release notes">
+      <Panel title="Release notes" ariaLabel="Release notes">
         {shown.length === 0 ? (
           <p className={styles.empty}>No release notes yet.</p>
         ) : (
@@ -125,6 +128,11 @@ export function ReleaseNotesModal({
           <button type="button" onClick={onClose}>
             Close
           </button>
+          {onOpenUserGuide !== undefined && (
+            <button type="button" onClick={onOpenUserGuide}>
+              User guide
+            </button>
+          )}
           {onOpenThirdPartyLicences !== undefined && (
             <button type="button" onClick={onOpenThirdPartyLicences}>
               Third-party licences

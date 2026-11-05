@@ -5,6 +5,7 @@
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "test": "wdio run wdio.conf.ts",
+    "screenshots": "wdio run wdio.screenshots.conf.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

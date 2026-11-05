@@ -8,6 +8,9 @@ loads it through `CLAUDE.md`'s `@AGENTS.md` import.
 Browsitory: a Git GUI. Rust backend (`git2`) shared across two frontends — a Tauri desktop app
 and a VSCode extension — behind one `RepoClient` IPC interface. See
 `docs/ARCHITECTURE.md` for the full design and `CHANGELOG.md` for what shipped when.
+`docs/README.md` indexes every document; the user guide is `docs/guide/` (one page per topic,
+published with MkDocs, see "User guide site" below) and `CONTRIBUTING.md` is the human-facing
+build guide.
 
 ## Commands
 
@@ -63,6 +66,17 @@ pnpm install --ignore-workspace                    # extension/e2e isn't a membe
 pnpm test                                          # spawns the extension under vscode.ExtensionMode.Test; needs a display (xvfb-run on headless CI)
 ```
 
+### User guide site (MkDocs), from repo root
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install --require-hashes -r docs/requirements.txt
+.venv/bin/mkdocs build --strict                   # what .github/workflows/docs.yml runs
+```
+
+The pages are `docs/guide/*.md`, plain Markdown with relative links (also read on GitHub); a new
+page needs a `nav` entry in `mkdocs.yml`. Screenshots in `docs/guide/assets/` come from
+`e2e/screenshots/capture.sh` (see `e2e/screenshots/README.md`); don't edit them by hand.
+
 ## Git hooks
 
 One-time setup, per clone/worktree:
@@ -94,9 +108,10 @@ have put at the top of `## [Unreleased]`: a `### Heading` line, an optional intr
 Renovate (`renovate.json`) opens dependency PRs before 6am on Mondays (Europe/Berlin), at most
 three open at a time, labelled `maintainability`, and never automerges — merge by hand once CI
 is green. Covered: the Cargo workspace, all four pnpm projects (`frontend/`, `extension/`,
-`e2e/`, `extension/e2e/`, each with its own lockfile), GitHub Actions, and
-`rust-toolchain.toml`. Minor/patch updates are grouped per ecosystem (Rust, JS, GitHub
-Actions); Tauri crates and `@tauri-apps/*` packages share one group. Majors and
+`e2e/`, `extension/e2e/`, each with its own lockfile), GitHub Actions,
+`rust-toolchain.toml`, and the user guide site's Python tools (`docs/requirements.in`, locked
+with hashes in `docs/requirements.txt` by Renovate's `pip-compile` manager). Minor/patch updates
+are grouped per ecosystem (Rust, JS, Python docs tools, GitHub Actions); Tauri crates and `@tauri-apps/*` packages share one group. Majors and
 `git2`/`libgit2-sys` wait for approval on the Dependency Dashboard issue (libgit2 bumps change
 behaviour the tests and `docs/ARCHITECTURE.md` characterize). Security fixes skip the
 schedule; lockfiles get a monthly maintenance PR.

@@ -47,7 +47,7 @@ function renderPanel(overrides: Partial<Parameters<typeof PullRequestPanel>[0]> 
       {...overrides}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Pull Requests" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pull requests" }));
   return result;
 }
 
@@ -58,6 +58,16 @@ describe("PullRequestPanel", () => {
     expect(screen.queryByLabelText("Access token")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /list pull requests/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /create pull request/i })).not.toBeInTheDocument();
+  });
+
+  it("points to Add remote in the Branches section when no remote is supported (#320)", () => {
+    renderPanel({ forgeRepositories: [] });
+
+    expect(
+      screen.getByText(
+        "No supported GitHub or Bitbucket remotes. Add one in the Branches section (Add remote) to see its pull requests here.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("shows account/token save-forget controls and a creation form for a supported repository", () => {
@@ -376,11 +386,11 @@ describe("PullRequestPanel", () => {
     );
   });
 
-  it("shows an icon and the total open pull-request count on the outer Pull Requests header", () => {
+  it("shows an icon and the total open pull-request count on the outer Pull requests header", () => {
     renderPanel({
       pullRequests: { origin: { pullRequests: [openPullRequest], truncated: false } },
     });
-    const header = screen.getByRole("button", { name: "Pull Requests" });
+    const header = screen.getByRole("button", { name: "Pull requests" });
     expect(header).toHaveTextContent("1");
     expect(header.querySelector("svg")).toBeInTheDocument();
   });
@@ -390,7 +400,7 @@ describe("PullRequestPanel", () => {
 
     const githubHeader = screen.getByRole("button", { name: /github: acme\/widget \(origin\)/i });
     const bitbucketHeader = screen.getByRole("button", { name: /bitbucket: acme\/widget \(bb-origin\)/i });
-    const outerHeader = screen.getByRole("button", { name: "Pull Requests" });
+    const outerHeader = screen.getByRole("button", { name: "Pull requests" });
 
     // ArrowDown from the last repo card wraps around to the first, proving the nested
     // AccordionGroup (not some ambient/absent outer one) owns the wrapping.

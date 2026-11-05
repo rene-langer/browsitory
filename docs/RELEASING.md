@@ -34,6 +34,24 @@ Merge it, then tag that commit. The `verify` job fails while any fragment is lef
 (`scripts/fold-changelog.py --check`), because every VSIX ships `CHANGELOG.md` and the app's
 release notes are built from it.
 
+### Before a release: docs and screenshots
+
+In the same release-prep pull request (or one before it):
+
+1. Re-run the screenshots: `e2e/screenshots/capture.sh` on Linux (see
+   `e2e/screenshots/README.md`). Look at every changed image in `docs/guide/assets/` and commit
+   the ones that show a real UI change.
+2. Read the pages in `docs/guide/` that cover what changed since the last release, and fix
+   anything the changelog makes out of date. Check `docs/guide/install.md` against how this
+   release ships (file names, pre-release or not, see `VSIX_PRE_RELEASE` below).
+3. CI's `Docs` workflow (`.github/workflows/docs.yml`) builds the site with
+   `mkdocs build --strict` on the pull request and publishes it to
+   <https://rene-langer.github.io/browsitory/> once it is on `main`.
+
+The Marketplace and Open VSX pages show `extension/README.md`, with images loaded from `main`
+(`raw.githubusercontent.com/.../main/docs/guide/assets/`), so merge the new screenshots before
+the release is published.
+
 ### Publishing the extension
 
 The same tag builds one `.vsix` per platform (`build-vsix-release`, version stamped from the
