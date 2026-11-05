@@ -108,6 +108,9 @@ jobs:
         run: python3 scripts/test_check_changelog.py
       - name: fold-changelog.py unit tests
         run: python3 scripts/test_fold_changelog.py
+      # Release tooling (release.yml's publish jobs, #344); no network, the HTTP calls are faked.
+      - name: verify-marketplace-listing.py unit tests
+        run: python3 scripts/test_verify_marketplace_listing.py
       - name: Changelog entry (fragment in changelog.d/ or CHANGELOG.md)
         env:
           # A dispatched run has no pull request: the default branch is the base, and there are

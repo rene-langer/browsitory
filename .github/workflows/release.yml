@@ -335,15 +335,34 @@ jobs:
       - name: Check the Entra sign-in reaches the Marketplace
         if: env.HAS_AZURE == 'true'
         run: pnpm --dir extension exec vsce verify-pat browsitory --azure-credential
+      # The Marketplace can answer "Published" and still drop a package (#344): in 0.3.0, the
+      # three targets uploaded while the first target of the new version was being validated
+      # (about 7 min) never appeared; a re-run uploaded them and they stayed. So publish one
+      # target, wait until the Marketplace validated it, then publish the rest.
+      # scripts/verify-marketplace-listing.py only reads the public gallery; it needs no token.
       - name: Publish to the Visual Studio Marketplace
         if: env.HAS_AZURE == 'true'
         shell: bash
         run: |
+          version="${GITHUB_REF_NAME#release/}"
           flags=(--azure-credential --skip-duplicate)
           if [ "$VSIX_PRE_RELEASE" = "true" ]; then flags+=(--pre-release); fi
-          for vsix in "$GITHUB_WORKSPACE"/release-vsix/*.vsix; do
+          packages=("$GITHUB_WORKSPACE"/release-vsix/*.vsix)
+          first="${packages[0]}"
+          first_target="$(basename "$first" .vsix)"
+          first_target="${first_target#browsitory-"$version"-}"
+          pnpm --dir extension exec vsce publish "${flags[@]}" --packagePath "$first"
+          python3 scripts/verify-marketplace-listing.py --version "$version" --timeout 1800 "$first_target"
+          for vsix in "${packages[@]:1}"; do
             pnpm --dir extension exec vsce publish "${flags[@]}" --packagePath "$vsix"
           done
+      # Fails with the missing targets if a package was dropped. Re-running the job is safe:
+      # --skip-duplicate skips the targets already published and uploads only the missing ones.
+      - name: Check every platform package is on the Marketplace
+        if: env.HAS_AZURE == 'true'
+        run: >-
+          python3 scripts/verify-marketplace-listing.py --version "${GITHUB_REF_NAME#release/}"
+          --timeout 1800 --packages-dir release-vsix
 
   # Publishes the same four packages to Open VSX (VSCodium, Cursor, Gitpod, ...), after the
   # draft GitHub Release succeeded. OVSX_PAT is a `marketplace` environment secret; it is passed
@@ -365,6 +384,12 @@ jobs:
       - name: Skip notice
         if: env.HAS_OVSX != 'true'
         run: echo "::notice::OVSX_PAT is not set in the marketplace environment; skipping Open VSX."
+      # Only the listing check below; nothing from the repository runs with OVSX_PAT.
+      - uses: actions/checkout@v7
+        if: env.HAS_OVSX == 'true'
+        with:
+          sparse-checkout: scripts/verify-marketplace-listing.py
+          sparse-checkout-cone-mode: false
       - uses: actions/setup-node@v7
         if: env.HAS_OVSX == 'true'
         with:
@@ -394,6 +419,12 @@ jobs:
           for vsix in "${packages[@]}"; do
             npx --yes ovsx@1.3.0 publish --skip-duplicate --packagePath "$vsix"
           done
+      # Same check as the Marketplace job (#344). Open VSX lists a package after its scan.
+      - name: Check every platform package is on Open VSX
+        if: env.HAS_OVSX == 'true'
+        run: >-
+          python3 scripts/verify-marketplace-listing.py --registry open-vsx
+          --version "${GITHUB_REF_NAME#release/}" --timeout 1800 --packages-dir release-vsix
 
   # --- Dry run (workflow_dispatch only) ---------------------------------------------------
   # Checks the publishing credentials without building, releasing or publishing anything. The
