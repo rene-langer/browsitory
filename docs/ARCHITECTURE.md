@@ -24,7 +24,7 @@ external-tool launchers `openInEditor`, `revealInFileManager`, `openTerminal`, `
 implements directly against VSCode APIs instead of round-tripping through the sidecar — see
 `docs/superpowers/specs/2026-08-30-vscode-extension-design.md`'s "VSCode-native integrations"
 section. Transfer progress (`subscribeTransferProgress`) rides the same JSON-RPC connection as
-everything else, as server-initiated notifications (`crates/vscode-sidecar/src/dispatch.rs`'s
+everything else, as server-initiated notifications (`crates/vscode-sidecar/src/dispatch/remote.rs`'s
 `spawn_progress_relay`) rather than request/response calls. Target-specific VSIX packages each
 bundle the `extension/` host, the `frontend/dist-vscode` webview bundle, and exactly one matching
 sidecar binary.
@@ -1680,7 +1680,7 @@ only `error`.
   and fail when a checked-in one is out of date (`UPDATE_TRANSPORT_METHODS=1` rewrites it):
   `wire_bindings_are_current` (`crates/repo-service/src/wire.rs`) writes
   `frontend/src/ipc/generated/wire-dto.ts`, and `dto_bindings_are_current`
-  (`crates/tauri-app/src/commands/mod.rs`, `crates/vscode-sidecar/src/dispatch.rs`) writes the
+  (`crates/tauri-app/src/commands/mod.rs`, `crates/vscode-sidecar/src/dispatch/tests.rs`) writes the
   transport-specific `tauri-dto.ts` and `sidecar-dto.ts`. They also fail when a listed DTO uses
   a type that is neither listed nor imported (`sidecar-dto.ts` imports `OpenRepoEntry` from
   `wire-dto.ts`). `frontend/src/ipc/dtoContract.ts` then requires each
