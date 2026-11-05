@@ -226,7 +226,7 @@ export function CommitGraph({
     if (next < 1) {
       setSelection(EMPTY_SELECTION, rows[next]);
     } else if (extendRange) {
-      // Row 0 is "Uncommitted Changes"; commit rows are offset by one.
+      // Row 0 is "Uncommitted changes"; commit rows are offset by one.
       setSelection(extendSelection(effectiveSelection, commits, commits[next - 1].id), rows[next]);
     } else {
       setSelection(selectOnly(commits[next - 1].id), rows[next]);
@@ -440,7 +440,7 @@ export function CommitGraph({
           <WorkingTreeLaneGraphic lane={commitLayouts[0]?.lane ?? 0} totalLanes={laneCount} />
         </div>
         <span className={styles.commitSummary}>
-          Uncommitted Changes{status.length > 0 && ` (${status.length})`}
+          Uncommitted changes{status.length > 0 && ` (${status.length})`}
         </span>
       </ListRow>
       {commits.map((commit, index) => (

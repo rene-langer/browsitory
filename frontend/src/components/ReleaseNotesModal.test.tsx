@@ -173,6 +173,17 @@ describe("ReleaseNotesModal", () => {
     expect(onOpenThirdPartyLicences).toHaveBeenCalledOnce();
   });
 
+  it("links to the user guide when the app can open it (#320)", () => {
+    const onOpenUserGuide = vi.fn();
+    const { rerender } = render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "User guide" })).not.toBeInTheDocument();
+
+    rerender(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} onOpenUserGuide={onOpenUserGuide} />);
+    screen.getByRole("button", { name: "User guide" }).click();
+
+    expect(onOpenUserGuide).toHaveBeenCalledOnce();
+  });
+
   it("calls onClose when the close button is clicked", () => {
     const onClose = vi.fn();
     render(<ReleaseNotesModal entries={ENTRIES} onClose={onClose} />);

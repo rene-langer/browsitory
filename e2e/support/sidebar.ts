@@ -1,6 +1,6 @@
 import { $ } from "@wdio/globals";
 
-// Every sidebar section (Branches, Worktrees, Submodules, Reflog, Remotes, Tags, Pull Requests)
+// Every sidebar section (Branches, Worktrees, Submodules, Reflog, Remotes, Tags, Pull requests)
 // is wrapped in `AccordionSection` (see `frontend/src/components/primitives/AccordionSection.tsx`)
 // and defaults CLOSED — its body isn't even rendered into the DOM until the header button is
 // clicked open (conditional render, not CSS hiding), so any spec that reaches into a section's

@@ -21,6 +21,12 @@
     "enabled": true,
     "schedule": ["at any time"]
   },
+  "pip-compile": {
+    "managerFilePatterns": ["/^docs/requirements\\.txt$/"]
+  },
+  "pip_requirements": {
+    "enabled": false
+  },
   "packageRules": [
     {
       "matchManagers": ["cargo"],
@@ -31,6 +37,11 @@
       "matchManagers": ["npm"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "JS dependencies (non-major)"
+    },
+    {
+      "matchManagers": ["pip-compile"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Python docs tools (non-major)"
     },
     {
       "matchManagers": ["github-actions"],

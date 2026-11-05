@@ -20,7 +20,7 @@ function opacityFor(segmentId: number, hoveredSegmentId: number | null | undefin
 }
 
 /**
- * Hollow node for the "Uncommitted Changes" row: occupies the same lane column width as the
+ * Hollow node for the "Uncommitted changes" row: occupies the same lane column width as the
  * commit rows' graphic so the row's text lines up with commit summaries, and links down to the
  * first commit (HEAD) in that commit's lane.
  */

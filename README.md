@@ -4,46 +4,67 @@
 
 <h1 align="center">Browsitory</h1>
 
-<p align="center">A fast, keyboard-driven Git desktop client.</p>
+<p align="center">A fast, keyboard-friendly Git client for your desktop and for VSCode.</p>
 
-<p align="center">Open several repositories at once as tabs, and save recurring multi-repo projects as <strong>workspaces</strong> — a folder of repos you open, group, and close together in one action.</p>
+<p align="center">
+  <a href="https://rene-langer.github.io/browsitory/">User guide</a> ·
+  <a href="https://github.com/rene-langer/browsitory/releases/latest">Download</a> ·
+  <a href="https://github.com/rene-langer/browsitory/issues">Report a problem</a>
+</p>
 
-## VSCode extension
+![Browsitory: sidebar, commit graph and diff pane](docs/guide/assets/overview.png)
 
-Browsitory also runs inside VSCode (1.134 or newer; Linux x64, macOS, Windows x64). It is a
-pre-release for now:
+Browsitory shows your history as a commit graph and lets you stage, commit, branch, merge,
+rebase, stash and tag without typing Git commands. Open several repositories at once as tabs,
+and save a group of them as a **workspace** you open and close in one step.
 
-- **Visual Studio Marketplace**: search for "Browsitory" in the Extensions view and pick
-  **Install Pre-Release Version**, or run
+## Features
+
+- **Commit graph** with branches and tags, commit search, file history, blame, and compares
+  between commits, branches or the working tree.
+- **Staging by file, hunk or line.** Discard or ignore files, amend, add co-authors, sign
+  commits, and run your Git hooks.
+- **Branches and remotes:** create, switch, merge, rename and delete branches; fetch, pull and
+  push; set upstreams and manage remotes and credentials.
+- **Rebase and history rewriting:** an interactive rebase planner, cherry-pick, revert, reset,
+  squash and reorder, with conflicts resolved in the app.
+- **Undo and redo** for most Git operations, discards included, and a reflog view.
+- **Stashes, tags, worktrees and submodules**, each in its own sidebar section.
+- **Pull requests** for GitHub and Bitbucket remotes.
+- **Command palette** (Ctrl+K, or Cmd+K on macOS) with almost every action, plus keyboard
+  shortcuts and keyboard-driven menus.
+- **Light and dark theme.**
+
+## Install
+
+**Desktop app** (Windows, macOS, Linux): download the installer for your system from the
+[latest release](https://github.com/rene-langer/browsitory/releases/latest): `.exe` or `.msi`
+for Windows, `.dmg` for macOS, `.AppImage`, `.deb` or `.rpm` for Linux. The app updates itself.
+See [Install Browsitory](docs/guide/install.md) for details.
+
+**VSCode extension** (VSCode 1.134 or newer on desktop; Linux x64, macOS, Windows x64):
+
+- **Visual Studio Marketplace:** search for "Browsitory" in the Extensions view. While it is a
+  pre-release, choose **Install Pre-Release Version**, or run
   `code --install-extension browsitory.browsitory --pre-release`.
-- **Open VSX** (VSCodium, Cursor and others): search for "Browsitory" there, or see
+- **Open VSX** (VSCodium, Cursor and others):
   <https://open-vsx.org/extension/browsitory/browsitory>.
-- **From a file**: download the `.vsix` for your platform from the
+- **From a file:** download the `.vsix` for your platform from the
   [releases page](https://github.com/rene-langer/browsitory/releases) and run
   `code --install-extension browsitory-<version>-<platform>.vsix`.
 
-Then run **Browsitory: Open** from the Command Palette. See the
-[User Guide](docs/USER_GUIDE.md#installing-the-vscode-extension).
+Then run **Browsitory: Open** from VSCode's Command Palette.
 
-## Quickstart
+## Learn more
 
-```bash
-git clone <this-repo-url>
-cd browsitory
-cd frontend && pnpm install && cd ../crates/tauri-app
-cargo tauri dev
-```
+The [user guide](https://rene-langer.github.io/browsitory/) explains every feature. You can
+also read it here in the repository: [docs/guide/](docs/guide/README.md).
 
-Requires Rust, [pnpm](https://pnpm.io), the [Tauri CLI](https://tauri.app/) (`cargo install tauri-cli`), and the Tauri prerequisites for your OS.
+Want to build Browsitory yourself or help out? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Building a distributable
+## Licence
 
-```bash
-scripts/build-dist.sh      # Linux/macOS: .deb/.rpm/.AppImage or .dmg
-scripts\build-dist.ps1     # Windows: .msi/.exe
-```
-
-Bundles land in `crates/tauri-app/target/release/bundle/`.
-
-See the [User Guide](docs/USER_GUIDE.md) for a tour of the UI, and [AGENTS.md](AGENTS.md) for full build, test, and E2E commands, and
-[docs/RELEASING.md](docs/RELEASING.md) for releases.
+Browsitory is MIT-licensed; see [LICENSE](LICENSE). It includes libgit2 (GPL-2.0 with a linking
+exception) and other open-source libraries. Their licences are in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which ships with every installer and
+extension package.

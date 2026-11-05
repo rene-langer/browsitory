@@ -139,6 +139,36 @@ library is involved, so this table has no dependency row for one.
 | mocha 11.8.0 | MIT | dev only; test runner loaded by `suite/index.ts`. |
 | typescript 6.0.3 | Apache-2.0 | dev only; same package as the frontend row above. |
 
+## Python, user guide site (`docs/requirements.txt`)
+
+Build-only. `.github/workflows/docs.yml` installs these into a throwaway virtual environment to
+build the user guide site from `docs/guide/` (`mkdocs.yml`) and publishes only the generated
+HTML. Nothing of them ships in the desktop app or the VSCode extension, and the site itself
+holds only our own text plus the theme's MIT-licensed CSS and JavaScript. The two direct
+dependencies are named, without versions, in `docs/requirements.in`. `docs/requirements.txt`,
+generated from it with `pip-compile --generate-hashes`, pins every package, direct and
+transitive, to an exact version with hashes; Renovate updates it. Owner approved MkDocs
+with the Material theme as a build-only docs tool on 2026-11-04 (#320). Licences read from each
+package's metadata (`License-Expression`, else `License` and the classifiers) with
+`importlib.metadata` on 2026-11-04; re-check them when a Renovate PR adds a package or changes
+one's licence.
+
+| Package | License | Notes |
+|---|---|---|
+| mkdocs 1.6.1 | BSD-2-Clause | Direct. The site generator. |
+| mkdocs-material 9.8.0 | MIT | Direct. The theme, with search. Its maintainers announced end of life on 2027-05-05, with Zensical as the successor (<https://github.com/squidfunk/mkdocs-material/releases/tag/9.8.0>). The move to Zensical is tracked in #340. |
+| certifi 2026.10.23 | MPL-2.0 | Through `requests` (needed by mkdocs-material). MPL-2.0 is file-level copyleft: it only covers changes to certifi itself, which we neither make nor distribute, and it runs on the CI runner only. Owner decision 2026-11-04, #320: accepted as a build-only exception. |
+| pathspec 1.1.1 | MPL-2.0 | Through `mkdocs` itself. Same reasoning as certifi. Owner decision 2026-11-04, #320: accepted as a build-only exception. |
+| babel, click, idna, markdown, markupsafe, python-dateutil, colorama, jinja2 | BSD-3-Clause | Transitive. colorama and jinja2 declare it only through the "BSD License" classifier; their licence files are BSD-3-Clause. |
+| pygments | BSD-2-Clause | Transitive. |
+| backrefs, charset-normalizer, mergedeep, mkdocs-get-deps, mkdocs-material-extensions, paginate, platformdirs, pymdown-extensions, pyyaml, pyyaml-env-tag, urllib3 | MIT | Transitive. mergedeep declares it only through its classifier. |
+| ghp-import, requests, tzdata, watchdog | Apache-2.0 | Transitive. |
+| packaging | Apache-2.0 OR BSD-2-Clause | Transitive. |
+
+No script enforces these licences. `scripts/check-license-compliance.py` and
+`scripts/check-dependency-licenses.py` cover Rust and npm only, so CI does not check this table
+or the packages in `docs/requirements.txt`; it is kept up to date by hand.
+
 ## The one exception: libgit2 via `git2`
 
 `git2` vendors libgit2, which is GPL-2.0-with-linking-exception, not MIT. The linking
@@ -269,6 +299,9 @@ every pull request, every push to `main` and the weekly scheduled run:
   old-style `licenses` array counts as all of its licences together.
 - An exception or clarification that no longer matches anything fails both checks, so the
   tables can't go stale.
+
+- **Python** (the user guide site's build tools, `docs/requirements.txt`): not checked by a
+  script; see that section above.
 
 `scripts/check-license-compliance.py` (the `audit` job) still runs: it fails if a direct
 dependency has no row in the tables above. The tree checks verify licence values; this one
