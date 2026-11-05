@@ -6,6 +6,105 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Internal: test reliability
+
+- Fixed: ten commit search tests no longer read one page under the 250 ms page time budget. A
+  slow runner could end the page before the match. The `git-core` tests now search without a
+  time budget, and the worker tests follow `next_cursor` (#182).
+- Fixed: the state lock's fork test waited a fixed 200 ms for the child to fork. It now waits
+  for a byte the child writes after the fork, and fails if the child has already exec'd when
+  the lock is checked (#182).
+- Fixed: E2E specs that checked too early now wait for the real condition: the stored sequence
+  file to go away (`cherry-pick-sequence`), the hunk commit to land (`hunk-staging`), a commit
+  menu item that a graph refresh can't close before the click (`history-rewrite`), and the header's
+  "Release notes" button to render (VSCode `third-party-licences`) (#182).
+
+### Cancel a running hook
+
+- Fixed: Cancel on the "Running post-checkout hook…" strip (and on a commit hook's status)
+  could do nothing when you clicked it right as it appeared. The button then stayed on
+  "Cancelling…" until the hook ended by itself. Cancel now always reaches the hook. (#182)
+
+### Mark resolved on a folder
+
+- Fixed: when a conflicted path had become a folder, Mark resolved opened it again by its path
+  before staging it. Something swapped in at that moment could hang Browsitory (a FIFO) or be
+  staged in its place (a link, or another repository). Browsitory now holds the folder open and
+  reads the nested repository's commit through it, never by path. A FIFO or link inside the
+  nested repository is not opened or followed either, and its files are read only up to a size
+  limit (#213).
+- Fixed: Mark resolved on a file below a folder that has become a file (for example `a/b/c.txt`
+  where `a` is now a file) failed with "Not a directory". It now stages the deletion, as
+  `git add` does. Discard hunk and Discard lines there now say which file is in the way, as
+  Discard does, instead of a raw error (#213).
+- Changed: a nested repository is still staged as its checked-out commit, as `git add` does,
+  also when it is a submodule (its git folder in `.git/modules`, nested ones included) or a
+  linked worktree of a repository in the work tree. Browsitory never opens anything outside the
+  work tree for this. A repository whose git folder is elsewhere, or at a path Browsitory can't
+  match to the work tree, is refused; stage it with `git add <path>` in a terminal. That
+  includes a linked worktree of a repository outside the work tree, and one git wrote with a
+  path the work tree wasn't opened by (for example macOS `/private/var` for `/var`) (#213).
+- Changed: when Browsitory can't stage the folder, it now says why instead of showing a raw
+  git error, and how to stage it with git: the folder isn't a repository, the repository has no
+  commit yet, its git folder is outside the work tree or can't be matched to it, a linked
+  worktree's main repository can't be found, or Browsitory can't read it (a SHA-256 or reftable
+  repository, a ref name git refuses, or a ref or `packed-refs` that isn't a regular file)
+  (#213).
+
+### Documentation and user guide
+
+- Added: a user guide website, <https://rene-langer.github.io/browsitory/>, with one page per
+  topic, navigation and search. **Open user guide** in the command palette and **User guide**
+  in the release notes open it in your browser, in the desktop app and in VSCode (#320).
+- Added: the guide now covers the theme switch, the release notes, the update banner,
+  **Expand all sections** and **Collapse all sections**, choosing which branches the commit
+  graph shows, **Split view**, and the palette's commands and keyboard shortcuts (#320).
+- Fixed: the guide described some controls wrongly, for example the upstream buttons at the
+  bottom of the Branches section, a "Conflicted" group that doesn't exist, and the names of the
+  squash, fixup and drop buttons (#320).
+- Changed: "Pull Requests", "Uncommitted Changes", "Release Notes", "New Workspace",
+  "Edit Workspace" and "Choose Root Folder" are now written in sentence case, like the rest of
+  the app. Recent commands in the palette keep working (#320).
+- Fixed: with no GitHub or Bitbucket remote, the Pull requests section pointed to a Remotes
+  section that no longer exists. It now points to **Add remote** in the Branches section (#320).
+- Changed: the README, the VSCode Marketplace page and the screenshots were rewritten for 0.3.0
+  (#320).
+- Internal: the screenshots come from `e2e/screenshots/capture.sh`, which builds a fixed demo
+  repository and drives the app through the E2E harness. The site is built with MkDocs
+  (`mkdocs.yml`, `.github/workflows/docs.yml`); build and contributor notes moved to
+  `CONTRIBUTING.md` (#320).
+
+### Release notes in the app
+
+- Fixed: the release notes in the app left out every changelog section with a topic heading,
+  such as "Commit signing" or "Undo and redo", so most of 0.3.0 was missing. Each topic now
+  shows as its own group, and a "Fixed", "Added" or "Changed" label marks each note. Notes
+  for developers only are left out (#335).
+
+### Stash apply checks case-only names where names fold
+
+- Fixed: Apply and Pop now refuse a stash whose untracked file `d/x` needs a folder where a
+  tracked file differs only in case (`D`). This applies when the repository sets
+  `core.ignorecase`, and always on macOS and Windows, even if a copied repository says
+  otherwise. On a case-insensitive drive `d` and `D` are the same name, so the stash could not be
+  applied cleanly, and git refuses it too. On a case-sensitive drive with `core.ignorecase` set,
+  git would apply it; Browsitory refuses on purpose, to be safe. Nothing is written and the
+  stash is kept. (#234)
+
+### Changelog fragments (internal)
+
+Pull requests no longer conflict over `CHANGELOG.md`. Each one now adds its entry as a file in
+`changelog.d/`, and a release folds them into `CHANGELOG.md`.
+
+- Changed: `scripts/check-changelog.py` (pre-push hook and CI) accepts a new or edited fragment,
+  `changelog.d/<issue>-<short-slug>.md`, as the changelog entry, and checks that it starts with
+  a `### ` heading. Editing `CHANGELOG.md` still counts. Any other file in `changelog.d/`
+  (such as `240-x.MD`) fails the check. The format is in `changelog.d/README.md`.
+- Changed: the pre-push hook compares against `origin/main` when the clone has it, else `main`.
+- Added: `scripts/fold-changelog.py` moves all fragments to the top of `## [Unreleased]`,
+  newest first, and deletes them. With `--check` it fails while fragments are left; the release
+  workflow runs that check, so a release always ships a complete `CHANGELOG.md`.
+
 ### Leftover merge, cherry-pick and revert state
 
 Sometimes git's notes about a merge, cherry-pick or revert stay behind although its changes
