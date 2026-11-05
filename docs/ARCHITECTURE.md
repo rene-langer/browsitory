@@ -1629,8 +1629,8 @@ only `error`.
 
 - `git-core`/`config`: `cargo test`, real temp-dir repos/files, no mocks.
 - `repo-service`: inline unit tests next to the code they cover (worker, credential store, and
-  forge/PR API logic), including `crates/repo-service/src/worker/mod.rs`'s tests, which spawn a
-  real worker thread against a real temp-dir repo — no mocks. The wire format of its DTOs is
+  forge/PR API logic), including the worker's tests (`crates/repo-service/src/worker/tests/`, one
+  file per area), which spawn a real worker thread against a real temp-dir repo — no mocks. The wire format of its DTOs is
   pinned by the wire snapshots and the generated DTO types below.
 - `tauri-app`: now a thin Tauri command adapter over `repo-service`, so it doesn't need
   delegation tests of its own. `crates/tauri-app/src/commands/mod.rs`'s inline tests still
