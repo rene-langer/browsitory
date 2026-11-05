@@ -5053,6 +5053,30 @@ describe("git hooks", () => {
     expect(cancelTransfer).toHaveBeenCalledWith(TEST_REPO_PATH, "checkout-1");
   });
 
+  // #182 review: a hook that started and finished in one React batch leaves `hookRun` null
+  // before and after, so the sync effect doesn't run; Finished itself must clear the target.
+  it("cancels nothing after a hook that started and finished in one batch", async () => {
+    const cancelTransfer = vi.fn(async () => {});
+    let emit: ((event: HookProgress) => void) | undefined;
+    const client = transferClient({
+      cancelTransfer,
+      subscribeHookProgress: (listener: (event: HookProgress) => void) => {
+        emit = listener;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    const event = { repoPath: TEST_REPO_PATH, operationId: "checkout-1", hook: "post-checkout", source: "Checkout" as const };
+
+    act(() => {
+      emit?.({ ...event, phase: "Started" });
+      emit?.({ ...event, phase: "Finished" });
+    });
+    await act(async () => result.current.cancelHookRun());
+
+    expect(cancelTransfer).not.toHaveBeenCalled();
+  });
+
   it("turns a HookFailed push into a retryable hook failure", async () => {
     let listener: ((progress: TransferProgress) => void) | undefined;
     const pushCurrentBranch = vi.fn(async () => "push-1");
