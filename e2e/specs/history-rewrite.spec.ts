@@ -18,6 +18,24 @@ async function openCommitMenu(summary: string) {
   }, row);
 }
 
+/**
+ * Waits until the commit graph shows `count` rows (innermost `<li>`s) containing `summary`.
+ * Counted inside the page, so no handle to a row can go stale while the graph refreshes.
+ */
+async function waitForGraphRows(summary: string, count: number) {
+  await browser.waitUntil(
+    () =>
+      browser.execute(
+        (text: string) =>
+          Array.from(document.querySelectorAll("li")).filter(
+            (li) => li.querySelector("li") === null && (li.textContent ?? "").includes(text),
+          ).length,
+        summary,
+      ).then((found) => found === count),
+    { timeout: 10000, timeoutMsg: `the commit graph never showed ${count} row(s) with "${summary}"` },
+  );
+}
+
 async function clickMenuItem(label: string) {
   const item = await $(`button*=${label}`);
   await item.waitForExist({ timeout: 10000 });
@@ -46,6 +64,10 @@ describe("Browsitory history rewrite", () => {
       timeout: 10000,
     });
     expect(fs.existsSync(path.join(E2E_REPO_PATH, "picked.txt"))).toBe(true);
+    // The commit lands before the graph refreshes. A menu opened on the old graph is closed by
+    // the refresh, and the click on its Revert item then does nothing (#182). Wait for the
+    // picked copy's row next to the original's.
+    await waitForGraphRows("e2e: commit to cherry-pick", 2);
 
     // The picked copy is now HEAD on baseBranch; it is the first matching row.
     await openCommitMenu("e2e: commit to cherry-pick");
@@ -55,6 +77,8 @@ describe("Browsitory history rewrite", () => {
       { timeout: 10000 },
     );
     expect(fs.existsSync(path.join(E2E_REPO_PATH, "picked.txt"))).toBe(false);
+    // Same as above: let the graph show the revert before opening the next menu.
+    await waitForGraphRows('Revert "e2e: commit to cherry-pick"', 1);
 
     const startSummary = git("log", "-1", "--format=%s", startTip);
     await openCommitMenu(startSummary);

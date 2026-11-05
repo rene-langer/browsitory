@@ -29,10 +29,11 @@ export function useHookActions(
       client.subscribeHookProgress((event) => {
         if (event.repoPath !== repoPath) return;
         if (event.phase === "Started") {
-          setState((prev) => ({
-            ...prev,
-            hookRun: { operationId: event.operationId, hook: event.hook, source: event.source },
-          }));
+          const run = { operationId: event.operationId, hook: event.hook, source: event.source };
+          // Set now, not only by the effect above: Cancel is on screen once React commits this
+          // render, and a click before its effects run would otherwise cancel nothing (#182).
+          hookRunRef.current = run;
+          setState((prev) => ({ ...prev, hookRun: run }));
         } else {
           setState((prev) =>
             prev.hookRun?.operationId === event.operationId ? { ...prev, hookRun: null } : prev,

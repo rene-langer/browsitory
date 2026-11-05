@@ -5029,6 +5029,30 @@ describe("git hooks", () => {
     expect(cancelTransfer).toHaveBeenCalledWith(TEST_REPO_PATH, "commit-1");
   });
 
+  // #182: the strip's Cancel is on screen as soon as React commits the Started render, before
+  // its passive effects run. A click in that gap must still reach the hook (the Tauri e2e
+  // `git-hooks.spec.ts` clicked there, and the cancel was lost while the button latched).
+  it("cancels a hook that started but whose render effects have not run yet", async () => {
+    const cancelTransfer = vi.fn(async () => {});
+    let emit: ((event: HookProgress) => void) | undefined;
+    const client = transferClient({
+      cancelTransfer,
+      subscribeHookProgress: (listener: (event: HookProgress) => void) => {
+        emit = listener;
+        return () => {};
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    // One act: React renders and runs effects only when it ends, after the cancel.
+    await act(async () => {
+      emit?.({ repoPath: TEST_REPO_PATH, operationId: "checkout-1", hook: "post-checkout", phase: "Started", source: "Checkout" });
+      await result.current.cancelHookRun();
+    });
+
+    expect(cancelTransfer).toHaveBeenCalledWith(TEST_REPO_PATH, "checkout-1");
+  });
+
   it("turns a HookFailed push into a retryable hook failure", async () => {
     let listener: ((progress: TransferProgress) => void) | undefined;
     const pushCurrentBranch = vi.fn(async () => "push-1");

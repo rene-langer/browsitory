@@ -53,13 +53,16 @@ describe("Browsitory hunk staging", () => {
     const commitButton = await $("button=Commit");
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
+    // Wait for the commit itself. The working file has "line 14 changed" before and after the
+    // commit, so it says nothing about whether the commit landed: reading HEAD right after it
+    // could still see the seed commit, without "line 2 changed" (#182).
     await browser.waitUntil(
-      async () => {
-        const content = fs.readFileSync(path.join(E2E_REPO_PATH, HUNK_FIXTURE_FILE), "utf8");
-        return content.includes("line 14 changed");
-      },
-      { timeout: 10000, timeoutMsg: "expected the file to still have the unstaged hunk's dirty content" },
+      () =>
+        execFileSync("git", ["log", "-1", "--format=%s"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim() ===
+        "stage one hunk",
+      { timeout: 10000, timeoutMsg: "the commit of the staged hunk did not land" },
     );
+    expect(fs.readFileSync(path.join(E2E_REPO_PATH, HUNK_FIXTURE_FILE), "utf8")).toContain("line 14 changed");
 
     const committedShow = execFileSync("git", ["show", "HEAD:" + HUNK_FIXTURE_FILE], {
       cwd: E2E_REPO_PATH,

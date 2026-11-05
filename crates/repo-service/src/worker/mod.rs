@@ -4307,20 +4307,34 @@ mod tests {
         (dir, repo)
     }
 
+    /// Every page of a search, following `next_cursor` the way the frontend does: the worker's
+    /// pages are time-boxed (`PageLimits::DEFAULT`, 250 ms), so on a slow runner the first page
+    /// can end after the newest commit, before the match (#182). Returns the matches' summaries
+    /// and the last page's `scanned`.
+    fn search_all_pages(handle: &super::WorkerHandle, query: &str) -> (Vec<String>, usize) {
+        let mut summaries = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = handle
+                .search_commits(query.into(), None, cursor.take())
+                .unwrap();
+            summaries.extend(page.commits.into_iter().map(|c| c.summary));
+            match page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => return (summaries, page.scanned),
+            }
+        }
+    }
+
     #[test]
     fn search_commits_round_trips_through_the_worker() {
         let (dir, _repo) = two_commit_repo();
         let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
 
-        let page = worker
-            .handle()
-            .search_commits("alpha".into(), None, None)
-            .unwrap();
+        let (summaries, scanned) = search_all_pages(&worker.handle(), "alpha");
 
-        assert_eq!(page.commits.len(), 1);
-        assert_eq!(page.commits[0].summary, "alpha commit");
-        assert_eq!(page.next_cursor, None);
-        assert_eq!(page.scanned, 2);
+        assert_eq!(summaries, ["alpha commit"]);
+        assert_eq!(scanned, 2);
     }
 
     #[test]
@@ -4354,14 +4368,7 @@ mod tests {
             "Search cancelled."
         );
         // A fresh search after the cancel runs normally.
-        assert_eq!(
-            handle
-                .search_commits("alpha".into(), None, None)
-                .unwrap()
-                .commits
-                .len(),
-            1
-        );
+        assert_eq!(search_all_pages(&handle, "alpha").0, ["alpha commit"]);
     }
 
     #[test]
