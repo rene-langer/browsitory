@@ -8,10 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.3.0] - 2026-11-05
 
-The first public release. Browsitory now ships as a desktop app and as a VSCode extension on the
-Visual Studio Marketplace and Open VSX. This release adds commit search, compare, git hooks, undo
-and redo, commit signing and a user guide website. Worktrees, and rebases, cherry-picks and
-bisects you start in a terminal, are now handled much more safely.
+The first public release. Browsitory ships as a desktop app and as a VSCode extension, available
+on the Visual Studio Marketplace and Open VSX as a pre-release. This release adds commit search,
+compare, git hooks, undo and redo, commit signing and a user guide website. Worktrees, and
+rebases, cherry-picks and bisects you start in a terminal, are now handled much more safely.
 
 ### Rebases, cherry-picks and bisects started in a terminal
 
@@ -77,7 +77,7 @@ bisects you start in a terminal, are now handled much more safely.
 - If Abort can't remove one of git's merge state files, it now says "Couldn't remove git's merge
   state: …" instead of "failed to write resolved file: …" (#249).
 
-### VSCode extension, now on the Marketplace and Open VSX
+### VSCode extension on the Marketplace and Open VSX (pre-release)
 
 - Added: release tags now publish the VSCode extension to the Visual Studio Marketplace and to
   Open VSX (for VSCodium, Cursor and similar editors), one package per platform. It ships as a
@@ -101,6 +101,9 @@ bisects you start in a terminal, are now handled much more safely.
   own thread.
 - Fixed: uncaught errors in the extension's webview are now written to the log, as in the
   desktop app. They were silently dropped before.
+- Added: fetch, pull and push show their progress in VSCode, as in the desktop app.
+- Fixed: in VSCode, a request the extension doesn't handle now gets an error reply instead of
+  never being answered (#306).
 - Internal: the webview forwards its `RepoClient` calls to `vscode-sidecar` over JSON-RPC, and
   error logging goes through `RepoClient` instead of a Tauri-only plugin. Main-branch CI keeps all
   four VSIX packages as artifacts.
@@ -383,13 +386,14 @@ bisects you start in a terminal, are now handled much more safely.
 - Fixed: the add-remote form's "Push URL (optional)" section could reopen right after a
   successful add instead of collapsing (#276).
 - Transfer progress shows MB/GB instead of ever-larger KB values, and the transfer panel now has
-  a working Cancel button (PERF-002). Cancelling aborts the in-flight `git2` transfer itself: a
-  shared registry of cancelled operation IDs is polled from inside the fetch progress callbacks,
-  so a cancel lands even while the worker thread is blocked in network I/O. A push can only be
-  cancelled before its data is sent (at `push_negotiation`); a cancel pressed later lets the push
-  finish and report its real outcome, since the remote may already have applied it. Surfaces
-  as a new `TransferErrorKind::Cancelled`, a `cancel_transfer` command on both the Tauri and
-  VSCode transports, and a "Fetch/Pull/Push cancelled." notice rather than a failure message.
+  a working Cancel button. Cancel stops a fetch or pull even while it waits on the network. A
+  push can only be cancelled before its data is sent; a cancel pressed later lets the push
+  finish and report its real outcome, since the remote may already have applied it. A cancelled
+  transfer shows a "Fetch/Pull/Push cancelled." notice rather than a failure message.
+- Internal: (PERF-002) cancelling aborts the in-flight `git2` transfer itself: a shared registry
+  of cancelled operation IDs is polled from inside the fetch progress callbacks. A push is
+  cancellable only up to `push_negotiation`. New `TransferErrorKind::Cancelled` and a
+  `cancel_transfer` command on both the Tauri and VSCode transports.
 - Pulling a fast-forward no longer force-checks out over untracked or ignored files: the
   checkout is now safe and aborts untouched with a "would be overwritten" error, and the pull
   surfaces its dirty-worktree, no-upstream, detached-HEAD and checkout-conflict reasons instead
@@ -478,18 +482,19 @@ bisects you start in a terminal, are now handled much more safely.
 ### Commit graph, branch tree and sync bar
 
 - Selecting a commit now shows a header with its full message, author, date, full SHA (copyable)
-  and parents (click to jump), backed by a new `get_commit_message` IPC command wired through
-  git-core, repo-service, tauri-app and the VSCode sidecar (UX-001). History rows also show
-  author and date columns that hide when the pane is narrow.
+  and parents (click to jump). History rows also show author and date columns that hide when
+  the pane is narrow.
 - History pagination: the graph loads 300 commits at a time with a "Load more" row, and
-  arrowing past the last row loads the next page instead of silently stopping (UX-002).
-- Sync bar above the commit graph with Fetch, Pull and Push buttons and ahead/behind counts;
-  `UpstreamInfo` gains optional `ahead`/`behind` (null until the tracking ref is fetched)
-  (UX-008).
+  arrowing past the last row loads the next page instead of silently stopping.
+- Sync bar above the commit graph with Fetch, Pull and Push buttons and ahead/behind counts
+  (shown once the upstream branch has been fetched).
 - "Checkout" is now the first item of a local branch's context menu; the user guide documents
-  double-click checkout too (UX-003).
-- The "Uncommitted Changes" row now has a hollow lane node and aligns with commit rows
-  (VIS-004).
+  double-click checkout too.
+- The "Uncommitted Changes" row now has a hollow lane node and aligns with commit rows.
+- Internal: the commit header is backed by a new `get_commit_message` IPC command wired through
+  git-core, repo-service, tauri-app and the VSCode sidecar (UX-001). `UpstreamInfo` gains
+  optional `ahead`/`behind`, null until the tracking ref is fetched (UX-008). Also UX-002, UX-003
+  and VIS-004.
 - Branch tree: local branches get an "Actions" button and a bold current-branch marker; inline
   new-branch/add-remote/rename forms focus on open and cancel on Escape; remote lists show
   "Loading..." and "No branches"; the Upstream block is styled, explains a disabled Pull, and
@@ -514,8 +519,9 @@ bisects you start in a terminal, are now handled much more safely.
   a later-painted, unrelated pass-through line crossing it, a pass-through lane's straight
   continuation could be dropped entirely when another commit's connector happened to land on
   the same lane, and even once both were fixed, a straight pass-through line split into two
-  segments at the row's midpoint could still show a hairline rendering seam. `CommitLaneGraphic`
-  now paints connectors last and draws each non-own pass-through lane as a single unbroken line.
+  segments at the row's midpoint could still show a hairline rendering seam. Connectors are now
+  painted last, and each pass-through lane is drawn as a single unbroken line.
+- Internal: the lane fix is in `CommitLaneGraphic`.
 - A saved graph branch selection naming a deleted or renamed branch no longer breaks the whole
   refresh; deleting or renaming a branch in the app now updates the selection, and deleting the
   only isolated branch shows all branches again (#97).
@@ -541,10 +547,12 @@ bisects you start in a terminal, are now handled much more safely.
 - Denser branch tree: folders and branches share one even 22px row height with no gaps between
   folders, a tighter indent, and each branch's "…" menu shows on hover or focus.
 - A gear popover in the sidebar lets each panel (Stashes, Worktrees, Submodules, Reflog, Tags, Pull
-  Requests) be shown or hidden, persisted globally (one `localStorage` setting shared across every
-  repo and open tab) — clutter from features a project doesn't use can be tucked away.
+  Requests) be shown or hidden. The choice applies to every repository and open tab, so
+  clutter from features a project doesn't use can be tucked away.
 - Every remaining sidebar section (Worktrees, Submodules, Reflog, Remotes, Tags, Pull Requests)
-  reskinned to the Phase 5 design system: consistent row styling, per-row icons, and empty states.
+  uses the new design: consistent row styling, per-row icons, and empty states.
+- Internal: the panel choice is one `localStorage` setting; the sidebar reskin followed the
+  Phase 5 design system.
 
 ### Keyboard context menus
 
@@ -831,9 +839,11 @@ unresolved conflicts is never one.
 - Changed: when Browsitory can't stage the folder, it now says why instead of showing a raw
   git error, and how to stage it with git: the folder isn't a repository, the repository has no
   commit yet, its git folder is outside the work tree or can't be matched to it, a linked
-  worktree's main repository can't be found, or Browsitory can't read it (a SHA-256 or reftable
-  repository, a ref name git refuses, or a ref or `packed-refs` that isn't a regular file)
-  (#213).
+  worktree's main repository can't be found, or Browsitory can't read it (for example a
+  repository in one of the newer formats git supports, or one with damaged or unusual branch
+  data) (#213).
+- Internal: "can't read it" covers SHA-256 and reftable repositories, ref names git refuses, and
+  a ref or `packed-refs` that isn't a regular file (#213).
 
 ### Files open in another program (Windows)
 
@@ -869,9 +879,11 @@ unresolved conflicts is never one.
   (Windows) or "Permission denied" (macOS, Linux) when the file was read-only, and Use ours /
   Use theirs (whole file) replaced the read-only file. They now say "'f.txt' is read-only. Make
   it writable, then try again." and change nothing (#209).
-- `config.toml` writes are now atomic (write-temp-then-rename) instead of an in-place `fs::write`,
-  which could interleave with a concurrent save and leave corrupt trailing bytes from the prior
-  write.
+- Fixed: Browsitory's own settings file is now written to a new copy and swapped in, so two
+  saves at once can no longer leave it corrupted.
+- Internal: `config.toml` writes are atomic (write-temp-then-rename) instead of an in-place
+  `fs::write`, which could interleave with a concurrent save and leave trailing bytes from the
+  prior write.
 
 ### Windows hardening
 
@@ -882,7 +894,8 @@ unresolved conflicts is never one.
   FAT/exFAT drives and network shares without POSIX deletes behave as before (#168).
 - Windows: a missing folder is created through the folder Browsitory already holds, so a folder
   swapped for a junction at that moment can't get an empty folder created outside the repository
-  (#163). Tests cover folders turned into junctions during a write (#164).
+  (#163).
+- Internal: tests cover folders turned into junctions during a write (#164).
 - Fixed (Windows): undo, redo and discards no longer fail with "Access is denied" on read-only
   files in the working tree (#194).
 - Windows: every file and folder of a working-tree read, write or delete is opened through the
@@ -943,11 +956,17 @@ unresolved conflicts is never one.
   `.mhtml`, `.hlp` and disk images (`.iso`, `.img`, `.vhd`, `.vhdx`, `.dmg`), names ending in a
   dot or space (`setup.exe.`), and more desktop launcher variants (`[KDE Desktop Entry]`,
   `[Desktop Action …]`, a header after a long comment block) (#131).
-- `resolve_conflict` now validates that the given path is an actual index conflict before
-  writing to the working directory, closing a gap where any path (including one under `.git/`)
-  would be written and staged unconditionally.
-- Updated `rustls` to 0.23.45 to pick up the fix for RUSTSEC-2026-0285 (TLS 1.3 handshake
+- Fixed: resolving a conflict now checks that the file really has a conflict before it writes
+  anything. Before, any path, even one inside the `.git` folder, could be written and staged.
+- Fixed: updated the TLS library to pick up the fix for RUSTSEC-2026-0285 (TLS 1.3 handshake
   messages accepted across encryption-level boundaries).
+- Fixed: updated the desktop app updater's zip library to fix three security advisories
+  (RUSTSEC-2026-0367, -0368 and -0369) (#81).
+- Changed: in VSCode, the extension's webview can no longer call the three operations of the
+  helper program that are meant only for the extension itself. Such a request now gets an error
+  reply and never reaches the helper (#306).
+- Internal: `resolve_conflict` validates that the path is an index conflict; `rustls` is now
+  0.23.45.
 - Fixed: Mark resolved stages exactly the content it checked for conflict markers, read without
   following a symbolic link or waiting on a named pipe; a file swapped at that moment can no
   longer hang it or get other content staged (#199).
@@ -982,10 +1001,10 @@ unresolved conflicts is never one.
 
 ### Pull requests trust your system's certificates
 
-- Changed: the GitHub and Bitbucket pull-request features use reqwest 0.13 and now check server
-  certificates against the operating system's certificate store, not a list bundled into the
-  app. A root CA your system trusts (for example a company proxy's) now works there too. TLS
-  still uses rustls with the ring crypto library.
+- Changed: the GitHub and Bitbucket pull-request features now check server certificates against
+  the operating system's certificate store, not a list bundled into the app. A root CA your
+  system trusts (for example a company proxy's) now works there too.
+- Internal: reqwest 0.13; TLS still uses rustls with the ring crypto library.
 
 ### Open repositories and background work
 
@@ -1008,21 +1027,22 @@ unresolved conflicts is never one.
 - A persistent status strip now shows while a merge or rebase is in progress (step, conflict
   count, Abort), and Commit / Continue rebase show a visible reason when disabled.
 - Success toasts (polite live region) after commit, checkout, branch delete, stash, fetch, push
-  and pull. Error banners float instead of shifting the layout (FB-004). A failed diff, blame or
+  and pull. Error banners float instead of shifting the layout. A failed diff, blame or
   commit-file fetch in the diff pane keeps the raw error text, adds a plain-language hint for known
   error kinds and offers Retry; a failed repository open also offers Retry, and a lost backend
   connection shows a fixed hint. Errors from actions (the top-level banner for a failed commit,
   checkout, push and so on) still show the message only, with no hint and no Retry.
-- New success, warning and info color tokens for light and dark themes (VIS-002), applied to status
-  strip, toasts, and conflicted file tinting.
+- New success, warning and info colours for light and dark themes, used in the status strip,
+  toasts and conflicted file tinting.
 - The inline New branch form shows its base, validates the name inline, and can check the new
   branch out. Pull request source/target branches default sensibly and suggest known branches.
 - The repository picker leads with folder names, explains workspaces, and hints at the command
   palette. The palette hint is platform-aware and release notes use a "What's new" icon.
-- Sentence case for UI labels (FB-007): picker, workspace and rebase buttons, the branch "+" menu
+- Sentence case for UI labels: picker, workspace and rebase buttons, the branch "+" menu
   ("New branch…", "Add remote…"), hunk actions, conflict resolution ("Accept ours", "Keep their
-  version", …) and "Back to diff", documented in `docs/CONTENT_GUIDELINES.md` together with the
-  Title Case labels that remain.
+  version", …) and "Back to diff".
+- Internal: FB-004, VIS-002 (colour tokens), FB-007; the label rules and the Title Case labels
+  that remained are documented in `docs/CONTENT_GUIDELINES.md`.
 - Errors now stay on screen until you dismiss them or start another change (stage, commit, checkout,
   …); refreshing no longer clears them. Same in the desktop app and the VSCode extension (#177).
 - Accessibility: a remote branch's actions button is named with its remote ("Actions for
@@ -1036,12 +1056,12 @@ unresolved conflicts is never one.
 - Diff pane: a file's diff shows "Loading diff…" instead of a false "No differences" while it
   loads; empty diffs now read "No text differences (binary file or mode-only change)".
   Collapsed file sections no longer fetch their diff until expanded, and sections far from the
-  viewport not until scrolled near (PERF-001, IntersectionObserver). Open diffs refetch on every
+  viewport not until scrolled near. Open diffs refetch on every
   refresh (an action, the palette's Refresh, a stash apply or pull), and a hunk stage/unstage/
   discard refetches both the staged and unstaged diff of that file once the action has finished.
-  Only the active repository tab's workspace is mounted, to avoid paying every open tab's DOM and
-  IPC cost; a half-typed commit message is kept per repository across tab switches, and a tab
-  switched away from mid-action no longer stays unclosable.
+  Only the active repository tab is kept loaded, so many open tabs don't slow the app down; a
+  half-typed commit message is kept per repository across tab switches, and a tab switched away
+  from mid-action no longer stays unclosable.
 - Diff hunk actions are no longer tab stops. The diff is one tab stop with `[`/`]` (prev/next
   hunk), `s` (stage/unstage) and `d` (discard, press twice). The armed "Confirm discard" is
   styled as danger and disarms on blur, Escape or after 5 seconds.
@@ -1049,32 +1069,33 @@ unresolved conflicts is never one.
   at narrow widths. Paired Remove/Add lines now highlight only the changed words (computed once
   per loaded diff; line pairs too long to compare cheaply, such as minified code, are marked
   wholly changed instead), and a Split view / Unified view toggle switches the diff between the
-  single-column and a side-by-side layout (UX-007).
+  single-column and a side-by-side layout.
 - Commit dock is lighter (single border, no nested panel) and no longer lets diff content show
   beneath it.
-- Accessibility pass: confirm and form dialogs return focus to the invoking control when they
-  close; workspace deletion uses the shared modal `ConfirmDialog`; repo tabs use roving tabindex
-  with Left/Right/Home/End navigation and link to their workspace panel. Each tab's close button
-  is still inside the tablist but is now `aria-hidden` and out of the Tab order (mouse-only), so
-  the tablist exposes only tabs; from the keyboard, Delete closes the focused tab, the palette
-  has a "Close tab" command, and Ctrl/Cmd+W closes the active tab where the host doesn't take
-  the key first (Tauri's default macOS menu binds Cmd+W to Close Window) (A11Y-003); swatches,
-  tab close buttons, sidebar toolbar buttons and split dividers have at least 24x24 pointer
-  targets (`--size-target-min`); context menus no longer close on mouse leave and stay inside the
-  viewport; reduced-motion preference disables smooth scrolling and transitions; sidebar toolbar
-  icons have tooltips. Added a shared `Field` primitive (label, hint, error, `aria-invalid`,
-  `aria-describedby`, `required`).
+- Accessibility pass: confirm and form dialogs return focus to the control that opened them;
+  deleting a workspace asks in a proper dialog; repository tabs move with Left/Right/Home/End
+  and link to their workspace panel. A tab's close button is for the mouse only and out of the
+  Tab order; from the keyboard, Delete closes the focused tab, the palette has a "Close tab"
+  command, and Ctrl/Cmd+W closes the active tab where the host doesn't take the key first (the
+  desktop app's macOS menu binds Cmd+W to Close Window). Swatches, tab close buttons, sidebar
+  toolbar buttons and split dividers have at least 24x24 pointer targets; context menus no
+  longer close on mouse leave and stay inside the window; the reduced-motion setting turns off
+  smooth scrolling and transitions; sidebar toolbar icons have tooltips.
+- Internal: (A11Y-003) workspace deletion uses the shared `ConfirmDialog`; tabs use roving
+  tabindex, and the close button stays inside the tablist as `aria-hidden`; the target size is
+  `--size-target-min`. Also a shared `Field` primitive (label, hint, error, `aria-invalid`,
+  `aria-describedby`, `required`). PERF-001 (`IntersectionObserver`), UX-007, RESP-001, RESP-002
+  and UX-006 belong to the diff pane and layout bullets above and below.
 - Narrow windows: the Tauri window has a minimum size (800x500), the diff pane keeps a minimum
-  width instead of collapsing to zero, and the sidebar auto-collapses below 900px (RESP-001).
-- The header "+" (open repository) button is pinned outside the scrolling tab strip (RESP-002).
-- Keyboard shortcut sheet, opened with `?` or the "Show keyboard shortcuts" palette command
-  (UX-006).
+  width instead of collapsing to zero, and the sidebar auto-collapses below 900px.
+- The header "+" (open repository) button is pinned outside the scrolling tab strip.
+- Keyboard shortcut sheet, opened with `?` or the "Show keyboard shortcuts" palette command.
 - Sidebar section header buttons (such as the Branches "+") no longer sit under the sidebar's
-  overlay scrollbar, which swallowed clicks on them once the sections overflowed; this also
-  fixes the remote e2e specs that go through that button.
-- Remote-tracking branch rows in the Branches tree are now keyboard-focusable, and the shared
-  `ContextMenu` widget implements standard menu keyboard navigation (arrow keys, Home/End,
-  initial focus on open) instead of only closing on Escape.
+  overlay scrollbar, which swallowed clicks on them once the sections overflowed.
+- Internal: this also fixes the remote e2e specs that go through that button.
+- Remote-tracking branch rows in the Branches tree are now keyboard-focusable, and context
+  menus support standard keyboard navigation (arrow keys, Home/End, focus on the first item
+  when opened) instead of only closing on Escape.
 - The commit-message textarea now has an explicit accessible name.
 - The window no longer flashes blank while open repositories restore.
 - Commit, Continue rebase and Abort rebase/merge buttons are pinned to the bottom of the diff pane
@@ -1090,10 +1111,12 @@ unresolved conflicts is never one.
 
 ### Failure log
 
-- Failure logging: the backend now writes a rotated log file to the OS log directory
-  (`tauri-plugin-log`), with a panic hook covering worker-thread crashes. The frontend routes every
-  failed IPC call and any uncaught error/rejection into the same file via `@tauri-apps/plugin-log`,
-  so a bug report doesn't require a live dev session to diagnose.
+- Added: the desktop app now writes a log file to the system's log folder, rotated as it grows.
+  Failed actions, uncaught errors and crashes of background work all go into it, so a bug report
+  can include what went wrong.
+- Internal: the log uses `tauri-plugin-log` in the backend, with a panic hook for worker-thread
+  crashes, and `@tauri-apps/plugin-log` for every failed IPC call and uncaught error or
+  rejection in the frontend.
 - HTTPS credential-store failures now retain a safe diagnostic in the application log while keeping
   the on-screen message generic.
 
@@ -1109,10 +1132,11 @@ unresolved conflicts is never one.
 - Sidebar menus (e.g. the Branches "Add" menu) are no longer clipped by their section while it
   is opening: the section open animation now fades only, without the transform that confined
   fixed-position menus to the section body (#98).
-- `current_upstream` no longer errors on a detached HEAD (the normal state during an in-progress
-  rebase); it returns "no upstream" instead. Previously this rejected the frontend's whole
-  per-mutation state refresh, leaving the UI stuck showing stale pre-rebase content after a
-  rebase paused on a conflict or was aborted.
+- Fixed: after a rebase paused on a conflict or was aborted, the app could stay stuck showing
+  the content from before the rebase. A detached HEAD, normal during a rebase, now counts as
+  "no upstream" instead of failing the refresh.
+- Internal: `current_upstream` no longer errors on a detached HEAD; that error rejected the
+  frontend's whole per-mutation state refresh.
 
 ### Internal: test reliability
 
@@ -1231,11 +1255,10 @@ unresolved conflicts is never one.
   once in code and checked in as generated lists under `frontend/src/ipc/generated/`.
   Today's differences are all intended: clone and init are desktop-only, frontend error
   logging needs no Tauri command, and three sidecar methods serve only the extension host.
-- Changed: in VSCode, the webview can no longer call the three sidecar methods meant only for
-  the extension host (`read_file_version`, `repo_workdir`, `check_merge_target`). Such a
-  request now gets an error reply and never reaches the sidecar (#306).
-- Fixed: a request for a VSCode extension host method without a handler now gets an error
-  reply instead of never being answered (#306).
+- Internal: the three sidecar methods the webview can no longer call are `read_file_version`,
+  `repo_workdir` and `check_merge_target`; the extension host answers them with an error and
+  never forwards them to the sidecar. The unanswered requests were extension host methods without
+  a handler (#306).
 
 ### Internal: code structure
 
