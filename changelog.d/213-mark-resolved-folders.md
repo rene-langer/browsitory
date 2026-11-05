@@ -11,10 +11,12 @@
   `git add` does. Discard hunk and Discard lines there now say which file is in the way, as
   Discard does, instead of a raw error (#213).
 - Changed: a nested repository is still staged as its checked-out commit, as `git add` does,
-  also when its `.git` is a `gitdir:` file (a submodule) or it is a linked worktree. When
-  Browsitory can't stage the folder, it now says why instead of showing a raw git error: the
-  folder is not a repository (also when its `.git` is a link or its git folder is gone), the
-  repository has no commit yet, a linked worktree's main repository is gone, or Browsitory
-  can't read it. Stage such a folder with git. Browsitory can't read a SHA-256 or reftable
-  repository, a ref name git refuses, or a ref that isn't a regular file. On Windows, it never
-  opens a git folder on a network share (#213).
+  also when it is a submodule (its git folder in `.git/modules`) or a linked worktree of a
+  repository in the work tree. Browsitory never opens anything outside the work tree for this.
+  A repository whose git folder is elsewhere, including a linked worktree of a repository
+  outside the work tree, is refused; stage it with `git add <path>` in a terminal (#213).
+- Changed: when Browsitory can't stage the folder, it now says why instead of showing a raw
+  git error: the folder isn't a repository, the repository has no commit yet, its git folder is
+  outside the work tree, a linked worktree's main repository can't be found, or Browsitory
+  can't read it (a SHA-256 or reftable repository, a ref name git refuses, or a ref that isn't a
+  regular file) (#213).
