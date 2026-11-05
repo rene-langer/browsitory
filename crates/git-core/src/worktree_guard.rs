@@ -1373,73 +1373,34 @@ pub(crate) enum Probe {
 }
 
 /// A folder held open by [`probe_beneath`] (or [`HeldFolder::resolve`]), with every folder above
-/// it up to the root it was reached from. Reads below it walk from its handle (as
-/// [`read_beneath`] walks from the work tree root), and `..` goes to the held folder above, so a
-/// path swapped for a link, a FIFO or another folder after the probe is never looked at (#213).
+/// it up to the work tree root. Reads below it walk from its handle (as [`read_beneath`] walks
+/// from the work tree root), and `..` goes to the held folder above, so a path swapped for a
+/// link, a FIFO or another folder after the probe is never looked at (#213). Nothing outside
+/// the work tree is ever opened through it.
 pub(crate) struct HeldFolder {
-    /// From `root` (`chain[0]`) down to this folder (the last), each held.
+    /// From the work tree root (`chain[0]`) down to this folder (the last), each held.
     chain: Vec<beneath::Folder>,
-    /// Where `chain[0]` was opened by path: the work tree root, or a git folder outside it.
+    /// The work tree root's path as the caller spelled it.
     root: PathBuf,
-    /// The work tree root, held since the probe: a path inside the work tree is resolved from
-    /// it, never opened by path.
-    work_tree: std::sync::Arc<WorkTreeRoot>,
-}
-
-/// The work tree root as [`HeldFolder`] keeps it.
-struct WorkTreeRoot {
-    /// As the caller spelled it.
-    path: PathBuf,
-    folder: beneath::Folder,
-    /// The folder's identity (device and inode, or volume and file ID), to recognise it under
-    /// another spelling.
-    identity: Option<beneath::Identity>,
 }
 
 /// What [`HeldFolder::resolve`] found.
 pub(crate) enum Resolved {
     Held(HeldFolder),
-    /// A component is missing, a link or not a folder.
+    /// A component is missing.
     NotFound,
-    /// A path it refuses to look at; why.
-    Refused(&'static str),
+    /// A component is a link, a file or anything else that isn't a folder.
+    NotAFolder,
+    /// The path leads out of the work tree: an absolute path that isn't below the work tree root
+    /// as it was opened, or `..` above it. Nothing was opened.
+    Outside,
+    /// More than [`RESOLVE_MAX_COMPONENTS`] names. Nothing was opened.
+    TooDeep,
 }
 
 /// The most names [`HeldFolder::resolve`] takes from a path, counting only normal components
-/// (not `/`, a drive or share prefix, `.` or `..`); a folder may be held for each.
+/// (not `/`, a drive prefix, `.` or `..`); a folder may be held for each.
 const RESOLVE_MAX_COMPONENTS: usize = 64;
-
-/// `path` with `.` dropped and each `..` removing the component before it (never the root).
-fn lexical(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
-                    out.pop();
-                }
-            }
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-/// A Windows network share (`\\host\share`, `\\?\UNC\…`) or device (`\\.\…`) path, or any other
-/// verbatim one: opening it could contact a host (sending the user's credentials) or a device.
-#[cfg(windows)]
-fn network_or_device(path: &Path) -> bool {
-    match path.components().next() {
-        Some(Component::Prefix(prefix)) => !matches!(prefix.kind(), std::path::Prefix::Disk(_)),
-        _ => false,
-    }
-}
-
-#[cfg(not(windows))]
-fn network_or_device(_: &Path) -> bool {
-    false
-}
 
 /// A file [`HeldFolder::read`] found larger than the caller's limit.
 #[derive(Debug)]
@@ -1476,18 +1437,11 @@ fn read_capped(file: impl io::Read, limit: u64) -> io::Result<Vec<u8>> {
 
 impl HeldFolder {
     /// `chain` from the work tree root `workdir` (`chain[0]`) down to the probed folder.
-    fn in_work_tree(chain: Vec<beneath::Folder>, workdir: &Path) -> io::Result<Self> {
-        let folder = chain[0].try_clone()?;
-        let identity = folder.identity().ok();
-        Ok(Self {
+    fn in_work_tree(chain: Vec<beneath::Folder>, workdir: &Path) -> Self {
+        Self {
             chain,
             root: workdir.to_path_buf(),
-            work_tree: std::sync::Arc::new(WorkTreeRoot {
-                path: workdir.to_path_buf(),
-                folder,
-                identity,
-            }),
-        })
+        }
     }
 
     fn last(&self) -> &beneath::Folder {
@@ -1518,118 +1472,61 @@ impl HeldFolder {
     }
 
     /// The folder `target` (a `gitdir:` or `commondir`) names, relative to this one or absolute,
-    /// held. Resolved one component at a time from held handles: a name is opened in the folder
-    /// held before it (never a link), `..` is the held folder above.
-    ///
-    /// A relative path that climbs above the folder this chain starts from (the work tree root,
-    /// or a git folder outside it) is joined lexically to where that folder was opened, then
-    /// taken as an absolute path. `..` in an absolute path is taken lexically too (as written,
-    /// not after following a link). An absolute path inside the work tree is resolved from the
-    /// work tree root held since the probe: spelled as it was opened, or any other way that
-    /// leads to that same folder (a symlinked or case-folded spelling, an 8.3 name), recognised
-    /// by its identity. Only a path proven outside the work tree is opened by path, once per
-    /// call, links on the way to it followed as for the work tree root itself; the folder opened
-    /// must not be within the work tree either (reached through a link into it). Everything
-    /// below it is held again. Refused: more than [`RESOLVE_MAX_COMPONENTS`] names, and on
-    /// Windows network shares and devices, before anything is opened.
+    /// held, inside the work tree only. Resolved one component at a time from held handles: a
+    /// name is opened in the folder held before it (never a link), `..` is the held folder above
+    /// (physical, never applied to the path's text). An absolute path counts only when it is
+    /// below the work tree root exactly as that was opened, compared by component; the rest is
+    /// then resolved the same way from the held root. Anything that leads out of the work tree
+    /// (another absolute path, `..` above the root) is [`Resolved::Outside`], and more than
+    /// [`RESOLVE_MAX_COMPONENTS`] names is [`Resolved::TooDeep`]; in both cases nothing is
+    /// opened or looked up.
     pub(crate) fn resolve(&self, target: &Path) -> io::Result<Resolved> {
         let names = target
             .components()
             .filter(|c| matches!(c, Component::Normal(_)))
             .count();
         if names > RESOLVE_MAX_COMPONENTS {
-            return Ok(Resolved::Refused("a git folder path that is too deep"));
+            return Ok(Resolved::TooDeep);
         }
-        if network_or_device(target) {
-            return Ok(Resolved::Refused("a network or device path"));
-        }
-        if target.is_absolute() {
-            return self.resolve_absolute(&lexical(target));
-        }
-        let mut chain = self
-            .chain
-            .iter()
-            .map(beneath::Folder::try_clone)
-            .collect::<io::Result<Vec<_>>>()?;
-        let components: Vec<Component> = target.components().collect();
-        for (i, component) in components.iter().enumerate() {
+        let (mut chain, rest) = if target.is_absolute() {
+            let Ok(inside) = target.strip_prefix(&self.root) else {
+                return Ok(Resolved::Outside);
+            };
+            (vec![self.chain[0].try_clone()?], inside)
+        } else {
+            let chain = self
+                .chain
+                .iter()
+                .map(beneath::Folder::try_clone)
+                .collect::<io::Result<Vec<_>>>()?;
+            (chain, target)
+        };
+        for component in rest.components() {
             match component {
-                Component::Normal(name) => match chain[chain.len() - 1].child(name)? {
-                    Some(folder) => chain.push(folder),
-                    None => return Ok(Resolved::NotFound),
-                },
+                Component::Normal(name) => {
+                    let last = &chain[chain.len() - 1];
+                    match last.child(name)? {
+                        Some(folder) => chain.push(folder),
+                        None => {
+                            return Ok(match last.kind(Path::new(name), &mut no_step)? {
+                                Kind::Missing => Resolved::NotFound,
+                                _ => Resolved::NotAFolder,
+                            })
+                        }
+                    }
+                }
                 Component::CurDir => {}
                 Component::ParentDir if chain.len() > 1 => {
                     chain.pop();
                 }
-                // Above the folder the chain starts from: lexically from where it was opened.
-                Component::ParentDir => {
-                    let rest: PathBuf = components[i..].iter().collect();
-                    return self.resolve_absolute(&lexical(&self.root.join(rest)));
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                    return Ok(Resolved::Outside)
                 }
-                Component::RootDir | Component::Prefix(_) => return Ok(Resolved::NotFound),
             }
         }
         Ok(Resolved::Held(HeldFolder {
             chain,
             root: self.root.clone(),
-            work_tree: self.work_tree.clone(),
-        }))
-    }
-
-    /// [`Self::resolve`] for an absolute, lexically normalised `target`.
-    fn resolve_absolute(&self, target: &Path) -> io::Result<Resolved> {
-        if network_or_device(target) {
-            return Ok(Resolved::Refused("a network or device path"));
-        }
-        let work_tree = &self.work_tree;
-        if let Ok(inside) = target.strip_prefix(&work_tree.path) {
-            return self.below_work_tree_root(inside);
-        }
-        // The work tree under another spelling: the first prefix that is that same folder.
-        let mut prefix = PathBuf::new();
-        for component in target.components() {
-            prefix.push(component);
-            if matches!(component, Component::Normal(_))
-                && work_tree.identity.is_some()
-                && beneath::identity_of(&prefix) == work_tree.identity
-            {
-                return self.below_work_tree_root(target.strip_prefix(&prefix).unwrap_or(target));
-            }
-        }
-        // No spelling of the work tree on the way: outside, opened by path once.
-        let Some(folder) = beneath::Folder::open(target)? else {
-            return Ok(Resolved::NotFound);
-        };
-        // Unless a link on the way led into the work tree after all (or that can't be told).
-        if folder.is_within(&work_tree.folder).unwrap_or(true) {
-            return Ok(Resolved::Refused(
-                "a git folder path that leads into the work tree through a link",
-            ));
-        }
-        Ok(Resolved::Held(HeldFolder {
-            chain: vec![folder],
-            root: target.to_path_buf(),
-            work_tree: self.work_tree.clone(),
-        }))
-    }
-
-    /// The folder `inside` (plain names) below the held work tree root, held.
-    fn below_work_tree_root(&self, inside: &Path) -> io::Result<Resolved> {
-        let mut chain = vec![self.work_tree.folder.try_clone()?];
-        for component in inside.components() {
-            let Component::Normal(name) = component else {
-                return Ok(Resolved::NotFound);
-            };
-            match chain[chain.len() - 1].child(name)? {
-                Some(folder) => chain.push(folder),
-                None => return Ok(Resolved::NotFound),
-            }
-        }
-        Ok(Resolved::Held(HeldFolder {
-            chain,
-            root: self.work_tree.path.clone(),
-            work_tree: self.work_tree.clone(),
         }))
     }
 }
@@ -2982,13 +2879,15 @@ mod tests {
         }
     }
 
-    /// `resolve`'s answer as text, for comparing: `held`, `not found` or the refusal.
+    /// `resolve`'s answer as text, for comparing.
     #[cfg(any(unix, windows))]
     fn outcome(resolved: &Resolved) -> &'static str {
         match resolved {
             Resolved::Held(_) => "held",
             Resolved::NotFound => "not found",
-            Resolved::Refused(why) => why,
+            Resolved::NotAFolder => "not a folder",
+            Resolved::Outside => "outside",
+            Resolved::TooDeep => "too deep",
         }
     }
 
@@ -3001,8 +2900,8 @@ mod tests {
     }
 
     /// #213: `..` out of a held folder is the held folder above, not its name: the parent
-    /// swapped for a link to a folder outside after the probe is never looked through. `..`
-    /// above the work tree root is refused, never opened by path.
+    /// swapped for a link to a folder outside after the probe is never looked through. A name
+    /// that is a link is no folder; `..` above the work tree root is outside, whatever is there.
     #[test]
     #[cfg(unix)]
     fn resolving_up_from_a_held_folder_goes_through_the_held_parent() {
@@ -3020,111 +2919,98 @@ mod tests {
         std::os::unix::fs::symlink(out.path(), dir.path().join("a")).unwrap();
         let x = held(folder.resolve(Path::new("../x")).unwrap());
         assert_eq!(read_held(&x, "f"), "held\n");
-        // An absolute path inside the work tree starts from the held work tree root, whose
-        // `a` is now the link: not followed.
+        // An absolute path inside the work tree starts from the held work tree root, whose `a`
+        // is now the link: not followed.
         let inside = folder.resolve(&dir.path().join("a/x")).unwrap();
-        assert_eq!(outcome(&inside), "not found");
+        assert_eq!(outcome(&inside), "not a folder");
         let moved = held(folder.resolve(&dir.path().join("moved/x")).unwrap());
         assert_eq!(read_held(&moved, "f"), "held\n");
-        // A name that is a link, or missing, is no folder.
+        // `..` in an absolute path is applied to held folders too: `moved/../moved/x`.
+        let again = held(
+            folder
+                .resolve(&dir.path().join("moved/../moved/x"))
+                .unwrap(),
+        );
+        assert_eq!(read_held(&again, "f"), "held\n");
         assert_eq!(
             outcome(&folder.resolve(Path::new("../../a")).unwrap()),
-            "not found"
+            "not a folder"
         );
         assert_eq!(
             outcome(&folder.resolve(Path::new("missing")).unwrap()),
             "not found"
         );
-        // Out of the work tree by `..`: joined lexically to the work tree root's path, then an
-        // outside folder like any other (here `out/x`, opened once).
+        // Out of the work tree by `..`, even to come back in: outside.
         let name = out.path().file_name().unwrap().to_str().unwrap();
-        let x = held(
-            folder
-                .resolve(Path::new(&format!("../../../{name}/x")))
-                .unwrap(),
-        );
-        assert_eq!(read_held(&x, "f"), "OUTSIDE\n");
-        // Out and back in again: from the held root, so the link at `a` isn't followed.
         let work = dir.path().file_name().unwrap().to_str().unwrap();
-        assert_eq!(
-            outcome(
-                &folder
-                    .resolve(Path::new(&format!("../../../{work}/a/x")))
-                    .unwrap()
-            ),
-            "not found"
-        );
-        let back = held(
-            folder
-                .resolve(Path::new(&format!("../../../{work}/moved/x")))
-                .unwrap(),
-        );
-        assert_eq!(read_held(&back, "f"), "held\n");
+        for target in [
+            format!("../../../{name}/x"),
+            format!("../../../{work}/moved/x"),
+        ] {
+            assert_eq!(
+                outcome(&folder.resolve(Path::new(&target)).unwrap()),
+                "outside",
+                "{target}"
+            );
+        }
     }
 
-    /// #213: a folder outside the work tree is opened by path once; what is read below it then
-    /// comes through that handle, also after its path is swapped for a link. `..` above it is
-    /// taken lexically and opened once. From it, an absolute path back inside the work tree
-    /// starts from the work tree root held since the probe, never a path.
+    /// #213: an absolute path that isn't below the work tree root as it was opened is outside,
+    /// and nothing is opened or looked up for it: not an existing folder, not a sibling whose
+    /// name only starts like the work tree's (`b` and `bc`), not another spelling of the work
+    /// tree (a symlinked one here).
     #[test]
-    #[cfg(unix)]
-    fn a_folder_outside_the_work_tree_is_held_once_resolved() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let out = tempfile::TempDir::new().unwrap();
-        let other = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join("n")).unwrap();
-        std::fs::create_dir_all(dir.path().join("w/x")).unwrap();
-        std::fs::create_dir_all(out.path().join("git/refs")).unwrap();
-        std::fs::write(out.path().join("git/refs/f"), "held\n").unwrap();
-        std::fs::create_dir_all(other.path().join("refs")).unwrap();
-        std::fs::write(other.path().join("refs/f"), "OTHER\n").unwrap();
-        std::fs::create_dir_all(other.path().join("x")).unwrap();
-        let Probe::Folder(folder) = probe_beneath(dir.path(), "n").unwrap() else {
+    #[cfg(any(unix, windows))]
+    fn an_absolute_path_outside_the_work_tree_is_refused_unopened() {
+        let base = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(base.path().join("b/n")).unwrap();
+        std::fs::create_dir_all(base.path().join("bc/git")).unwrap();
+        let Probe::Folder(folder) = probe_beneath(&base.path().join("b"), "n").unwrap() else {
             panic!("not probed as a folder");
         };
-        let git = held(folder.resolve(&out.path().join("git")).unwrap());
-        std::fs::rename(out.path().join("git"), out.path().join("moved")).unwrap();
-        std::os::unix::fs::symlink(other.path(), out.path().join("git")).unwrap();
-        assert_eq!(read_held(&git, "refs/f"), "held\n");
-        let refs = held(git.resolve(Path::new("../moved/refs")).unwrap());
-        assert_eq!(read_held(&refs, "f"), "held\n");
         assert_eq!(
-            outcome(&folder.resolve(&out.path().join("gone")).unwrap()),
-            "not found"
+            outcome(&folder.resolve(&base.path().join("bc/git")).unwrap()),
+            "outside"
         );
-        // Back into the work tree from the outside folder: `w` swapped for a link to a folder
-        // that has `x` too is not followed, the held work tree root is used.
         assert_eq!(
-            outcome(&git.resolve(&dir.path().join("w/x")).unwrap()),
+            outcome(&folder.resolve(&base.path().join("b/../bc/git")).unwrap()),
+            "outside"
+        );
+        assert_eq!(
+            outcome(&folder.resolve(&base.path().join("b/n")).unwrap()),
             "held"
         );
-        std::fs::rename(dir.path().join("w"), dir.path().join("w2")).unwrap();
-        std::os::unix::fs::symlink(other.path(), dir.path().join("w")).unwrap();
-        assert_eq!(
-            outcome(&git.resolve(&dir.path().join("w/x")).unwrap()),
-            "not found"
-        );
-        // Also when reached lexically by `..` from the outside folder.
-        let relative = pathdiff(&dir.path().join("w/x"), &out.path().join("moved"));
-        assert_eq!(outcome(&git.resolve(&relative).unwrap()), "not found");
-    }
-
-    /// `to` relative to `from` (both absolute, sharing the temp folder): `../…` up to the common
-    /// parent, then down.
-    #[cfg(unix)]
-    fn pathdiff(to: &Path, from: &Path) -> PathBuf {
-        let common = from
-            .ancestors()
-            .find(|ancestor| to.starts_with(ancestor))
-            .unwrap();
-        let mut rel = PathBuf::new();
-        for _ in from.strip_prefix(common).unwrap().components() {
-            rel.push("..");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(base.path().join("b"), base.path().join("alias")).unwrap();
+            assert_eq!(
+                outcome(&folder.resolve(&base.path().join("alias/n")).unwrap()),
+                "outside"
+            );
         }
-        rel.join(to.strip_prefix(common).unwrap())
+        #[cfg(windows)]
+        for target in [
+            r"\\host.invalid\share\x",
+            r"//host.invalid/share/x",
+            r"\\?\UNC\host.invalid\share\x",
+            r"\\.\pipe\x",
+            r"\\?\C:\x",
+        ] {
+            let started = std::time::Instant::now();
+            assert_eq!(
+                outcome(&folder.resolve(Path::new(target)).unwrap()),
+                "outside",
+                "{target}"
+            );
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "{target}"
+            );
+        }
     }
 
-    /// #213: a target with more components than the cap is refused before any folder is held.
+    /// #213: a target with more names than the cap is refused before any folder is held; `.`,
+    /// `..` and the root don't count.
     #[test]
     #[cfg(any(unix, windows))]
     fn resolving_a_too_deep_path_is_refused() {
@@ -3133,8 +3019,6 @@ mod tests {
         let Probe::Folder(folder) = probe_beneath(dir.path(), "n").unwrap() else {
             panic!("not probed as a folder");
         };
-        // 64 names are taken (here missing below `n`), 65 refused; `.`, `..` and the root
-        // don't count.
         let deep = |names: usize| "x/".repeat(names);
         assert_eq!(
             outcome(
@@ -3148,9 +3032,8 @@ mod tests {
             outcome(
                 &folder
                     .resolve(Path::new(&format!(
-                        "./{}../{}",
-                        deep(RESOLVE_MAX_COMPONENTS - 1),
-                        "x"
+                        "./{}../x",
+                        deep(RESOLVE_MAX_COMPONENTS - 1)
                     )))
                     .unwrap()
             ),
@@ -3162,7 +3045,7 @@ mod tests {
                     .resolve(Path::new(&deep(RESOLVE_MAX_COMPONENTS + 1)))
                     .unwrap()
             ),
-            "a git folder path that is too deep"
+            "too deep"
         );
         let names = dir
             .path()
@@ -3173,120 +3056,9 @@ mod tests {
         for _ in names..=RESOLVE_MAX_COMPONENTS {
             path.push("x");
         }
-        assert_eq!(
-            outcome(&folder.resolve(&path).unwrap()),
-            "a git folder path that is too deep"
-        );
+        assert_eq!(outcome(&folder.resolve(&path).unwrap()), "too deep");
         path.pop();
         assert_eq!(outcome(&folder.resolve(&path).unwrap()), "not found");
-    }
-
-    /// #213: a sibling whose name only starts like the work tree's (`b` and `bc`) is outside it:
-    /// compared by component, opened once.
-    #[test]
-    #[cfg(any(unix, windows))]
-    fn a_sibling_named_like_the_work_tree_is_outside() {
-        let base = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(base.path().join("b/n")).unwrap();
-        std::fs::create_dir_all(base.path().join("bc/git")).unwrap();
-        std::fs::write(base.path().join("bc/git/HEAD"), "x\n").unwrap();
-        let Probe::Folder(folder) = probe_beneath(&base.path().join("b"), "n").unwrap() else {
-            panic!("not probed as a folder");
-        };
-        let resolved = folder.resolve(&base.path().join("bc/git")).unwrap();
-        let Resolved::Held(git) = resolved else {
-            panic!("{}", outcome(&resolved));
-        };
-        assert!(matches!(
-            git.read("HEAD", 100).unwrap(),
-            Some(Leaf::File { .. })
-        ));
-        assert_eq!(git.root, base.path().join("bc/git"));
-    }
-
-    /// #213 (Unix): the work tree under a symlinked spelling is recognised as the work tree and
-    /// resolved from the held root (a folder in it swapped for a link isn't followed); an
-    /// outside path whose link leads into the work tree is refused.
-    #[test]
-    #[cfg(unix)]
-    fn another_spelling_of_the_work_tree_is_resolved_from_the_held_root() {
-        let base = tempfile::TempDir::new().unwrap();
-        let out = tempfile::TempDir::new().unwrap();
-        let work = base.path().join("work");
-        std::fs::create_dir_all(work.join("n")).unwrap();
-        std::fs::create_dir_all(work.join("w/x")).unwrap();
-        std::fs::create_dir_all(out.path().join("x")).unwrap();
-        std::os::unix::fs::symlink(&work, base.path().join("alias")).unwrap();
-        let Probe::Folder(folder) = probe_beneath(&work, "n").unwrap() else {
-            panic!("not probed as a folder");
-        };
-        let via_alias = base.path().join("alias/w/x");
-        assert_eq!(outcome(&folder.resolve(&via_alias).unwrap()), "held");
-        std::fs::rename(work.join("w"), work.join("w2")).unwrap();
-        std::os::unix::fs::symlink(out.path(), work.join("w")).unwrap();
-        assert_eq!(outcome(&folder.resolve(&via_alias).unwrap()), "not found");
-        // A link outside the work tree that points into it.
-        std::os::unix::fs::symlink(work.join("w2"), out.path().join("into")).unwrap();
-        assert_eq!(
-            outcome(&folder.resolve(&out.path().join("into/x")).unwrap()),
-            "a git folder path that leads into the work tree through a link"
-        );
-    }
-
-    /// #213 (case-insensitive file systems): the work tree spelled in another case is the work
-    /// tree, resolved from the held root.
-    #[test]
-    #[cfg(any(target_os = "macos", windows))]
-    fn the_work_tree_in_another_case_is_resolved_from_the_held_root() {
-        let base = tempfile::TempDir::new().unwrap();
-        let out = tempfile::TempDir::new().unwrap();
-        let work = base.path().join("work");
-        std::fs::create_dir_all(work.join("n")).unwrap();
-        std::fs::create_dir_all(work.join("w/x")).unwrap();
-        std::fs::create_dir_all(out.path().join("x")).unwrap();
-        if !dir_folds_case(&work).unwrap() {
-            return;
-        }
-        let Probe::Folder(folder) = probe_beneath(&work, "n").unwrap() else {
-            panic!("not probed as a folder");
-        };
-        let upper = PathBuf::from(work.to_string_lossy().to_uppercase()).join("W/X");
-        assert_ne!(upper, work.join("w/x"));
-        assert_eq!(outcome(&folder.resolve(&upper).unwrap()), "held");
-        std::fs::rename(work.join("w"), work.join("w2")).unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(out.path(), work.join("w")).unwrap();
-        #[cfg(windows)]
-        junction(&work.join("w"), out.path());
-        assert_eq!(outcome(&folder.resolve(&upper).unwrap()), "not found");
-    }
-
-    /// #213 (Windows): network shares and devices are refused before any open.
-    #[test]
-    #[cfg(windows)]
-    fn resolving_a_network_or_device_path_is_refused() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join("n")).unwrap();
-        let Probe::Folder(folder) = probe_beneath(dir.path(), "n").unwrap() else {
-            panic!("not probed as a folder");
-        };
-        for target in [
-            r"\\host.invalid\share\x",
-            r"//host.invalid/share/x",
-            r"\\?\UNC\host.invalid\share\x",
-            r"\\.\pipe\x",
-            r"\\?\C:\x",
-        ] {
-            assert_eq!(
-                outcome(&folder.resolve(Path::new(target)).unwrap()),
-                "a network or device path",
-                "{target}"
-            );
-        }
-        assert_eq!(
-            outcome(&folder.resolve(&dir.path().join("n")).unwrap()),
-            "held"
-        );
     }
 
     /// #213: a read through a held folder stops past its limit.

@@ -80,8 +80,11 @@ pub enum NotStagedReason {
     NotARepository,
     /// A repository whose branch has no commit yet.
     NoCommit,
-    /// A linked worktree whose main repository (its `commondir`) is gone.
+    /// A linked worktree whose main repository (its `commondir`) can't be found.
     MainRepositoryGone,
+    /// A repository whose git folder (or main repository) is outside the work tree: never
+    /// opened (#213).
+    GitFolderOutside,
     /// A repository whose checked-out commit Browsitory can't read; what it can't read.
     Unsupported(&'static str),
 }
@@ -90,8 +93,14 @@ impl NotStagedReason {
     fn message(&self, path: &str) -> String {
         match self {
             Self::MainRepositoryGone => format!(
-                "'{path}' is a linked worktree whose main repository is gone. Repair it with \
-                 git (`git worktree repair`), then try again."
+                "'{path}' is a linked worktree, but Browsitory can't find its main repository. \
+                 If the main repository was moved, run `git worktree repair` in it, then try \
+                 again."
+            ),
+            Self::GitFolderOutside => format!(
+                "'{path}' is a repository whose git folder is outside the work tree, and \
+                 Browsitory doesn't open folders there. Stage it with `git add {path}` in a \
+                 terminal."
             ),
             Self::NotARepository => format!(
                 "'{path}' is a folder, not a repository. Only a repository can be marked \
@@ -103,7 +112,7 @@ impl NotStagedReason {
             ),
             Self::Unsupported(what) => format!(
                 "Browsitory can't read which commit the repository '{path}' has checked out \
-                 ({what}). Stage it with git."
+                 ({what}). Stage it with `git add {path}` in a terminal."
             ),
         }
     }
@@ -719,8 +728,7 @@ const PER_WORKTREE_REFS: [&str; 3] = ["refs/worktree/", "refs/bisect/", "refs/re
 /// HEAD, followed through symbolic refs to a loose ref or `packed-refs`. Everything is read
 /// through held folders (`HeldFolder::resolve`), never by path, no link followed and no FIFO
 /// opened: `.git` (a folder, or a `gitdir:` file), HEAD, `commondir` and the refs, each file
-/// size-capped. A `gitdir:` or `commondir` outside the work tree is opened by path once and
-/// then held.
+/// size-capped. A `gitdir:` or `commondir` outside the work tree is refused unopened.
 fn nested_head(
     path: &str,
     folder: &crate::worktree_guard::HeldFolder,
@@ -736,11 +744,19 @@ fn nested_head(
         Err(error) => Err(MergeError::Io(error)),
     };
     let not_a_repository = || refuse(NotStagedReason::NotARepository);
+    // Where `resolve` refused, the same for the git folder and the common folder.
+    let refused = |resolved: Resolved| match resolved {
+        Resolved::Outside => refuse(NotStagedReason::GitFolderOutside),
+        Resolved::TooDeep => refuse(NotStagedReason::Unsupported(
+            "a git folder path that is too deep",
+        )),
+        _ => not_a_repository(),
+    };
     let resolve = |from: &HeldFolder, target: &str| match from.resolve(Path::new(target))? {
         Resolved::Held(folder) => Ok(folder),
         // A missing folder (a `gitdir:` whose git folder is gone), a link or not a folder.
-        Resolved::NotFound => Err(not_a_repository()),
-        Resolved::Refused(why) => Err(refuse(NotStagedReason::Unsupported(why))),
+        Resolved::NotFound | Resolved::NotAFolder => Err(not_a_repository()),
+        other => Err(refused(other)),
     };
     let git = match read(folder, ".git", SMALL_GIT_FILE_LIMIT)? {
         Some(bytes) => {
@@ -761,7 +777,12 @@ fn nested_head(
         Some(bytes) => match git.resolve(Path::new(String::from_utf8_lossy(&bytes).trim()))? {
             Resolved::Held(common) => common,
             Resolved::NotFound => return Err(refuse(NotStagedReason::MainRepositoryGone)),
-            Resolved::Refused(why) => return Err(refuse(NotStagedReason::Unsupported(why))),
+            Resolved::NotAFolder => {
+                return Err(refuse(NotStagedReason::Unsupported(
+                    "its main repository's path is a link or a file",
+                )))
+            }
+            other => return Err(refused(other)),
         },
         None => git,
     };

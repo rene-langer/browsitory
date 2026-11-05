@@ -590,39 +590,7 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
 /// A folder held open by its descriptor (see `worktree_guard::HeldFolder`).
 pub(super) struct Folder(OwnedFd);
 
-/// A file's device and inode.
-pub(super) type Identity = (u64, u64);
-
-/// The casts are no-ops on some targets.
-#[allow(clippy::unnecessary_cast)]
-fn identity(stat: &libc::stat) -> Identity {
-    (stat.st_dev as u64, stat.st_ino as u64)
-}
-
-/// The identity of the folder at `path` (links followed); `None` when it isn't one or can't be
-/// looked at.
-pub(super) fn identity_of(path: &Path) -> Option<Identity> {
-    use std::os::unix::fs::MetadataExt;
-    let meta = std::fs::metadata(path).ok()?;
-    meta.is_dir().then(|| (meta.dev(), meta.ino()))
-}
-
 impl Folder {
-    /// Opens the folder `path` by path (links on the way followed). `None` when it is missing or
-    /// not a folder.
-    pub(super) fn open(path: &Path) -> io::Result<Option<Folder>> {
-        use std::os::unix::fs::OpenOptionsExt;
-        match std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
-            .open(path)
-        {
-            Ok(dir) => Ok(Some(Folder(dir.into()))),
-            Err(error) if gone(&error) => Ok(None),
-            Err(error) => Err(error),
-        }
-    }
-
     pub(super) fn try_clone(&self) -> io::Result<Folder> {
         Ok(Folder(self.0.try_clone()?))
     }
@@ -659,36 +627,6 @@ impl Folder {
 
     pub(super) fn stat(&self) -> io::Result<super::FileStat> {
         Ok(file_stat(&fstat(self.0.as_raw_fd())?))
-    }
-
-    /// The folder's device and inode.
-    pub(super) fn identity(&self) -> io::Result<Identity> {
-        Ok(identity(&fstat(self.0.as_raw_fd())?))
-    }
-
-    /// Whether this folder is `root` or below it, physically: its `..` chain (each opened from
-    /// the one before, never by path) reaches `root` before the file system root. Too deep to
-    /// tell counts as within.
-    pub(super) fn is_within(&self, root: &Folder) -> io::Result<bool> {
-        let root = root.identity()?;
-        let mut current = self.try_clone()?;
-        for _ in 0..4096 {
-            let id = current.identity()?;
-            if id == root {
-                return Ok(true);
-            }
-            let parent = Folder(open_at(
-                current.0.as_raw_fd(),
-                OsStr::new(".."),
-                libc::O_RDONLY | libc::O_DIRECTORY,
-                0,
-            )?);
-            if parent.identity()? == id {
-                return Ok(false);
-            }
-            current = parent;
-        }
-        Ok(true)
     }
 
     /// See `worktree_guard::HeldFolder::kind`.
@@ -738,7 +676,7 @@ pub(super) fn probe(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<
             Ok(fd) => {
                 let mut chain: Vec<Folder> = at.dirs.into_iter().map(Folder).collect();
                 chain.push(Folder(fd));
-                return Ok(Probe::Folder(HeldFolder::in_work_tree(chain, workdir)?));
+                return Ok(Probe::Folder(HeldFolder::in_work_tree(chain, workdir)));
             }
             // Swapped since the `fstatat`: classified again.
             Err(error) if gone(&error) => {}
