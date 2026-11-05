@@ -87,7 +87,12 @@ describe("Browsitory cherry-pick sequence", () => {
     ]);
     expect(fs.readFileSync(path.join(E2E_REPO_PATH, "seq-shared.txt"), "utf8")).toBe("ours\n");
     expect(fs.existsSync(path.join(E2E_REPO_PATH, "seq-two.txt"))).toBe(true);
-    expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git", "browsitory", "sequence.json"))).toBe(false);
+    // Polled: the worker clears the stored sequence just after the last commit lands, so the
+    // `git log` wait above can return while the file is still there (#182).
+    await browser.waitUntil(
+      () => !fs.existsSync(path.join(E2E_REPO_PATH, ".git", "browsitory", "sequence.json")),
+      { timeout: 10000, timeoutMsg: "the stored sequence (sequence.json) was not cleared" },
+    );
     // Polled in the page rather than through an element handle: the strip is removed while
     // the app refreshes, and a handle to it can go stale mid-wait (a tauri-driver flake).
     await browser.waitUntil(

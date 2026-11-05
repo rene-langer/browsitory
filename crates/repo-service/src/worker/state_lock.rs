@@ -371,27 +371,47 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_child_forked_while_the_lock_was_held_does_not_keep_it() {
+        use std::io::{Read, Write};
         use std::os::unix::process::CommandExt;
         let (_dir, repo) = repo();
         let (a, b) = (StateLock::open(&repo), StateLock::open(&repo));
         let guard = held(a.try_acquire());
-        let forker = std::thread::spawn(|| {
+        // The child writes a byte here once it is forked, so the test drops the guard only
+        // while the child surely holds a copy of the lock's descriptor (#182 review: a fixed
+        // sleep passed vacuously when the fork came late).
+        let (mut forked_rx, forked_tx) = std::io::pipe().unwrap();
+        let forker = std::thread::spawn(move || {
             let mut command = std::process::Command::new("sh");
             command.arg("-c").arg(":");
-            // SAFETY: `nanosleep` is async-signal-safe; the closure allocates nothing.
+            // SAFETY: `write` and `nanosleep` are async-signal-safe; writing one byte to a pipe
+            // allocates nothing.
             unsafe {
-                command.pre_exec(|| {
-                    std::thread::sleep(Duration::from_secs(1));
+                command.pre_exec(move || {
+                    (&forked_tx).write_all(&[1])?;
+                    std::thread::sleep(Duration::from_secs(2));
                     Ok(())
                 });
             }
             // `spawn` returns once the child has exec'd (or failed to), so the child holds a
-            // copy of the lock's descriptor for about a second.
+            // copy of the lock's descriptor from the byte until about two seconds later.
             command.spawn().unwrap().wait().unwrap();
         });
-        std::thread::sleep(Duration::from_millis(200));
+        let (forked, wait_forked) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut byte = [0];
+            let _ = forked.send(forked_rx.read_exact(&mut byte));
+        });
+        wait_forked
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the child was not forked within 30 s")
+            .unwrap();
         drop(guard);
         let acquired = b.try_acquire();
+        // Still before the child's `exec`, or the check proved nothing: fail, don't pass.
+        assert!(
+            !forker.is_finished(),
+            "the child exec'd before the lock was checked"
+        );
         forker.join().unwrap();
         held(acquired);
     }

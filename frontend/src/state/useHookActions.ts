@@ -19,6 +19,9 @@ export function useHookActions(
   hookRun: AppState["hookRun"],
   setState: (updater: (prev: AppState) => AppState) => void,
 ): HookActions {
+  // One slot is enough: a repository has one worker thread (`WorkerRegistry`), which runs its
+  // commands and their hooks one at a time, so a hook's Finished always comes before the next
+  // Started.
   const hookRunRef = useRef(hookRun);
   useEffect(() => {
     hookRunRef.current = hookRun;
@@ -29,11 +32,16 @@ export function useHookActions(
       client.subscribeHookProgress((event) => {
         if (event.repoPath !== repoPath) return;
         if (event.phase === "Started") {
-          setState((prev) => ({
-            ...prev,
-            hookRun: { operationId: event.operationId, hook: event.hook, source: event.source },
-          }));
+          const run = { operationId: event.operationId, hook: event.hook, source: event.source };
+          // Set now, not only by the effect above: Cancel is on screen once React commits this
+          // render, and a click before its effects run would otherwise cancel nothing (#182).
+          hookRunRef.current = run;
+          setState((prev) => ({ ...prev, hookRun: run }));
         } else {
+          // Clear it here too: Started and Finished in one React batch leave `hookRun` null
+          // before and after, so the effect above wouldn't run and Cancel would target the
+          // ended run (#182).
+          if (hookRunRef.current?.operationId === event.operationId) hookRunRef.current = null;
           setState((prev) =>
             prev.hookRun?.operationId === event.operationId ? { ...prev, hookRun: null } : prev,
           );

@@ -35,6 +35,15 @@ fn commit_as(
         .unwrap()
 }
 
+/// `PageLimits::DEFAULT` without its 250 ms time budget. These tests read one page and expect
+/// the whole match set in it. With the budget, a slow runner can end the page after the newest
+/// commit (no match) and leave the match behind a `next_cursor` the test never follows (#182).
+/// The time budget has its own tests below.
+const NO_TIME_BUDGET: PageLimits = PageLimits {
+    time: Duration::MAX,
+    ..PageLimits::DEFAULT
+};
+
 fn search_with(
     repo: &Repository,
     query: &str,
@@ -45,7 +54,7 @@ fn search_with(
         &parse_query(query)?,
         refs,
         None,
-        PageLimits::DEFAULT,
+        NO_TIME_BUDGET,
         &|| false,
     )
 }
@@ -442,7 +451,7 @@ fn cancel_stops_before_and_during_the_walk() {
     let query = parse_query("zzz").unwrap();
 
     assert!(matches!(
-        search_commits(&repo, &query, None, None, PageLimits::DEFAULT, &|| true),
+        search_commits(&repo, &query, None, None, NO_TIME_BUDGET, &|| true),
         Err(SearchError::Cancelled)
     ));
 
@@ -451,8 +460,9 @@ fn cancel_stops_before_and_during_the_walk() {
         polls.set(polls.get() + 1);
         polls.get() >= 3
     };
+    // No time budget: a page that ran out of time would end before the third poll.
     assert!(matches!(
-        search_commits(&repo, &query, None, None, PageLimits::DEFAULT, &cancel),
+        search_commits(&repo, &query, None, None, NO_TIME_BUDGET, &cancel),
         Err(SearchError::Cancelled)
     ));
     assert_eq!(polls.get(), 3);

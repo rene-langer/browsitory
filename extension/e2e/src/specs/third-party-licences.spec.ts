@@ -11,7 +11,11 @@ describe("Browsitory VSCode extension third-party licences", () => {
     if (!cdpPort) throw new Error("BROWSITORY_VSCODE_E2E_CDP_PORT not set");
     const webview = await connectToWebview(`http://127.0.0.1:${cdpPort}`);
     try {
+      // `connectToWebview` returns once the webview has a document, not once the app rendered
+      // into it: clicking at once could find no header yet (#182). Wait for each button.
+      await webview.waitForSelector('button[aria-label="Release notes"]', 15000);
       await webview.click('button[aria-label="Release notes"]');
+      await webview.waitForText("button", "Third-party licences", 15000);
       await webview.clickByText("button", "Third-party licences");
       // The text region renders only once third-party-notices.md was fetched from the
       // webview's own files, so this proves the CSP's connect-src and the asset path.
