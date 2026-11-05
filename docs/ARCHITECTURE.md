@@ -1543,10 +1543,13 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   - an absolute path below the work tree root exactly as it was opened, compared by component
     (so `/a/bc` is not inside `/a/b`); the rest is resolved from the held root the same way.
 
-  Everything else is `NotStagedReason::GitFolderOutside`, and the message says to stage the
-  folder with `git add <path>` in a terminal. That covers:
+  Everything else is `NotStagedReason::GitFolderOutside`. Its message says the git folder is
+  outside the work tree or at a path Browsitory can't match to it, and to stage the folder with
+  `git add <path>` in a terminal. That covers:
   - an absolute path elsewhere, including Windows network shares and devices;
-  - another spelling of the work tree (a symlinked or case-folded one, an 8.3 name);
+  - another spelling of the work tree (a symlinked or case-folded one, `\\?\`, an 8.3 name).
+    git writes a linked worktree's `gitdir:` as an absolute real path, so a work tree opened
+    through a link (macOS `/var` for `/private/var`) or under a short name lands here;
   - a relative path that climbs out of the work tree, even to come back in (git 2.48's
     `worktree.useRelativePaths` for a main repository outside);
   - a linked worktree of a repository outside (libgit2 and older git write absolute paths).
@@ -1562,13 +1565,18 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `MergeError::FolderNotStaged` with a reason:
   - no repository: a plain folder, `.git` a link, or its `gitdir:` missing, a link or a file;
   - no commit: the branch is absent both as a loose ref and from `packed-refs`;
-  - main repository missing: a linked worktree whose `commondir` can't be found (`git
-    worktree repair` fixes a moved main repository);
+  - main repository missing: a linked worktree whose `commondir` names a folder that doesn't
+    exist. git writes `commondir` as `../..` inside the git folder, so this only happens when
+    it was edited; a moved main repository shows up as a missing `gitdir:` (no repository) or
+    one outside the work tree instead;
   - git folder outside the work tree, as above;
   - a format it can't read: SHA-256 ids, reftable, a HEAD on a per-worktree ref, a ref name
     git refuses, a malformed or oversized file, a ref that exists but isn't a regular file (a
-    link, folder or FIFO, or a link on the way to it), a `commondir` that is a link or a file,
-    or a path that is too deep.
+    link, folder or FIFO, or a link on the way to it), a `packed-refs` that isn't a regular
+    file, a `commondir` that is a link or a file, or a path that is too deep.
+
+  The messages for no repository, a git folder outside, a missing main repository and an
+  unreadable format all end by saying to stage the folder with `git add <path>` in a terminal.
 
   `git add` stages a deletion when a folder on the way is a file, at any depth; so does Mark
   resolved (git twin tests). Discard file, hunk or lines below such a file names it

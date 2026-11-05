@@ -20,11 +20,12 @@ the **Changes** group. The group shows a badge such as **1 conflict**, and each 
 - If the conflicted path is now a folder that holds a repository (a nested repository, a
   submodule's checkout or a linked worktree), **Mark resolved** stages the commit that
   repository has checked out, as `git add` does. Browsitory only reads that repository's git
-  folder when it is inside the work tree, for example a submodule's under `.git/modules`. When it
-  can't stage the folder, it says why: the folder isn't a repository, the repository has no
-  commit yet, its git folder (or a linked worktree's main repository) is outside the work tree or
-  can't be found, or the repository uses a format Browsitory can't read (SHA-256, reftable). Stage
-  such a folder with `git add <path>` in a terminal.
+  folder when it is inside the work tree, for example a submodule's under `.git/modules`, and
+  written with the same path as the work tree. When it can't stage the folder, it says why: the
+  folder isn't a repository, the repository has no commit yet, its git folder (or a linked
+  worktree's main repository) is outside the work tree, at a path Browsitory can't match to the
+  work tree, or can't be found, or the repository uses a format Browsitory can't read (SHA-256,
+  reftable). Stage such a folder with `git add <path>` in a terminal.
 
 If the conflicted file is read-only, **Save resolution**, **Use ours (whole file)** and **Use
 theirs (whole file)** change nothing and say so: "'f.txt' is read-only. Make it writable, then
