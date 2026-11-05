@@ -36,6 +36,10 @@ pub enum MergeError {
     /// swapped for a link at that moment (#199).
     #[error("'{0}' can't be read safely; check its permissions and try again.")]
     Unreadable(String),
+    /// Mark resolved on a folder that can't be staged as a nested repository's commit, which is
+    /// the only way git stages a folder (#213). Nothing was staged.
+    #[error("{}", .1.message(.0))]
+    FolderNotStaged(String, NotStagedReason),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
     /// The file to write is read-only; nothing was written (#209).
@@ -66,6 +70,55 @@ pub enum MergeError {
     /// rebase's, which only the terminal ends (#263). Nothing was changed.
     #[error(transparent)]
     TerminalRebase(#[from] crate::repo::TerminalRebaseInProgress),
+}
+
+/// Why Mark resolved didn't stage a folder (`MergeError::FolderNotStaged`, #213).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotStagedReason {
+    /// No repository: a folder of plain files, a `.git` that is a link or missing its git
+    /// folder (a `gitdir:` to a folder that is gone), or no HEAD.
+    NotARepository,
+    /// A repository whose branch has no commit yet.
+    NoCommit,
+    /// A linked worktree whose `commondir` names a folder that doesn't exist. (git writes it
+    /// as `../..` inside the git folder, so a moved main repository shows up as a missing or
+    /// outside git folder instead.)
+    MainRepositoryGone,
+    /// A repository whose git folder (or main repository) is outside the work tree, or at an
+    /// absolute path not spelled like the work tree root (a symlinked or case-folded spelling,
+    /// an 8.3 name, `\\?\`): never opened (#213).
+    GitFolderOutside,
+    /// A repository whose checked-out commit Browsitory can't read; what it can't read.
+    Unsupported(&'static str),
+}
+
+impl NotStagedReason {
+    fn message(&self, path: &str) -> String {
+        match self {
+            Self::MainRepositoryGone => format!(
+                "'{path}' is a linked worktree whose main repository can't be found: its git \
+                 folder's `commondir` names a folder that doesn't exist. Stage it with \
+                 `git add {path}` in a terminal once git can read it."
+            ),
+            Self::GitFolderOutside => format!(
+                "'{path}' has its git folder outside the work tree, or at a path Browsitory \
+                 can't match to it. Stage it with `git add {path}` in a terminal."
+            ),
+            Self::NotARepository => format!(
+                "'{path}' is a folder Browsitory can't read as a repository: it has no `.git`, \
+                 or its `.git` is a link or names a git folder that can't be found. To stage it \
+                 anyway, run `git add {path}` in a terminal."
+            ),
+            Self::NoCommit => format!(
+                "'{path}' is a repository without a commit checked out. Commit in it first, \
+                 then try again."
+            ),
+            Self::Unsupported(what) => format!(
+                "Browsitory can't read which commit the repository '{path}' has checked out \
+                 ({what}). Stage it with `git add {path}` in a terminal."
+            ),
+        }
+    }
 }
 
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
@@ -555,15 +608,29 @@ pub fn mark_resolved(
 /// hint, so the same clean filters (`core.autocrlf`, `.gitattributes`) apply as with
 /// `add_path`; `remove_path` moves the conflict stages to resolve-undo (REUC), as `add_path`
 /// does. The new entry carries the stat data of the descriptor the bytes were read from, so
-/// status trusts it like any entry `git add` wrote. A folder at the path (a nested repository,
-/// staged as a gitlink) still goes through `add_path`: a FIFO swapped for it in that instant is
-/// a residual.
+/// status trusts it like any entry `git add` wrote. A folder at the path is probed and held
+/// through `worktree_guard::probe_beneath`, never reopened by path: a nested repository is
+/// staged as a gitlink to the commit its HEAD names, read through the held folder (#213), and
+/// any other folder is refused (`FolderNotStaged`).
 #[doc(hidden)]
 pub fn mark_resolved_with_pause(
     repo: &Repository,
     path: &str,
     force: bool,
     after_check: &mut dyn FnMut(),
+) -> Result<MarkResolvedOutcome, MergeError> {
+    mark_resolved_with_pauses(repo, path, force, after_check, &mut || {})
+}
+
+/// `mark_resolved_with_pause` with a second test seam: `folder_held` runs once a folder at the
+/// path is held and before anything in it is read, so a test can swap the folder then (#213).
+#[doc(hidden)]
+pub fn mark_resolved_with_pauses(
+    repo: &Repository,
+    path: &str,
+    force: bool,
+    after_check: &mut dyn FnMut(),
+    folder_held: &mut dyn FnMut(),
 ) -> Result<MarkResolvedOutcome, MergeError> {
     use crate::worktree_guard::Leaf;
     if !crate::launch::is_safe_relative(path) {
@@ -622,26 +689,199 @@ pub fn mark_resolved_with_pause(
         }
         None => {
             after_check();
-            // Re-checked, so the type below is (barring a swap in this instant) the path's own,
-            // not something beyond a folder that became a link.
-            ensure_inside_workdir(workdir, path)?;
-            match std::fs::symlink_metadata(&full) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // Judged again through the held folders, never by path, so the type below is the
+            // path's own, not something beyond a folder that became a link.
+            use crate::worktree_guard::Probe;
+            match crate::worktree_guard::probe_beneath(workdir, path)? {
+                Probe::Missing => {
                     index.remove_path(Path::new(path))?;
                 }
-                Err(error) => return Err(error.into()),
-                Ok(meta) if meta.is_dir() => index.add_path(Path::new(path))?,
+                Probe::BeyondLink => return Err(MergeError::SymlinkedFolder(path.to_string())),
                 // A file or link `read_beneath` couldn't open (no permission, being deleted, or
                 // swapped meanwhile).
-                Ok(meta) if meta.is_file() || meta.file_type().is_symlink() => {
-                    return Err(MergeError::Unreadable(path.to_string()))
+                Probe::File | Probe::Link => return Err(MergeError::Unreadable(path.to_string())),
+                Probe::Other => return Err(MergeError::NotAFile(path.to_string())),
+                Probe::Folder(folder) => {
+                    folder_held();
+                    let head = nested_head(path, &folder)?;
+                    let stat = folder.stat()?;
+                    index.remove_path(Path::new(path))?;
+                    index.add(&staged_entry(path, head, MODE_GITLINK, &stat))?;
                 }
-                Ok(_) => return Err(MergeError::NotAFile(path.to_string())),
             }
         }
     }
     index.write()?;
     Ok(MarkResolvedOutcome::Resolved)
+}
+
+/// Git's file mode for a gitlink (a nested repository's commit).
+const MODE_GITLINK: u32 = 0o160000;
+
+/// The most [`nested_head`] reads of a small git file (`.git`, HEAD, `commondir`, a loose ref).
+const SMALL_GIT_FILE_LIMIT: u64 = 4096;
+/// The most [`nested_head`] reads of `packed-refs`.
+const PACKED_REFS_LIMIT: u64 = 64 << 20;
+
+/// Refs that live in each worktree's own git folder, not the common one (git's
+/// `is_per_worktree_ref`).
+const PER_WORKTREE_REFS: [&str; 3] = ["refs/worktree/", "refs/bisect/", "refs/rewritten/"];
+
+/// The commit a nested repository has checked out, as `git add` stages it for a folder (#213):
+/// HEAD, followed through symbolic refs to a loose ref or `packed-refs`. Everything is read
+/// through held folders (`HeldFolder::resolve`), never by path, no link followed and no FIFO
+/// opened: `.git` (a folder, or a `gitdir:` file), HEAD, `commondir` and the refs, each file
+/// size-capped. A `gitdir:` or `commondir` outside the work tree is refused unopened.
+fn nested_head(
+    path: &str,
+    folder: &crate::worktree_guard::HeldFolder,
+) -> Result<git2::Oid, MergeError> {
+    use crate::worktree_guard::{HeldFolder, Kind, Leaf, Resolved};
+    let refuse = |reason| MergeError::FolderNotStaged(path.to_string(), reason);
+    let read = |dir: &HeldFolder, name: &str, limit| match dir.read(name, limit) {
+        Ok(Some(Leaf::File { bytes, .. })) => Ok(Some(bytes)),
+        Ok(_) => Ok(None),
+        Err(error) if crate::worktree_guard::is_too_large(&error) => Err(refuse(
+            NotStagedReason::Unsupported("a file in its git folder is too large"),
+        )),
+        Err(error) => Err(MergeError::Io(error)),
+    };
+    let not_a_repository = || refuse(NotStagedReason::NotARepository);
+    // Where `resolve` refused, the same for the git folder and the common folder.
+    let refused = |resolved: Resolved| match resolved {
+        Resolved::Outside => refuse(NotStagedReason::GitFolderOutside),
+        Resolved::TooDeep => refuse(NotStagedReason::Unsupported(
+            "a git folder path that is too deep",
+        )),
+        _ => not_a_repository(),
+    };
+    let resolve = |from: &HeldFolder, target: &str| match from.resolve(Path::new(target))? {
+        Resolved::Held(folder) => Ok(folder),
+        // A missing folder (a `gitdir:` whose git folder is gone), a link or not a folder.
+        Resolved::NotFound | Resolved::NotAFolder => Err(not_a_repository()),
+        other => Err(refused(other)),
+    };
+    let git = match read(folder, ".git", SMALL_GIT_FILE_LIMIT)? {
+        Some(bytes) => {
+            let text = String::from_utf8_lossy(&bytes);
+            let target = text
+                .trim()
+                .strip_prefix("gitdir:")
+                .map(str::trim)
+                .ok_or_else(not_a_repository)?;
+            resolve(folder, target)?
+        }
+        // A folder; a link, FIFO or nothing gives `NotFound`.
+        None => resolve(folder, ".git")?,
+    };
+    let mut content = read(&git, "HEAD", SMALL_GIT_FILE_LIMIT)?.ok_or_else(not_a_repository)?;
+    // A linked worktree's branches are in its repository's common folder.
+    let common = match read(&git, "commondir", SMALL_GIT_FILE_LIMIT)? {
+        Some(bytes) => match git.resolve(Path::new(String::from_utf8_lossy(&bytes).trim()))? {
+            Resolved::Held(common) => common,
+            Resolved::NotFound => return Err(refuse(NotStagedReason::MainRepositoryGone)),
+            Resolved::NotAFolder => {
+                return Err(refuse(NotStagedReason::Unsupported(
+                    "its main repository's path is a link or a file",
+                )))
+            }
+            other => return Err(refused(other)),
+        },
+        None => git,
+    };
+    // git reads at most 5 refs, HEAD included (`SYMREF_MAXDEPTH`): HEAD and 4 symbolic refs.
+    for _ in 0..5 {
+        let text = String::from_utf8_lossy(&content);
+        let text = text.trim();
+        let Some(name) = text.strip_prefix("ref:").map(str::trim) else {
+            return parse_oid(text).map_err(refuse);
+        };
+        // What git's reftable backend writes into HEAD so older git refuses the repository.
+        if name == "refs/heads/.invalid" {
+            return Err(refuse(NotStagedReason::Unsupported("reftable refs")));
+        }
+        if PER_WORKTREE_REFS
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
+            return Err(refuse(NotStagedReason::Unsupported(
+                "HEAD on a per-worktree ref",
+            )));
+        }
+        if !name.starts_with("refs/") {
+            return Err(refuse(NotStagedReason::Unsupported("HEAD outside refs/")));
+        }
+        if !git_accepts_refname(name) {
+            return Err(refuse(NotStagedReason::Unsupported(
+                "a malformed HEAD or ref",
+            )));
+        }
+        match read(&common, name, SMALL_GIT_FILE_LIMIT)? {
+            Some(next) => content = next,
+            // Not a regular file, yet not absent either: a link, a folder, a FIFO, or a link on
+            // the way to it. Never "no commit".
+            None if common.kind(name)? != Kind::Missing => {
+                return Err(refuse(NotStagedReason::Unsupported(
+                    "a ref that isn't a regular file",
+                )))
+            }
+            None => {
+                let packed = match read(&common, "packed-refs", PACKED_REFS_LIMIT)? {
+                    Some(packed) => packed,
+                    // A link, folder or FIFO there isn't "no packed refs": never "no commit".
+                    None if common.kind("packed-refs")? != Kind::Missing => {
+                        return Err(refuse(NotStagedReason::Unsupported(
+                            "a `packed-refs` that isn't a regular file",
+                        )))
+                    }
+                    None => Vec::new(),
+                };
+                let id = String::from_utf8_lossy(&packed)
+                    .lines()
+                    .filter(|line| !line.starts_with('#') && !line.starts_with('^'))
+                    .find_map(|line| {
+                        let (id, ref_name) = line.split_once(' ')?;
+                        (ref_name.trim_end() == name).then(|| id.trim().to_string())
+                    });
+                return match id {
+                    Some(id) => parse_oid(&id).map_err(refuse),
+                    // An unborn branch.
+                    None => Err(refuse(NotStagedReason::NoCommit)),
+                };
+            }
+        }
+    }
+    Err(refuse(NotStagedReason::Unsupported(
+        "symbolic refs nested too deeply",
+    )))
+}
+
+/// Whether git's `check_refname_format` accepts `name` (without `REFNAME_ALLOW_ONELEVEL` or
+/// `REFNAME_REFSPEC_PATTERN`): no control character, space, `~ ^ : ? * [ \`, no `..` or `@{`,
+/// no part empty, starting with `.` or ending with `.lock`, not `@` alone and no trailing `.`
+/// (#213). Only such a name is used as a path below the git folder: `:` would open an NTFS
+/// alternate data stream on Windows.
+fn git_accepts_refname(name: &str) -> bool {
+    let bad_char = |c: char| c.is_ascii_control() || " ~^:?*[\\".contains(c);
+    name != "@"
+        && !name.contains("..")
+        && !name.contains("@{")
+        && !name.ends_with('.')
+        && !name.chars().any(bad_char)
+        && name
+            .split('/')
+            .all(|part| !part.is_empty() && !part.starts_with('.') && !part.ends_with(".lock"))
+}
+
+/// A full hexadecimal SHA-1 object id (git2 would also take a prefix).
+fn parse_oid(text: &str) -> Result<git2::Oid, NotStagedReason> {
+    let hex = text.bytes().all(|b| b.is_ascii_hexdigit());
+    match text.len() {
+        40 if hex => git2::Oid::from_str(text)
+            .map_err(|_| NotStagedReason::Unsupported("a malformed HEAD or ref")),
+        64 if hex => Err(NotStagedReason::Unsupported("SHA-256 object ids")),
+        _ => Err(NotStagedReason::Unsupported("a malformed HEAD or ref")),
+    }
 }
 
 /// The index entry `git add` would write for a file read with `stat`: git truncates the times,

@@ -58,8 +58,9 @@ never writes or deletes outside the repository, including through a symlinked fo
 tracked file was replaced by a symbolic link, discarding removes the link and restores the file
 (the link's target is never touched), like git; reset, undo/redo, aborting a merge or rebase and
 resolving a conflict do the same. If a tracked folder was replaced by a file of the same name,
-discarding a file that was in the folder refuses and names the file in the way ("Couldn't discard
-'d/f': 'd' is now a file, not a folder. Discard or move 'd' first."); **Discard all** with both
+discarding a file that was in the folder, or a hunk or lines of it, refuses and names the file in
+the way ("Couldn't discard 'd/f': 'd' is now a file, not a folder. Discard or move 'd' first."),
+also when the folder was further up; **Discard all** with both
 the file and the folder's files deletes the file first and then restores the folder. If a tracked
 file was replaced by a folder, discarding the file deletes the untracked files in the folder, like
 git, and Undo brings them back; if the folder holds anything Undo can't bring back (an ignored

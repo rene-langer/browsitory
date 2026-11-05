@@ -10,14 +10,14 @@
 
 use std::ffi::{CString, OsStr, OsString};
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 #[cfg(test)]
 use super::no_step;
-use super::{Content, Leaf, OnLink, OnMissing, Step, StepFn, Walk};
+use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
 
 /// The folders from the work tree root down to the leaf's parent, each held open.
 pub(super) struct Beneath {
@@ -190,6 +190,24 @@ pub(super) fn walk(
     step: StepFn<'_>,
 ) -> io::Result<Walk<Beneath>> {
     use std::os::unix::fs::OpenOptionsExt;
+    if rel.components().next().is_none() {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    let root = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
+        .open(workdir)?;
+    walk_from(root.into(), rel, on_link, on_missing, step)
+}
+
+/// [`walk`] from the held folder `root` instead of the work tree root.
+fn walk_from(
+    root: OwnedFd,
+    rel: &Path,
+    on_link: OnLink,
+    on_missing: OnMissing,
+    step: StepFn<'_>,
+) -> io::Result<Walk<Beneath>> {
     let names: Vec<OsString> = rel
         .components()
         .map(|c| c.as_os_str().to_os_string())
@@ -197,11 +215,7 @@ pub(super) fn walk(
     if names.is_empty() {
         return Err(io::Error::from(io::ErrorKind::InvalidInput));
     }
-    let root = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
-        .open(workdir)?;
-    let mut dirs: Vec<OwnedFd> = vec![root.into()];
+    let mut dirs: Vec<OwnedFd> = vec![root];
     for name in &names[..names.len() - 1] {
         let mut next = None;
         for _ in 0..ATTEMPTS {
@@ -570,6 +584,113 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
     let Walk::Found(at) = walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? else {
         return Ok(None);
     };
+    read_leaf(&at, u64::MAX)
+}
+
+/// A folder held open by its descriptor (see `worktree_guard::HeldFolder`).
+pub(super) struct Folder(OwnedFd);
+
+impl Folder {
+    pub(super) fn try_clone(&self) -> io::Result<Folder> {
+        Ok(Folder(self.0.try_clone()?))
+    }
+
+    /// The folder `name` directly in this one, held. `None` when it is missing, a link or not a
+    /// folder.
+    pub(super) fn child(&self, name: &OsStr) -> io::Result<Option<Folder>> {
+        match open_at(
+            self.0.as_raw_fd(),
+            name,
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+            0,
+        ) {
+            Ok(fd) => Ok(Some(Folder(fd))),
+            Err(error) if gone(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// [`read`] below this folder, walked from its descriptor, never from a path; a file over
+    /// `limit` bytes is `worktree_guard::TooLarge`.
+    pub(super) fn read(
+        &self,
+        rel: &Path,
+        limit: u64,
+        step: StepFn<'_>,
+    ) -> io::Result<Option<Leaf>> {
+        let root = self.0.try_clone()?;
+        let Walk::Found(at) = walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, step)? else {
+            return Ok(None);
+        };
+        read_leaf(&at, limit)
+    }
+
+    pub(super) fn stat(&self) -> io::Result<super::FileStat> {
+        Ok(file_stat(&fstat(self.0.as_raw_fd())?))
+    }
+
+    /// See `worktree_guard::HeldFolder::kind`.
+    pub(super) fn kind(&self, rel: &Path, step: StepFn<'_>) -> io::Result<Kind> {
+        let root = self.0.try_clone()?;
+        let at = match walk_from(root, rel, OnLink::Refuse, OnMissing::Stop, step)? {
+            Walk::Found(at) => at,
+            Walk::Link => return Ok(Kind::BeyondLink),
+            Walk::Missing | Walk::NotDir => return Ok(Kind::Missing),
+        };
+        Ok(match stat_at(at.parent(), at.leaf())? {
+            None => Kind::Missing,
+            Some(stat) => match file_type(&stat) {
+                libc::S_IFREG => Kind::File,
+                libc::S_IFLNK => Kind::Link,
+                libc::S_IFDIR => Kind::Folder,
+                _ => Kind::Other,
+            },
+        })
+    }
+}
+
+/// See `worktree_guard::probe_beneath`.
+pub(super) fn probe(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Probe> {
+    let at = match walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? {
+        Walk::Found(at) => at,
+        Walk::Link => return Ok(Probe::BeyondLink),
+        Walk::Missing | Walk::NotDir => return Ok(Probe::Missing),
+    };
+    for _ in 0..ATTEMPTS {
+        let Some(stat) = stat_at(at.parent(), at.leaf())? else {
+            return Ok(Probe::Missing);
+        };
+        if !is_dir(&stat) {
+            return Ok(match file_type(&stat) {
+                libc::S_IFREG => Probe::File,
+                libc::S_IFLNK => Probe::Link,
+                _ => Probe::Other,
+            });
+        }
+        match open_at(
+            at.parent(),
+            at.leaf(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+            0,
+        ) {
+            Ok(fd) => {
+                let mut chain: Vec<Folder> = at.dirs.into_iter().map(Folder).collect();
+                chain.push(Folder(fd));
+                return Ok(Probe::Folder(HeldFolder::in_work_tree(chain, workdir)));
+            }
+            // Swapped since the `fstatat`: classified again.
+            Err(error) if gone(&error) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Err(io::Error::other(
+        "the working tree kept changing while it was being read",
+    ))
+}
+
+/// Reads the leaf of `at` (see [`read`]); a file over `limit` bytes is
+/// `worktree_guard::TooLarge`.
+fn read_leaf(at: &Beneath, limit: u64) -> io::Result<Option<Leaf>> {
     let stat = match stat_at(at.parent(), at.leaf())? {
         None => return Ok(None),
         Some(stat) => stat,
@@ -599,8 +720,7 @@ pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<O
     if file_type(&opened) != libc::S_IFREG {
         return Ok(None);
     }
-    let mut bytes = Vec::new();
-    File::from(fd).read_to_end(&mut bytes)?;
+    let bytes = super::read_capped(File::from(fd), limit)?;
     Ok(Some(Leaf::File {
         bytes,
         executable: opened.st_mode & 0o111 != 0,

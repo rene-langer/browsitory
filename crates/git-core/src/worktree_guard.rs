@@ -1356,6 +1356,205 @@ pub(crate) fn read_beneath(workdir: &Path, rel: &str) -> io::Result<Option<Leaf>
     beneath::read(workdir, Path::new(rel), &mut no_step)
 }
 
+/// What [`probe_beneath`] found at a path, judged without following a link at any component.
+pub(crate) enum Probe {
+    /// Missing, or a component on the way is a file.
+    Missing,
+    /// A component on the way is a link.
+    BeyondLink,
+    File,
+    Link,
+    /// A FIFO, socket or device (never on Windows).
+    #[cfg_attr(windows, allow(dead_code))]
+    Other,
+    /// A folder, now held open: what is read through it is in this folder, whatever happens to
+    /// its path meanwhile.
+    Folder(HeldFolder),
+}
+
+/// A folder held open by [`probe_beneath`] (or [`HeldFolder::resolve`]), with every folder above
+/// it up to the work tree root. Reads below it walk from its handle (as [`read_beneath`] walks
+/// from the work tree root), and `..` goes to the held folder above, so a path swapped for a
+/// link, a FIFO or another folder after the probe is never looked at (#213). Nothing outside
+/// the work tree is ever opened through it.
+pub(crate) struct HeldFolder {
+    /// From the work tree root (`chain[0]`) down to this folder (the last), each held.
+    chain: Vec<beneath::Folder>,
+    /// The work tree root's path as the caller spelled it.
+    root: PathBuf,
+}
+
+/// What [`HeldFolder::resolve`] found.
+pub(crate) enum Resolved {
+    Held(HeldFolder),
+    /// A component is missing.
+    NotFound,
+    /// A component is a link, a file or anything else that isn't a folder.
+    NotAFolder,
+    /// The path leads out of the work tree: an absolute path that isn't below the work tree root
+    /// as it was opened, or `..` above it. Nothing was opened.
+    Outside,
+    /// More than [`RESOLVE_MAX_COMPONENTS`] names. Nothing was opened.
+    TooDeep,
+}
+
+/// The most names [`HeldFolder::resolve`] takes from a path, counting only normal components
+/// (not `/`, a drive prefix, `.` or `..`); a folder may be held for each.
+const RESOLVE_MAX_COMPONENTS: usize = 64;
+
+/// A file [`HeldFolder::read`] found larger than the caller's limit.
+#[derive(Debug)]
+pub(crate) struct TooLarge;
+
+impl std::fmt::Display for TooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the file is larger than expected")
+    }
+}
+
+impl std::error::Error for TooLarge {}
+
+/// Whether `error` is [`TooLarge`]'s.
+pub(crate) fn is_too_large(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|source| source.is::<TooLarge>())
+}
+
+/// Reads `file` to its end, at most `limit` bytes; more is [`TooLarge`].
+#[cfg(any(unix, windows))]
+fn read_capped(file: impl io::Read, limit: u64) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    io::Read::read_to_end(
+        &mut io::Read::take(file, limit.saturating_add(1)),
+        &mut bytes,
+    )?;
+    if bytes.len() as u64 > limit {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, TooLarge));
+    }
+    Ok(bytes)
+}
+
+impl HeldFolder {
+    /// `chain` from the work tree root `workdir` (`chain[0]`) down to the probed folder.
+    fn in_work_tree(chain: Vec<beneath::Folder>, workdir: &Path) -> Self {
+        Self {
+            chain,
+            root: workdir.to_path_buf(),
+        }
+    }
+
+    fn last(&self) -> &beneath::Folder {
+        &self.chain[self.chain.len() - 1]
+    }
+
+    /// What is at `rel` below this folder, judged like [`probe_beneath`] but without holding a
+    /// folder found there.
+    pub(crate) fn kind(&self, rel: &str) -> io::Result<Kind> {
+        if !plain_relative(Path::new(rel)) {
+            return Ok(Kind::Missing);
+        }
+        self.last().kind(Path::new(rel), &mut no_step)
+    }
+
+    /// [`read_beneath`] for `rel` below this folder, at most `limit` bytes: a larger file is an
+    /// error for which [`is_too_large`] is true.
+    pub(crate) fn read(&self, rel: &str, limit: u64) -> io::Result<Option<Leaf>> {
+        if !plain_relative(Path::new(rel)) {
+            return Ok(None);
+        }
+        self.last().read(Path::new(rel), limit, &mut no_step)
+    }
+
+    /// The folder's own stat data, as git's index records it.
+    pub(crate) fn stat(&self) -> io::Result<FileStat> {
+        self.last().stat()
+    }
+
+    /// The folder `target` (a `gitdir:` or `commondir`) names, relative to this one or absolute,
+    /// held, inside the work tree only. Resolved one component at a time from held handles: a
+    /// name is opened in the folder held before it (never a link), `..` is the held folder above
+    /// (physical, never applied to the path's text). An absolute path counts only when it is
+    /// below the work tree root exactly as that was opened, compared by component; the rest is
+    /// then resolved the same way from the held root. Anything that leads out of the work tree
+    /// (another absolute path, `..` above the root) is [`Resolved::Outside`], and more than
+    /// [`RESOLVE_MAX_COMPONENTS`] names is [`Resolved::TooDeep`]; in both cases nothing is
+    /// opened or looked up.
+    pub(crate) fn resolve(&self, target: &Path) -> io::Result<Resolved> {
+        let names = target
+            .components()
+            .filter(|c| matches!(c, Component::Normal(_)))
+            .count();
+        if names > RESOLVE_MAX_COMPONENTS {
+            return Ok(Resolved::TooDeep);
+        }
+        let (mut chain, rest) = if target.is_absolute() {
+            let Ok(inside) = target.strip_prefix(&self.root) else {
+                return Ok(Resolved::Outside);
+            };
+            (vec![self.chain[0].try_clone()?], inside)
+        } else {
+            let chain = self
+                .chain
+                .iter()
+                .map(beneath::Folder::try_clone)
+                .collect::<io::Result<Vec<_>>>()?;
+            (chain, target)
+        };
+        for component in rest.components() {
+            match component {
+                Component::Normal(name) => {
+                    let last = &chain[chain.len() - 1];
+                    match last.child(name)? {
+                        Some(folder) => chain.push(folder),
+                        None => {
+                            return Ok(match last.kind(Path::new(name), &mut no_step)? {
+                                Kind::Missing => Resolved::NotFound,
+                                _ => Resolved::NotAFolder,
+                            })
+                        }
+                    }
+                }
+                Component::CurDir => {}
+                Component::ParentDir if chain.len() > 1 => {
+                    chain.pop();
+                }
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                    return Ok(Resolved::Outside)
+                }
+            }
+        }
+        Ok(Resolved::Held(HeldFolder {
+            chain,
+            root: self.root.clone(),
+        }))
+    }
+}
+
+/// What [`HeldFolder::kind`] found at a path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    /// Missing, or a component on the way is a file.
+    Missing,
+    /// A component on the way is a link.
+    BeyondLink,
+    File,
+    Link,
+    Folder,
+    /// A FIFO, socket or device (never on Windows).
+    #[cfg_attr(windows, allow(dead_code))]
+    Other,
+}
+
+/// Says what is at `rel` and, for a folder, holds it open. Never opens a file, so a FIFO can't
+/// block it.
+pub(crate) fn probe_beneath(workdir: &Path, rel: &str) -> io::Result<Probe> {
+    if !plain_relative(Path::new(rel)) {
+        return Ok(Probe::Missing);
+    }
+    beneath::probe(workdir, Path::new(rel), &mut no_step)
+}
+
 /// Removes the file, link or empty folder `rel`, then the folders that emptied, up to (never
 /// including) the work tree. Does nothing beyond a link: a path below one doesn't exist for git.
 /// `rel` is a `Path`, so on Unix a name that isn't UTF-8 works too (#262).
@@ -2624,6 +2823,281 @@ mod tests {
         remove_and_prune_beneath(dir.path(), Path::new("d/f")).unwrap();
         assert!(!dir.path().join("d").exists());
         assert!(dir.path().join("a.txt").exists());
+    }
+
+    /// #213: reads below a probed folder stay in that folder after its path became a link to a
+    /// folder outside or another folder, and never open a FIFO.
+    #[test]
+    #[cfg(unix)]
+    fn a_held_folder_is_read_through_its_handle_after_its_path_is_swapped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let out = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("n/sub")).unwrap();
+        std::fs::write(dir.path().join("n/sub/f"), "held\n").unwrap();
+        std::fs::create_dir_all(out.path().join("sub")).unwrap();
+        std::fs::write(out.path().join("sub/f"), "OUTSIDE\n").unwrap();
+        let Probe::Folder(held) = probe_beneath(dir.path(), "n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        std::fs::rename(dir.path().join("n"), dir.path().join("moved")).unwrap();
+        std::os::unix::fs::symlink(out.path(), dir.path().join("n")).unwrap();
+        assert_eq!(read_held(&held, "sub/f"), "held\n");
+        assert!(matches!(
+            probe_beneath(dir.path(), "n").unwrap(),
+            Probe::Link
+        ));
+        assert!(matches!(
+            probe_beneath(dir.path(), "n/sub/f").unwrap(),
+            Probe::BeyondLink
+        ));
+        // A FIFO below the held folder is classified, never opened.
+        let fifo = dir.path().join("moved/sub/p");
+        let c_path = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
+        assert_eq!(held.read("sub/p", u64::MAX).unwrap(), None);
+        assert!(matches!(
+            probe_beneath(dir.path(), "moved/sub/p").unwrap(),
+            Probe::Other
+        ));
+        assert!(matches!(
+            probe_beneath(dir.path(), "moved/sub/f").unwrap(),
+            Probe::File
+        ));
+        assert!(matches!(
+            probe_beneath(dir.path(), "moved/missing").unwrap(),
+            Probe::Missing
+        ));
+    }
+
+    /// The regular file `rel` below `held`, as text.
+    #[cfg(unix)]
+    fn read_held(held: &HeldFolder, rel: &str) -> String {
+        match held.read(rel, u64::MAX).unwrap() {
+            Some(Leaf::File { bytes, .. }) => String::from_utf8(bytes).unwrap(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// `resolve`'s answer as text, for comparing.
+    #[cfg(any(unix, windows))]
+    fn outcome(resolved: &Resolved) -> &'static str {
+        match resolved {
+            Resolved::Held(_) => "held",
+            Resolved::NotFound => "not found",
+            Resolved::NotAFolder => "not a folder",
+            Resolved::Outside => "outside",
+            Resolved::TooDeep => "too deep",
+        }
+    }
+
+    #[cfg(unix)]
+    fn held(resolved: Resolved) -> HeldFolder {
+        match resolved {
+            Resolved::Held(folder) => folder,
+            other => panic!("{}", outcome(&other)),
+        }
+    }
+
+    /// #213: `..` out of a held folder is the held folder above, not its name: the parent
+    /// swapped for a link to a folder outside after the probe is never looked through. A name
+    /// that is a link is no folder; `..` above the work tree root is outside, whatever is there.
+    #[test]
+    #[cfg(unix)]
+    fn resolving_up_from_a_held_folder_goes_through_the_held_parent() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let out = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("a/n")).unwrap();
+        std::fs::create_dir_all(dir.path().join("a/x")).unwrap();
+        std::fs::write(dir.path().join("a/x/f"), "held\n").unwrap();
+        std::fs::create_dir_all(out.path().join("x")).unwrap();
+        std::fs::write(out.path().join("x/f"), "OUTSIDE\n").unwrap();
+        let Probe::Folder(folder) = probe_beneath(dir.path(), "a/n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        std::fs::rename(dir.path().join("a"), dir.path().join("moved")).unwrap();
+        std::os::unix::fs::symlink(out.path(), dir.path().join("a")).unwrap();
+        let x = held(folder.resolve(Path::new("../x")).unwrap());
+        assert_eq!(read_held(&x, "f"), "held\n");
+        // An absolute path inside the work tree starts from the held work tree root, whose `a`
+        // is now the link: not followed.
+        let inside = folder.resolve(&dir.path().join("a/x")).unwrap();
+        assert_eq!(outcome(&inside), "not a folder");
+        let moved = held(folder.resolve(&dir.path().join("moved/x")).unwrap());
+        assert_eq!(read_held(&moved, "f"), "held\n");
+        // `..` in an absolute path is applied to held folders too: `moved/../moved/x`.
+        let again = held(
+            folder
+                .resolve(&dir.path().join("moved/../moved/x"))
+                .unwrap(),
+        );
+        assert_eq!(read_held(&again, "f"), "held\n");
+        assert_eq!(
+            outcome(&folder.resolve(Path::new("../../a")).unwrap()),
+            "not a folder"
+        );
+        assert_eq!(
+            outcome(&folder.resolve(Path::new("missing")).unwrap()),
+            "not found"
+        );
+        // Out of the work tree by `..`, even to come back in: outside.
+        let name = out.path().file_name().unwrap().to_str().unwrap();
+        let work = dir.path().file_name().unwrap().to_str().unwrap();
+        for target in [
+            format!("../../../{name}/x"),
+            format!("../../../{work}/moved/x"),
+        ] {
+            assert_eq!(
+                outcome(&folder.resolve(Path::new(&target)).unwrap()),
+                "outside",
+                "{target}"
+            );
+        }
+    }
+
+    /// #213: an absolute path that isn't below the work tree root as it was opened is outside,
+    /// and nothing is opened or looked up for it: not an existing folder, not a sibling whose
+    /// name only starts like the work tree's (`b` and `bc`), not another spelling of the work
+    /// tree (a symlinked one here).
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn an_absolute_path_not_below_the_opened_work_tree_root_is_outside() {
+        let base = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(base.path().join("b/n")).unwrap();
+        std::fs::create_dir_all(base.path().join("bc/git")).unwrap();
+        let Probe::Folder(folder) = probe_beneath(&base.path().join("b"), "n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        assert_eq!(
+            outcome(&folder.resolve(&base.path().join("bc/git")).unwrap()),
+            "outside"
+        );
+        assert_eq!(
+            outcome(&folder.resolve(&base.path().join("b/../bc/git")).unwrap()),
+            "outside"
+        );
+        assert_eq!(
+            outcome(&folder.resolve(&base.path().join("b/n")).unwrap()),
+            "held"
+        );
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(base.path().join("b"), base.path().join("alias")).unwrap();
+            assert_eq!(
+                outcome(&folder.resolve(&base.path().join("alias/n")).unwrap()),
+                "outside"
+            );
+        }
+        #[cfg(windows)]
+        for target in [
+            r"\\host.invalid\share\x",
+            r"//host.invalid/share/x",
+            r"\\?\UNC\host.invalid\share\x",
+            r"\\.\pipe\x",
+            r"\\?\C:\x",
+        ] {
+            let started = std::time::Instant::now();
+            assert_eq!(
+                outcome(&folder.resolve(Path::new(target)).unwrap()),
+                "outside",
+                "{target}"
+            );
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(2),
+                "{target}"
+            );
+        }
+    }
+
+    /// #213: a target with more names than the cap is refused before any folder is held; `.`,
+    /// `..` and the root don't count.
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn resolving_a_too_deep_path_is_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("n")).unwrap();
+        let Probe::Folder(folder) = probe_beneath(dir.path(), "n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        let deep = |names: usize| "x/".repeat(names);
+        assert_eq!(
+            outcome(
+                &folder
+                    .resolve(Path::new(&deep(RESOLVE_MAX_COMPONENTS)))
+                    .unwrap()
+            ),
+            "not found"
+        );
+        assert_eq!(
+            outcome(
+                &folder
+                    .resolve(Path::new(&format!(
+                        "./{}../x",
+                        deep(RESOLVE_MAX_COMPONENTS - 1)
+                    )))
+                    .unwrap()
+            ),
+            "not found"
+        );
+        assert_eq!(
+            outcome(
+                &folder
+                    .resolve(Path::new(&deep(RESOLVE_MAX_COMPONENTS + 1)))
+                    .unwrap()
+            ),
+            "too deep"
+        );
+        let names = dir
+            .path()
+            .components()
+            .filter(|c| matches!(c, Component::Normal(_)))
+            .count();
+        let mut path = dir.path().to_path_buf();
+        for _ in names..=RESOLVE_MAX_COMPONENTS {
+            path.push("x");
+        }
+        assert_eq!(outcome(&folder.resolve(&path).unwrap()), "too deep");
+        path.pop();
+        assert_eq!(outcome(&folder.resolve(&path).unwrap()), "not found");
+    }
+
+    /// #213: a read through a held folder stops past its limit.
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn a_held_folder_read_is_capped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("n")).unwrap();
+        std::fs::write(dir.path().join("n/f"), "12345").unwrap();
+        let Probe::Folder(held) = probe_beneath(dir.path(), "n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        assert!(matches!(
+            held.read("f", 5).unwrap(),
+            Some(Leaf::File { ref bytes, .. }) if bytes == b"12345"
+        ));
+        let error = held.read("f", 4).unwrap_err();
+        assert!(is_too_large(&error), "{error:?}");
+    }
+
+    /// #213: Windows holds a probed folder without sharing delete, so it can't be renamed or
+    /// deleted while held (nor a folder above it); its stat data comes from the held handle.
+    #[test]
+    #[cfg(windows)]
+    fn a_held_folder_cannot_be_renamed_or_deleted_and_has_stat_data() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("a/n")).unwrap();
+        let Probe::Folder(held) = probe_beneath(dir.path(), "a/n").unwrap() else {
+            panic!("not probed as a folder");
+        };
+        assert!(std::fs::rename(dir.path().join("a/n"), dir.path().join("a/m")).is_err());
+        assert!(std::fs::remove_dir(dir.path().join("a/n")).is_err());
+        assert!(std::fs::rename(dir.path().join("a"), dir.path().join("b")).is_err());
+        let stat = held.stat().unwrap();
+        let meta = std::fs::metadata(dir.path().join("a/n")).unwrap();
+        assert_eq!(stat, FileStat::of(&meta));
+        assert_ne!(stat.mtime, (0, 0));
+        drop(held);
+        std::fs::rename(dir.path().join("a/n"), dir.path().join("a/m")).unwrap();
     }
 
     #[test]

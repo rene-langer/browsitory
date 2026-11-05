@@ -1525,10 +1525,63 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   `git add` wrote. With `core.filemode`/`core.symlinks` off the mode comes from stage 0, else
   2, 3, 1, as libgit2's `index_existing_and_best`. libgit2's `add_path` would `lstat` and open
   the path a second time, following a link and blocking on a FIFO swapped in meanwhile (#199).
-  A file or link it can't open is `MergeError::Unreadable`; before looking at a path that read
-  as absent, the folders are checked for links again. Only a folder at the path (a nested
-  repository, staged as a gitlink) still goes through `add_path`; a FIFO swapped for it in that
-  instant is a residual.
+  A file or link it can't open is `MergeError::Unreadable`. A path that read as absent is
+  judged again with `worktree_guard::probe_beneath`, through held folders, never by path:
+  missing (the deletion is staged), beyond a link, a FIFO, or a folder, which it holds open
+  (`HeldFolder`, with every folder above it up to the work tree root). A held folder is never
+  reopened by path (#213): reads below it walk from its handle like `read_beneath`, each capped
+  (4 KiB for `.git`, HEAD, `commondir` and a loose ref, 64 MiB for `packed-refs`), and
+  `HeldFolder::resolve` follows a `gitdir:` or `commondir` one component at a time from held
+  handles: a name is opened in the folder held before it (never a link), and `..` is the held
+  folder above (physical, never applied to the path's text).
+
+  The rule is simple: nothing outside the work tree is opened or looked up. Inside it,
+  everything goes through held handles. A `gitdir:` or `commondir` is used only when it stays in
+  the work tree:
+  - a relative path whose `..` never climbs above the work tree root (a submodule's
+    `../.git/modules/x`, a linked worktree's `commondir` of `../..` inside `.git`);
+  - an absolute path below the work tree root exactly as it was opened, compared by component
+    (so `/a/bc` is not inside `/a/b`); the rest is resolved from the held root the same way.
+
+  Everything else is `NotStagedReason::GitFolderOutside`. Its message says the git folder is
+  outside the work tree or at a path Browsitory can't match to it, and to stage the folder with
+  `git add <path>` in a terminal. That covers:
+  - an absolute path elsewhere, including Windows network shares and devices;
+  - another spelling of the work tree (a symlinked or case-folded one, `\\?\`, an 8.3 name).
+    git writes a linked worktree's `gitdir:` as an absolute real path, so a work tree opened
+    through a link (macOS `/var` for `/private/var`) or under a short name lands here;
+  - a relative path that climbs out of the work tree, even to come back in (git 2.48's
+    `worktree.useRelativePaths` for a main repository outside);
+  - a linked worktree of a repository outside (libgit2 and older git write absolute paths).
+
+  A path with more than 64 names (normal components; `/`, a prefix, `.` and `..` don't count)
+  is refused unopened as well.
+
+  A nested repository is staged as a gitlink (`Index::add`, mode 160000) to the commit its
+  HEAD names: `.git` (a folder, or a `gitdir:` file), HEAD, then a loose ref or `packed-refs`
+  (in `commondir` for a linked worktree), symbolic refs followed as deep as git does
+  (`SYMREF_MAXDEPTH`). A ref name is used only if git's `check_refname_format` would accept
+  it, so `:` never reaches a Windows path (an NTFS alternate data stream). Otherwise it is
+  `MergeError::FolderNotStaged` with a reason:
+  - no repository: a plain folder, `.git` a link, or its `gitdir:` missing, a link or a file;
+  - no commit: the branch is absent both as a loose ref and from `packed-refs`;
+  - main repository missing: a linked worktree whose `commondir` names a folder that doesn't
+    exist. git writes `commondir` as `../..` inside the git folder, so this only happens when
+    it was edited; a moved main repository shows up as a missing `gitdir:` (no repository) or
+    one outside the work tree instead;
+  - git folder outside the work tree, as above;
+  - a format it can't read: SHA-256 ids, reftable, a HEAD on a per-worktree ref, a ref name
+    git refuses, a malformed or oversized file, a ref that exists but isn't a regular file (a
+    link, folder or FIFO, or a link on the way to it), a `packed-refs` that isn't a regular
+    file, a `commondir` that is a link or a file, or a path that is too deep.
+
+  The messages for no repository, a git folder outside, a missing main repository and an
+  unreadable format all end by saying to stage the folder with `git add <path>` in a terminal.
+
+  `git add` stages a deletion when a folder on the way is a file, at any depth; so does Mark
+  resolved (git twin tests). Discard file, hunk or lines below such a file names it
+  (`StageError::FolderIsNowAFile`) and writes nothing; staging lines there only changes the
+  index.
 - Work tree paths come from `WorkerHandle::workdir()` (captured at spawn), never from the raw
   repo path, which may be a subdirectory (`Repository::discover`).
 
