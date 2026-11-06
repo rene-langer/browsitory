@@ -379,8 +379,8 @@ fn fold_text(text: &str) -> Vec<u8> {
 /// Whether case collisions matter for `repo`: `core.ignorecase`, or always on macOS and Windows
 /// (decision D1), where a repository copied from elsewhere can carry a wrong setting.
 ///
-/// A config it can't read counts as "not set" here. Only `stash.rs` still calls it, to be moved
-/// to [`try_folds_case`] (which reports that error) in a follow-up to #225.
+/// A config it can't read counts as "not set" here. Only `stash.rs` still calls it; everything
+/// else calls [`try_folds_case`], which reports that error.
 pub(crate) fn folds_case(repo: &git2::Repository) -> bool {
     try_folds_case(repo).unwrap_or(false)
 }
@@ -388,16 +388,38 @@ pub(crate) fn folds_case(repo: &git2::Repository) -> bool {
 /// [`folds_case`], with a config that can't be read (or an invalid `core.ignorecase`) as an
 /// error instead of "case doesn't fold", which on Linux would skip the case-collision checks
 /// (#225).
-pub(crate) fn try_folds_case(repo: &git2::Repository) -> Result<bool, git2::Error> {
+pub(crate) fn try_folds_case(repo: &git2::Repository) -> Result<bool, CaseConfigUnreadable> {
     Ok(cfg!(any(target_os = "macos", windows)) || core_ignorecase(repo)?)
 }
 
 /// `core.ignorecase`, false when not set; an unreadable config or an invalid value is an error.
-pub(crate) fn core_ignorecase(repo: &git2::Repository) -> Result<bool, git2::Error> {
-    match repo.config()?.get_bool("core.ignorecase") {
+pub(crate) fn core_ignorecase(repo: &git2::Repository) -> Result<bool, CaseConfigUnreadable> {
+    let unreadable = |error: git2::Error| CaseConfigUnreadable(error.message().to_string());
+    match repo
+        .config()
+        .map_err(unreadable)?
+        .get_bool("core.ignorecase")
+    {
         Ok(value) => Ok(value),
         Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(false),
-        Err(error) => Err(error),
+        Err(error) => Err(unreadable(error)),
+    }
+}
+
+/// The repository's `core.ignorecase` can't be read (the config is unreadable, or the value
+/// isn't a boolean), so whether names that differ only in case collide is unknown (#225). The
+/// operation stops instead of skipping its case-collision check.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "Can't read core.ignorecase from the Git config: {0}. Set it to true or false (or remove \
+     it), then try again."
+)]
+pub struct CaseConfigUnreadable(pub String);
+
+/// `StashError` has no variant of its own for this yet; `Io` shows the message as it is.
+impl From<CaseConfigUnreadable> for crate::stash::StashError {
+    fn from(error: CaseConfigUnreadable) -> Self {
+        Self::Io(io::Error::other(error))
     }
 }
 
@@ -454,7 +476,7 @@ pub(crate) enum CasePolicy {
 }
 
 impl CasePolicy {
-    pub(crate) fn applies(self, repo: &git2::Repository) -> Result<bool, git2::Error> {
+    pub(crate) fn applies(self, repo: &git2::Repository) -> Result<bool, CaseConfigUnreadable> {
         Ok(self == CasePolicy::Always || try_folds_case(repo)?)
     }
 }
@@ -723,7 +745,7 @@ pub(crate) fn refuse_case_collision<E, P>(
     paths: Option<&[P]>,
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<CaseCollision>,
+    E: From<git2::Error> + From<CaseCollision> + From<CaseConfigUnreadable>,
     P: AsRef<[u8]>,
 {
     refuse_case_collision_if(try_folds_case(repo)?, source, paths)
@@ -784,8 +806,11 @@ where
     };
     // A collision the target brings in is refused; one HEAD already holds (aborting a merge,
     // `reset --hard` to HEAD, discarding) isn't, so such a repository can still be cleaned up.
-    // Every collision of the target must already be known, not just the first one found.
-    if let (Some(target), true) = (target, try_folds_case(repo)?) {
+    // Every collision of the target must already be known, not just the first one found. A
+    // `core.ignorecase` that can't be read counts as folding here (#225): the check still runs,
+    // and cleaning up (Abort, Reset hard, discards) keeps working with a broken config.
+    let folds = || try_folds_case(repo).unwrap_or(true);
+    if let Some(target) = target.filter(|_| folds()) {
         let brought = find_case_collisions(target, paths)?;
         if !brought.is_empty() {
             let known = known_collisions(repo, paths, also_known)?;
@@ -795,8 +820,9 @@ where
         }
     }
     // libgit2 matches checkout paths case-insensitively under `core.ignorecase`; so does the
-    // filter here, or `TC` would scan nothing for a tracked `tc`.
-    let ignore_case = core_ignorecase(repo)?;
+    // filter here, or `TC` would scan nothing for a tracked `tc`. An unreadable value scans
+    // case-insensitively, which only finds more (#225).
+    let ignore_case = core_ignorecase(repo).unwrap_or(true);
     let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
     let mut scanner = Scanner::new(workdir, true);
     let mut hazards = BTreeSet::new();
@@ -846,7 +872,7 @@ pub(crate) fn refuse_linked_folders<E>(
     incoming: &[Incoming],
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<LinkedFolder> + From<CaseCollision>,
+    E: From<git2::Error> + From<LinkedFolder> + From<CaseCollision> + From<CaseConfigUnreadable>,
 {
     refuse_linked_folders_known(repo, incoming, None)
 }
@@ -859,7 +885,7 @@ pub(crate) fn refuse_linked_folders_known<E>(
     also_known: Option<&git2::Tree>,
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<LinkedFolder> + From<CaseCollision>,
+    E: From<git2::Error> + From<LinkedFolder> + From<CaseCollision> + From<CaseConfigUnreadable>,
 {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
@@ -2490,6 +2516,28 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// An invalid `core.ignorecase` doesn't fail the forced-checkout guard (#225): it checks
+    /// what the target brings in as if case folds, so cleaning up isn't blocked by the guard.
+    #[test]
+    fn the_forced_checkout_guard_treats_an_invalid_ignorecase_as_folding() {
+        let (_dir, repo) = repo();
+        repo.config()
+            .unwrap()
+            .set_str("core.ignorecase", "maybe")
+            .unwrap();
+        let plain = tree_of(&repo, &[("a", FILE, "a")]);
+        let result: Result<(), crate::reset::ResetError> =
+            prepare_forced_checkout(&repo, Some(&GuardSource::Tree(&plain)), ALL);
+        assert!(result.is_ok(), "{result:?}");
+        let colliding = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
+        let result: Result<(), crate::reset::ResetError> =
+            prepare_forced_checkout(&repo, Some(&GuardSource::Tree(&colliding)), ALL);
+        assert!(
+            matches!(result, Err(crate::reset::ResetError::CaseCollision(_))),
+            "{result:?}"
+        );
+    }
+
     #[test]
     fn also_known_exempts_only_its_own_collisions() {
         let (_dir, repo) = repo();
@@ -2624,8 +2672,12 @@ mod tests {
             assert!(applies.unwrap());
         } else {
             let error = folds.unwrap_err();
-            assert_eq!(error.class(), git2::ErrorClass::Config, "{error}");
-            assert!(applies.is_err());
+            assert_eq!(
+                error.to_string(),
+                "Can't read core.ignorecase from the Git config: failed to parse 'maybe' as a \
+                 boolean. Set it to true or false (or remove it), then try again."
+            );
+            assert_eq!(applies, Err(error));
         }
         assert!(CasePolicy::Always.applies(&repo).unwrap());
     }

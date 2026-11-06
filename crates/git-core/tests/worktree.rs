@@ -200,7 +200,10 @@ fn an_invalid_core_ignorecase_refuses_the_worktree() {
     let error =
         git_core::worktree::create_worktree_with(&repo, "evil-tree", &linked, "evil", None, never)
             .unwrap_err();
-    assert!(matches!(error, WorktreeError::Git), "{error}");
+    assert!(matches!(error, WorktreeError::CaseConfig(_)), "{error}");
+    assert!(error
+        .to_string()
+        .starts_with("Can't read core.ignorecase from the Git config: "));
     assert!(!linked.exists());
     assert!(!repo.path().join("worktrees").join("evil-tree").exists());
 }

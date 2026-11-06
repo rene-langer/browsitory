@@ -51,6 +51,9 @@ pub enum MergeError {
     FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
+    #[error(transparent)]
+    CaseConfig(#[from] crate::CaseConfigUnreadable),
     /// Windows: a checkout stopped at a file another program holds open (#303).
     #[error(transparent)]
     HeldOpen(#[from] crate::HeldOpen),

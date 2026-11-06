@@ -69,6 +69,9 @@ pub enum WorktreeError {
     },
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
+    #[error(transparent)]
+    CaseConfig(#[from] crate::CaseConfigUnreadable),
     /// The branch is being rebased in a terminal, in this or another worktree (#263).
     #[error(transparent)]
     BeingRebased(#[from] crate::repo::BranchBeingRebased),

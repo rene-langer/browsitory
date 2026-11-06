@@ -53,6 +53,9 @@ pub enum CloneError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
+    #[error(transparent)]
+    CaseConfig(#[from] crate::CaseConfigUnreadable),
     /// Windows: a checkout stopped at a file another program holds open (#303).
     #[error(transparent)]
     HeldOpen(#[from] crate::HeldOpen),
@@ -212,6 +215,7 @@ pub(crate) fn clone_repo_with(
         return Err(match error {
             CheckoutFailure::Case(collision) => collision.into(),
             CheckoutFailure::Held(held) => held.into(),
+            CheckoutFailure::CaseConfig(error) => error.into(),
             CheckoutFailure::Git(error) => classify(error, false, cancel),
         });
     }
@@ -237,7 +241,14 @@ pub(crate) fn clone_repo_with(
 enum CheckoutFailure {
     Case(crate::CaseCollision),
     Held(crate::HeldOpen),
+    CaseConfig(crate::CaseConfigUnreadable),
     Git(git2::Error),
+}
+
+impl From<crate::CaseConfigUnreadable> for CheckoutFailure {
+    fn from(error: crate::CaseConfigUnreadable) -> Self {
+        Self::CaseConfig(error)
+    }
 }
 
 impl From<crate::HeldOpen> for CheckoutFailure {

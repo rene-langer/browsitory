@@ -30,7 +30,7 @@ pub mod tools;
 pub mod undo;
 pub mod worktree;
 pub(crate) mod worktree_guard;
-pub use worktree_guard::{CaseCollision, HeldDuring, HeldOpen, LinkedFolder};
+pub use worktree_guard::{CaseCollision, CaseConfigUnreadable, HeldDuring, HeldOpen, LinkedFolder};
 
 // Hide the developer's / CI runner's global and system git config from every test (#111).
 #[cfg(test)]
