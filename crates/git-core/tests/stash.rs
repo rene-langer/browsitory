@@ -3003,3 +3003,48 @@ fn stashing_either_side_of_a_staged_rename_stashes_the_whole_rename() {
         .success());
     assert_eq!(git_status(twin.path()), "D  old\n M other\n");
 }
+
+#[test]
+fn stashing_an_ignored_file_removed_from_the_index_is_refused_like_stash_all() {
+    // #259: `git rm --cached .env`, `.env` ignored, then edited. Stash file… said "There are no
+    // changes to stash"; it refuses like Stash all (`IgnoredOverwritten`) and writes nothing.
+    // git refuses too (`.env` matches no file it knows).
+    let (dir, mut repo) = ignored_file_removed_from_the_index();
+    let status_before = git_core::status::status(&repo).unwrap();
+    for keep_index in [false, true] {
+        let opts = with(|o| {
+            o.paths = vec![".env".into()];
+            o.keep_index = keep_index;
+        });
+
+        let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+        assert_ignored_overwritten(&mut repo, &opts, error, ".env", &status_before);
+        assert_eq!(read(dir.path(), ".env"), "local secret\n");
+    }
+    let (twin, _repo) = ignored_file_removed_from_the_index();
+    assert!(!git(twin.path(), &["stash", "push", "--", ".env"])
+        .status
+        .success());
+    assert_eq!(read(twin.path(), ".env"), "local secret\n");
+}
+
+#[test]
+fn stashing_a_file_in_an_ignored_folder_removed_from_the_index_is_refused_like_stash_all() {
+    // #259, folder form: `git rm -r --cached build`, `build/` ignored, `build/a` edited.
+    for picked in ["build/a", "build/b", "build"] {
+        let (dir, mut repo) = ignored_folder_removed_from_the_index();
+        let status_before = git_core::status::status(&repo).unwrap();
+        let opts = with(|o| o.paths = vec![picked.into()]);
+
+        let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+        assert_ignored_overwritten(&mut repo, &opts, error, "build", &status_before);
+        assert_eq!(read(dir.path(), "build/a"), "local\n");
+        assert_eq!(read(dir.path(), "build/b"), "b\n");
+    }
+    let (twin, _repo) = ignored_folder_removed_from_the_index();
+    assert!(!git(twin.path(), &["stash", "push", "--", "build/a"])
+        .status
+        .success());
+}

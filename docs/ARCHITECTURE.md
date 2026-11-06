@@ -239,7 +239,11 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   plain `INDEX_DELETED`. `entry_in_the_way` therefore refuses with
   `StashError::IgnoredOverwritten` for any `INDEX_DELETED` entry without `WT_NEW` whose worktree
   path is a non-folder (one no-follow stat per staged deletion) and a restored file, in both
-  modes. It names the ignored folder when the file is inside one.
+  modes. It names the ignored folder when the file is inside one. Stash file… refuses the same
+  way (`ignored_removed_from_index`, #259): a selected `INDEX_DELETED` path that is still an
+  ignored file in the worktree. Stashing it would put HEAD's entry back in the index, so a pop
+  without "Restore staged changes" would leave the file tracked again with its local edit
+  unstaged; `git stash push -- .env` refuses too ("did not match any file(s) known to git").
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as

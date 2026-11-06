@@ -331,6 +331,11 @@ fn save_path_limited_stash(
     for entry in repo.statuses(Some(&mut status_options))?.iter() {
         let status = entry.status();
         let Ok(path) = entry.path() else { continue };
+        if status.contains(git2::Status::INDEX_DELETED) {
+            if let Some(ignored) = ignored_removed_from_index(repo, &workdir, path)? {
+                return Err(StashError::IgnoredOverwritten(ignored));
+            }
+        }
         if status.contains(git2::Status::IGNORED) || path.ends_with('/') {
             continue;
         }
@@ -611,6 +616,34 @@ fn with_rename_partners(repo: &Repository, paths: &[String]) -> Result<Vec<Strin
         }
     }
     Ok(all)
+}
+
+/// For the staged deletion `path` (the index no longer has it): when the worktree still has it as
+/// an ignored file (`git rm --cached .env`, then ignored, usually edited), the ignored entry to
+/// name, the outermost ignored folder holding it or else `path` itself. Stash file… refuses it
+/// like Stash all (`IgnoredOverwritten`, see `entry_in_the_way`) and like git (`stash push --
+/// .env` matches no file git knows): stashing it would put the committed version back in the
+/// worktree and the index, so after a pop without "Restore staged changes" the ignored file
+/// would be tracked again, the local edit ready to be committed (#259). A folder at the path, or
+/// a path beyond a symlinked folder, is left to the other checks.
+fn ignored_removed_from_index(
+    repo: &Repository,
+    workdir: &std::path::Path,
+    path: &str,
+) -> Result<Option<String>, StashError> {
+    if has_symlinked_ancestor(workdir, path)
+        || !std::fs::symlink_metadata(workdir.join(path)).is_ok_and(|meta| !meta.is_dir())
+        || !repo.is_path_ignored(path)?
+    {
+        return Ok(None);
+    }
+    for (slash, _) in path.match_indices('/') {
+        let folder = &path[..slash];
+        if repo.is_path_ignored(format!("{folder}/"))? {
+            return Ok(Some(folder.to_string()));
+        }
+    }
+    Ok(Some(path.to_string()))
 }
 
 /// True when the worktree file `path` is untracked: not in the index and not ignored.
