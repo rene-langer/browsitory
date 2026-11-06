@@ -207,7 +207,7 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     }
     refuse_staged_repository(repo, &index, &opts.paths)?;
     if !opts.paths.is_empty() {
-        return save_path_limited_stash(repo, opts, message);
+        return save_path_limited_stash(repo, opts, message, true);
     }
     // The reset after stashing would delete an untracked file (#186), an ignored file or folder
     // (#208) or a nested repository (#211) in the way of a tracked path. The path-limited stash
@@ -251,7 +251,7 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
             paths,
             ..opts.clone()
         };
-        return save_path_limited_stash(repo, &routed, message);
+        return save_path_limited_stash(repo, &routed, message, false);
     }
     let signature = repo.signature()?;
     let mut flags = StashFlags::empty();
@@ -376,10 +376,14 @@ fn changed_paths(repo: &Repository, include_untracked: bool) -> Result<Vec<Strin
 ///
 /// Reverting touches only the matched paths: tracked ones go back to HEAD in index and worktree
 /// (to the index version in the worktree with `keep_index`), untracked ones are deleted.
+///
+/// `picked`: the user chose `opts.paths` (Stash file…), rather than Stash all routing every
+/// change here; see `with_rename_partners`.
 fn save_path_limited_stash(
     repo: &Repository,
     opts: &StashOptions,
     message: Option<&str>,
+    picked: bool,
 ) -> Result<(), StashError> {
     let workdir = repo
         .workdir()
@@ -404,7 +408,7 @@ fn save_path_limited_stash(
         base.summary().ok().flatten().unwrap_or_default()
     );
 
-    let paths = with_rename_partners(repo, &opts.paths)?;
+    let paths = with_rename_partners(repo, &opts.paths, picked)?;
     let mut status_options = git2::StatusOptions::new();
     status_options
         .include_untracked(opts.include_untracked)
@@ -434,8 +438,9 @@ fn save_path_limited_stash(
             tracked.push(path.to_string());
         }
     }
-    // First: on a drive that folds names, the deleted `Old` of a case-only rename finds the new
-    // file `old`, which the check below would take for an ignored file.
+    // First: the staged deletion `Old` of a case-only rename finds a file at `Old` (the new
+    // `old` on a drive that folds names, or an ignored `Old` beside it), which the check below
+    // would take for an ignored file removed from the index.
     refuse_case_only_rename(repo, &base, &tracked)?;
     // A selected file removed from the index and then ignored: refused by the same rule as
     // Stash all (#259).
@@ -691,11 +696,18 @@ fn save_path_limited_stash(
 /// new file the user made there), this refuses (`RenameSourceRecreated`): stashing the deletion
 /// would record that file and write the committed version over it, though the user picked only
 /// the rename, and even with untracked files left out. Selecting the old path stashes it too.
+/// `picked_alone` is false for Stash all on the path-limited route (`save_stash` selects every
+/// change): nothing was picked on its own there, so the new file at the old path is stashed
+/// like any edit to a file removed from the index (#247) and Pop brings it back.
 ///
 /// Not paired: submodule renames (left out like everywhere in the path-limited stash; the new
 /// gitlink is refused first, see `refuse_staged_repository`) and paths that aren't UTF-8 (status
 /// paths that aren't UTF-8 are skipped everywhere here, and the frontend can't send them).
-fn with_rename_partners(repo: &Repository, paths: &[String]) -> Result<Vec<String>, StashError> {
+fn with_rename_partners(
+    repo: &Repository,
+    paths: &[String],
+    picked_alone: bool,
+) -> Result<Vec<String>, StashError> {
     let workdir = repo.workdir();
     let folds_case = crate::worktree_guard::folds_case(repo);
     let mut options = git2::StatusOptions::new();
@@ -731,10 +743,9 @@ fn with_rename_partners(repo: &Repository, paths: &[String]) -> Result<Vec<Strin
             }
             // A case-only rename on a drive that folds names finds the new file at the old
             // path; `refuse_case_only_rename` refuses it later.
-            if partner == old
-                && !(folds_case
-                    && crate::worktree_guard::fold_name(old.as_bytes())
-                        == crate::worktree_guard::fold_name(new.as_bytes()))
+            if picked_alone
+                && partner == old
+                && !(folds_case && same_in_icase_index(old.as_bytes(), new.as_bytes()))
                 && workdir
                     .is_some_and(|workdir| std::fs::symlink_metadata(workdir.join(old)).is_ok())
             {
@@ -749,11 +760,21 @@ fn with_rename_partners(repo: &Repository, paths: &[String]) -> Result<Vec<Strin
     Ok(all)
 }
 
-/// Where names fold (`folds_case`), refuses when a stashed tracked path differs only in case from
-/// a path HEAD or the index has (a case-only rename, `git mv Old old`). libgit2's index then
-/// looks paths up ignoring case, so the stash's index tree would hold both names and the revert
-/// would find nothing to change: the stash is written but the rename stays (Stash all, through
-/// libgit2's own stash, has the same problem; see `docs/ARCHITECTURE.md`).
+/// True when libgit2's ignore-case index (`core.ignorecase`) takes `a` and `b` for one entry: it
+/// compares with `strcasecmp`/`git__strcasecmp` and hashes with `git__tolower` (index.c,
+/// index_map.c), byte by byte with ASCII letters folded only (the C locale; `git__tolower` on
+/// Windows). So `README`/`readme` are one entry, but `Straße`/`Strasse` or NFC/NFD spellings
+/// are two, unlike `worktree_guard::fold_name`, which follows the file systems.
+fn same_in_icase_index(a: &[u8], b: &[u8]) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+/// Where names fold (`folds_case`), refuses when a stashed tracked path differs only in ASCII
+/// case from a path HEAD or the index has (a case-only rename, `git mv Old old`). libgit2's index
+/// then finds one as the other (`same_in_icase_index`), so the stash's index tree would hold
+/// both names and the revert would find nothing to change: the stash is written but the rename
+/// stays (Stash all, through libgit2's own stash, has the same problem; see
+/// `docs/ARCHITECTURE.md`, #370).
 fn refuse_case_only_rename(
     repo: &Repository,
     base: &git2::Commit,
@@ -762,7 +783,8 @@ fn refuse_case_only_rename(
     if !crate::worktree_guard::folds_case(repo) {
         return Ok(());
     }
-    let fold = |path: &[u8]| crate::worktree_guard::fold_name(path);
+    // The key `same_in_icase_index` compares by.
+    let fold = |path: &[u8]| path.to_ascii_lowercase();
     let mut known = std::collections::HashMap::new();
     base.tree()?
         .walk(git2::TreeWalkMode::PreOrder, |root, entry| {

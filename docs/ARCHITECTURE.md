@@ -260,17 +260,24 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   (`with_rename_partners`, renames detected HEAD to index as in `status::status`; #152). If the
   worktree has something at the old path again, picking only the new path refuses
   (`RenameSourceRecreated`) instead of stashing and overwriting it; picking the old path
-  stashes both. Submodule renames aren't paired (the new gitlink is refused first), nor are
-  paths that aren't UTF-8 (skipped everywhere in the path-limited stash). Where names fold
-  (`folds_case`), a case-only rename (`git mv Old old`) is refused (`CaseOnlyRename`,
-  `refuse_case_only_rename`): libgit2's index looks paths up ignoring case, so the stash's index
-  tree held both names and the revert changed nothing. It runs before the ignored-file check:
-  on a drive that folds names the deleted `Old` finds the file `old` and would look like an
-  ignored file removed from the index. Known limitation: Stash all doesn't handle a case-only
-  rename either. With `core.ignorecase` on a case-sensitive drive libgit2's own stash writes a
-  stash but leaves the rename in place (nothing is lost; Pop refuses until the rename is
-  committed or undone). On a drive that folds names `entry_in_the_way` presumably takes `Old`
-  for an ignored file and refuses with `IgnoredOverwritten` (not checked on macOS or Windows).
+  stashes both. Stash all on the path-limited route selects every change, so it never refuses
+  this: the new file at the old path is stashed like any edit to a file removed from the index
+  and comes back on Pop. Submodule renames aren't paired (the new gitlink is refused first), nor
+  are paths that aren't UTF-8 (skipped everywhere in the path-limited stash).
+- Stash file… refuses a case-only rename (`git mv README readme`; `CaseOnlyRename`,
+  `refuse_case_only_rename`) where names fold. libgit2's ignore-case index (`core.ignorecase`)
+  finds one name as the other, so the stash's index tree held both names and the revert changed
+  nothing. "Case-only" means what libgit2 compares as one entry (`same_in_icase_index`):
+  `strcasecmp`/`git__strcasecmp` and a `git__tolower` hash (index.c, index_map.c), ASCII letters
+  only, byte by byte. `Straße`/`Strasse` and NFC/NFD spellings are two names there and stash
+  normally; `worktree_guard::fold_name` (the file-system fold the other stash checks use) is
+  not used for this. The check runs before the ignored-file check, since the staged deletion
+  `Old` can find a file at `Old` (the new `old` on a drive that folds names, or an ignored
+  `Old` beside it) and would look like an ignored file removed from the index. "Where names
+  fold" is `worktree_guard::folds_case`, as for every stash check (#337): macOS, Windows, or
+  `core.ignorecase`. The stash never probes the drive (`dir_folds_case`), so on a Linux
+  casefold folder or a vfat mount without `core.ignorecase` the check doesn't run. Stash all
+  doesn't refuse case-only renames yet: #370.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as

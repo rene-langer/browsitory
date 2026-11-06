@@ -3280,19 +3280,27 @@ fn assert_stash_file_refuses_like_stash_all(
     }
     for opts in modes {
         let (dir, mut repo) = removed_with_ignore_rules(committed, removed, edited, exclude);
+        let status_before = git_core::status::status(&repo).unwrap();
 
         let result = git_core::stash::save_stash(&mut repo, &opts);
 
         match refused {
             Some(name) => {
-                assert!(
-                    matches!(result, Err(StashError::IgnoredOverwritten(ref path)) if path == name),
-                    "{exclude:?} {opts:?}: {result:?}"
-                );
-                assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
-                for path in edited {
-                    assert_eq!(read(dir.path(), path), "local\n");
+                let error = result.unwrap_err();
+                // Status (index and worktree), `refs/stash` and the stash list unchanged.
+                assert_ignored_overwritten(&mut repo, &opts, error, name, &status_before);
+                for path in committed {
+                    let expected = if edited.contains(path) {
+                        "local\n"
+                    } else {
+                        "head\n"
+                    };
+                    assert_eq!(read(dir.path(), path), expected, "{opts:?}");
+                    let in_index_now = in_index(&repo, path);
+                    let expected_index = (!removed.contains(path)).then(|| "head\n".to_string());
+                    assert_eq!(in_index_now, expected_index, "{path} {opts:?}");
                 }
+                assert_eq!(read(dir.path(), "a"), "a\n");
             }
             None => {
                 assert!(result.is_ok(), "{exclude:?} {opts:?}: {result:?}");
@@ -3417,6 +3425,122 @@ fn stashing_a_case_only_rename_is_refused_where_names_fold() {
         git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["old".into()])).unwrap();
         assert_eq!(top_level(dir.path()), ["Old", "other"]);
         assert!(git_status(dir.path()).is_empty());
+    }
+}
+
+/// HEAD has `old` (four lines) and `other`, with `core.ignorecase` on; `git mv old new`, then
+/// `other` edited.
+fn rename_with_ignorecase(old: &str, new: &str) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    write_file(dir.path(), old, "a\nb\nc\nd\n");
+    write_file(dir.path(), "other", "x\n");
+    commit_all(&repo, "base");
+    assert!(git(dir.path(), &["mv", old, new]).status.success());
+    write_file(dir.path(), "other", "changed\n");
+    (dir, repo)
+}
+
+#[test]
+fn only_an_ascii_case_change_counts_as_a_case_only_rename() {
+    // #152 review: libgit2's ignore-case index compares names with `strcasecmp` (ASCII letters
+    // only, byte by byte), so only those renames are refused. `Straße` → `Strasse` and an NFC →
+    // NFD change are two different names to libgit2 and stash normally.
+    let (_dir, mut repo) = rename_with_ignorecase("README.md", "readme.MD");
+    let error =
+        git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["readme.MD".into()]))
+            .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Can't stash 'readme.MD': it differs from 'README.md' only in case. Commit the rename first, or undo it."
+    );
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+
+    let mut renames = vec![("Straße", "Strasse")];
+    // APFS treats NFC and NFD spellings as one file name, so only elsewhere.
+    if !cfg!(target_os = "macos") {
+        renames.push(("Caf\u{e9}", "Cafe\u{301}"));
+    }
+    for (old, new) in renames {
+        let (dir, mut repo) = rename_with_ignorecase(old, new);
+
+        git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec![new.into()])).unwrap();
+
+        assert_eq!(git_status(dir.path()), " M other\n", "{old}");
+        assert_eq!(read(dir.path(), old), "a\nb\nc\nd\n");
+        assert!(!dir.path().join(new).exists(), "{new}");
+        assert_eq!(
+            git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+            StashApplyOutcome::Applied
+        );
+        assert_eq!(read(dir.path(), new), "a\nb\nc\nd\n");
+        assert!(!dir.path().join(old).exists(), "{old}");
+    }
+}
+
+#[test]
+fn a_case_only_rename_is_refused_before_the_ignored_file_check() {
+    // #152 review: on a case-sensitive drive with `core.ignorecase`, an ignored file `Old` next
+    // to the renamed `old` would make the staged deletion of `Old` look like an ignored file
+    // removed from the index (`IgnoredOverwritten`); the case-only check comes first. (On macOS
+    // and Windows the two names are one file, as CI showed.)
+    if cfg!(any(target_os = "macos", windows)) {
+        return;
+    }
+    let (dir, mut repo) = rename_with_ignorecase("Old", "old");
+    write_file(dir.path(), ".git/info/exclude", "Old\n");
+    write_file(dir.path(), "Old", "ignored\n");
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let error = git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["old".into()]))
+        .unwrap_err();
+
+    assert!(
+        matches!(error, StashError::CaseOnlyRename { ref path, ref other } if path == "old" && other == "Old"),
+        "{error:?}"
+    );
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+    assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+    assert_eq!(read(dir.path(), "Old"), "ignored\n");
+}
+
+#[test]
+fn stash_all_stashes_a_rename_whose_old_path_exists_again() {
+    // #152 review: Stash all takes the path-limited route here (the new `old` is a file removed
+    // from the index, #247) and selects every change, so the rename isn't picked "on its own":
+    // the new `old` is stashed like any edit to a file removed from the index and comes back
+    // on Pop.
+    for opts in whole_stash_modes() {
+        let (dir, mut repo) = staged_rename();
+        write_file(dir.path(), "old", "recreated\n");
+
+        git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+        assert_eq!(
+            stashed(&mut repo, "old")[0].as_deref(),
+            Some("recreated\n"),
+            "{opts:?}"
+        );
+        assert_eq!(
+            stashed(&mut repo, "new")[0].as_deref(),
+            Some("a\nb\nc\nd\n"),
+            "{opts:?}"
+        );
+        if opts.keep_index {
+            continue;
+        }
+        assert!(git_status(dir.path()).is_empty(), "{opts:?}");
+        assert_eq!(
+            git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+            StashApplyOutcome::Applied,
+            "{opts:?}"
+        );
+        assert_eq!(read(dir.path(), "old"), "recreated\n");
+        assert_eq!(read(dir.path(), "new"), "a\nb\nc\nd\n");
+        assert_eq!(read(dir.path(), "other"), "changed\n");
     }
 }
 

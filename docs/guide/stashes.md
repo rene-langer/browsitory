@@ -11,8 +11,8 @@ that file. For an untracked file, untracked files are always included. For a sta
 stashes both names: the new file and the old name's deletion. If you made a new file at the old
 name since, it refuses ("Can't stash 'new' on its own: it was renamed from 'old', and 'old'
 exists again. Stash 'old' too, or move it first."); **Stash file…** on the old name stashes
-both. A rename that changes only the case of a name (`Old` to `old`) can't be stashed on macOS,
-Windows or with `core.ignorecase`; commit it or undo it first. One file at a time: the
+both. On macOS, Windows or with `core.ignorecase`, **Stash file…** refuses a rename that
+changes only the case of a name (`Old` to `old`); commit it or undo it first. One file at a time: the
 change lists have no multi-select. A file inside a symlinked folder can't be stashed on its own.
 If a tracked file was replaced by a symbolic link, stashing keeps the link in the stash and puts
 the file back; while a symbolic link replaces a tracked folder, **Stash all** refuses (move the
