@@ -348,14 +348,20 @@ function UncommittedFileSection({
               ref={actionsRef}
               aria-label={`Actions for ${entry.path}`}
               aria-haspopup="menu"
+              aria-expanded={menu !== null}
               onClick={(event) => {
                 event.stopPropagation();
                 // A pointer click (`detail > 0`) need not focus the button (WebKit), so name it as
                 // where focus returns. A key, or DiffPane's Menu-key `click()`, leaves focus where it is.
-                setMenu({
-                  ...rectAnchor(event.currentTarget),
-                  returnFocusTo: event.detail > 0 ? event.currentTarget : undefined,
-                });
+                const button = event.currentTarget;
+                if (menu !== null) {
+                  // A second click closes the open menu. Focus stays on the button, as when the
+                  // menu closes from a key (WebKit may not have focused it on the click).
+                  button.focus({ preventScroll: true });
+                  setMenu(null);
+                  return;
+                }
+                setMenu({ ...rectAnchor(button), returnFocusTo: event.detail > 0 ? button : undefined });
               }}
             >
               <MoreHorizontal size={14} aria-hidden="true" />
@@ -496,6 +502,9 @@ function UncommittedFileSection({
           x={menu.x}
           y={menu.y}
           returnFocusTo={menu.returnFocusTo}
+          // Opened by the list's Menu key (`click()` on "…" with focus left on the row), "…" is
+          // neither `returnFocusTo` nor the focused element, but still this menu's own button.
+          isTrigger={(button) => button === actionsRef.current}
           items={menuItems}
           onClose={() => setMenu(null)}
         />
