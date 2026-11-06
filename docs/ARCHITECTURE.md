@@ -244,6 +244,13 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   ignored file in the worktree. Stashing it would put HEAD's entry back in the index, so a pop
   without "Restore staged changes" would leave the file tracked again with its local edit
   unstaged; `git stash push -- .env` refuses too ("did not match any file(s) known to git").
+- A gitlink in the index that HEAD doesn't have, with the repository's folder in the worktree
+  (`git add lib` on a nested repository, or `git submodule add` before the commit), makes
+  libgit2 1.9.6's stash fail with "cannot create blob from '…/lib': it is a directory"; a
+  gitlink HEAD already has, changed or not, stashes fine. `save_stash` checks the index first
+  (`refuse_staged_repository`) and refuses a whole stash, or Stash file… on that path, with
+  `StashError::EmbeddedRepository` (no `submodule.*.path` in `.gitmodules`) or `NewSubmodule`;
+  nothing is written. git stashes the gitlink and keeps the folder (#244).
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as

@@ -3048,3 +3048,92 @@ fn stashing_a_file_in_an_ignored_folder_removed_from_the_index_is_refused_like_s
         .status
         .success());
 }
+
+/// HEAD has `a.txt`; the repository `lib` (its own `.git` and one commit) was staged with `git
+/// add lib` (a gitlink HEAD doesn't have), after `.gitmodules` registered it when `submodule`;
+/// `a.txt` was then edited.
+fn staged_repository(submodule: bool) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    let lib = dir.path().join("lib");
+    let inner = git2::Repository::init(&lib).unwrap();
+    {
+        let mut config = inner.config().unwrap();
+        config.set_str("user.name", "Inner").unwrap();
+        config.set_str("user.email", "inner@example.com").unwrap();
+    }
+    write_file(&lib, "l.txt", "l\n");
+    commit_all(&inner, "inner");
+    if submodule {
+        write_file(
+            dir.path(),
+            ".gitmodules",
+            "[submodule \"lib\"]\n\tpath = lib\n\turl = ./lib\n",
+        );
+        assert!(git(dir.path(), &["add", ".gitmodules"]).status.success());
+    }
+    assert!(git(dir.path(), &["add", "lib"]).status.success());
+    write_file(dir.path(), "a.txt", "edited\n");
+    (dir, repo)
+}
+
+/// Stash all, and Stash file… on `lib`, refuse the staged repository `lib` with `message`
+/// (libgit2 failed with "cannot create blob from '…/lib': it is a directory") and write nothing.
+fn assert_staged_repository_refused(submodule: bool, message: &str) {
+    let mut modes = whole_stash_modes();
+    modes.push(with(|o| o.paths = vec!["lib".into()]));
+    modes.push(with(|o| o.paths = vec!["lib".into(), "a.txt".into()]));
+    for opts in modes {
+        let (dir, mut repo) = staged_repository(submodule);
+        let status_before = git_core::status::status(&repo).unwrap();
+
+        let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+        let expected = if submodule {
+            matches!(error, StashError::NewSubmodule(ref path) if path == "lib")
+        } else {
+            matches!(error, StashError::EmbeddedRepository(ref path) if path == "lib")
+        };
+        assert!(expected, "{opts:?}: {error:?}");
+        assert_nothing_stashed(&mut repo, &error, message, &status_before);
+        assert_eq!(read(dir.path(), "a.txt"), "edited\n");
+        assert_eq!(read(dir.path(), "lib/l.txt"), "l\n");
+        assert!(dir.path().join("lib/.git").is_dir());
+    }
+}
+
+#[test]
+fn stashing_a_staged_embedded_repository_is_refused_with_a_clear_message() {
+    // #244. git stashes the gitlink (and keeps the folder: "unable to rmdir 'lib'").
+    assert_staged_repository_refused(
+        false,
+        "'lib' is a repository inside this one. Add it as a submodule or remove it from the index first.",
+    );
+    let (twin, _repo) = staged_repository(false);
+    assert!(git(twin.path(), &["stash", "push", "-q"]).status.success());
+    assert_eq!(read(twin.path(), "lib/l.txt"), "l\n");
+}
+
+#[test]
+fn stashing_a_staged_new_submodule_is_refused_with_a_clear_message() {
+    // #244: the same libgit2 failure for a submodule added but not committed yet.
+    assert_staged_repository_refused(
+        true,
+        "Can't stash the new submodule 'lib'. Commit it first, or remove it from the index.",
+    );
+}
+
+#[test]
+fn stashing_another_file_next_to_a_staged_repository_still_works() {
+    // Stash file… on `a.txt` doesn't touch `lib`, which stays staged.
+    for submodule in [false, true] {
+        let (dir, mut repo) = staged_repository(submodule);
+
+        git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["a.txt".into()])).unwrap();
+
+        assert_eq!(read(dir.path(), "a.txt"), "a\n");
+        assert!(git_status(dir.path()).contains("A  lib\n"));
+        assert_eq!(read(dir.path(), "lib/l.txt"), "l\n");
+    }
+}

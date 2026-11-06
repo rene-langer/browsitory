@@ -76,6 +76,14 @@ pub enum StashError {
     /// `<file>~Updated upstream` and report success (#206).
     #[error("This stash can't be applied here: its untracked file '{untracked}' needs a folder where '{file}' is tracked. Commit the deletion of '{file}' first, then apply it; the stash is kept.")]
     UntrackedBelowTrackedFile { untracked: String, file: String },
+    /// The index has the gitlink `0` that HEAD doesn't (`git add lib` with `lib` holding its own
+    /// repository) and `.gitmodules` doesn't register it. libgit2's stash can't record it ("cannot
+    /// create blob from '…/lib': it is a directory"); git can (#244).
+    #[error("'{0}' is a repository inside this one. Add it as a submodule or remove it from the index first.")]
+    EmbeddedRepository(String),
+    /// The same for a submodule `.gitmodules` registers but HEAD doesn't have yet (#244).
+    #[error("Can't stash the new submodule '{0}'. Commit it first, or remove it from the index.")]
+    NewSubmodule(String),
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
@@ -186,6 +194,7 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     if index.has_conflicts() {
         return Err(StashError::ConflictsBeforeStash);
     }
+    refuse_staged_repository(repo, &index, &opts.paths)?;
     if !opts.paths.is_empty() {
         return save_path_limited_stash(repo, opts, message);
     }
@@ -252,6 +261,70 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
             }
         })?;
     Ok(())
+}
+
+/// Refuses a stash of everything (`paths` empty), or of a selected path, when the index has a
+/// gitlink there that HEAD doesn't and the worktree has the repository's folder: `git add lib`
+/// with `lib` holding its own `.git` (`EmbeddedRepository`), or a submodule added but not
+/// committed yet (`NewSubmodule`, registered in `.gitmodules`). libgit2 1.9.6's stash fails on it
+/// with the raw "cannot create blob from '…/lib': it is a directory" (it adds the folder by path
+/// to build its worktree tree), and the path-limited stash, which skips submodules, said "There
+/// are no changes to stash" for `lib`. Nothing is written either way. git stashes the gitlink
+/// and keeps the folder (#244). A gitlink HEAD already has, changed or not, stashes fine.
+fn refuse_staged_repository(
+    repo: &Repository,
+    index: &git2::Index,
+    paths: &[String],
+) -> Result<(), StashError> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(());
+    };
+    let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
+    for entry in index.iter() {
+        if entry.mode != 0o160000 || (entry.flags >> 12) & 0x3 != 0 {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        if !paths.is_empty() && !paths.contains(&path) {
+            continue;
+        }
+        let in_head = head.as_ref().is_some_and(|head| {
+            head.get_path(std::path::Path::new(&path))
+                .is_ok_and(|entry| entry.filemode() == 0o160000)
+        });
+        if in_head
+            || has_symlinked_ancestor(workdir, &path)
+            || !std::fs::symlink_metadata(workdir.join(&path)).is_ok_and(|meta| meta.is_dir())
+        {
+            continue;
+        }
+        return Err(if registered_submodule(workdir, &path) {
+            StashError::NewSubmodule(path)
+        } else {
+            StashError::EmbeddedRepository(path)
+        });
+    }
+    Ok(())
+}
+
+/// True when the worktree's `.gitmodules` has a `submodule.<name>.path` of `path`.
+fn registered_submodule(workdir: &std::path::Path, path: &str) -> bool {
+    let file = workdir.join(".gitmodules");
+    if !std::fs::symlink_metadata(&file).is_ok_and(|meta| meta.is_file()) {
+        return false;
+    }
+    let Ok(config) = git2::Config::open(&file) else {
+        return false;
+    };
+    let Ok(mut entries) = config.entries(Some(r"^submodule\..*\.path$")) else {
+        return false;
+    };
+    while let Some(Ok(entry)) = entries.next() {
+        if entry.value().is_ok_and(|value| value == path) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Every changed file path (staged, unstaged and, with `include_untracked`, untracked; never
