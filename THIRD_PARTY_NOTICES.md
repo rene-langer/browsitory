@@ -13,7 +13,7 @@ unless noted:
   linking exception. The linking exception lets Browsitory link libgit2 and distribute the
   result under its own licence. libgit2's licence file also covers the code libgit2 bundles.
   Source: <https://github.com/libgit2/libgit2/tree/v1.9.7>.
-- **libssh2** (through the `libssh2-sys` crate 0.3.3): BSD-3-Clause. Source:
+- **libssh2** (through the `libssh2-sys` crate 0.3.4): BSD-3-Clause. Source:
   <https://github.com/libssh2/libssh2>.
 - **OpenSSL** 3.6.3 (through the `openssl-src` crate 300.6.1+3.6.3), Linux and macOS only:
   Apache-2.0. Source: <https://github.com/openssl/openssl>.
@@ -1532,38 +1532,31 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Copyright (C) 2015 Microsoft Corp.
  * All rights reserved.
  *
- * Redistribution and use in source and binary forms,
- * with or without modification, are permitted provided
- * that the following conditions are met:
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- *   Redistributions of source code must retain the above
- *   copyright notice, this list of conditions and the
- *   following disclaimer.
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
  *
- *   Redistributions in binary form must reproduce the above
- *   copyright notice, this list of conditions and the following
- *   disclaimer in the documentation and/or other materials
- *   provided with the distribution.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
  *
- *   Neither the name of the copyright holder nor the names
- *   of any other contributors may be used to endorse or
- *   promote products derived from this software without
- *   specific prior written permission.
+ * 3. Neither the name of the copyright holder nor the names of its
+ *    contributors may be used to endorse or promote products derived from this
+ *    software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
- * CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
- * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
- * USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
- * OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 ```
 
@@ -1783,7 +1776,7 @@ Rust crates linked into the desktop app and the VSCode extension's `bin/vscode-s
 - **Apache-2.0**: dpi 0.1.2, dunce 1.0.5, ring 0.17.14, sync_wrapper 1.0.2, tao 0.37.2
 - **BSD-3-Clause**: alloc-no-stdlib 3.0.0, alloc-stdlib 0.3.0, brotli 9.1.1, subtle 2.6.1
 - **ISC**: ring 0.17.14, rustls-webpki 0.103.16, untrusted 0.9.0
-- **MIT**: adler2 2.0.1, aes 0.9.3, aho-corasick 1.1.5, anyhow 1.0.104, apple-native-keyring-store 1.0.2, async-broadcast 0.7.2, async-channel 2.5.0, async-executor 1.14.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atk 0.18.2, atk-sys 0.18.2, atomic-waker 1.1.2, base64 0.23.1, bitflags 1.3.2, bitflags 2.13.2, block-buffer 0.12.1, block-padding 0.4.2, block2 0.6.2, blocking 1.7.0, brotli 9.1.1, brotli-decompressor 6.2.0, byteorder 1.5.0, bytes 1.12.1, cairo-rs 0.18.5, cairo-sys-rs 0.18.2, cbc 0.2.1, cfb 0.14.0, cfg-if 1.0.5, cipher 0.5.2, cmov 0.5.4, concurrent-queue 2.5.0, const-oid 0.10.2, cookie 0.18.2, core-foundation 0.10.1, core-foundation 0.9.4, core-foundation-sys 0.8.7, core-graphics 0.25.0, core-graphics-types 0.2.0, cpubits 0.1.1, cpufeatures 0.3.1, crc32fast 1.5.4, crossbeam-channel 0.5.17, crossbeam-utils 0.8.23, crypto-common 0.2.2, ctor 1.0.13, ctutils 0.4.7, dbus 0.9.12, deranged 0.5.9, digest 0.11.3, directories 6.0.0, dirs 7.0.0, dirs-sys 0.5.0, dispatch2 0.3.1, dlopen2 0.8.2, dpi 0.1.2, embed_plist 1.2.2, endi 1.1.1, enumflags2 0.7.12, equivalent 1.0.3, erased-serde 0.4.11, errno 0.3.14, event-listener 5.4.2, event-listener-strategy 0.5.4, fastrand 2.5.0, fdeflate 0.3.7, fern 0.7.1, field-offset 0.3.6, filetime 0.2.29, flate2 1.1.10, fnv 1.0.7, foreign-types 0.5.0, foreign-types-shared 0.3.1, form_urlencoded 1.2.2, futures-channel 0.3.34, futures-core 0.3.34, futures-executor 0.3.34, futures-io 0.3.34, futures-lite 2.6.1, futures-sink 0.3.34, futures-task 0.3.34, futures-util 0.3.34, gdk 0.18.2, gdk-pixbuf 0.18.5, gdk-pixbuf-sys 0.18.0, gdk-sys 0.18.2, gdkwayland-sys 0.18.2, gdkx11 0.18.2, gdkx11-sys 0.18.2, getrandom 0.2.17, getrandom 0.3.4, getrandom 0.4.3, gio 0.18.4, gio-sys 0.18.1, git2 0.21.0, glib 0.18.5, glib-sys 0.18.1, glob 0.3.4, gobject-sys 0.18.0, gtk 0.18.2, gtk-sys 0.18.2, hashbrown 0.17.1, heck 0.5.0, hex 0.4.3, hkdf 0.13.0, hmac 0.13.0, http 1.5.0, http-body 1.1.0, http-body-util 0.1.5, httparse 1.10.1, hybrid-array 0.4.15, hyper 1.12.0, hyper-rustls 0.27.10, hyper-util 0.1.21, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, infer 0.22.0, inout 0.2.5, ipnet 2.12.2, is-docker 0.2.0, is-wsl 0.4.0, itoa 1.0.18, javascriptcore-rs 1.1.2, javascriptcore-rs-sys 1.1.1, json-patch 4.2.0, jsonptr 0.7.1, keyboard-types 0.8.3, keyring 4.2.0, keyring-core 1.0.1, libc 0.2.191, libdbus-sys 0.2.7, libgit2-sys 0.18.8+1.9.7, libssh2-sys 0.3.3, libz-sys 1.1.31, linux-raw-sys 0.12.1, lock_api 0.4.14, log 0.4.35, memchr 2.8.3, memoffset 0.9.1, mime 0.3.17, minisign-verify 0.3.0, miniz_oxide 0.8.9, miniz_oxide 0.9.1, mio 1.2.4, muda 0.20.0, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-conv 0.2.2, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, num_threads 0.1.8, objc2 0.6.5, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-encode 4.1.0, objc2-exception-helper 0.1.1, objc2-foundation 0.3.2, objc2-osa-kit 0.3.2, objc2-quartz-core 0.3.2, objc2-web-kit 0.3.2, once_cell 1.21.4, open 5.4.5, openssl-probe 0.1.6, openssl-probe 0.2.2, openssl-sys 0.9.118, ordered-stream 0.2.0, osakit 0.3.1, pango 0.18.3, pango-sys 0.18.0, parking 2.2.1, parking_lot 0.12.5, parking_lot_core 0.9.12, percent-encoding 2.3.2, phf 0.13.1, phf_shared 0.13.1, pin-project-lite 0.2.17, piper 0.2.5, plist 1.10.3, png 0.18.1, polling 3.11.0, powerfmt 0.2.1, proc-macro2 1.0.107, quick-xml 0.42.0, quote 1.0.47, raw-window-handle 0.6.2, regex 1.13.1, regex-automata 0.4.18, regex-syntax 0.8.11, reqwest 0.13.5, rfd 0.17.2, rustix 1.1.6, rustls 0.23.46, rustls-native-certs 0.8.5, rustls-pki-types 1.15.1, rustls-platform-verifier 0.7.1, same-file 1.0.6, scopeguard 1.2.0, secret-service 5.2.0, security-framework 3.7.0, security-framework-sys 2.17.0, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9, serde_core 1.0.229, serde_json 1.0.154, serde_spanned 1.1.3, serde_with 3.24.0, serialize-to-javascript 0.1.2, sha2 0.11.1, signal-hook-registry 1.4.8, simd-adler32 0.3.10, siphasher 1.0.4, slab 0.4.12, smallvec 1.16.4, socket2 0.6.5, softbuffer 0.4.8, soup3 0.5.0, soup3-sys 0.5.0, stable_deref_trait 1.2.1, syn 3.0.9, system-configuration 0.7.0, system-configuration-sys 0.6.0, tar 0.4.46, tauri 2.12.5, tauri-plugin-dialog 2.8.4, tauri-plugin-fs 2.7.1, tauri-plugin-log 2.10.1, tauri-plugin-opener 2.7.2, tauri-plugin-process 2.4.0, tauri-plugin-updater 2.14.1, tauri-runtime 2.12.2, tauri-runtime-wry 2.12.3, tauri-utils 2.10.2, tempfile 3.27.0, thiserror 1.0.69, thiserror 2.0.21, time 0.3.55, time-core 0.1.9, tinyvec 1.13.3, tokio 1.54.1, tokio-rustls 0.26.6, tokio-util 0.7.20, toml 1.2.1+spec-1.1.0, toml_datetime 1.1.3+spec-1.1.0, toml_parser 1.1.5+spec-1.1.0, toml_writer 1.2.0+spec-1.1.0, tower 0.5.3, tower-http 0.6.11, tower-layer 0.3.3, tower-service 0.3.3, tracing 0.1.44, tracing-core 0.1.36, try-lock 0.2.5, typed-path 0.13.0, typeid 1.0.3, typenum 1.20.1, unicode-ident 1.0.27, unicode-normalization 0.1.26, unicode-segmentation 1.13.3, url 2.5.8, urlpattern 0.6.0, utf8_iter 1.1.0, utf_types 1.0.0, uuid 1.29.0, walkdir 2.5.0, want 0.3.2, web-time 1.1.0, webkit2gtk 2.0.2, webkit2gtk-sys 2.0.2, webview2-com 0.39.1, webview2-com-sys 0.39.1, winapi-util 0.1.11, window-vibrancy 0.8.1, windows 0.62.2, windows-collections 0.3.2, windows-core 0.62.2, windows-future 0.3.2, windows-link 0.2.1, windows-native-keyring-store 1.1.0, windows-numerics 0.3.1, windows-registry 0.6.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.52.0, windows-sys 0.61.2, windows-targets 0.52.6, windows-threading 0.2.1, windows-version 0.1.7, windows_aarch64_msvc 0.52.6, winnow 1.0.4, wry 0.57.1, x11 2.21.0, x11-dl 2.21.0, xattr 1.7.0, zbus 5.19.0, zbus-secret-service-keyring-store 1.0.1, zbus_names 4.3.5, zcheapstr 1.2.0, zeroize 1.9.1, zip 9.2.2, zmij 1.0.23, zvariant 5.15.1, zvariant_utils 4.2.0
+- **MIT**: adler2 2.0.1, aes 0.9.4, aho-corasick 1.1.5, anyhow 1.0.104, apple-native-keyring-store 1.0.2, async-broadcast 0.7.2, async-channel 2.5.0, async-executor 1.14.1, async-io 2.6.0, async-lock 3.5.0, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atk 0.18.2, atk-sys 0.18.2, atomic-waker 1.1.2, base64 0.23.1, bitflags 1.3.2, bitflags 2.13.2, block-buffer 0.12.1, block-padding 0.4.2, block2 0.6.2, blocking 1.7.0, brotli 9.1.1, brotli-decompressor 6.3.0, byteorder 1.5.0, bytes 1.12.1, cairo-rs 0.18.5, cairo-sys-rs 0.18.2, cbc 0.2.1, cfb 0.14.0, cfg-if 1.0.5, cipher 0.5.2, cmov 0.5.4, concurrent-queue 2.5.0, const-oid 0.10.2, cookie 0.18.2, core-foundation 0.10.1, core-foundation 0.9.4, core-foundation-sys 0.8.7, core-graphics 0.25.0, core-graphics-types 0.2.0, cpubits 0.1.1, cpufeatures 0.3.1, crc32fast 1.5.4, crossbeam-channel 0.5.17, crossbeam-utils 0.8.23, crypto-common 0.2.2, ctor 1.0.13, ctutils 0.4.8, dbus 0.9.12, deranged 0.5.9, digest 0.11.3, directories 6.0.0, dirs 7.0.0, dirs-sys 0.5.0, dispatch2 0.3.1, dlopen2 0.8.2, dpi 0.1.2, embed_plist 1.2.2, endi 1.1.1, enumflags2 0.7.12, equivalent 1.0.3, erased-serde 0.4.11, errno 0.3.14, event-listener 5.4.2, event-listener-strategy 0.5.4, fastrand 2.5.0, fdeflate 0.3.7, fern 0.7.1, field-offset 0.3.6, filetime 0.2.29, flate2 1.1.11, fnv 1.0.7, foreign-types 0.5.0, foreign-types-shared 0.3.1, form_urlencoded 1.2.2, futures-channel 0.3.34, futures-core 0.3.34, futures-executor 0.3.34, futures-io 0.3.34, futures-lite 2.6.1, futures-sink 0.3.34, futures-task 0.3.34, futures-util 0.3.34, gdk 0.18.2, gdk-pixbuf 0.18.5, gdk-pixbuf-sys 0.18.0, gdk-sys 0.18.2, gdkwayland-sys 0.18.2, gdkx11 0.18.2, gdkx11-sys 0.18.2, getrandom 0.2.17, getrandom 0.3.4, getrandom 0.4.3, gio 0.18.4, gio-sys 0.18.1, git2 0.21.0, glib 0.18.5, glib-sys 0.18.1, glob 0.3.4, gobject-sys 0.18.0, gtk 0.18.2, gtk-sys 0.18.2, hashbrown 0.17.1, heck 0.5.0, hex 0.4.3, hkdf 0.13.0, hmac 0.13.0, http 1.5.0, http-body 1.1.0, http-body-util 0.1.5, httparse 1.10.1, hybrid-array 0.4.15, hyper 1.12.0, hyper-rustls 0.27.10, hyper-util 0.1.21, idna 1.1.0, idna_adapter 1.2.2, indexmap 2.14.2, infer 0.22.0, inout 0.2.5, ipnet 2.12.2, is-docker 0.2.0, is-wsl 0.4.0, itoa 1.0.18, javascriptcore-rs 1.1.2, javascriptcore-rs-sys 1.1.1, json-patch 4.2.0, jsonptr 0.7.1, keyboard-types 0.8.3, keyring 4.2.0, keyring-core 1.0.1, libc 0.2.191, libdbus-sys 0.2.7, libgit2-sys 0.18.8+1.9.7, libssh2-sys 0.3.4, libz-sys 1.1.31, linux-raw-sys 0.12.1, lock_api 0.4.14, log 0.4.35, memchr 2.8.3, memoffset 0.9.1, mime 0.3.18, minisign-verify 0.3.0, miniz_oxide 0.8.9, miniz_oxide 0.9.1, mio 1.2.4, muda 0.20.0, num 0.4.3, num-bigint 0.4.8, num-complex 0.4.6, num-conv 0.2.2, num-integer 0.1.47, num-iter 0.1.46, num-rational 0.4.2, num-traits 0.2.19, num_threads 0.1.8, objc2 0.6.5, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-encode 4.1.0, objc2-exception-helper 0.1.1, objc2-foundation 0.3.2, objc2-osa-kit 0.3.2, objc2-quartz-core 0.3.2, objc2-web-kit 0.3.2, once_cell 1.21.4, open 5.4.5, openssl-probe 0.1.6, openssl-probe 0.2.2, openssl-sys 0.9.118, ordered-stream 0.2.0, osakit 0.3.1, pango 0.18.3, pango-sys 0.18.0, parking 2.2.1, parking_lot 0.12.5, parking_lot_core 0.9.12, percent-encoding 2.3.2, phf 0.13.1, phf_shared 0.13.1, pin-project-lite 0.2.17, piper 0.2.5, plist 1.10.3, png 0.18.1, polling 3.11.0, powerfmt 0.2.1, proc-macro2 1.0.107, quick-xml 0.42.0, quote 1.0.47, raw-window-handle 0.6.2, regex 1.13.1, regex-automata 0.4.18, regex-syntax 0.8.11, reqwest 0.13.5, rfd 0.17.2, rustix 1.1.6, rustls 0.23.46, rustls-native-certs 0.8.5, rustls-pki-types 1.15.1, rustls-platform-verifier 0.7.1, same-file 1.0.6, scopeguard 1.2.0, secret-service 5.2.0, security-framework 3.7.0, security-framework-sys 2.17.0, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9, serde_core 1.0.229, serde_json 1.0.154, serde_spanned 1.1.3, serde_with 3.24.0, serialize-to-javascript 0.1.2, sha2 0.11.1, signal-hook-registry 1.4.8, simd-adler32 0.3.10, siphasher 1.0.4, slab 0.4.12, smallvec 1.16.4, socket2 0.6.5, softbuffer 0.4.8, soup3 0.5.0, soup3-sys 0.5.0, stable_deref_trait 1.2.1, syn 3.0.9, system-configuration 0.7.0, system-configuration-sys 0.6.0, tar 0.4.46, tauri 2.12.5, tauri-plugin-dialog 2.8.4, tauri-plugin-fs 2.7.1, tauri-plugin-log 2.10.1, tauri-plugin-opener 2.7.2, tauri-plugin-process 2.4.0, tauri-plugin-updater 2.14.1, tauri-runtime 2.12.2, tauri-runtime-wry 2.12.3, tauri-utils 2.10.2, tempfile 3.27.0, thiserror 1.0.69, thiserror 2.0.21, time 0.3.55, time-core 0.1.9, tinyvec 1.13.3, tokio 1.54.1, tokio-rustls 0.26.6, tokio-util 0.7.20, toml 1.2.1+spec-1.1.0, toml_datetime 1.1.3+spec-1.1.0, toml_parser 1.1.5+spec-1.1.0, toml_writer 1.2.0+spec-1.1.0, tower 0.5.3, tower-http 0.6.11, tower-layer 0.3.3, tower-service 0.3.3, tracing 0.1.44, tracing-core 0.1.36, try-lock 0.2.5, typed-path 0.13.0, typeid 1.0.3, typenum 1.20.1, unicode-ident 1.0.27, unicode-normalization 0.1.26, unicode-segmentation 1.13.3, url 2.5.8, urlpattern 0.6.0, utf8_iter 1.1.0, utf_types 1.0.0, uuid 1.29.0, walkdir 2.5.0, want 0.3.2, web-time 1.1.0, webkit2gtk 2.0.2, webkit2gtk-sys 2.0.2, webview2-com 0.39.1, webview2-com-sys 0.39.1, winapi-util 0.1.11, window-vibrancy 0.8.1, windows 0.62.2, windows-collections 0.3.2, windows-core 0.62.2, windows-future 0.3.2, windows-link 0.2.1, windows-native-keyring-store 1.1.0, windows-numerics 0.3.1, windows-registry 0.6.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.52.0, windows-sys 0.61.2, windows-targets 0.52.6, windows-threading 0.2.1, windows-version 0.1.7, windows_aarch64_msvc 0.52.6, winnow 1.0.5, wry 0.57.1, x11 2.21.0, x11-dl 2.21.0, xattr 1.7.0, zbus 5.19.0, zbus-secret-service-keyring-store 1.0.1, zbus_names 4.3.5, zcheapstr 1.2.0, zeroize 1.9.1, zip 9.4.1, zmij 1.0.23, zvariant 5.15.1, zvariant_utils 4.2.0
 - **MPL-2.0**: option-ext 0.2.0
 - **Unicode-3.0**: icu_collections 2.4.0, icu_locale_core 2.4.0, icu_normalizer 2.4.0, icu_normalizer_data 2.4.0, icu_properties 2.4.0, icu_properties_data 2.4.0, icu_provider 2.4.0, litemap 0.8.3, potential_utf 0.1.6, tinystr 0.8.5, unicode-ident 1.0.27, unicode-normalization 0.1.26, writeable 0.6.4, yoke 0.8.4, zerofrom 0.1.8, zerotrie 0.2.5, zerovec 0.11.9
 
@@ -3362,7 +3355,7 @@ Used by: untrusted 0.9.0.
 
 ### MIT: adler2 2.0.1 and 43 more
 
-Used by: adler2 2.0.1, anyhow 1.0.104, async-channel 2.5.0, async-executor 1.14.0, async-io 2.6.0, async-lock 3.4.2, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.7.0, concurrent-queue 2.5.0, endi 1.1.1, erased-serde 0.4.11, event-listener 5.4.2, event-listener-strategy 0.5.4, fastrand 2.5.0, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.107, quote 1.0.47, rustix 1.1.6, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9, serde_core 1.0.229, serde_json 1.0.154, syn 3.0.9, thiserror 1.0.69, thiserror 2.0.21, typed-path 0.13.0, typeid 1.0.3, unicode-ident 1.0.27, x11 2.21.0, x11-dl 2.21.0, zmij 1.0.23, zvariant_utils 4.2.0.
+Used by: adler2 2.0.1, anyhow 1.0.104, async-channel 2.5.0, async-executor 1.14.1, async-io 2.6.0, async-lock 3.5.0, async-process 2.5.0, async-signal 0.2.14, async-task 4.7.1, atomic-waker 1.1.2, blocking 1.7.0, concurrent-queue 2.5.0, endi 1.1.1, erased-serde 0.4.11, event-listener 5.4.2, event-listener-strategy 0.5.4, fastrand 2.5.0, futures-lite 2.6.1, itoa 1.0.18, linux-raw-sys 0.12.1, once_cell 1.21.4, ordered-stream 0.2.0, parking 2.2.1, pin-project-lite 0.2.17, piper 0.2.5, polling 3.11.0, proc-macro2 1.0.107, quote 1.0.47, rustix 1.1.6, semver 1.0.28, serde 1.0.229, serde-untagged 0.1.9, serde_core 1.0.229, serde_json 1.0.154, syn 3.0.9, thiserror 1.0.69, thiserror 2.0.21, typed-path 0.13.0, typeid 1.0.3, unicode-ident 1.0.27, x11 2.21.0, x11-dl 2.21.0, zmij 1.0.23, zvariant_utils 4.2.0.
 
 ```text
 Permission is hereby granted, free of charge, to any
@@ -3390,9 +3383,9 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### MIT: aes 0.9.3
+### MIT: aes 0.9.4
 
-Used by: aes 0.9.3.
+Used by: aes 0.9.4.
 
 ```text
 Copyright (c) 2018-2024 The RustCrypto Project Developers
@@ -3681,7 +3674,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### MIT: block2 0.6.2 and 37 more
 
-Used by: block2 0.6.2, brotli-decompressor 6.2.0, dispatch2 0.3.1, dlopen2 0.8.2, dpi 0.1.2, minisign-verify 0.3.0, objc2 0.6.5, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-encode 4.1.0, objc2-exception-helper 0.1.1, objc2-foundation 0.3.2, objc2-osa-kit 0.3.2, objc2-quartz-core 0.3.2, objc2-web-kit 0.3.2, tauri-plugin-dialog 2.8.4, tauri-plugin-fs 2.7.1, tauri-plugin-log 2.10.1, tauri-plugin-opener 2.7.2, tauri-plugin-process 2.4.0, tauri-plugin-updater 2.14.1, webview2-com 0.39.1, webview2-com-sys 0.39.1, windows 0.62.2, windows-collections 0.3.2, windows-core 0.62.2, windows-future 0.3.2, windows-link 0.2.1, windows-numerics 0.3.1, windows-registry 0.6.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.52.0, windows-sys 0.61.2, windows-targets 0.52.6, windows-threading 0.2.1, windows-version 0.1.7, windows_aarch64_msvc 0.52.6.
+Used by: block2 0.6.2, brotli-decompressor 6.3.0, dispatch2 0.3.1, dlopen2 0.8.2, dpi 0.1.2, minisign-verify 0.3.0, objc2 0.6.5, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-encode 4.1.0, objc2-exception-helper 0.1.1, objc2-foundation 0.3.2, objc2-osa-kit 0.3.2, objc2-quartz-core 0.3.2, objc2-web-kit 0.3.2, tauri-plugin-dialog 2.8.4, tauri-plugin-fs 2.7.1, tauri-plugin-log 2.10.1, tauri-plugin-opener 2.7.2, tauri-plugin-process 2.4.0, tauri-plugin-updater 2.14.1, webview2-com 0.39.1, webview2-com-sys 0.39.1, windows 0.62.2, windows-collections 0.3.2, windows-core 0.62.2, windows-future 0.3.2, windows-link 0.2.1, windows-numerics 0.3.1, windows-registry 0.6.1, windows-result 0.4.1, windows-strings 0.5.1, windows-sys 0.52.0, windows-sys 0.61.2, windows-targets 0.52.6, windows-threading 0.2.1, windows-version 0.1.7, windows_aarch64_msvc 0.52.6.
 
 ```text
 MIT License
@@ -3825,7 +3818,7 @@ SOFTWARE.
 
 ### MIT: cfg-if 1.0.5 and 8 more
 
-Used by: cfg-if 1.0.5, filetime 0.2.29, git2 0.21.0, libgit2-sys 0.18.8+1.9.7, libssh2-sys 0.3.3, openssl-probe 0.1.6, openssl-probe 0.2.2, openssl-sys 0.9.118, socket2 0.6.5.
+Used by: cfg-if 1.0.5, filetime 0.2.29, git2 0.21.0, libgit2-sys 0.18.8+1.9.7, libssh2-sys 0.3.4, openssl-probe 0.1.6, openssl-probe 0.2.2, openssl-sys 0.9.118, socket2 0.6.5.
 
 ```text
 Copyright (c) 2014 Alex Crichton
@@ -4154,9 +4147,9 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### MIT: ctutils 0.4.7
+### MIT: ctutils 0.4.8
 
-Used by: ctutils 0.4.7.
+Used by: ctutils 0.4.8.
 
 ```text
 Copyright (c) 2025-2026 The RustCrypto Project Developers
@@ -4521,9 +4514,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### MIT: flate2 1.1.10
+### MIT: flate2 1.1.11
 
-Used by: flate2 1.1.10.
+Used by: flate2 1.1.11.
 
 ```text
 Copyright (c) 2014-2026 Alex Crichton
@@ -5547,9 +5540,9 @@ OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
-### MIT: libssh2-sys 0.3.3
+### MIT: libssh2-sys 0.3.4
 
-Used by: libssh2-sys 0.3.3.
+Used by: libssh2-sys 0.3.4.
 
 ```text
 MIT License
@@ -5666,9 +5659,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### MIT: mime 0.3.17
+### MIT: mime 0.3.18
 
-Used by: mime 0.3.17.
+Used by: mime 0.3.18.
 
 ```text
 Copyright (c) 2014 Sean McArthur
@@ -6966,7 +6959,7 @@ DEALINGS IN THE SOFTWARE.
 
 ### MIT: tracing-core 0.1.36 and 1 more
 
-Used by: tracing-core 0.1.36, zip 9.2.2.
+Used by: tracing-core 0.1.36, zip 9.4.1.
 
 ```text
 The MIT License (MIT)
@@ -7274,9 +7267,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### MIT: winnow 1.0.4
+### MIT: winnow 1.0.5
 
-Used by: winnow 1.0.4.
+Used by: winnow 1.0.5.
 
 ```text
 Permission is hereby granted, free of charge, to any person obtaining
@@ -7908,7 +7901,7 @@ JavaScript packages bundled into the app's user interface.
 
 - **Apache-2.0 OR MIT**: @tauri-apps/api 2.12.4
 - **ISC**: @ungap/structured-clone 1.4.0, lucide-react 1.70.0
-- **MIT**: @shikijs/core 4.6.0, @shikijs/engine-javascript 4.6.0, @shikijs/engine-oniguruma 4.6.0, @shikijs/langs 4.6.0, @shikijs/primitive 4.6.0, @shikijs/themes 4.6.0, @shikijs/types 4.6.0, @shikijs/vscode-textmate 10.1.0, ccount 2.0.1, character-entities-html4 2.1.0, character-entities-legacy 3.0.0, comma-separated-tokens 2.0.3, csstype 3.2.3, dequal 2.0.3, devlop 1.1.0, hast-util-to-html 9.0.6, hast-util-whitespace 3.0.0, html-void-elements 3.0.0, mdast-util-to-hast 13.2.1, micromark-util-character 2.1.1, micromark-util-encode 2.0.1, micromark-util-sanitize-uri 2.0.1, micromark-util-symbol 2.0.1, micromark-util-types 2.0.3, oniguruma-parser 0.12.2, oniguruma-to-es 4.3.6, property-information 7.2.0, react 19.3.1, react-dom 19.3.1, regex 6.1.0, regex-recursion 6.0.2, regex-utilities 2.3.0, scheduler 0.28.0, shiki 4.6.0, space-separated-tokens 2.0.2, stringify-entities 4.0.4, trim-lines 3.0.1, unist-util-is 6.0.1, unist-util-position 5.0.0, unist-util-stringify-position 4.0.0, unist-util-visit 5.2.0, unist-util-visit-parents 6.1.0, vfile 6.0.3, vfile-message 4.0.3, zwitch 2.0.4
+- **MIT**: @shikijs/core 4.6.0, @shikijs/engine-javascript 4.6.0, @shikijs/engine-oniguruma 4.6.0, @shikijs/langs 4.6.0, @shikijs/primitive 4.6.0, @shikijs/themes 4.6.0, @shikijs/types 4.6.0, @shikijs/vscode-textmate 10.1.0, ccount 2.0.1, character-entities-html4 2.1.0, character-entities-legacy 3.0.0, comma-separated-tokens 2.0.3, csstype 3.2.3, dequal 2.0.3, devlop 1.1.0, hast-util-to-html 9.0.6, hast-util-whitespace 3.0.0, html-void-elements 3.0.0, mdast-util-to-hast 13.2.1, micromark-util-character 2.1.1, micromark-util-encode 2.0.1, micromark-util-sanitize-uri 2.0.1, micromark-util-symbol 2.0.1, micromark-util-types 2.0.3, oniguruma-parser 0.12.2, oniguruma-to-es 4.3.6, property-information 7.2.0, react 19.3.1, react-dom 19.3.1, regex 6.1.0, regex-recursion 6.0.2, regex-utilities 2.3.0, scheduler 0.28.0, shiki 4.6.0, space-separated-tokens 2.0.2, stringify-entities 4.0.4, trim-lines 3.0.1, unist-util-is 6.0.1, unist-util-position 5.0.0, unist-util-stringify-position 4.0.0, unist-util-visit 5.2.0, unist-util-visit-parents 6.1.0, vfile 6.0.3, vfile-message 4.0.4, zwitch 2.0.4
 - **MIT OR Apache-2.0**: @tauri-apps/plugin-log 2.10.1, @tauri-apps/plugin-process 2.4.0, @tauri-apps/plugin-updater 2.14.1
 
 ### Apache-2.0 OR MIT: @tauri-apps/api 2.12.4
@@ -8211,7 +8204,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ### MIT: hast-util-to-html 9.0.6 and 8 more
 
-Used by: hast-util-to-html 9.0.6, micromark-util-character 2.1.1, micromark-util-encode 2.0.1, micromark-util-sanitize-uri 2.0.1, micromark-util-symbol 2.0.1, micromark-util-types 2.0.3, unist-util-visit 5.2.0, unist-util-visit-parents 6.1.0, vfile-message 4.0.3.
+Used by: hast-util-to-html 9.0.6, micromark-util-character 2.1.1, micromark-util-encode 2.0.1, micromark-util-sanitize-uri 2.0.1, micromark-util-symbol 2.0.1, micromark-util-types 2.0.3, unist-util-visit 5.2.0, unist-util-visit-parents 6.1.0, vfile-message 4.0.4.
 
 ```text
 (The MIT License)
