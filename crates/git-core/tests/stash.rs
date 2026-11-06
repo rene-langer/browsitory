@@ -3459,11 +3459,13 @@ fn only_an_ascii_case_change_counts_as_a_case_only_rename() {
     );
     assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
 
-    let mut renames = vec![("Straße", "Strasse")];
-    // APFS treats NFC and NFD spellings as one file name, so only elsewhere.
-    if !cfg!(target_os = "macos") {
-        renames.push(("Caf\u{e9}", "Cafe\u{301}"));
-    }
+    // APFS takes `Straße` and `Strasse`, and NFC and NFD spellings, for one file name (`git mv`
+    // refuses there), so only elsewhere.
+    let renames = if cfg!(target_os = "macos") {
+        vec![]
+    } else {
+        vec![("Straße", "Strasse"), ("Caf\u{e9}", "Cafe\u{301}")]
+    };
     for (old, new) in renames {
         let (dir, mut repo) = rename_with_ignorecase(old, new);
 

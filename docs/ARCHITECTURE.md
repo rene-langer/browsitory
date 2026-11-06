@@ -270,7 +270,8 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   nothing. "Case-only" means what libgit2 compares as one entry (`same_in_icase_index`):
   `strcasecmp`/`git__strcasecmp` and a `git__tolower` hash (index.c, index_map.c), ASCII letters
   only, byte by byte. `Straße`/`Strasse` and NFC/NFD spellings are two names there and stash
-  normally; `worktree_guard::fold_name` (the file-system fold the other stash checks use) is
+  normally (tested off macOS; APFS takes each pair for one file, so such a rename isn't even
+  possible with `git mv` there, and isn't covered); `worktree_guard::fold_name` (the file-system fold the other stash checks use) is
   not used for this. The check runs before the ignored-file check, since the staged deletion
   `Old` can find a file at `Old` (the new `old` on a drive that folds names, or an ignored
   `Old` beside it) and would look like an ignored file removed from the index. "Where names
