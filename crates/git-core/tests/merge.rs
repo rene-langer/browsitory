@@ -650,6 +650,25 @@ fn mark_resolved_records_the_files_stat_data() {
         assert_eq!(entry.ino, meta.ino() as u32);
         assert_eq!(entry.ctime.seconds(), meta.ctime() as i32);
     }
+    // Status sees the work tree file as staged, nothing more...
+    let status = repo.status_file(Path::new("shared.txt")).unwrap();
+    assert_eq!(status, git2::Status::INDEX_MODIFIED, "{status:?}");
+    // ...and still notices a rewrite of the same size with a later mtime: the recorded stat
+    // data doesn't hide a change.
+    write_file(dir.path(), "shared.txt", "RESOLVED\n");
+    let file = std::fs::File::options()
+        .write(true)
+        .open(dir.path().join("shared.txt"))
+        .unwrap();
+    file.set_modified(meta.modified().unwrap() + std::time::Duration::from_secs(5))
+        .unwrap();
+    drop(file);
+    let status = repo.status_file(Path::new("shared.txt")).unwrap();
+    assert_eq!(
+        status,
+        git2::Status::INDEX_MODIFIED | git2::Status::WT_MODIFIED,
+        "{status:?}"
+    );
 }
 
 /// A file Mark resolved can't open isn't called a FIFO, socket or device (#199).
