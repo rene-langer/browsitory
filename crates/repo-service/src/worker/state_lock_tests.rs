@@ -140,18 +140,14 @@ fn locks_state_covers_every_recordable_and_operation_ending_command() {
 fn start_sequence_outside(repo: &Repository, ids: Vec<String>) -> String {
     let branch = repo.head().unwrap().shorthand().unwrap().to_string();
     let store = super::sequence_store::SequenceStore::open(repo);
-    let cancelled: super::CancelRegistry =
-        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    let cancelled = super::CancelRegistry::default();
     assert!(matches!(
         super::history::pick_many(
             repo,
             &store,
             git_core::pick::SequenceKind::CherryPick,
             ids,
-            super::remote::TransferOp {
-                id: "pick-1".into(),
-                cancelled: &cancelled,
-            },
+            super::remote::TransferOp::new(cancelled.allocate("pick")),
             mpsc::channel().0,
         )
         .unwrap(),

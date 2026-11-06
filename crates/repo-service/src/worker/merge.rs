@@ -57,7 +57,7 @@ pub(super) fn start(
     repo: &git2::Repository,
     branch_name: String,
     options: MergeOptions,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<MergeOutcome, String>>,
 ) -> Result<MergeOutcome, String> {
@@ -188,7 +188,7 @@ impl WorkerHandle {
             .send(Command::StartMerge {
                 branch_name,
                 options,
-                operation_id: super::remote::next_operation_id("merge"),
+                operation_id: self.cancelled.allocate("merge"),
                 events,
                 reply: tx,
             })
