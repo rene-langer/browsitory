@@ -1137,7 +1137,7 @@ mod tests {
         let merge = |branch_name: &str, squash: bool| {
             let (tx, _rx) = channel();
             label(Command::StartMerge {
-                operation_id: String::new(),
+                operation_id: String::new().into(),
                 events: channel().0,
                 branch_name: branch_name.into(),
                 options: git_core::merge::MergeOptions {
@@ -1278,7 +1278,7 @@ mod tests {
             message: s(),
             no_verify: false,
             trailers: Vec::new(),
-            operation_id: s(),
+            operation_id: s().into(),
             events: channel().0
         });
         assert_held!(AmendCommit {
@@ -1286,7 +1286,7 @@ mod tests {
             no_verify: false,
             author: None,
             trailers: Vec::new(),
-            operation_id: s(),
+            operation_id: s().into(),
             events: channel().0
         });
         assert_held!(CreateBranch {
@@ -1324,12 +1324,12 @@ mod tests {
         assert_held!(DiscardAllUnstaged { paths: vec![] });
         assert_held!(IgnorePath { pattern: s() });
         assert_held!(SwitchBranch {
-            operation_id: String::new(),
+            operation_id: String::new().into(),
             events: channel().0,
             name: s()
         });
         assert_held!(CheckoutCommit {
-            operation_id: String::new(),
+            operation_id: String::new().into(),
             events: channel().0,
             commit_id: s()
         });
@@ -1338,29 +1338,29 @@ mod tests {
             mode: ResetMode::Hard
         });
         assert_held!(CherryPick {
-            operation_id: String::new(),
+            operation_id: String::new().into(),
             events: channel().0,
             commit_id: s(),
             mainline: None
         });
         assert_held!(RevertCommit {
-            operation_id: String::new(),
+            operation_id: String::new().into(),
             events: channel().0,
             commit_id: s(),
             mainline: Some(1)
         });
         assert_held!(CherryPickMany {
-            operation_id: String::new(),
+            operation_id: String::new().into(),
             events: channel().0,
             commit_ids: vec![s()]
         });
         assert_held!(RevertMany {
-            operation_id: String::new(),
+            operation_id: String::new().into(),
             events: channel().0,
             commit_ids: vec![s()]
         });
         assert_held!(StartMerge {
-            operation_id: String::new(),
+            operation_id: String::new().into(),
             events: channel().0,
             branch_name: s(),
             options: git_core::merge::MergeOptions::default()
@@ -1370,7 +1370,7 @@ mod tests {
             plan: vec![]
         });
         assert_held!(PullCurrentUpstream {
-            operation_id: s(),
+            operation_id: s().into(),
             events: channel().0
         });
         assert_held!(RestoreReflogEntry {
@@ -1442,7 +1442,7 @@ mod tests {
         let (tx, _rx) = channel();
         assert_eq!(
             label(Command::CherryPickMany {
-                operation_id: String::new(),
+                operation_id: String::new().into(),
                 events: channel().0,
                 commit_ids: vec!["a".into(), "b".into(), "c".into()],
                 reply: tx
@@ -1452,7 +1452,7 @@ mod tests {
         let (tx, _rx) = channel();
         assert_eq!(
             label(Command::RevertMany {
-                operation_id: String::new(),
+                operation_id: String::new().into(),
                 events: channel().0,
                 commit_ids: vec!["a".into()],
                 reply: tx
@@ -1466,7 +1466,7 @@ mod tests {
         let (tx, _rx) = channel();
         assert_eq!(
             label(Command::CheckoutCommit {
-                operation_id: String::new(),
+                operation_id: String::new().into(),
                 events: channel().0,
                 commit_id: "äöüäöüäöü".into(),
                 reply: tx

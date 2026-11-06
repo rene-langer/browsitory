@@ -19,6 +19,7 @@ use crate::pull_requests::{ForgeApiError, ForgeHttpRequest, ForgeHttpResponse};
 
 mod basics;
 mod branch;
+mod cancel;
 mod commit;
 mod forge;
 mod history;
