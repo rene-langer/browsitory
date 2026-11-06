@@ -35,7 +35,8 @@ export function StashPanel({
   onSelectRow: (row: SelectedRow) => void;
   onApplyStash: (index: number) => void;
   onPopStash: (index: number) => void;
-  onDropStash: (index: number) => void;
+  // A promise settles when the drop has finished, failed or been refused.
+  onDropStash: (index: number) => void | Promise<unknown>;
   // "Restore staged changes" for Apply and Pop (shared with the stash view).
   restoreIndex: boolean;
   onSetRestoreIndex: (on: boolean) => void;
@@ -56,7 +57,7 @@ export function StashPanel({
   const dropStash = pendingDrop === null ? undefined : stashes.find((stash) => stash.commitId === pendingDrop.commitId);
 
   // When a stash this panel had focus on leaves the list (its menu or drop confirmation was open,
-  // or its drop was just confirmed and focus went back to its "…"), focus would drop to the page.
+  // or its drop is still running and focus went back to its "…"), focus would drop to the page.
   // Remember its place in the last list that held it, and move focus there after the commit.
   // State is adjusted while rendering, as React recommends over an effect.
   const [lastStashes, setLastStashes] = useState(stashes);
@@ -91,6 +92,12 @@ export function StashPanel({
   const applyTitle = applyDisabledReason ?? (operationDisabled ? (operationDisabledReason ?? undefined) : undefined);
   const dropTitle = operationDisabled ? (operationDisabledReason ?? undefined) : undefined;
 
+  // A new menu or Drop dialog ends watching an earlier drop (its stash may never go).
+  const openMenu = (next: StashMenu) => {
+    setDroppedCommitId(null);
+    setMenu(next);
+  };
+
   const menuItems = (stash: StashEntry): ContextMenuItem[] => [
     { label: "Apply", disabled: applyDisabled, title: applyTitle, onSelect: () => onApplyStash(stash.index) },
     { label: "Pop", disabled: applyDisabled, title: applyTitle, onSelect: () => onPopStash(stash.index) },
@@ -99,7 +106,10 @@ export function StashPanel({
       disabled: operationDisabled,
       title: dropTitle,
       destructive: true,
-      onSelect: () => setPendingDrop(stash),
+      onSelect: () => {
+        setDroppedCommitId(null);
+        setPendingDrop(stash);
+      },
     },
   ];
 
@@ -134,7 +144,7 @@ export function StashPanel({
               <ListRow
                 key={stash.commitId}
                 onClick={() => onSelectRow({ commitId: stash.commitId })}
-                onOpenMenu={(anchor, trigger) => setMenu({ stash, ...anchor, returnFocusTo: trigger })}
+                onOpenMenu={(anchor, trigger) => openMenu({ stash, ...anchor, returnFocusTo: trigger })}
               >
                 <Archive size={14} aria-hidden="true" className={styles.rowIcon} />
                 <span className={styles.message} title={stash.message}>
@@ -156,7 +166,7 @@ export function StashPanel({
                       trigger.focus({ preventScroll: true });
                       setMenu(null);
                     } else {
-                      setMenu({ stash, ...rectAnchor(trigger), returnFocusTo: trigger });
+                      openMenu({ stash, ...rectAnchor(trigger), returnFocusTo: trigger });
                     }
                   }}
                 >
@@ -187,9 +197,14 @@ export function StashPanel({
           confirmDisabled={operationDisabled}
           confirmTitle={dropTitle}
           onConfirm={() => {
-            onDropStash(dropStash.index);
-            setDroppedCommitId(dropStash.commitId);
+            const { commitId } = dropStash;
+            setDroppedCommitId(commitId);
             setPendingDrop(null);
+            // Once the drop has finished (its refresh included), failed or been refused, a later
+            // removal of this stash is no longer this panel's doing: stop watching it.
+            void Promise.resolve(onDropStash(dropStash.index))
+              .catch(() => undefined)
+              .finally(() => setDroppedCommitId((current) => (current === commitId ? null : current)));
           }}
           onCancel={() => setPendingDrop(null)}
         />

@@ -502,6 +502,9 @@ function UncommittedFileSection({
           x={menu.x}
           y={menu.y}
           returnFocusTo={menu.returnFocusTo}
+          // Opened by the list's Menu key (`click()` on "…" with focus left on the row), "…" is
+          // neither `returnFocusTo` nor the focused element, but still this menu's own button.
+          isTrigger={(button) => button === actionsRef.current}
           items={menuItems}
           onClose={() => setMenu(null)}
         />

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { StashEntry } from "../ipc/RepoClient";
 import { StashPanel } from "./StashPanel";
@@ -268,7 +268,8 @@ describe("StashPanel", () => {
   });
 
   it("moves focus to the '…' now in that place once a confirmed drop removes the stash", () => {
-    const onDropStash = vi.fn();
+    // Still running: the app removes the stash (optimistically) before the drop settles.
+    const onDropStash = vi.fn(() => new Promise<void>(() => {}));
     const { rerender } = renderPanel({ stashes: three, onDropStash });
     openMenu(/stash1fix/);
     fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
@@ -278,6 +279,39 @@ describe("StashPanel", () => {
     rerender(panel({ stashes: renumber([three[0], three[2]]), onDropStash }));
 
     expect(actionsFor("stash2fix")).toHaveFocus();
+  });
+
+  it("leaves focus elsewhere alone when a watched stash disappears", () => {
+    const textarea = document.createElement("textarea");
+    document.body.appendChild(textarea);
+    try {
+      const onDropStash = vi.fn(() => new Promise<void>(() => {}));
+      const { rerender } = renderPanel({ stashes: three, onDropStash });
+      openMenu(/stash1fix/);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
+      fireEvent.click(within(screen.getByRole("dialog", { name: /Drop stash/ })).getByRole("button", { name: "Drop stash" }));
+      textarea.focus();
+
+      rerender(panel({ stashes: renumber([three[0], three[2]]), onDropStash }));
+
+      expect(textarea).toHaveFocus();
+    } finally {
+      textarea.remove();
+    }
+  });
+
+  it("stops watching a drop that settled without removing the stash", async () => {
+    const onDropStash = vi.fn(async () => {});
+    const { rerender } = renderPanel({ stashes: three, onDropStash });
+    openMenu(/stash1fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: /Drop stash/ })).getByRole("button", { name: "Drop stash" }));
+    await act(async () => {});
+
+    // Later, something else (another window) removes it: not this panel's doing.
+    rerender(panel({ stashes: renumber([three[0], three[2]]), onDropStash }));
+
+    expect(document.body).toHaveFocus();
   });
 
   it("moves focus to the section header when the last stash of a focused menu disappears", () => {

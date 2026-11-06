@@ -486,6 +486,19 @@ describe("DiffPane", () => {
         expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
       });
 
+      it("a mouse click on '…' closes the menu the Menu key opened", () => {
+        render();
+        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.keyDown(screen.getByRole("listbox", { name: "Unstaged changes" }), { key: "ContextMenu" });
+        expect(screen.getByRole("menu")).toBeInTheDocument();
+        const actions = screen.getByRole("button", { name: "Actions for src/a.ts" });
+
+        fireEvent.mouseDown(actions);
+        fireEvent.click(actions, { detail: 1 });
+
+        expect(screen.queryByRole("menu")).toBeNull();
+      });
+
       it("opens the menu of the row holding focus, not the selected row", () => {
         render();
         fireEvent.click(screen.getByText("src/a.ts (Modified)"));
