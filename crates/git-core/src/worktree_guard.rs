@@ -379,15 +379,9 @@ fn fold_text(text: &str) -> Vec<u8> {
 /// Whether case collisions matter for `repo`: `core.ignorecase`, or always on macOS and Windows
 /// (decision D1), where a repository copied from elsewhere can carry a wrong setting.
 ///
-/// A config it can't read counts as "not set" here. Only `stash.rs` still calls it; everything
-/// else calls [`try_folds_case`], which reports that error.
-pub(crate) fn folds_case(repo: &git2::Repository) -> bool {
-    try_folds_case(repo).unwrap_or(false)
-}
-
-/// [`folds_case`], with a config that can't be read (or an invalid `core.ignorecase`) as an
-/// error instead of "case doesn't fold", which on Linux would skip the case-collision checks
-/// (#225).
+/// A config that can't be read (or an invalid `core.ignorecase`) is an error, not "case doesn't
+/// fold", which on Linux would skip the case-collision checks (#225, #369). On macOS and
+/// Windows the setting isn't read; [`core_ignorecase`] reads it strictly everywhere.
 pub(crate) fn try_folds_case(repo: &git2::Repository) -> Result<bool, CaseConfigUnreadable> {
     Ok(cfg!(any(target_os = "macos", windows)) || core_ignorecase(repo)?)
 }
@@ -415,13 +409,6 @@ pub(crate) fn core_ignorecase(repo: &git2::Repository) -> Result<bool, CaseConfi
      it), then try again."
 )]
 pub struct CaseConfigUnreadable(pub String);
-
-/// `StashError` has no variant of its own for this yet; `Io` shows the message as it is.
-impl From<CaseConfigUnreadable> for crate::stash::StashError {
-    fn from(error: CaseConfigUnreadable) -> Self {
-        Self::Io(io::Error::other(error))
-    }
-}
 
 /// Whether the file system holding `dir` (an existing folder) folds case (#162): creates a
 /// hidden temp file there and looks it up with its ASCII case flipped. The file is removed
@@ -2644,13 +2631,15 @@ mod tests {
     }
 
     #[test]
-    fn folds_case_reads_core_ignorecase() {
+    fn try_folds_case_reads_core_ignorecase() {
         let (_dir, repo) = repo();
         let mut config = repo.config().unwrap();
         config.set_bool("core.ignorecase", false).unwrap();
-        assert_eq!(folds_case(&repo), cfg!(any(target_os = "macos", windows)));
+        assert_eq!(
+            try_folds_case(&repo).unwrap(),
+            cfg!(any(target_os = "macos", windows))
+        );
         config.set_bool("core.ignorecase", true).unwrap();
-        assert!(folds_case(&repo));
         assert!(try_folds_case(&repo).unwrap());
         config.remove("core.ignorecase").unwrap();
         assert_eq!(

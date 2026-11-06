@@ -275,7 +275,7 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   not used for this. The check runs before the ignored-file check, since the staged deletion
   `Old` can find a file at `Old` (the new `old` on a drive that folds names, or an ignored
   `Old` beside it) and would look like an ignored file removed from the index. "Where names
-  fold" is `worktree_guard::folds_case`, as for every stash check (#337): macOS, Windows, or
+  fold" is `worktree_guard::try_folds_case`, as for every stash check (#337, #369): macOS, Windows, or
   `core.ignorecase`. The stash never probes the drive (`dir_folds_case`), so on a Linux
   casefold folder or a vfat mount without `core.ignorecase` the check doesn't run. Stash all
   doesn't refuse case-only renames yet: #370.
@@ -295,7 +295,7 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   `git stash pop` fails on it too. `apply_stash` refuses first with
   `StashError::UntrackedBelowTrackedFile` when an untracked-tree file has a proper prefix that is
   a stage-0 index path; nothing is written and the stash is kept. libgit2's merge compares exact
-  case. Where `worktree_guard::folds_case` holds (the repository sets `core.ignorecase`, or
+  case. Where `worktree_guard::try_folds_case` holds (the repository sets `core.ignorecase`, or
   always on macOS and Windows, like the case-collision walker), the check folds case
   (`fold_name`, whole path components only), so `d/x` is refused over the indexed file `D` too
   (#234). On a case-insensitive drive `d` is `D`, and `git stash pop` fails there as well. On a
@@ -1372,12 +1372,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   strictly on every OS, before it removes any link, for every forced checkout, cleanups
   included (Abort, Reset hard, discards, undo): libgit2's checkout counts an invalid value as
   false, but its attribute and ignore parsing refuses it, so going on could remove the links
-  and then stop half-way with HEAD unchanged. The user fixes the setting instead. Stash
-  apply/pop reach `try_folds_case` through `refuse_linked_folders` and refuse too. Only stash
-  save's check for entries in the way (`entry_in_the_way`) and the apply/pop check for an
-  untracked file below a tracked one (`refuse_untracked_below_tracked_file`) still call
-  `folds_case`, which counts the value as unset; stash save's forced reset also removes the
-  links it stashed without reading the value (#369). Worktree add also applies it when the destination folds case (#162): a worktree
+  and then stop half-way with HEAD unchanged. The user fixes the setting instead. Stash save,
+  apply and pop read it strictly on every OS too, first, before any check or write (#369):
+  stash save's forced reset removes the links it stashed without `prepare_forced_checkout`,
+  and its path-limited route writes the stash commit and `refs/stash` before the reset, so a
+  later refusal would leave a stash written and the worktree half reset. Drop only edits the
+  stash list and doesn't read it. Worktree add also applies it when the destination folds case (#162): a worktree
   shares the main repository's config, whose `core.ignorecase` libgit2 probed where the main
   repository lives, so `worktree_guard::dir_folds_case` creates a hidden
   `.browsitory-case-probe-*` temp file in the nearest existing folder of the destination, looks
