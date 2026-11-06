@@ -2953,11 +2953,19 @@ fn stash_all_reverting_a_path_that_head_has_as_a_folder_keeps_the_index_valid() 
 /// HEAD has `old` (four lines) and `other`; `old` was renamed to `new` and the rename staged
 /// (`git mv old new`), and `other` was edited.
 fn staged_rename() -> (tempfile::TempDir, git2::Repository) {
+    staged_rename_of("old", "new")
+}
+
+/// The same with the rename `old` → `new` (folders created as needed).
+fn staged_rename_of(old: &str, new: &str) -> (tempfile::TempDir, git2::Repository) {
     let (dir, repo) = init_repo();
-    write_file(dir.path(), "old", "a\nb\nc\nd\n");
+    write_file(dir.path(), old, "a\nb\nc\nd\n");
     write_file(dir.path(), "other", "x\n");
     commit_all(&repo, "base");
-    assert!(git(dir.path(), &["mv", "old", "new"]).status.success());
+    if let Some((folder, _)) = new.rsplit_once('/') {
+        std::fs::create_dir_all(dir.path().join(folder)).unwrap();
+    }
+    assert!(git(dir.path(), &["mv", old, new]).status.success());
     write_file(dir.path(), "other", "y\n");
     (dir, repo)
 }
@@ -3135,5 +3143,349 @@ fn stashing_another_file_next_to_a_staged_repository_still_works() {
         assert_eq!(read(dir.path(), "a.txt"), "a\n");
         assert!(git_status(dir.path()).contains("A  lib\n"));
         assert_eq!(read(dir.path(), "lib/l.txt"), "l\n");
+    }
+}
+
+#[test]
+fn a_new_gitlink_without_its_repository_is_refused() {
+    // #244 review: `git add lib`, then `lib` deleted (or its `.git`). libgit2's stash
+    // succeeded but left `AD lib` staged, so Pop refused with "Commit or unstage your staged
+    // changes". Browsitory refuses with a neutral message; nothing is written.
+    let message = "Can't stash 'lib': the index links it to another repository, and that link isn't committed yet. Remove 'lib' from the index first.";
+    for remove in ["lib", "lib/.git"] {
+        let mut modes = whole_stash_modes();
+        modes.push(with(|o| o.paths = vec!["lib".into()]));
+        for opts in modes {
+            let (dir, mut repo) = staged_repository(false);
+            std::fs::remove_dir_all(dir.path().join(remove)).unwrap();
+            let status_before = git_core::status::status(&repo).unwrap();
+
+            let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+            assert!(
+                matches!(error, StashError::NewGitlink(ref path) if path == "lib"),
+                "{remove} {opts:?}: {error:?}"
+            );
+            assert_nothing_stashed(&mut repo, &error, message, &status_before);
+            assert_eq!(read(dir.path(), "a.txt"), "edited\n");
+        }
+    }
+}
+
+/// The nested repository `lib`'s HEAD summary and the content of its `l.txt`.
+fn nested_state(dir: &std::path::Path) -> (String, String) {
+    let inner = git2::Repository::open(dir.join("lib")).unwrap();
+    let head = inner.head().unwrap().peel_to_commit().unwrap();
+    (
+        head.summary()
+            .ok()
+            .flatten()
+            .unwrap_or_default()
+            .to_string(),
+        read(&dir.join("lib"), "l.txt"),
+    )
+}
+
+#[test]
+fn a_committed_gitlink_stashes_and_leaves_the_nested_repository_alone() {
+    // Behind the #244 claim "a gitlink HEAD already has, changed or not, stashes fine": HEAD has
+    // `lib` at `inner`; the nested repository then committed `inner2` and has an unsaved edit.
+    // The stash records the outer gitlink only; it never moves the nested repository's HEAD or
+    // touches its files, before or after Pop (git doesn't recurse into it either).
+    for staged in [false, true] {
+        for keep_index in [false, true] {
+            let (dir, mut repo) = staged_repository(false);
+            assert!(git(dir.path(), &["commit", "-qm", "lib"]).status.success());
+            let inner = git2::Repository::open(dir.path().join("lib")).unwrap();
+            write_file(&dir.path().join("lib"), "l.txt", "l2\n");
+            commit_all(&inner, "inner2");
+            write_file(&dir.path().join("lib"), "l.txt", "dirty\n");
+            if staged {
+                assert!(git(dir.path(), &["add", "lib"]).status.success());
+            }
+            let gitlink = if staged { "MM lib\n" } else { " M lib\n" };
+            assert_eq!(git_status(dir.path()), format!(" M a.txt\n{gitlink}"));
+            let opts = with(|o| o.keep_index = keep_index);
+
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            let label = format!("staged={staged} keep_index={keep_index}");
+            assert_eq!(
+                nested_state(dir.path()),
+                ("inner2".into(), "dirty\n".into())
+            );
+            assert_eq!(read(dir.path(), "a.txt"), "a\n", "{label}");
+            let after = if staged && keep_index {
+                "MM lib\n"
+            } else {
+                " M lib\n"
+            };
+            assert_eq!(git_status(dir.path()), after, "{label}");
+            if staged && keep_index {
+                // Keep-index leaves the gitlink staged, so Pop waits for it, as for any file.
+                continue;
+            }
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+                StashApplyOutcome::Applied,
+                "{label}"
+            );
+            assert_eq!(
+                git_status(dir.path()),
+                format!(" M a.txt\n{gitlink}"),
+                "{label}"
+            );
+            assert_eq!(
+                nested_state(dir.path()),
+                ("inner2".into(), "dirty\n".into())
+            );
+        }
+    }
+}
+
+/// HEAD has `a` and `committed` ("head\n" each); `removed` were removed from the index and
+/// `edited` changed to "local\n"; `.git/info/exclude` holds `exclude`.
+fn removed_with_ignore_rules(
+    committed: &[&str],
+    removed: &[&str],
+    edited: &[&str],
+    exclude: &str,
+) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = removed_paths(committed, removed, edited);
+    write_file(dir.path(), ".git/info/exclude", exclude);
+    (dir, repo)
+}
+
+/// Stash file… on each of `picked`, with and without untracked files, refuses exactly when Stash
+/// all does (every mode), naming the same entry (`refused`); otherwise each stash records every
+/// edit and puts the committed version back.
+fn assert_stash_file_refuses_like_stash_all(
+    committed: &[&str],
+    removed: &[&str],
+    edited: &[&str],
+    exclude: &str,
+    picked: &[&str],
+    refused: Option<&str>,
+) {
+    let mut modes = whole_stash_modes();
+    for path in picked {
+        for include_untracked in [false, true] {
+            modes.push(with(|o| {
+                o.paths = vec![path.to_string()];
+                o.include_untracked = include_untracked;
+            }));
+        }
+    }
+    for opts in modes {
+        let (dir, mut repo) = removed_with_ignore_rules(committed, removed, edited, exclude);
+
+        let result = git_core::stash::save_stash(&mut repo, &opts);
+
+        match refused {
+            Some(name) => {
+                assert!(
+                    matches!(result, Err(StashError::IgnoredOverwritten(ref path)) if path == name),
+                    "{exclude:?} {opts:?}: {result:?}"
+                );
+                assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+                for path in edited {
+                    assert_eq!(read(dir.path(), path), "local\n");
+                }
+            }
+            None => {
+                assert!(result.is_ok(), "{exclude:?} {opts:?}: {result:?}");
+                for path in edited {
+                    assert_eq!(stashed(&mut repo, path)[0].as_deref(), Some("local\n"));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn stash_file_refuses_ignored_files_removed_from_the_index_by_the_same_rule_as_stash_all() {
+    // #259 review: Stash file… and Stash all decide alike, from the status of the file.
+    // A tracked file that matches an ignore rule is a plain change, never refused.
+    assert_stash_file_refuses_like_stash_all(&[".env"], &[], &[".env"], ".env\n", &[".env"], None);
+    // A `!` rule re-includes it: it is untracked, not ignored, and stashed as in #247.
+    assert_stash_file_refuses_like_stash_all(
+        &["keep.env"],
+        &["keep.env"],
+        &["keep.env"],
+        "*.env\n!keep.env\n",
+        &["keep.env"],
+        None,
+    );
+    // A folder that holds a tracked file isn't ignored as a whole: the file itself is named.
+    assert_stash_file_refuses_like_stash_all(
+        &["build/t", "build/o"],
+        &["build/o"],
+        &["build/o"],
+        "build/\n",
+        &["build/o", "build"],
+        Some("build/o"),
+    );
+    // A rule that ignores a parent folder: the folder is named.
+    assert_stash_file_refuses_like_stash_all(
+        &["d/sub/f"],
+        &["d/sub/f"],
+        &["d/sub/f"],
+        "sub/\n",
+        &["d/sub/f", "d"],
+        Some("d/sub"),
+    );
+}
+
+#[test]
+fn stashing_a_rename_whose_old_path_exists_again_is_refused_unless_both_are_picked() {
+    // #152 review: `git mv old new`, then a new file `old`. Picking only `new` would stash and
+    // overwrite the unrelated `old`, even with untracked files left out: refused, nothing
+    // written. Picking `old` stashes both, its new content included.
+    for include_untracked in [false, true] {
+        let (dir, mut repo) = staged_rename();
+        write_file(dir.path(), "old", "recreated\n");
+        let status_before = git_core::status::status(&repo).unwrap();
+        let opts = with(|o| {
+            o.paths = vec!["new".into()];
+            o.include_untracked = include_untracked;
+        });
+
+        let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+        assert!(
+            matches!(error, StashError::RenameSourceRecreated { ref path, ref old } if path == "new" && old == "old"),
+            "{error:?}"
+        );
+        assert_nothing_stashed(
+            &mut repo,
+            &error,
+            "Can't stash 'new' on its own: it was renamed from 'old', and 'old' exists again. Stash 'old' too, or move it first.",
+            &status_before,
+        );
+        assert_eq!(read(dir.path(), "old"), "recreated\n");
+    }
+    let (dir, mut repo) = staged_rename();
+    write_file(dir.path(), "old", "recreated\n");
+    git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["old".into()])).unwrap();
+    assert_eq!(git_status(dir.path()), " M other\n");
+    assert_eq!(stashed(&mut repo, "old")[0].as_deref(), Some("recreated\n"));
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+        StashApplyOutcome::Applied
+    );
+    assert_eq!(read(dir.path(), "old"), "recreated\n");
+    assert_eq!(read(dir.path(), "new"), "a\nb\nc\nd\n");
+}
+
+#[test]
+fn stashing_a_case_only_rename_is_refused_where_names_fold() {
+    // #152 review: HEAD `Old`, index `old` (`git mv Old old`) with `core.ignorecase` (always so
+    // on macOS and Windows). libgit2's index then finds `Old` as `old`: the stash held both
+    // names and the revert changed nothing, leaving a stash Pop refused. Refused, nothing
+    // written. Without folding the rename is two different names and stashes normally.
+    let setup = |ignore_case: bool| {
+        let (dir, repo) = init_repo();
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", ignore_case)
+            .unwrap();
+        write_file(dir.path(), "Old", "a\nb\nc\nd\n");
+        write_file(dir.path(), "other", "x\n");
+        commit_all(&repo, "base");
+        assert!(git(dir.path(), &["mv", "Old", "old"]).status.success());
+        (dir, repo)
+    };
+    for picked in ["old", "Old"] {
+        let (_dir, mut repo) = setup(true);
+        let status_before = git_core::status::status(&repo).unwrap();
+
+        let error =
+            git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec![picked.into()]))
+                .unwrap_err();
+
+        assert!(
+            matches!(error, StashError::CaseOnlyRename { .. }),
+            "{picked}: {error:?}"
+        );
+        assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+        assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+    }
+    if !cfg!(any(target_os = "macos", windows)) {
+        let (dir, mut repo) = setup(false);
+        git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["old".into()])).unwrap();
+        assert_eq!(top_level(dir.path()), ["Old", "other"]);
+        assert!(git_status(dir.path()).is_empty());
+    }
+}
+
+#[test]
+fn stashing_a_rename_with_keep_index_keeps_it_staged_and_in_the_worktree() {
+    let (dir, mut repo) = staged_rename();
+    let opts = with(|o| {
+        o.paths = vec!["new".into()];
+        o.keep_index = true;
+    });
+
+    git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+    assert_eq!(git_status(dir.path()), "R  old -> new\n M other\n");
+    assert_eq!(read(dir.path(), "new"), "a\nb\nc\nd\n");
+    assert!(!dir.path().join("old").exists());
+    assert_eq!(
+        stashed(&mut repo, "new")[1].as_deref(),
+        Some("a\nb\nc\nd\n")
+    );
+    assert_eq!(stashed(&mut repo, "old"), [None, None, None]);
+}
+
+#[test]
+fn stashing_a_renamed_file_edited_in_the_worktree_keeps_both_versions() {
+    // `RM`: the staged rename plus an unstaged edit of `new`.
+    for restore_index in [false, true] {
+        let (dir, mut repo) = staged_rename();
+        write_file(dir.path(), "new", "a\nb\nc\nd\ne\n");
+
+        git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["new".into()])).unwrap();
+
+        assert_eq!(git_status(dir.path()), " M other\n");
+        assert_eq!(
+            stashed(&mut repo, "new"),
+            [
+                Some("a\nb\nc\nd\ne\n".into()),
+                Some("a\nb\nc\nd\n".into()),
+                None
+            ]
+        );
+        assert_eq!(
+            git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap(),
+            StashApplyOutcome::Applied
+        );
+        assert_eq!(read(dir.path(), "new"), "a\nb\nc\nd\ne\n");
+        assert!(!dir.path().join("old").exists());
+        if restore_index {
+            assert_eq!(git_status(dir.path()), "RM old -> new\n M other\n");
+        }
+    }
+}
+
+#[test]
+fn stashing_a_folder_takes_the_renames_in_it_and_their_partners_outside_it() {
+    // Inside the picked folder `d`, and from `x/old` (outside it) into it.
+    for (old, new) in [("d/old", "d/new"), ("x/old", "d/new")] {
+        let (dir, mut repo) = staged_rename_of(old, new);
+
+        git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["d".into()])).unwrap();
+
+        assert_eq!(git_status(dir.path()), " M other\n", "{old}");
+        assert_eq!(read(dir.path(), old), "a\nb\nc\nd\n");
+        assert!(!dir.path().join(new).exists());
+        assert_eq!(
+            git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+            StashApplyOutcome::Applied
+        );
+        assert_eq!(
+            git_status(dir.path()),
+            format!("R  {old} -> {new}\n M other\n")
+        );
     }
 }

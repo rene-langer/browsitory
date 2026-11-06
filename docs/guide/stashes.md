@@ -8,7 +8,11 @@ opens **Stash all** and **Stash…**, a dialog with an optional message, **Keep 
 **Stash file…** in a changed file's menu (staged or not) opens the same dialog for just that
 file; every other change stays where it is, and "Restore staged changes" later restages only
 that file. For an untracked file, untracked files are always included. For a staged rename it
-stashes both names: the new file and the old name's deletion. One file at a time: the
+stashes both names: the new file and the old name's deletion. If you made a new file at the old
+name since, it refuses ("Can't stash 'new' on its own: it was renamed from 'old', and 'old'
+exists again. Stash 'old' too, or move it first."); **Stash file…** on the old name stashes
+both. A rename that changes only the case of a name (`Old` to `old`) can't be stashed on macOS,
+Windows or with `core.ignorecase`; commit it or undo it first. One file at a time: the
 change lists have no multi-select. A file inside a symlinked folder can't be stashed on its own.
 If a tracked file was replaced by a symbolic link, stashing keeps the link in the stash and puts
 the file back; while a symbolic link replaces a tracked folder, **Stash all** refuses (move the
@@ -60,7 +64,8 @@ A repository you staged inside this one (`git add lib`, where `lib` has its own 
 stashed. **Stash all**, and **Stash file…** on `lib`, refuse and change nothing: "'lib' is a
 repository inside this one. Add it as a submodule or remove it from the index first." A
 submodule you added but haven't committed yet gets "Can't stash the new submodule 'lib'. Commit
-it first, or remove it from the index." **Stash file…** on other files still works.
+it first, or remove it from the index." If `lib` is gone, or has no `.git` any more, the message
+asks you to remove `lib` from the index first. **Stash file…** on other files still works.
 If you removed a file or folder from the index without ignoring it (`git rm -r --cached d`) and
 then edited it, **Stash all** stashes your edit and puts the committed version back. **Pop**
 brings the edit back; with **Restore staged changes** the removal from the index comes back too.
