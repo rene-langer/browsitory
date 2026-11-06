@@ -378,12 +378,27 @@ fn fold_text(text: &str) -> Vec<u8> {
 
 /// Whether case collisions matter for `repo`: `core.ignorecase`, or always on macOS and Windows
 /// (decision D1), where a repository copied from elsewhere can carry a wrong setting.
+///
+/// A config it can't read counts as "not set" here. Only `stash.rs` still calls it, to be moved
+/// to [`try_folds_case`] (which reports that error) in a follow-up to #225.
 pub(crate) fn folds_case(repo: &git2::Repository) -> bool {
-    cfg!(any(target_os = "macos", windows))
-        || repo
-            .config()
-            .and_then(|config| config.get_bool("core.ignorecase"))
-            .unwrap_or(false)
+    try_folds_case(repo).unwrap_or(false)
+}
+
+/// [`folds_case`], with a config that can't be read (or an invalid `core.ignorecase`) as an
+/// error instead of "case doesn't fold", which on Linux would skip the case-collision checks
+/// (#225).
+pub(crate) fn try_folds_case(repo: &git2::Repository) -> Result<bool, git2::Error> {
+    Ok(cfg!(any(target_os = "macos", windows)) || core_ignorecase(repo)?)
+}
+
+/// `core.ignorecase`, false when not set; an unreadable config or an invalid value is an error.
+pub(crate) fn core_ignorecase(repo: &git2::Repository) -> Result<bool, git2::Error> {
+    match repo.config()?.get_bool("core.ignorecase") {
+        Ok(value) => Ok(value),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// Whether the file system holding `dir` (an existing folder) folds case (#162): creates a
@@ -432,15 +447,15 @@ pub(crate) fn nearest_existing(path: &Path) -> Option<&Path> {
 /// fresh clone's config, so they force the check with `Always`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CasePolicy {
-    /// [`folds_case`] of the repository being checked out.
+    /// [`try_folds_case`] of the repository being checked out.
     FromRepo,
     #[cfg_attr(not(test), allow(dead_code))]
     Always,
 }
 
 impl CasePolicy {
-    pub(crate) fn applies(self, repo: &git2::Repository) -> bool {
-        self == CasePolicy::Always || folds_case(repo)
+    pub(crate) fn applies(self, repo: &git2::Repository) -> Result<bool, git2::Error> {
+        Ok(self == CasePolicy::Always || try_folds_case(repo)?)
     }
 }
 
@@ -701,7 +716,7 @@ fn tracked_as_link(head_tree: Option<&git2::Tree>, rel: &Path) -> bool {
 }
 
 /// Refuses `source` (optionally limited to `paths`) when it holds a case collision and case
-/// matters for `repo` ([`folds_case`]).
+/// matters for `repo` ([`try_folds_case`]).
 pub(crate) fn refuse_case_collision<E, P>(
     repo: &git2::Repository,
     source: &GuardSource,
@@ -711,7 +726,7 @@ where
     E: From<git2::Error> + From<CaseCollision>,
     P: AsRef<[u8]>,
 {
-    refuse_case_collision_if(folds_case(repo), source, paths)
+    refuse_case_collision_if(try_folds_case(repo)?, source, paths)
 }
 
 /// [`refuse_case_collision`] with the caller's answer to whether case matters (`applies`).
@@ -770,7 +785,7 @@ where
     // A collision the target brings in is refused; one HEAD already holds (aborting a merge,
     // `reset --hard` to HEAD, discarding) isn't, so such a repository can still be cleaned up.
     // Every collision of the target must already be known, not just the first one found.
-    if let (Some(target), true) = (target, folds_case(repo)) {
+    if let (Some(target), true) = (target, try_folds_case(repo)?) {
         let brought = find_case_collisions(target, paths)?;
         if !brought.is_empty() {
             let known = known_collisions(repo, paths, also_known)?;
@@ -781,10 +796,7 @@ where
     }
     // libgit2 matches checkout paths case-insensitively under `core.ignorecase`; so does the
     // filter here, or `TC` would scan nothing for a tracked `tc`.
-    let ignore_case = repo
-        .config()
-        .and_then(|config| config.get_bool("core.ignorecase"))
-        .unwrap_or(false);
+    let ignore_case = core_ignorecase(repo)?;
     let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
     let mut scanner = Scanner::new(workdir, true);
     let mut hazards = BTreeSet::new();
@@ -893,7 +905,7 @@ where
     // is exempt (#167), so a HEAD that holds one doesn't lock the repository; any other one is
     // refused. The link scan above stays the guard for the exempt ones: on a case-insensitive
     // file system the folder's name resolves to the on-disk link, which it refuses.
-    if folds_case(repo) {
+    if try_folds_case(repo)? {
         let sources: Vec<GuardSource> = incoming
             .iter()
             .map(|source| match source {
@@ -2586,6 +2598,34 @@ mod tests {
         assert_eq!(folds_case(&repo), cfg!(any(target_os = "macos", windows)));
         config.set_bool("core.ignorecase", true).unwrap();
         assert!(folds_case(&repo));
+        assert!(try_folds_case(&repo).unwrap());
+        config.remove("core.ignorecase").unwrap();
+        assert_eq!(
+            try_folds_case(&repo).unwrap(),
+            cfg!(any(target_os = "macos", windows))
+        );
+    }
+
+    /// An invalid `core.ignorecase` is an error, not "case doesn't fold" (#225). On macOS and
+    /// Windows case always folds, so the setting isn't read there.
+    #[test]
+    fn an_invalid_core_ignorecase_is_an_error() {
+        let (_dir, repo) = repo();
+        repo.config()
+            .unwrap()
+            .set_str("core.ignorecase", "maybe")
+            .unwrap();
+        let folds = try_folds_case(&repo);
+        let applies = CasePolicy::FromRepo.applies(&repo);
+        if cfg!(any(target_os = "macos", windows)) {
+            assert!(folds.unwrap());
+            assert!(applies.unwrap());
+        } else {
+            let error = folds.unwrap_err();
+            assert_eq!(error.class(), git2::ErrorClass::Config, "{error}");
+            assert!(applies.is_err());
+        }
+        assert!(CasePolicy::Always.applies(&repo).unwrap());
     }
 
     #[test]

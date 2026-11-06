@@ -184,6 +184,27 @@ fn creating_a_worktree_on_a_branch_with_a_collision_is_refused() {
     assert!(repo.find_branch("new", git2::BranchType::Local).is_err());
 }
 
+/// An invalid `core.ignorecase` refuses the worktree instead of counting as "case doesn't
+/// fold" and skipping the case-collision check (#225). macOS and Windows always check, so the
+/// test is Linux's.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_invalid_core_ignorecase_refuses_the_worktree() {
+    let (dir, repo) = case_sensitive_repo_with_evil_branch();
+    repo.config()
+        .unwrap()
+        .set_str("core.ignorecase", "maybe")
+        .unwrap();
+    let linked = dir.path().join("evil-tree");
+    let never = |_: &std::path::Path| -> std::io::Result<bool> { panic!("probed") };
+    let error =
+        git_core::worktree::create_worktree_with(&repo, "evil-tree", &linked, "evil", None, never)
+            .unwrap_err();
+    assert!(matches!(error, WorktreeError::Git), "{error}");
+    assert!(!linked.exists());
+    assert!(!repo.path().join("worktrees").join("evil-tree").exists());
+}
+
 /// A repository whose config says case matters (`core.ignorecase=false`: names differing only
 /// in case are different files), with the branch `evil` holding a collision.
 #[cfg(target_os = "linux")]

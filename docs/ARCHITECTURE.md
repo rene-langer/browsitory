@@ -1327,8 +1327,10 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   refuses more) and compares folded
   link/gitlink paths with folded strict-prefix folders (and a link with a gitlink), both orders
   and exact duplicates, over all of an operation's incoming sources together; a file next to a
-  folder is fine. It applies when `folds_case` (`core.ignorecase`, or always on macOS/Windows
-  builds). Worktree add also applies it when the destination folds case (#162): a worktree
+  folder is fine. It applies when `try_folds_case` (`core.ignorecase`, or always on
+  macOS/Windows builds). A config it can't read, or a `core.ignorecase` that isn't a boolean, is
+  an error that stops the operation, not "case doesn't fold" (#225; stash still calls
+  `folds_case`, which counts it as unset). Worktree add also applies it when the destination folds case (#162): a worktree
   shares the main repository's config, whose `core.ignorecase` libgit2 probed where the main
   repository lives, so `worktree_guard::dir_folds_case` creates a hidden
   `.browsitory-case-probe-*` temp file in the nearest existing folder of the destination, looks

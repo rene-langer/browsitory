@@ -207,7 +207,7 @@ fn check_submodule_tree(
     tree: &Tree<'_>,
     policy: CasePolicy,
 ) -> Result<(), SubmoduleError> {
-    if policy.applies(sub) {
+    if policy.applies(sub)? {
         const ALL: Option<&[&str]> = None;
         if let Some(collision) =
             crate::worktree_guard::find_case_collision(&GuardSource::Tree(tree), ALL)?

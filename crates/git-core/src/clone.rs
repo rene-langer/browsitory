@@ -264,7 +264,7 @@ fn checkout_clone(
     let Ok(tree) = repo.head().and_then(|head| head.peel_to_tree()) else {
         return Ok(());
     };
-    if policy.applies(repo) {
+    if policy.applies(repo)? {
         const ALL: Option<&[&str]> = None;
         if let Some(collision) = find_case_collision(&GuardSource::Tree(&tree), ALL)? {
             return Err(CheckoutFailure::Case(collision));
