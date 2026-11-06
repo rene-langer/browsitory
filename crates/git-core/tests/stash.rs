@@ -3636,10 +3636,22 @@ fn every_kind_of_change() -> (tempfile::TempDir, git2::Repository, tempfile::Tem
     (dir, repo, out)
 }
 
-/// What a refused operation must leave as it was: every worktree entry outside `.git` (a link
-/// as its target), the index file, whether a stash ref or log exists, and the number of loose
-/// objects (no stash commit was written).
-fn untouched_state(dir: &std::path::Path) -> (Vec<(String, String)>, Vec<u8>, bool, usize) {
+/// What a refused operation must leave as it was, in [`untouched_state`].
+#[derive(Debug, PartialEq)]
+struct Untouched {
+    /// Every worktree entry outside `.git`, a link as its target.
+    entries: Vec<(String, String)>,
+    index: Vec<u8>,
+    /// What `refs/stash` resolves to.
+    stash: Option<git2::Oid>,
+    /// The bytes of `HEAD`, the branch it names, `refs/stash`, `packed-refs` and their reflogs
+    /// (`None` when missing).
+    refs: Vec<(String, Option<Vec<u8>>)>,
+    /// The number of loose objects: no stash commit was written.
+    objects: usize,
+}
+
+fn untouched_state(dir: &std::path::Path) -> Untouched {
     fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, String)>) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
@@ -3673,12 +3685,35 @@ fn untouched_state(dir: &std::path::Path) -> (Vec<(String, String)>, Vec<u8>, bo
         .filter(|path| path.file_name().is_some_and(|name| name.len() == 2))
         .map(|path| std::fs::read_dir(path).unwrap().count())
         .sum();
-    (
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).unwrap();
+    let mut names = vec![
+        "HEAD".to_string(),
+        "refs/stash".into(),
+        "packed-refs".into(),
+    ];
+    if let Some(branch) = head.trim().strip_prefix("ref: ") {
+        names.push(branch.to_string());
+    }
+    for name in names.clone() {
+        names.push(format!("logs/{name}"));
+    }
+    let refs = names
+        .into_iter()
+        .map(|name| {
+            let bytes = std::fs::read(git_dir.join(&name)).ok();
+            (name, bytes)
+        })
+        .collect();
+    Untouched {
         entries,
-        std::fs::read(git_dir.join("index")).unwrap(),
-        git_dir.join("refs/stash").exists() || git_dir.join("logs/refs/stash").exists(),
+        index: std::fs::read(git_dir.join("index")).unwrap(),
+        stash: git2::Repository::open(dir)
+            .unwrap()
+            .refname_to_id("refs/stash")
+            .ok(),
+        refs,
         objects,
-    )
+    }
 }
 
 /// Sets `core.ignorecase` in the repository's own config to `value`, or removes it.
