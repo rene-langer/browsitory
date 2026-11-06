@@ -434,6 +434,9 @@ fn save_path_limited_stash(
             tracked.push(path.to_string());
         }
     }
+    // First: on a drive that folds names, the deleted `Old` of a case-only rename finds the new
+    // file `old`, which the check below would take for an ignored file.
+    refuse_case_only_rename(repo, &base, &tracked)?;
     // A selected file removed from the index and then ignored: refused by the same rule as
     // Stash all (#259).
     if !deleted.is_empty() {
@@ -450,7 +453,6 @@ fn save_path_limited_stash(
     if tracked.is_empty() && untracked.is_empty() {
         return Err(StashError::NothingToStash);
     }
-    refuse_case_only_rename(repo, &base, &tracked)?;
     // A tracked path that is now a real directory but not a tree in what the revert restores
     // would have its directory (and whatever the stash does not hold in it) replaced.
     for path in &tracked {

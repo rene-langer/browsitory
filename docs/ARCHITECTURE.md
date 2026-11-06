@@ -264,9 +264,13 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   paths that aren't UTF-8 (skipped everywhere in the path-limited stash). Where names fold
   (`folds_case`), a case-only rename (`git mv Old old`) is refused (`CaseOnlyRename`,
   `refuse_case_only_rename`): libgit2's index looks paths up ignoring case, so the stash's index
-  tree held both names and the revert changed nothing. Known limitation: Stash all, through
-  libgit2's own stash, has the same problem there (it writes a stash but leaves the rename in
-  place; nothing is lost, and Pop refuses until the rename is committed or undone).
+  tree held both names and the revert changed nothing. It runs before the ignored-file check:
+  on a drive that folds names the deleted `Old` finds the file `old` and would look like an
+  ignored file removed from the index. Known limitation: Stash all doesn't handle a case-only
+  rename either. With `core.ignorecase` on a case-sensitive drive libgit2's own stash writes a
+  stash but leaves the rename in place (nothing is lost; Pop refuses until the rename is
+  committed or undone). On a drive that folds names `entry_in_the_way` presumably takes `Old`
+  for an ignored file and refuses with `IgnoredOverwritten` (not checked on macOS or Windows).
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as
