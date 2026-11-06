@@ -69,6 +69,9 @@ pub enum UndoError {
     FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
+    #[error(transparent)]
+    CaseConfig(#[from] crate::CaseConfigUnreadable),
 }
 
 pub fn capture(repo: &Repository, scope: SnapshotScope) -> Result<RepoSnapshot, UndoError> {
@@ -179,7 +182,7 @@ pub(crate) fn read_worktree_file(
 ) -> io::Result<Option<(Vec<u8>, u32)>> {
     let (bytes, executable) = match crate::worktree_guard::read_beneath(workdir, rel)? {
         None => return Ok(None),
-        Some(Leaf::Link(target)) => return Ok(Some((target, MODE_LINK))),
+        Some(Leaf::Link { target, .. }) => return Ok(Some((target, MODE_LINK))),
         Some(Leaf::File {
             bytes, executable, ..
         }) => (bytes, executable),

@@ -341,6 +341,7 @@ export type CloneErrorKind =
   | "Io"
   | "InitFailed"
   | "CaseCollision"
+  | "CaseConfig"
   | "FileInUse"
   | TransferErrorKind;
 

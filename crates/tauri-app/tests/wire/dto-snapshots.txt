@@ -233,6 +233,7 @@ CloneErrorPayload/clone-BranchNotFound {"kind":"BranchNotFound","message":"Branc
 CloneErrorPayload/clone-Cancelled {"kind":"Cancelled","message":"Clone cancelled."}
 CloneErrorPayload/clone-Io {"kind":"Io","message":"disk full"}
 CloneErrorPayload/clone-CaseCollision {"kind":"CaseCollision","message":"'Docs' is a symbolic link and 'docs' a folder whose names differ only in case. On this file system they are the same name, so Browsitory won't check them out. Rename one of them in the repository."}
+CloneErrorPayload/clone-CaseConfig {"kind":"CaseConfig","message":"Can't read core.ignorecase from the Git config: failed to parse 'maybe' as a boolean. Set it to true or false (or remove it), then try again."}
 CloneErrorPayload/clone-FileInUse {"kind":"FileInUse","message":"'f.txt' is open in another program. Close it, then try again."}
 CloneErrorPayload/clone-Transfer-NonFastForward {"kind":"NonFastForward","message":"The transfer failed."}
 CloneErrorPayload/clone-Transfer-RejectedRemoteRef {"kind":"RejectedRemoteRef","message":"The transfer failed."}

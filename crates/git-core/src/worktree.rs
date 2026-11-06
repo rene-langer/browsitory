@@ -69,6 +69,9 @@ pub enum WorktreeError {
     },
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
+    #[error(transparent)]
+    CaseConfig(#[from] crate::CaseConfigUnreadable),
     /// The branch is being rebased in a terminal, in this or another worktree (#263).
     #[error(transparent)]
     BeingRebased(#[from] crate::repo::BranchBeingRebased),
@@ -316,7 +319,7 @@ pub fn create_worktree_with(
     // The worktree may live on another file system than the repository (#162): probed only
     // when the repository's setting doesn't already say case folds. A failed probe leaves the
     // repository's setting to decide, as before.
-    let case_matters = crate::worktree_guard::folds_case(repo)
+    let case_matters = crate::worktree_guard::try_folds_case(repo)?
         || crate::worktree_guard::nearest_existing(path)
             .is_some_and(|dir| probe(dir).unwrap_or(false));
 

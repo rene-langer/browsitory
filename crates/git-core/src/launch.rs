@@ -334,6 +334,11 @@ fn has_magic(head: &[u8]) -> bool {
 /// `[Desktop Entry]` (#201). Newer globs (`.org`, `.toml`) are left out: on an older desktop
 /// such a name matches no glob, so Qt sniffs it. Lower case;
 /// `document_extensions_have_a_shared_mime_info_glob` checks the list on Linux CI.
+///
+/// That test reads the runner's shared-mime-info, which is newer than 1.15, so it can't catch a
+/// glob added after 1.15. Check every new entry by hand against 1.15's `freedesktop.org.xml.in`
+/// (tag `Release-1-15` of xdg/shared-mime-info on gitlab.freedesktop.org). The repository keeps
+/// no copy of it as a test fixture: shared-mime-info is GPL-2.0 (#225).
 const DOCUMENT_EXTENSIONS: &[&str] = &[
     "txt", "md", "markdown", "rst", "tex", "log", "csv", "tsv", "json", "yaml", "yml", "xml",
     "html", "htm", "xhtml", "svg", "css", "diff", "patch", "c", "h", "cpp", "hpp", "rs", "go",
@@ -1172,7 +1177,8 @@ mod tests {
 
     /// #201: every `DOCUMENT_EXTENSIONS` entry has a shared-mime-info glob, and none of its types
     /// is a launcher, so the desktop types such a name by its glob. Skipped without the
-    /// database, except on CI.
+    /// database, except on CI. This is the runner's database, not 1.15's: see
+    /// `DOCUMENT_EXTENSIONS` for checking a new entry against 1.15.
     #[cfg(target_os = "linux")]
     #[test]
     fn document_extensions_have_a_shared_mime_info_glob() {
