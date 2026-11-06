@@ -754,18 +754,23 @@ enum Kind {
 ///
 /// The restored tree is HEAD's; with `keep_index` the index's too: libgit2 resets once to the
 /// index commit, but with HEAD as the checkout baseline, so it still removes what is in the way
-/// of a path HEAD has and the index deletes (git does too). With `core.ignorecase` paths
-/// compare case-insensitively (`docs` is in the way of `Docs/f` on such a drive). Untracked
-/// symlinks are left to the hazard route (`BeyondSymlink`).
+/// of a path HEAD has and the index deletes (git does too). Where names fold (`folds_case`: the
+/// repository sets `core.ignorecase`, or always on macOS and Windows) paths compare as
+/// `fold_name` folds them, like the apply/pop check (`refuse_untracked_below_tracked_file`) and
+/// the case-collision walker: `docs` is in the way of `Docs/f`, `STRASSE` of `Straße/f` and an
+/// NFD `Café` of an NFC `Café/f` (#337). Untracked symlinks are left to the hazard route
+/// (`BeyondSymlink`).
 fn entry_in_the_way(
     repo: &Repository,
     keep_index: bool,
     include_untracked: bool,
 ) -> Result<Option<InTheWay>, StashError> {
-    let ignore_case = repo.config()?.get_bool("core.ignorecase").unwrap_or(false);
+    let ignore_case = crate::worktree_guard::folds_case(repo);
     let fold = |path: &str| {
         if ignore_case {
-            path.to_lowercase()
+            // `path` is UTF-8 and `fold_name` keeps it so; the lossy branch never runs.
+            String::from_utf8(crate::worktree_guard::fold_name(path.as_bytes()))
+                .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
         } else {
             path.to_string()
         }
