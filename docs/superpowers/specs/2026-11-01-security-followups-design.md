@@ -128,8 +128,9 @@ shared-mime-info (pulled in by the GTK dev packages).
 
 1. `previous_mode` = the stage-0 entry's mode, else stage 2 ("ours"), 3 ("theirs"), 1 (base),
    as libgit2's `index_existing_and_best` (corrected in review, see below).
-2. `undo::read_worktree_file(workdir, path, &undo::worktree_config(repo)?, previous_mode)?`:
-   - `Some((bytes, mode))`:
+2. `worktree_guard::read_beneath(workdir, path)?`, a file's mode from `undo::file_mode(&config,
+   executable, previous_mode)` (as built; this step first named `undo::read_worktree_file`):
+   - a file's `bytes` and `mode`, or a link's target:
      - unless `force` or `mode == MODE_LINK`, `has_conflict_markers(&bytes)` →
        `MarkersRemain`;
      - test seam `after_check()`;
@@ -381,7 +382,7 @@ Real temp-dir repositories, never a mocked `Repository`.
     fallback clearing read-only;
   - "Launch" (l. 746–760): the x-desktop sniff is Linux-only and skipped for document
     extensions (glob before magic, as GLib and Qt); Mark resolved stages the bytes it checked
-    (`read_worktree_file` + `blob_writer` + `remove_path`/`add`).
+    (`read_beneath` + `blob_writer` + `remove_path`/`add`).
 - `docs/USER_GUIDE.md`:
   - l. 670–671: "…each action waits about a second for it instead of 10; a quick run of
     actions waits only once.";

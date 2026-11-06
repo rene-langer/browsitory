@@ -467,9 +467,9 @@ certificate.
   "the operation ended, but its entry isn't recorded yet" and drops it as stale. Stash save and
   worktree add (#174) take it too, though they record nothing: the gate refuses them while a
   rebase or sequence is stored, and under the lock that check and the change can't interleave
-  with the other app starting one. Other commands
-  (reads, fetch, staging, resolving) never wait: `settle`/`finish` take the lock only when about
-  to write, and skip the write while it's held (a later command repeats it). The guard is
+  with the other app starting one. Other commands (reads, fetch, staging, resolving) never wait:
+  `settle`/`finish` take the lock only when about to write, and skip the write while it's held
+  (a later command repeats it). The guard is
   dropped before the held replies are released. A locked command that can't get the lock within
   `LOCK_WAIT` (10 s; a long holder such as a pull, a commit hook or a pinentry dialog in the
   other app) logs once and runs unrecorded, and the next locked command waits only
@@ -481,30 +481,29 @@ certificate.
   costs about one `CONTENDED_WAIT`, not one each, however long each takes. Commands that would
   refuse (`undo::refuses_when_busy`: Undo, Redo, discards, Reset hard) still wait
   `CONTENDED_WAIT` inside the window. After a quiet `CONTENDED_WAIT` the next command waits
-  again, and taking the lock resets it (#197). The
-  commands that
-  destroy work-tree content with no other way back (discard hunk, lines, file or all unstaged,
-  and a hard reset) are refused instead with "Another Browsitory window is changing this
-  repository's undo history. Try again in a moment, so this change can be undone."
-  (`undo::reply_busy`); Undo/Redo instead reply "Another Browsitory window is changing this repository's
-  undo history. Try again in a moment." The lock is an OS lock on a handle, so a process that
-  exits or is killed, or a worker thread that panics, releases it; the file is never deleted
-  (that would let the next opener lock a new inode). The guard unlocks explicitly on drop
-  (#175): a child that any thread forks (a hook, a signer, git) holds a copy of every descriptor
-  until it execs, and a `flock` lock is released only by an explicit unlock or the last close, so
-  closing our descriptor alone could leave the lock held for that instant. (Open-file-description
-  locks would not help: they are inherited across `fork` the same way.) The lock is held across
-  a commit's signing and a pull's transfer by design: the other app waits (or, after
-  `LOCK_WAIT`, runs unrecorded) rather than interleave with them. Where locks aren't supported (some network
-  file systems) the worker logs once and runs unlocked, as before. Each linked worktree has its
-  own lock, like its own `undo.json`. While `undo.json` was written by a newer version (never
-  overwritten) the in-memory stacks are the session's history and aren't reloaded; after any
-  other failed save the next locked write reloads the file first, so a stale copy never
-  overwrites the other window's entries. On NFS,
-  Linux emulates `flock` with per-process `fcntl` locks, so only separate processes exclude
-  each other there. `undo.json`, `sequence.json` and `rebase.json` are written
-  by `atomic_file::write_atomically` (temp file `<name>.<pid>.<n>.tmp`, unique per write in a
-  process, `sync_all`, rename).
+  again, and taking the lock resets it (#197). The commands that destroy work-tree content with
+  no other way back (discard hunk, lines, file or all unstaged, and a hard reset) are refused
+  instead with "Another Browsitory window is changing this repository's undo history. Try again
+  in a moment, so this change can be undone." (`undo::reply_busy`); Undo/Redo instead reply
+  "Another Browsitory window is changing this repository's undo history. Try again in a
+  moment." `undo::refuses_when_busy` and `undo::reply_busy` read one list,
+  `undo::busy_refusal` (#225). The lock is an OS lock on a handle, so a process that exits or is
+  killed, or a worker thread that panics, releases it; the file is never deleted (that would
+  let the next opener lock a new inode). The guard unlocks explicitly on drop (#175): a child
+  that any thread forks (a hook, a signer, git) holds a copy of every descriptor until it
+  execs, and a `flock` lock is released only by an explicit unlock or the last close, so closing
+  our descriptor alone could leave the lock held for that instant. (Open-file-description locks
+  would not help: they are inherited across `fork` the same way.) The lock is held across a
+  commit's signing and a pull's transfer by design: the other app waits (or, after
+  `LOCK_WAIT`, runs unrecorded) rather than interleave with them. Where locks aren't supported
+  (some network file systems) the worker logs once and runs unlocked, as before. Each linked
+  worktree has its own lock, like its own `undo.json`. While `undo.json` was written by a newer
+  version (never overwritten) the in-memory stacks are the session's history and aren't
+  reloaded; after any other failed save the next locked write reloads the file first, so a
+  stale copy never overwrites the other window's entries. On NFS, Linux emulates `flock` with
+  per-process `fcntl` locks, so only separate processes exclude each other there. `undo.json`,
+  `sequence.json` and `rebase.json` are written by `atomic_file::write_atomically` (temp file
+  `<name>.<pid>.<n>.tmp`, unique per write in a process, `sync_all`, rename).
 - **Storage**: `<gitdir>/browsitory/undo.json` per worktree (50 entries); objects pinned by
   `refs/browsitory/undo/main` (main worktree) or `refs/browsitory/undo/wt/<name>` (linked
   worktree), an anchor commit visible in `git log --all`, plus

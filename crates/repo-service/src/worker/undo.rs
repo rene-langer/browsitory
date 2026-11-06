@@ -731,8 +731,8 @@ impl HeldReplies {
 /// `every_recordable_command_has_its_reply_held` and `ending_commands_have_their_reply_held`.
 ///
 /// Arms are grouped by reply type: an or-pattern must bind `reply` at one type, so commands
-/// whose reply isn't `Sender<Result<(), String>>` (`Commit`/`AmendCommit` reply with a `CommitOutcome`,
-/// `StartMerge` with a `MergeOutcome`, ...) get arms of their own.
+/// whose reply isn't `Sender<Result<(), String>>` (`Commit`/`AmendCommit` reply with a
+/// `CommitOutcome`, `StartMerge` with a `MergeOutcome`, ...) get arms of their own.
 pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
     match command {
         Command::StageFile { reply, .. }
