@@ -1593,7 +1593,8 @@ describe("App", () => {
 
       fireEvent.click(await screen.findByRole("button", { name: "Stashes" }));
       const row = (await screen.findByText("On main: wip")).closest("li")!;
-      fireEvent.click(within(row).getByRole("button", { name: button }));
+      fireEvent.click(within(row).getByRole("button", { name: "Actions for On main: wip" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: button }));
 
       expect(await screen.findByText(toast)).toBeInTheDocument();
       expect(button === "Pop" ? popStash : applyStash).toHaveBeenCalledWith("/repos/a", 0, "s0", true);
@@ -1613,8 +1614,9 @@ describe("App", () => {
 
       fireEvent.click(await screen.findByRole("button", { name: "Stashes" }));
       const row = (await screen.findByText("On main: wip")).closest("li")!;
-      await waitFor(() => expect(within(row).getByRole("button", { name: "Pop" })).toBeDisabled());
-      expect(within(row).getByRole("button", { name: "Apply" })).toHaveAttribute(
+      fireEvent.click(within(row).getByRole("button", { name: "Actions for On main: wip" }));
+      await waitFor(() => expect(screen.getByRole("menuitem", { name: "Pop" })).toBeDisabled());
+      expect(screen.getByRole("menuitem", { name: "Apply" })).toHaveAttribute(
         "title",
         "Unstage or commit staged changes first.",
       );

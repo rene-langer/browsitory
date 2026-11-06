@@ -30,6 +30,12 @@ function renderPanel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) 
   return result;
 }
 
+/** Opens the actions menu of the stash row whose message matches `message`. */
+function openMenu(message: RegExp) {
+  const row = screen.getByText(message).closest("li")!;
+  fireEvent.click(within(row).getByRole("button", { name: /^Actions for / }));
+}
+
 describe("StashPanel", () => {
   it("shows an empty state when there are no stashes", () => {
     renderPanel({ stashes: [] });
@@ -53,23 +59,60 @@ describe("StashPanel", () => {
     expect(onSelectRow).toHaveBeenCalledWith({ commitId: "stash0" });
   });
 
-  it("clicking Apply on a stash row calls onApplyStash with its index, not onSelectRow", () => {
+  it("shows the full stash message as a tooltip, since a long one is cut off", () => {
+    renderPanel();
+
+    expect(screen.getByText("WIP on main: stash0fix uncommitted edit")).toHaveAttribute(
+      "title",
+      "WIP on main: stash0fix uncommitted edit",
+    );
+  });
+
+  it("gives each row one named actions button that opens a menu, not inline buttons", () => {
+    renderPanel();
+
+    const row = screen.getByText(/stash0fix/).closest("li")!;
+    const trigger = within(row).getByRole("button", { name: "Actions for WIP on main: stash0fix uncommitted edit" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(within(row).queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
+  it("applying from the menu calls onApplyStash with its index, not onSelectRow", () => {
     const onApplyStash = vi.fn();
     const onSelectRow = vi.fn();
     renderPanel({ onApplyStash, onSelectRow });
 
-    fireEvent.click(screen.getAllByText("Apply")[0]);
+    openMenu(/stash0fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply" }));
 
     expect(onApplyStash).toHaveBeenCalledWith(0);
     expect(onSelectRow).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("clicking Drop opens a confirmation naming the stash; confirming calls onDropStash with its index", () => {
+  it("opens the same menu with Shift+F10 on the row", () => {
+    renderPanel();
+
+    const row = screen.getByText(/stash1fix/).closest("li")!;
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Apply", "Pop", "Drop…"]);
+  });
+
+  it("Drop… opens a confirmation naming the stash; confirming calls onDropStash with its index", () => {
     const onDropStash = vi.fn();
     const onSelectRow = vi.fn();
     renderPanel({ onDropStash, onSelectRow });
 
-    fireEvent.click(screen.getAllByText("Drop")[1]);
+    openMenu(/stash1fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
     expect(onDropStash).not.toHaveBeenCalled();
     expect(onSelectRow).not.toHaveBeenCalled();
 
@@ -84,7 +127,8 @@ describe("StashPanel", () => {
     const onDropStash = vi.fn();
     renderPanel({ onDropStash });
 
-    fireEvent.click(screen.getAllByText("Drop")[0]);
+    openMenu(/stash0fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
     const dialog = screen.getByRole("dialog", { name: /Drop stash/ });
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
@@ -92,25 +136,14 @@ describe("StashPanel", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("disables every stash row's Apply and Drop buttons while an operation is pending", () => {
-    renderPanel({ operationDisabled: true });
-
-    for (const button of screen.getAllByText("Apply")) {
-      expect(button).toBeDisabled();
-    }
-    for (const button of screen.getAllByText("Drop")) {
-      expect(button).toBeDisabled();
-    }
-  });
-
-  it("explains why the stash Apply/Drop buttons are disabled via their title", () => {
+  it("disables every menu action, with the reason as its title, while an operation is pending", () => {
     renderPanel({ operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
 
-    for (const button of screen.getAllByText("Apply")) {
-      expect(button).toHaveAttribute("title", "A transfer is in progress.");
-    }
-    for (const button of screen.getAllByText("Drop")) {
-      expect(button).toHaveAttribute("title", "A transfer is in progress.");
+    openMenu(/stash0fix/);
+    for (const name of ["Apply", "Pop", "Drop…"]) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute("title", "A transfer is in progress.");
     }
   });
 });
@@ -121,17 +154,11 @@ describe("StashPanel pop and restore staged changes", () => {
     const onSelectRow = vi.fn();
     renderPanel({ onPopStash, onSelectRow });
 
-    const row = screen.getByText(/stash1fix/).closest("li")!;
-    fireEvent.click(within(row).getByRole("button", { name: "Pop" }));
+    openMenu(/stash1fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pop" }));
 
     expect(onPopStash).toHaveBeenCalledWith(1);
     expect(onSelectRow).not.toHaveBeenCalled();
-  });
-
-  it("orders the row actions Apply, Pop, Drop", () => {
-    renderPanel();
-    const row = screen.getByText(/stash0fix/).closest("li")!;
-    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Apply", "Pop", "Drop"]);
   });
 
   it("shows and toggles Restore staged changes", () => {
@@ -148,12 +175,12 @@ describe("StashPanel pop and restore staged changes", () => {
   it("disables Apply and Pop, not Drop, with the apply-disabled reason", () => {
     renderPanel({ applyDisabledReason: "Unstage or commit staged changes first." });
 
-    const row = screen.getByText(/stash0fix/).closest("li")!;
+    openMenu(/stash0fix/);
     for (const name of ["Apply", "Pop"]) {
-      const button = within(row).getByRole("button", { name });
-      expect(button).toBeDisabled();
-      expect(button).toHaveAttribute("title", "Unstage or commit staged changes first.");
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute("title", "Unstage or commit staged changes first.");
     }
-    expect(within(row).getByRole("button", { name: "Drop" })).toBeEnabled();
+    expect(screen.getByRole("menuitem", { name: "Drop…" })).toBeEnabled();
   });
 });

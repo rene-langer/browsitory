@@ -21,6 +21,23 @@
   flex: 1 1 auto;
 }
 
+/* The row's "…" menu button; the message (flex 1 1 auto, min-width 0) takes the rest of the row. */
+.iconButton {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.iconButton:hover:not(:disabled),
+.iconButton[aria-expanded="true"] {
+  background: var(--color-control);
+  color: var(--color-text);
+}
+
 .empty {
   padding: var(--space-2) var(--space-3);
   color: var(--color-text-muted);

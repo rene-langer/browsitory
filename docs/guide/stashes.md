@@ -93,8 +93,10 @@ accent is encoded (`é` as one or two code points).
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there
 or from the panel you can **Apply** it (keep the stash), **Pop** it (apply, then drop it) or
-drop it (**Drop…** in the stash view, **Drop** in the panel). **Restore staged changes** (on by default) brings back staged work as staged;
-turn it off to get everything back unstaged.
+drop it (**Drop…**). In the panel these are in the stash's menu: click its **…** button or
+right-click the stash. Hover over a long stash name to read all of it. **Restore staged
+changes** (on by default) brings back staged work as staged; turn it off to get everything back
+unstaged.
 
 Apply and Pop need nothing staged and no unresolved conflicts; the buttons are disabled with the
 reason until then. A stash that conflicts with your current files applies anyway and opens the
