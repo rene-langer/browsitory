@@ -3617,3 +3617,197 @@ fn stashing_a_folder_takes_the_renames_in_it_and_their_partners_outside_it() {
         );
     }
 }
+
+/// A repository with every kind of change a stash takes: an edited file, a staged new file, an
+/// untracked file and (Unix) a tracked file replaced by a link to a file outside it, which sends
+/// Stash all down the path-limited route (#114).
+fn every_kind_of_change() -> (tempfile::TempDir, git2::Repository, tempfile::TempDir) {
+    let out = common::outside_dir();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    write_file(dir.path(), "tc", "plain\n");
+    commit_all(&repo, "initial");
+    write_file(dir.path(), "a.txt", "edited\n");
+    write_file(dir.path(), "b.txt", "staged\n");
+    stage(&repo, "b.txt");
+    write_file(dir.path(), "u.txt", "untracked\n");
+    #[cfg(unix)]
+    common::replace_with_link(dir.path(), "tc", &out.path().join("target.txt"));
+    (dir, repo, out)
+}
+
+/// What a refused operation must leave as it was: every worktree entry outside `.git` (a link
+/// as its target), the index file, whether a stash ref or log exists, and the number of loose
+/// objects (no stash commit was written).
+fn untouched_state(dir: &std::path::Path) -> (Vec<(String, String)>, Vec<u8>, bool, usize) {
+    fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            if rel == ".git" {
+                continue;
+            }
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            if meta.file_type().is_symlink() {
+                let target = std::fs::read_link(&path).unwrap();
+                out.push((rel, format!("link {}", target.display())));
+            } else if meta.is_dir() {
+                out.push((rel, "dir".into()));
+                walk(root, &path, out);
+            } else {
+                out.push((rel, std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    let mut entries = Vec::new();
+    walk(dir, dir, &mut entries);
+    entries.sort();
+    let git_dir = dir.join(".git");
+    let objects = std::fs::read_dir(git_dir.join("objects"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.file_name().is_some_and(|name| name.len() == 2))
+        .map(|path| std::fs::read_dir(path).unwrap().count())
+        .sum();
+    (
+        entries,
+        std::fs::read(git_dir.join("index")).unwrap(),
+        git_dir.join("refs/stash").exists() || git_dir.join("logs/refs/stash").exists(),
+        objects,
+    )
+}
+
+/// Sets `core.ignorecase` in the repository's own config to `value`, or removes it.
+fn set_ignorecase(repo: &git2::Repository, value: Option<&str>) {
+    let mut config = repo
+        .config()
+        .unwrap()
+        .open_level(git2::ConfigLevel::Local)
+        .unwrap();
+    match value {
+        Some(value) => config.set_str("core.ignorecase", value).unwrap(),
+        None => {
+            let _ = config.remove("core.ignorecase");
+        }
+    }
+}
+
+/// Every stash route: each whole-stash mode, and Stash file… on each kind of change, with and
+/// without keep-index.
+fn every_stash_route() -> Vec<StashOptions> {
+    let mut routes = whole_stash_modes();
+    let mut picked = vec!["a.txt", "b.txt", "u.txt"];
+    if cfg!(unix) {
+        picked.push("tc");
+    }
+    for path in picked {
+        for keep_index in [false, true] {
+            routes.push(with(|o| {
+                o.paths = vec![path.into()];
+                o.keep_index = keep_index;
+            }));
+        }
+    }
+    routes
+}
+
+/// An invalid `core.ignorecase` stops every stash before anything is written: no stash commit,
+/// no `refs/stash`, the index, the files and the link as they were (#369). Before, stash read it
+/// as unset and skipped its case checks, and its forced reset could remove the link before
+/// libgit2's checkout refused the value.
+#[test]
+fn stash_save_refuses_an_invalid_core_ignorecase_and_writes_nothing() {
+    for opts in every_stash_route() {
+        let (dir, mut repo, out) = every_kind_of_change();
+        let status_before = git_core::status::status(&repo).unwrap();
+        set_ignorecase(&repo, Some("maybe"));
+        let before = untouched_state(dir.path());
+
+        let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+        assert!(
+            matches!(error, StashError::CaseConfig(_)),
+            "{opts:?}: {error:?}"
+        );
+        assert!(
+            error.to_string().starts_with("Can't read core.ignorecase"),
+            "{error}"
+        );
+        assert_eq!(untouched_state(dir.path()), before, "{opts:?}");
+        common::assert_outside_untouched(out.path());
+
+        // Absent again: the same stash works as before.
+        set_ignorecase(&repo, None);
+        assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+        git_core::stash::save_stash(&mut repo, &opts).unwrap();
+        assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+        common::assert_outside_untouched(out.path());
+    }
+}
+
+#[test]
+fn stash_save_works_with_a_valid_core_ignorecase() {
+    for value in ["true", "false"] {
+        for opts in every_stash_route() {
+            let (dir, mut repo, out) = every_kind_of_change();
+            set_ignorecase(&repo, Some(value));
+
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            assert_eq!(
+                git_core::stash::list_stashes(&mut repo).unwrap().len(),
+                1,
+                "{value} {opts:?}"
+            );
+            common::assert_outside_untouched(out.path());
+            if opts.paths.is_empty() && !opts.keep_index {
+                assert_eq!(read(dir.path(), "a.txt"), "a\n", "{value} {opts:?}");
+                assert_eq!(
+                    git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+                    StashApplyOutcome::Applied,
+                    "{value} {opts:?}"
+                );
+                assert_eq!(read(dir.path(), "a.txt"), "edited\n", "{value} {opts:?}");
+            }
+        }
+    }
+}
+
+/// Apply and Pop stop too, with the stash kept and nothing written (#369). Drop only edits the
+/// stash list and still works.
+#[test]
+fn apply_and_pop_refuse_an_invalid_core_ignorecase_and_write_nothing() {
+    let (dir, mut repo, out) = every_kind_of_change();
+    git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = true)).unwrap();
+    set_ignorecase(&repo, Some("maybe"));
+    let before = untouched_state(dir.path());
+
+    for restore_index in [false, true] {
+        let error = git_core::stash::apply_stash(&mut repo, 0, None, restore_index).unwrap_err();
+        assert!(matches!(error, StashError::CaseConfig(_)), "{error:?}");
+        assert_eq!(untouched_state(dir.path()), before);
+        let error = git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap_err();
+        assert!(matches!(error, StashError::CaseConfig(_)), "{error:?}");
+        assert_eq!(untouched_state(dir.path()), before);
+    }
+    assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+    common::assert_outside_untouched(out.path());
+
+    // Absent again: Pop works.
+    set_ignorecase(&repo, None);
+    assert_eq!(
+        git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+        StashApplyOutcome::Applied
+    );
+    assert_eq!(read(dir.path(), "a.txt"), "edited\n");
+    assert_eq!(read(dir.path(), "u.txt"), "untracked\n");
+
+    git_core::stash::save_stash(&mut repo, &StashOptions::default()).unwrap();
+    set_ignorecase(&repo, Some("maybe"));
+    git_core::stash::drop_stash(&mut repo, 0, None).unwrap();
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+}

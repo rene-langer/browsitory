@@ -99,6 +99,10 @@ pub enum StashError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` can't be read, so the case checks can't run and libgit2's checkout
+    /// could stop half-way (#225, #369). Nothing is written.
+    #[error(transparent)]
+    CaseConfig(#[from] crate::CaseConfigUnreadable),
     /// Windows: a stash apply (or pop) stopped at a file another program holds open; what its
     /// checkout had written was put back and the stash is kept (#321).
     #[error(transparent)]
@@ -196,6 +200,11 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
         .as_deref()
         .map(str::trim)
         .filter(|message| !message.is_empty());
+    // First, strictly and on every OS (#369): the case checks below need the value, and the
+    // path-limited route writes the stash commit and `refs/stash`, then removes the links it
+    // stashed, before its checkout, which refuses an invalid value while parsing attributes and
+    // ignore rules. Refusing then would leave the stash written and the worktree half reset.
+    crate::worktree_guard::core_ignorecase(repo)?;
     // Before any route: the path-limited stash (Stash file…, and Stash all when it takes that
     // route) would record the conflicted file with its markers and put HEAD's entry back in
     // the index, leaving the merge in progress, so the next commit would drop the other side.
@@ -709,7 +718,7 @@ fn with_rename_partners(
     picked_alone: bool,
 ) -> Result<Vec<String>, StashError> {
     let workdir = repo.workdir();
-    let folds_case = crate::worktree_guard::folds_case(repo);
+    let folds_case = crate::worktree_guard::try_folds_case(repo)?;
     let mut options = git2::StatusOptions::new();
     options
         .include_untracked(false)
@@ -769,9 +778,9 @@ fn same_in_icase_index(a: &[u8], b: &[u8]) -> bool {
     a.eq_ignore_ascii_case(b)
 }
 
-/// Where names fold (`folds_case`), refuses when a stashed tracked path differs only in ASCII
-/// case from a path HEAD or the index has (a case-only rename, `git mv Old old`). libgit2's index
-/// then finds one as the other (`same_in_icase_index`), so the stash's index tree would hold
+/// Where names fold (`try_folds_case`), refuses when a stashed tracked path differs only in
+/// ASCII case from a path HEAD or the index has (a case-only rename, `git mv Old old`).
+/// libgit2's index then finds one as the other (`same_in_icase_index`), so the stash's index tree would hold
 /// both names and the revert would find nothing to change: the stash is written but the rename
 /// stays (Stash all, through libgit2's own stash, has the same problem; see
 /// `docs/ARCHITECTURE.md`, #370).
@@ -780,7 +789,7 @@ fn refuse_case_only_rename(
     base: &git2::Commit,
     tracked: &[String],
 ) -> Result<(), StashError> {
-    if !crate::worktree_guard::folds_case(repo) {
+    if !crate::worktree_guard::try_folds_case(repo)? {
         return Ok(());
     }
     // The key `same_in_icase_index` compares by.
@@ -1052,8 +1061,8 @@ enum Kind {
 ///
 /// The restored tree is HEAD's; with `keep_index` the index's too: libgit2 resets once to the
 /// index commit, but with HEAD as the checkout baseline, so it still removes what is in the way
-/// of a path HEAD has and the index deletes (git does too). Where names fold (`folds_case`: the
-/// repository sets `core.ignorecase`, or always on macOS and Windows) paths compare as
+/// of a path HEAD has and the index deletes (git does too). Where names fold (`try_folds_case`:
+/// the repository sets `core.ignorecase`, or always on macOS and Windows) paths compare as
 /// `fold_name` folds them, like the apply/pop check (`refuse_untracked_below_tracked_file`) and
 /// the case-collision walker: `docs` is in the way of `Docs/f`, `STRASSE` of `Straße/f` and an
 /// NFD `Café` of an NFC `Café/f` (#337). Untracked symlinks are left to the hazard route
@@ -1063,7 +1072,7 @@ fn entry_in_the_way(
     keep_index: bool,
     include_untracked: bool,
 ) -> Result<Option<InTheWay>, StashError> {
-    let ignore_case = crate::worktree_guard::folds_case(repo);
+    let ignore_case = crate::worktree_guard::try_folds_case(repo)?;
     let fold = |path: &str| {
         if ignore_case {
             // `path` is UTF-8 and `fold_name` keeps it so; the lossy branch never runs.
@@ -1245,6 +1254,9 @@ pub fn apply_stash(
     restore_index: bool,
 ) -> Result<StashApplyOutcome, StashError> {
     ensure_stash_at(repo, index, expected)?;
+    // Strictly, on every OS, before the checks below and libgit2's checkout (#369), as
+    // `prepare_forced_checkout` does: `try_folds_case` doesn't read it on macOS and Windows.
+    crate::worktree_guard::core_ignorecase(repo)?;
     if repo.index()?.has_conflicts() {
         return Err(StashError::UnresolvedConflicts);
     }
@@ -1384,9 +1396,9 @@ fn refuse_untracked_file_over_folder(repo: &Repository, index: usize) -> Result<
 /// it checks out as `d~Updated upstream` while reporting success, and a pop would drop the
 /// stash (#206). Typically the stash itself recorded the swap (the untracked `d/x` with the
 /// file `d` deleted); the deletion is applied only after the untracked files. libgit2's merge
-/// compares exact case. Where names fold (`folds_case`: the repository sets `core.ignorecase`,
-/// or always on macOS and Windows, like the case-collision walker) paths compare as `fold_name`
-/// folds them, so `d/x` is refused over the indexed file `D` too (#234). On a case-insensitive
+/// compares exact case. Where names fold (`try_folds_case`: the repository sets
+/// `core.ignorecase`, or always on macOS and Windows, like the case-collision walker) paths
+/// compare as `fold_name` folds them, so `d/x` is refused over the indexed file `D` too (#234). On a case-insensitive
 /// drive `d` is `D` and `git stash pop` refuses as well. On a case-sensitive drive with
 /// `core.ignorecase` set, git would pop it; Browsitory refuses on purpose, since the setting may
 /// be right (a Linux casefold folder or a vfat mount folds names too).
@@ -1401,7 +1413,7 @@ fn refuse_untracked_below_tracked_file(repo: &Repository, index: usize) -> Resul
     let Ok(untracked) = repo.find_commit(id)?.parent(2) else {
         return Ok(());
     };
-    let ignore_case = crate::worktree_guard::folds_case(repo);
+    let ignore_case = crate::worktree_guard::try_folds_case(repo)?;
     let fold = |path: &[u8]| {
         let folded = if ignore_case {
             crate::worktree_guard::fold_name(path)
