@@ -188,7 +188,7 @@ impl WorkerHandle {
             .send(Command::StartMerge {
                 branch_name,
                 options,
-                operation_id: super::remote::next_operation_id("merge"),
+                operation_id: self.cancelled.allocate("merge"),
                 events,
                 reply: tx,
             })

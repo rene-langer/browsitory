@@ -87,7 +87,7 @@ impl WorkerHandle {
         self.tx
             .send(Command::SwitchBranch {
                 name,
-                operation_id: super::remote::next_operation_id("switch"),
+                operation_id: self.cancelled.allocate("switch"),
                 events,
                 reply: reply_tx,
             })

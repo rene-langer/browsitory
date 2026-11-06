@@ -336,7 +336,7 @@ impl WorkerHandle {
         trailers: Vec<git_core::commit::Trailer>,
         events: Sender<super::HookEvent>,
     ) -> Result<git_core::commit::CommitOutcome, String> {
-        let operation_id = super::remote::next_operation_id("amend");
+        let operation_id = self.cancelled.allocate("amend");
         round_trip(self, |reply| Command::AmendCommit {
             message,
             no_verify,
@@ -363,7 +363,7 @@ impl WorkerHandle {
         round_trip(self, |reply| Command::CherryPick {
             commit_id,
             mainline,
-            operation_id: super::remote::next_operation_id("pick"),
+            operation_id: self.cancelled.allocate("pick"),
             events,
             reply,
         })
@@ -378,7 +378,7 @@ impl WorkerHandle {
         round_trip(self, |reply| Command::RevertCommit {
             commit_id,
             mainline,
-            operation_id: super::remote::next_operation_id("pick"),
+            operation_id: self.cancelled.allocate("pick"),
             events,
             reply,
         })
@@ -393,7 +393,7 @@ impl WorkerHandle {
     ) -> Result<SequenceOutcome, String> {
         round_trip(self, |reply| Command::CherryPickMany {
             commit_ids,
-            operation_id: super::remote::next_operation_id("pick"),
+            operation_id: self.cancelled.allocate("pick"),
             events,
             reply,
         })
@@ -406,7 +406,7 @@ impl WorkerHandle {
     ) -> Result<SequenceOutcome, String> {
         round_trip(self, |reply| Command::RevertMany {
             commit_ids,
-            operation_id: super::remote::next_operation_id("pick"),
+            operation_id: self.cancelled.allocate("pick"),
             events,
             reply,
         })
@@ -421,7 +421,7 @@ impl WorkerHandle {
     ) -> Result<SequenceOutcome, String> {
         round_trip(self, |reply| Command::ContinueSequence {
             no_verify,
-            operation_id: super::remote::next_operation_id("continue"),
+            operation_id: self.cancelled.allocate("continue"),
             events,
             reply,
         })
@@ -450,7 +450,7 @@ impl WorkerHandle {
     ) -> Result<(), String> {
         round_trip(self, |reply| Command::CheckoutCommit {
             commit_id,
-            operation_id: super::remote::next_operation_id("checkout"),
+            operation_id: self.cancelled.allocate("checkout"),
             events,
             reply,
         })

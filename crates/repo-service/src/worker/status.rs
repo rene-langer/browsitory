@@ -709,7 +709,7 @@ impl WorkerHandle {
                 message,
                 no_verify,
                 trailers,
-                operation_id: super::remote::next_operation_id("commit"),
+                operation_id: self.cancelled.allocate("commit"),
                 events,
                 reply: tx,
             })

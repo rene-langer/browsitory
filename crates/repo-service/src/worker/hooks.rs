@@ -122,8 +122,7 @@ pub(super) fn run_post_hook_reported(
 }
 
 /// Runs `name` as a post hook of `op`'s command, reported on `events` as `source` and stopped
-/// by `cancel_transfer(op.id)`, then drops `op` from the cancel registry. The command's outcome
-/// stands whatever the hook does (#185).
+/// by `cancel_transfer(op.id)`. The command's outcome stands whatever the hook does (#185).
 pub(super) fn run_post_hook_on(
     repo: &git2::Repository,
     name: &str,

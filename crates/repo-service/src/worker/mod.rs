@@ -1,8 +1,7 @@
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 
 use git_core::blame::BlameLine;
@@ -30,6 +29,7 @@ use crate::pull_requests::{
 
 mod atomic_file;
 mod branch;
+mod cancel;
 mod compare;
 mod forge;
 mod gate;
@@ -685,15 +685,35 @@ pub(crate) enum Command {
     },
 }
 
-/// Operation IDs whose transfer the user asked to stop.
-///
-/// This is deliberately a *side channel* rather than another `Command`: the worker thread
-/// processes one command at a time, and while a fetch/pull/push is blocked inside `git2`'s
-/// network I/O it is not reading `rx` at all — a cancel sent through the command channel would
-/// queue behind the very transfer it is meant to interrupt. `WorkerHandle::cancel_transfer`
-/// therefore writes straight into this set, and `git-core`'s progress callbacks poll it on every
-/// tick from inside the blocked call (see `worker/remote.rs`'s `cancel_check`).
-pub type CancelRegistry = Arc<Mutex<HashSet<String>>>;
+pub use cancel::CancelRegistry;
+
+impl Command {
+    /// The cancellable operation this command carries, if any: the ID its handle method took
+    /// from `CancelRegistry::allocate`.
+    fn operation_id(&self) -> Option<&str> {
+        match self {
+            Command::Commit { operation_id, .. }
+            | Command::AmendCommit { operation_id, .. }
+            | Command::SwitchBranch { operation_id, .. }
+            | Command::CheckoutCommit { operation_id, .. }
+            | Command::StartMerge { operation_id, .. }
+            | Command::CherryPick { operation_id, .. }
+            | Command::RevertCommit { operation_id, .. }
+            | Command::CherryPickMany { operation_id, .. }
+            | Command::RevertMany { operation_id, .. }
+            | Command::ContinueSequence { operation_id, .. }
+            | Command::FetchRemote { operation_id, .. }
+            | Command::FetchAllRemotes { operation_id, .. }
+            | Command::PullCurrentUpstream { operation_id, .. }
+            | Command::PushBranch { operation_id, .. }
+            | Command::PushCurrentBranch { operation_id, .. }
+            | Command::ForcePushCurrentBranch { operation_id, .. }
+            | Command::PushTags { operation_id, .. }
+            | Command::DeleteRemoteBranch { operation_id, .. } => Some(operation_id),
+            _ => None,
+        }
+    }
+}
 
 /// The generation of the newest commit search. A running search whose generation is no longer
 /// current stops, so a newer search (or `cancel_search`) supersedes any older one, queued or
@@ -801,8 +821,8 @@ impl Worker {
         let repo = git_core::repo::open(&repo_path).map_err(|e| e.to_string())?;
         let workdir = repo.workdir().map(std::path::Path::to_path_buf);
         let (tx, rx) = mpsc::channel::<Command>();
-        let cancelled: CancelRegistry = Arc::new(Mutex::new(HashSet::new()));
-        let worker_cancelled = Arc::clone(&cancelled);
+        let cancelled = CancelRegistry::default();
+        let worker_cancelled = cancelled.clone();
         let search_generation: SearchGeneration = Arc::new(AtomicU64::new(0));
         let worker_search_generation = Arc::clone(&search_generation);
 
@@ -861,6 +881,12 @@ impl Worker {
             // (#175, #197).
             let mut contention = state_lock::Contention::default();
             for mut command in rx {
+                // The command's operation is done once this iteration ends, whether it ran or
+                // was refused (busy, or gated during a rebase or sequence): a cancel for it is
+                // then dropped rather than kept forever (#219).
+                let _operation_done = command
+                    .operation_id()
+                    .map(|operation_id| cancelled.done_on_drop(operation_id));
                 // A command that can record an entry or end a paused operation holds the lock
                 // from before `settle` until its `finish`, so no other holder ever sees "the
                 // operation ended, but its entry isn't recorded yet". Reads never wait.
@@ -1146,10 +1172,7 @@ impl Worker {
                             no_verify,
                             trailers,
                             set,
-                            remote::TransferOp {
-                                id: operation_id,
-                                cancelled: &cancelled,
-                            },
+                            remote::TransferOp::new(operation_id, &cancelled),
                             events,
                             reply,
                         );
@@ -1173,10 +1196,7 @@ impl Worker {
                     } => branch::switch(
                         &repo,
                         name,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1326,10 +1346,7 @@ impl Worker {
                             &repo,
                             branch_name,
                             options,
-                            remote::TransferOp {
-                                id: operation_id,
-                                cancelled: &cancelled,
-                            },
+                            remote::TransferOp::new(operation_id, &cancelled),
                             events,
                             reply,
                         );
@@ -1382,10 +1399,7 @@ impl Worker {
                         no_verify,
                         author,
                         trailers,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1400,10 +1414,7 @@ impl Worker {
                         git_core::pick::SequenceKind::CherryPick,
                         commit_id,
                         mainline,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1418,10 +1429,7 @@ impl Worker {
                         git_core::pick::SequenceKind::Revert,
                         commit_id,
                         mainline,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1437,10 +1445,7 @@ impl Worker {
                             &sequence_store,
                             kind,
                             commit_ids,
-                            remote::TransferOp {
-                                id: operation_id,
-                                cancelled: &cancelled,
-                            },
+                            remote::TransferOp::new(operation_id, &cancelled),
                             events,
                         );
                         undo::relabel_sequence(&mut undo_recorder, kind, &result);
@@ -1458,10 +1463,7 @@ impl Worker {
                             &sequence_store,
                             kind,
                             commit_ids,
-                            remote::TransferOp {
-                                id: operation_id,
-                                cancelled: &cancelled,
-                            },
+                            remote::TransferOp::new(operation_id, &cancelled),
                             events,
                         );
                         undo::relabel_sequence(&mut undo_recorder, kind, &result);
@@ -1477,10 +1479,7 @@ impl Worker {
                             &repo,
                             &sequence_store,
                             no_verify,
-                            remote::TransferOp {
-                                id: operation_id,
-                                cancelled: &cancelled,
-                            },
+                            remote::TransferOp::new(operation_id, &cancelled),
                             events,
                         );
                         if let Some(kind) = kind {
@@ -1504,10 +1503,7 @@ impl Worker {
                     } => history::checkout(
                         &repo,
                         commit_id,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1522,10 +1518,7 @@ impl Worker {
                         &credential_service,
                         remote_name,
                         no_verify,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1587,10 +1580,7 @@ impl Worker {
                         &credential_service,
                         remote_name,
                         prune,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1601,10 +1591,7 @@ impl Worker {
                     } => remote::pull(
                         &repo,
                         &credential_service,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1619,10 +1606,7 @@ impl Worker {
                         &credential_service,
                         remote_name,
                         no_verify,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1639,10 +1623,7 @@ impl Worker {
                         remote_name,
                         names,
                         no_verify,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1655,10 +1636,7 @@ impl Worker {
                         &repo,
                         &credential_service,
                         prune,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1681,10 +1659,7 @@ impl Worker {
                             set_upstream,
                             no_verify,
                         },
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1701,10 +1676,7 @@ impl Worker {
                         remote_name,
                         branch_name,
                         no_verify,
-                        remote::TransferOp {
-                            id: operation_id,
-                            cancelled: &cancelled,
-                        },
+                        remote::TransferOp::new(operation_id, &cancelled),
                         events,
                         reply,
                     ),
@@ -1791,7 +1763,7 @@ impl Worker {
     pub fn handle(&self) -> WorkerHandle {
         WorkerHandle {
             tx: self.tx.clone(),
-            cancelled: Arc::clone(&self.cancelled),
+            cancelled: self.cancelled.clone(),
             search_generation: Arc::clone(&self.search_generation),
             workdir: self.workdir.clone(),
         }
@@ -1825,7 +1797,7 @@ struct PauseHook {
     point: PausePoint,
     armed: Arc<std::sync::atomic::AtomicBool>,
     reached: Sender<()>,
-    go: Mutex<mpsc::Receiver<()>>,
+    go: std::sync::Mutex<mpsc::Receiver<()>>,
 }
 
 #[cfg(test)]
@@ -1839,7 +1811,7 @@ impl PauseHook {
                 point,
                 armed: Arc::clone(&armed),
                 reached: reached_tx,
-                go: Mutex::new(go_rx),
+                go: std::sync::Mutex::new(go_rx),
             },
             PauseControl {
                 armed,
@@ -1904,14 +1876,11 @@ impl WorkerHandle {
     /// transfer had already finished, which is exactly what this must not do. The `git2`
     /// progress callbacks poll this set from inside the blocked call and abort the transfer.
     ///
-    /// Marking an operation that is not (or no longer) running is harmless: the entry is
-    /// removed when a transfer with that ID completes, and an ID that never runs only occupies
-    /// one string until the worker is dropped.
+    /// A cancel for an operation that is still queued stops it as soon as it starts. A cancel
+    /// for an ID this worker is not running or about to run (it finished already, or never
+    /// existed) is dropped (#219).
     pub fn cancel_transfer(&self, operation_id: &str) {
-        self.cancelled
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .insert(operation_id.to_string());
+        self.cancelled.cancel(operation_id);
     }
 
     /// Test-only: crashes the worker thread from inside its dispatch loop, the same failure mode

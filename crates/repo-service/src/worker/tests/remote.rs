@@ -139,14 +139,16 @@ fn cancelling_a_transfer_by_operation_id_surfaces_a_cancelled_completion_event()
     // local bare remote finishes in microseconds, so cancelling after `fetch_remote` returned
     // would race the transfer and make this test flaky; pre-marking is well-defined precisely
     // because `cancel_transfer` writes to the shared registry rather than sending a command,
-    // and the registry is what the `git2` progress callbacks poll.
-    handle.cancel_transfer("fetch-cancel-test");
+    // and the registry is what the `git2` progress callbacks poll. The ID comes from the
+    // registry, as `fetch_remote` takes it, so the registry keeps this early cancel (#219).
+    let operation_id = handle.cancelled.allocate("fetch");
+    handle.cancel_transfer(&operation_id);
     handle
         .tx
         .send(Command::FetchRemote {
             remote_name: "origin".into(),
             prune: None,
-            operation_id: "fetch-cancel-test".into(),
+            operation_id: operation_id.clone(),
             events: event_tx,
             reply: reply_tx,
         })
@@ -161,7 +163,7 @@ fn cancelling_a_transfer_by_operation_id_surfaces_a_cancelled_completion_event()
             operation: TransferOperation::Fetch,
             error: Some(TransferErrorKind::Cancelled),
             hook_output: None,
-        }) if id == "fetch-cancel-test"
+        }) if id == &operation_id
     ));
     // The cancelled transfer never created the tracking ref it would have on success.
     assert!(Repository::open(local_dir.path())
@@ -170,11 +172,7 @@ fn cancelling_a_transfer_by_operation_id_surfaces_a_cancelled_completion_event()
         .is_err());
     // Completion clears the registry entry, so a long-lived worker's cancel set cannot grow
     // without bound.
-    assert!(!handle
-        .cancelled
-        .lock()
-        .unwrap()
-        .contains("fetch-cancel-test"));
+    assert_eq!(handle.cancelled.len(), 0);
 }
 
 #[test]
@@ -187,14 +185,16 @@ fn cancel_transfer_reaches_a_worker_that_is_not_reading_its_command_channel() {
     let (dir, _repo) = init_repo();
     let worker = Worker::spawn(dir.path().to_path_buf()).expect("spawn worker");
     let handle = worker.handle();
+    // Handed out, as for a transfer queued before the worker stopped reading commands.
+    let operation_id = handle.cancelled.allocate("fetch");
     handle.crash_for_test();
     while handle.is_alive() {
         thread::sleep(Duration::from_millis(5));
     }
 
-    handle.cancel_transfer("fetch-7");
+    handle.cancel_transfer(&operation_id);
 
-    assert!(handle.cancelled.lock().unwrap().contains("fetch-7"));
+    assert!(handle.cancelled.is_cancelled(&operation_id));
 }
 
 #[test]
