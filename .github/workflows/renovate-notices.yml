@@ -62,7 +62,7 @@ jobs:
             exit 1
           fi
           echo "CARGO_ABOUT_VERSION=$version" >> "$GITHUB_ENV"
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-about@${{ env.CARGO_ABOUT_VERSION }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
