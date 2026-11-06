@@ -238,10 +238,37 @@ describe("BranchTree — local branches", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByRole("menuitem", { name: "Show all branches" })).toBeDisabled();
 
+    // The open menu follows the new props.
     rerender(<BranchTree {...props} graphBranchSelection={["feat/foo"]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
     expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith(["main", "feat/foo"]);
+  });
+
+  it("a second click on a menu button closes its menu", () => {
+    renderTree();
+    const add = screen.getByRole("button", { name: "Add" });
+    fireEvent.click(add);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.mouseDown(add);
+    fireEvent.click(add);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(add).toHaveAttribute("aria-expanded", "false");
+    expect(add).toHaveFocus();
+  });
+
+  it("a click on a branch's '…' closes the menu that Shift+F10 on its row opened", () => {
+    renderTree();
+    const actions = screen.getByRole("button", { name: "Actions for main" });
+    const row = actions.closest("li")!;
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.mouseDown(actions);
+    fireEvent.click(actions);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", async () => {

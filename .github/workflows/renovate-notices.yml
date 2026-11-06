@@ -40,6 +40,8 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'renovate/')
     runs-on: ubuntu-latest
+    # Same work as ci.yml's `licenses` job (about 2 minutes) minus two of the four installs (#353).
+    timeout-minutes: 15
     outputs:
       changed: ${{ steps.changes.outputs.changed }}
     steps:
@@ -103,6 +105,8 @@ jobs:
     needs: generate
     if: needs.generate.outputs.changed == 'true'
     runs-on: ubuntu-latest
+    # A checkout, one push and at most a minute waiting for the dispatched run (#353).
+    timeout-minutes: 10
     permissions:
       contents: write # push the regenerated file to the Renovate branch
       actions: write # dispatch ci.yml on that branch

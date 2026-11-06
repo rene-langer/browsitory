@@ -45,6 +45,20 @@ describe("SplitButton", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("a second click on the chevron closes the menu and keeps focus on the chevron", () => {
+    renderSplit();
+    const chevron = screen.getByRole("button", { name: "More stash options" });
+    fireEvent.click(chevron);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.mouseDown(chevron);
+    fireEvent.click(chevron);
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(chevron).toHaveAttribute("aria-expanded", "false");
+    expect(chevron).toHaveFocus();
+  });
+
   it("disables both buttons with the title", () => {
     renderSplit({ disabled: true, title: "Nothing to stash" });
     expect(screen.getByRole("button", { name: "Stash" })).toBeDisabled();

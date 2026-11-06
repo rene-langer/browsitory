@@ -51,8 +51,12 @@ describe("Browsitory stash", () => {
     const stashRow = await $("li*=WIP on");
     await stashRow.waitForExist({ timeout: 10000 });
 
-    const applyButton = await $("button=Apply");
-    await browser.execute((el) => (el as HTMLElement).click(), applyButton);
+    // Apply sits in the row's actions menu ("…"), not inline in the row (#339).
+    const actions = await stashRow.$('button[aria-label^="Actions for"]');
+    await browser.execute((el) => (el as HTMLElement).click(), actions);
+    const applyItem = await $('[role="menu"]').$("button=Apply");
+    await applyItem.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => (el as HTMLElement).click(), applyItem);
 
     await browser.waitUntil(
       async () => {

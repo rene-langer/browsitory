@@ -486,6 +486,19 @@ describe("DiffPane", () => {
         expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
       });
 
+      it("a mouse click on '…' closes the menu the Menu key opened", () => {
+        render();
+        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.keyDown(screen.getByRole("listbox", { name: "Unstaged changes" }), { key: "ContextMenu" });
+        expect(screen.getByRole("menu")).toBeInTheDocument();
+        const actions = screen.getByRole("button", { name: "Actions for src/a.ts" });
+
+        fireEvent.mouseDown(actions);
+        fireEvent.click(actions, { detail: 1 });
+
+        expect(screen.queryByRole("menu")).toBeNull();
+      });
+
       it("opens the menu of the row holding focus, not the selected row", () => {
         render();
         fireEvent.click(screen.getByText("src/a.ts (Modified)"));
@@ -498,6 +511,20 @@ describe("DiffPane", () => {
         expect(screen.getByRole("menuitem", { name: "Ignore all *.log" })).toBeInTheDocument();
         fireEvent.keyDown(screen.getByRole("menuitem", { name: "Discard changes…" }), { key: "Escape" });
         expect(other).toHaveFocus();
+      });
+
+      it("a second click on '…' closes its menu", () => {
+        render();
+        const actions = screen.getByRole("button", { name: "Actions for src/a.ts" });
+        fireEvent.click(actions, { detail: 1 });
+        expect(actions).toHaveAttribute("aria-expanded", "true");
+
+        fireEvent.mouseDown(actions);
+        fireEvent.click(actions, { detail: 1 });
+
+        expect(screen.queryByRole("menu")).toBeNull();
+        expect(actions).toHaveAttribute("aria-expanded", "false");
+        expect(actions).toHaveFocus();
       });
 
       it("a menu opened by clicking '…' returns focus to it, even if the click did not focus it", () => {

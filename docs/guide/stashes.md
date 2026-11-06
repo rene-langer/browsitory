@@ -104,11 +104,14 @@ accent is encoded (`é` as one or two code points).
 Expand **Stashes** to see everything set aside. Click a stash to see what it holds: **Changes**
 (diffed against the commit it was made on) and, if it took any, **Untracked** files. From there
 or from the panel you can **Apply** it (keep the stash), **Pop** it (apply, then drop it) or
-drop it (**Drop…** in the stash view, **Drop** in the panel). **Restore staged changes** (on by default) brings back staged work as staged;
-turn it off to get everything back unstaged.
+drop it (**Drop…**). In the panel these are menu items in the stash's menu: open it with the
+**…** button that shows when you point at or tab to the stash, by right-clicking the stash, or
+with the Menu key or Shift+F10. Hover over a long stash name to read all of it. **Restore staged
+changes** (on by default) brings back staged work as staged; turn it off to get everything back
+unstaged.
 
-Apply and Pop need nothing staged and no unresolved conflicts; the buttons are disabled with the
-reason until then. A stash that conflicts with your current files applies anyway and opens the
+Apply and Pop need nothing staged and no unresolved conflicts; the buttons and menu items are
+disabled with the reason until then. A stash that conflicts with your current files applies anyway and opens the
 files in the conflict pane; a conflicting **Pop** keeps the stash, so drop it yourself once the
 files are resolved. If the stash list changed since you looked (another tool stashed or
 dropped), Apply, Pop and Drop stop and ask you to refresh. Dropping asks for confirmation first, since it can't be undone, and stash

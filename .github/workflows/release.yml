@@ -37,6 +37,9 @@ jobs:
   verify:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Observed up to 9 min (uncached cargo test). Its apt step has no limit of its own, and a slow
+    # mirror has taken up to 30 min (#353).
+    timeout-minutes: 45
     env:
       # Same pin as ci.yml's `licenses` job; keep both in sync (Renovate updates both).
       # renovate: datasource=crate depName=cargo-about
@@ -103,6 +106,9 @@ jobs:
           - os: windows-latest
             args: ""
     runs-on: ${{ matrix.os }}
+    # Observed up to 16 min (macOS universal build, no cache), plus up to 30 min for a slow apt
+    # mirror on Linux (#353).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - name: Set package version from tag
@@ -179,6 +185,8 @@ jobs:
             vsix_target: win32-x64
             sidecar_suffix: .exe
     runs-on: ${{ matrix.os }}
+    # Observed up to 6 min (#353).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - id: release-version
@@ -235,6 +243,8 @@ jobs:
     needs: [build-release, build-vsix-release]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Observed under 1 min: downloads the packages, uploads them to the draft release (#353).
+    timeout-minutes: 15
     steps:
       # For THIRD_PARTY_NOTICES.md: every installer and .vsix already carries it; the release
       # page gets a copy too, so the licences can be read without installing anything.
@@ -267,6 +277,9 @@ jobs:
     needs: publish-vsix-release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
     runs-on: ubuntu-latest
+    # Two listing checks of up to 30 min each (--timeout 1800 below), four vsce publishes and
+    # setup (#353).
+    timeout-minutes: 90
     environment: marketplace
     # One group per registry: a second job in the same group would wait, and a third would
     # cancel the waiting one.
@@ -375,6 +388,8 @@ jobs:
     needs: publish-vsix-release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
     runs-on: ubuntu-latest
+    # One listing check of up to 30 min (--timeout 1800 below) plus four ovsx publishes (#353).
+    timeout-minutes: 60
     environment: marketplace
     concurrency:
       group: marketplace-publish-ovsx
@@ -441,6 +456,8 @@ jobs:
   dry-run-guard:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # One shell check (#353).
+    timeout-minutes: 5
     permissions: {}
     steps:
       - name: Allow only a dry run on a release/ tag
@@ -466,6 +483,8 @@ jobs:
     needs: dry-run-guard
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Observed under 1 min (#353).
+    timeout-minutes: 15
     environment: marketplace
     permissions:
       contents: read
@@ -509,6 +528,8 @@ jobs:
     needs: dry-run-guard
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Observed under 1 min (#353).
+    timeout-minutes: 10
     environment: marketplace
     permissions:
       contents: read

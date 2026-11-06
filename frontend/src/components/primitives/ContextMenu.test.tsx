@@ -82,6 +82,91 @@ describe("ContextMenu", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("leaves a mousedown on its menu-button trigger to that button's click, so the button can toggle it", () => {
+    const onClose = vi.fn();
+    render(<button aria-haspopup="menu">trigger</button>);
+    const trigger = screen.getByRole("button", { name: "trigger" });
+    render(<ContextMenu x={0} y={0} returnFocusTo={trigger} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(trigger);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("leaves a press on the menu button focused when it opened (opened by a key) to that button", () => {
+    const onClose = vi.fn();
+    render(<button aria-haspopup="menu">trigger</button>);
+    const trigger = screen.getByRole("button", { name: "trigger" });
+    trigger.focus();
+    render(<ContextMenu x={0} y={0} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(trigger);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("leaves a press on a menu button the caller names with isTrigger to that button", () => {
+    const onClose = vi.fn();
+    render(
+      <button aria-haspopup="menu" data-menu-key="row-1">
+        trigger
+      </button>,
+    );
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        isTrigger={(button) => button.getAttribute("data-menu-key") === "row-1"}
+        onClose={onClose}
+        items={[{ label: "X", onSelect: () => {} }]}
+      />,
+    );
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "trigger" }));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on a press on another menu's open trigger", () => {
+    const onClose = vi.fn();
+    render(
+      <>
+        <button aria-haspopup="menu">mine</button>
+        <button aria-haspopup="menu" aria-expanded="true">
+          other
+        </button>
+      </>,
+    );
+    const mine = screen.getByRole("button", { name: "mine" });
+    render(<ContextMenu x={0} y={0} returnFocusTo={mine} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "other" }));
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("closes on a secondary-button press on its trigger", () => {
+    const onClose = vi.fn();
+    render(<button aria-haspopup="menu">trigger</button>);
+    const trigger = screen.getByRole("button", { name: "trigger" });
+    render(<ContextMenu x={0} y={0} returnFocusTo={trigger} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(trigger, { button: 2 });
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("still closes on a mousedown on a right-clicked row it returns focus to", () => {
+    const onClose = vi.fn();
+    render(<div data-testid="row">row</div>);
+    const row = screen.getByTestId("row");
+    render(<ContextMenu x={0} y={0} returnFocusTo={row} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(row);
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("stays open when the pointer leaves it (outside click and Escape close it)", () => {
     const onClose = vi.fn();
     render(<ContextMenu x={0} y={0} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);

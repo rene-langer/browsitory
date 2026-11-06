@@ -20,6 +20,7 @@ export function ContextMenu({
   items,
   onClose,
   returnFocusTo,
+  isTrigger,
 }: {
   x: number;
   y: number;
@@ -30,6 +31,12 @@ export function ContextMenu({
    * Defaults to whatever was focused when the menu first rendered (its trigger).
    */
   returnFocusTo?: HTMLElement | null;
+  /**
+   * Names this menu's own menu button when it may be neither `returnFocusTo` nor the element
+   * focused at open, e.g. a row's "…" when the menu was opened from the row by a key or a
+   * right-click. Called at press time with the pressed `aria-haspopup="menu"` element.
+   */
+  isTrigger?: (button: Element) => boolean;
 }) {
   const menuRef = useRef<HTMLUListElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -73,10 +80,14 @@ export function ContextMenu({
   // menu pattern's initial-focus expectation.
   const [focusedIndex, setFocusedIndex] = useState<number>(() => enabledIndexes[0] ?? -1);
 
-  // The document listener below reads the latest `restoreFocus` without re-subscribing.
+  // The document listeners below read the latest `restoreFocus` and trigger without re-subscribing.
   const restoreFocusRef = useRef(restoreFocus);
+  const returnFocusToRef = useRef(returnFocusTo);
+  const isTriggerRef = useRef(isTrigger);
   useEffect(() => {
     restoreFocusRef.current = restoreFocus;
+    returnFocusToRef.current = returnFocusTo;
+    isTriggerRef.current = isTrigger;
   });
 
   useEffect(() => {
@@ -89,7 +100,25 @@ export function ContextMenu({
       onClose();
     }
     function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current !== null && !menuRef.current.contains(event.target as Node)) onClose();
+      const target = event.target as Node;
+      if (menuRef.current === null || menuRef.current.contains(target)) return;
+      if (event.button === 0 && isOwnMenuButton(target)) return;
+      onClose();
+    }
+    // A primary press on this menu's own menu button is left to that button's click, which
+    // toggles the menu closed; closing here would let the click reopen it at once. Its own button
+    // is a menu button (`aria-haspopup="menu"`, so never a right-clicked row) that is the trigger
+    // it returns focus to, the element focused when it opened, or the one `isTrigger` names.
+    // Another menu's open button is not: a press there closes this menu.
+    function isOwnMenuButton(target: Node): boolean {
+      const element = target instanceof Element ? target : target.parentElement;
+      const button = element?.closest('[aria-haspopup="menu"]');
+      if (button === null || button === undefined) return false;
+      return (
+        button === returnFocusToRef.current ||
+        button === capturedTrigger.current ||
+        isTriggerRef.current?.(button) === true
+      );
     }
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("mousedown", handleClickOutside);

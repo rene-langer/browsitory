@@ -29,7 +29,7 @@ export function SplitButton({
   /** Extra class for the chevron, for callers whose own button styles need overriding. */
   chevronClassName?: string;
 }) {
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo: HTMLElement } | null>(null);
   return (
     <span className={styles.group}>
       <button type="button" disabled={disabled} title={title} onClick={() => onClick()}>
@@ -44,14 +44,28 @@ export function SplitButton({
         disabled={disabled}
         title={menuTitle ?? title}
         onClick={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          setMenu({ x: rect.left, y: rect.bottom });
+          const chevron = event.currentTarget;
+          if (menu !== null) {
+            // A second click closes the menu; focus stays on the chevron (WebKit may not have
+            // focused it on the click).
+            chevron.focus({ preventScroll: true });
+            setMenu(null);
+            return;
+          }
+          const rect = chevron.getBoundingClientRect();
+          setMenu({ x: rect.left, y: rect.bottom, returnFocusTo: chevron });
         }}
       >
         <ChevronDown size={12} aria-hidden="true" />
       </button>
       {menu !== null && (
-        <ContextMenu x={menu.x} y={menu.y} items={items} onClose={() => setMenu(null)} />
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          returnFocusTo={menu.returnFocusTo}
+          items={items}
+          onClose={() => setMenu(null)}
+        />
       )}
     </span>
   );
