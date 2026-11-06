@@ -607,8 +607,9 @@ pub fn mark_resolved(
 /// that was never checked (#199). A file's blob goes through `blob_writer` with the path as
 /// hint, so the same clean filters (`core.autocrlf`, `.gitattributes`) apply as with
 /// `add_path`; `remove_path` moves the conflict stages to resolve-undo (REUC), as `add_path`
-/// does. The new entry carries the stat data of the descriptor the bytes were read from, so
-/// status trusts it like any entry `git add` wrote. A folder at the path is probed and held
+/// does. The new entry carries the stat data of the descriptor the bytes were read from (a
+/// link's own `lstat` data, zeroed on Windows), so status trusts it like any entry `git add`
+/// wrote. A folder at the path is probed and held
 /// through `worktree_guard::probe_beneath`, never reopened by path: a nested repository is
 /// staged as a gitlink to the commit its HEAD names, read through the held folder (#213), and
 /// any other folder is refused (`FolderNotStaged`).
@@ -663,11 +664,11 @@ pub fn mark_resolved_with_pauses(
         }
     })?;
     match leaf {
-        Some(Leaf::Link(target)) => {
+        Some(Leaf::Link { target, stat }) => {
             after_check();
             let id = repo.blob(&target)?;
             index.remove_path(Path::new(path))?;
-            index.add(&crate::undo::index_entry(path, id, crate::undo::MODE_LINK))?;
+            index.add(&staged_entry(path, id, crate::undo::MODE_LINK, &stat))?;
         }
         Some(Leaf::File {
             bytes,

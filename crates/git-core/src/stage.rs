@@ -385,7 +385,7 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
     let existing = match crate::worktree_guard::read_beneath(workdir, ".gitignore")? {
         Some(Leaf::File { bytes, .. }) => String::from_utf8(bytes)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-        Some(Leaf::Link(_)) => return Err(StageError::InvalidPath),
+        Some(Leaf::Link { .. }) => return Err(StageError::InvalidPath),
         None => match std::fs::symlink_metadata(workdir.join(".gitignore")) {
             // Missing: a new file.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),

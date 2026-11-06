@@ -697,7 +697,10 @@ fn read_leaf(at: &Beneath, limit: u64) -> io::Result<Option<Leaf>> {
     };
     if is_link(&stat) {
         return match readlink_at(at.parent(), at.leaf()) {
-            Ok(target) => Ok(Some(Leaf::Link(target))),
+            Ok(target) => Ok(Some(Leaf::Link {
+                target,
+                stat: file_stat(&stat),
+            })),
             Err(error) if gone(&error) || errno(&error) == libc::EINVAL => Ok(None),
             Err(error) => Err(error),
         };
@@ -1333,10 +1336,10 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let (dir, outside) = tree();
         std::os::unix::fs::symlink("../elsewhere", dir.path().join("d/l")).unwrap();
-        assert_eq!(
+        assert!(matches!(
             read(dir.path(), Path::new("d/l"), &mut no_step).unwrap(),
-            Some(Leaf::Link(b"../elsewhere".to_vec()))
-        );
+            Some(Leaf::Link { target, .. }) if target == b"../elsewhere"
+        ));
         std::fs::set_permissions(
             dir.path().join("d/f"),
             std::fs::Permissions::from_mode(0o755),

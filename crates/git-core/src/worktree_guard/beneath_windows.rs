@@ -1643,7 +1643,10 @@ fn read_walked(walked: io::Result<Walk<Beneath>>, limit: u64) -> io::Result<Opti
     match found {
         Found::Dir => Ok(None),
         // From the handle just checked to be in the held parent: never followed.
-        Found::Link => Ok(link_target(&leaf).ok().map(Leaf::Link)),
+        Found::Link => Ok(link_target(&leaf).ok().map(|target| Leaf::Link {
+            target,
+            stat: super::FileStat::default(),
+        })),
         Found::File { .. } => {
             drop(leaf);
             let Some(file) = open_leaf_for_reading(&at)? else {
@@ -2166,10 +2169,11 @@ mod tests {
             target_through_the_handle(dir.path(), "j"),
             read_link(&dir.path().join("j"))
         );
-        assert_eq!(
+        assert!(matches!(
             read(dir.path(), Path::new("j"), &mut no_step).unwrap(),
-            Some(Leaf::Link(read_link(&dir.path().join("j")).into_bytes()))
-        );
+            Some(Leaf::Link { target, .. })
+                if target == read_link(&dir.path().join("j")).into_bytes()
+        ));
         if !symlink_privilege(dir.path()) {
             // CI runners may create symbolic links: there the check must not be skipped.
             assert!(

@@ -1297,8 +1297,13 @@ pub(crate) enum Leaf {
         /// Taken from the descriptor the bytes were read from, before reading them.
         stat: FileStat,
     },
-    /// The link's target (`/`-separated on Windows).
-    Link(Vec<u8>),
+    Link {
+        /// The link's target (`/`-separated on Windows).
+        target: Vec<u8>,
+        /// The link's own stat data (`lstat`), taken before its target was read. Zeroed on
+        /// Windows, where status then reads the link again on every refresh (#225).
+        stat: FileStat,
+    },
 }
 
 /// A file's stat data as `git add` records it in the index (git's `fill_stat_data`), from the
@@ -2757,7 +2762,7 @@ mod tests {
         assert_eq!(
             read_beneath(dir.path(), "l")
                 .unwrap()
-                .map(|leaf| matches!(leaf, Leaf::Link(_))),
+                .map(|leaf| matches!(leaf, Leaf::Link { .. })),
             Some(true)
         );
     }

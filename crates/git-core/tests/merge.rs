@@ -671,6 +671,33 @@ fn mark_resolved_records_the_files_stat_data() {
     );
 }
 
+/// A staged link records its own stat data (`lstat`) too, so status trusts it instead of
+/// reading the link again on every refresh (#225).
+#[cfg(unix)]
+#[test]
+fn mark_resolved_records_a_links_stat_data() {
+    use std::os::unix::fs::MetadataExt;
+    let (dir, repo) = make_conflicted_repo();
+    let link = dir.path().join("shared.txt");
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink("elsewhere.txt", &link).unwrap();
+    git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    let entry = repo
+        .index()
+        .unwrap()
+        .get_path(Path::new("shared.txt"), 0)
+        .unwrap();
+    let meta = std::fs::symlink_metadata(&link).unwrap();
+    assert_eq!(entry.mode, 0o120000);
+    assert_eq!(entry.ino, meta.ino() as u32);
+    assert_eq!(entry.file_size as u64, meta.len());
+    assert_eq!(entry.mtime.seconds(), meta.mtime() as i32);
+    assert_eq!(entry.mtime.nanoseconds(), meta.mtime_nsec() as u32);
+    assert_eq!(entry.ctime.seconds(), meta.ctime() as i32);
+    let status = repo.status_file(Path::new("shared.txt")).unwrap();
+    assert_eq!(status, git2::Status::INDEX_TYPECHANGE, "{status:?}");
+}
+
 /// A file Mark resolved can't open isn't called a FIFO, socket or device (#199).
 #[cfg(unix)]
 #[test]
