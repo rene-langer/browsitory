@@ -1326,6 +1326,95 @@ fn stash_all_without_untracked_refuses_a_case_only_swap_when_ignorecase_is_on() 
     assert_eq!(read(dir.path(), "docs"), "now a file\n");
 }
 
+/// HEAD has `{folder}/f`; the worktree swapped the folder for the untracked file `file`, a name
+/// a case-insensitive file system folds to the same as `folder`, with `core.ignorecase` set to
+/// `ignore_case`. Saving without untracked files returns the error and the file stays.
+fn save_over_folded_name(folder: &str, file: &str, ignore_case: bool) -> Result<(), StashError> {
+    let (dir, mut repo) = init_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", ignore_case)
+        .unwrap();
+    write_file(dir.path(), &format!("{folder}/f"), "f\n");
+    commit_all(&repo, "base");
+    std::fs::remove_dir_all(dir.path().join(folder)).unwrap();
+    write_file(dir.path(), file, "now a file\n");
+    let status_before = git_core::status::status(&repo).unwrap();
+
+    let result = git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false));
+
+    if result.is_err() {
+        assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+        assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+    }
+    assert_eq!(read(dir.path(), file), "now a file\n");
+    result
+}
+
+/// `result` is `UntrackedInTheWay` for one of `untracked` (macOS may report a name in its
+/// precomposed form) in the way of `tracked`.
+fn assert_in_the_way_of(result: Result<(), StashError>, untracked: &[&str], tracked: &str) {
+    let error = result.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            StashError::UntrackedInTheWay { untracked: ref u, tracked: ref t }
+                if untracked.contains(&u.as_str()) && t == tracked
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn stash_save_folds_sharp_s_like_the_file_system_when_ignorecase_is_on() {
+    // `to_lowercase` keeps `ß`; the full case fold the guard uses makes it `ss` (#337).
+    let result = save_over_folded_name("Straße", "STRASSE", true);
+    assert_in_the_way_of(result, &["STRASSE"], "Straße/f");
+}
+
+#[test]
+fn stash_save_treats_composed_and_decomposed_names_as_one_when_ignorecase_is_on() {
+    // APFS and HFS+ compare names after Unicode normalization: `é` as U+00E9 and as `e` +
+    // U+0301 are one name (#337).
+    let result = save_over_folded_name("Caf\u{e9}", "Cafe\u{301}", true);
+    assert_in_the_way_of(result, &["Cafe\u{301}", "Caf\u{e9}"], "Caf\u{e9}/f");
+}
+
+#[test]
+fn stash_save_ignores_hfs_ignorable_code_points_when_ignorecase_is_on() {
+    // HFS+ drops U+200C (zero-width non-joiner) from names, so there `do\u{200c}cs` is `docs`.
+    // APFS doesn't ignore U+200C; this documents `fold_name`'s HFS+ behaviour, which errs
+    // towards refusing more (#337).
+    let result = save_over_folded_name("Docs", "do\u{200c}cs", true);
+    assert_in_the_way_of(result, &["do\u{200c}cs"], "Docs/f");
+}
+
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn stash_save_folds_case_on_macos_and_windows_even_if_ignorecase_is_off() {
+    // A repository copied from elsewhere can carry a wrong `core.ignorecase = false`; the drive
+    // still folds case, so the reset would delete `docs` to bring back `Docs/f` (#337, as the
+    // apply/pop check since #234).
+    let result = save_over_folded_name("Docs", "docs", false);
+    assert_in_the_way_of(result, &["docs"], "Docs/f");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stash_save_keeps_case_apart_when_ignorecase_is_off() {
+    // A case-sensitive drive: `docs` and `Docs` are two names, nothing is in the way. A temp
+    // dir on a case-insensitive file system (a casefold folder, a vfat mount) can't hold both,
+    // so the test has nothing to check there.
+    let probe = tempfile::TempDir::new().unwrap();
+    std::fs::write(probe.path().join("a"), "").unwrap();
+    if probe.path().join("A").exists() {
+        eprintln!("skipped: the temp dir folds case");
+        return;
+    }
+    save_over_folded_name("Docs", "docs", false).unwrap();
+    save_over_folded_name("Straße", "STRASSE", false).unwrap();
+}
+
 #[test]
 fn stash_all_with_keep_index_checks_untracked_files_against_head_and_the_index() {
     // A staged deletion of `d/f`: libgit2's keep-index stash resets once, to the index commit,
