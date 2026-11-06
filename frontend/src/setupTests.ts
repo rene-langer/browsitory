@@ -5,10 +5,11 @@ import { configure, getConfig } from "@testing-library/react";
 //
 // A `findBy*`/`waitFor` retries its query on every DOM change and every 50 ms. Each failed try
 // builds a "TestingLibraryElementError" whose message holds a pretty-printed dump of the whole
-// document. `waitFor` throws all of these away except the last one, so on a full-App render the
-// dumps alone were about 15% of the CPU time of App.test.tsx. Build the dump only when something
-// reads the message: a failed synchronous `getBy*` (Vitest reads it right away, before cleanup)
-// or the error `waitFor` rejects with when it times out. The message text is unchanged.
+// document. `waitFor` throws all of these away except the last one. On a full-App render the
+// dumps took about 5% of App.test.tsx's CPU time on a quiet machine and about 15% on a busy one,
+// where each query has to retry more often. Build the dump only when something reads the
+// message: a failed synchronous `getBy*` (Vitest reads it right away, before cleanup) or the
+// error `waitFor` rejects with when it times out. The message text is unchanged.
 //
 // `asyncUtilTimeout` (default 1000 ms) is how long a `findBy*`/`waitFor` waits. One second is
 // enough on an idle machine but not under load: with a load average of about 24 on 4 cores,
