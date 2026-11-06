@@ -138,8 +138,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
-        # Bounded download retries that skip a slow mirror (#353); see the script.
-        timeout-minutes: 12
+        # Bounded download retries that skip a slow mirror (#353). The script's download phases
+        # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
+        # the cache (under 1 min so far); see the script's "Time budget".
+        timeout-minutes: 15
         run: |
           scripts/ci-apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
@@ -218,9 +220,11 @@ jobs:
           fi
       - name: Install system dependencies
         if: steps.diff.outputs.relevant == 'true'
-        # libdbus-sys (keyring, in repo-service) builds against libdbus via pkg-config. Bounded
-        # download retries that skip a slow mirror (#353); see the script.
-        timeout-minutes: 10
+        # libdbus-sys (keyring, in repo-service) builds against libdbus via pkg-config.
+        # Bounded download retries that skip a slow mirror (#353). The script's download phases
+        # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
+        # the cache (under 1 min so far); see the script's "Time budget".
+        timeout-minutes: 15
         run: scripts/ci-apt-install.sh libdbus-1-dev pkg-config
       - uses: dtolnay/rust-toolchain@stable
         if: steps.diff.outputs.relevant == 'true'
@@ -363,8 +367,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-latest'
-        # Bounded download retries that skip a slow mirror (#353); see the script.
-        timeout-minutes: 12
+        # Bounded download retries that skip a slow mirror (#353). The script's download phases
+        # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
+        # the cache (under 1 min so far); see the script's "Time budget".
+        timeout-minutes: 15
         run: |
           scripts/ci-apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
@@ -475,12 +481,14 @@ jobs:
   # development mode. Runs on every PR; build-vsix checks all four targets on main.
   vsix-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - name: Install Xvfb
-        # Bounded download retries that skip a slow mirror (#353); see the script.
-        timeout-minutes: 10
+        # Bounded download retries that skip a slow mirror (#353). The script's download phases
+        # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
+        # the cache (under 1 min so far); see the script's "Time budget".
+        timeout-minutes: 15
         run: scripts/ci-apt-install.sh xvfb dbus
       - uses: dtolnay/rust-toolchain@stable
       # Own cache (job-id key): only the release vscode-sidecar.
@@ -527,14 +535,16 @@ jobs:
 
   e2e-vscode:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     env:
       VSCODE_E2E_REPO_PATH: /tmp/browsitory-vscode-e2e-repo
     steps:
       - uses: actions/checkout@v7
       - name: Install Xvfb and Tauri system dependencies (Linux)
-        # Bounded download retries that skip a slow mirror (#353); see the script.
-        timeout-minutes: 12
+        # Bounded download retries that skip a slow mirror (#353). The script's download phases
+        # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
+        # the cache (under 1 min so far); see the script's "Time budget".
+        timeout-minutes: 15
         run: |
           scripts/ci-apt-install.sh xvfb dbus libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
@@ -595,7 +605,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     # Fixed fixture-repo path the E2E frontend build bakes in via VITE_E2E_REPO_PATH and that
     # e2e/wdio.conf.ts's `onPrepare` hook creates before the WebDriver session starts. Must
     # match `E2E_REPO_PATH` in e2e/wdio.conf.ts (os.tmpdir() is `/tmp` on Linux runners).
@@ -604,8 +614,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install Tauri + tauri-driver system dependencies (Linux)
-        # Bounded download retries that skip a slow mirror (#353); see the script.
-        timeout-minutes: 12
+        # Bounded download retries that skip a slow mirror (#353). The script's download phases
+        # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
+        # the cache (under 1 min so far); see the script's "Time budget".
+        timeout-minutes: 15
         run: |
           scripts/ci-apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \

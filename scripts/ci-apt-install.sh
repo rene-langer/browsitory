@@ -9,12 +9,19 @@
 # arriving. So this script:
 #   1. runs `apt-get update` (each attempt limited to UPDATE_LIMIT seconds),
 #   2. downloads the packages only (`--download-only`, each attempt limited to DOWNLOAD_LIMIT
-#      seconds). Before the second attempt it drops the first mirror from apt-mirrors.txt, so
-#      apt fetches from the next one. Finished and partial downloads stay in apt's cache, so a
-#      retry continues where the last attempt stopped,
-#   3. installs from the cache. That needs no network and is never cut off, so dpkg is never
-#      killed half-way through.
-# Gives up after 3 attempts per phase. The workflow step's own timeout-minutes is the backstop.
+#      seconds). Finished and partial downloads stay in apt's cache, so a retry continues where
+#      the last attempt stopped,
+#   3. installs from the cache with `--no-download`: a package missing from the cache fails at
+#      once instead of going back to the network. This phase has no time limit of its own, so
+#      dpkg is never killed half-way through.
+# Before every retry (of phase 1 or 2) it drops the first mirror from apt-mirrors.txt, so apt
+# moves on to the next one; it never drops the last one. Gives up after 3 attempts per phase.
+#
+# Time budget, for the workflow step's timeout-minutes: `timeout --kill-after=10` stops an
+# attempt at most LIMIT + 10 s after it starts, so phases 1 and 2 take at most
+# 3 x (45 + 10) + 3 x (150 + 10) = 645 s, about 11 min. Phase 3 (unpack and configure, no
+# network) took 10 to 60 s on the runners. The steps that call this script use
+# timeout-minutes: 15, which leaves about 4 min for phase 3.
 set -euo pipefail
 
 if [ "$#" -eq 0 ]; then
@@ -23,8 +30,8 @@ if [ "$#" -eq 0 ]; then
 fi
 
 ATTEMPTS=3
-UPDATE_LIMIT=60
-DOWNLOAD_LIMIT=180
+UPDATE_LIMIT=45
+DOWNLOAD_LIMIT=150
 MIRRORS=/etc/apt/apt-mirrors.txt
 
 # Retries a connection that fails or goes silent for 30 s; dpkg waits up to 60 s for a lock
@@ -75,13 +82,18 @@ attempt() {
   return 1
 }
 
-if [ -f "$MIRRORS" ]; then
-  echo "apt mirrors ($MIRRORS):"
-  cat "$MIRRORS"
-fi
+# Shows where apt fetches from: the runner's sources point at mirror+file:$MIRRORS.
+echo "::group::apt sources and mirrors"
+for f in /etc/apt/sources.list /etc/apt/sources.list.d/* "$MIRRORS"; do
+  if [ -f "$f" ]; then
+    echo "== $f"
+    cat "$f"
+  fi
+done
+echo "::endgroup::"
 
-attempt "$UPDATE_LIMIT" "apt-get update" true \
+attempt "$UPDATE_LIMIT" "apt-get update" drop_first_mirror \
   apt-get "${APT_OPTS[@]}" update
 attempt "$DOWNLOAD_LIMIT" "Downloading packages" drop_first_mirror \
   apt-get "${APT_OPTS[@]}" install -y --download-only "$@"
-sudo apt-get "${APT_OPTS[@]}" install -y "$@"
+sudo apt-get "${APT_OPTS[@]}" install -y --no-download "$@"
