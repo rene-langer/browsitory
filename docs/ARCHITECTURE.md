@@ -1523,8 +1523,9 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   a link's target as is, then `Index::remove_path` (which moves the conflict stages to REUC, as
   `add_path` does) and `Index::add`. The entry carries the stat data (`FileStat`) of the
   descriptor the bytes were read from, taken before reading, so status trusts it like any entry
-  `git add` wrote. Its device is `st_dev`, as the git CLI records it (libgit2 records `st_rdev`;
-  neither compares the device by default). A link's entry carries the link's own stat data
+  `git add` wrote. Its device is `st_dev`, as the git CLI records it (libgit2 records
+  `st_rdev`). libgit2 never compares the device; git does only when built with `USE_STDEV` (off
+  by default) and `core.checkStat` isn't `minimal`, and then `st_dev` matches. A link's entry carries the link's own stat data
   (`lstat`, taken before its target is read); on Windows that is zeroed, so status reads the
   link again on each refresh there (#225). With `core.filemode`/`core.symlinks` off the mode
   comes from stage 0, else 2, 3, 1, as libgit2's `index_existing_and_best`. libgit2's
