@@ -14,6 +14,13 @@ vi.mock("./generated/releaseNotes.json", async (importOriginal) => {
   return { default: releaseNotes };
 });
 
+// Every test here renders the whole App (RepoWorkspace and all its panels) and drives it through
+// several re-renders, which is far more work than a component test. On an idle machine these
+// tests take 0.3–1.2 s; with a load average of about 24 on 4 cores the median was 2.3 s and the
+// slowest passing ones 4–5 s, so Vitest's 5 s default failed different tests on each run (#217).
+// The longer budget only matters when the machine is that busy, or when a test hangs.
+vi.setConfig({ testTimeout: 20_000 });
+
 function unused(): never {
   throw new Error("not used in this test");
 }
