@@ -5,8 +5,8 @@
   only in case. Switching branches, merging, pulling, cherry-picking, rebasing, applying a stash,
   cloning, adding a worktree and updating submodules now stop with "Can't read core.ignorecase
   from the Git config: …". Every reset, discard, Abort and undo also stops, on every system,
-  before it changes anything (the message names the setting). Fix the setting, then try again.
-  Saving a stash doesn't check it yet (#369) (#225).
+  before it changes anything (the message names the setting). Fix the setting, then try again
+  (#225).
 - Internal: the commands refused while another window holds the undo history are listed once,
   over every command, so the wait and the refusal can't disagree (#225).
 - Internal: Mark resolved records a link's own stat data, so status doesn't read the link again
