@@ -24,7 +24,7 @@ external-tool launchers `openInEditor`, `revealInFileManager`, `openTerminal`, `
 implements directly against VSCode APIs instead of round-tripping through the sidecar — see
 `docs/superpowers/specs/2026-08-30-vscode-extension-design.md`'s "VSCode-native integrations"
 section. Transfer progress (`subscribeTransferProgress`) rides the same JSON-RPC connection as
-everything else, as server-initiated notifications (`crates/vscode-sidecar/src/dispatch.rs`'s
+everything else, as server-initiated notifications (`crates/vscode-sidecar/src/dispatch/remote.rs`'s
 `spawn_progress_relay`) rather than request/response calls. Target-specific VSIX packages each
 bundle the `extension/` host, the `frontend/dist-vscode` webview bundle, and exactly one matching
 sidecar binary.
@@ -1629,11 +1629,11 @@ only `error`.
 
 - `git-core`/`config`: `cargo test`, real temp-dir repos/files, no mocks.
 - `repo-service`: inline unit tests next to the code they cover (worker, credential store, and
-  forge/PR API logic), including `crates/repo-service/src/worker/mod.rs`'s tests, which spawn a
-  real worker thread against a real temp-dir repo — no mocks. The wire format of its DTOs is
+  forge/PR API logic), including the worker's tests (`crates/repo-service/src/worker/tests/`, one
+  file per area), which spawn a real worker thread against a real temp-dir repo — no mocks. The wire format of its DTOs is
   pinned by the wire snapshots and the generated DTO types below.
 - `tauri-app`: now a thin Tauri command adapter over `repo-service`, so it doesn't need
-  delegation tests of its own. `crates/tauri-app/src/commands/mod.rs`'s inline tests still
+  delegation tests of its own. Its tests (`crates/tauri-app/src/commands/tests/`) still
   check the serialization of DTOs as the desktop app sends them (e.g. camelCase field names on
   `WorkspaceDto`/`OpenRepoEntryDto`), although those DTOs now live in `repo_service::wire`.
 - Hermetic git config: every Rust test binary (`git-core`, `repo-service`, `vscode-sidecar`,
@@ -1680,7 +1680,7 @@ only `error`.
   and fail when a checked-in one is out of date (`UPDATE_TRANSPORT_METHODS=1` rewrites it):
   `wire_bindings_are_current` (`crates/repo-service/src/wire.rs`) writes
   `frontend/src/ipc/generated/wire-dto.ts`, and `dto_bindings_are_current`
-  (`crates/tauri-app/src/commands/mod.rs`, `crates/vscode-sidecar/src/dispatch.rs`) writes the
+  (`crates/tauri-app/src/commands/mod.rs`, `crates/vscode-sidecar/src/dispatch/tests.rs`) writes the
   transport-specific `tauri-dto.ts` and `sidecar-dto.ts`. They also fail when a listed DTO uses
   a type that is neither listed nor imported (`sidecar-dto.ts` imports `OpenRepoEntry` from
   `wire-dto.ts`). `frontend/src/ipc/dtoContract.ts` then requires each
@@ -1747,8 +1747,8 @@ only `error`.
   tauri-app/custom-protocol` (the `custom-protocol` feature makes the binary load its embedded
   `frontend/dist` instead of the Vite dev server; plain `cargo build` stays in dev-server mode
   regardless of debug/release, so it can't be driven standalone). One flow per major feature
-  area, added where a flow spans backend+frontend in a way unit tests can't catch; `App.tsx`
-  reads a `VITE_E2E_REPO_PATH` build-time env var to auto-open a fixture repo, since
+  area, added where a flow spans backend+frontend in a way unit tests can't catch; `App`
+  (`frontend/src/state/useE2eAutoOpen.ts`) reads a `VITE_E2E_REPO_PATH` build-time env var to auto-open a fixture repo, since
   `RepoPicker`'s native folder dialog can't be driven through WebDriver. (Not Playwright:
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the

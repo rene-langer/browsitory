@@ -24,7 +24,7 @@ use protocol::{JsonRpcRequest, JsonRpcResponse};
 ///
 /// Responses (and the transfer-progress notifications `spawn_progress_relay` emits) are written
 /// through the shared `stdout` mutex, which is what keeps concurrent writers from interleaving a
-/// line; see that function's doc comment in `dispatch.rs`.
+/// line; see that function's doc comment in `dispatch/remote.rs`.
 fn main() {
     let stdin = io::stdin();
     let stdout = Arc::new(Mutex::new(io::stdout()));

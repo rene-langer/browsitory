@@ -1,7 +1,7 @@
 //! #306: byte-exact snapshots of the sidecar's wire output, checked in as
 //! `crates/vscode-sidecar/tests/wire/dto-snapshots.txt`. Each line is one DTO built from the
 //! shared domain values in `crates/test-support/wire_fixtures.rs` through the same `From` impls
-//! and helpers the handlers call (`repo_service::wire`, plus `OpenReposDto` in `dispatch.rs`),
+//! and helpers the handlers call (`repo_service::wire`, plus `OpenReposDto` in `dispatch/repos.rs`),
 //! serialized the way the sidecar sends it. A second test compares the cases both
 //! transports share with the desktop app's snapshots
 //! (`crates/tauri-app/src/commands/wire_snapshots.rs`).
@@ -9,12 +9,22 @@
 //! (after the desktop app's, for the comparison).
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::Serialize;
 
 use super::*;
 use repo_service::wire::{
-    RebaseInfoDto, SequenceProgressDto, TerminalRebaseDto, TerminalSequenceDto,
+    transfer_progress_dto, BlameLineDto, BranchInfoDto, ChangedFileDto, CommitMessageSettingsDto,
+    CommitOutcomeDto, CommitSignatureDto, CompareRangeDto, ConflictSegmentDto, DiffHunkDto,
+    DiffSettingsDto, ExternalToolSettingsDto, FileHistoryEntryDto, FileSidesDto,
+    ForgeRepositoryDto, GitToolsDto, GraphCommitDto, HeadInfoDto, MarkResolvedOutcomeDto,
+    MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto,
+    PullRequestDto, PullRequestListDto, RebaseAbortDto, RebaseInfoDto, RebasePlanCommitDto,
+    RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto, SearchPageDto, SequenceAbortDto,
+    SequenceOutcomeDto, SequenceProgressDto, StashApplyOutcomeDto, StashEntryDto, StashFilesDto,
+    StatusEntryDto, SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto, TerminalSequenceDto,
+    UndoOutcomeDto, UndoStateDto, UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
 };
 
 #[path = "../../../test-support/wire_fixtures.rs"]
