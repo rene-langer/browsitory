@@ -871,7 +871,7 @@ impl Worker {
                         }
                         state_lock::Acquire::Busy => {
                             contention.busy(std::time::Instant::now());
-                            if undo::reply_busy(&mut command) {
+                            if undo::reply_busy(&command) {
                                 continue;
                             }
                             if !logged_busy {
