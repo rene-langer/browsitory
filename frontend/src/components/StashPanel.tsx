@@ -50,6 +50,13 @@ export function StashPanel({
 }) {
   const [pendingDrop, setPendingDrop] = useState<StashEntry | null>(null);
   const [menu, setMenu] = useState<StashMenu | null>(null);
+  // The menu and the drop confirmation act on the stash they were opened for, looked up again by
+  // commit id: a refresh while they are open can move it to another index or remove it (#339).
+  const menuStash = menu === null ? undefined : stashes.find((stash) => stash.commitId === menu.stash.commitId);
+  const dropStash = pendingDrop === null ? undefined : stashes.find((stash) => stash.commitId === pendingDrop.commitId);
+  // Gone from the list: close them (state adjusted while rendering, as React recommends over an effect).
+  if (menu !== null && menuStash === undefined) setMenu(null);
+  if (pendingDrop !== null && dropStash === undefined) setPendingDrop(null);
   const applyDisabled = operationDisabled || applyDisabledReason !== null;
   const applyTitle = applyDisabledReason ?? (operationDisabled ? (operationDisabledReason ?? undefined) : undefined);
   const dropTitle = operationDisabled ? (operationDisabledReason ?? undefined) : undefined;
@@ -99,7 +106,12 @@ export function StashPanel({
                   aria-expanded={menu?.stash.commitId === stash.commitId}
                   onClick={(event) => {
                     event.stopPropagation();
-                    setMenu({ stash, ...rectAnchor(event.currentTarget), returnFocusTo: event.currentTarget });
+                    const trigger = event.currentTarget;
+                    setMenu((open) =>
+                      open?.stash.commitId === stash.commitId
+                        ? null
+                        : { stash, ...rectAnchor(trigger), returnFocusTo: trigger },
+                    );
                   }}
                 >
                   <MoreHorizontal size={14} aria-hidden="true" />
@@ -109,25 +121,25 @@ export function StashPanel({
           </ul>
         </>
       )}
-      {menu !== null && (
+      {menu !== null && menuStash !== undefined && (
         <ContextMenu
-          key={menu.stash.commitId}
+          key={menuStash.commitId}
           x={menu.x}
           y={menu.y}
           returnFocusTo={menu.returnFocusTo}
           onClose={() => setMenu(null)}
-          items={menuItems(menu.stash)}
+          items={menuItems(menuStash)}
         />
       )}
-      {pendingDrop !== null && (
+      {dropStash !== undefined && (
         <ConfirmDialog
-          ariaLabel={`Drop stash ${pendingDrop.message}`}
-          message={<p>Drop "{pendingDrop.message}"? This cannot be undone.</p>}
+          ariaLabel={`Drop stash ${dropStash.message}`}
+          message={<p>Drop "{dropStash.message}"? This cannot be undone.</p>}
           confirmLabel="Drop stash"
           confirmDisabled={operationDisabled}
           confirmTitle={dropTitle}
           onConfirm={() => {
-            onDropStash(pendingDrop.index);
+            onDropStash(dropStash.index);
             setPendingDrop(null);
           }}
           onCancel={() => setPendingDrop(null)}

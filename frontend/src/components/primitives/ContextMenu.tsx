@@ -73,10 +73,12 @@ export function ContextMenu({
   // menu pattern's initial-focus expectation.
   const [focusedIndex, setFocusedIndex] = useState<number>(() => enabledIndexes[0] ?? -1);
 
-  // The document listener below reads the latest `restoreFocus` without re-subscribing.
+  // The document listeners below read the latest `restoreFocus` and trigger without re-subscribing.
   const restoreFocusRef = useRef(restoreFocus);
+  const returnFocusToRef = useRef(returnFocusTo);
   useEffect(() => {
     restoreFocusRef.current = restoreFocus;
+    returnFocusToRef.current = returnFocusTo;
   });
 
   useEffect(() => {
@@ -89,7 +91,14 @@ export function ContextMenu({
       onClose();
     }
     function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current !== null && !menuRef.current.contains(event.target as Node)) onClose();
+      const target = event.target as Node;
+      if (menuRef.current === null || menuRef.current.contains(target)) return;
+      // A mousedown on the menu button that opened this menu is left to that button's click,
+      // which toggles the menu closed. Closing here would let the click reopen it at once. Only
+      // for a real menu button: a right-clicked row is a trigger too, and a click on it closes.
+      const trigger = returnFocusToRef.current;
+      if (trigger?.getAttribute("aria-haspopup") === "menu" && trigger.contains(target)) return;
+      onClose();
     }
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("mousedown", handleClickOutside);

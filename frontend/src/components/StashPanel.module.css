@@ -21,8 +21,11 @@
   flex: 1 1 auto;
 }
 
-/* The row's "…" menu button; the message (flex 1 1 auto, min-width 0) takes the rest of the row. */
+/* The row's "…" menu button; the message (flex 1 1 auto, min-width 0) takes the rest of the row.
+   Shown on hover, keyboard focus in the row or while its menu is open, like the Branches rows;
+   `opacity` (not `display`) keeps it in the tab order. */
 .iconButton {
+  opacity: 0;
   display: inline-flex;
   flex: none;
   align-items: center;
@@ -36,6 +39,12 @@
 .iconButton[aria-expanded="true"] {
   background: var(--color-control);
   color: var(--color-text);
+}
+
+li:hover > .iconButton,
+li:focus-within > .iconButton,
+.iconButton[aria-expanded="true"] {
+  opacity: 1;
 }
 
 .empty {

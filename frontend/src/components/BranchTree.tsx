@@ -360,7 +360,7 @@ export function BranchTree({
                 aria-haspopup="menu"
                 aria-expanded={rowMenu?.kind === "local-branch" && rowMenu.name === branch.name}
                 onClick={(event) =>
-                  openRowMenu({
+                  toggleRowMenu({
                     kind: "local-branch",
                     name: branch.name,
                     ...rectAnchor(event.currentTarget),
@@ -446,7 +446,7 @@ export function BranchTree({
                 rowMenu?.kind === "remote-branch" && rowMenu.remoteName === remoteName && rowMenu.branchName === branchName
               }
               onClick={(event) =>
-                openRowMenu({
+                toggleRowMenu({
                   kind: "remote-branch",
                   remoteName,
                   branchName,
@@ -619,6 +619,11 @@ export function BranchTree({
     setRenameValue("");
     setRowMenu(menu);
   };
+  // For the menu buttons ("…", "Add"): a second click on the button of the open menu closes it.
+  const toggleRowMenu = (menu: RowContextMenu) => {
+    if (rowMenu !== null && rowMenuKey(rowMenu) === rowMenuKey(menu)) setRowMenu(null);
+    else openRowMenu(menu);
+  };
 
   const newBranchProblem = branchNameProblem(newBranchName.trim());
   const startPoint = createBranchDraft?.startPoint ?? "HEAD";
@@ -755,7 +760,7 @@ export function BranchTree({
             aria-label="Add"
             aria-haspopup="menu"
             aria-expanded={rowMenu?.kind === "add"}
-            onClick={(event) => openRowMenu({ kind: "add", ...rectAnchor(event.currentTarget), returnFocusTo: event.currentTarget })}
+            onClick={(event) => toggleRowMenu({ kind: "add", ...rectAnchor(event.currentTarget), returnFocusTo: event.currentTarget })}
           >
             <Plus size={14} aria-hidden="true" />
           </button>
@@ -970,7 +975,7 @@ export function BranchTree({
                   aria-haspopup="menu"
                   aria-expanded={rowMenu?.kind === "remote-folder" && rowMenu.name === remote.name}
                   onClick={(event) =>
-                    openRowMenu({
+                    toggleRowMenu({
                       kind: "remote-folder",
                       name: remote.name,
                       ...rectAnchor(event.currentTarget),

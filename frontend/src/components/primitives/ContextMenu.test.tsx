@@ -82,6 +82,28 @@ describe("ContextMenu", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("leaves a mousedown on its menu-button trigger to that button's click, so the button can toggle it", () => {
+    const onClose = vi.fn();
+    render(<button aria-haspopup="menu">trigger</button>);
+    const trigger = screen.getByRole("button", { name: "trigger" });
+    render(<ContextMenu x={0} y={0} returnFocusTo={trigger} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(trigger);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("still closes on a mousedown on a right-clicked row it returns focus to", () => {
+    const onClose = vi.fn();
+    render(<div data-testid="row">row</div>);
+    const row = screen.getByTestId("row");
+    render(<ContextMenu x={0} y={0} returnFocusTo={row} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(row);
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("stays open when the pointer leaves it (outside click and Escape close it)", () => {
     const onClose = vi.fn();
     render(<ContextMenu x={0} y={0} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);

@@ -9,9 +9,8 @@ const stashes: StashEntry[] = [
   { index: 1, message: "WIP on main: stash1fix earlier edit", commitId: "stash1" },
 ];
 
-function renderPanel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) {
-  localStorage.removeItem("sidebar-stashes");
-  const result = render(
+function panel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) {
+  return (
     <StashPanel
       stashes={stashes}
       onSelectRow={vi.fn()}
@@ -24,8 +23,13 @@ function renderPanel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) 
       operationDisabled={false}
       operationDisabledReason={null}
       {...overrides}
-    />,
+    />
   );
+}
+
+function renderPanel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) {
+  localStorage.removeItem("sidebar-stashes");
+  const result = render(panel(overrides));
   fireEvent.click(screen.getByRole("button", { name: "Stashes" }));
   return result;
 }
@@ -93,6 +97,76 @@ describe("StashPanel", () => {
 
     expect(onApplyStash).toHaveBeenCalledWith(0);
     expect(onSelectRow).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("a second click on the open menu's button closes it", () => {
+    renderPanel();
+
+    const row = screen.getByText(/stash0fix/).closest("li")!;
+    const trigger = within(row).getByRole("button", { name: /^Actions for / });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    // A real click: the mousedown must not count as "outside" and close-then-reopen the menu.
+    fireEvent.mouseDown(trigger);
+    fireEvent.click(trigger);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("a click elsewhere on the row closes the menu opened from its button", () => {
+    renderPanel();
+
+    const row = screen.getByText(/stash0fix/).closest("li")!;
+    fireEvent.click(within(row).getByRole("button", { name: /^Actions for / }));
+    fireEvent.mouseDown(screen.getByText(/stash1fix/));
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("opens the menu on right-click of the row", () => {
+    renderPanel();
+
+    fireEvent.contextMenu(screen.getByText(/stash1fix/).closest("li")!);
+
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Apply", "Pop", "Drop…"]);
+  });
+
+  it("Escape closes the menu and returns focus to its button", () => {
+    renderPanel();
+
+    const row = screen.getByText(/stash0fix/).closest("li")!;
+    const trigger = within(row).getByRole("button", { name: /^Actions for / });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Apply" }), { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("acts on the stash the menu was opened for when the list shifts while it is open", () => {
+    const onApplyStash = vi.fn();
+    const { rerender } = renderPanel({ onApplyStash });
+    openMenu(/stash1fix/);
+
+    // A new stash pushed on top moves the opened one from index 1 to index 2.
+    const shifted: StashEntry[] = [{ index: 0, message: "WIP on main: newest", commitId: "stashN" }].concat(
+      stashes.map((stash) => ({ ...stash, index: stash.index + 1 })),
+    );
+    rerender(panel({ onApplyStash, stashes: shifted }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply" }));
+
+    expect(onApplyStash).toHaveBeenCalledWith(2);
+  });
+
+  it("closes the menu when its stash disappears from the list", () => {
+    const { rerender } = renderPanel();
+    openMenu(/stash1fix/);
+
+    rerender(panel({ stashes: [stashes[0]] }));
+
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
