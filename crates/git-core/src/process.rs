@@ -1360,6 +1360,19 @@ mod tests {
         );
     }
 
+    /// `kill_tree`'s second sweep (#349) needs the program dead but its pid still taken.
+    #[cfg(unix)]
+    #[test]
+    fn exited_unreaped_waits_for_the_exit_and_leaves_the_child_to_reap() {
+        let mut child = spawn_retrying(&mut sh("sleep 0.3; exit 3")).unwrap();
+        assert!(exited_unreaped(child.id() as libc::pid_t));
+        // It has exited (no waiting here) and nobody reaped it yet.
+        let status = child.try_wait().unwrap().expect("the child has exited");
+        assert_eq!(status.code(), Some(3));
+        // Not our child (`init`): nothing to wait for.
+        assert!(!exited_unreaped(1));
+    }
+
     #[cfg(unix)]
     #[test]
     fn cancel_stops_the_process() {
