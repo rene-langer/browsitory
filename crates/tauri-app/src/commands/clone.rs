@@ -182,6 +182,10 @@ mod tests {
                 "CaseCollision",
             ),
             (
+                CloneError::CaseConfig(git_core::CaseConfigUnreadable("x".into())),
+                "CaseConfig",
+            ),
+            (
                 CloneError::HeldOpen(git_core::HeldOpen {
                     path: "f.txt".into(),
                     during: git_core::HeldDuring::Clone,
