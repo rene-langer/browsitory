@@ -1382,7 +1382,9 @@ fn stash_save_treats_composed_and_decomposed_names_as_one_when_ignorecase_is_on(
 
 #[test]
 fn stash_save_ignores_hfs_ignorable_code_points_when_ignorecase_is_on() {
-    // HFS+ drops U+200C (zero-width non-joiner) from names, so `do\u{200c}cs` is `docs` (#337).
+    // HFS+ drops U+200C (zero-width non-joiner) from names, so there `do\u{200c}cs` is `docs`.
+    // APFS doesn't ignore U+200C; this documents `fold_name`'s HFS+ behaviour, which errs
+    // towards refusing more (#337).
     let result = save_over_folded_name("Docs", "do\u{200c}cs", true);
     assert_in_the_way_of(result, &["do\u{200c}cs"], "Docs/f");
 }
@@ -1400,7 +1402,15 @@ fn stash_save_folds_case_on_macos_and_windows_even_if_ignorecase_is_off() {
 #[cfg(target_os = "linux")]
 #[test]
 fn stash_save_keeps_case_apart_when_ignorecase_is_off() {
-    // A case-sensitive drive: `docs` and `Docs` are two names, nothing is in the way.
+    // A case-sensitive drive: `docs` and `Docs` are two names, nothing is in the way. A temp
+    // dir on a case-insensitive file system (a casefold folder, a vfat mount) can't hold both,
+    // so the test has nothing to check there.
+    let probe = tempfile::TempDir::new().unwrap();
+    std::fs::write(probe.path().join("a"), "").unwrap();
+    if probe.path().join("A").exists() {
+        eprintln!("skipped: the temp dir folds case");
+        return;
+    }
     save_over_folded_name("Docs", "docs", false).unwrap();
     save_over_folded_name("Straße", "STRASSE", false).unwrap();
 }

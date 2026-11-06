@@ -768,7 +768,9 @@ fn entry_in_the_way(
     let ignore_case = crate::worktree_guard::folds_case(repo);
     let fold = |path: &str| {
         if ignore_case {
-            String::from_utf8_lossy(&crate::worktree_guard::fold_name(path.as_bytes())).into_owned()
+            // `path` is UTF-8 and `fold_name` keeps it so; the lossy branch never runs.
+            String::from_utf8(crate::worktree_guard::fold_name(path.as_bytes()))
+                .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
         } else {
             path.to_string()
         }
