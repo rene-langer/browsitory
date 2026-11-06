@@ -80,6 +80,24 @@ higher than every pre-release version already published.
 published version. `--skip-duplicate` only makes re-running the *same* commit's release safe; a
 moved tag would leave the registries on the old build. Bump the version instead.
 
+**Missing platform packages (#344).** The Marketplace can accept a package and still drop it.
+In 0.3.0, `vsce` printed "Published" for all four targets and the job passed, but only the
+first target (darwin-arm64) appeared. The other three were uploaded seconds later, while the
+Marketplace was still validating the first package of the new version (about 7 minutes). Their
+download URLs answered 404, and VSCode on Linux called the extension unsupported on that
+platform. So the jobs now:
+
+- publish one target first, wait until the Marketplace lists it as validated, then publish the
+  other three;
+- after publishing, check that every target is listed and downloadable on the public gallery
+  (`scripts/verify-marketplace-listing.py`, read-only, no token). The Open VSX job runs the same
+  check against the Open VSX API. Each waits up to 30 minutes.
+
+If a check fails, the error names the missing targets. **Re-run the failed job.**
+`--skip-duplicate` skips the targets already published and uploads only the missing ones. To
+check a version by hand: `python3 scripts/verify-marketplace-listing.py --version 0.3.0
+darwin-arm64 darwin-x64 linux-x64 win32-x64` (add `--registry open-vsx` for Open VSX).
+
 Owner setup (once):
 
 1. Marketplace: create publisher `browsitory` (<https://marketplace.visualstudio.com/manage>).
