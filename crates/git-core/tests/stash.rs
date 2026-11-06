@@ -2966,7 +2966,9 @@ fn staged_rename_of(old: &str, new: &str) -> (tempfile::TempDir, git2::Repositor
         std::fs::create_dir_all(dir.path().join(folder)).unwrap();
     }
     assert!(git(dir.path(), &["mv", old, new]).status.success());
-    write_file(dir.path(), "other", "y\n");
+    // A different size: an edit of the same size within the commit's timestamp tick can look
+    // unchanged to `git status` once libgit2 has rewritten the index (racy stat data).
+    write_file(dir.path(), "other", "changed\n");
     (dir, repo)
 }
 
