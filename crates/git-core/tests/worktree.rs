@@ -751,6 +751,67 @@ fn a_trailing_dot_in_the_branch_is_rolled_back() {
     assert_an_unwritable_name_is_rolled_back("a.");
 }
 
+/// The names of the entries in `dir`, as stored (a trailing dot or space kept).
+fn entry_names(dir: &Path) -> Vec<std::ffi::OsString> {
+    std::fs::read_dir(dir)
+        .map(|entries| entries.map(|entry| entry.unwrap().file_name()).collect())
+        .unwrap_or_default()
+}
+
+/// On Windows, libgit2 would create a name ending in a dot or a space literally while Windows
+/// paths elsewhere drop it, so the worktree couldn't be found or removed (#261); a reserved
+/// device name can't be a folder at all. Such a name or destination is refused before anything
+/// is created.
+#[cfg(windows)]
+#[test]
+fn a_name_or_destination_windows_cannot_use_is_refused() {
+    let (dir, repo, _) = committed_repo();
+    let before = entry_names(dir.path());
+    let cases = [
+        ("wt.", dir.path().join("wt")),
+        ("wt ", dir.path().join("wt")),
+        ("aux", dir.path().join("wt")),
+        ("wt", dir.path().join("wt.")),
+        ("wt", dir.path().join("wt ")),
+        ("wt", dir.path().join("nul.txt")),
+        ("wt", dir.path().join("a.").join("wt")),
+        ("wt", PathBuf::from("wt.")),
+        ("wt", PathBuf::from(r"a \wt")),
+    ];
+    for (name, path) in cases {
+        let result = create_worktree(&repo, name, &path, "newb", Some("HEAD"));
+
+        let Err(error @ WorktreeError::UnusableWindowsName { .. }) = result else {
+            panic!("{name:?} {path:?}: {result:?}");
+        };
+        assert!(
+            error.to_string().starts_with("Windows can't use '"),
+            "{error}"
+        );
+        assert_eq!(entry_names(dir.path()), before, "{name:?} {path:?}");
+        assert!(entry_names(&repo.path().join("worktrees")).is_empty());
+        assert!(!has_branch(&repo, "newb"));
+    }
+
+    create_worktree(&repo, "wt", &dir.path().join("wt"), "newb", Some("HEAD")).unwrap();
+    assert!(dir.path().join("wt").join("file.txt").is_file());
+}
+
+/// Elsewhere such names work, as in git, and stay allowed.
+#[cfg(not(windows))]
+#[test]
+fn a_name_ending_in_a_dot_or_a_space_works_outside_windows() {
+    let (dir, repo, _) = committed_repo();
+    for (name, branch) in [("wt.", "b1"), ("wt ", "b2"), ("aux", "b3")] {
+        let linked = dir.path().join(name);
+        create_worktree(&repo, name, &linked, branch, Some("HEAD")).unwrap();
+        assert!(linked.join("file.txt").is_file(), "{name:?}");
+        remove_worktree_named(&repo, name, &linked.canonicalize().unwrap()).unwrap();
+        assert!(!linked.exists(), "{name:?}");
+    }
+    assert!(entry_names(&repo.path().join("worktrees")).is_empty());
+}
+
 /// A repository in `<temp>/repo` with the linked worktrees `<temp>/kept` and `<temp>/gone` (on
 /// branches of the same names); `gone`'s folder has been deleted.
 fn repo_with_a_missing_worktree() -> (tempfile::TempDir, git2::Repository, PathBuf, PathBuf) {
