@@ -38,7 +38,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           # Same as docs/requirements.txt's pip-compile header.
-          python-version: "3.14"
+          python-version: "3.15"
           cache: pip
           cache-dependency-path: docs/requirements.txt
       - name: Install MkDocs (pinned, with hashes)
