@@ -93,12 +93,23 @@ export function ContextMenu({
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as Node;
       if (menuRef.current === null || menuRef.current.contains(target)) return;
-      // A mousedown on the menu button that opened this menu is left to that button's click,
-      // which toggles the menu closed. Closing here would let the click reopen it at once. Only
-      // for a real menu button: a right-clicked row is a trigger too, and a click on it closes.
-      const trigger = returnFocusToRef.current;
-      if (trigger?.getAttribute("aria-haspopup") === "menu" && trigger.contains(target)) return;
+      if (event.button === 0 && isOwnMenuButton(target)) return;
       onClose();
+    }
+    // A primary press on this menu's own menu button is left to that button's click, which
+    // toggles the menu closed; closing here would let the click reopen it at once. Its own button
+    // is a menu button (`aria-haspopup="menu"`, so never a right-clicked row) that is the trigger
+    // it returns focus to, the element focused when it opened, or says it is open
+    // (`aria-expanded="true"`): a menu opened by a key or a right-click has no button trigger.
+    function isOwnMenuButton(target: Node): boolean {
+      const element = target instanceof Element ? target : target.parentElement;
+      const button = element?.closest('[aria-haspopup="menu"]');
+      if (button === null || button === undefined) return false;
+      return (
+        button === returnFocusToRef.current ||
+        button === capturedTrigger.current ||
+        button.getAttribute("aria-expanded") === "true"
+      );
     }
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("mousedown", handleClickOutside);

@@ -173,13 +173,15 @@ export function ReadOnlyFileSection({
               ref={actionsRef}
               aria-label={`Actions for ${path}`}
               aria-haspopup="menu"
+              aria-expanded={menu !== null}
               onClick={(event) => {
                 // A pointer click (`detail > 0`) need not focus the button (WebKit), so name it as
                 // where focus returns. A key, or DiffPane's Menu-key `click()`, leaves focus where it is.
-                setMenu({
-                  ...rectAnchor(event.currentTarget),
-                  returnFocusTo: event.detail > 0 ? event.currentTarget : undefined,
-                });
+                // A second click on it closes the open menu.
+                const button = event.currentTarget;
+                const anchor = rectAnchor(button);
+                const returnFocusTo = event.detail > 0 ? button : undefined;
+                setMenu((open) => (open !== null ? null : { ...anchor, returnFocusTo }));
               }}
             >
               <MoreHorizontal size={14} aria-hidden="true" />

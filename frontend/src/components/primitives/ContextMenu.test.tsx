@@ -93,6 +93,31 @@ describe("ContextMenu", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("leaves a press on a menu button that says it is open (opened by a key) to that button", () => {
+    const onClose = vi.fn();
+    render(
+      <button aria-haspopup="menu" aria-expanded="true">
+        trigger
+      </button>,
+    );
+    render(<ContextMenu x={0} y={0} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "trigger" }));
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on a secondary-button press on its trigger", () => {
+    const onClose = vi.fn();
+    render(<button aria-haspopup="menu">trigger</button>);
+    const trigger = screen.getByRole("button", { name: "trigger" });
+    render(<ContextMenu x={0} y={0} returnFocusTo={trigger} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(trigger, { button: 2 });
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("still closes on a mousedown on a right-clicked row it returns focus to", () => {
     const onClose = vi.fn();
     render(<div data-testid="row">row</div>);

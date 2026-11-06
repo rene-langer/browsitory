@@ -81,6 +81,20 @@ describe("ReadOnlyFileSection", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("a second click on '…' closes its menu", () => {
+    const externalTools = { openInEditor: vi.fn(), reveal: vi.fn(), openDiffTool: vi.fn() } as unknown as ExternalToolsApi;
+    renderSection({ externalTools, toolSource: { kind: "Commit", commitId: "abc" } as unknown as DiffSource });
+    const actions = screen.getByRole("button", { name: "Actions for a.txt" });
+    fireEvent.click(actions, { detail: 1 });
+    expect(actions).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.mouseDown(actions);
+    fireEvent.click(actions, { detail: 1 });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(actions).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("a menu opened by clicking '…' returns focus to it, even if the click did not focus it", () => {
     const externalTools = { openInEditor: vi.fn(), reveal: vi.fn(), openDiffTool: vi.fn() } as unknown as ExternalToolsApi;
     renderSection({ externalTools, toolSource: { kind: "Commit", commitId: "abc" } as unknown as DiffSource });

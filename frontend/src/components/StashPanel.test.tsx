@@ -126,6 +126,44 @@ describe("StashPanel", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("a click on '…' closes the menu that Shift+F10 on its row opened", () => {
+    renderPanel();
+
+    const row = screen.getByText(/stash0fix/).closest("li")!;
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    const trigger = within(row).getByRole("button", { name: /^Actions for / });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.mouseDown(trigger);
+    fireEvent.click(trigger);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("a click on '…' closes the menu that a right-click on its row opened", () => {
+    renderPanel();
+
+    const row = screen.getByText(/stash0fix/).closest("li")!;
+    fireEvent.contextMenu(row);
+    const trigger = within(row).getByRole("button", { name: /^Actions for / });
+
+    fireEvent.mouseDown(trigger);
+    fireEvent.click(trigger);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("a right-button press on '…' closes its open menu", () => {
+    renderPanel();
+
+    const row = screen.getByText(/stash0fix/).closest("li")!;
+    const trigger = within(row).getByRole("button", { name: /^Actions for / });
+    fireEvent.click(trigger);
+    fireEvent.mouseDown(trigger, { button: 2 });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
   it("opens the menu on right-click of the row", () => {
     renderPanel();
 
@@ -168,6 +206,25 @@ describe("StashPanel", () => {
     rerender(panel({ stashes: [stashes[0]] }));
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("moves focus to the '…' now in that place when the stash of a focused menu disappears", () => {
+    const { rerender } = renderPanel();
+    openMenu(/stash1fix/);
+    expect(screen.getByRole("menuitem", { name: "Apply" })).toHaveFocus();
+
+    rerender(panel({ stashes: [stashes[0]] }));
+
+    expect(screen.getByRole("button", { name: "Actions for WIP on main: stash0fix uncommitted edit" })).toHaveFocus();
+  });
+
+  it("moves focus to the section header when the last stash of a focused menu disappears", () => {
+    const { rerender } = renderPanel();
+    openMenu(/stash0fix/);
+
+    rerender(panel({ stashes: [] }));
+
+    expect(screen.getByRole("button", { name: /^Stashes/ })).toHaveFocus();
   });
 
   it("opens the same menu with Shift+F10 on the row", () => {

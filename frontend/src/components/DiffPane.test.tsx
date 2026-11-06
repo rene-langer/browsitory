@@ -500,6 +500,19 @@ describe("DiffPane", () => {
         expect(other).toHaveFocus();
       });
 
+      it("a second click on '…' closes its menu", () => {
+        render();
+        const actions = screen.getByRole("button", { name: "Actions for src/a.ts" });
+        fireEvent.click(actions, { detail: 1 });
+        expect(actions).toHaveAttribute("aria-expanded", "true");
+
+        fireEvent.mouseDown(actions);
+        fireEvent.click(actions, { detail: 1 });
+
+        expect(screen.queryByRole("menu")).toBeNull();
+        expect(actions).toHaveAttribute("aria-expanded", "false");
+      });
+
       it("a menu opened by clicking '…' returns focus to it, even if the click did not focus it", () => {
         render();
         screen.getByRole("button", { name: "Stage logs/run.log" }).focus();

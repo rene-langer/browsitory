@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Archive, MoreHorizontal } from "lucide-react";
 import { rectAnchor } from "../lib/menuKeys";
 import type { StashEntry } from "../ipc/RepoClient";
@@ -54,9 +54,30 @@ export function StashPanel({
   // commit id: a refresh while they are open can move it to another index or remove it (#339).
   const menuStash = menu === null ? undefined : stashes.find((stash) => stash.commitId === menu.stash.commitId);
   const dropStash = pendingDrop === null ? undefined : stashes.find((stash) => stash.commitId === pendingDrop.commitId);
-  // Gone from the list: close them (state adjusted while rendering, as React recommends over an effect).
-  if (menu !== null && menuStash === undefined) setMenu(null);
-  if (pendingDrop !== null && dropStash === undefined) setPendingDrop(null);
+  // Gone from the list: close them (state adjusted while rendering, as React recommends over an
+  // effect), and remember where the stash was so focus does not drop to the page (below).
+  const [refocus, setRefocus] = useState<{ index: number } | null>(null);
+  if (menu !== null && menuStash === undefined) {
+    setMenu(null);
+    setRefocus({ index: menu.stash.index });
+  }
+  if (pendingDrop !== null && dropStash === undefined) {
+    setPendingDrop(null);
+    setRefocus({ index: pendingDrop.index });
+  }
+  // The list, or the empty-state text when there is none.
+  const bodyRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (refocus === null) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && active.isConnected) return;
+    // Focus went with the closed menu or dialog: move it to the "…" of the stash now in that
+    // place (or the last one), else to the section's header.
+    const buttons = bodyRef.current?.querySelectorAll<HTMLElement>('button[aria-haspopup="menu"]') ?? [];
+    const next = buttons.length > 0 ? buttons[Math.min(refocus.index, buttons.length - 1)] : undefined;
+    const header = bodyRef.current?.closest("section")?.querySelector<HTMLElement>("button");
+    (next ?? header)?.focus({ preventScroll: true });
+  }, [refocus]);
   const applyDisabled = operationDisabled || applyDisabledReason !== null;
   const applyTitle = applyDisabledReason ?? (operationDisabled ? (operationDisabledReason ?? undefined) : undefined);
   const dropTitle = operationDisabled ? (operationDisabledReason ?? undefined) : undefined;
@@ -76,7 +97,14 @@ export function StashPanel({
   return (
     <AccordionSection title="Stashes" storageKey="sidebar-stashes" icon={Archive} count={stashes.length}>
       {stashes.length === 0 ? (
-        <p className={styles.empty}>No stashes. Set changes aside from the commit box to see them here.</p>
+        <p
+          ref={(element) => {
+            bodyRef.current = element;
+          }}
+          className={styles.empty}
+        >
+          No stashes. Set changes aside from the commit box to see them here.
+        </p>
       ) : (
         <>
           <label className={styles.restoreIndex}>
@@ -87,7 +115,12 @@ export function StashPanel({
             />
             Restore staged changes
           </label>
-          <ul className={styles.list}>
+          <ul
+            ref={(element) => {
+              bodyRef.current = element;
+            }}
+            className={styles.list}
+          >
             {stashes.map((stash) => (
               <ListRow
                 key={stash.commitId}
