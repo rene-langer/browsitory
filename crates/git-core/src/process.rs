@@ -185,13 +185,49 @@ fn kill_tree(child: &mut Child, job: Option<&Job>) {
     #[cfg(not(windows))]
     let _ = job;
     #[cfg(unix)]
-    {
-        // SAFETY: plain syscall; the group id is the unreaped child's pid (see above).
-        unsafe {
-            libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
-        }
+    let group = child.id() as libc::pid_t;
+    #[cfg(unix)]
+    // SAFETY: plain syscall; the group id is the unreaped child's pid (see above).
+    unsafe {
+        libc::killpg(group, libc::SIGKILL);
     }
     let _ = child.kill();
+    // A second sweep, once the program is dead (#349). A `killpg` that lands while the program
+    // is forking can miss the new child on macOS (Linux restarts such a fork instead), and that
+    // child (a hook's background job) would outlive the cancel. Once the program has exited,
+    // every fork it started has finished and its children are in the group. The program is not
+    // reaped yet, so its pid (the group id) can't have been reused.
+    #[cfg(unix)]
+    if exited_unreaped(group) {
+        // SAFETY: as above.
+        unsafe {
+            libc::killpg(group, libc::SIGKILL);
+        }
+    }
+}
+
+/// Waits until the child `pid` has exited, without reaping it (`WNOWAIT`), so its pid stays
+/// taken. False if that can't be waited for (then the caller's reap reports the error).
+#[cfg(unix)]
+fn exited_unreaped(pid: libc::pid_t) -> bool {
+    loop {
+        // SAFETY: `info` is a valid, zeroed out-parameter; `WNOWAIT` leaves the child unreaped.
+        let result = unsafe {
+            let mut info: libc::siginfo_t = std::mem::zeroed();
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if result == 0 {
+            return true;
+        }
+        if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return false;
+        }
+    }
 }
 
 /// Kills and reaps: never leaves a zombie behind.
@@ -1182,25 +1218,28 @@ mod tests {
     }
 
     /// A hook's background job that redirects its output (so it doesn't hold the pipe), says it
-    /// started (`$MARKER.started`) and does its work two seconds later (`$MARKER`): a timeout or
-    /// cancel must kill it too (#179). A non-interactive `sh` has no job control, so the job
-    /// stays in the hook's process group, which `kill_tree` kills with `killpg`. The foreground
-    /// command sleeps `foreground` seconds.
+    /// started (`$MARKER.started`), and once the test has stopped the hook (`$MARKER.stopped`)
+    /// writes `$MARKER`: a timeout or cancel must kill it too (#179). It waits for the test, not
+    /// for a clock, so a slow runner can't let it write `$MARKER` before the kill (#349). It
+    /// gives up waiting after 30 seconds, so a test that panics leaves no endless loop behind. A
+    /// non-interactive `sh` has no job control, so the job stays in the hook's process group,
+    /// which `kill_tree` kills with `killpg`. The foreground command sleeps `foreground` seconds.
     #[cfg(unix)]
     fn grandchild_script(foreground: u32) -> String {
         format!(
-            r#"(: > "$MARKER.started"; sleep 2; echo alive > "$MARKER") >/dev/null 2>&1 & sleep {foreground}"#
+            r#"(: > "$MARKER.started"; i=0; while [ ! -e "$MARKER.stopped" ] && [ $i -lt 300 ]; do sleep 0.1; i=$((i+1)); done; echo alive > "$MARKER") >/dev/null 2>&1 & sleep {foreground}"#
         )
     }
 
-    /// When a marker test stops the hook: late enough for its background job to have started.
+    /// The time limit of the marker timeout tests: long enough for even a slow runner to have
+    /// started the background job.
     #[cfg(unix)]
-    const MARKER_STOP: Duration = Duration::from_millis(500);
+    const MARKER_TIMEOUT: Duration = Duration::from_secs(2);
 
-    /// How long to wait, after the hook was stopped, for a background job that survived to write
-    /// its marker (due about two seconds after it started).
+    /// How long to wait, after telling the hook's background job the hook was stopped, for a
+    /// job that survived to write its marker (it looks every 0.1 seconds).
     #[cfg(unix)]
-    const MARKER_WAIT: Duration = Duration::from_secs(3);
+    const MARKER_WAIT: Duration = Duration::from_secs(2);
 
     #[cfg(unix)]
     fn unix_marker() -> (tempfile::TempDir, std::path::PathBuf) {
@@ -1209,12 +1248,37 @@ mod tests {
         (dir, marker)
     }
 
+    /// `marker` with `suffix` appended.
+    #[cfg(unix)]
+    fn marker_with(marker: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+        let mut name = marker.as_os_str().to_owned();
+        name.push(suffix);
+        std::path::PathBuf::from(name)
+    }
+
     /// `$MARKER.started`: without it, a test whose background job never ran would pass.
     #[cfg(unix)]
     fn started_marker(marker: &std::path::Path) -> std::path::PathBuf {
-        let mut name = marker.as_os_str().to_owned();
-        name.push(".started");
-        std::path::PathBuf::from(name)
+        marker_with(marker, ".started")
+    }
+
+    /// A cancel that fires once the background job has started, so the test doesn't depend on
+    /// how fast the runner starts it (#349).
+    #[cfg(unix)]
+    fn cancel_once_started(marker: &std::path::Path) -> impl Fn() -> bool {
+        let started = started_marker(marker);
+        move || started.exists()
+    }
+
+    /// Tells a background job that survived to write `$MARKER` now (`$MARKER.stopped`), and
+    /// waits up to `MARKER_WAIT` for it.
+    #[cfg(unix)]
+    fn release_survivor(marker: &std::path::Path) {
+        std::fs::write(marker_with(marker, ".stopped"), "").unwrap();
+        let deadline = Instant::now() + MARKER_WAIT;
+        while !marker.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     /// The marker test's verdict, after the hook was stopped.
@@ -1224,7 +1288,7 @@ mod tests {
             started_marker(marker).exists(),
             "the background job never started, so this test proves nothing"
         );
-        std::thread::sleep(MARKER_WAIT);
+        release_survivor(marker);
         assert!(!marker.exists(), "the background process survived");
     }
 
@@ -1244,7 +1308,7 @@ mod tests {
             sh_with_marker(&grandchild_script(30), &marker),
             None,
             &|| false,
-            MARKER_STOP,
+            MARKER_TIMEOUT,
             1024,
         )
         .unwrap();
@@ -1256,11 +1320,10 @@ mod tests {
     #[test]
     fn cancel_kills_a_hooks_background_grandchild_on_unix() {
         let (_dir, marker) = unix_marker();
-        let cancel_at = Instant::now() + MARKER_STOP;
         let result = run_captured(
             sh_with_marker(&grandchild_script(30), &marker),
             None,
-            &|| Instant::now() >= cancel_at,
+            &cancel_once_started(&marker),
             Duration::from_secs(60),
             1024,
         );
@@ -1283,12 +1346,14 @@ mod tests {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let mut child = spawn_retrying(&mut command).unwrap();
-        let (_, timed_out) = wait_bounded(&mut child, &|| false, MARKER_STOP, None).unwrap();
-        assert!(timed_out);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !marker.exists() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        let result = wait_bounded(
+            &mut child,
+            &cancel_once_started(&marker),
+            Duration::from_secs(60),
+            None,
+        );
+        assert!(matches!(result, Err(RunError::Cancelled)));
+        release_survivor(&marker);
         assert!(
             marker.exists(),
             "the background process died without a process group kill: the marker tests prove nothing"
@@ -1390,7 +1455,7 @@ mod tests {
             sh_with_marker(&grandchild_script(30), &marker),
             None,
             &|| false,
-            MARKER_STOP,
+            MARKER_TIMEOUT,
             1024,
             1024,
         )
@@ -1403,11 +1468,10 @@ mod tests {
     #[test]
     fn split_cancel_kills_a_background_grandchild() {
         let (_dir, marker) = unix_marker();
-        let cancel_at = Instant::now() + MARKER_STOP;
         let result = run_captured_split(
             sh_with_marker(&grandchild_script(30), &marker),
             None,
-            &|| Instant::now() >= cancel_at,
+            &cancel_once_started(&marker),
             Duration::from_secs(60),
             1024,
             1024,
