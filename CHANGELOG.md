@@ -6,6 +6,112 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-06
+
+A patch release: stash fixes, a roomier Stashes sidebar, a clear stop for an invalid
+`core.ignorecase`, and safer release publishing. The VSCode extension is now a stable release on
+the Visual Studio Marketplace and Open VSX.
+
+### VSCode extension is a stable release
+
+- Changed: the extension is published on the Visual Studio Marketplace and Open VSX as a stable
+  release, no longer as a pre-release (#345).
+
+### Stashes
+
+- Fixed: "Stash file…" on a staged rename stashes the whole rename. Before, it stashed only the
+  new name and left the old name's deletion staged. If a new file was made at the old name
+  since, it refuses instead of stashing that file too. Where names fold (macOS, Windows,
+  `core.ignorecase`), "Stash file…" refuses a rename that only changes case, since the stash
+  couldn't undo it (#152).
+- Fixed: "Stash file…" on a file that was removed from the index, ignored and then edited now
+  refuses with the same clear message as "Stash all", like git. Before, the stash put the
+  committed version back and tracked the file again (#259).
+- Fixed: stashing with a repository staged inside this one (`git add lib`, where `lib` has its
+  own `.git`) showed a raw libgit2 error. "Stash all", and "Stash file…" on it, now refuse with
+  a clear message. A new submodule that isn't committed yet, or a staged link whose folder is
+  gone, gets its own message (#244).
+- Fixed: saving a stash now spots a file in the way of a restored folder when the names differ
+  only in case or Unicode form (such as `ß` and `ss`), the same way applying a stash does. This
+  applies on macOS and Windows, and on Linux when the repository sets `core.ignorecase`. Before,
+  saving could delete that file (#337).
+
+### Stashes sidebar
+
+- Fixed: in a narrow sidebar, the Stashes section stacked its Apply, Pop and Drop buttons and cut
+  stash names to a few letters. Each stash now has a "…" menu with Apply, Pop and Drop… (also on
+  right-click, the Menu key or Shift+F10), its name uses the full row, and hovering a long name
+  shows all of it (#339).
+- Fixed: a second click on a menu button ("…" on sidebar rows and file headers, "Add", the
+  arrow beside Fetch and Stash) now closes its menu instead of opening it again, also when the
+  menu was opened by a right-click or a key (#339).
+
+### An invalid core.ignorecase
+
+- Fixed: a `core.ignorecase` that isn't true or false (or a config that can't be read) no
+  longer counts as "case doesn't fold" on Linux, which skipped the check for names that differ
+  only in case. Switching branches, merging, pulling, cherry-picking, rebasing, cloning, adding a
+  worktree and updating submodules now stop with "Can't read core.ignorecase from the Git
+  config: …". Every reset, discard, Abort and undo also stops, on every system, before it
+  changes anything. Fix the setting, then try again (#225).
+- Fixed: saving a stash, in every mode and with "Stash file…", now stops with the same message
+  before it writes anything. Before, it could write the stash and then leave the files only half
+  reset. Applying and popping a stash stop too, on every system, before any other check (#369).
+
+### Worktree names on Windows
+
+- Fixed: on Windows, a worktree whose name or folder ended in a dot or a space was created but
+  couldn't be found, removed or rolled back from the app. Such names, and names Windows reserves
+  for devices (`con`, `aux`, `nul`, `com1` and the like), are now refused before anything is
+  created, with a message naming the part to change (#261).
+
+### Hook cancel on macOS
+
+- Changed: when a hook is cancelled or runs out of time, Browsitory now kills its process group
+  a second time once the hook itself has exited. This closes a suspected race where a hook's
+  background job could survive the cancel on macOS (#349).
+- Internal: the hook timeout and cancel tests on Unix and Windows no longer depend on how fast
+  the runner starts the hook's background job, which made them flaky on macOS CI (#349).
+
+### Internal: security review leftovers
+
+- Internal: the commands refused while another window holds the undo history are listed once,
+  over every command, so the wait and the refusal can't disagree (#225).
+- Internal: Mark resolved records a link's own stat data, so status doesn't read the link again
+  on every refresh (#225).
+- Internal: comments and docs on stat data, the document extension list and the undo lock are
+  corrected, and tests check status right after Mark resolved (#225).
+
+### Internal: late cancels no longer pile up
+
+- Internal: a cancel for an operation that already finished (a late click on Cancel) is now
+  dropped instead of being kept until the repository is closed. A late cancel for a clone is
+  kept only among the last few, since the clone dialog can also cancel before its clone
+  starts (#219).
+
+### Internal: frontend tests under load
+
+- Internal: frontend tests no longer time out on a busy machine (#217). A failed
+  `findBy*`/`waitFor` retry no longer pretty-prints the whole document (5% of App.test.tsx's CPU
+  time when idle, 15% under load). Testing Library waits up to 4 s instead of 1 s, the default
+  test timeout is 10 s instead of 5 s, and App.test.tsx (whole-App renders) and the VSCode
+  bootstrap test get 20 s.
+
+### Internal: smaller source files
+
+- Internal: the five largest files are split by feature, with no behaviour change (#307). The
+  worker's and the desktop commands' inline tests moved to `worker/tests/` and
+  `commands/tests/`, the sidecar's handlers to `dispatch/<feature>.rs`, `App.tsx`'s
+  `RepoWorkspace` and its state hooks to their own files, and `useAppState.test.ts` to one test
+  file per area.
+
+### Internal: Marketplace publishing checks every platform package
+
+- Internal: the release's Marketplace job publishes one platform package, waits until the
+  Marketplace validated it, then publishes the rest, and fails if any target is still missing
+  from the public gallery after 30 minutes. The Open VSX job runs the same check. Re-running the
+  job uploads only the missing targets (`scripts/verify-marketplace-listing.py`, #344).
+
 ## [0.3.0] - 2026-11-05
 
 The first public release. Browsitory ships as a desktop app and as a VSCode extension, available

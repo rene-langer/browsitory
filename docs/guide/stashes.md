@@ -12,8 +12,8 @@ stashes both names: the new file and the old name's deletion. If you made a new 
 name since, it refuses ("Can't stash 'new' on its own: it was renamed from 'old', and 'old'
 exists again. Stash 'old' too, or move it first."); **Stash file…** on the old name stashes
 both. On macOS, Windows or with `core.ignorecase`, **Stash file…** refuses a rename that
-changes only the case of a name (`Old` to `old`); commit it or undo it first. One file at a time: the
-change lists have no multi-select. A file inside a symlinked folder can't be stashed on its own.
+changes only the case of a name (`Old` to `old`); commit it or undo it first. One file at a
+time: the change lists have no multi-select. A file inside a symlinked folder can't be stashed on its own.
 If a tracked file was replaced by a symbolic link, stashing keeps the link in the stash and puts
 the file back; while a symbolic link replaces a tracked folder, **Stash all** refuses (move the
 link away first). So do switching branches, merging, cherry-picking, reverting, rebasing,
@@ -42,7 +42,8 @@ first."). With **Include untracked files** off, stashing would delete an untrack
 in the way of a stashed folder or file (with **Keep staged changes** also one in the way of a
 staged one), so it refuses instead ("Stashing would delete the untracked file 'd', which is in
 the way of 'd/f'. Turn on Include untracked files, or move 'd' first."). Where names ignore case
-(`core.ignorecase`), `docs` counts as in the way of `Docs/f`.
+(macOS, Windows, or `core.ignorecase` on Linux), `docs` counts as in the way of `Docs/f`, and so
+does a name that differs only in Unicode form (`ss` in the way of `ß/f`).
 
 Ignored files and repositories nested in the worktree are never stashed. If one is in the way of
 a file or folder that stashing puts back, **Stash all** would delete it, as git does. So it

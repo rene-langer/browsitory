@@ -33,8 +33,8 @@ The extension needs VSCode 1.134 or newer on Linux x64, macOS (Intel or Apple si
 Windows x64. It doesn't run in vscode.dev or in Codespaces in the browser.
 
 - **Visual Studio Marketplace** (VSCode): open the Extensions view and search for
-  "Browsitory". While Browsitory is a pre-release there, choose **Install Pre-Release
-  Version**, or run `code --install-extension browsitory.browsitory --pre-release`.
+  "Browsitory" and choose **Install**, or run
+  `code --install-extension browsitory.browsitory`.
 - **Open VSX** (VSCodium, Cursor, Gitpod and other editors that use it): search for
   "Browsitory" in the editor's Extensions view, or see
   <https://open-vsx.org/extension/browsitory/browsitory>.
