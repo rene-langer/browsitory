@@ -1329,11 +1329,16 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   folder is fine. It applies when `try_folds_case` (`core.ignorecase`, or always on
   macOS/Windows builds). A config it can't read, or a `core.ignorecase` that isn't a boolean,
   stops the operation with `CaseConfigUnreadable` ("Can't read core.ignorecase from the Git
-  config: …"), not "case doesn't fold" (#225). `prepare_forced_checkout` counts it as folding
-  instead, so its check still runs and never adds that error to a cleanup (Abort, Reset hard, a
-  discard); libgit2's own checkout and diff then refuse the value anyway ("failed to parse … as
-  a boolean"). Stash still calls `folds_case`, which counts it as unset. Worktree add also
-  applies it when the destination folds case (#162): a worktree
+  config: …"), not "case doesn't fold" (#225). `prepare_forced_checkout` reads the value
+  strictly on every OS, before it removes any link, for every forced checkout, cleanups
+  included (Abort, Reset hard, discards, undo): libgit2's checkout counts an invalid value as
+  false, but its attribute and ignore parsing refuses it, so going on could remove the links
+  and then stop half-way with HEAD unchanged. The user fixes the setting instead. Stash
+  apply/pop reach `try_folds_case` through `refuse_linked_folders` and refuse too. Only stash
+  save's check for entries in the way (`entry_in_the_way`) and the apply/pop check for an
+  untracked file below a tracked one (`refuse_untracked_below_tracked_file`) still call
+  `folds_case`, which counts the value as unset; stash save's forced reset also removes the
+  links it stashed without reading the value (#369). Worktree add also applies it when the destination folds case (#162): a worktree
   shares the main repository's config, whose `core.ignorecase` libgit2 probed where the main
   repository lives, so `worktree_guard::dir_folds_case` creates a hidden
   `.browsitory-case-probe-*` temp file in the nearest existing folder of the destination, looks

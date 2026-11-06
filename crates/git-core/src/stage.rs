@@ -60,6 +60,9 @@ pub enum StageError {
     Status(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
+    #[error(transparent)]
+    CaseConfig(#[from] crate::CaseConfigUnreadable),
     /// The file to write is read-only; nothing was written (#209).
     #[error("'{0}' is read-only. Make it writable, then try again.")]
     ReadOnlyFile(String),

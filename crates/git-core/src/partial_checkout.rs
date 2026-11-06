@@ -70,6 +70,13 @@ pub(crate) enum Unfinished {
     Git(git2::Error),
     Io(std::io::Error),
     CaseCollision(crate::CaseCollision),
+    CaseConfig(crate::CaseConfigUnreadable),
+}
+
+impl From<crate::CaseConfigUnreadable> for Unfinished {
+    fn from(error: crate::CaseConfigUnreadable) -> Self {
+        Self::CaseConfig(error)
+    }
 }
 
 impl From<git2::Error> for Unfinished {

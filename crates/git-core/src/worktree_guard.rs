@@ -783,7 +783,7 @@ pub(crate) fn prepare_forced_checkout<E, P>(
     paths: Option<&[P]>,
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<io::Error> + From<CaseCollision>,
+    E: From<git2::Error> + From<io::Error> + From<CaseCollision> + From<CaseConfigUnreadable>,
     P: AsRef<[u8]>,
 {
     prepare_forced_checkout_known(repo, target, paths, None)
@@ -798,19 +798,21 @@ pub(crate) fn prepare_forced_checkout_known<E, P>(
     also_known: Option<&git2::Tree>,
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<io::Error> + From<CaseCollision>,
+    E: From<git2::Error> + From<io::Error> + From<CaseCollision> + From<CaseConfigUnreadable>,
     P: AsRef<[u8]>,
 {
     let Some(workdir) = repo.workdir() else {
         return Ok(());
     };
+    // Read strictly, before anything is written, also on macOS and Windows and for a cleanup
+    // (#225). libgit2's checkout counts an invalid value as false but its attribute and ignore
+    // parsing refuses it, so going on could remove the links below and then stop half-way.
+    let ignore_case = core_ignorecase(repo)?;
+    let folds = cfg!(any(target_os = "macos", windows)) || ignore_case;
     // A collision the target brings in is refused; one HEAD already holds (aborting a merge,
     // `reset --hard` to HEAD, discarding) isn't, so such a repository can still be cleaned up.
-    // Every collision of the target must already be known, not just the first one found. A
-    // `core.ignorecase` that can't be read counts as folding here (#225): the check still runs,
-    // and cleaning up (Abort, Reset hard, discards) keeps working with a broken config.
-    let folds = || try_folds_case(repo).unwrap_or(true);
-    if let Some(target) = target.filter(|_| folds()) {
+    // Every collision of the target must already be known, not just the first one found.
+    if let Some(target) = target.filter(|_| folds) {
         let brought = find_case_collisions(target, paths)?;
         if !brought.is_empty() {
             let known = known_collisions(repo, paths, also_known)?;
@@ -820,9 +822,7 @@ where
         }
     }
     // libgit2 matches checkout paths case-insensitively under `core.ignorecase`; so does the
-    // filter here, or `TC` would scan nothing for a tracked `tc`. An unreadable value scans
-    // case-insensitively, which only finds more (#225).
-    let ignore_case = core_ignorecase(repo).unwrap_or(true);
+    // filter here, or `TC` would scan nothing for a tracked `tc`.
     let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
     let mut scanner = Scanner::new(workdir, true);
     let mut hazards = BTreeSet::new();
@@ -2517,26 +2517,28 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// An invalid `core.ignorecase` doesn't fail the forced-checkout guard (#225): it checks
-    /// what the target brings in as if case folds, so cleaning up isn't blocked by the guard.
+    /// An invalid `core.ignorecase` refuses the forced-checkout guard on every OS, with or
+    /// without a target, before any link is removed (#225).
     #[test]
-    fn the_forced_checkout_guard_treats_an_invalid_ignorecase_as_folding() {
+    fn the_forced_checkout_guard_refuses_an_invalid_ignorecase() {
         let (_dir, repo) = repo();
         repo.config()
             .unwrap()
             .set_str("core.ignorecase", "maybe")
             .unwrap();
         let plain = tree_of(&repo, &[("a", FILE, "a")]);
+        for target in [Some(GuardSource::Tree(&plain)), None] {
+            let result: Result<(), crate::reset::ResetError> =
+                prepare_forced_checkout(&repo, target.as_ref(), ALL);
+            assert!(
+                matches!(result, Err(crate::reset::ResetError::CaseConfig(_))),
+                "{result:?}"
+            );
+        }
+        repo.config().unwrap().remove("core.ignorecase").unwrap();
         let result: Result<(), crate::reset::ResetError> =
             prepare_forced_checkout(&repo, Some(&GuardSource::Tree(&plain)), ALL);
         assert!(result.is_ok(), "{result:?}");
-        let colliding = tree_of(&repo, &[("D", LINK, "/x"), ("d/x", FILE, "x")]);
-        let result: Result<(), crate::reset::ResetError> =
-            prepare_forced_checkout(&repo, Some(&GuardSource::Tree(&colliding)), ALL);
-        assert!(
-            matches!(result, Err(crate::reset::ResetError::CaseCollision(_))),
-            "{result:?}"
-        );
     }
 
     #[test]

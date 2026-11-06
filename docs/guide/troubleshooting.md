@@ -16,7 +16,10 @@ Report problems on [GitHub](https://github.com/rene-langer/browsitory/issues).
 ## An invalid `core.ignorecase`
 
 If the repository's `core.ignorecase` setting holds something other than true or false,
-neither Browsitory nor Git can tell whether names that differ only in case are the same file.
-Most actions that check out files then stop with an error that names the setting, such as
-"Can't read core.ignorecase from the Git config: failed to parse 'maybe' as a boolean." Set it
-to true or false, or remove it (`git config --unset core.ignorecase`), then try again.
+Browsitory can't tell whether names that differ only in case are the same file. Actions that
+write files from a commit then stop before they change anything: switching branches, merging,
+pulling, cherry-picking, rebasing, applying or popping a stash, resetting, discarding changes,
+Abort, undo/redo, cloning, adding a worktree and updating a submodule. The error names the
+setting, for example "Can't read core.ignorecase from the Git config: failed to parse 'maybe'
+as a boolean." Set it to true or false, or remove it (`git config --unset core.ignorecase`),
+then try again.
