@@ -315,6 +315,7 @@ fn save_path_limited_stash(
         base.summary().ok().flatten().unwrap_or_default()
     );
 
+    let paths = with_rename_partners(repo, &opts.paths)?;
     let mut status_options = git2::StatusOptions::new();
     status_options
         .include_untracked(opts.include_untracked)
@@ -322,7 +323,7 @@ fn save_path_limited_stash(
         .include_ignored(false)
         .exclude_submodules(true)
         .disable_pathspec_match(true);
-    for path in &opts.paths {
+    for path in &paths {
         status_options.pathspec(path.as_str());
     }
     let mut tracked = Vec::new();
@@ -392,7 +393,7 @@ fn save_path_limited_stash(
     }
     // Reading or reverting `d/f` while `d` is a symlink would read and write *through* it,
     // possibly outside the repository. Refuse before anything is written, like git does.
-    for path in opts.paths.iter().chain(&tracked).chain(&untracked) {
+    for path in paths.iter().chain(&tracked).chain(&untracked) {
         if has_symlinked_ancestor(&workdir, path) {
             return Err(StashError::BeyondSymlink(path.clone()));
         }
@@ -568,6 +569,48 @@ fn save_path_limited_stash(
         }
     }
     Ok(())
+}
+
+/// `paths` plus the other side of every staged rename one of them names (or a folder of them
+/// holds), so Stash file… on a staged rename's new path also stashes the old path's deletion,
+/// instead of leaving it staged (#152). Renames are detected between HEAD and the index as
+/// `status::status` detects them, so they match what the file list shows. (git's `stash push
+/// -- new` leaves the deletion staged, and `-- old new` fails: `old` matches no file it knows.)
+fn with_rename_partners(repo: &Repository, paths: &[String]) -> Result<Vec<String>, StashError> {
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(false)
+        .include_ignored(false)
+        .exclude_submodules(true)
+        .renames_head_to_index(true)
+        .renames_index_to_workdir(false);
+    let selects = |path: &str| {
+        paths.iter().any(|picked| {
+            path.strip_prefix(picked.as_str())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        })
+    };
+    let mut all = paths.to_vec();
+    for entry in repo.statuses(Some(&mut options))?.iter() {
+        if !entry.status().contains(git2::Status::INDEX_RENAMED) {
+            continue;
+        }
+        let Some(delta) = entry.head_to_index() else {
+            continue;
+        };
+        let (Some(old), Some(new)) = (
+            delta.old_file().path().and_then(std::path::Path::to_str),
+            delta.new_file().path().and_then(std::path::Path::to_str),
+        ) else {
+            continue;
+        };
+        for (picked, partner) in [(new, old), (old, new)] {
+            if selects(picked) && !selects(partner) && !all.iter().any(|path| path == partner) {
+                all.push(partner.to_string());
+            }
+        }
+    }
+    Ok(all)
 }
 
 /// True when the worktree file `path` is untracked: not in the index and not ignored.

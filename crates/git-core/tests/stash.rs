@@ -2949,3 +2949,57 @@ fn stash_all_reverting_a_path_that_head_has_as_a_folder_keeps_the_index_valid() 
     );
     assert_eq!(read(dir.path(), "f"), "local\n");
 }
+
+/// HEAD has `old` (four lines) and `other`; `old` was renamed to `new` and the rename staged
+/// (`git mv old new`), and `other` was edited.
+fn staged_rename() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old", "a\nb\nc\nd\n");
+    write_file(dir.path(), "other", "x\n");
+    commit_all(&repo, "base");
+    assert!(git(dir.path(), &["mv", "old", "new"]).status.success());
+    write_file(dir.path(), "other", "y\n");
+    (dir, repo)
+}
+
+#[test]
+fn stashing_either_side_of_a_staged_rename_stashes_the_whole_rename() {
+    // #152: Stash file… sends the rename's new path. The old path's deletion goes into the
+    // stash too, so nothing of the rename stays staged. (git's `stash push -- new` leaves `D
+    // old` staged, and `stash push -- old new` fails: `old` matches no file git knows.)
+    const CONTENT: &str = "a\nb\nc\nd\n";
+    for picked in ["new", "old"] {
+        for restore_index in [false, true] {
+            let (dir, mut repo) = staged_rename();
+            let opts = with(|o| o.paths = vec![picked.into()]);
+
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            assert_eq!(git_status(dir.path()), " M other\n", "{picked}");
+            assert_eq!(read(dir.path(), "old"), CONTENT);
+            assert!(!dir.path().join("new").exists());
+            assert_eq!(
+                stashed(&mut repo, "new"),
+                [Some(CONTENT.into()), Some(CONTENT.into()), None]
+            );
+            assert_eq!(stashed(&mut repo, "old"), [None, None, None]);
+
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, restore_index).unwrap(),
+                StashApplyOutcome::Applied,
+                "{picked} restore_index={restore_index}"
+            );
+            assert_eq!(read(dir.path(), "new"), CONTENT);
+            assert!(!dir.path().join("old").exists());
+            if restore_index {
+                assert_eq!(git_status(dir.path()), "R  old -> new\n M other\n");
+            }
+        }
+    }
+    // git leaves the old path's deletion staged.
+    let (twin, _repo) = staged_rename();
+    assert!(git(twin.path(), &["stash", "push", "-q", "--", "new"])
+        .status
+        .success());
+    assert_eq!(git_status(twin.path()), "D  old\n M other\n");
+}
