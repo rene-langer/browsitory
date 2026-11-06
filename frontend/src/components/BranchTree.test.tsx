@@ -255,6 +255,20 @@ describe("BranchTree — local branches", () => {
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(add).toHaveAttribute("aria-expanded", "false");
+    expect(add).toHaveFocus();
+  });
+
+  it("a click on a branch's '…' closes the menu that Shift+F10 on its row opened", () => {
+    renderTree();
+    const actions = screen.getByRole("button", { name: "Actions for main" });
+    const row = actions.closest("li")!;
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    fireEvent.mouseDown(actions);
+    fireEvent.click(actions);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", async () => {

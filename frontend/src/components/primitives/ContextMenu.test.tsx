@@ -93,18 +93,56 @@ describe("ContextMenu", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("leaves a press on a menu button that says it is open (opened by a key) to that button", () => {
+  it("leaves a press on the menu button focused when it opened (opened by a key) to that button", () => {
+    const onClose = vi.fn();
+    render(<button aria-haspopup="menu">trigger</button>);
+    const trigger = screen.getByRole("button", { name: "trigger" });
+    trigger.focus();
+    render(<ContextMenu x={0} y={0} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(trigger);
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("leaves a press on a menu button the caller names with isTrigger to that button", () => {
     const onClose = vi.fn();
     render(
-      <button aria-haspopup="menu" aria-expanded="true">
+      <button aria-haspopup="menu" data-menu-key="row-1">
         trigger
       </button>,
     );
-    render(<ContextMenu x={0} y={0} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        isTrigger={(button) => button.getAttribute("data-menu-key") === "row-1"}
+        onClose={onClose}
+        items={[{ label: "X", onSelect: () => {} }]}
+      />,
+    );
 
     fireEvent.mouseDown(screen.getByRole("button", { name: "trigger" }));
 
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes on a press on another menu's open trigger", () => {
+    const onClose = vi.fn();
+    render(
+      <>
+        <button aria-haspopup="menu">mine</button>
+        <button aria-haspopup="menu" aria-expanded="true">
+          other
+        </button>
+      </>,
+    );
+    const mine = screen.getByRole("button", { name: "mine" });
+    render(<ContextMenu x={0} y={0} returnFocusTo={mine} onClose={onClose} items={[{ label: "X", onSelect: () => {} }]} />);
+
+    fireEvent.mouseDown(screen.getByRole("button", { name: "other" }));
+
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("closes on a secondary-button press on its trigger", () => {

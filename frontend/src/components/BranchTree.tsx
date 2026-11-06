@@ -358,6 +358,7 @@ export function BranchTree({
                 className={styles.iconButton}
                 aria-label={`Actions for ${branch.name}`}
                 aria-haspopup="menu"
+                data-menu-key={`local-branch:${branch.name}`}
                 aria-expanded={rowMenu?.kind === "local-branch" && rowMenu.name === branch.name}
                 onClick={(event) =>
                   toggleRowMenu({
@@ -442,6 +443,7 @@ export function BranchTree({
               className={styles.iconButton}
               aria-label={`Actions for ${remoteName}/${branchName}`}
               aria-haspopup="menu"
+              data-menu-key={`remote-branch:${remoteName}/${branchName}`}
               aria-expanded={
                 rowMenu?.kind === "remote-branch" && rowMenu.remoteName === remoteName && rowMenu.branchName === branchName
               }
@@ -620,9 +622,15 @@ export function BranchTree({
     setRowMenu(menu);
   };
   // For the menu buttons ("…", "Add"): a second click on the button of the open menu closes it.
+  const isRowMenuTrigger = (button: Element) =>
+    rowMenu !== null && button.getAttribute("data-menu-key") === rowMenuKey(rowMenu);
+  // The button carries `data-menu-key` so its menu knows it as its own button however it opened.
   const toggleRowMenu = (menu: RowContextMenu) => {
-    if (rowMenu !== null && rowMenuKey(rowMenu) === rowMenuKey(menu)) setRowMenu(null);
-    else openRowMenu(menu);
+    if (rowMenu !== null && rowMenuKey(rowMenu) === rowMenuKey(menu)) {
+      // Focus stays on the button (WebKit may not have focused it on the click).
+      menu.returnFocusTo?.focus({ preventScroll: true });
+      setRowMenu(null);
+    } else openRowMenu(menu);
   };
 
   const newBranchProblem = branchNameProblem(newBranchName.trim());
@@ -759,6 +767,7 @@ export function BranchTree({
             className={styles.iconButton}
             aria-label="Add"
             aria-haspopup="menu"
+            data-menu-key="add"
             aria-expanded={rowMenu?.kind === "add"}
             onClick={(event) => toggleRowMenu({ kind: "add", ...rectAnchor(event.currentTarget), returnFocusTo: event.currentTarget })}
           >
@@ -973,6 +982,7 @@ export function BranchTree({
                   className={styles.iconButton}
                   aria-label={`Actions for remote ${remote.name}`}
                   aria-haspopup="menu"
+                  data-menu-key={`remote-folder:${remote.name}`}
                   aria-expanded={rowMenu?.kind === "remote-folder" && rowMenu.name === remote.name}
                   onClick={(event) =>
                     toggleRowMenu({
@@ -1039,6 +1049,7 @@ export function BranchTree({
             return branch !== undefined ? (
               <ContextMenu
                 key={rowMenuKey(rowMenu)}
+                isTrigger={isRowMenuTrigger}
                 x={rowMenu.x}
                 y={rowMenu.y}
                 returnFocusTo={rowMenu.returnFocusTo}
@@ -1050,6 +1061,7 @@ export function BranchTree({
         {rowMenu !== null && rowMenu.kind === "add" && (
           <ContextMenu
             key={rowMenuKey(rowMenu)}
+            isTrigger={isRowMenuTrigger}
             x={rowMenu.x}
             y={rowMenu.y}
             returnFocusTo={rowMenu.returnFocusTo}
@@ -1072,6 +1084,7 @@ export function BranchTree({
             return remote !== undefined ? (
               <ContextMenu
                 key={rowMenuKey(rowMenu)}
+                isTrigger={isRowMenuTrigger}
                 x={rowMenu.x}
                 y={rowMenu.y}
                 returnFocusTo={rowMenu.returnFocusTo}
@@ -1083,6 +1096,7 @@ export function BranchTree({
         {rowMenu !== null && rowMenu.kind === "remote-branch" && (
           <ContextMenu
             key={rowMenuKey(rowMenu)}
+            isTrigger={isRowMenuTrigger}
             x={rowMenu.x}
             y={rowMenu.y}
             returnFocusTo={rowMenu.returnFocusTo}

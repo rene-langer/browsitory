@@ -511,6 +511,7 @@ describe("DiffPane", () => {
 
         expect(screen.queryByRole("menu")).toBeNull();
         expect(actions).toHaveAttribute("aria-expanded", "false");
+        expect(actions).toHaveFocus();
       });
 
       it("a menu opened by clicking '…' returns focus to it, even if the click did not focus it", () => {

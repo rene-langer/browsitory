@@ -54,27 +54,36 @@ export function StashPanel({
   // commit id: a refresh while they are open can move it to another index or remove it (#339).
   const menuStash = menu === null ? undefined : stashes.find((stash) => stash.commitId === menu.stash.commitId);
   const dropStash = pendingDrop === null ? undefined : stashes.find((stash) => stash.commitId === pendingDrop.commitId);
-  // Gone from the list: close them (state adjusted while rendering, as React recommends over an
-  // effect), and remember where the stash was so focus does not drop to the page (below).
-  const [refocus, setRefocus] = useState<{ index: number } | null>(null);
-  if (menu !== null && menuStash === undefined) {
-    setMenu(null);
-    setRefocus({ index: menu.stash.index });
+
+  // When a stash this panel had focus on leaves the list (its menu or drop confirmation was open,
+  // or its drop was just confirmed and focus went back to its "…"), focus would drop to the page.
+  // Remember its place in the last list that held it, and move focus there after the commit.
+  // State is adjusted while rendering, as React recommends over an effect.
+  const [lastStashes, setLastStashes] = useState(stashes);
+  const [droppedCommitId, setDroppedCommitId] = useState<string | null>(null);
+  const [refocus, setRefocus] = useState<{ position: number } | null>(null);
+  if (stashes !== lastStashes) {
+    setLastStashes(stashes);
+    const watched = [menu?.stash.commitId, pendingDrop?.commitId, droppedCommitId];
+    const gone = watched.find(
+      (commitId) => commitId != null && !stashes.some((stash) => stash.commitId === commitId),
+    );
+    if (gone != null) {
+      setRefocus({ position: Math.max(0, lastStashes.findIndex((stash) => stash.commitId === gone)) });
+      if (gone === droppedCommitId) setDroppedCommitId(null);
+    }
   }
-  if (pendingDrop !== null && dropStash === undefined) {
-    setPendingDrop(null);
-    setRefocus({ index: pendingDrop.index });
-  }
+  if (menu !== null && menuStash === undefined) setMenu(null);
+  if (pendingDrop !== null && dropStash === undefined) setPendingDrop(null);
   // The list, or the empty-state text when there is none.
   const bodyRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (refocus === null) return;
     const active = document.activeElement;
     if (active !== null && active !== document.body && active.isConnected) return;
-    // Focus went with the closed menu or dialog: move it to the "…" of the stash now in that
-    // place (or the last one), else to the section's header.
+    // The "…" of the stash now in that place, else the last one, else the section's header.
     const buttons = bodyRef.current?.querySelectorAll<HTMLElement>('button[aria-haspopup="menu"]') ?? [];
-    const next = buttons.length > 0 ? buttons[Math.min(refocus.index, buttons.length - 1)] : undefined;
+    const next = buttons.length > 0 ? buttons[Math.min(refocus.position, buttons.length - 1)] : undefined;
     const header = bodyRef.current?.closest("section")?.querySelector<HTMLElement>("button");
     (next ?? header)?.focus({ preventScroll: true });
   }, [refocus]);
@@ -137,14 +146,18 @@ export function StashPanel({
                   aria-label={`Actions for ${stash.message}`}
                   aria-haspopup="menu"
                   aria-expanded={menu?.stash.commitId === stash.commitId}
+                  data-menu-key={stash.commitId}
                   onClick={(event) => {
                     event.stopPropagation();
                     const trigger = event.currentTarget;
-                    setMenu((open) =>
-                      open?.stash.commitId === stash.commitId
-                        ? null
-                        : { stash, ...rectAnchor(trigger), returnFocusTo: trigger },
-                    );
+                    if (menu?.stash.commitId === stash.commitId) {
+                      // A second click closes it; focus stays on the button (WebKit may not have
+                      // focused it on the click).
+                      trigger.focus({ preventScroll: true });
+                      setMenu(null);
+                    } else {
+                      setMenu({ stash, ...rectAnchor(trigger), returnFocusTo: trigger });
+                    }
                   }}
                 >
                   <MoreHorizontal size={14} aria-hidden="true" />
@@ -160,6 +173,8 @@ export function StashPanel({
           x={menu.x}
           y={menu.y}
           returnFocusTo={menu.returnFocusTo}
+          // Opened from the row by a key or a right-click, the row's "…" is still its own button.
+          isTrigger={(button) => button.getAttribute("data-menu-key") === menuStash.commitId}
           onClose={() => setMenu(null)}
           items={menuItems(menuStash)}
         />
@@ -173,6 +188,7 @@ export function StashPanel({
           confirmTitle={dropTitle}
           onConfirm={() => {
             onDropStash(dropStash.index);
+            setDroppedCommitId(dropStash.commitId);
             setPendingDrop(null);
           }}
           onCancel={() => setPendingDrop(null)}

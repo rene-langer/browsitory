@@ -34,6 +34,22 @@ function renderPanel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) 
   return result;
 }
 
+const three: StashEntry[] = [
+  ...stashes,
+  { index: 2, message: "WIP on main: stash2fix oldest edit", commitId: "stash2" },
+];
+
+/** The list with `index` matching each entry's place, as the backend reports it. */
+function renumber(list: StashEntry[]): StashEntry[] {
+  return list.map((stash, index) => ({ ...stash, index }));
+}
+
+/** The "…" button of the stash whose message contains `stem`. */
+function actionsFor(stem: string) {
+  const row = screen.getByText(new RegExp(stem)).closest("li")!;
+  return within(row).getByRole("button", { name: /^Actions for / });
+}
+
 /** Opens the actions menu of the stash row whose message matches `message`. */
 function openMenu(message: RegExp) {
   const row = screen.getByText(message).closest("li")!;
@@ -209,13 +225,59 @@ describe("StashPanel", () => {
   });
 
   it("moves focus to the '…' now in that place when the stash of a focused menu disappears", () => {
-    const { rerender } = renderPanel();
+    const { rerender } = renderPanel({ stashes: three });
     openMenu(/stash1fix/);
     expect(screen.getByRole("menuitem", { name: "Apply" })).toHaveFocus();
 
-    rerender(panel({ stashes: [stashes[0]] }));
+    rerender(panel({ stashes: renumber([three[0], three[2]]) }));
 
-    expect(screen.getByRole("button", { name: "Actions for WIP on main: stash0fix uncommitted edit" })).toHaveFocus();
+    expect(actionsFor("stash2fix")).toHaveFocus();
+  });
+
+  it("moves focus to the last '…' when the last stash of a focused menu disappears", () => {
+    const { rerender } = renderPanel({ stashes: three });
+    openMenu(/stash2fix/);
+
+    rerender(panel({ stashes: renumber([three[0], three[1]]) }));
+
+    expect(actionsFor("stash1fix")).toHaveFocus();
+  });
+
+  it("finds that place in the latest list, after refreshes that moved the stash", () => {
+    const { rerender } = renderPanel({ stashes: three });
+    openMenu(/stash1fix/);
+    const newest = { index: 0, message: "WIP on main: stashNfix newest", commitId: "stashN" };
+
+    // A new stash on top moves stash1 from place 1 to place 2, then stash1 goes.
+    rerender(panel({ stashes: renumber([newest, ...three]) }));
+    rerender(panel({ stashes: renumber([newest, three[0], three[2]]) }));
+
+    expect(actionsFor("stash2fix")).toHaveFocus();
+  });
+
+  it("moves focus to the '…' now in that place when the stash of a focused drop dialog disappears", () => {
+    const { rerender } = renderPanel({ stashes: three });
+    openMenu(/stash1fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
+    expect(screen.getByRole("dialog", { name: /Drop stash/ })).toBeInTheDocument();
+
+    rerender(panel({ stashes: renumber([three[0], three[2]]) }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(actionsFor("stash2fix")).toHaveFocus();
+  });
+
+  it("moves focus to the '…' now in that place once a confirmed drop removes the stash", () => {
+    const onDropStash = vi.fn();
+    const { rerender } = renderPanel({ stashes: three, onDropStash });
+    openMenu(/stash1fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: /Drop stash/ })).getByRole("button", { name: "Drop stash" }));
+    expect(onDropStash).toHaveBeenCalledWith(1);
+
+    rerender(panel({ stashes: renumber([three[0], three[2]]), onDropStash }));
+
+    expect(actionsFor("stash2fix")).toHaveFocus();
   });
 
   it("moves focus to the section header when the last stash of a focused menu disappears", () => {
