@@ -3,7 +3,8 @@
 **Worktrees** creates and removes linked worktrees, and opens one directly
 in Browsitory. If the worktree's folder is inside folders that don't exist
 yet, Browsitory creates them, as `git worktree add` does. On Windows, the
-worktree's name and the folders of its path can't end in a dot or a space,
+worktree's name and the folders in its path, as you type it, can't end in a
+dot or a space,
 and can't be a name Windows reserves for devices, such as `con`, `aux` or
 `nul`: Browsitory refuses them before it creates anything. If creating the
 worktree fails (for example, a folder can't be created, the disk is full, or

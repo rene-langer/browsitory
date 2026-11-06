@@ -57,10 +57,15 @@ pub enum WorktreeError {
     AddFailedFolderLeft { reason: String, path: PathBuf },
     /// On Windows, the worktree's name or a folder of its destination can't be used there
     /// (#261).
-    #[error("Windows can't use '{name}' as a folder name because {problem}. Choose another name.")]
+    /// `in_path` is set for a folder of the destination, unset for the worktree's name.
+    #[error(
+        "Windows can't use '{name}' as a folder name because {problem}. Choose another {}.",
+        if *in_path { "folder" } else { "name" }
+    )]
     UnusableWindowsName {
         name: String,
         problem: WindowsNameProblem,
+        in_path: bool,
     },
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
@@ -217,7 +222,8 @@ fn windows_name_problem(name: &str) -> Option<WindowsNameProblem> {
         .next()
         .unwrap_or(name)
         .trim_end_matches(' ');
-    let upper = base.to_uppercase();
+    // Device names are ASCII: `to_uppercase` would also turn a dotless `ı` into `I`.
+    let upper = base.to_ascii_uppercase();
     let reserved = matches!(
         upper.as_str(),
         "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
@@ -237,15 +243,18 @@ fn windows_name_problem(name: &str) -> Option<WindowsNameProblem> {
 /// can't use (see [`windows_name_problem`]). Called only on Windows: git allows these names
 /// elsewhere, and so does Browsitory.
 fn refuse_unusable_windows_names(name: &str, path: &Path) -> Result<(), WorktreeError> {
+    // A drive, a share, a verbatim (`\\?\`) prefix, the root, `.` and `..` aren't folder names.
     let folders = path.components().filter_map(|component| match component {
-        std::path::Component::Normal(folder) => Some(folder.to_string_lossy()),
+        std::path::Component::Normal(folder) => Some((folder.to_string_lossy(), true)),
         _ => None,
     });
-    for part in std::iter::once(std::borrow::Cow::Borrowed(name)).chain(folders) {
+    for (part, in_path) in std::iter::once((std::borrow::Cow::Borrowed(name), false)).chain(folders)
+    {
         if let Some(problem) = windows_name_problem(&part) {
             return Err(WorktreeError::UnusableWindowsName {
                 name: part.into_owned(),
                 problem,
+                in_path,
             });
         }
     }
@@ -907,57 +916,99 @@ mod tests {
         }
     }
 
+    /// Device names are ASCII: a look-alike that only Unicode case mapping turns into one
+    /// (dotless `ı` uppercases to `I`) is an ordinary name.
+    #[test]
+    fn a_non_ascii_look_alike_of_a_device_name_is_usable() {
+        for name in ["con\u{131}n$", "CON\u{131}N$", "\u{131}aux"] {
+            assert_eq!(windows_name_problem(name), None, "{name:?}");
+        }
+    }
+
+    fn refused(name: &str, path: &str) -> Option<(String, WindowsNameProblem, bool)> {
+        match refuse_unusable_windows_names(name, Path::new(path)) {
+            Err(WorktreeError::UnusableWindowsName {
+                name,
+                problem,
+                in_path,
+            }) => Some((name, problem, in_path)),
+            Ok(()) => None,
+            Err(other) => panic!("{other}"),
+        }
+    }
+
     #[test]
     fn every_part_of_the_name_and_the_destination_is_checked() {
-        let refused =
-            |name: &str, path: &str| match refuse_unusable_windows_names(name, Path::new(path)) {
-                Err(WorktreeError::UnusableWindowsName { name, problem }) => Some((name, problem)),
-                Ok(()) => None,
-                Err(other) => panic!("{other}"),
-            };
         assert_eq!(refused("wt", "work/wt"), None);
         assert_eq!(refused("wt", "../work/./wt/"), None);
         assert_eq!(
             refused("wt.", "work/wt"),
-            Some(("wt.".to_string(), WindowsNameProblem::TrailingDot))
+            Some(("wt.".to_string(), WindowsNameProblem::TrailingDot, false))
         );
         assert_eq!(
             refused("wt", "work./wt"),
-            Some(("work.".to_string(), WindowsNameProblem::TrailingDot))
+            Some(("work.".to_string(), WindowsNameProblem::TrailingDot, true))
         );
         assert_eq!(
             refused("wt", "work/wt /"),
-            Some(("wt ".to_string(), WindowsNameProblem::TrailingSpace))
+            Some(("wt ".to_string(), WindowsNameProblem::TrailingSpace, true))
         );
         assert_eq!(
             refused("wt", "aux/wt"),
-            Some(("aux".to_string(), WindowsNameProblem::Reserved))
+            Some(("aux".to_string(), WindowsNameProblem::Reserved, true))
         );
+    }
+
+    /// The root, `.` and `..` aren't folder names and pass.
+    #[test]
+    fn roots_and_dot_components_are_accepted() {
+        for path in ["/work/wt", "/work/./wt", "./wt", ".", "..", "../wt", "/"] {
+            assert_eq!(refused("wt", path), None, "{path:?}");
+        }
+    }
+
+    /// A drive, a share and a verbatim prefix aren't folder names either.
+    #[cfg(windows)]
+    #[test]
+    fn windows_prefixes_and_dot_components_are_accepted() {
+        for path in [
+            r"C:\work\wt",
+            r"C:\work\.\wt",
+            r".\wt",
+            r"..\wt",
+            r"\\server\share\wt",
+            r"\\?\C:\work\wt",
+            r"\\?\UNC\server\share\wt",
+            r"C:\",
+        ] {
+            assert_eq!(refused("wt", path), None, "{path:?}");
+        }
     }
 
     #[test]
     fn the_refusal_names_the_part_and_the_problem() {
-        let message = |name: &str, problem| {
+        let message = |name: &str, problem, in_path| {
             WorktreeError::UnusableWindowsName {
                 name: name.to_string(),
                 problem,
+                in_path,
             }
             .to_string()
         };
         assert_eq!(
-            message("wt.", WindowsNameProblem::TrailingDot),
+            message("wt.", WindowsNameProblem::TrailingDot, false),
             "Windows can't use 'wt.' as a folder name because it ends in a dot. Choose another \
              name."
         );
         assert_eq!(
-            message("wt ", WindowsNameProblem::TrailingSpace),
+            message("wt ", WindowsNameProblem::TrailingSpace, true),
             "Windows can't use 'wt ' as a folder name because it ends in a space. Choose another \
-             name."
+             folder."
         );
         assert_eq!(
-            message("aux", WindowsNameProblem::Reserved),
+            message("aux", WindowsNameProblem::Reserved, true),
             "Windows can't use 'aux' as a folder name because it is reserved for a device. \
-             Choose another name."
+             Choose another folder."
         );
     }
 

@@ -797,6 +797,30 @@ fn a_name_or_destination_windows_cannot_use_is_refused() {
     assert!(dir.path().join("wt").join("file.txt").is_file());
 }
 
+/// A drive, a verbatim (`\\?\`) prefix and `.` components aren't folder names: such
+/// destinations still work on Windows.
+#[cfg(windows)]
+#[test]
+fn windows_roots_and_dot_components_are_accepted() {
+    let (dir, repo, _) = committed_repo();
+    let verbatim = dir.path().canonicalize().unwrap();
+    assert!(
+        verbatim.to_string_lossy().starts_with(r"\\?\"),
+        "{verbatim:?}"
+    );
+    let cases = [
+        ("abs", dir.path().join("abs")),
+        ("dotted", dir.path().join(".").join("dotted")),
+        ("verb", verbatim.join("verb")),
+        ("rel", PathBuf::from(r".\rel")),
+    ];
+    for (name, path) in cases {
+        create_worktree(&repo, name, &path, name, Some("HEAD"))
+            .unwrap_or_else(|error| panic!("{path:?}: {error}"));
+        assert!(dir.path().join(name).join("file.txt").is_file(), "{path:?}");
+    }
+}
+
 /// Elsewhere such names work, as in git, and stay allowed.
 #[cfg(not(windows))]
 #[test]
