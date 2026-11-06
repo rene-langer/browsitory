@@ -1,22 +1,9 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
 
 use git_core::remote::{PullOutcome, RemoteInfo, TransferOperation, UpstreamInfo};
 
-use super::{CancelRegistry, Command, TransferEvent, WorkerHandle};
+use super::{Command, TransferEvent, WorkerHandle};
 use crate::credentials::{CredentialService, CredentialStore, CredentialStoreError};
-
-static NEXT_TRANSFER_ID: AtomicU64 = AtomicU64::new(1);
-
-/// `"<prefix>-<n>"`, unique per process; also used for commit/amend so their hooks can be
-/// cancelled through `CancelRegistry` like a transfer.
-pub(super) fn next_operation_id(prefix: &str) -> String {
-    format!(
-        "{prefix}-{}",
-        NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed)
-    )
-}
 
 struct ChannelReporter {
     events: Sender<TransferEvent>,
@@ -207,47 +194,42 @@ pub(super) fn clear_current_upstream(repo: &git2::Repository, reply: Sender<Resu
         .send(git_core::remote::clear_current_upstream(repo).map_err(|error| error.to_string()));
 }
 
-/// The per-operation state every remote transfer carries: the ID the UI tracks the operation
-/// by, and the shared registry a cancel request for that ID lands in.
-///
-/// They travel together because they are only meaningful together — the registry is keyed by
-/// exactly this ID — and keeping them as one parameter keeps the transfer entry points below at
-/// a readable arity.
-pub(super) struct TransferOp<'a> {
+/// The per-operation state every cancellable operation carries: the ID the UI tracks the
+/// operation by, and its registration in the shared registry a cancel request for that ID lands
+/// in. Dropping it (with the command's other parts) ends the registration.
+pub(super) struct TransferOp {
     pub(super) id: String,
-    pub(super) cancelled: &'a CancelRegistry,
+    registered: super::cancel::OperationId,
 }
 
-impl TransferOp<'_> {
+impl TransferOp {
+    pub(super) fn new(registered: super::cancel::OperationId) -> Self {
+        Self {
+            id: registered.as_str().to_string(),
+            registered,
+        }
+    }
+
     /// Builds the closure `git-core` polls from inside its `git2` progress callbacks.
     ///
     /// Owns a clone of the shared registry and the operation's own ID, so the check stays valid
     /// for the whole (blocking) transfer without borrowing anything from the command loop.
     pub(super) fn cancel_check(&self) -> impl Fn() -> bool {
-        let cancelled = Arc::clone(self.cancelled);
+        let cancelled = self.registered.registry().clone();
         let operation_id = self.id.clone();
-        move || {
-            cancelled
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .contains(&operation_id)
-        }
+        move || cancelled.is_cancelled(&operation_id)
     }
 
-    /// Drops this operation from the shared registry. Called on every terminal path (success,
-    /// real failure and cancellation alike) so a long-lived worker's cancel set cannot grow
-    /// unbounded.
+    /// Forgets a cancel asked for so far, so a later step (such as a post hook) only honours a
+    /// cancel asked for while it runs. The operation stays cancellable until dropped.
     pub(super) fn clear(&self) {
-        self.cancelled
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .remove(&self.id);
+        self.registered.registry().reset(&self.id);
     }
 }
 
 fn complete(
     events: &Sender<TransferEvent>,
-    op: TransferOp<'_>,
+    op: TransferOp,
     operation: TransferOperation,
     result: Result<(), git_core::remote::RemoteError>,
 ) {
@@ -271,7 +253,7 @@ pub(super) fn fetch<S: CredentialStore>(
     credentials: &CredentialService<S>,
     remote_name: String,
     prune: Option<bool>,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -302,7 +284,7 @@ pub(super) fn fetch<S: CredentialStore>(
 pub(super) fn pull<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<PullOutcome, String>>,
 ) {
@@ -422,7 +404,7 @@ pub(super) fn push_current<S: CredentialStore>(
     credentials: &CredentialService<S>,
     remote_name: String,
     no_verify: bool,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -460,7 +442,7 @@ pub(super) fn force_push_branch<S: CredentialStore>(
     credentials: &CredentialService<S>,
     remote_name: String,
     no_verify: bool,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -500,7 +482,7 @@ pub(super) fn push_tags<S: CredentialStore>(
     remote_name: String,
     names: Vec<String>,
     no_verify: bool,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -556,7 +538,7 @@ pub(super) fn fetch_all<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     prune: Option<bool>,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -608,7 +590,7 @@ pub(super) fn push_branch<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     target: PushTarget,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -648,7 +630,7 @@ pub(super) fn delete_remote_branch<S: CredentialStore>(
     remote_name: String,
     branch_name: String,
     no_verify: bool,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -686,7 +668,7 @@ impl WorkerHandle {
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
-        let operation_id = format!("fetch-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
+        let operation_id = self.cancelled.allocate("fetch");
         self.tx
             .send(Command::FetchRemote {
                 remote_name,
@@ -705,10 +687,7 @@ impl WorkerHandle {
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
-        let operation_id = format!(
-            "fetch-all-{}",
-            NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed)
-        );
+        let operation_id = self.cancelled.allocate("fetch-all");
         self.tx
             .send(Command::FetchAllRemotes {
                 prune,
@@ -730,7 +709,7 @@ impl WorkerHandle {
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
-        let operation_id = format!("push-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
+        let operation_id = self.cancelled.allocate("push");
         self.tx
             .send(Command::PushBranch {
                 remote_name,
@@ -754,10 +733,7 @@ impl WorkerHandle {
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
-        let operation_id = format!(
-            "delete-remote-{}",
-            NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed)
-        );
+        let operation_id = self.cancelled.allocate("delete-remote");
         self.tx
             .send(Command::DeleteRemoteBranch {
                 remote_name,
@@ -776,7 +752,7 @@ impl WorkerHandle {
         events: Sender<TransferEvent>,
     ) -> Result<PullOutcome, String> {
         let (reply, rx) = std::sync::mpsc::channel();
-        let operation_id = format!("pull-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
+        let operation_id = self.cancelled.allocate("pull");
         self.tx
             .send(Command::PullCurrentUpstream {
                 operation_id,
@@ -794,7 +770,7 @@ impl WorkerHandle {
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
-        let operation_id = format!("push-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
+        let operation_id = self.cancelled.allocate("push");
         self.tx
             .send(Command::PushCurrentBranch {
                 remote_name,
@@ -814,10 +790,7 @@ impl WorkerHandle {
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
-        let operation_id = format!(
-            "force-push-{}",
-            NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed)
-        );
+        let operation_id = self.cancelled.allocate("force-push");
         self.tx
             .send(Command::ForcePushCurrentBranch {
                 remote_name,
@@ -838,7 +811,7 @@ impl WorkerHandle {
         events: Sender<TransferEvent>,
     ) -> Result<String, String> {
         let (reply, rx) = std::sync::mpsc::channel();
-        let operation_id = format!("push-{}", NEXT_TRANSFER_ID.fetch_add(1, Ordering::Relaxed));
+        let operation_id = self.cancelled.allocate("push");
         self.tx
             .send(Command::PushTags {
                 remote_name,

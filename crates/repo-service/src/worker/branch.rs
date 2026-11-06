@@ -20,7 +20,7 @@ pub(super) fn create(
 pub(super) fn switch(
     repo: &git2::Repository,
     name: String,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<(), String>>,
 ) {
@@ -87,7 +87,7 @@ impl WorkerHandle {
         self.tx
             .send(Command::SwitchBranch {
                 name,
-                operation_id: super::remote::next_operation_id("switch"),
+                operation_id: self.cancelled.allocate("switch"),
                 events,
                 reply: reply_tx,
             })

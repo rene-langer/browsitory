@@ -940,8 +940,7 @@ fn a_clean_merge_aborted_before_the_commit_runs_no_post_merge() {
     index.add_path(Path::new("staged.txt")).unwrap();
     index.write().unwrap();
     let mut repo = Repository::open(dir.path()).unwrap();
-    let cancelled: super::super::CancelRegistry =
-        Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let cancelled = super::super::CancelRegistry::default();
     let (reply_tx, reply_rx) = mpsc::channel();
 
     let head = repo.head().unwrap().peel_to_commit().unwrap().id();
@@ -954,10 +953,7 @@ fn a_clean_merge_aborted_before_the_commit_runs_no_post_merge() {
             head,
             merge_heads: Vec::new(),
         },
-        super::super::remote::TransferOp {
-            id: "commit-1".into(),
-            cancelled: &cancelled,
-        },
+        super::super::remote::TransferOp::new(cancelled.allocate("commit")),
         mpsc::channel().0,
         reply_tx,
     );
