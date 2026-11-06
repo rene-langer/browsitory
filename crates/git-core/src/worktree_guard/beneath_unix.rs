@@ -728,7 +728,8 @@ fn read_leaf(at: &Beneath, limit: u64) -> io::Result<Option<Leaf>> {
     }))
 }
 
-/// `stat`'s fields as git's index records them. The casts are no-ops on some targets.
+/// `stat`'s fields as the git CLI's index records them (the device is `st_dev`, not libgit2's
+/// `st_rdev`). The casts are no-ops on some targets.
 #[allow(clippy::unnecessary_cast)]
 fn file_stat(stat: &libc::stat) -> super::FileStat {
     super::FileStat {

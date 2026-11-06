@@ -1301,9 +1301,11 @@ pub(crate) enum Leaf {
     Link(Vec<u8>),
 }
 
-/// A file's stat data as git's index records it (`git_index_entry__init_from_stat`), from the
-/// descriptor [`read_beneath`] read it through. On Windows, as libgit2 fills it there: the
-/// creation time as ctime, and no device, inode or owner.
+/// A file's stat data as `git add` records it in the index (git's `fill_stat_data`), from the
+/// descriptor [`read_beneath`] read it through. `dev` is `st_dev`, as the git CLI records it;
+/// libgit2's `git_index_entry__init_from_stat` records `st_rdev` there instead, and neither
+/// compares the device by default. On Windows, as libgit2 fills it there: the creation time as
+/// ctime, and no device, inode or owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct FileStat {
     pub ctime: (i64, u32),

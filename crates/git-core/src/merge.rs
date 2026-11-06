@@ -885,7 +885,8 @@ fn parse_oid(text: &str) -> Result<git2::Oid, NotStagedReason> {
 }
 
 /// The index entry `git add` would write for a file read with `stat`: git truncates the times,
-/// device, inode and size to 32 bits.
+/// device, inode and size to 32 bits. The device is `st_dev`, as the git CLI records it
+/// (libgit2 records `st_rdev`; see `worktree_guard::FileStat`).
 fn staged_entry(
     path: &str,
     id: git2::Oid,

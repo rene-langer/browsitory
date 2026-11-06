@@ -411,9 +411,11 @@ An independent review of PR 1 asked for these changes, made on the same branch:
 2. **Stat data (#199).** An entry with zeroed stat data is re-hashed by status on every refresh,
    not once: nothing in the crates updates the index after a status. `Leaf::File` now carries a
    `FileStat` taken from the descriptor the bytes were read from (before reading), and the entry
-   records it (ctime, mtime, dev, ino, uid, gid, size, truncated to 32 bits as git does). On
-   Windows it is what the handle gives, as libgit2 fills it there: the creation time as ctime, the
-   last write time as mtime, the size, and zero device, inode and owner.
+   records it (ctime, mtime, dev, ino, uid, gid, size, truncated to 32 bits as git does). The
+   device is `st_dev`, as the git CLI records it; libgit2 records `st_rdev` instead, and neither
+   compares it by default (#225). On Windows it is what the handle gives, as libgit2 fills it
+   there: the creation time as ctime, the last write time as mtime, the size, and zero device,
+   inode and owner.
 3. **Refusing commands inside a burst (#197).** A command that refuses when the lock stays busy
    (Undo, Redo, discards, Reset hard: `undo::refuses_when_busy`) waits `CONTENDED_WAIT` even
    inside a window, so it doesn't refuse at once; only commands that would run unrecorded try

@@ -1522,9 +1522,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   a link's target as is, then `Index::remove_path` (which moves the conflict stages to REUC, as
   `add_path` does) and `Index::add`. The entry carries the stat data (`FileStat`) of the
   descriptor the bytes were read from, taken before reading, so status trusts it like any entry
-  `git add` wrote. With `core.filemode`/`core.symlinks` off the mode comes from stage 0, else
-  2, 3, 1, as libgit2's `index_existing_and_best`. libgit2's `add_path` would `lstat` and open
-  the path a second time, following a link and blocking on a FIFO swapped in meanwhile (#199).
+  `git add` wrote. Its device is `st_dev`, as the git CLI records it (libgit2 records `st_rdev`;
+  neither compares the device by default). With `core.filemode`/`core.symlinks` off the mode
+  comes from stage 0, else 2, 3, 1, as libgit2's `index_existing_and_best`. libgit2's
+  `add_path` would `lstat` and open the path a second time, following a link and blocking on a
+  FIFO swapped in meanwhile (#199).
   A file or link it can't open is `MergeError::Unreadable`. A path that read as absent is
   judged again with `worktree_guard::probe_beneath`, through held folders, never by path:
   missing (the deletion is staged), beyond a link, a FIFO, or a folder, which it holds open
