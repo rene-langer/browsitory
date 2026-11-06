@@ -2,7 +2,7 @@ use std::sync::mpsc::Sender;
 
 use git_core::remote::{PullOutcome, RemoteInfo, TransferOperation, UpstreamInfo};
 
-use super::{CancelRegistry, Command, TransferEvent, WorkerHandle};
+use super::{Command, TransferEvent, WorkerHandle};
 use crate::credentials::{CredentialService, CredentialStore, CredentialStoreError};
 
 struct ChannelReporter {
@@ -195,19 +195,19 @@ pub(super) fn clear_current_upstream(repo: &git2::Repository, reply: Sender<Resu
 }
 
 /// The per-operation state every cancellable operation carries: the ID the UI tracks the
-/// operation by, and the shared registry a cancel request for that ID lands in.
-///
-/// They travel together because they are only meaningful together — the registry is keyed by
-/// exactly this ID — and keeping them as one parameter keeps the entry points below at a
-/// readable arity.
-pub(super) struct TransferOp<'a> {
+/// operation by, and its registration in the shared registry a cancel request for that ID lands
+/// in. Dropping it (with the command's other parts) ends the registration.
+pub(super) struct TransferOp {
     pub(super) id: String,
-    cancelled: &'a CancelRegistry,
+    registered: super::cancel::OperationId,
 }
 
-impl<'a> TransferOp<'a> {
-    pub(super) fn new(id: String, cancelled: &'a CancelRegistry) -> Self {
-        Self { id, cancelled }
+impl TransferOp {
+    pub(super) fn new(registered: super::cancel::OperationId) -> Self {
+        Self {
+            id: registered.as_str().to_string(),
+            registered,
+        }
     }
 
     /// Builds the closure `git-core` polls from inside its `git2` progress callbacks.
@@ -215,22 +215,21 @@ impl<'a> TransferOp<'a> {
     /// Owns a clone of the shared registry and the operation's own ID, so the check stays valid
     /// for the whole (blocking) transfer without borrowing anything from the command loop.
     pub(super) fn cancel_check(&self) -> impl Fn() -> bool {
-        let cancelled = self.cancelled.clone();
+        let cancelled = self.registered.registry().clone();
         let operation_id = self.id.clone();
         move || cancelled.is_cancelled(&operation_id)
     }
 
     /// Forgets a cancel asked for so far, so a later step (such as a post hook) only honours a
-    /// cancel asked for while it runs. The operation stays cancellable until the worker is done
-    /// with its command (see `CancelRegistry`).
+    /// cancel asked for while it runs. The operation stays cancellable until dropped.
     pub(super) fn clear(&self) {
-        self.cancelled.reset(&self.id);
+        self.registered.registry().reset(&self.id);
     }
 }
 
 fn complete(
     events: &Sender<TransferEvent>,
-    op: TransferOp<'_>,
+    op: TransferOp,
     operation: TransferOperation,
     result: Result<(), git_core::remote::RemoteError>,
 ) {
@@ -254,7 +253,7 @@ pub(super) fn fetch<S: CredentialStore>(
     credentials: &CredentialService<S>,
     remote_name: String,
     prune: Option<bool>,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -285,7 +284,7 @@ pub(super) fn fetch<S: CredentialStore>(
 pub(super) fn pull<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<PullOutcome, String>>,
 ) {
@@ -405,7 +404,7 @@ pub(super) fn push_current<S: CredentialStore>(
     credentials: &CredentialService<S>,
     remote_name: String,
     no_verify: bool,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -443,7 +442,7 @@ pub(super) fn force_push_branch<S: CredentialStore>(
     credentials: &CredentialService<S>,
     remote_name: String,
     no_verify: bool,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -483,7 +482,7 @@ pub(super) fn push_tags<S: CredentialStore>(
     remote_name: String,
     names: Vec<String>,
     no_verify: bool,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -539,7 +538,7 @@ pub(super) fn fetch_all<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     prune: Option<bool>,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -591,7 +590,7 @@ pub(super) fn push_branch<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     target: PushTarget,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
@@ -631,7 +630,7 @@ pub(super) fn delete_remote_branch<S: CredentialStore>(
     remote_name: String,
     branch_name: String,
     no_verify: bool,
-    op: TransferOp<'_>,
+    op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {

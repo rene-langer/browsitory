@@ -305,7 +305,7 @@ pub(super) fn commit(
     no_verify: bool,
     trailers: Vec<git_core::commit::Trailer>,
     set: git_core::commit::CommitHookSet,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
 ) -> bool {

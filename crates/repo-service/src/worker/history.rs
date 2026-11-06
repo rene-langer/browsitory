@@ -79,7 +79,7 @@ fn persist(sequence_store: &SequenceStore, run: SequenceRun) -> Result<SequenceO
 /// Hook options for a pick's own hooks (`prepare-commit-msg`, signing, `post-commit`, #183):
 /// reported on `events` as `HookSource::Pick`, cancellable through `op`.
 fn pick_reporter(
-    op: &super::remote::TransferOp<'_>,
+    op: &super::remote::TransferOp,
     events: Sender<super::HookEvent>,
 ) -> super::hooks::ChannelHookReporter {
     super::hooks::ChannelHookReporter {
@@ -94,7 +94,7 @@ pub(super) fn pick_many(
     sequence_store: &SequenceStore,
     kind: SequenceKind,
     commit_ids: Vec<String>,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
 ) -> Result<SequenceOutcome, String> {
     let cancel = op.cancel_check();
@@ -119,7 +119,7 @@ pub(super) fn continue_sequence(
     repo: &git2::Repository,
     sequence_store: &SequenceStore,
     no_verify: bool,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
 ) -> (Option<SequenceKind>, Result<SequenceOutcome, String>) {
     let Some(state) = sequence_store.load(repo) else {
@@ -217,7 +217,7 @@ pub(super) fn amend(
     no_verify: bool,
     author: Option<git_core::commit::SignatureInput>,
     trailers: Vec<git_core::commit::Trailer>,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
 ) {
@@ -264,7 +264,7 @@ pub(super) fn pick_one(
     kind: SequenceKind,
     commit_id: String,
     mainline: Option<u32>,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<PickOutcome, String>>,
 ) {
@@ -296,7 +296,7 @@ pub(super) fn reset(
 pub(super) fn checkout(
     repo: &git2::Repository,
     commit_id: String,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<(), String>>,
 ) {

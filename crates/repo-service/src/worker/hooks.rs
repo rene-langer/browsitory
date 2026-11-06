@@ -127,7 +127,7 @@ pub(super) fn run_post_hook_on(
     repo: &git2::Repository,
     name: &str,
     args: &[&str],
-    op: &super::remote::TransferOp<'_>,
+    op: &super::remote::TransferOp,
     events: Sender<HookEvent>,
     source: HookSource,
 ) {
@@ -163,7 +163,7 @@ pub(super) fn head_oid(repo: &git2::Repository) -> git2::Oid {
 pub(super) fn run_post_checkout(
     repo: &git2::Repository,
     before: git2::Oid,
-    op: &super::remote::TransferOp<'_>,
+    op: &super::remote::TransferOp,
     events: Sender<HookEvent>,
 ) {
     let old = before.to_string();

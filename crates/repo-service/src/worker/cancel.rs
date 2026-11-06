@@ -14,11 +14,11 @@ static NEXT_OPERATION_ID: AtomicU64 = AtomicU64::new(1);
 /// every tick from inside the blocked call (see `worker/remote.rs`'s `cancel_check`).
 ///
 /// An operation is known from the moment the handle hands out its ID (`allocate`, before the
-/// command is queued) until the worker is done with the command that carries it
-/// (`OperationDone`), whether the command ran or was refused. A cancel for a known ID is kept,
-/// even one that arrives before the worker starts the operation. A cancel for any other ID,
-/// such as one clicked after the operation finished, is dropped, so the registry cannot grow
-/// with late clicks (#219).
+/// command is queued) until its `OperationId` is dropped: after the operation ran, when the
+/// command was refused, or when it never reached a worker. A cancel for a known ID is kept; a
+/// cancel for any other ID, such as one clicked after the operation finished, is dropped, so the
+/// registry cannot grow with late clicks (#219). (A cancel while the command is still queued is
+/// kept too, but the UI only learns an ID once the operation started.)
 #[derive(Clone, Default)]
 pub struct CancelRegistry(Arc<Mutex<HashMap<String, bool>>>);
 
@@ -27,15 +27,18 @@ impl CancelRegistry {
         self.0.lock().unwrap_or_else(|error| error.into_inner())
     }
 
-    /// A new `"<prefix>-<n>"` ID, unique per process, known to this registry until the operation
-    /// it names is done.
-    pub(super) fn allocate(&self, prefix: &str) -> String {
+    /// A new `"<prefix>-<n>"` ID, unique per process, known to this registry until the returned
+    /// `OperationId` is dropped.
+    pub(super) fn allocate(&self, prefix: &str) -> OperationId {
         let id = format!(
             "{prefix}-{}",
             NEXT_OPERATION_ID.fetch_add(1, Ordering::Relaxed)
         );
         self.operations().insert(id.clone(), false);
-        id
+        OperationId {
+            id,
+            registry: self.clone(),
+        }
     }
 
     /// Asks the operation `id` to stop; ignored when no such operation is pending or running.
@@ -56,14 +59,6 @@ impl CancelRegistry {
         }
     }
 
-    /// Forgets the operation `id` once the returned value is dropped.
-    pub(super) fn done_on_drop(&self, id: &str) -> OperationDone {
-        OperationDone {
-            registry: self.clone(),
-            id: id.to_string(),
-        }
-    }
-
     /// How many operations are known: pending or running.
     #[cfg(test)]
     pub(super) fn len(&self) -> usize {
@@ -71,14 +66,43 @@ impl CancelRegistry {
     }
 }
 
-/// Forgets its operation in the registry when dropped: the operation is done, and a cancel for
-/// it from now on is dropped.
-pub(super) struct OperationDone {
-    registry: CancelRegistry,
+/// An ID handed out by `CancelRegistry::allocate`, carried by the command it names. The registry
+/// forgets the ID when this is dropped, on every path: the worker is done with the command, the
+/// gate refused it, the send failed, or the command was still queued when the worker died.
+pub(crate) struct OperationId {
     id: String,
+    registry: CancelRegistry,
 }
 
-impl Drop for OperationDone {
+impl OperationId {
+    pub(super) fn as_str(&self) -> &str {
+        &self.id
+    }
+
+    pub(super) fn registry(&self) -> &CancelRegistry {
+        &self.registry
+    }
+}
+
+/// A stand-in ID for tests that build a `Command` without a worker, known to no registry.
+#[cfg(test)]
+impl From<String> for OperationId {
+    fn from(id: String) -> Self {
+        Self {
+            id,
+            registry: CancelRegistry::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl From<&str> for OperationId {
+    fn from(id: &str) -> Self {
+        id.to_string().into()
+    }
+}
+
+impl Drop for OperationId {
     fn drop(&mut self) {
         self.registry.operations().remove(&self.id);
     }

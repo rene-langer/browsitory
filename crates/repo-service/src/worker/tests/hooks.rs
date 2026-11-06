@@ -953,7 +953,7 @@ fn a_clean_merge_aborted_before_the_commit_runs_no_post_merge() {
             head,
             merge_heads: Vec::new(),
         },
-        super::super::remote::TransferOp::new("commit-1".into(), &cancelled),
+        super::super::remote::TransferOp::new(cancelled.allocate("commit")),
         mpsc::channel().0,
         reply_tx,
     );

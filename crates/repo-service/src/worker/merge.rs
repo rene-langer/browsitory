@@ -57,7 +57,7 @@ pub(super) fn start(
     repo: &git2::Repository,
     branch_name: String,
     options: MergeOptions,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<MergeOutcome, String>>,
 ) -> Result<MergeOutcome, String> {

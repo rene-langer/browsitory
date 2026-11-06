@@ -147,7 +147,7 @@ fn start_sequence_outside(repo: &Repository, ids: Vec<String>) -> String {
             &store,
             git_core::pick::SequenceKind::CherryPick,
             ids,
-            super::remote::TransferOp::new("pick-1".into(), &cancelled),
+            super::remote::TransferOp::new(cancelled.allocate("pick")),
             mpsc::channel().0,
         )
         .unwrap(),

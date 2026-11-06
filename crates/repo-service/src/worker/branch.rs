@@ -20,7 +20,7 @@ pub(super) fn create(
 pub(super) fn switch(
     repo: &git2::Repository,
     name: String,
-    op: super::remote::TransferOp<'_>,
+    op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
     reply: Sender<Result<(), String>>,
 ) {

@@ -141,14 +141,15 @@ fn cancelling_a_transfer_by_operation_id_surfaces_a_cancelled_completion_event()
     // because `cancel_transfer` writes to the shared registry rather than sending a command,
     // and the registry is what the `git2` progress callbacks poll. The ID comes from the
     // registry, as `fetch_remote` takes it, so the registry keeps this early cancel (#219).
-    let operation_id = handle.cancelled.allocate("fetch");
+    let operation = handle.cancelled.allocate("fetch");
+    let operation_id = operation.as_str().to_string();
     handle.cancel_transfer(&operation_id);
     handle
         .tx
         .send(Command::FetchRemote {
             remote_name: "origin".into(),
             prune: None,
-            operation_id: operation_id.clone(),
+            operation_id: operation,
             events: event_tx,
             reply: reply_tx,
         })
@@ -186,15 +187,15 @@ fn cancel_transfer_reaches_a_worker_that_is_not_reading_its_command_channel() {
     let worker = Worker::spawn(dir.path().to_path_buf()).expect("spawn worker");
     let handle = worker.handle();
     // Handed out, as for a transfer queued before the worker stopped reading commands.
-    let operation_id = handle.cancelled.allocate("fetch");
+    let operation = handle.cancelled.allocate("fetch");
     handle.crash_for_test();
     while handle.is_alive() {
         thread::sleep(Duration::from_millis(5));
     }
 
-    handle.cancel_transfer(&operation_id);
+    handle.cancel_transfer(operation.as_str());
 
-    assert!(handle.cancelled.is_cancelled(&operation_id));
+    assert!(handle.cancelled.is_cancelled(operation.as_str()));
 }
 
 #[test]

@@ -3,7 +3,7 @@
 //! registry. Progress goes out as `TransferEvent::Progress` only — never `Started`/`Completed`,
 //! which an open repo tab's pending fetch/push would adopt as its own transfer.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -29,9 +29,21 @@ pub struct ServiceCloneOutcome {
 
 type StoreFactory<S> = Box<dyn Fn() -> S + Send + Sync>;
 
+/// How many cancels for clones that aren't running `CloneService` keeps for a clone still to
+/// start. Such a cancel may also be a late one, for a clone that already finished, so the list
+/// is capped rather than kept forever (#219).
+const EARLY_CANCELS: usize = 8;
+
 pub struct CloneService<S: CredentialStore> {
     new_store: StoreFactory<S>,
-    running: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    clones: Mutex<Clones>,
+}
+
+/// The running clones' cancel flags, and the latest cancels for IDs that weren't running.
+#[derive(Default)]
+struct Clones {
+    running: HashMap<String, Arc<AtomicBool>>,
+    early: VecDeque<String>,
 }
 
 #[cfg(not(feature = "forge-fixture-override"))]
@@ -109,50 +121,72 @@ impl<S: CredentialStore> CloneService<S> {
     pub fn with_store_factory(factory: impl Fn() -> S + Send + Sync + 'static) -> Self {
         Self {
             new_store: Box::new(factory),
-            running: Mutex::new(HashMap::new()),
+            clones: Mutex::new(Clones::default()),
         }
     }
 
-    /// Registers `operation_id`'s cancel flag (idempotent: a flag set by an early `cancel`
-    /// survives) and returns it.
+    fn clones(&self) -> std::sync::MutexGuard<'_, Clones> {
+        self.clones
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Registers `operation_id`'s cancel flag and returns it, set when a cancel for it arrived
+    /// before it started.
     pub(crate) fn register(&self, operation_id: &str) -> Arc<AtomicBool> {
+        let mut clones = self.clones();
+        let early = clones.early.iter().position(|id| id == operation_id);
+        let cancelled = early.is_some();
+        if let Some(index) = early {
+            clones.early.remove(index);
+        }
         Arc::clone(
-            self.running
-                .lock()
-                .unwrap()
+            clones
+                .running
                 .entry(operation_id.to_string())
-                .or_insert_with(|| Arc::new(AtomicBool::new(false))),
+                .or_insert_with(|| Arc::new(AtomicBool::new(cancelled))),
         )
     }
 
     pub(crate) fn unregister(&self, operation_id: &str) {
-        self.running.lock().unwrap().remove(operation_id);
+        self.clones().running.remove(operation_id);
     }
 
     #[cfg(test)]
     pub(crate) fn is_idle(&self) -> bool {
-        self.running.lock().unwrap().is_empty()
+        self.clones().running.is_empty()
     }
 
     #[cfg(test)]
     pub(crate) fn is_cancelled(&self, operation_id: &str) -> bool {
-        self.running
-            .lock()
-            .unwrap()
+        self.clones()
+            .running
             .get(operation_id)
             .is_some_and(|flag| flag.load(Ordering::Relaxed))
     }
 
-    /// Sets `operation_id`'s cancel flag, creating it if the clone hasn't registered yet — the
-    /// frontend can cancel before `clone_repo`'s blocking thread starts. A flag for an id that
-    /// never starts is a few bytes (ids are UUIDs, created only by a user pressing Cancel).
+    #[cfg(test)]
+    fn early_cancels(&self) -> usize {
+        self.clones().early.len()
+    }
+
+    /// Sets `operation_id`'s cancel flag. The frontend makes up the ID and can cancel before
+    /// `clone_repo`'s blocking thread registers it, so a cancel for an ID that isn't running is
+    /// kept for `register`, but only the latest `EARLY_CANCELS` of them: it may as well be a
+    /// late click for a clone that already finished.
     pub fn cancel(&self, operation_id: &str) {
-        self.running
-            .lock()
-            .unwrap()
-            .entry(operation_id.to_string())
-            .or_insert_with(|| Arc::new(AtomicBool::new(false)))
-            .store(true, Ordering::Relaxed);
+        let mut clones = self.clones();
+        if let Some(flag) = clones.running.get(operation_id) {
+            flag.store(true, Ordering::Relaxed);
+            return;
+        }
+        if clones.early.iter().any(|id| id == operation_id) {
+            return;
+        }
+        if clones.early.len() == EARLY_CANCELS {
+            clones.early.pop_front();
+        }
+        clones.early.push_back(operation_id.to_string());
     }
 
     pub fn clone_repo(
@@ -224,6 +258,7 @@ fn persist_https<S: CredentialStore>(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::atomic::Ordering;
     use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
 
@@ -472,6 +507,32 @@ mod tests {
         );
 
         assert!(matches!(result, Err(CloneError::Cancelled)), "{result:?}");
+    }
+
+    #[test]
+    fn late_cancels_for_finished_clones_are_capped() {
+        let service = CloneService::with_store_factory(SharedStore::default);
+        for n in 0..100 {
+            let id = format!("clone-late-{n}");
+            service.register(&id);
+            service.unregister(&id);
+            service.cancel(&id);
+        }
+
+        assert!(service.is_idle());
+        assert_eq!(service.early_cancels(), super::EARLY_CANCELS);
+    }
+
+    #[test]
+    fn an_early_cancel_is_used_once() {
+        let service = CloneService::with_store_factory(SharedStore::default);
+        service.cancel("clone-11");
+        service.cancel("clone-11");
+
+        assert!(service.register("clone-11").load(Ordering::Relaxed));
+        assert_eq!(service.early_cancels(), 0);
+        service.unregister("clone-11");
+        assert!(!service.register("clone-11").load(Ordering::Relaxed));
     }
 
     #[test]
