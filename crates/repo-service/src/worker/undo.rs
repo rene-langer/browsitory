@@ -147,7 +147,9 @@ enum BusyRefusal<'a> {
 }
 
 /// The one list of commands that refuse while the state lock stays busy, with the reply each
-/// gets. [`refuses_when_busy`] and [`reply_busy`] both read it, so they can't drift apart.
+/// gets. [`refuses_when_busy`] and [`reply_busy`] both read it, so they can't drift apart. The
+/// match names every `Command` variant (no catch-all), so a new command doesn't compile until
+/// it is placed on one side (#225).
 fn busy_refusal(command: &Command) -> Option<BusyRefusal<'_>> {
     match command {
         Command::Undo { reply } | Command::Redo { reply } => Some(BusyRefusal::Undo(reply)),
@@ -160,7 +162,120 @@ fn busy_refusal(command: &Command) -> Option<BusyRefusal<'_>> {
             reply,
             ..
         } => Some(BusyRefusal::Discard(reply)),
-        _ => None,
+        // A reset that keeps the work tree runs unrecorded instead.
+        Command::ResetToCommit {
+            mode: ResetMode::Soft | ResetMode::Mixed,
+            ..
+        } => None,
+        // Every other command, listed so a new variant must be placed here or above.
+        Command::Ping { .. }
+        | Command::GetStatus { .. }
+        | Command::GetCommitGraph { .. }
+        | Command::GetWorkingDiff { .. }
+        | Command::GetCommitDiff { .. }
+        | Command::GetCommitFiles { .. }
+        | Command::GetCommitMessage { .. }
+        | Command::GetCommitSignature { .. }
+        | Command::GetBlame { .. }
+        | Command::GetFileHistory { .. }
+        | Command::SearchCommits { .. }
+        | Command::GetCommitRenameDiff { .. }
+        | Command::GetRangeFiles { .. }
+        | Command::GetRangeDiff { .. }
+        | Command::GetWorkingTreeCompareFiles { .. }
+        | Command::GetWorkingTreeCompareDiff { .. }
+        | Command::GetBranchCompareRange { .. }
+        | Command::StageFile { .. }
+        | Command::UnstageFile { .. }
+        | Command::StageHunk { .. }
+        | Command::UnstageHunk { .. }
+        | Command::StageLines { .. }
+        | Command::UnstageLines { .. }
+        | Command::IgnorePath { .. }
+        | Command::Commit { .. }
+        | Command::ListBranches { .. }
+        | Command::CreateBranch { .. }
+        | Command::SwitchBranch { .. }
+        | Command::DeleteBranch { .. }
+        | Command::RenameBranch { .. }
+        | Command::ListWorktrees { .. }
+        | Command::CreateWorktree { .. }
+        | Command::RemoveWorktree { .. }
+        | Command::PruneWorktrees { .. }
+        | Command::ListSubmodules { .. }
+        | Command::InitSubmodule { .. }
+        | Command::UpdateSubmodule { .. }
+        | Command::ListReflogRefs { .. }
+        | Command::GetReflog { .. }
+        | Command::RestoreReflogEntry { .. }
+        | Command::ListRemotes { .. }
+        | Command::ListRemoteBranches { .. }
+        | Command::GetCurrentUpstream { .. }
+        | Command::GetRemoteUpstreams { .. }
+        | Command::GetRemoteAuthMode { .. }
+        | Command::SaveHttpsCredential { .. }
+        | Command::ForgetHttpsCredential { .. }
+        | Command::SetRemoteAuthMode { .. }
+        | Command::AddRemote { .. }
+        | Command::RenameRemote { .. }
+        | Command::UpdateRemoteUrls { .. }
+        | Command::RemoveRemote { .. }
+        | Command::SetCurrentUpstream { .. }
+        | Command::ClearCurrentUpstream { .. }
+        | Command::ListTags { .. }
+        | Command::CreateTag { .. }
+        | Command::DeleteTag { .. }
+        | Command::ListStashes { .. }
+        | Command::SaveStash { .. }
+        | Command::ApplyStash { .. }
+        | Command::PopStash { .. }
+        | Command::GetStashFiles { .. }
+        | Command::DropStash { .. }
+        | Command::StartMerge { .. }
+        | Command::GetMergeDefaults { .. }
+        | Command::GetConflictHunks { .. }
+        | Command::ResolveConflict { .. }
+        | Command::AbortMerge { .. }
+        | Command::GetMergeMessage { .. }
+        | Command::ResolveAddDeleteConflict { .. }
+        | Command::MarkResolved { .. }
+        | Command::ResolveWholeFile { .. }
+        | Command::PrepareDiffTool { .. }
+        | Command::PrepareMergeTool { .. }
+        | Command::GetGitTools { .. }
+        | Command::GetFileSides { .. }
+        | Command::ListRecentAuthors { .. }
+        | Command::CheckMergeTarget { .. }
+        | Command::ReadFileVersion { .. }
+        | Command::CommitsSince { .. }
+        | Command::StartRebase { .. }
+        | Command::RebaseContinue { .. }
+        | Command::AbortRebase { .. }
+        | Command::FetchRemote { .. }
+        | Command::PullCurrentUpstream { .. }
+        | Command::GetHeadInfo { .. }
+        | Command::AmendCommit { .. }
+        | Command::CherryPick { .. }
+        | Command::RevertCommit { .. }
+        | Command::CherryPickMany { .. }
+        | Command::RevertMany { .. }
+        | Command::ContinueSequence { .. }
+        | Command::AbortSequence { .. }
+        | Command::CheckoutCommit { .. }
+        | Command::ForcePushCurrentBranch { .. }
+        | Command::PushCurrentBranch { .. }
+        | Command::PushTags { .. }
+        | Command::FetchAllRemotes { .. }
+        | Command::PushBranch { .. }
+        | Command::DeleteRemoteBranch { .. }
+        | Command::DetectForgeRepository { .. }
+        | Command::SaveForgeToken { .. }
+        | Command::ForgetForgeToken { .. }
+        | Command::ListPullRequests { .. }
+        | Command::CreatePullRequest { .. }
+        | Command::GetUndoState { .. } => None,
+        #[cfg(test)]
+        Command::PanicNow => None,
     }
 }
 
