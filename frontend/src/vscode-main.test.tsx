@@ -34,7 +34,7 @@ describe("VSCode webview bootstrap", () => {
 
     expect(rootRender).toHaveBeenCalledOnce();
     // The dynamic import loads and transforms the whole App module graph from cold inside the
-    // test, so it gets more than the 5 s default: about 0.3 s in CI, but over 5 s on a busy
+    // test, so it gets more than the 10 s default: about 0.3 s in CI, but over 5 s on a busy
     // machine (#217).
   }, 20_000);
 });

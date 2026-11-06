@@ -17,8 +17,11 @@ vi.mock("./generated/releaseNotes.json", async (importOriginal) => {
 // Every test here renders the whole App (RepoWorkspace and all its panels) and drives it through
 // several re-renders, which is far more work than a component test. On an idle machine these
 // tests take 0.3–1.2 s; with a load average of about 24 on 4 cores the median was 2.3 s and the
-// slowest passing ones 4–5 s, so Vitest's 5 s default failed different tests on each run (#217).
-// The longer budget only matters when the machine is that busy, or when a test hangs.
+// slowest passing ones 4–5 s, so Vitest's old 5 s default failed different tests on each run
+// (#217). 20 s is 4× that worst case; the longer budget only matters when the machine is that
+// busy, or when a test hangs. vi.setConfig applies to this file only: Vitest's worker calls
+// vi.resetConfig() after every test file, with or without isolation (vitest/dist/chunks/base.*.js,
+// "reset after tests, because user might call `vi.setConfig` in setupFile").
 vi.setConfig({ testTimeout: 20_000 });
 
 function unused(): never {

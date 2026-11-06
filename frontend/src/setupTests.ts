@@ -8,15 +8,21 @@ import { configure, getConfig } from "@testing-library/react";
 // document. `waitFor` throws all of these away except the last one. On a full-App render the
 // dumps took about 5% of App.test.tsx's CPU time on a quiet machine and about 15% on a busy one,
 // where each query has to retry more often. Build the dump only when something reads the
-// message: a failed synchronous `getBy*` (Vitest reads it right away, before cleanup) or the
-// error `waitFor` rejects with when it times out. The message text is unchanged.
+// message: a failed synchronous `getBy*` or the error `waitFor` rejects with when it times out.
+// The message text is unchanged, and so is `stack`: V8 formats the stack header from `message`
+// on the first read of `stack`, which also goes through the getter. Vitest reads both fields
+// while handling the test's own rejection, before afterEach hooks (and so before Testing
+// Library's auto-cleanup) run, so the dump shows the DOM the test failed on. In Vitest 5.1 see
+// `failTask` → `processError` → `serializeValue` in vitest/dist/chunks/run.*.js and
+// source-map.*.js. setupTests.test.tsx covers both paths.
 //
 // `asyncUtilTimeout` (default 1000 ms) is how long a `findBy*`/`waitFor` waits. One second is
 // enough on an idle machine but not under load: with a load average of about 24 on 4 cores,
 // most App.test.tsx failures were a `findBy*` giving up after 1 s while the App was still
 // re-rendering. Waiting longer only slows a test that is failing anyway; a passing test returns
-// as soon as its query matches. Keep it below Vitest's 5 s default `testTimeout`, so a test that
-// does fail reports the element it was waiting for, not just "Test timed out".
+// as soon as its query matches. Keep it well below `testTimeout` (10 s, vite.config.ts), so a
+// test that fails a wait after doing other work still reports the element it was waiting for,
+// not just "Test timed out".
 const buildElementError = getConfig().getElementError;
 configure({
   asyncUtilTimeout: 4000,
