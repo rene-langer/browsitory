@@ -60,6 +60,9 @@ pub enum StageError {
     Status(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
+    #[error(transparent)]
+    CaseConfig(#[from] crate::CaseConfigUnreadable),
     /// The file to write is read-only; nothing was written (#209).
     #[error("'{0}' is read-only. Make it writable, then try again.")]
     ReadOnlyFile(String),
@@ -385,7 +388,7 @@ pub fn ignore_path(repo: &git2::Repository, pattern: &str) -> Result<(), StageEr
     let existing = match crate::worktree_guard::read_beneath(workdir, ".gitignore")? {
         Some(Leaf::File { bytes, .. }) => String::from_utf8(bytes)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-        Some(Leaf::Link(_)) => return Err(StageError::InvalidPath),
+        Some(Leaf::Link { .. }) => return Err(StageError::InvalidPath),
         None => match std::fs::symlink_metadata(workdir.join(".gitignore")) {
             // Missing: a new file.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),

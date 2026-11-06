@@ -336,6 +336,12 @@ fn clone_errors() -> Vec<(String, CloneErrorDto)> {
             }),
         ),
         (
+            "CaseConfig".into(),
+            CloneError::CaseConfig(git_core::CaseConfigUnreadable(
+                "failed to parse 'maybe' as a boolean".to_string(),
+            )),
+        ),
+        (
             "FileInUse".into(),
             CloneError::HeldOpen(git_core::HeldOpen {
                 path: "f.txt".to_string(),
@@ -362,6 +368,7 @@ fn clone_errors() -> Vec<(String, CloneErrorDto)> {
         CloneError::Transfer { .. },
         CloneError::Io(_),
         CloneError::CaseCollision(_),
+        CloneError::CaseConfig(_),
         CloneError::HeldOpen(_),
     );
     let init_errors: Vec<(String, RepoError)> = vec![

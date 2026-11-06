@@ -372,6 +372,8 @@ fn pull_error_message(error: git_core::remote::RemoteError) -> String {
         | git_core::remote::RemoteError::CheckoutConflict
         | git_core::remote::RemoteError::LinkedFolder(_)
         | git_core::remote::RemoteError::CaseCollision(_)
+        // Names only the setting and libgit2's parse error (#225).
+        | git_core::remote::RemoteError::CaseConfig(_)
         | git_core::remote::RemoteError::DetachedHead
         // A file another program holds open; the pull was rolled back (#321).
         | git_core::remote::RemoteError::HeldOpen(_)
@@ -1012,6 +1014,20 @@ mod tests {
         assert_eq!(
             pull_error_message(error),
             "'d/f.txt' is open in another program. Close it, then try again."
+        );
+    }
+
+    /// A pull stopped at an unreadable `core.ignorecase` says so (#225), not "pull failed".
+    #[test]
+    fn a_pull_stopped_at_an_unreadable_ignorecase_says_so() {
+        let error = git_core::remote::RemoteError::CaseConfig(git_core::CaseConfigUnreadable(
+            "failed to parse 'maybe' as a boolean".to_string(),
+        ));
+
+        assert_eq!(
+            pull_error_message(error),
+            "Can't read core.ignorecase from the Git config: failed to parse 'maybe' as a \
+             boolean. Set it to true or false (or remove it), then try again."
         );
     }
 

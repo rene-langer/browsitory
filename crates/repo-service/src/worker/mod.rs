@@ -845,10 +845,10 @@ impl Worker {
             let (mut logged_busy, mut logged_unavailable) = (false, false);
             // After a command waited `LOCK_WAIT` in vain, later ones wait only `CONTENDED_WAIT`
             // until the lock is taken again, and while it keeps being found busy a run of them
-            // waits that once, not once each; those that would refuse still wait (`Contention`). A long holder in the other window
-            // (a pull, a hook, a pinentry dialog) costs one long wait, not one per click (the
-            // queue, reads included, is behind it), while a brief hold is still waited out
-            // (#175, #197).
+            // waits that once, not once each; those that would refuse still wait (`Contention`).
+            // A long holder in the other window (a pull, a hook, a pinentry dialog) costs one
+            // long wait, not one per click (the queue, reads included, is behind it), while a
+            // brief hold is still waited out (#175, #197).
             let mut contention = state_lock::Contention::default();
             for mut command in rx {
                 // A command that can record an entry or end a paused operation holds the lock
@@ -871,7 +871,7 @@ impl Worker {
                         }
                         state_lock::Acquire::Busy => {
                             contention.busy(std::time::Instant::now());
-                            if undo::reply_busy(&mut command) {
+                            if undo::reply_busy(&command) {
                                 continue;
                             }
                             if !logged_busy {

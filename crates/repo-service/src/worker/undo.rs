@@ -138,37 +138,21 @@ pub(super) fn locks_state(command: &Command) -> bool {
         )
 }
 
-/// While another holder keeps the state lock past `LOCK_WAIT`, replies `UNDO_BUSY` to Undo/Redo
-/// (D7-A) and `DISCARD_BUSY` to the commands that destroy work-tree content with no other way
-/// back: discarding a hunk, lines, a file or all unstaged changes, and a hard reset (they would
-/// run unrecorded, so nothing could bring the content back). `true` when it replied (the command
-/// must not run); `false` for every other command, which runs unrecorded instead (D6-A). Branch,
-/// tag and reflog changes stay recoverable from the reflog; switches, merges, picks and pulls
-/// refuse to overwrite local changes.
-/// Whether `reply_busy` refuses `command` (instead of running it unrecorded) when the lock
-/// stays busy; such a command waits for the lock even inside a burst (#197).
-pub(super) fn refuses_when_busy(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::Undo { .. }
-            | Command::Redo { .. }
-            | Command::DiscardHunk { .. }
-            | Command::DiscardLines { .. }
-            | Command::DiscardFile { .. }
-            | Command::DiscardAllUnstaged { .. }
-            | Command::ResetToCommit {
-                mode: ResetMode::Hard,
-                ..
-            }
-    )
+/// The reply [`reply_busy`] sends to a command that refuses while the state lock stays busy.
+enum BusyRefusal<'a> {
+    /// `UNDO_BUSY`.
+    Undo(&'a Sender<Result<UndoOutcome, String>>),
+    /// `DISCARD_BUSY`.
+    Discard(&'a Sender<Result<(), String>>),
 }
 
-pub(super) fn reply_busy(command: &mut Command) -> bool {
+/// The one list of commands that refuse while the state lock stays busy, with the reply each
+/// gets. [`refuses_when_busy`] and [`reply_busy`] both read it, so they can't drift apart. The
+/// match names every `Command` variant (no catch-all), so a new command doesn't compile until
+/// it is placed on one side (#225).
+fn busy_refusal(command: &Command) -> Option<BusyRefusal<'_>> {
     match command {
-        Command::Undo { reply } | Command::Redo { reply } => {
-            let _ = reply.send(Err(UNDO_BUSY.to_string()));
-            true
-        }
+        Command::Undo { reply } | Command::Redo { reply } => Some(BusyRefusal::Undo(reply)),
         Command::DiscardHunk { reply, .. }
         | Command::DiscardLines { reply, .. }
         | Command::DiscardFile { reply, .. }
@@ -177,11 +161,148 @@ pub(super) fn reply_busy(command: &mut Command) -> bool {
             mode: ResetMode::Hard,
             reply,
             ..
-        } => {
+        } => Some(BusyRefusal::Discard(reply)),
+        // A reset that keeps the work tree runs unrecorded instead.
+        Command::ResetToCommit {
+            mode: ResetMode::Soft | ResetMode::Mixed,
+            ..
+        } => None,
+        // Every other command, listed so a new variant must be placed here or above.
+        Command::Ping { .. }
+        | Command::GetStatus { .. }
+        | Command::GetCommitGraph { .. }
+        | Command::GetWorkingDiff { .. }
+        | Command::GetCommitDiff { .. }
+        | Command::GetCommitFiles { .. }
+        | Command::GetCommitMessage { .. }
+        | Command::GetCommitSignature { .. }
+        | Command::GetBlame { .. }
+        | Command::GetFileHistory { .. }
+        | Command::SearchCommits { .. }
+        | Command::GetCommitRenameDiff { .. }
+        | Command::GetRangeFiles { .. }
+        | Command::GetRangeDiff { .. }
+        | Command::GetWorkingTreeCompareFiles { .. }
+        | Command::GetWorkingTreeCompareDiff { .. }
+        | Command::GetBranchCompareRange { .. }
+        | Command::StageFile { .. }
+        | Command::UnstageFile { .. }
+        | Command::StageHunk { .. }
+        | Command::UnstageHunk { .. }
+        | Command::StageLines { .. }
+        | Command::UnstageLines { .. }
+        | Command::IgnorePath { .. }
+        | Command::Commit { .. }
+        | Command::ListBranches { .. }
+        | Command::CreateBranch { .. }
+        | Command::SwitchBranch { .. }
+        | Command::DeleteBranch { .. }
+        | Command::RenameBranch { .. }
+        | Command::ListWorktrees { .. }
+        | Command::CreateWorktree { .. }
+        | Command::RemoveWorktree { .. }
+        | Command::PruneWorktrees { .. }
+        | Command::ListSubmodules { .. }
+        | Command::InitSubmodule { .. }
+        | Command::UpdateSubmodule { .. }
+        | Command::ListReflogRefs { .. }
+        | Command::GetReflog { .. }
+        | Command::RestoreReflogEntry { .. }
+        | Command::ListRemotes { .. }
+        | Command::ListRemoteBranches { .. }
+        | Command::GetCurrentUpstream { .. }
+        | Command::GetRemoteUpstreams { .. }
+        | Command::GetRemoteAuthMode { .. }
+        | Command::SaveHttpsCredential { .. }
+        | Command::ForgetHttpsCredential { .. }
+        | Command::SetRemoteAuthMode { .. }
+        | Command::AddRemote { .. }
+        | Command::RenameRemote { .. }
+        | Command::UpdateRemoteUrls { .. }
+        | Command::RemoveRemote { .. }
+        | Command::SetCurrentUpstream { .. }
+        | Command::ClearCurrentUpstream { .. }
+        | Command::ListTags { .. }
+        | Command::CreateTag { .. }
+        | Command::DeleteTag { .. }
+        | Command::ListStashes { .. }
+        | Command::SaveStash { .. }
+        | Command::ApplyStash { .. }
+        | Command::PopStash { .. }
+        | Command::GetStashFiles { .. }
+        | Command::DropStash { .. }
+        | Command::StartMerge { .. }
+        | Command::GetMergeDefaults { .. }
+        | Command::GetConflictHunks { .. }
+        | Command::ResolveConflict { .. }
+        | Command::AbortMerge { .. }
+        | Command::GetMergeMessage { .. }
+        | Command::ResolveAddDeleteConflict { .. }
+        | Command::MarkResolved { .. }
+        | Command::ResolveWholeFile { .. }
+        | Command::PrepareDiffTool { .. }
+        | Command::PrepareMergeTool { .. }
+        | Command::GetGitTools { .. }
+        | Command::GetFileSides { .. }
+        | Command::ListRecentAuthors { .. }
+        | Command::CheckMergeTarget { .. }
+        | Command::ReadFileVersion { .. }
+        | Command::CommitsSince { .. }
+        | Command::StartRebase { .. }
+        | Command::RebaseContinue { .. }
+        | Command::AbortRebase { .. }
+        | Command::FetchRemote { .. }
+        | Command::PullCurrentUpstream { .. }
+        | Command::GetHeadInfo { .. }
+        | Command::AmendCommit { .. }
+        | Command::CherryPick { .. }
+        | Command::RevertCommit { .. }
+        | Command::CherryPickMany { .. }
+        | Command::RevertMany { .. }
+        | Command::ContinueSequence { .. }
+        | Command::AbortSequence { .. }
+        | Command::CheckoutCommit { .. }
+        | Command::ForcePushCurrentBranch { .. }
+        | Command::PushCurrentBranch { .. }
+        | Command::PushTags { .. }
+        | Command::FetchAllRemotes { .. }
+        | Command::PushBranch { .. }
+        | Command::DeleteRemoteBranch { .. }
+        | Command::DetectForgeRepository { .. }
+        | Command::SaveForgeToken { .. }
+        | Command::ForgetForgeToken { .. }
+        | Command::ListPullRequests { .. }
+        | Command::CreatePullRequest { .. }
+        | Command::GetUndoState { .. } => None,
+        #[cfg(test)]
+        Command::PanicNow => None,
+    }
+}
+
+/// Whether [`reply_busy`] refuses `command` (instead of running it unrecorded) when the lock
+/// stays busy; such a command waits for the lock even inside a burst (#197).
+pub(super) fn refuses_when_busy(command: &Command) -> bool {
+    busy_refusal(command).is_some()
+}
+
+/// While another holder keeps the state lock past `LOCK_WAIT`, replies `UNDO_BUSY` to Undo/Redo
+/// (D7-A) and `DISCARD_BUSY` to the commands that destroy work-tree content with no other way
+/// back: discarding a hunk, lines, a file or all unstaged changes, and a hard reset (they would
+/// run unrecorded, so nothing could bring the content back). `true` when it replied (the command
+/// must not run); `false` for every other command, which runs unrecorded instead (D6-A). Branch,
+/// tag and reflog changes stay recoverable from the reflog; switches, merges, picks and pulls
+/// refuse to overwrite local changes.
+pub(super) fn reply_busy(command: &Command) -> bool {
+    match busy_refusal(command) {
+        Some(BusyRefusal::Undo(reply)) => {
+            let _ = reply.send(Err(UNDO_BUSY.to_string()));
+            true
+        }
+        Some(BusyRefusal::Discard(reply)) => {
             let _ = reply.send(Err(DISCARD_BUSY.to_string()));
             true
         }
-        _ => false,
+        None => false,
     }
 }
 
@@ -725,8 +846,8 @@ impl HeldReplies {
 /// `every_recordable_command_has_its_reply_held` and `ending_commands_have_their_reply_held`.
 ///
 /// Arms are grouped by reply type: an or-pattern must bind `reply` at one type, so commands
-/// whose reply isn't `Sender<Result<(), String>>` (`Commit`/`AmendCommit` reply with a `CommitOutcome`,
-/// `StartMerge` with a `MergeOutcome`, ...) get arms of their own.
+/// whose reply isn't `Sender<Result<(), String>>` (`Commit`/`AmendCommit` reply with a
+/// `CommitOutcome`, `StartMerge` with a `MergeOutcome`, ...) get arms of their own.
 pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
     match command {
         Command::StageFile { reply, .. }
@@ -1555,5 +1676,49 @@ mod tests {
             .map(|(l, _)| l),
             Some("Amend last commit".into())
         );
+    }
+
+    /// `refuses_when_busy` and `reply_busy` read one list: a command refuses exactly when it
+    /// gets a busy reply, with the text for its kind.
+    #[test]
+    fn busy_refusal_and_its_reply_agree() {
+        macro_rules! check {
+            ($variant:ident { $($field:ident: $value:expr),* }, $text:expr) => {{
+                let (reply, rx) = channel();
+                let command = Command::$variant { $($field: $value,)* reply };
+                let text: Option<&str> = $text;
+                assert_eq!(refuses_when_busy(&command), text.is_some());
+                assert_eq!(reply_busy(&command), text.is_some());
+                let sent = rx.try_recv().ok().and_then(Result::err);
+                assert_eq!(sent.as_deref(), text, "{}", stringify!($variant));
+            }};
+        }
+        let s = || String::from("x");
+        check!(Undo {}, Some(UNDO_BUSY));
+        check!(Redo {}, Some(UNDO_BUSY));
+        check!(DiscardFile { path: s() }, Some(DISCARD_BUSY));
+        check!(DiscardAllUnstaged { paths: vec![] }, Some(DISCARD_BUSY));
+        check!(
+            ResetToCommit {
+                commit_id: s(),
+                mode: ResetMode::Hard
+            },
+            Some(DISCARD_BUSY)
+        );
+        check!(
+            ResetToCommit {
+                commit_id: s(),
+                mode: ResetMode::Mixed
+            },
+            None
+        );
+        check!(
+            ResetToCommit {
+                commit_id: s(),
+                mode: ResetMode::Soft
+            },
+            None
+        );
+        check!(StageFile { path: s() }, None);
     }
 }

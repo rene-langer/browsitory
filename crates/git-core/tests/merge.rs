@@ -650,6 +650,129 @@ fn mark_resolved_records_the_files_stat_data() {
         assert_eq!(entry.ino, meta.ino() as u32);
         assert_eq!(entry.ctime.seconds(), meta.ctime() as i32);
     }
+    // Status sees the work tree file as staged, nothing more...
+    let status = repo.status_file(Path::new("shared.txt")).unwrap();
+    assert_eq!(status, git2::Status::INDEX_MODIFIED, "{status:?}");
+    // ...and still notices a rewrite of the same size with a later mtime: the recorded stat
+    // data doesn't hide a change.
+    write_file(dir.path(), "shared.txt", "RESOLVED\n");
+    let file = std::fs::File::options()
+        .write(true)
+        .open(dir.path().join("shared.txt"))
+        .unwrap();
+    file.set_modified(meta.modified().unwrap() + std::time::Duration::from_secs(5))
+        .unwrap();
+    drop(file);
+    let status = repo.status_file(Path::new("shared.txt")).unwrap();
+    assert_eq!(
+        status,
+        git2::Status::INDEX_MODIFIED | git2::Status::WT_MODIFIED,
+        "{status:?}"
+    );
+}
+
+/// A staged link records its own stat data (`lstat`) too, so status trusts it instead of
+/// reading the link again on every refresh (#225).
+#[cfg(unix)]
+#[test]
+fn mark_resolved_records_a_links_stat_data() {
+    use std::os::unix::fs::MetadataExt;
+    let (dir, repo) = make_conflicted_repo();
+    let link = dir.path().join("shared.txt");
+    std::fs::remove_file(&link).unwrap();
+    std::os::unix::fs::symlink("elsewhere.txt", &link).unwrap();
+    git_core::merge::mark_resolved(&repo, "shared.txt", false).unwrap();
+    let entry = repo
+        .index()
+        .unwrap()
+        .get_path(Path::new("shared.txt"), 0)
+        .unwrap();
+    let meta = std::fs::symlink_metadata(&link).unwrap();
+    assert_eq!(entry.mode, 0o120000);
+    assert_eq!(entry.ino, meta.ino() as u32);
+    assert_eq!(entry.file_size as u64, meta.len());
+    assert_eq!(entry.mtime.seconds(), meta.mtime() as i32);
+    assert_eq!(entry.mtime.nanoseconds(), meta.mtime_nsec() as u32);
+    assert_eq!(entry.ctime.seconds(), meta.ctime() as i32);
+    let status = repo.status_file(Path::new("shared.txt")).unwrap();
+    assert_eq!(status, git2::Status::INDEX_TYPECHANGE, "{status:?}");
+}
+
+/// The repository's HEAD, index file and `name`'s link target, to show nothing changed.
+#[cfg(unix)]
+fn snapshot(
+    dir: &Path,
+    repo: &git2::Repository,
+    name: &str,
+) -> (git2::Oid, Vec<u8>, std::path::PathBuf) {
+    (
+        repo.head().unwrap().target().unwrap(),
+        std::fs::read(repo.path().join("index")).unwrap(),
+        std::fs::read_link(dir.join(name)).unwrap(),
+    )
+}
+
+/// An invalid `core.ignorecase` refuses a forced checkout before anything is written, cleanup
+/// included (#225): libgit2's checkout would count it as false, but its attribute and ignore
+/// parsing refuses it, so the links removed first could be gone while the checkout stopped.
+#[cfg(unix)]
+#[test]
+fn abort_and_reset_hard_refuse_an_invalid_core_ignorecase_untouched() {
+    let (dir, repo) = make_conflicted_repo();
+    std::fs::remove_file(dir.path().join("shared.txt")).unwrap();
+    std::os::unix::fs::symlink("elsewhere", dir.path().join("shared.txt")).unwrap();
+    repo.config()
+        .unwrap()
+        .set_str("core.ignorecase", "maybe")
+        .unwrap();
+    let before = snapshot(dir.path(), &repo, "shared.txt");
+    assert!(git_core::merge::abort_merge(&repo).is_err());
+    assert_eq!(snapshot(dir.path(), &repo, "shared.txt"), before);
+    assert!(repo.path().join("MERGE_HEAD").exists());
+
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    write_file(dir.path(), "f", "f\n");
+    commit_all(&repo, "base");
+    std::fs::remove_file(dir.path().join("f")).unwrap();
+    std::os::unix::fs::symlink("elsewhere", dir.path().join("f")).unwrap();
+    write_file(dir.path(), "a.txt", "edited\n");
+    repo.config()
+        .unwrap()
+        .set_str("core.ignorecase", "maybe")
+        .unwrap();
+    let head = repo.head().unwrap().target().unwrap().to_string();
+    let before = snapshot(dir.path(), &repo, "f");
+    let error =
+        git_core::reset::reset_to(&repo, &head, git_core::reset::ResetMode::Hard).unwrap_err();
+    assert!(
+        matches!(error, git_core::reset::ResetError::CaseConfig(_)),
+        "{error}"
+    );
+    assert_eq!(snapshot(dir.path(), &repo, "f"), before);
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "edited\n"
+    );
+
+    // A valid value (or none) resets as before: the link is replaced by the file.
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", false)
+        .unwrap();
+    git_core::reset::reset_to(&repo, &head, git_core::reset::ResetMode::Hard).unwrap();
+    assert!(!dir.path().join("f").is_symlink());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f")).unwrap(),
+        "f\n"
+    );
+    repo.config().unwrap().remove("core.ignorecase").unwrap();
+    write_file(dir.path(), "a.txt", "again\n");
+    git_core::reset::reset_to(&repo, &head, git_core::reset::ResetMode::Hard).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+        "a\n"
+    );
 }
 
 /// A file Mark resolved can't open isn't called a FIFO, socket or device (#199).

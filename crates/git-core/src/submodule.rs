@@ -44,6 +44,9 @@ pub enum SubmoduleError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
+    #[error(transparent)]
+    CaseConfig(#[from] crate::CaseConfigUnreadable),
     /// Windows: a checkout stopped at a file another program holds open (#303).
     #[error(transparent)]
     HeldOpen(#[from] crate::HeldOpen),
@@ -207,7 +210,7 @@ fn check_submodule_tree(
     tree: &Tree<'_>,
     policy: CasePolicy,
 ) -> Result<(), SubmoduleError> {
-    if policy.applies(sub) {
+    if policy.applies(sub)? {
         const ALL: Option<&[&str]> = None;
         if let Some(collision) =
             crate::worktree_guard::find_case_collision(&GuardSource::Tree(tree), ALL)?
