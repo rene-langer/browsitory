@@ -3,13 +3,16 @@
 An error stays at the top of the window until you dismiss it or start another change (stage,
 commit, checkout, …); refreshing doesn't clear it.
 
-Browsitory writes a rotated failure log (keeping the 5 most recent files) to the OS log
-directory, so a bug report doesn't require a live dev session to reproduce. Attach the
-newest file there to a bug report:
+The desktop app writes a log file, `browsitory.log`, to your system's log folder, so a bug
+report doesn't require a live dev session to reproduce. When the file reaches 40 KB, it is
+renamed with the date and time (`browsitory_2026-11-06_14-30-00.log`) and a new one starts; the
+5 most recent old files are kept. Attach `browsitory.log` (and the newest old file, if the
+problem was earlier) to a bug report:
 
-- **Linux:** `~/.local/share/com.browsitory.browsitory/logs`
-- **macOS:** `~/Library/Logs/com.browsitory.Browsitory`
-- **Windows:** `%APPDATA%\com.browsitory.Browsitory\logs`
+- **Linux:** `~/.local/share/com.browsitory.app/logs` (or `$XDG_DATA_HOME/com.browsitory.app/logs`
+  if you set `XDG_DATA_HOME`)
+- **macOS:** `~/Library/Logs/com.browsitory.app`
+- **Windows:** `%LOCALAPPDATA%\com.browsitory.app\logs`
 
 Report problems on [GitHub](https://github.com/rene-langer/browsitory/issues).
 
