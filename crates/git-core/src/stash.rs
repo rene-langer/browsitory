@@ -76,6 +76,25 @@ pub enum StashError {
     /// `<file>~Updated upstream` and report success (#206).
     #[error("This stash can't be applied here: its untracked file '{untracked}' needs a folder where '{file}' is tracked. Commit the deletion of '{file}' first, then apply it; the stash is kept.")]
     UntrackedBelowTrackedFile { untracked: String, file: String },
+    /// The index has the gitlink `0` that HEAD doesn't (`git add lib` with `lib` holding its own
+    /// repository) and `.gitmodules` doesn't register it. libgit2's stash can't record it ("cannot
+    /// create blob from '…/lib': it is a directory"); git can (#244).
+    #[error("'{0}' is a repository inside this one. Add it as a submodule or remove it from the index first.")]
+    EmbeddedRepository(String),
+    /// The same for a submodule `.gitmodules` registers but HEAD doesn't have yet (#244).
+    #[error("Can't stash the new submodule '{0}'. Commit it first, or remove it from the index.")]
+    NewSubmodule(String),
+    /// The same for a new gitlink whose folder is gone or holds no repository (#244).
+    #[error("Can't stash '{0}': the index links it to another repository, and that link isn't committed yet. Remove '{0}' from the index first.")]
+    NewGitlink(String),
+    /// Stash file… on the new path `path` of the staged rename of `old`, while the worktree has
+    /// a new file (or folder) at `old`: stashing the rename would also take it.
+    #[error("Can't stash '{path}' on its own: it was renamed from '{old}', and '{old}' exists again. Stash '{old}' too, or move it first.")]
+    RenameSourceRecreated { path: String, old: String },
+    /// Where names fold: a stashed path differs only in case from `other` in HEAD or the
+    /// index (a case-only rename). The stash couldn't revert it.
+    #[error("Can't stash '{path}': it differs from '{other}' only in case. Commit the rename first, or undo it.")]
+    CaseOnlyRename { path: String, other: String },
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
@@ -186,8 +205,9 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     if index.has_conflicts() {
         return Err(StashError::ConflictsBeforeStash);
     }
+    refuse_staged_repository(repo, &index, &opts.paths)?;
     if !opts.paths.is_empty() {
-        return save_path_limited_stash(repo, opts, message);
+        return save_path_limited_stash(repo, opts, message, true);
     }
     // The reset after stashing would delete an untracked file (#186), an ignored file or folder
     // (#208) or a nested repository (#211) in the way of a tracked path. The path-limited stash
@@ -231,7 +251,7 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
             paths,
             ..opts.clone()
         };
-        return save_path_limited_stash(repo, &routed, message);
+        return save_path_limited_stash(repo, &routed, message, false);
     }
     let signature = repo.signature()?;
     let mut flags = StashFlags::empty();
@@ -252,6 +272,75 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
             }
         })?;
     Ok(())
+}
+
+/// Refuses a stash of everything (`paths` empty), or of a selected path, when the index has a
+/// gitlink there that HEAD doesn't: a submodule added but not committed yet (`NewSubmodule`,
+/// registered in `.gitmodules`), `git add lib` with `lib` holding its own `.git`
+/// (`EmbeddedRepository`), or else (the folder is gone or holds no `.git`) `NewGitlink`. With the
+/// folder there, libgit2 1.9.6's stash fails with the raw "cannot create blob from '…/lib': it
+/// is a directory" (it adds the folder by path to build its worktree tree); without it, the
+/// stash succeeds but leaves the gitlink staged (`AD lib`), so Pop refuses with
+/// `StagedChanges`. The path-limited stash, which skips submodules, said "There are no changes
+/// to stash" for `lib`. Nothing is written. git stashes the gitlink and keeps the folder (#244).
+/// A gitlink HEAD already has, changed or not, stashes fine, and the nested repository's
+/// checkout is never touched (`a_committed_gitlink_stashes_and_leaves_the_nested_repository_alone`).
+fn refuse_staged_repository(
+    repo: &Repository,
+    index: &git2::Index,
+    paths: &[String],
+) -> Result<(), StashError> {
+    let Some(workdir) = repo.workdir() else {
+        return Ok(());
+    };
+    let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
+    for entry in index.iter() {
+        if entry.mode != 0o160000 || (entry.flags >> 12) & 0x3 != 0 {
+            continue;
+        }
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        if !paths.is_empty() && !paths.contains(&path) {
+            continue;
+        }
+        let in_head = head.as_ref().is_some_and(|head| {
+            head.get_path(std::path::Path::new(&path))
+                .is_ok_and(|entry| entry.filemode() == 0o160000)
+        });
+        if in_head {
+            continue;
+        }
+        let is_repository = !has_symlinked_ancestor(workdir, &path)
+            && std::fs::symlink_metadata(workdir.join(&path)).is_ok_and(|meta| meta.is_dir())
+            && std::fs::symlink_metadata(workdir.join(&path).join(".git")).is_ok();
+        return Err(if registered_submodule(workdir, &path) {
+            StashError::NewSubmodule(path)
+        } else if is_repository {
+            StashError::EmbeddedRepository(path)
+        } else {
+            StashError::NewGitlink(path)
+        });
+    }
+    Ok(())
+}
+
+/// True when the worktree's `.gitmodules` has a `submodule.<name>.path` of `path`.
+fn registered_submodule(workdir: &std::path::Path, path: &str) -> bool {
+    let file = workdir.join(".gitmodules");
+    if !std::fs::symlink_metadata(&file).is_ok_and(|meta| meta.is_file()) {
+        return false;
+    }
+    let Ok(config) = git2::Config::open(&file) else {
+        return false;
+    };
+    let Ok(mut entries) = config.entries(Some(r"^submodule\..*\.path$")) else {
+        return false;
+    };
+    while let Some(Ok(entry)) = entries.next() {
+        if entry.value().is_ok_and(|value| value == path) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Every changed file path (staged, unstaged and, with `include_untracked`, untracked; never
@@ -287,10 +376,14 @@ fn changed_paths(repo: &Repository, include_untracked: bool) -> Result<Vec<Strin
 ///
 /// Reverting touches only the matched paths: tracked ones go back to HEAD in index and worktree
 /// (to the index version in the worktree with `keep_index`), untracked ones are deleted.
+///
+/// `picked`: the user chose `opts.paths` (Stash file…), rather than Stash all routing every
+/// change here; see `with_rename_partners`.
 fn save_path_limited_stash(
     repo: &Repository,
     opts: &StashOptions,
     message: Option<&str>,
+    picked: bool,
 ) -> Result<(), StashError> {
     let workdir = repo
         .workdir()
@@ -315,6 +408,7 @@ fn save_path_limited_stash(
         base.summary().ok().flatten().unwrap_or_default()
     );
 
+    let paths = with_rename_partners(repo, &opts.paths, picked)?;
     let mut status_options = git2::StatusOptions::new();
     status_options
         .include_untracked(opts.include_untracked)
@@ -322,14 +416,19 @@ fn save_path_limited_stash(
         .include_ignored(false)
         .exclude_submodules(true)
         .disable_pathspec_match(true);
-    for path in &opts.paths {
+    for path in &paths {
         status_options.pathspec(path.as_str());
     }
     let mut tracked = Vec::new();
     let mut untracked = Vec::new();
+    let mut deleted = std::collections::HashSet::new();
     for entry in repo.statuses(Some(&mut status_options))?.iter() {
         let status = entry.status();
         let Ok(path) = entry.path() else { continue };
+        if status.contains(git2::Status::INDEX_DELETED) {
+            // Ignored or not: with untracked files left out, status can't tell.
+            deleted.insert(path.to_string());
+        }
         if status.contains(git2::Status::IGNORED) || path.ends_with('/') {
             continue;
         }
@@ -337,6 +436,23 @@ fn save_path_limited_stash(
             untracked.push(path.to_string());
         } else {
             tracked.push(path.to_string());
+        }
+    }
+    // First: the staged deletion `Old` of a case-only rename finds a file at `Old` (the new
+    // `old` on a drive that folds names, or an ignored `Old` beside it), which the check below
+    // would take for an ignored file removed from the index.
+    refuse_case_only_rename(repo, &base, &tracked)?;
+    // A selected file removed from the index and then ignored: refused by the same rule as
+    // Stash all (#259).
+    if !deleted.is_empty() {
+        let scan = WorktreeScan::new(repo)?;
+        for (status, raw) in &scan.entries {
+            if !deleted.contains(raw) || has_symlinked_ancestor(&workdir, raw) {
+                continue;
+            }
+            if let Some(path) = scan.ignored_overwritten(Some(&workdir), *status, raw) {
+                return Err(StashError::IgnoredOverwritten(path));
+            }
         }
     }
     if tracked.is_empty() && untracked.is_empty() {
@@ -392,7 +508,7 @@ fn save_path_limited_stash(
     }
     // Reading or reverting `d/f` while `d` is a symlink would read and write *through* it,
     // possibly outside the repository. Refuse before anything is written, like git does.
-    for path in opts.paths.iter().chain(&tracked).chain(&untracked) {
+    for path in paths.iter().chain(&tracked).chain(&untracked) {
         if has_symlinked_ancestor(&workdir, path) {
             return Err(StashError::BeyondSymlink(path.clone()));
         }
@@ -570,6 +686,130 @@ fn save_path_limited_stash(
     Ok(())
 }
 
+/// `paths` plus the other side of every staged rename one of them names (or a folder of them
+/// holds), so Stash file… on a staged rename's new path also stashes the old path's deletion,
+/// instead of leaving it staged (#152). Renames are detected between HEAD and the index as
+/// `status::status` detects them, so they match what the file list shows. (git's `stash push
+/// -- new` leaves the deletion staged, and `-- old new` fails: `old` matches no file it knows.)
+///
+/// When only the new path is selected and the worktree has something at the old path again (a
+/// new file the user made there), this refuses (`RenameSourceRecreated`): stashing the deletion
+/// would record that file and write the committed version over it, though the user picked only
+/// the rename, and even with untracked files left out. Selecting the old path stashes it too.
+/// `picked_alone` is false for Stash all on the path-limited route (`save_stash` selects every
+/// change): nothing was picked on its own there, so the new file at the old path is stashed
+/// like any edit to a file removed from the index (#247) and Pop brings it back.
+///
+/// Not paired: submodule renames (left out like everywhere in the path-limited stash; the new
+/// gitlink is refused first, see `refuse_staged_repository`) and paths that aren't UTF-8 (status
+/// paths that aren't UTF-8 are skipped everywhere here, and the frontend can't send them).
+fn with_rename_partners(
+    repo: &Repository,
+    paths: &[String],
+    picked_alone: bool,
+) -> Result<Vec<String>, StashError> {
+    let workdir = repo.workdir();
+    let folds_case = crate::worktree_guard::folds_case(repo);
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(false)
+        .include_ignored(false)
+        .exclude_submodules(true)
+        .renames_head_to_index(true)
+        .renames_index_to_workdir(false);
+    let selects = |path: &str| {
+        paths.iter().any(|picked| {
+            path.strip_prefix(picked.as_str())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        })
+    };
+    let mut all = paths.to_vec();
+    for entry in repo.statuses(Some(&mut options))?.iter() {
+        if !entry.status().contains(git2::Status::INDEX_RENAMED) {
+            continue;
+        }
+        let Some(delta) = entry.head_to_index() else {
+            continue;
+        };
+        let (Some(old), Some(new)) = (
+            delta.old_file().path().and_then(std::path::Path::to_str),
+            delta.new_file().path().and_then(std::path::Path::to_str),
+        ) else {
+            continue;
+        };
+        for (picked, partner) in [(new, old), (old, new)] {
+            if !selects(picked) || selects(partner) || all.iter().any(|path| path == partner) {
+                continue;
+            }
+            // A case-only rename on a drive that folds names finds the new file at the old
+            // path; `refuse_case_only_rename` refuses it later.
+            if picked_alone
+                && partner == old
+                && !(folds_case && same_in_icase_index(old.as_bytes(), new.as_bytes()))
+                && workdir
+                    .is_some_and(|workdir| std::fs::symlink_metadata(workdir.join(old)).is_ok())
+            {
+                return Err(StashError::RenameSourceRecreated {
+                    path: new.to_string(),
+                    old: old.to_string(),
+                });
+            }
+            all.push(partner.to_string());
+        }
+    }
+    Ok(all)
+}
+
+/// True when libgit2's ignore-case index (`core.ignorecase`) takes `a` and `b` for one entry: it
+/// compares with `strcasecmp`/`git__strcasecmp` and hashes with `git__tolower` (index.c,
+/// index_map.c), byte by byte with ASCII letters folded only (the C locale; `git__tolower` on
+/// Windows). So `README`/`readme` are one entry, but `Straße`/`Strasse` or NFC/NFD spellings
+/// are two, unlike `worktree_guard::fold_name`, which follows the file systems.
+fn same_in_icase_index(a: &[u8], b: &[u8]) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
+
+/// Where names fold (`folds_case`), refuses when a stashed tracked path differs only in ASCII
+/// case from a path HEAD or the index has (a case-only rename, `git mv Old old`). libgit2's index
+/// then finds one as the other (`same_in_icase_index`), so the stash's index tree would hold
+/// both names and the revert would find nothing to change: the stash is written but the rename
+/// stays (Stash all, through libgit2's own stash, has the same problem; see
+/// `docs/ARCHITECTURE.md`, #370).
+fn refuse_case_only_rename(
+    repo: &Repository,
+    base: &git2::Commit,
+    tracked: &[String],
+) -> Result<(), StashError> {
+    if !crate::worktree_guard::folds_case(repo) {
+        return Ok(());
+    }
+    // The key `same_in_icase_index` compares by.
+    let fold = |path: &[u8]| path.to_ascii_lowercase();
+    let mut known = std::collections::HashMap::new();
+    base.tree()?
+        .walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            if entry.kind() != Some(git2::ObjectType::Tree) {
+                let path = [root.as_bytes(), entry.name_bytes()].concat();
+                known.entry(fold(&path)).or_insert(path);
+            }
+            git2::TreeWalkResult::Ok
+        })?;
+    for entry in repo.index()?.iter() {
+        known.entry(fold(&entry.path)).or_insert(entry.path);
+    }
+    for path in tracked {
+        if let Some(other) = known.get(&fold(path.as_bytes())) {
+            if other.as_slice() != path.as_bytes() {
+                return Err(StashError::CaseOnlyRename {
+                    path: path.clone(),
+                    other: String::from_utf8_lossy(other).into_owned(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 /// True when the worktree file `path` is untracked: not in the index and not ignored.
 /// (`status_file` can't tell: the path is ambiguous while the index has entries below it.)
 fn is_untracked(repo: &Repository, path: &str) -> Result<bool, StashError> {
@@ -719,6 +959,64 @@ fn edit_removed_from_index(repo: &Repository) -> Result<bool, StashError> {
     Ok(false)
 }
 
+/// The whole-worktree status Stash all checks before stashing (`entry_in_the_way`), and Stash
+/// file… for a staged deletion: untracked and ignored entries included, ignored folders not
+/// recursed, submodules left out.
+struct WorktreeScan {
+    entries: Vec<(git2::Status, String)>,
+}
+
+impl WorktreeScan {
+    fn new(repo: &Repository) -> Result<Self, StashError> {
+        let mut options = git2::StatusOptions::new();
+        options
+            .include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .include_ignored(true)
+            .recurse_ignored_dirs(false)
+            .exclude_submodules(true);
+        let entries = repo
+            .statuses(Some(&mut options))?
+            .iter()
+            .filter_map(|entry| Some((entry.status(), entry.path().ok()?.to_string())))
+            .collect();
+        Ok(Self { entries })
+    }
+
+    /// For the entry `raw` with `status`: a file the index no longer has but the worktree still
+    /// does, and that status doesn't report as `WT_NEW` (`git rm --cached`, then ignored, alone
+    /// or as part of an ignored folder). A stash doesn't record it (libgit2's skips ignored
+    /// files; the path-limited stash would record it but put HEAD's entry back in the index, so
+    /// the file would be tracked again after a pop, #259), and the revert writes the committed
+    /// version over it (with keep-index it deletes it): `IgnoredOverwritten`, naming the folder
+    /// ignored as a whole that holds it, or else `raw`. Status reports such a folder's files one
+    /// by one only when the index still had them (`INDEX_DELETED`), without the `IGNORED` flag.
+    fn ignored_overwritten(
+        &self,
+        workdir: Option<&std::path::Path>,
+        status: git2::Status,
+        raw: &str,
+    ) -> Option<String> {
+        if !status.contains(git2::Status::INDEX_DELETED)
+            || status.contains(git2::Status::WT_NEW)
+            || !workdir.is_some_and(|workdir| {
+                std::fs::symlink_metadata(workdir.join(raw)).is_ok_and(|meta| !meta.is_dir())
+            })
+        {
+            return None;
+        }
+        let folder = self.entries.iter().find_map(|(status, folder)| {
+            let folder = folder.strip_suffix('/')?;
+            (status.contains(git2::Status::IGNORED)
+                && raw
+                    .strip_prefix(folder)
+                    .is_some_and(|rest| rest.starts_with('/')))
+            .then_some(folder)
+        });
+        Some(folder.unwrap_or(raw).to_string())
+    }
+}
+
 /// What `entry_in_the_way` found: the worktree entry `path` the reset would delete, the
 /// restored path `tracked` it is in the way of, and what kind of entry it is.
 struct InTheWay {
@@ -805,49 +1103,17 @@ fn entry_in_the_way(
         }
     }
     let workdir = repo.workdir().map(std::path::Path::to_path_buf);
-    let mut options = git2::StatusOptions::new();
-    options
-        .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .include_ignored(true)
-        .recurse_ignored_dirs(false)
-        .exclude_submodules(true);
-    let statuses = repo.statuses(Some(&mut options))?;
-    let entries: Vec<(git2::Status, String)> = statuses
-        .iter()
-        .filter_map(|entry| Some((entry.status(), entry.path().ok()?.to_string())))
-        .collect();
-    // Folders ignored as a whole: their files are reported one by one only when the index
-    // still had them (`INDEX_DELETED`), without the `IGNORED` flag.
-    let ignored_folders: Vec<&str> = entries
-        .iter()
-        .filter(|(status, raw)| status.contains(git2::Status::IGNORED) && raw.ends_with('/'))
-        .map(|(_, raw)| raw.trim_end_matches('/'))
-        .collect();
-    for (status, raw) in &entries {
+    let scan = WorktreeScan::new(repo)?;
+    for (status, raw) in &scan.entries {
         let status = *status;
-        // A file the index no longer has but the worktree still does (`git rm --cached`, then
-        // ignored, so it isn't `WT_NEW`): the stash doesn't record it, and the reset writes the
-        // committed version over it (with keep-index it deletes it).
-        if status.contains(git2::Status::INDEX_DELETED)
-            && !status.contains(git2::Status::WT_NEW)
-            && files.contains_key(&fold(raw))
-            && workdir.as_ref().is_some_and(|workdir| {
-                std::fs::symlink_metadata(workdir.join(raw)).is_ok_and(|meta| !meta.is_dir())
-            })
-        {
-            let path = ignored_folders
-                .iter()
-                .find(|folder| {
-                    raw.strip_prefix(**folder)
-                        .is_some_and(|rest| rest.starts_with('/'))
-                })
-                .map_or(raw.as_str(), |folder| folder);
-            return Ok(Some(InTheWay {
-                path: path.to_string(),
-                tracked: raw.clone(),
-                kind: Kind::IgnoredOverwritten,
-            }));
+        if files.contains_key(&fold(raw)) {
+            if let Some(path) = scan.ignored_overwritten(workdir.as_deref(), status, raw) {
+                return Ok(Some(InTheWay {
+                    path,
+                    tracked: raw.clone(),
+                    kind: Kind::IgnoredOverwritten,
+                }));
+            }
         }
         let ignored = status.contains(git2::Status::IGNORED);
         if status != git2::Status::WT_NEW && !ignored {

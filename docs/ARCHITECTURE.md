@@ -239,7 +239,46 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   plain `INDEX_DELETED`. `entry_in_the_way` therefore refuses with
   `StashError::IgnoredOverwritten` for any `INDEX_DELETED` entry without `WT_NEW` whose worktree
   path is a non-folder (one no-follow stat per staged deletion) and a restored file, in both
-  modes. It names the ignored folder when the file is inside one.
+  modes. It names the ignored folder when the file is inside one. Stash file… refuses its
+  selected staged deletions by the same rule, on the same whole-worktree status
+  (`WorktreeScan::ignored_overwritten`, #259); the path-limited status can't tell, since with
+  untracked files left out it never reports `WT_NEW`. Stashing such a file would put HEAD's
+  entry back in the index, so a pop without "Restore staged changes" would leave it tracked
+  again with its local edit unstaged; `git stash push -- .env` refuses too ("did not match any
+  file(s) known to git").
+- A gitlink in the index that HEAD doesn't have (`git add lib` on a nested repository, or `git
+  submodule add` before the commit) makes libgit2 1.9.6's stash fail with "cannot create blob
+  from '…/lib': it is a directory" while the folder is there; without the folder the stash
+  succeeds but leaves the gitlink staged, so Pop refuses. `save_stash` checks the index first
+  (`refuse_staged_repository`) and refuses a whole stash, or Stash file… on that path, with
+  `StashError::NewSubmodule` (a `submodule.*.path` in `.gitmodules` names it),
+  `EmbeddedRepository` (the folder holds a `.git`) or `NewGitlink`; nothing is written. git
+  stashes the gitlink and keeps the folder (#244). A gitlink HEAD already has, changed or not,
+  stashes fine: the stash records the outer gitlink only and never moves the nested
+  repository's HEAD or touches its files (git doesn't recurse into it either).
+- Stash file… on a staged rename's new path also stashes the old path's deletion
+  (`with_rename_partners`, renames detected HEAD to index as in `status::status`; #152). If the
+  worktree has something at the old path again, picking only the new path refuses
+  (`RenameSourceRecreated`) instead of stashing and overwriting it; picking the old path
+  stashes both. Stash all on the path-limited route selects every change, so it never refuses
+  this: the new file at the old path is stashed like any edit to a file removed from the index
+  and comes back on Pop. Submodule renames aren't paired (the new gitlink is refused first), nor
+  are paths that aren't UTF-8 (skipped everywhere in the path-limited stash).
+- Stash file… refuses a case-only rename (`git mv README readme`; `CaseOnlyRename`,
+  `refuse_case_only_rename`) where names fold. libgit2's ignore-case index (`core.ignorecase`)
+  finds one name as the other, so the stash's index tree held both names and the revert changed
+  nothing. "Case-only" means what libgit2 compares as one entry (`same_in_icase_index`):
+  `strcasecmp`/`git__strcasecmp` and a `git__tolower` hash (index.c, index_map.c), ASCII letters
+  only, byte by byte. `Straße`/`Strasse` and NFC/NFD spellings are two names there and stash
+  normally (tested off macOS; APFS takes each pair for one file, so such a rename isn't even
+  possible with `git mv` there, and isn't covered); `worktree_guard::fold_name` (the file-system fold the other stash checks use) is
+  not used for this. The check runs before the ignored-file check, since the staged deletion
+  `Old` can find a file at `Old` (the new `old` on a drive that folds names, or an ignored
+  `Old` beside it) and would look like an ignored file removed from the index. "Where names
+  fold" is `worktree_guard::folds_case`, as for every stash check (#337): macOS, Windows, or
+  `core.ignorecase`. The stash never probes the drive (`dir_folds_case`), so on a Linux
+  casefold folder or a vfat mount without `core.ignorecase` the check doesn't run. Stash all
+  doesn't refuse case-only renames yet: #370.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as
