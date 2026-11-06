@@ -71,10 +71,15 @@ The owner is a required reviewer on `marketplace`, so both publish jobs wait for
 approval before they start: open the release run's page in Actions and use **Review
 deployments**, or find the run with `gh run view` and approve it there.
 
-**Pre-release switch:** `VSIX_PRE_RELEASE` at the top of `release.yml` (`"true"` now). Set it to
-`"false"` to package and publish stable releases. Packaging reads it too, because `vsce publish
+**Pre-release switch:** `VSIX_PRE_RELEASE` at the top of `release.yml`. It is `"false"` since
+0.3.1: releases are packaged and published as stable (0.3.0 was a pre-release).
+Set it to `"true"` to publish pre-releases again. Packaging reads it too, because `vsce publish
 --pre-release` refuses a package that wasn't packaged as a pre-release. A stable version must be
-higher than every pre-release version already published.
+higher than every pre-release version already published. `vsix-smoke` in `ci.yml` packages the
+same way (stable now); change it with the switch.
+
+**GitHub release:** publish the draft as a normal release, not a pre-release. The app's updater
+reads `releases/latest/download/latest.json`, and GitHub's `latest` skips pre-releases.
 
 **Never re-tag a published version at a different commit.** Both registries refuse to replace a
 published version. `--skip-duplicate` only makes re-running the *same* commit's release safe; a

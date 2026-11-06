@@ -5,9 +5,8 @@ lets you stage, commit, branch, merge, rebase, stash and tag without leaving the
 undo for most of it. It is the same app as the
 [Browsitory desktop client](https://github.com/rene-langer/browsitory), running inside VSCode.
 
-> **Pre-release.** Browsitory is new. If the Marketplace lists it as a pre-release, choose
-> **Install Pre-Release Version** (or **Switch to Pre-Release Version**) to get it. Please
-> report problems on [GitHub](https://github.com/rene-langer/browsitory/issues).
+> Browsitory is new. Please report problems on
+> [GitHub](https://github.com/rene-langer/browsitory/issues).
 
 ![Browsitory: sidebar, commit graph and working tree changes](https://raw.githubusercontent.com/rene-langer/browsitory/main/docs/guide/assets/overview.png)
 

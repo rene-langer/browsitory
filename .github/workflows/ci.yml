@@ -512,17 +512,18 @@ jobs:
       - run: pnpm --dir extension install --frozen-lockfile
       - run: pnpm --dir extension run compile
       - run: cargo build --release -p vscode-sidecar
-      # Pre-release, like release.yml while VSIX_PRE_RELEASE is "true".
+      # Stable, like release.yml while VSIX_PRE_RELEASE is "false" (add --pre-release to both
+      # steps if it goes back to "true").
       - name: Package the linux-x64 .vsix
         run: >-
           pnpm --dir extension run package:vsix -- --target linux-x64
           --sidecar target/release/vscode-sidecar
-          --out artifacts/browsitory-linux-x64.vsix --pre-release
+          --out artifacts/browsitory-linux-x64.vsix
       - name: Check the package
         run: >-
           pnpm --dir extension run check:vsix -- --target linux-x64
           --version "$(node -p "require('./extension/package.json').version")"
-          --pre-release artifacts/browsitory-linux-x64.vsix
+          artifacts/browsitory-linux-x64.vsix
       - name: Install e2e dependencies
         working-directory: extension/e2e
         # --ignore-workspace: see e2e-vscode.

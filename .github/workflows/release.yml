@@ -24,11 +24,11 @@ permissions:
   contents: write
 
 env:
-  # The VSCode extension's release channel. "true" packages and publishes every release tag as
-  # a pre-release on the Visual Studio Marketplace and Open VSX; set it to "false" to publish
-  # stable releases. (`vsce publish --pre-release` refuses a package that wasn't also packaged
-  # with `--pre-release`, so build-vsix-release and publish-vsix-marketplace read it.)
-  VSIX_PRE_RELEASE: "true"
+  # The VSCode extension's release channel. "false" (since 0.3.1) packages and publishes every
+  # release tag as a stable release on the Visual Studio Marketplace and Open VSX; "true" would
+  # publish pre-releases. (`vsce publish --pre-release` refuses a package that wasn't also
+  # packaged with `--pre-release`, so build-vsix-release and publish-vsix-marketplace read it.)
+  VSIX_PRE_RELEASE: "false"
 
 jobs:
   # Fast sanity gate before spending 3 platforms' worth of build time. Full cross-platform

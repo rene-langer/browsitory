@@ -44,9 +44,8 @@ See [Install Browsitory](docs/guide/install.md) for details.
 
 **VSCode extension** (VSCode 1.134 or newer on desktop; Linux x64, macOS, Windows x64):
 
-- **Visual Studio Marketplace:** search for "Browsitory" in the Extensions view. While it is a
-  pre-release, choose **Install Pre-Release Version**, or run
-  `code --install-extension browsitory.browsitory --pre-release`.
+- **Visual Studio Marketplace:** search for "Browsitory" in the Extensions view, or run
+  `code --install-extension browsitory.browsitory`.
 - **Open VSX** (VSCodium, Cursor and others):
   <https://open-vsx.org/extension/browsitory/browsitory>.
 - **From a file:** download the `.vsix` for your platform from the
