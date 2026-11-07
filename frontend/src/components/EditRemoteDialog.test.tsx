@@ -54,6 +54,36 @@ describe("EditRemoteDialog", () => {
     expect(props.onClose).not.toHaveBeenCalled();
   });
 
+  // #418: unchanged fields make Save a Cancel; the name gets the Add remote form's check.
+  it("closes without a backend call when nothing changed (spaces aside)", async () => {
+    const { props, dialog } = renderDialog();
+    fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: " origin " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save remote", hidden: true }));
+    await waitFor(() => expect(props.onClose).toHaveBeenCalled());
+    expect(props.onRename).not.toHaveBeenCalled();
+    expect(props.onUpdateUrls).not.toHaveBeenCalled();
+  });
+
+  it("trims the new name before renaming", async () => {
+    const { props, dialog } = renderDialog();
+    fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: "  upstream " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save remote", hidden: true }));
+    await waitFor(() => expect(props.onRename).toHaveBeenCalledWith("origin", "upstream"));
+  });
+
+  it("shows a remote-name problem inline and keeps Save disabled", () => {
+    const { props, dialog } = renderDialog();
+    const input = within(dialog).getByLabelText("Remote name");
+    fireEvent.change(input, { target: { value: "up..stream" } });
+
+    expect(within(dialog).getByText("Remote names can't contain .. or @{.")).toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(within(dialog).getByRole("button", { name: "Save remote", hidden: true })).toBeDisabled();
+    fireEvent.submit(input.closest("form")!);
+    expect(props.onRename).not.toHaveBeenCalled();
+    expect(props.onUpdateUrls).not.toHaveBeenCalled();
+  });
+
   it("copies the fetch URL, and the push URL only when one is set", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });

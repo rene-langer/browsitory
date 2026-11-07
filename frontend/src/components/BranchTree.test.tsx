@@ -424,6 +424,79 @@ describe("BranchTree — local branches", () => {
     expect(props.onRenameBranch).not.toHaveBeenCalled();
   });
 
+  // #418: the inline rename follows the New branch form's rules.
+  it("trims the new branch name before renaming", () => {
+    const { props } = renderTree();
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByDisplayValue("feat/foo");
+    fireEvent.change(input, { target: { value: "  feat/bar " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(props.onRenameBranch).toHaveBeenCalledWith("feat/foo", "feat/bar");
+  });
+
+  it("Enter on an unchanged name (spaces aside) closes the input without renaming", () => {
+    const { props } = renderTree();
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByDisplayValue("feat/foo");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const again = screen.getByDisplayValue("feat/foo");
+    fireEvent.change(again, { target: { value: "feat/foo  " } });
+    fireEvent.keyDown(again, { key: "Enter" });
+    expect(screen.queryByRole("textbox", { name: "Rename feat/foo" })).not.toBeInTheDocument();
+    expect(props.onRenameBranch).not.toHaveBeenCalled();
+  });
+
+  it("shows the New branch form's message for an invalid name and keeps the input open on Enter", () => {
+    const { props } = renderTree();
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByDisplayValue("feat/foo");
+    fireEvent.change(input, { target: { value: "feat bar" } });
+
+    expect(screen.getByText("Branch names can't contain spaces.")).toBeInTheDocument();
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAccessibleDescription("Branch names can't contain spaces.");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(props.onRenameBranch).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Rename feat/foo" })).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "feat/bar" } });
+    expect(screen.queryByText("Branch names can't contain spaces.")).not.toBeInTheDocument();
+  });
+
+  it("Add remote shows a remote-name problem inline and keeps Add remote disabled", () => {
+    const onAddRemote = vi.fn().mockResolvedValue(null);
+    renderTree({ addRemoteDraftOpen: true, onAddRemote });
+    fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "my fork" } });
+    fireEvent.change(screen.getByTestId("add-remote-fetch-url"), { target: { value: "../fork.git" } });
+
+    expect(screen.getByText("Remote names can't contain spaces.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add remote" })).toBeDisabled();
+    expect(onAddRemote).not.toHaveBeenCalled();
+  });
+
+  it("Add remote refuses an invalid name derived from the URL with the same message", async () => {
+    const onAddRemote = vi.fn().mockResolvedValue(null);
+    // "origin" is taken, so the name comes from the URL's last part.
+    renderTree({
+      addRemoteDraftOpen: true,
+      onAddRemote,
+      remotes: [{ name: "origin", fetchUrl: "u", pushUrl: null, authMode: null, authUsername: null }],
+    });
+    fireEvent.change(screen.getByTestId("add-remote-fetch-url"), { target: { value: "../my fork.git" } });
+    fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
+
+    expect(await screen.findByText("Remote names can't contain spaces.")).toBeInTheDocument();
+    expect(onAddRemote).not.toHaveBeenCalled();
+  });
+
   it("disables the merge action while a merge is already in progress", () => {
     renderTree({ isMerging: true });
 
@@ -748,8 +821,11 @@ describe("BranchTree — remotes", () => {
     const dialog = await screen.findByRole("dialog", { name: "Edit origin" });
     expect(within(dialog).getByDisplayValue("git@github.com:user/repo.git")).toBeInTheDocument();
     expect(within(dialog).getByLabelText("Remote name")).toHaveFocus();
+    fireEvent.change(within(dialog).getByLabelText("Fetch URL"), { target: { value: "git@github.com:user/moved.git" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save remote" }));
-    expect(onUpdateRemoteUrls).toHaveBeenCalledWith("origin", "git@github.com:user/repo.git", null);
+    await waitFor(() =>
+      expect(onUpdateRemoteUrls).toHaveBeenCalledWith("origin", "git@github.com:user/moved.git", null),
+    );
   });
 
   it("Manage credentials opens a dialog; saving an HTTPS credential calls onSaveHttpsCredential", async () => {
