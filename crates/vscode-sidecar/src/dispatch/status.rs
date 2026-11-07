@@ -166,6 +166,13 @@ pub(super) fn set_graph_branch_selection(
     Ok(Value::Null)
 }
 
+/// Forgets the saved selection, back to every local branch (#402).
+pub(super) fn clear_graph_branch_selection(params: RepoPathParams) -> Result<Value, String> {
+    config::clear_graph_branch_selection(Path::new(&params.repo_path))
+        .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
 pub(super) fn get_graph_remote_branch_selection(params: RepoPathParams) -> Result<Value, String> {
     let selection = config::get_graph_remote_branch_selection(Path::new(&params.repo_path))
         .map_err(|error| error.to_string())?;
@@ -187,6 +194,13 @@ pub(super) fn set_graph_remote_branch_selection(
         &params.selected_branches,
     )
     .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+/// Forgets the saved remote selection, back to no remote commits and every remote badge (#402).
+pub(super) fn clear_graph_remote_branch_selection(params: RepoPathParams) -> Result<Value, String> {
+    config::clear_graph_remote_branch_selection(Path::new(&params.repo_path))
+        .map_err(|error| error.to_string())?;
     Ok(Value::Null)
 }
 

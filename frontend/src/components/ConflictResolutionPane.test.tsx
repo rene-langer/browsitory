@@ -157,6 +157,8 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     setGraphBranchSelection: unused,
     getGraphRemoteBranchSelection: async () => null,
     setGraphRemoteBranchSelection: unused,
+    clearGraphBranchSelection: unused,
+    clearGraphRemoteBranchSelection: unused,
     logFrontendError: unused,
     ...overrides,
   };

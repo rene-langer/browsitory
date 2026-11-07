@@ -629,6 +629,13 @@ certificate.
   (`isolateGraphBranch`): on a remote branch, local `[]` and remote `[name]`; on a local branch,
   local `[name]`, and remote `[]` only when a non-empty remote selection was saved (a
   never-saved one walks nothing and keeps every remote badge).
+- Going back to the default clears a saved selection (`clear_graph_branch_selection`,
+  `clear_graph_remote_branch_selection`, #402) instead of saving today's branch names, which
+  would hide branches created later and, with one local branch, walk first parents only. The
+  setters take a list, never `null`, so only these calls clear. "Show all branches"
+  (`showAllGraphBranches`) clears both in one mutation. A dot click that turns every local
+  branch on, and deleting a branch when every remaining one would be selected, clear the local
+  one only (`coversEveryBranch` in `frontend/src/lib/graphSelection.ts`).
 - The cursor is `<offset>:<fingerprint of the start oids and first-parent mode>` (the two
   things that decide the walk, so a changed remote selection changes it too); resuming
   re-walks and skips `offset` (polling cancel every 1,024 skipped commits), and any moved start

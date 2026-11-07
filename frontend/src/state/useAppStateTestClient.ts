@@ -87,6 +87,8 @@ export const remoteManagementClient = {
   setGraphBranchSelection: async () => {},
   getGraphRemoteBranchSelection: async () => null,
   setGraphRemoteBranchSelection: async () => {},
+  clearGraphBranchSelection: async () => {},
+  clearGraphRemoteBranchSelection: async () => {},
   logFrontendError: async () => {},
 };
 

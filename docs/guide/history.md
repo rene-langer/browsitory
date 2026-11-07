@@ -23,8 +23,10 @@ its commits to the graph, even ones no local branch has (a colleague's fetched b
 example). Until you pick remote branches, the graph shows no remote-only commits, and the badge
 of every remote branch whose commit is already in the graph. A branch's menu, local or remote,
 has **Isolate branch**, which shows only that branch. **Show all branches** in the **+** menu of
-the Branches section goes back to every local branch; remote branches you turned on stay on.
-Browsitory remembers the choice per repository.
+the Branches section goes back to the graph you started with: every local branch, also ones you
+create later, no remote-only commits, and every remote branch's badge. Turning dots back on until
+every local branch is on does the same for the local branches; the remote branches you picked
+stay. Browsitory remembers the choice per repository.
 
 When the graph shows a single branch, local or remote (after **Isolate branch**, for example),
 it shows only that branch's own line: the commits made directly on it and its merge commits, newest

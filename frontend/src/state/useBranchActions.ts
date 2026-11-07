@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { withRenamedBranch, withoutBranch } from "../lib/graphSelection";
+import { coversEveryBranch, withRenamedBranch, withoutBranch } from "../lib/graphSelection";
 import type { RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type {
@@ -21,6 +21,12 @@ export interface BranchActions {
   closeCreateBranchDraft(): void;
   setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
   setGraphRemoteBranchSelection(selectedBranches: string[]): Promise<void>;
+  // Forgets the saved local selection: the graph walks every local branch again, also ones
+  // created later, and never just one branch's first parents (#402). The remote one stays.
+  clearGraphBranchSelection(): Promise<void>;
+  // "Show all branches": forgets both saved selections in one mutation, back to the default
+  // graph (every local branch, no remote-only commits, every remote badge; #402).
+  showAllGraphBranches(): Promise<void>;
   // "Isolate branch": the graph shows only `name`, a local branch or a remote one
   // (`<remote>/<branch>`). Both selections are saved before the one reload, so no other branch,
   // local or remote, joins the walk and the graph follows that branch's first parents (#385).
@@ -51,9 +57,10 @@ export function useBranchActions(
   // The branch operation already succeeded; a failure to rewrite the saved selection must not
   // report it as failed (the graph skips missing names anyway, #97), so it is only logged.
   const updateSelection = useCallback(
-    async (next: string[], after: "delete" | "rename") => {
+    async (next: string[] | "clear", after: "delete" | "rename") => {
       try {
-        await client.setGraphBranchSelection(repoPath, next);
+        if (next === "clear") await client.clearGraphBranchSelection(repoPath);
+        else await client.setGraphBranchSelection(repoPath, next);
       } catch (error) {
         void client
           .logFrontendError(`Updating the graph branch selection after a branch ${after} failed`, error)
@@ -89,12 +96,10 @@ export function useBranchActions(
         async () => {
           await client.deleteBranch(repoPath, name, force);
           // A persisted selection naming the deleted branch would otherwise linger (#97).
-          const next = withoutBranch(
-            selectionRef.current,
-            name,
-            branchNamesRef.current.filter((candidate) => candidate !== name),
-          );
-          if (next !== null) await updateSelection(next, "delete");
+          const remaining = branchNamesRef.current.filter((candidate) => candidate !== name);
+          const next = withoutBranch(selectionRef.current, name, remaining);
+          // Every branch left shown is the default graph: forget the list (#402).
+          if (next !== null) await updateSelection(coversEveryBranch(next, remaining) ? "clear" : next, "delete");
         },
       ),
     [client, runOptimisticMutation, repoPath, updateSelection],
@@ -137,6 +142,20 @@ export function useBranchActions(
     [client, runMutation, repoPath],
   );
 
+  const clearGraphBranchSelection = useCallback(
+    () => runMutation(() => client.clearGraphBranchSelection(repoPath)),
+    [client, runMutation, repoPath],
+  );
+
+  const showAllGraphBranches = useCallback(
+    () =>
+      runMutation(async () => {
+        await client.clearGraphBranchSelection(repoPath);
+        await client.clearGraphRemoteBranchSelection(repoPath);
+      }),
+    [client, runMutation, repoPath],
+  );
+
   const isolateGraphBranch = useCallback(
     (kind: "local" | "remote", name: string) =>
       runMutation(async () => {
@@ -163,6 +182,8 @@ export function useBranchActions(
     closeCreateBranchDraft,
     setGraphBranchSelection,
     setGraphRemoteBranchSelection,
+    clearGraphBranchSelection,
+    showAllGraphBranches,
     isolateGraphBranch,
   };
 }

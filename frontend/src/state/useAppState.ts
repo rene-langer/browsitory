@@ -315,6 +315,9 @@ export interface UseAppStateResult {
   openExternalUrl(url: string): Promise<void>;
   setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
   setGraphRemoteBranchSelection(selectedBranches: string[]): Promise<void>;
+  // See `BranchActions.clearGraphBranchSelection`/`showAllGraphBranches`.
+  clearGraphBranchSelection(): Promise<void>;
+  showAllGraphBranches(): Promise<void>;
   // See `BranchActions.isolateGraphBranch`.
   isolateGraphBranch(kind: "local" | "remote", name: string): Promise<void>;
   // Fetches the next page of history (grows the graph limit by one page and reloads).
@@ -539,6 +542,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     closeCreateBranchDraft,
     setGraphBranchSelection,
     setGraphRemoteBranchSelection,
+    clearGraphBranchSelection,
+    showAllGraphBranches,
     isolateGraphBranch,
   } = useBranchActions(
     client,
@@ -810,6 +815,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     openExternalUrl,
     setGraphBranchSelection,
     setGraphRemoteBranchSelection,
+    clearGraphBranchSelection,
+    showAllGraphBranches,
     isolateGraphBranch,
     loadMoreHistory,
     refresh,

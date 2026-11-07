@@ -54,6 +54,12 @@ pub fn set_graph_branch_selection(
         .map_err(|error| error.to_string())
 }
 
+/// Forgets the saved selection, back to every local branch (#402).
+#[tauri::command]
+pub fn clear_graph_branch_selection(repo_path: String) -> Result<(), String> {
+    config::clear_graph_branch_selection(Path::new(&repo_path)).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn get_graph_remote_branch_selection(repo_path: String) -> Result<Option<Vec<String>>, String> {
     config::get_graph_remote_branch_selection(Path::new(&repo_path))
@@ -66,6 +72,13 @@ pub fn set_graph_remote_branch_selection(
     selected_branches: Vec<String>,
 ) -> Result<(), String> {
     config::set_graph_remote_branch_selection(Path::new(&repo_path), &selected_branches)
+        .map_err(|error| error.to_string())
+}
+
+/// Forgets the saved remote selection, back to no remote commits and every remote badge (#402).
+#[tauri::command]
+pub fn clear_graph_remote_branch_selection(repo_path: String) -> Result<(), String> {
+    config::clear_graph_remote_branch_selection(Path::new(&repo_path))
         .map_err(|error| error.to_string())
 }
 

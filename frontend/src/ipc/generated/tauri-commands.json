@@ -12,6 +12,8 @@
   "cherry_pick",
   "cherry_pick_many",
   "clear_current_upstream",
+  "clear_graph_branch_selection",
+  "clear_graph_remote_branch_selection",
   "clone_repo",
   "close_repo",
   "commit",

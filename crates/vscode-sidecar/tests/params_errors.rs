@@ -102,6 +102,18 @@ fn a_field_of_the_wrong_type_names_the_expected_type() {
             json!({ "repoPath": "/r", "commitIds": "abc" }),
             "invalid type: string \"abc\", expected a sequence",
         ),
+        // A setter can't clear a saved graph selection by sending `null`: only
+        // `clear_graph_branch_selection`/`clear_graph_remote_branch_selection` do (#402).
+        (
+            "set_graph_branch_selection",
+            json!({ "repoPath": "/r", "selectedBranches": null }),
+            "invalid type: null, expected a sequence",
+        ),
+        (
+            "set_graph_remote_branch_selection",
+            json!({ "repoPath": "/r", "selectedBranches": null }),
+            "invalid type: null, expected a sequence",
+        ),
         // A `#[serde(default)]` field may be absent, but not `null`.
         (
             "continue_sequence",

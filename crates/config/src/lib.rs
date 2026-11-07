@@ -503,6 +503,24 @@ pub fn set_graph_branch_selection_at(
     write_config(config_file, &config)
 }
 
+/// Forgets the saved graph branch selection of `repo_path`, so the graph shows every local
+/// branch again, also ones created later ("Show all branches", #402). Not a setter taking
+/// `None`: clearing is its own call, so no caller clears a selection by passing an empty value.
+pub fn clear_graph_branch_selection(repo_path: &Path) -> Result<(), ConfigError> {
+    clear_graph_branch_selection_at(&config_file_path()?, repo_path)
+}
+
+pub fn clear_graph_branch_selection_at(
+    config_file: &Path,
+    repo_path: &Path,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config
+        .graph_branch_selections
+        .retain(|s| s.repo_path != repo_path);
+    write_config(config_file, &config)
+}
+
 pub fn get_graph_remote_branch_selection(
     repo_path: &Path,
 ) -> Result<Option<Vec<String>>, ConfigError> {
@@ -543,6 +561,23 @@ pub fn set_graph_remote_branch_selection_at(
             repo_path: repo_path.to_path_buf(),
             selected_branches: selected_branches.to_vec(),
         });
+    write_config(config_file, &config)
+}
+
+/// Forgets the saved remote graph branch selection of `repo_path`: the graph walks no remote
+/// branch and shows every remote badge again (#402). See `clear_graph_branch_selection`.
+pub fn clear_graph_remote_branch_selection(repo_path: &Path) -> Result<(), ConfigError> {
+    clear_graph_remote_branch_selection_at(&config_file_path()?, repo_path)
+}
+
+pub fn clear_graph_remote_branch_selection_at(
+    config_file: &Path,
+    repo_path: &Path,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config
+        .graph_remote_branch_selections
+        .retain(|s| s.repo_path != repo_path);
     write_config(config_file, &config)
 }
 
