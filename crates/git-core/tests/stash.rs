@@ -3618,32 +3618,235 @@ fn stash_all_stashes_a_case_only_rename_where_names_do_not_fold() {
     }
 }
 
+/// Case pairs only a case-sensitive drive holds, as `(first, second)` in the order they are
+/// written (the order a directory lists them in decided which file libgit2 deleted, #392).
 #[cfg(target_os = "linux")]
-#[test]
-fn stash_all_does_not_take_a_committed_case_pair_for_a_rename() {
-    // Only a case-sensitive drive holds both `A` and `a`. With `core.ignorecase` turned on
-    // afterwards, HEAD and the index have the same two names: no rename, so the case-only check
-    // (#370) leaves an unrelated edit alone. (Committed with the setting off; an open
-    // repository keeps its index's case mode, so reopen it.)
+const CASE_PAIRS: [(&str, &str); 4] = [("A", "a"), ("a", "A"), ("x/B", "x/b"), ("D/f", "d/f")];
+
+/// HEAD has the case pair `first`/`second` and `other`; then `core.ignorecase` is turned on
+/// (`ignore_case`) and `other` edited. Committed with the setting off; an open repository keeps
+/// its index's case mode, so this reopens it.
+#[cfg(target_os = "linux")]
+fn committed_case_pair(
+    (first, second): (&str, &str),
+    ignore_case: bool,
+) -> (tempfile::TempDir, git2::Repository) {
     let (dir, repo) = init_repo();
-    write_file(dir.path(), "A", "upper\n");
-    write_file(dir.path(), "a", "lower\n");
+    write_file(dir.path(), first, "first\n");
+    write_file(dir.path(), second, "second\n");
     write_file(dir.path(), "other", "x\n");
     commit_all(&repo, "base");
     repo.config()
         .unwrap()
-        .set_bool("core.ignorecase", true)
+        .set_bool("core.ignorecase", ignore_case)
         .unwrap();
     drop(repo);
-    let mut repo = git2::Repository::open(dir.path()).unwrap();
+    let repo = git2::Repository::open(dir.path()).unwrap();
     write_file(dir.path(), "other", "changed\n");
+    (dir, repo)
+}
 
-    // Succeeds: not refused as `CaseOnlyRename`.
+/// Every file below `dir` (`.git` left out), sorted, with `/` separators.
+#[cfg(target_os = "linux")]
+fn all_files(dir: &std::path::Path) -> Vec<String> {
+    fn walk(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            if rel == ".git" {
+                continue;
+            }
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else {
+                out.push(rel);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out.sort();
+    out
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn libgit2_forced_checkout_drops_one_of_a_case_pair_under_ignorecase() {
+    // #392, the libgit2 1.9 behaviour `CasePair` guards against: a forced checkout of HEAD (as
+    // libgit2's stash resets after stashing) with `core.ignorecase` keeps only one of `A` and
+    // `a` in the index, even with nothing to check out. If a libgit2 update changes this, the
+    // refusal below may be relaxed.
+    for pair in CASE_PAIRS {
+        let (dir, repo) = committed_case_pair(pair, true);
+        write_file(dir.path(), "other", "x\n");
+
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+            .unwrap();
+
+        let index = git2::Index::open(&dir.path().join(".git/index")).unwrap();
+        assert_eq!(index.len(), 2, "{pair:?}");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stash_all_refuses_a_committed_case_pair_where_names_fold() {
+    // #392: a case pair committed on a case-sensitive drive, then `core.ignorecase` on. libgit2's
+    // stash recorded the edit to `other`, but its reset kept only one of the pair in the index
+    // (the other became a staged deletion) and, depending on directory order (the ubuntu-latest
+    // runner's ext4 vs a local tmpfs), deleted its file. Now refused before anything is written.
+    for pair in CASE_PAIRS {
+        for opts in whole_stash_modes() {
+            let (dir, mut repo) = committed_case_pair(pair, true);
+            let index_before = std::fs::read(dir.path().join(".git/index")).unwrap();
+            let files_before = all_files(dir.path());
+
+            let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+            let mut names = [pair.0, pair.1];
+            names.sort();
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "Can't stash: '{}' and '{}' differ only in case, and stashing would remove one of them. Rename one of the two in the repository first, or stash only other files.",
+                    names[0], names[1]
+                ),
+                "{pair:?} {opts:?}"
+            );
+            assert!(matches!(error, StashError::CasePair { .. }));
+            assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+            assert_eq!(
+                std::fs::read(dir.path().join(".git/index")).unwrap(),
+                index_before
+            );
+            assert_eq!(all_files(dir.path()), files_before);
+            assert_eq!(read(dir.path(), pair.0), "first\n");
+            assert_eq!(read(dir.path(), pair.1), "second\n");
+            assert_eq!(read(dir.path(), "other"), "changed\n");
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stash_all_refuses_a_case_pair_with_one_side_removed_from_the_index() {
+    // #392: HEAD alone holds the pair (`git rm --cached a`). The reset would check out both again
+    // through the same ignore-case index; refused too.
+    let (dir, mut repo) = committed_case_pair(("A", "a"), true);
+    assert!(git(dir.path(), &["rm", "-q", "--cached", "a"])
+        .status
+        .success());
+
+    let error =
+        git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false)).unwrap_err();
+
+    assert!(
+        matches!(error, StashError::CasePair { ref path, ref other } if path == "A" && other == "a"),
+        "{error:?}"
+    );
+    assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stash_all_keeps_a_case_pair_where_names_do_not_fold() {
+    // Without `core.ignorecase` the pair is two names to libgit2 too: Stash all stashes `other`
+    // and keeps both.
+    for pair in CASE_PAIRS {
+        let (dir, mut repo) = committed_case_pair(pair, false);
+
+        git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false)).unwrap();
+
+        assert_eq!(git_status(dir.path()), "", "{pair:?}");
+        assert_eq!(read(dir.path(), pair.0), "first\n");
+        assert_eq!(read(dir.path(), pair.1), "second\n");
+        assert_eq!(read(dir.path(), "other"), "x\n");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stash_file_keeps_a_case_pair_where_names_fold() {
+    // #392: the path-limited stash (Stash file…) checks out only the stashed paths, so the pair
+    // stays; this is what the refusal points to.
+    for pair in CASE_PAIRS {
+        let (dir, mut repo) = committed_case_pair(pair, true);
+
+        git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["other".into()])).unwrap();
+
+        assert_eq!(git_status(dir.path()), "", "{pair:?}");
+        assert_eq!(read(dir.path(), pair.0), "first\n");
+        assert_eq!(read(dir.path(), pair.1), "second\n");
+        assert_eq!(read(dir.path(), "other"), "x\n");
+        assert_eq!(
+            git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+            StashApplyOutcome::Applied
+        );
+        assert_eq!(git_status(dir.path()), " M other\n", "{pair:?}");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stash_file_of_one_of_a_case_pair_is_refused_where_names_fold() {
+    // #392: picking `a` itself was refused as a case-only rename ("Commit the rename first"),
+    // though nothing was renamed. It is a case pair: refused as one, nothing written.
+    for pair in CASE_PAIRS {
+        let (dir, mut repo) = committed_case_pair(pair, true);
+        write_file(dir.path(), pair.1, "edited\n");
+        let index_before = std::fs::read(dir.path().join(".git/index")).unwrap();
+
+        let error =
+            git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec![pair.1.into()]))
+                .unwrap_err();
+
+        // The ignore-case pathspec selects both names, so either may be named first.
+        let StashError::CasePair { path, other } = &error else {
+            panic!("{pair:?} {error:?}");
+        };
+        let mut named = [path.as_str(), other.as_str()];
+        named.sort();
+        let mut expected = [pair.0, pair.1];
+        expected.sort();
+        assert_eq!(named, expected);
+        assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join(".git/index")).unwrap(),
+            index_before
+        );
+        assert_eq!(read(dir.path(), pair.0), "first\n");
+        assert_eq!(read(dir.path(), pair.1), "edited\n");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn git_stash_keeps_a_committed_case_pair_where_names_fold() {
+    // What git does with the same repository (#392): it stashes `other` and keeps both.
+    let (dir, _repo) = committed_case_pair(("A", "a"), true);
+
+    assert!(git_stash_push(dir.path(), false));
+
+    assert_eq!(git_status(dir.path()), "");
+    assert_eq!(top_level(dir.path()), ["A", "a", "other"]);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stash_all_does_not_take_folders_differing_in_case_for_a_pair() {
+    // `D/f` and `d/g` are two different paths to libgit2's index (it compares whole paths), and
+    // its reset keeps both: not refused.
+    let (dir, mut repo) = committed_case_pair(("D/f", "d/g"), true);
+
     git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false)).unwrap();
 
+    assert_eq!(git_status(dir.path()), "");
+    assert_eq!(all_files(dir.path()), ["D/f", "d/g", "other"]);
     assert_eq!(read(dir.path(), "other"), "x\n");
-    // Not checked: whether `A` and `a` both stay. libgit2's stash dropped `a` on the
-    // ubuntu-latest runner (not locally); that is #392.
 }
 
 #[test]

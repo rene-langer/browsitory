@@ -15,6 +15,10 @@
 // Hide the developer's / CI runner's global and system git config (#111).
 test_support::hermetic_git!();
 
+// TEMPORARY (#389): printed by CI's `--nocapture` step on macOS and Windows.
+#[path = "probe389/mod.rs"]
+mod probe389;
+
 use std::path::{Path, PathBuf};
 
 use git2::build::{CheckoutBuilder, RepoBuilder};

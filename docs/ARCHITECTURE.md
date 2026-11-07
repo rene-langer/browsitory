@@ -285,9 +285,30 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   the deleted `Old` found the file `old` (`IgnoredOverwritten("Old")`, seen on CI). `git stash`
   stashes the rename and puts `Old` back on all three (on macOS its worktree tree holds both
   names); libgit2's stash can't, and the path-limited route refuses as
-  Stash file… does, so refusing is the consistent fix. A case pair HEAD and the index both hold
-  (`A` and `a`, committed on a case-sensitive drive) is no rename and isn't refused (libgit2's
-  stash may drop one of the pair there: #392).
+  Stash file… does, so refusing is the consistent fix.
+- A case pair (`A` and `a`, committed on a case-sensitive drive, then `core.ignorecase` on; on
+  macOS and Windows such a pair can't even be checked out) is no rename, but libgit2 1.9 can't
+  stash around it either (#392). Its forced checkout of HEAD (stash.c
+  `reset_index_and_workdir`, `GIT_CHECKOUT_FORCE`) keeps only one of the two in its ignore-case
+  index, even with nothing to check out
+  (`libgit2_forced_checkout_drops_one_of_a_case_pair_under_ignorecase` pins this): the other
+  became a staged deletion. Whether its file was deleted too depended on the order the
+  directory lists the two names in: the workdir iterator sorts with plain `strcasecmp` and no
+  tie-break (`filesystem_iterator_entry_cmp_icase`, iterator.c), the tree iterator breaks ties
+  case-sensitively, so on a tmpfs (newest first) or an ext4 htree (hash order) the walk paired
+  the tree's `A` with the file `a` for some names and not others. Locally (tmpfs and ext4, all
+  26 letter pairs, both write orders) the index lost one entry every time and the file only for
+  some names, which is how the ubuntu-latest runner could delete `a` where a local run kept the
+  file (the runner's report is #392). The path-limited
+  stash's checkout of a pair member did the same (one entry dropped, sometimes the file
+  deleted, Pop then refused with `StagedChanges`). git keeps both. `save_stash` therefore
+  refuses with `StashError::CasePair` where names fold (`try_folds_case`), before anything is
+  written: Stash all when HEAD or the index holds two paths `same_in_icase_index` takes for one
+  (checked after the rename check, so a case-only rename keeps its `CaseOnlyRename`), Stash
+  file… when it picks one of them (`refuse_case_only_rename` tells a pair, two names in HEAD or
+  in the index alone, from a rename, one name in each). Stash file… on other paths keeps the
+  pair, since its checkout is limited to the stashed paths. Only whole paths count: `D/f` and
+  `d/g` are two entries to libgit2 and stash normally.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as

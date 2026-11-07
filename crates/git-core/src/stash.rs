@@ -95,6 +95,12 @@ pub enum StashError {
     /// index (a case-only rename). The stash couldn't revert it.
     #[error("Can't stash '{path}': it differs from '{other}' only in case. Commit the rename first, or undo it.")]
     CaseOnlyRename { path: String, other: String },
+    /// Where names fold: HEAD or the index holds both `path` and `other`, which libgit2's
+    /// ignore-case index takes for one entry (`A` and `a`, committed on a case-sensitive drive).
+    /// The forced checkout after libgit2's stash dropped one of them from the index, and
+    /// depending on directory order from the worktree too (#392).
+    #[error("Can't stash: '{path}' and '{other}' differ only in case, and stashing would remove one of them. Rename one of the two in the repository first, or stash only other files.")]
+    CasePair { path: String, other: String },
     #[error("{0}")]
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
@@ -786,6 +792,11 @@ fn same_in_icase_index(a: &[u8], b: &[u8]) -> bool {
 /// libgit2's index then finds one as the other (`same_in_icase_index`), so the stash's index tree would hold
 /// both names and the revert would find nothing to change: the stash is written but the rename
 /// stays. Stash all checks the whole index instead (`refuse_staged_case_only_rename`).
+///
+/// When HEAD or the index alone holds both names (`A` and `a`, committed on a case-sensitive
+/// drive), it is a case pair, not a rename, and refused as `CasePair` (#392): the revert's
+/// ignore-case checkout dropped one of the pair from the index, or deleted its file, and Pop
+/// then refused with `StagedChanges`. A pair the stash doesn't touch stays as it is.
 fn refuse_case_only_rename(
     repo: &Repository,
     base: &git2::Commit,
@@ -796,27 +807,51 @@ fn refuse_case_only_rename(
     }
     // The key `same_in_icase_index` compares by.
     let fold = |path: &[u8]| path.to_ascii_lowercase();
-    let mut known = std::collections::HashMap::new();
+    // The paths of HEAD (`.0`) and of the index (`.1`) under each key.
+    type Variants = (
+        std::collections::BTreeSet<Vec<u8>>,
+        std::collections::BTreeSet<Vec<u8>>,
+    );
+    let mut known = std::collections::HashMap::<Vec<u8>, Variants>::new();
     base.tree()?
         .walk(git2::TreeWalkMode::PreOrder, |root, entry| {
             if entry.kind() != Some(git2::ObjectType::Tree) {
                 let path = [root.as_bytes(), entry.name_bytes()].concat();
-                known.entry(fold(&path)).or_insert(path);
+                known.entry(fold(&path)).or_default().0.insert(path);
             }
             git2::TreeWalkResult::Ok
         })?;
     for entry in repo.index()?.iter() {
-        known.entry(fold(&entry.path)).or_insert(entry.path);
+        known
+            .entry(fold(&entry.path))
+            .or_default()
+            .1
+            .insert(entry.path);
     }
     for path in tracked {
-        if let Some(other) = known.get(&fold(path.as_bytes())) {
-            if other.as_slice() != path.as_bytes() {
-                return Err(StashError::CaseOnlyRename {
-                    path: path.clone(),
-                    other: String::from_utf8_lossy(other).into_owned(),
-                });
+        let Some((in_head, in_index)) = known.get(&fold(path.as_bytes())) else {
+            continue;
+        };
+        let Some(other) = in_head
+            .iter()
+            .chain(in_index)
+            .find(|other| other.as_slice() != path.as_bytes())
+        else {
+            continue;
+        };
+        let other = String::from_utf8_lossy(other).into_owned();
+        // HEAD or the index alone holds two of the names: a case pair, not a rename (#392).
+        return Err(if in_head.len() > 1 || in_index.len() > 1 {
+            StashError::CasePair {
+                path: path.clone(),
+                other,
             }
-        }
+        } else {
+            StashError::CaseOnlyRename {
+                path: path.clone(),
+                other,
+            }
+        });
     }
     Ok(())
 }
@@ -828,8 +863,13 @@ fn refuse_case_only_rename(
 /// both names and left the rename in place; on macOS and Windows the deleted `Old` found the
 /// file `old` and was refused as an ignored file removed from the index. git stashes the rename
 /// and puts `Old` back, which libgit2's stash can't. Runs before the checks that look at the
-/// worktree; nothing is written. HEAD and the index holding the same case pair (`A` and `a`, committed on a
-/// case-sensitive drive) is no rename and isn't refused.
+/// worktree; nothing is written.
+///
+/// HEAD or the index holding a case pair (`A` and `a`, committed on a case-sensitive drive) is
+/// no rename, but refused too (`CasePair`, #392): libgit2's forced checkout after the stash
+/// (`reset_index_and_workdir`) keeps only one of them in its ignore-case index, so the other
+/// became a staged deletion, and depending on the directory's read order its file was deleted
+/// as well. Only whole paths count, as in `same_in_icase_index` (`D/f` and `d/g` are kept).
 fn refuse_staged_case_only_rename(
     repo: &Repository,
     index: &git2::Index,
@@ -870,6 +910,23 @@ fn refuse_staged_case_only_rename(
                 path: String::from_utf8_lossy(path).into_owned(),
                 other: String::from_utf8_lossy(other).into_owned(),
             });
+        }
+    }
+    // No rename, but HEAD or the index holds two paths libgit2's index takes for one (#392).
+    let mut names =
+        std::collections::BTreeMap::<Vec<u8>, std::collections::BTreeSet<Vec<u8>>>::new();
+    for path in in_head.into_values().flatten().chain(paths) {
+        names
+            .entry(path.to_ascii_lowercase())
+            .or_default()
+            .insert(path);
+    }
+    if let Some(pair) = names.into_values().find(|names| names.len() > 1) {
+        let mut pair = pair
+            .into_iter()
+            .map(|path| String::from_utf8_lossy(&path).into_owned());
+        if let (Some(path), Some(other)) = (pair.next(), pair.next()) {
+            return Err(StashError::CasePair { path, other });
         }
     }
     Ok(())
