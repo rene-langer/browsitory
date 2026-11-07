@@ -11,7 +11,8 @@ import type {
   RunOptimisticMutationWithMessage,
   RunOptimisticMutationWithOutcome,
 } from "./useMutationRunner";
-import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
+import type { RemoteInfo, TagInfo, UpstreamInfo } from "../ipc/RepoClient";
+import { refNameClash, takenNameMessage } from "../lib/takenNames";
 import type { AppState, RemoteDialog } from "./useAppState";
 import { hookFailedMessage, type PushRequest } from "../lib/hookFailure";
 
@@ -54,11 +55,6 @@ function transferFailureMessage(progress: TransferProgress, upstreamLabel: strin
   if (progress.operation === "Pull") return "Pull failed";
   if (progress.operation === "Fetch" || progress.operation === "FetchAll") return "Fetch failed";
   return "Transfer failed";
-}
-
-/** The Add remote form's error for a name `state.remotes` already lists (#408). */
-function remoteNameTakenMessage(name: string): string {
-  return `A remote named "${name}" already exists.`;
 }
 
 /** One remote that failed during a Fetch all, as its `RemoteFailed` event reported it. */
@@ -152,6 +148,7 @@ export function useRemoteTransferActions(
   fetchPrune: boolean | null,
   currentBranch: string | null,
   remotes: RemoteInfo[],
+  tags: TagInfo[],
 ): RemoteTransferActions {
   const activeTransferId = useRef<string | null>(null);
   const transferRequestPending = useRef(false);
@@ -177,6 +174,10 @@ export function useRemoteTransferActions(
   useEffect(() => {
     remotesRef.current = remotes;
   }, [remotes]);
+  const tagsRef = useRef<TagInfo[]>(tags);
+  useEffect(() => {
+    tagsRef.current = tags;
+  }, [tags]);
   // Remotes a Fetch all reported as failed (`RemoteFailed`), for the active operation only.
   const failedRemotes = useRef<FailedRemote[]>([]);
 
@@ -264,16 +265,27 @@ export function useRemoteTransferActions(
     });
   }, [client, refresh, repoPath, setState]);
 
+  // Refuses `name` when `existing` already holds it, reporting it like any failed mutation (also
+  // in `state.error`); returns the message, or `null` when the name is free. `folders` also
+  // refuses a name that is a folder of a listed one or the other way round (`v1` and `v1/rc`),
+  // which git refuses for refs; remote names aren't refs, so remotes compare exactly.
+  const refuseTakenName = useCallback(
+    (kind: string, existing: string[], name: string, folders: boolean): string | null => {
+      const clash = folders ? refNameClash(existing, name) : existing.includes(name) ? name : null;
+      if (clash === null) return null;
+      const message = takenNameMessage(kind, name, clash);
+      setState((prev) => ({ ...prev, error: message }));
+      return message;
+    },
+    [setState],
+  );
   const addRemote = useCallback(
     async (name: string, fetchUrl: string, pushUrl: string | null) => {
       // A taken name is refused here, before the optimistic append: appending it would render the
       // remote twice (with a duplicate React key in `BranchTree`) until the backend refused it, with
       // libgit2's raw "already exists" error (#408).
-      if (remotesRef.current.some((remote) => remote.name === name)) {
-        const message = remoteNameTakenMessage(name);
-        setState((prev) => ({ ...prev, error: message }));
-        return message;
-      }
+      const refused = refuseTakenName("remote", remotesRef.current.map((remote) => remote.name), name, false);
+      if (refused !== null) return refused;
       return runOptimisticMutationWithMessage(
         (prev) =>
           // Belt and braces for a name that arrived since the check above: never list it twice.
@@ -286,18 +298,25 @@ export function useRemoteTransferActions(
         () => client.addRemote(repoPath, name, fetchUrl, pushUrl),
       );
     },
-    [client, runOptimisticMutationWithMessage, repoPath, setState],
+    [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],
   );
   const renameRemote = useCallback(
-    (oldName: string, newName: string) =>
-      runOptimisticMutationWithOutcome(
-        (prev) => ({
-          ...prev,
-          remotes: prev.remotes.map((remote) => (remote.name === oldName ? { ...remote, name: newName } : remote)),
-        }),
+    async (oldName: string, newName: string) => {
+      // As `addRemote`: renaming onto another remote's name would list that name twice (#413).
+      const others = remotesRef.current.map((remote) => remote.name).filter((name) => name !== oldName);
+      if (refuseTakenName("remote", others, newName, false) !== null) return false;
+      return runOptimisticMutationWithOutcome(
+        (prev) =>
+          prev.remotes.some((remote) => remote.name === newName && remote.name !== oldName)
+            ? prev
+            : {
+                ...prev,
+                remotes: prev.remotes.map((remote) => (remote.name === oldName ? { ...remote, name: newName } : remote)),
+              },
         () => client.renameRemote(repoPath, oldName, newName),
-      ),
-    [client, runOptimisticMutationWithOutcome, repoPath],
+      );
+    },
+    [client, refuseTakenName, runOptimisticMutationWithOutcome, repoPath],
   );
   const updateRemoteUrls = useCallback(
     (name: string, fetchUrl: string, pushUrl: string | null) =>
@@ -413,18 +432,25 @@ export function useRemoteTransferActions(
   );
 
   const createTag = useCallback(
-    (name: string, message: string | null) =>
-      runOptimisticMutationWithMessage(
-        (prev) => ({
-          ...prev,
-          tags: [
-            ...prev.tags,
-            { name, targetId: "", commitId: null, annotated: message !== null, message, taggerName: null, timestamp: null },
-          ],
-        }),
+    async (name: string, message: string | null) => {
+      // A taken tag name would show twice in `TagPanel` (keyed by name) until refused (#413).
+      const refused = refuseTakenName("tag", tagsRef.current.map((tag) => tag.name), name, true);
+      if (refused !== null) return refused;
+      return runOptimisticMutationWithMessage(
+        (prev) =>
+          refNameClash(prev.tags.map((tag) => tag.name), name) !== null
+            ? prev
+            : {
+                ...prev,
+                tags: [
+                  ...prev.tags,
+                  { name, targetId: "", commitId: null, annotated: message !== null, message, taggerName: null, timestamp: null },
+                ],
+              },
         () => client.createTag(repoPath, name, message),
-      ),
-    [client, runOptimisticMutationWithMessage, repoPath],
+      );
+    },
+    [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],
   );
   const deleteTag = useCallback(
     (name: string) =>

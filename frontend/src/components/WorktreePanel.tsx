@@ -126,7 +126,10 @@ export function WorktreePanel({
       ) : (
         <ul className={styles.list}>
           {worktrees.map((worktree) => (
-            <ListRow key={worktree.path}>
+            // Keyed by entry, not path: two entries can name one folder (an old one whose folder was
+            // deleted and a newer one made there; `list_worktrees` lists both), while a linked
+            // worktree's name is its own folder under `.git/worktrees` (#413).
+            <ListRow key={worktree.isMain ? "main" : `linked/${worktree.name}`}>
               <FolderGit2 size={14} aria-hidden="true" className={styles.rowIcon} />
               <strong>{worktree.isMain ? "Main" : "Linked"}</strong>
               <span>{worktree.path}</span>
