@@ -249,10 +249,14 @@ describe("ReleaseNotesModal", () => {
       const dialog = screen.getByRole("dialog", { name: "Release notes" });
       dialog.getBoundingClientRect = () => new DOMRect(100, 100, 400, 300);
 
+      fireEvent.mouseDown(screen.getByText("Feature A"));
       fireEvent.click(screen.getByText("Feature A"));
-      fireEvent.click(dialog, { clientX: 200, clientY: 200 });
+      // Selecting notes text and releasing over the backdrop: the click targets the dialog.
+      fireEvent.mouseDown(screen.getByText("Feature A"), { clientX: 200, clientY: 200 });
+      fireEvent.click(dialog, { clientX: 20, clientY: 20 });
       expect(onClose).not.toHaveBeenCalled();
 
+      fireEvent.mouseDown(dialog, { clientX: 20, clientY: 20 });
       fireEvent.click(dialog, { clientX: 20, clientY: 20 });
       expect(onClose).toHaveBeenCalledOnce();
     });

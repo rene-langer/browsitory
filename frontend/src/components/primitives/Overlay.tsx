@@ -62,26 +62,39 @@ export function Overlay({
     onClose?.();
   };
 
-  // A click on the backdrop is dispatched to the `<dialog>` itself, as is one on its border, so
-  // the click's position tells the two apart. Clicks on the content target a child.
-  const handleClick = (event: MouseEvent<HTMLDialogElement>) => {
-    if (!closeOnBackdropClick || event.target !== event.currentTarget) return;
+  // A press on the backdrop is dispatched to the `<dialog>` itself, as is one on its border, so
+  // the position tells the two apart. Presses on the content target a child.
+  const onBackdrop = (event: MouseEvent<HTMLDialogElement>) => {
+    if (event.target !== event.currentTarget) return false;
     const rect = event.currentTarget.getBoundingClientRect();
     const inside =
       event.clientX >= rect.left &&
       event.clientX <= rect.right &&
       event.clientY >= rect.top &&
       event.clientY <= rect.bottom;
-    if (!inside) onClose?.();
+    return !inside;
+  };
+  // Where the last press started. A drag that starts in the content (e.g. selecting text) and
+  // ends over the backdrop also fires a click on the `<dialog>`, their common ancestor, at a
+  // point outside it; it must not close the overlay.
+  const pressStartedOnBackdrop = useRef(false);
+  const handleMouseDown = (event: MouseEvent<HTMLDialogElement>) => {
+    pressStartedOnBackdrop.current = closeOnBackdropClick && onBackdrop(event);
+  };
+  const handleClick = (event: MouseEvent<HTMLDialogElement>) => {
+    const startedOnBackdrop = pressStartedOnBackdrop.current;
+    pressStartedOnBackdrop.current = false;
+    if (closeOnBackdropClick && startedOnBackdrop && onBackdrop(event)) onClose?.();
   };
 
   return (
-    // The dialog closes on Escape by itself; the click handler only adds the backdrop click.
+    // The dialog closes on Escape by itself; the mouse handlers only add the backdrop click.
     <dialog
       ref={ref}
       className={styles.overlay}
       aria-label={ariaLabel}
       onClose={handleClose}
+      onMouseDown={handleMouseDown}
       onClick={handleClick}
     >
       {children}
