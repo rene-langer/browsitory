@@ -15,6 +15,9 @@ Download the installer for your system from the
 | macOS (Intel and Apple silicon) | `Browsitory_<version>_universal.dmg` |
 | Linux (x64) | `.AppImage`, `.deb` (Debian, Ubuntu) or `.rpm` (Fedora, openSUSE) |
 
+On Linux, the app needs glibc 2.39 or newer (for example Ubuntu 24.04, Debian 13, Fedora 40 or
+newer) and WebKitGTK 4.1.
+
 The installers are not signed with an Apple or Microsoft certificate yet, so your system may
 warn you the first time:
 
@@ -29,8 +32,8 @@ the whole system, so Linux asks for your password when you restart to update.
 
 ## VSCode extension
 
-The extension needs VSCode 1.134 or newer on Linux x64, macOS (Intel or Apple silicon) or
-Windows x64. It doesn't run in vscode.dev or in Codespaces in the browser.
+The extension needs VSCode 1.134 or newer on Linux x64 (with glibc 2.39 or newer, as the app),
+macOS (Intel or Apple silicon) or Windows x64. It doesn't run in vscode.dev or in Codespaces in the browser.
 
 - **Visual Studio Marketplace** (VSCode): open the Extensions view and search for
   "Browsitory" and choose **Install**, or run

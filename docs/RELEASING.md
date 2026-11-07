@@ -19,6 +19,18 @@ the tagged commit: `cargo test --workspace`, the frontend test suite,
 `scripts/generate-third-party-notices.py --check`, so a stale notices file stops the release,
 and `scripts/fold-changelog.py --check`, so unfolded changelog fragments stop it too.
 
+### Linux build image (glibc floor)
+
+The Linux bundles (AppImage, `.deb`, `.rpm`) and the linux-x64 VSIX's `vscode-sidecar` need at
+least the glibc of the image they are built on. So `build-release` and `build-vsix-release` run
+their Linux builds on a pinned `ubuntu-24.04`, not `ubuntu-latest`, which moves to Ubuntu 26.04
+(glibc 2.43) from October 2026 (#386). Built on 24.04, both need glibc 2.39 (0.3.1, checked with
+`objdump -T`): Ubuntu 24.04, Debian 13, Fedora 40 or newer, the floor `docs/guide/install.md`
+states. CI's `build-dist` and `build-vsix` pin the same image, so main builds what a release
+ships. The other Linux jobs stay on `ubuntu-latest`; CI ran them on `ubuntu-26.04` before the
+switch (#386). To raise the floor, move all four pins together and update
+`docs/guide/install.md`; do it before GitHub retires the `ubuntu-24.04` image.
+
 ### Preparing the changelog
 
 Pull requests don't edit `CHANGELOG.md`. Each adds a fragment, `changelog.d/<issue>-<slug>.md`
