@@ -109,50 +109,91 @@ impl RefDecorations {
     }
 }
 
-/// True when a walk over `selected_branches` follows first parents only: exactly one branch is
-/// selected (what "Isolate branch" produces). That branch's line is then its merge commits plus
-/// the commits made directly on it; the commits of merged side branches are left out. No
-/// selection (every local branch) or several branches walk every ancestor (#380).
-pub(crate) fn walks_first_parent(selected_branches: Option<&[String]>) -> bool {
-    matches!(selected_branches, Some([_]))
+/// The branches the graph walks, and a commit search without a `branch:` term (#385).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GraphSelection {
+    /// Local branch names: `None` (nothing saved) walks every local branch, `Some(vec![])`
+    /// none of them.
+    pub local: Option<Vec<String>>,
+    /// Remote-tracking branches as `<remote>/<branch>`, walked on top of `local`. Empty (also
+    /// what a never-saved remote selection maps to) walks no remote branch, so remote-only
+    /// commits stay out of the default graph.
+    pub remote: Vec<String>,
 }
 
-/// The commits of `selected_branches` (`None` = every local branch), children before parents
-/// (`TOPOLOGICAL | TIME`), at most `limit`. With exactly one selected branch the walk follows
-/// first parents only (see [`walks_first_parent`]); a merge commit still lists all its
-/// `parent_ids`, so its other parents are usually not in the result.
+impl GraphSelection {
+    /// True when the walk follows first parents only: exactly one branch is selected, local
+    /// and remote together (what "Isolate branch" produces). That branch's line is then its
+    /// merge commits plus the commits made directly on it; the commits of merged side branches
+    /// are left out. `local: None` (every local branch) or several branches walk every
+    /// ancestor (#380).
+    pub(crate) fn walks_first_parent(&self) -> bool {
+        matches!(&self.local, Some(local) if local.len() + self.remote.len() == 1)
+    }
+
+    /// The commits the walk starts from, sorted and deduplicated. A persisted selection can
+    /// outlive its branches (deleted or renamed, possibly outside the app, or a remote branch
+    /// pruned by a fetch): missing names are skipped instead of failing the walk (#97).
+    pub(crate) fn start_oids(&self, repo: &Repository) -> Result<Vec<Oid>, git2::Error> {
+        let named = |refname: &str| -> Result<Option<Oid>, git2::Error> {
+            match repo.find_reference(refname) {
+                Ok(reference) => Ok(reference.peel_to_commit().ok().map(|c| c.id())),
+                // A name that isn't a valid ref name can't resolve either.
+                Err(error)
+                    if matches!(
+                        error.code(),
+                        git2::ErrorCode::NotFound | git2::ErrorCode::InvalidSpec
+                    ) =>
+                {
+                    Ok(None)
+                }
+                Err(error) => Err(error),
+            }
+        };
+        let mut oids = Vec::new();
+        match &self.local {
+            Some(names) => {
+                for name in names {
+                    oids.extend(named(&format!("refs/heads/{name}"))?);
+                }
+            }
+            // A repo with no commits yet has no local branches: the walk is simply empty, no
+            // special case for an unborn HEAD.
+            None => {
+                for reference in repo.references_glob("refs/heads/*")? {
+                    if let Ok(commit) = reference?.peel_to_commit() {
+                        oids.push(commit.id());
+                    }
+                }
+            }
+        }
+        for name in &self.remote {
+            oids.extend(named(&format!("refs/remotes/{name}"))?);
+        }
+        oids.sort();
+        oids.dedup();
+        Ok(oids)
+    }
+}
+
+/// The commits of `selection`, children before parents (`TOPOLOGICAL | TIME`), at most
+/// `limit`. With exactly one selected branch the walk follows first parents only (see
+/// [`GraphSelection::walks_first_parent`]); a merge commit still lists all its `parent_ids`,
+/// so its other parents are usually not in the result.
 pub fn graph_log(
     repo: &Repository,
     limit: usize,
-    selected_branches: Option<&[String]>,
+    selection: &GraphSelection,
 ) -> Result<Vec<GraphCommit>, GraphError> {
     let decorations = RefDecorations::load(repo)?;
 
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-    if walks_first_parent(selected_branches) {
+    if selection.walks_first_parent() {
         revwalk.simplify_first_parent()?;
     }
-    match selected_branches {
-        // On a repo with no commits yet, there are no local branches to match, so this simply
-        // pushes nothing — the loop below then runs zero times, giving an empty graph. Unlike
-        // `push_head()` (which errors on an unborn HEAD, the case the removed `log()` had to
-        // special-case), `push_glob` doesn't error on zero matches — no special-casing needed
-        // here.
-        None => revwalk.push_glob("refs/heads/*")?,
-        Some(names) => {
-            // A persisted selection can outlive its branches (deleted or renamed, possibly
-            // outside the app). Skip the missing ones, like `search_commits`, instead of
-            // failing the whole graph (#97).
-            for name in names {
-                let refname = format!("refs/heads/{name}");
-                match repo.find_reference(&refname) {
-                    Ok(_) => revwalk.push_ref(&refname)?,
-                    Err(error) if error.code() == git2::ErrorCode::NotFound => {}
-                    Err(error) => return Err(error.into()),
-                }
-            }
-        }
+    for oid in selection.start_oids(repo)? {
+        revwalk.push(oid)?;
     }
 
     let mut commits = Vec::new();

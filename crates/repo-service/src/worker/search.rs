@@ -1,6 +1,7 @@
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 
+use git_core::graph::GraphSelection;
 use git_core::search::{PageLimits, SearchPage};
 
 use super::{Command, SearchGeneration, WorkerHandle};
@@ -16,7 +17,7 @@ pub(super) fn search_commits(
     current: &SearchGeneration,
     generation: u64,
     query: String,
-    refs: Option<Vec<String>>,
+    selection: GraphSelection,
     cursor: Option<String>,
     reply: Sender<Result<SearchPage, String>>,
 ) {
@@ -24,7 +25,7 @@ pub(super) fn search_commits(
         git_core::search::search_commits(
             repo,
             &parsed,
-            refs.as_deref(),
+            &selection,
             cursor.as_deref(),
             PageLimits::DEFAULT,
             &|| current.load(Ordering::SeqCst) != generation,
@@ -39,11 +40,11 @@ impl WorkerHandle {
     pub fn search_commits(
         &self,
         query: String,
-        refs: Option<Vec<String>>,
+        selection: GraphSelection,
         cursor: Option<String>,
     ) -> Result<SearchPage, String> {
         let generation = self.claim_search_generation();
-        self.search_commits_claimed(generation, query, refs, cursor)
+        self.search_commits_claimed(generation, query, selection, cursor)
     }
 
     /// Claims a new `SearchGeneration`, cancelling any older search, without queueing anything.
@@ -60,14 +61,14 @@ impl WorkerHandle {
         &self,
         generation: u64,
         query: String,
-        refs: Option<Vec<String>>,
+        selection: GraphSelection,
         cursor: Option<String>,
     ) -> Result<SearchPage, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::SearchCommits {
                 query,
-                refs,
+                selection,
                 cursor,
                 generation,
                 reply: tx,

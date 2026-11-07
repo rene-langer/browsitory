@@ -1775,7 +1775,7 @@ describe("App", () => {
 
     fireEvent.change(input, { target: { value: "author:searchy" } });
     const results = await screen.findByRole("listbox", { name: "Search results" }, { timeout: 2000 });
-    await waitFor(() => expect(searchCommits).toHaveBeenCalledWith("/repos/a", "author:searchy", ["main"], null));
+    await waitFor(() => expect(searchCommits).toHaveBeenCalledWith("/repos/a", "author:searchy", ["main"], [], null));
     expect(screen.queryByRole("listbox", { name: "Commit history" })).toBeNull();
     expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("search hit");
 

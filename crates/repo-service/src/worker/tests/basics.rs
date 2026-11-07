@@ -28,7 +28,10 @@ fn get_commit_graph_reflects_a_commit() {
     commit_all(&repo, "initial commit");
 
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
-    let commits = worker.handle().get_commit_graph(10, None).unwrap();
+    let commits = worker
+        .handle()
+        .get_commit_graph(10, git_core::graph::GraphSelection::default())
+        .unwrap();
 
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0].summary, "initial commit");

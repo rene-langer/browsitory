@@ -185,6 +185,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     openExternalUrl: vi.fn(),
     setGraphBranchSelection: vi.fn(),
     setGraphRemoteBranchSelection: vi.fn(),
+    isolateGraphBranch: vi.fn(),
     loadMoreHistory: vi.fn(),
     refresh: vi.fn(),
     undo: vi.fn(),

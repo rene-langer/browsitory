@@ -1,7 +1,7 @@
 use super::{Command, WorkerHandle};
 use git_core::blame::BlameLine;
 use git_core::diff::DiffHunk;
-use git_core::graph::GraphCommit;
+use git_core::graph::{GraphCommit, GraphSelection};
 use git_core::status::StatusEntry;
 use std::sync::mpsc::Sender;
 
@@ -12,12 +12,11 @@ pub(super) fn get_status(repo: &git2::Repository, reply: Sender<Result<Vec<Statu
 pub(super) fn get_commit_graph(
     repo: &git2::Repository,
     limit: usize,
-    selected_branches: Option<Vec<String>>,
+    selection: GraphSelection,
     reply: Sender<Result<Vec<GraphCommit>, String>>,
 ) {
     let _ = reply.send(
-        git_core::graph::graph_log(repo, limit, selected_branches.as_deref())
-            .map_err(|error| error.to_string()),
+        git_core::graph::graph_log(repo, limit, &selection).map_err(|error| error.to_string()),
     );
 }
 
@@ -364,13 +363,13 @@ impl WorkerHandle {
     pub fn get_commit_graph(
         &self,
         limit: usize,
-        selected_branches: Option<Vec<String>>,
+        selection: GraphSelection,
     ) -> Result<Vec<GraphCommit>, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::GetCommitGraph {
                 limit,
-                selected_branches,
+                selection,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;

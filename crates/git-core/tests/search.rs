@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use common::{commit_all, commit_tree, init_repo, write_file};
 use git2::{Oid, Repository, Signature, Time};
+use git_core::graph::GraphSelection;
 use git_core::search::{parse_query, search_commits, PageLimits, SearchError, SearchPage};
 
 /// Writes `file`, stages everything, and commits on HEAD with explicit author/committer/time.
@@ -44,6 +45,19 @@ const NO_TIME_BUDGET: PageLimits = PageLimits {
     ..PageLimits::DEFAULT
 };
 
+/// The default graph: every local branch, no remote branch.
+fn everything() -> GraphSelection {
+    GraphSelection::default()
+}
+
+/// Exactly the local branches `names`, no remote branch.
+fn local(names: &[String]) -> GraphSelection {
+    GraphSelection {
+        local: Some(names.to_vec()),
+        remote: vec![],
+    }
+}
+
 fn search_with(
     repo: &Repository,
     query: &str,
@@ -52,7 +66,10 @@ fn search_with(
     search_commits(
         repo,
         &parse_query(query)?,
-        refs,
+        &GraphSelection {
+            local: refs.map(<[String]>::to_vec),
+            remote: vec![],
+        },
         None,
         NO_TIME_BUDGET,
         &|| false,
@@ -313,6 +330,87 @@ fn merged_side_branch(repo: &Repository) {
         .unwrap();
 }
 
+/// A repository whose `origin` (a second local repository, fetched) holds
+/// [`merged_side_branch`]; the only local branch, `main`, is at `side work`.
+fn fetched_side_branch() -> (tempfile::TempDir, tempfile::TempDir, Repository) {
+    let (upstream_dir, upstream) = init_repo();
+    merged_side_branch(&upstream);
+    let (dir, repo) = init_repo();
+    repo.remote("origin", upstream_dir.path().to_str().unwrap())
+        .unwrap()
+        .fetch(&[] as &[&str], None, None)
+        .unwrap();
+    let side = repo.refname_to_id("refs/remotes/origin/side").unwrap();
+    repo.reference("refs/heads/main", side, true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    (upstream_dir, dir, repo)
+}
+
+fn with_remote(local: Option<&[&str]>, remote: &[&str]) -> GraphSelection {
+    GraphSelection {
+        local: local.map(|names| names.iter().map(|n| n.to_string()).collect()),
+        remote: remote.iter().map(|n| n.to_string()).collect(),
+    }
+}
+
+#[test]
+fn search_walks_the_selected_remote_branches_like_the_graph() {
+    let (_upstream, _dir, repo) = fetched_side_branch();
+    let query = parse_query("work").unwrap();
+
+    for (selection, expected) in [
+        // Default: no remote branch is walked.
+        (with_remote(None, &[]), 2),
+        // Every local branch plus a remote one: every ancestor.
+        (with_remote(None, &["origin/trunk"]), 5),
+        // One remote branch alone: its first-parent line.
+        (with_remote(Some(&[]), &["origin/trunk"]), 4),
+        // A local and a remote branch: every ancestor; a missing remote branch is skipped.
+        (
+            with_remote(Some(&["main"]), &["origin/trunk", "origin/gone"]),
+            5,
+        ),
+    ] {
+        let found: Vec<String> =
+            search_commits(&repo, &query, &selection, None, NO_TIME_BUDGET, &|| false)
+                .unwrap()
+                .commits
+                .into_iter()
+                .map(|c| c.id)
+                .collect();
+        let graph: Vec<String> = git_core::graph::graph_log(&repo, 50, &selection)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(found, graph, "{selection:?}");
+        assert_eq!(found.len(), expected, "{selection:?}");
+    }
+}
+
+#[test]
+fn a_cursor_does_not_resume_after_the_remote_selection_changed() {
+    let (_upstream, _dir, repo) = fetched_side_branch();
+    let query = parse_query("work").unwrap();
+    let limits = PageLimits {
+        matches: 1,
+        scan: 100,
+        time: Duration::MAX,
+    };
+    let without = with_remote(None, &[]);
+    let with = with_remote(None, &["origin/trunk"]);
+
+    let first = search_commits(&repo, &query, &without, None, limits, &|| false).unwrap();
+    let cursor = first.next_cursor.expect("more to scan");
+
+    assert!(matches!(
+        search_commits(&repo, &query, &with, Some(&cursor), limits, &|| false),
+        Err(SearchError::StaleCursor)
+    ));
+    assert!(search_commits(&repo, &query, &without, Some(&cursor), limits, &|| false).is_ok());
+}
+
 #[test]
 fn one_selected_branch_searches_its_first_parent_line_like_the_graph() {
     let (_dir, repo) = init_repo();
@@ -351,14 +449,21 @@ fn a_cursor_from_a_first_parent_walk_does_not_resume_a_full_walk() {
     // Same start commit, but two selected branches: a full walk.
     let two = ["trunk".to_string(), "trunk-alias".to_string()];
 
-    let first = search_commits(&repo, &query, Some(&one), None, limits, &|| false).unwrap();
+    let first = search_commits(&repo, &query, &local(&one), None, limits, &|| false).unwrap();
     let cursor = first.next_cursor.expect("more to scan");
 
     assert!(matches!(
-        search_commits(&repo, &query, Some(&two), Some(&cursor), limits, &|| false),
+        search_commits(&repo, &query, &local(&two), Some(&cursor), limits, &|| {
+            false
+        }),
         Err(SearchError::StaleCursor)
     ));
-    assert!(search_commits(&repo, &query, Some(&one), Some(&cursor), limits, &|| false).is_ok());
+    assert!(
+        search_commits(&repo, &query, &local(&one), Some(&cursor), limits, &|| {
+            false
+        })
+        .is_ok()
+    );
 }
 
 #[test]
@@ -432,8 +537,15 @@ fn paging_resumes_without_duplicates_or_gaps() {
     let mut cursor: Option<String> = None;
     let mut pages = 0;
     loop {
-        let page =
-            search_commits(&repo, &query, None, cursor.as_deref(), limits, &|| false).unwrap();
+        let page = search_commits(
+            &repo,
+            &query,
+            &everything(),
+            cursor.as_deref(),
+            limits,
+            &|| false,
+        )
+        .unwrap();
         pages += 1;
         seen.extend(page.commits.into_iter().map(|c| c.summary));
         cursor = page.next_cursor;
@@ -457,13 +569,13 @@ fn a_page_stops_at_the_scan_budget() {
         time: Duration::MAX,
     };
 
-    let first = search_commits(&repo, &query, None, None, limits, &|| false).unwrap();
+    let first = search_commits(&repo, &query, &everything(), None, limits, &|| false).unwrap();
     assert!(first.commits.is_empty());
     assert_eq!(first.scanned, 2);
     let second = search_commits(
         &repo,
         &query,
-        None,
+        &everything(),
         first.next_cursor.as_deref(),
         limits,
         &|| false,
@@ -474,7 +586,7 @@ fn a_page_stops_at_the_scan_budget() {
     let third = search_commits(
         &repo,
         &query,
-        None,
+        &everything(),
         second.next_cursor.as_deref(),
         limits,
         &|| false,
@@ -495,16 +607,25 @@ fn resuming_after_history_moved_is_stale() {
         scan: 100,
         time: Duration::MAX,
     };
-    let first = search_commits(&repo, &query, None, None, limits, &|| false).unwrap();
+    let first = search_commits(&repo, &query, &everything(), None, limits, &|| false).unwrap();
     let cursor = first.next_cursor.expect("more to scan");
     linear_history(dir.path(), &repo, &["hit 3"]);
 
     assert!(matches!(
-        search_commits(&repo, &query, None, Some(&cursor), limits, &|| false),
+        search_commits(&repo, &query, &everything(), Some(&cursor), limits, &|| {
+            false
+        }),
         Err(SearchError::StaleCursor)
     ));
     assert!(matches!(
-        search_commits(&repo, &query, None, Some("garbage"), limits, &|| false),
+        search_commits(
+            &repo,
+            &query,
+            &everything(),
+            Some("garbage"),
+            limits,
+            &|| false
+        ),
         Err(SearchError::StaleCursor)
     ));
 }
@@ -516,7 +637,7 @@ fn cancel_stops_before_and_during_the_walk() {
     let query = parse_query("zzz").unwrap();
 
     assert!(matches!(
-        search_commits(&repo, &query, None, None, NO_TIME_BUDGET, &|| true),
+        search_commits(&repo, &query, &everything(), None, NO_TIME_BUDGET, &|| true),
         Err(SearchError::Cancelled)
     ));
 
@@ -527,7 +648,7 @@ fn cancel_stops_before_and_during_the_walk() {
     };
     // No time budget: a page that ran out of time would end before the third poll.
     assert!(matches!(
-        search_commits(&repo, &query, None, None, NO_TIME_BUDGET, &cancel),
+        search_commits(&repo, &query, &everything(), None, NO_TIME_BUDGET, &cancel),
         Err(SearchError::Cancelled)
     ));
     assert_eq!(polls.get(), 3);
@@ -553,8 +674,15 @@ fn a_zero_time_budget_still_scans_one_commit_per_page_and_pages_to_the_full_matc
     let mut previous_scanned = 0;
     let mut pages = 0;
     loop {
-        let page =
-            search_commits(&repo, &query, None, cursor.as_deref(), limits, &|| false).unwrap();
+        let page = search_commits(
+            &repo,
+            &query,
+            &everything(),
+            cursor.as_deref(),
+            limits,
+            &|| false,
+        )
+        .unwrap();
         pages += 1;
         assert!(page.scanned > previous_scanned, "every page makes progress");
         previous_scanned = page.scanned;
@@ -580,7 +708,7 @@ fn cancel_is_polled_while_skipping_to_a_cursor() {
         scan: 5,
         time: Duration::MAX,
     };
-    let first = search_commits(&repo, &query, None, None, limits, &|| false).unwrap();
+    let first = search_commits(&repo, &query, &everything(), None, limits, &|| false).unwrap();
     let cursor = first.next_cursor.expect("one commit left");
 
     // Polls: once before the walk, then while skipping the 5 already-scanned commits, then
@@ -590,7 +718,15 @@ fn cancel_is_polled_while_skipping_to_a_cursor() {
         polls.set(polls.get() + 1);
         false
     };
-    let page = search_commits(&repo, &query, None, Some(&cursor), limits, &counting).unwrap();
+    let page = search_commits(
+        &repo,
+        &query,
+        &everything(),
+        Some(&cursor),
+        limits,
+        &counting,
+    )
+    .unwrap();
     assert_eq!(page.scanned, 6);
     assert!(polls.get() > 2, "polled {} times", polls.get());
 
@@ -601,7 +737,7 @@ fn cancel_is_polled_while_skipping_to_a_cursor() {
         polls.get() >= 2
     };
     assert!(matches!(
-        search_commits(&repo, &query, None, Some(&cursor), limits, &cancel),
+        search_commits(&repo, &query, &everything(), Some(&cursor), limits, &cancel),
         Err(SearchError::Cancelled)
     ));
 }

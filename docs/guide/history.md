@@ -18,12 +18,16 @@ based on the last fetch.
 
 At first the graph shows the commits of every local branch. In the Branches section, each branch
 has a coloured dot in front of its name. Click the dot (**Show … in graph**) to add the branch to
-the graph or take it out; this works for remote branches too. A branch's menu has **Isolate
-branch**, which shows only that branch. **Show all branches** in the **+** menu of the Branches
-section goes back to every local branch. Browsitory remembers the choice per repository.
+the graph or take it out. This works for remote branches too: a remote branch you turn on adds
+its commits to the graph, even ones no local branch has (a colleague's fetched branch, for
+example). Until you pick remote branches, the graph shows no remote-only commits, and the badge
+of every remote branch whose commit is already in the graph. A branch's menu, local or remote,
+has **Isolate branch**, which shows only that branch. **Show all branches** in the **+** menu of
+the Branches section goes back to every local branch; remote branches you turned on stay on.
+Browsitory remembers the choice per repository.
 
-When the graph shows a single local branch (after **Isolate branch**, for example), it shows
-only that branch's own line: the commits made directly on it and its merge commits, newest
+When the graph shows a single branch, local or remote (after **Isolate branch**, for example),
+it shows only that branch's own line: the commits made directly on it and its merge commits, newest
 first. The commits of the branches merged into it are left out, so the list answers "what landed
 on this branch, and when?". A merge commit still lists all its parents in the commit details; in
 the graph it has a short dashed stub ("Merged from a branch not shown in this view") in place of

@@ -1,3 +1,4 @@
+use git_core::graph::GraphSelection;
 use repo_service::wire::SearchPageDto;
 use serde::Deserialize;
 use serde_json::Value;
@@ -10,13 +11,18 @@ pub(super) struct SearchCommitsParams {
     repo_path: String,
     query: String,
     refs: Option<Vec<String>>,
+    /// Required, like `GetCommitGraphParams::remote_branches` (#385).
+    remote_branches: Vec<String>,
     cursor: Option<String>,
 }
 
 pub(super) fn search_commits(params: SearchCommitsParams, repos: &Repos) -> Result<Value, String> {
     let page = worker_handle(repos, &params.repo_path)?.search_commits(
         params.query,
-        params.refs,
+        GraphSelection {
+            local: params.refs,
+            remote: params.remote_branches,
+        },
         params.cursor,
     )?;
     serde_json::to_value(SearchPageDto::from(page)).map_err(|error| error.to_string())

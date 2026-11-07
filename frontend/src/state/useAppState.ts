@@ -85,8 +85,10 @@ export interface AppState {
   // `null` means "no filter saved" — every local branch is walked (see `graph_log` in
   // `git-core`). Non-null is the persisted subset CommitGraph currently shows.
   graphBranchSelection: string[] | null;
-  // Independent of graphBranchSelection: this one never affects which commits `graph_log`
-  // walks, only which remote-branch badges CommitGraph renders. `null` means "show all".
+  // `<remote>/<branch>` names. `null` means "no remote selection saved": no remote branch is
+  // walked and CommitGraph shows every remote-branch badge on the commits it has. Non-null: these
+  // remote branches' commits join the walk (#385) and only their badges show. Together with
+  // graphBranchSelection, exactly one branch in total makes the graph first-parent only.
   graphRemoteBranchSelection: string[] | null;
   branches: BranchInfo[];
   worktrees: WorktreeInfo[];
@@ -313,6 +315,8 @@ export interface UseAppStateResult {
   openExternalUrl(url: string): Promise<void>;
   setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
   setGraphRemoteBranchSelection(selectedBranches: string[]): Promise<void>;
+  // See `BranchActions.isolateGraphBranch`.
+  isolateGraphBranch(kind: "local" | "remote", name: string): Promise<void>;
   // Fetches the next page of history (grows the graph limit by one page and reloads).
   loadMoreHistory(): Promise<void>;
   refresh(): Promise<void>;
@@ -403,7 +407,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, forgeRepositories, headInfo, undoState] =
         await Promise.all([
           client.getStatus(repoPath),
-          client.getCommitGraph(repoPath, limit, graphBranchSelection),
+          client.getCommitGraph(repoPath, limit, graphBranchSelection, graphRemoteBranchSelection ?? []),
           client.listBranches(repoPath),
           client.listWorktrees(repoPath),
           client.listSubmodules(repoPath),
@@ -535,6 +539,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     closeCreateBranchDraft,
     setGraphBranchSelection,
     setGraphRemoteBranchSelection,
+    isolateGraphBranch,
   } = useBranchActions(
     client,
     repoPath,
@@ -543,6 +548,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutationWithMessage,
     setState,
     state.graphBranchSelection,
+    state.graphRemoteBranchSelection,
     branchNames,
   );
   const { createWorktree, removeWorktree, pruneWorktrees } = useWorktreeActions(
@@ -804,6 +810,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     openExternalUrl,
     setGraphBranchSelection,
     setGraphRemoteBranchSelection,
+    isolateGraphBranch,
     loadMoreHistory,
     refresh,
     undo,

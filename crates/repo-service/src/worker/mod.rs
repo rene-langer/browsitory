@@ -8,7 +8,7 @@ use git_core::blame::BlameLine;
 use git_core::branch::BranchInfo;
 use git_core::diff::DiffHunk;
 use git_core::forge::{ForgeProvider, ForgeRepository};
-use git_core::graph::GraphCommit;
+use git_core::graph::{GraphCommit, GraphSelection};
 use git_core::merge::{ConflictSegment, FileConflictChoice, MergeOutcome};
 use git_core::rebase::{RebasePlanCommit, RebasePlanEntry, RebaseStepResult};
 use git_core::reflog::ReflogEntry;
@@ -98,7 +98,7 @@ pub(crate) enum Command {
     },
     GetCommitGraph {
         limit: usize,
-        selected_branches: Option<Vec<String>>,
+        selection: GraphSelection,
         reply: Sender<Result<Vec<GraphCommit>, String>>,
     },
     GetWorkingDiff {
@@ -141,7 +141,7 @@ pub(crate) enum Command {
     /// one stops and replies `Search cancelled.`.
     SearchCommits {
         query: String,
-        refs: Option<Vec<String>>,
+        selection: GraphSelection,
         cursor: Option<String>,
         generation: u64,
         reply: Sender<Result<git_core::search::SearchPage, String>>,
@@ -927,9 +927,9 @@ impl Worker {
                     Command::GetStatus { reply } => status::get_status(&repo, reply),
                     Command::GetCommitGraph {
                         limit,
-                        selected_branches,
+                        selection,
                         reply,
-                    } => status::get_commit_graph(&repo, limit, selected_branches, reply),
+                    } => status::get_commit_graph(&repo, limit, selection, reply),
                     Command::GetWorkingDiff {
                         path,
                         staged,
@@ -962,7 +962,7 @@ impl Worker {
                     }
                     Command::SearchCommits {
                         query,
-                        refs,
+                        selection,
                         cursor,
                         generation,
                         reply,
@@ -971,7 +971,7 @@ impl Worker {
                         &search_generation,
                         generation,
                         query,
-                        refs,
+                        selection,
                         cursor,
                         reply,
                     ),

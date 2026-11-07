@@ -1,12 +1,13 @@
 mod common;
 
 use common::{commit_all, commit_tree, init_repo, write_file};
+use git_core::graph::GraphSelection;
 
 #[test]
 fn graph_log_returns_an_empty_vec_for_a_repository_with_no_commits() {
     let (_dir, repo) = init_repo();
 
-    let result = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let result = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     assert!(result.is_empty());
 }
@@ -21,7 +22,7 @@ fn graph_log_shows_commits_from_every_local_branch() {
     write_file(dir.path(), "file.txt", "v2");
     commit_all(&repo, "feature commit");
 
-    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     assert_eq!(commits.len(), 2);
     assert!(commits.iter().any(|c| c.summary == "feature commit"));
@@ -42,7 +43,7 @@ fn graph_log_reports_branch_refs_only_for_tip_commits() {
     commit_all(&repo, "feature commit");
     git_core::branch::switch_branch(&repo, &initial_branch).unwrap();
 
-    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     let feature_commit = commits
         .iter()
@@ -71,7 +72,7 @@ fn graph_log_reports_empty_branch_refs_for_a_non_tip_commit() {
         .name
         .clone();
 
-    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     let middle_commit = commits
         .iter()
@@ -96,8 +97,7 @@ fn graph_log_with_selected_branches_only_walks_those_branches() {
     commit_all(&repo, "feature commit");
     git_core::branch::switch_branch(&repo, &main_branch).unwrap();
 
-    let commits =
-        git_core::graph::graph_log(&repo, 10, Some(std::slice::from_ref(&main_branch))).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &local(&[&main_branch])).unwrap();
 
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0].summary, "initial commit");
@@ -113,7 +113,7 @@ fn graph_log_respects_the_limit() {
     write_file(dir.path(), "file.txt", "v3");
     commit_all(&repo, "third commit");
 
-    let commits = git_core::graph::graph_log(&repo, 2, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 2, &GraphSelection::default()).unwrap();
 
     assert_eq!(commits.len(), 2);
 }
@@ -155,7 +155,7 @@ fn graph_log_reports_multiple_parent_ids_for_a_merge_commit() {
     )
     .unwrap();
 
-    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     let merge_commit = commits
         .iter()
@@ -200,7 +200,7 @@ fn graph_log_reports_remote_branch_refs_for_a_tip_commit() {
     repo.reference("refs/remotes/origin/main", oid, true, "test")
         .unwrap();
 
-    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     assert_eq!(
         commits[0].remote_branch_refs,
@@ -224,7 +224,7 @@ fn graph_log_excludes_a_remote_symbolic_head_ref() {
     )
     .unwrap();
 
-    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     // Only the direct ref should show up — the symbolic HEAD alias must not produce a
     // duplicate or an "origin/HEAD" badge.
@@ -246,7 +246,7 @@ fn graph_log_keeps_local_and_remote_branch_refs_independent() {
     repo.reference("refs/remotes/origin/main", oid, true, "test")
         .unwrap();
 
-    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     assert_eq!(commits[0].branch_refs, vec![main_branch]);
     assert_eq!(
@@ -269,7 +269,7 @@ fn graph_log_reports_lightweight_and_annotated_tags_sorted_on_their_commit() {
     repo.tag("alpha", head.as_object(), &signature, "annotated", false)
         .unwrap();
 
-    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     assert_eq!(commits[0].summary, "second");
     assert_eq!(
@@ -288,7 +288,7 @@ fn graph_log_ignores_a_tag_that_does_not_point_at_a_commit() {
     repo.tag_lightweight("tree-tag", tree.as_object(), false)
         .unwrap();
 
-    let commits = git_core::graph::graph_log(&repo, 10, None).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &GraphSelection::default()).unwrap();
 
     assert_eq!(commits.len(), 1);
     assert!(commits[0].tags.is_empty());
@@ -304,16 +304,13 @@ fn graph_log_skips_a_selected_branch_that_no_longer_exists() {
     git_core::branch::switch_branch(&repo, &main).unwrap();
     git_core::branch::delete_branch(&repo, "gone", true).unwrap();
 
-    let commits =
-        git_core::graph::graph_log(&repo, 10, Some(&["gone".to_string(), main.clone()])).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 10, &local(&["gone", &main])).unwrap();
 
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0].summary, "initial commit");
-    assert!(
-        git_core::graph::graph_log(&repo, 10, Some(&["gone".to_string()]))
-            .unwrap()
-            .is_empty()
-    );
+    assert!(git_core::graph::graph_log(&repo, 10, &local(&["gone"]))
+        .unwrap()
+        .is_empty());
 }
 
 /// `trunk`: base → direct → merge(direct, feature 3) → after; `feature`: base → feature 1..3.
@@ -344,7 +341,7 @@ fn graph_log_of_one_selected_branch_follows_first_parents_only() {
     let (_dir, repo) = init_repo();
     let ids = merged_feature_history(&repo);
 
-    let commits = git_core::graph::graph_log(&repo, 50, Some(&["trunk".to_string()])).unwrap();
+    let commits = git_core::graph::graph_log(&repo, 50, &local(&["trunk"])).unwrap();
 
     let summaries: Vec<&str> = commits.iter().map(|c| c.summary.as_str()).collect();
     assert_eq!(
@@ -363,17 +360,117 @@ fn graph_log_of_several_or_all_branches_still_walks_every_ancestor() {
     let (_dir, repo) = init_repo();
     merged_feature_history(&repo);
 
-    let both = git_core::graph::graph_log(
-        &repo,
-        50,
-        Some(&["trunk".to_string(), "feature".to_string()]),
-    )
-    .unwrap();
-    let all = git_core::graph::graph_log(&repo, 50, None).unwrap();
+    let both = git_core::graph::graph_log(&repo, 50, &local(&["trunk", "feature"])).unwrap();
+    let all = git_core::graph::graph_log(&repo, 50, &GraphSelection::default()).unwrap();
 
     for commits in [both, all] {
         assert_eq!(commits.len(), 7);
         assert!(commits.iter().any(|c| c.summary == "feature 2"));
         assert_eq!(commits.last().unwrap().summary, "base");
     }
+}
+
+/// Exactly the local branches `names`, no remote branch.
+fn local(names: &[&str]) -> GraphSelection {
+    selection(Some(names), &[])
+}
+
+fn selection(local: Option<&[&str]>, remote: &[&str]) -> GraphSelection {
+    GraphSelection {
+        local: local.map(|names| names.iter().map(|n| n.to_string()).collect()),
+        remote: remote.iter().map(|n| n.to_string()).collect(),
+    }
+}
+
+fn summaries(commits: &[git_core::graph::GraphCommit]) -> Vec<&str> {
+    commits.iter().map(|c| c.summary.as_str()).collect()
+}
+
+/// A repository whose `origin` (a second local repository, fetched) has `trunk` and `feature`
+/// from [`merged_feature_history`] plus `colleague` (base → colleague 1 → colleague 2). The
+/// only local branch is `main`, at `base`; every other commit exists only on `origin`.
+fn fetched_remote() -> (tempfile::TempDir, tempfile::TempDir, git2::Repository) {
+    const FILE: u32 = 0o100644;
+    let (upstream_dir, upstream) = init_repo();
+    let ids = merged_feature_history(&upstream);
+    let c1 = commit_tree(&upstream, &[("c.txt", "1", FILE)], &[ids[0]], "colleague 1");
+    let c2 = commit_tree(&upstream, &[("c.txt", "2", FILE)], &[c1], "colleague 2");
+    upstream
+        .reference("refs/heads/colleague", c2, true, "test")
+        .unwrap();
+
+    let (dir, repo) = init_repo();
+    repo.remote("origin", upstream_dir.path().to_str().unwrap())
+        .unwrap()
+        .fetch(&[] as &[&str], None, None)
+        .unwrap();
+    repo.reference("refs/heads/main", ids[0], true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    (upstream_dir, dir, repo)
+}
+
+#[test]
+fn the_default_graph_walks_no_remote_branch() {
+    let (_upstream, _dir, repo) = fetched_remote();
+
+    let commits = git_core::graph::graph_log(&repo, 50, &GraphSelection::default()).unwrap();
+
+    assert_eq!(summaries(&commits), ["base"]);
+}
+
+#[test]
+fn a_selected_remote_branch_adds_its_commits_to_the_graph() {
+    let (_upstream, _dir, repo) = fetched_remote();
+
+    let commits =
+        git_core::graph::graph_log(&repo, 50, &selection(None, &["origin/colleague"])).unwrap();
+
+    assert_eq!(summaries(&commits), ["colleague 2", "colleague 1", "base"]);
+    assert_eq!(commits[0].remote_branch_refs, ["origin/colleague"]);
+    assert_eq!(commits[2].branch_refs, ["main"]);
+}
+
+#[test]
+fn one_remote_branch_alone_follows_first_parents_only() {
+    let (_upstream, _dir, repo) = fetched_remote();
+
+    let commits =
+        git_core::graph::graph_log(&repo, 50, &selection(Some(&[]), &["origin/trunk"])).unwrap();
+
+    assert_eq!(
+        summaries(&commits),
+        ["after merge", "merge feature", "direct on trunk", "base"]
+    );
+}
+
+#[test]
+fn a_local_and_a_remote_branch_walk_every_ancestor() {
+    let (_upstream, _dir, repo) = fetched_remote();
+
+    let commits =
+        git_core::graph::graph_log(&repo, 50, &selection(Some(&["main"]), &["origin/trunk"]))
+            .unwrap();
+
+    assert_eq!(commits.len(), 7);
+    assert!(commits.iter().any(|c| c.summary == "feature 2"));
+}
+
+#[test]
+fn a_selected_remote_branch_that_no_longer_exists_is_skipped() {
+    let (_upstream, _dir, repo) = fetched_remote();
+
+    let commits = git_core::graph::graph_log(
+        &repo,
+        50,
+        &selection(Some(&[]), &["origin/gone", "origin/colleague"]),
+    )
+    .unwrap();
+
+    assert_eq!(summaries(&commits), ["colleague 2", "colleague 1", "base"]);
+    assert!(
+        git_core::graph::graph_log(&repo, 50, &selection(Some(&[]), &["origin/gone"]))
+            .unwrap()
+            .is_empty()
+    );
 }

@@ -1,3 +1,4 @@
+use git_core::graph::GraphSelection;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitOutcomeDto, CommitSignatureDto, DiffHunkDto, DiffOptionsDto,
     FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
@@ -27,6 +28,9 @@ pub(super) struct GetCommitGraphParams {
     repo_path: String,
     limit: usize,
     selected_branches: Option<Vec<String>>,
+    /// Required, so a caller that doesn't know about remote branches fails loudly instead of
+    /// silently dropping them from the graph (#385).
+    remote_branches: Vec<String>,
 }
 
 pub(super) fn get_commit_graph(
@@ -34,7 +38,13 @@ pub(super) fn get_commit_graph(
     repos: &Repos,
 ) -> Result<Value, String> {
     let commits: Vec<GraphCommitDto> = worker_handle(repos, &params.repo_path)?
-        .get_commit_graph(params.limit, params.selected_branches)?
+        .get_commit_graph(
+            params.limit,
+            GraphSelection {
+                local: params.selected_branches,
+                remote: params.remote_branches,
+            },
+        )?
         .into_iter()
         .map(GraphCommitDto::from)
         .collect();
