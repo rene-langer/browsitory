@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ThirdPartyLicencesDialog } from "./ThirdPartyLicencesDialog";
+import styles from "./ThirdPartyLicencesDialog.module.css";
 
 describe("ThirdPartyLicencesDialog", () => {
   it("shows a loading state, then the notices text", async () => {
@@ -54,5 +55,17 @@ describe("ThirdPartyLicencesDialog", () => {
     const close = screen.getByRole("button", { name: "Close" });
     expect(close.closest("footer")).not.toBeNull();
     expect(text.parentElement).not.toContainElement(close);
+  });
+
+  it("lets the licence text fill the body as its only scroll area (#383)", async () => {
+    render(<ThirdPartyLicencesDialog load={() => Promise.resolve("notices")} onClose={vi.fn()} />);
+
+    // jsdom doesn't lay out; check the structure the CSS relies on. The text sits directly in
+    // the panel's body, which is a flex column (styles.body) the text shrinks into, so the body
+    // never scrolls around the text's own scroll area.
+    const text = await screen.findByRole("region", { name: "Licence texts" });
+    expect(text).toHaveClass(styles.text);
+    expect(text.parentElement).toHaveClass(styles.body);
+    expect(text.parentElement).toContainElement(screen.getByText(/includes open source software/));
   });
 });

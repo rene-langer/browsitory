@@ -53,6 +53,7 @@ ALLOWED = frozenset(
         "Unicode-3.0",
         "Zlib",
         "BlueOak-1.0.0",
+        "0BSD",
         "PSF-2.0",
         "Python-2.0",
     }
@@ -102,7 +103,6 @@ EXCEPTIONS: tuple[LicenseException, ...] = (
     LicenseException("mdn-data", "2", "CC0-1.0", "CSS data for css-tree (jsdom, tests only)"),
     LicenseException("spdx-license-ids", "3", "CC0-1.0", "SPDX id list for package metadata tools (@wdio/cli)"),
     LicenseException("spdx-exceptions", "2", "CC-BY-3.0", "SPDX exception list for package metadata tools (@wdio/cli)"),
-    LicenseException("tslib", "2", "0BSD", "TypeScript runtime helpers inside @vscode/vsce's dependencies"),
     LicenseException("stream-buffers", "3", "Unlicense", "@wdio/local-runner (e2e only)"),
     LicenseException("@promptbook/utils", "0", "CC-BY-4.0", "@wdio/utils > locate-app (e2e only)"),
     LicenseException("binaryextensions", "6", "Artistic-2.0", "@vscode/vsce > secretlint > istextorbinary (packaging only)"),

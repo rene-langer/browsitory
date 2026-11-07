@@ -1,8 +1,9 @@
 # License compliance
 
 Browsitory is MIT-licensed. The allowed licences are MIT, Apache-2.0, ISC, BSD-2-Clause,
-BSD-3-Clause, MIT-0, Unicode-3.0, Zlib, BlueOak-1.0.0 and PSF-2.0 / Python-2.0. Anything else
-needs a recorded owner decision: the libgit2 exception and the per-package exceptions below.
+BSD-3-Clause, MIT-0, Unicode-3.0, Zlib, BlueOak-1.0.0, 0BSD and PSF-2.0 / Python-2.0.
+Anything else needs a recorded owner decision: the libgit2 exception and the per-package
+exceptions below.
 
 The tables below list the direct dependencies, verified with `cargo info <crate>` (Rust) and
 `npm info <package> license` (JS) on 2026-08-12, against `crates/*/Cargo.toml`,
@@ -141,33 +142,66 @@ library is involved, so this table has no dependency row for one.
 
 ## Python, user guide site (`docs/requirements.txt`)
 
-Build-only. `.github/workflows/docs.yml` installs these into a throwaway virtual environment to
-build the user guide site from `docs/guide/` (`mkdocs.yml`) and publishes only the generated
-HTML. Nothing of them ships in the desktop app or the VSCode extension, and the site itself
-holds only our own text plus the theme's MIT-licensed CSS and JavaScript. The two direct
-dependencies are named, without versions, in `docs/requirements.in`. `docs/requirements.txt`,
-generated from it with `pip-compile --generate-hashes`, pins every package, direct and
-transitive, to an exact version with hashes; Renovate updates it. Owner approved MkDocs
-with the Material theme as a build-only docs tool on 2026-11-04 (#320). Licences read from each
-package's metadata (`License-Expression`, else `License` and the classifiers) with
-`importlib.metadata` on 2026-11-04; re-check them when a Renovate PR adds a package or changes
-one's licence.
+Build-only. `.github/workflows/docs.yml` installs these into a throwaway virtual environment on
+the CI runner to build the user guide site from `docs/guide/` (`mkdocs.yml`) and publishes only
+the generated HTML. Nothing of them ships in the desktop app or the VSCode extension. The one
+direct dependency, Zensical, is named without a version in `docs/requirements.in`.
+`docs/requirements.txt`, generated from it with `pip-compile --generate-hashes`, pins every
+package, direct and transitive, to an exact version with hashes; Renovate updates it. Owner
+approved MkDocs with the Material theme as a build-only docs tool on 2026-11-04 (#320), and its
+successor Zensical, from the same team, on 2026-11-07 (#340). Licences read from each package's
+metadata (`License-Expression`, else `License` and the classifiers) with `importlib.metadata`
+on 2026-11-07; re-check them when a Renovate PR adds a package or changes one's licence.
 
 | Package | License | Notes |
 |---|---|---|
-| mkdocs 1.6.1 | BSD-2-Clause | Direct. The site generator. |
-| mkdocs-material 9.8.0 | MIT | Direct. The theme, with search. Its maintainers announced end of life on 2027-05-05, with Zensical as the successor (<https://github.com/squidfunk/mkdocs-material/releases/tag/9.8.0>). The move to Zensical is tracked in #340. |
-| certifi 2026.10.23 | MPL-2.0 | Through `requests` (needed by mkdocs-material). MPL-2.0 is file-level copyleft: it only covers changes to certifi itself, which we neither make nor distribute, and it runs on the CI runner only. Owner decision 2026-11-04, #320: accepted as a build-only exception. |
-| pathspec 1.1.1 | MPL-2.0 | Through `mkdocs` itself. Same reasoning as certifi. Owner decision 2026-11-04, #320: accepted as a build-only exception. |
-| babel, click, idna, markdown, markupsafe, python-dateutil, colorama, jinja2 | BSD-3-Clause | Transitive. colorama and jinja2 declare it only through the "BSD License" classifier; their licence files are BSD-3-Clause. |
+| zensical 0.1.0 | MIT | Direct. The site generator; reads `mkdocs.yml`. Ships a compiled Rust extension (`zensical.abi3.so`), whose crates are listed below. |
+| zensical-ui 0.0.41 | MIT | Through `zensical`. The theme (templates, CSS, JavaScript, icons); `theme.variant: classic` keeps the Material for MkDocs look. |
+| pathspec 1.1.1 | MPL-2.0 | Through `zensical`. MPL-2.0 is file-level copyleft: it only covers changes to pathspec itself, which we neither make nor distribute, and it runs on the CI runner only. Owner decision 2026-11-04, #320: accepted as a build-only exception. |
+| click, markdown, markupsafe, jinja2 | BSD-3-Clause | Transitive. jinja2 declares it only through the "BSD License" classifier; its licence file is BSD-3-Clause. |
 | pygments | BSD-2-Clause | Transitive. |
-| backrefs, charset-normalizer, mergedeep, mkdocs-get-deps, mkdocs-material-extensions, paginate, platformdirs, pymdown-extensions, pyyaml, pyyaml-env-tag, urllib3 | MIT | Transitive. mergedeep declares it only through its classifier. |
-| ghp-import, requests, tzdata, watchdog | Apache-2.0 | Transitive. |
-| packaging | Apache-2.0 OR BSD-2-Clause | Transitive. |
+| pymdown-extensions, pyyaml, tomli | MIT | Transitive. |
+
+### Published site assets
+
+The site on GitHub Pages holds our own text plus zensical-ui's CSS, JavaScript and icons, as
+generated by `zensical build` (zensical-ui 0.0.41). Checked on 2026-11-07 against the built
+`site/` and zensical-ui's `assets/javascripts/LICENSE`; re-check when Renovate updates
+zensical-ui.
+
+| Asset | License | Notes |
+|---|---|---|
+| Inlined icons (all pages) | Apache-2.0 | Pictogrammers' Material Design Icons (Pictogrammers Free License, icons Apache-2.0), including the repository link's icon: `mkdocs.yml` sets `theme.icon.repo: material/git` because the default is Font Awesome's `brands/git-alt` (CC-BY-4.0) (#423). |
+| Icons embedded in the theme CSS | Apache-2.0, MIT | Material Design Icons and GitHub Octicons (MIT), as `data:` URIs. One exception, see the Font Awesome row. |
+| Font Awesome `solid/caret-down`, embedded in the theme CSS | CC-BY-4.0 | The version selector's icon (`--md-version-icon`). We use no version selector, so it is never shown, but it is in the published stylesheets. Outside the policy. Owner decision 2026-11-07 (#423): accepted as an exception for the published docs site only; it is in neither the app nor the extension. CC-BY-4.0 asks for attribution, which the icon keeps in its own comment inside the CSS: "Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc." (version and year follow zensical-ui). Don't strip that comment from the published CSS. |
+| clipboard 2.0.11, escape-html 1.0.3 | MIT | In the theme's JavaScript bundle; listed in `assets/javascripts/LICENSE`, published next to it. |
+| rxjs 7.8.2 | Apache-2.0 | Same bundle and list. |
+| focus-visible 5.2.1 | W3C Software License | Same bundle and list. Outside the policy. Owner decision 2026-11-07 (#423): accepted as an exception for the published docs site only; it is in neither the app nor the extension. |
+| tslib helpers | 0BSD | rxjs's runtime helpers (`__extends`, `__generator`, ...) are in the same bundle (their error messages are in the minified code) but not in its `LICENSE` list. 0BSD is on the allowed list since 2026-11-07 (owner decision, #423). |
+
+### Rust crates inside Zensical
+
+Read from the CycloneDX SBOM that ships in the wheel
+(`zensical-<version>.dist-info/sboms/zensical.cyclonedx.json`, 321 crates for 0.1.0) on
+2026-11-07. Every crate is under a licence in the policy, or offers one (`MIT OR Apache-2.0`,
+`Unlicense OR MIT`, `Apache-2.0 OR GPL-2.0-only`, `Apache-2.0 OR BSL-1.0`, ...), except the
+five below. Each is an owner decision 2026-11-07 (#340), build-only (docs site build on CI),
+not shipped: accepted as an exception limited to this docs build tool. Zensical builds the site
+on the CI runner, and the published site holds none of its Rust code. Re-read the SBOM when Renovate updates Zensical;
+a new crate outside the policy needs a new owner decision.
+
+| Crate | License | How it reaches us |
+|---|---|---|
+| jpeg-encoder 0.7.1 | (MIT OR Apache-2.0) AND IJG | Direct dependency of `zensical` (image handling). Compiled in. |
+| notify 8.2.0 | CC0-1.0 | `zensical-watch` 0.0.10 → `zensical` (file watching for `zensical serve`). Compiled in. |
+| webpki-roots 1.0.11 | CDLA-Permissive-2.0 | `ureq` 3.4.0 → `zensical` (root certificates for HTTPS). Compiled in. |
+| dragonbox_ecma 0.0.5 | Apache-2.0 WITH LLVM-exception OR BSL-1.0 | `oxc_codegen` 0.81.0 → `zensical` (JavaScript code generation). |
+| target-lexicon 0.13.5 | Apache-2.0 WITH LLVM-exception | `pyo3-build-config` → `pyo3-ffi` → `pyo3` → `zensical`. Build time of the wheel only. The same crate is approved for the app's Rust build (see "Rust exceptions"); this decision extends it to this tree. |
 
 No script enforces these licences. `scripts/check-license-compliance.py` and
-`scripts/check-dependency-licenses.py` cover Rust and npm only, so CI does not check this table
-or the packages in `docs/requirements.txt`; it is kept up to date by hand.
+`scripts/check-dependency-licenses.py` cover Rust and npm only (`cargo deny` reads our
+`Cargo.lock`, not Zensical's crates), so CI checks neither these tables nor the packages in
+`docs/requirements.txt`; they are kept up to date by hand.
 
 ## The one exception: libgit2 via `git2`
 
@@ -217,6 +251,16 @@ with the copyright notice kept. They appear only in the npm dev trees: BlueOak-1
 `minimatch`, `lru-cache`, `path-scurry` and related packages; PSF-2.0 / Python-2.0 in
 `argparse` (through `js-yaml`).
 
+## 0BSD
+
+On the allowed list since 2026-11-07 (owner decision, #423). 0BSD (the Zero-Clause BSD
+licence) allows use, modification and redistribution without even the copyright notice. It
+appears in `tslib` (TypeScript's runtime helpers): in `@vscode/vsce`'s dependencies
+(`extension/`, packaging only; this needed a dev-tree exception until then) and inside the
+user guide site's theme JavaScript (see "Published site assets"). Some Rust crates offer it as
+one option among MIT/Apache-2.0 (`adler2`); `about.toml` lists it last, so the notices still
+carry MIT or Apache-2.0 for those.
+
 ## Rust exceptions
 
 Recorded in `deny.toml`'s `[licenses] exceptions`, pinned by crate name (not version, so a
@@ -259,7 +303,6 @@ not a lookalike such as `lightningcss-plugin`. Owner decision 2026-11-03 (#273).
 | mdn-data | 2 | CC0-1.0 | CSS data for `css-tree` (`jsdom`, tests only). |
 | spdx-license-ids | 3 | CC0-1.0 | SPDX id list for package metadata tools (`@wdio/cli`, `e2e/` only). |
 | spdx-exceptions | 2 | CC-BY-3.0 | SPDX exception list, same tools. |
-| tslib | 2 | 0BSD | TypeScript runtime helpers inside `@vscode/vsce`'s dependencies (`extension/` only). |
 | stream-buffers | 3 | Unlicense | `@wdio/local-runner` (`e2e/` only). |
 | @promptbook/utils | 0 | CC-BY-4.0 | `@wdio/utils` > `locate-app` (`e2e/` only). |
 | binaryextensions, editions, istextorbinary, textextensions, version-range | 6, 6, 9, 6, 4 | Artistic-2.0 | `@vscode/vsce` > secretlint > `istextorbinary` (packaging only). |

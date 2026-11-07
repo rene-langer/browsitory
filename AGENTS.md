@@ -9,7 +9,7 @@ Browsitory: a Git GUI. Rust backend (`git2`) shared across two frontends — a T
 and a VSCode extension — behind one `RepoClient` IPC interface. See
 `docs/ARCHITECTURE.md` for the full design and `CHANGELOG.md` for what shipped when.
 `docs/README.md` indexes every document; the user guide is `docs/guide/` (one page per topic,
-published with MkDocs, see "User guide site" below) and `CONTRIBUTING.md` is the human-facing
+published with Zensical, see "User guide site" below) and `CONTRIBUTING.md` is the human-facing
 build guide.
 
 ## Commands
@@ -66,15 +66,19 @@ pnpm install --ignore-workspace                    # extension/e2e isn't a membe
 pnpm test                                          # spawns the extension under vscode.ExtensionMode.Test; needs a display (xvfb-run on headless CI)
 ```
 
-### User guide site (MkDocs), from repo root
+### User guide site (Zensical), from repo root
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install --require-hashes -r docs/requirements.txt
-.venv/bin/mkdocs build --strict                   # what .github/workflows/docs.yml runs
+python3 scripts/check-docs-nav.py                 # nav vs pages, absolute links, missing images
+.venv/bin/zensical build --strict                 # links to missing pages or anchors
 ```
 
-The pages are `docs/guide/*.md`, plain Markdown with relative links (also read on GitHub); a new
-page needs a `nav` entry in `mkdocs.yml`. Screenshots in `docs/guide/assets/` come from
+Both are what `.github/workflows/docs.yml` runs.
+
+Zensical reads `mkdocs.yml` (`theme.variant: classic` keeps the Material look). The pages are
+`docs/guide/*.md`, plain Markdown with relative links (also read on GitHub); a new page needs a
+`nav` entry in `mkdocs.yml`. Screenshots in `docs/guide/assets/` come from
 `e2e/screenshots/capture.sh` (see `e2e/screenshots/README.md`); don't edit them by hand.
 
 ## Git hooks
@@ -164,7 +168,7 @@ Semantic versioning; a `release/MAJOR.MINOR.PATCH` tag (no `v` prefix) triggers
 ## License policy
 
 Permissive dependencies only: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, MIT-0,
-Unicode-3.0, Zlib, BlueOak-1.0.0 and PSF-2.0 / Python-2.0. One deliberate exception,
+Unicode-3.0, Zlib, BlueOak-1.0.0, 0BSD and PSF-2.0 / Python-2.0. One deliberate exception,
 `libgit2-sys` (vendored libgit2), plus per-package owner decisions for a few Rust crates and
 dev-only npm packages; all are listed in `docs/LICENSE_COMPLIANCE.md`. Never add a licence or
 an exception on your own: ask the owner. Before adding a dependency: verify its license

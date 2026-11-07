@@ -14,3 +14,20 @@ export function branchNameProblem(name: string): string | null {
   if (name === "@") return "Branch name can't be just @.";
   return null;
 }
+
+/**
+ * The same for remote names (Add remote, Edit remote): libgit2 takes a remote name when
+ * `refs/remotes/<name>/…` is a valid ref name, so only the rules for a ref's inner folders are
+ * mirrored here, not the branch-only ones (a leading dash, a trailing dot, a bare `@`).
+ */
+export function remoteNameProblem(name: string): string | null {
+  if (name === "") return null;
+  if (/\s/.test(name)) return "Remote names can't contain spaces.";
+  if (/[~^:?*[\\]/.test(name)) return "Remote names can't contain ~ ^ : ? * [ or \\.";
+  if (name.includes("..") || name.includes("@{")) return "Remote names can't contain .. or @{.";
+  if (name.startsWith("/") || name.endsWith("/") || name.includes("//")) return "Remote names can't start or end with / or contain //.";
+  if (name.split("/").some((part) => part.startsWith(".") || part.endsWith(".lock"))) {
+    return "No part of a remote name can start with . or end with .lock.";
+  }
+  return null;
+}

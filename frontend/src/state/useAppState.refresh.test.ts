@@ -682,4 +682,89 @@ describe("useAppState", () => {
 
     expect(result.current.state.pending).toBe(false);
   });
+
+  // #342: replies can arrive out of order (the VSCode sidecar answers each request on its own
+  // thread). A read sent before a commit that answers after the commit's refresh must not put
+  // the pre-commit state back.
+  it("keeps the commit's undo entry when a focus re-check sent before the commit answers late", async () => {
+    let undo: string | null = "Stage a.txt";
+    let answerFocusCheck: (() => void) | null = null;
+    let holdNextUndoRead = false;
+    const client = transferClient({
+      getUndoState: async () => {
+        const state = { undo, redo: null };
+        if (!holdNextUndoRead) return state;
+        holdNextUndoRead = false;
+        await new Promise<void>((resolve) => {
+          answerFocusCheck = resolve;
+        });
+        return state;
+      },
+      commit: async () => {
+        undo = "Commit “x”";
+        return { kind: "Committed", commitId: "c1" };
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    holdNextUndoRead = true;
+    let focusCheck!: Promise<void>;
+    act(() => {
+      focusCheck = result.current.refreshUndoState();
+    });
+    await act(async () => {
+      await result.current.commit("x", false);
+    });
+    expect(result.current.state.undoState.undo).toBe("Commit “x”");
+
+    await act(async () => {
+      answerFocusCheck?.();
+      await focusCheck;
+    });
+    expect(result.current.state.undoState.undo).toBe("Commit “x”");
+  });
+
+  it("drops an earlier refresh's results when a later refresh has already landed", async () => {
+    const staged: StatusEntry = { path: "a.txt", oldPath: null, kind: "New", staged: true };
+    let status: StatusEntry[] = [];
+    let undo: string | null = null;
+    let answerFirst: (() => void) | null = null;
+    let holdNextStatus = true;
+    const client = transferClient({
+      getStatus: async () => {
+        const snapshot = status;
+        if (holdNextStatus) {
+          holdNextStatus = false;
+          await new Promise<void>((resolve) => {
+            answerFirst = resolve;
+          });
+        }
+        return snapshot;
+      },
+      getUndoState: async () => ({ undo, redo: null }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    let first!: Promise<void>;
+    act(() => {
+      first = result.current.refresh();
+    });
+    // Let the first refresh send its reads: they see the repository before the change.
+    await act(async () => {
+      while (answerFirst === null) await Promise.resolve();
+    });
+    status = [staged];
+    undo = "Stage a.txt";
+    await act(() => result.current.refresh());
+    expect(result.current.state.status).toEqual([staged]);
+
+    await act(async () => {
+      answerFirst?.();
+      await first;
+    });
+    expect(result.current.state.status).toEqual([staged]);
+    expect(result.current.state.undoState.undo).toBe("Stage a.txt");
+    // Superseded or not, every refresh still advances the generation.
+    expect(result.current.state.refreshGeneration).toBe(2);
+  });
 });

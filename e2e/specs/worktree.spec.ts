@@ -67,7 +67,7 @@ describe("Browsitory worktrees", () => {
     await expandSidebarSection("Worktrees");
     await expandSidebarSection("Branches");
 
-    const createForm = await $("aria/Create worktree");
+    const createForm = await $("form[aria-label='Create worktree']");
     await createForm.waitForExist({ timeout: 10000 });
     const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
     await currentBranchButton.waitForExist({ timeout: 10000 });

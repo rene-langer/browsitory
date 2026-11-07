@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { clickInPage, waitUntilGoneInPage } from "../support/dom";
+import { clickInPage, waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "line-fixture.txt";
@@ -29,7 +29,7 @@ describe("Browsitory line staging and discard", () => {
     await row.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), row);
 
-    await $(".diff-line-add").waitForExist({ timeout: 10000 });
+    await waitUntilInPage(".diff-line-add");
     const addLines = await $$(".diff-line-add");
     await browser.execute((el) => (el as HTMLElement).click(), addLines[0]);
     await browser.execute(

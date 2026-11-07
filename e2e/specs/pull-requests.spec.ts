@@ -1,7 +1,7 @@
 import { expect } from "@wdio/globals";
 import { waitUntilGoneInPage } from "../support/dom";
 import { ForgeFixtureClient } from "../support/forgeFixtureServer";
-import { expandSidebarSection } from "../support/sidebar";
+import { ADD_REMOTE_NAME_INPUT, expandSidebarSection } from "../support/sidebar";
 
 // Canned provider responses, matching the exact JSON shapes
 // `crates/repo-service/src/pull_requests.rs`'s GitHub/Bitbucket adapters parse (see that module's
@@ -65,7 +65,7 @@ async function addRemote(name: string, url: string) {
     await addButton.click();
     await (await $("button=Add remote…")).click();
   }
-  const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
+  const remoteNameInput = await $(ADD_REMOTE_NAME_INPUT);
   await remoteNameInput.waitForExist({ timeout: 10000 });
   await remoteNameInput.setValue(name);
   await (await $("[data-testid='add-remote-fetch-url']")).setValue(url);

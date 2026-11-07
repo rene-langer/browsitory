@@ -15,7 +15,9 @@
 //! tree changed"), so nothing is opened, created or contacted in the link's target (#163,
 //! #193). On an SMB share the redirector sends the relative name to the server, which resolves
 //! it by path; there every component and leaf is also checked on its own handle to sit directly
-//! in the held parent (`GetFinalPathNameByHandleW` of both): a mismatch fails the act, and a
+//! in the held parent (`GetFinalPathNameByHandleW` of both; for a file with hard links, whose
+//! final path may be another of its names, one of its names listed by `FileHardLinkInformation`
+//! must be the leaf in the held parent, #260): a mismatch fails the act, and a
 //! file created by the failed act is deleted through its handle. A link's target is read from
 //! its own handle (`FSCTL_GET_REPARSE_POINT`), never by path. Leaves are deleted through their
 //! handle (`FileDispositionInfoEx` with POSIX semantics, read-only files included, see
@@ -109,6 +111,29 @@ struct FileIdInfo {
     file_id: [u8; 16],
 }
 
+/// `BY_HANDLE_FILE_INFORMATION` (each `FILETIME` as two u32s): the link count and the 64-bit
+/// file index (`FILE_INTERNAL_INFORMATION`'s, the `ParentFileId` a hard link names).
+#[repr(C)]
+#[derive(Default)]
+struct ByHandleFileInformation {
+    file_attributes: u32,
+    creation_time: [u32; 2],
+    last_access_time: [u32; 2],
+    last_write_time: [u32; 2],
+    volume_serial_number: u32,
+    file_size_high: u32,
+    file_size_low: u32,
+    number_of_links: u32,
+    file_index_high: u32,
+    file_index_low: u32,
+}
+
+impl ByHandleFileInformation {
+    fn file_index(&self) -> u64 {
+        (u64::from(self.file_index_high) << 32) | u64::from(self.file_index_low)
+    }
+}
+
 /// `FILE_DISPOSITION_INFO`: a single `BOOLEAN`.
 #[repr(C)]
 struct DispositionInfo {
@@ -147,6 +172,7 @@ extern "system" {
         size: u32,
     ) -> i32;
     fn GetFinalPathNameByHandleW(file: *mut c_void, path: *mut u16, len: u32, flags: u32) -> u32;
+    fn GetFileInformationByHandle(file: *mut c_void, info: *mut ByHandleFileInformation) -> i32;
     fn DeviceIoControl(
         device: *mut c_void,
         code: u32,
@@ -193,6 +219,60 @@ fn file_id(file: &File) -> io::Result<FileIdInfo> {
         return Err(io::Error::last_os_error());
     }
     Ok(info)
+}
+
+fn handle_information(file: &File) -> io::Result<ByHandleFileInformation> {
+    let mut info = ByHandleFileInformation::default();
+    // SAFETY: the handle belongs to `file`, which outlives the call; `info` is a writable
+    // `BY_HANDLE_FILE_INFORMATION` (`repr(C)`, 13 u32s).
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(info)
+}
+
+/// The names of the file `file` refers to (`FileHardLinkInformation`, see
+/// [`reparse::hard_links`]): each with the 64-bit file index of the folder it is in. An error
+/// where the file system can't list them (FAT/exFAT, which have no hard links, many SMB shares).
+fn hard_links(file: &File) -> io::Result<Vec<(u64, Vec<u16>)>> {
+    // u64s, so the buffer has the alignment the structure needs.
+    let mut words = vec![0u64; 512];
+    for _ in 0..4 {
+        let mut io_status = IoStatusBlock {
+            status: 0,
+            information: 0,
+        };
+        let size = u32::try_from(words.len() * 8).unwrap_or(u32::MAX);
+        // SAFETY: the handle belongs to `file`, which outlives the call; `io_status` is a
+        // writable `IO_STATUS_BLOCK`; `words` has `size` writable bytes, 8-byte aligned.
+        let status = unsafe {
+            NtQueryInformationFile(
+                file.as_raw_handle(),
+                &mut io_status,
+                words.as_mut_ptr().cast(),
+                size,
+                FILE_HARD_LINK_INFORMATION_CLASS,
+            )
+        };
+        let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_ne_bytes()).collect();
+        if status == STATUS_BUFFER_OVERFLOW {
+            // Too small: `BytesNeeded` says how much is.
+            let needed = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
+            if needed <= bytes.len() || needed > MAX_HARD_LINK_BYTES {
+                break;
+            }
+            words.resize(needed.div_ceil(8), 0);
+            continue;
+        }
+        if status < 0 {
+            // SAFETY: a pure conversion of a status code.
+            let code = unsafe { RtlNtStatusToDosError(status) } as i32;
+            return Err(io::Error::from_raw_os_error(code));
+        }
+        return reparse::hard_links(&bytes)
+            .ok_or_else(|| io::Error::other("unreadable list of hard links"));
+    }
+    Err(io::Error::other("unreadable list of hard links"))
 }
 
 /// Marks the file or folder `file` refers to for deletion. Acts on the object itself, never on a
@@ -379,7 +459,21 @@ extern "system" {
         length: u32,
         class: i32,
     ) -> i32;
+    fn NtQueryInformationFile(
+        handle: *mut c_void,
+        io_status: *mut IoStatusBlock,
+        info: *mut c_void,
+        length: u32,
+        class: i32,
+    ) -> i32;
 }
+
+/// `FILE_INFORMATION_CLASS` `FileHardLinkInformation`: a `FILE_LINKS_INFORMATION`.
+const FILE_HARD_LINK_INFORMATION_CLASS: i32 = 46;
+/// The buffer was too small for every entry (a warning status: `BytesNeeded` is filled in).
+const STATUS_BUFFER_OVERFLOW: i32 = 0x8000_0005_u32 as i32;
+/// More than NTFS's 1024 names of up to 255 UTF-16 units each ever need.
+const MAX_HARD_LINK_BYTES: usize = 1024 * 1024;
 
 /// `FILE_INFORMATION_CLASS` values (ntdll's, not kernel32's `FILE_INFO_BY_HANDLE_CLASS`).
 const FILE_RENAME_INFORMATION_CLASS: i32 = 10;
@@ -587,6 +681,41 @@ fn in_parent(child: &File, parent: &File) -> io::Result<bool> {
     Ok(final_path(child)?.parent() == Some(final_path(parent)?.as_path()))
 }
 
+/// [`in_parent`] for a leaf opened by the name `leaf`: its spelling on disk (see
+/// [`on_disk_name`]) when the leaf is directly in the held folder `parent`, `None` when it isn't.
+///
+/// A file with more than one name (hard links, #260) has one final path, which may be any of its
+/// names: the one it was opened by, or (opened by its file ID) another, in another folder. So
+/// when the final path is elsewhere and the file has several names, they are listed
+/// (`FileHardLinkInformation`): one of them must be `leaf` (ignoring case) in `parent`, the
+/// folder compared by its file index on the same volume. Then the handle is the file named
+/// `leaf` in the held folder, as the final path check would have shown for a file with one name.
+/// Where the names can't be listed (some SMB shares) it is refused as before.
+fn name_in_parent(child: &File, parent: &File, leaf: &OsStr) -> io::Result<Option<OsString>> {
+    let path = final_path(child)?;
+    if path.parent() == Some(final_path(parent)?.as_path()) {
+        return Ok(Some(on_disk_name(leaf, &path)));
+    }
+    let info = handle_information(child)?;
+    if info.number_of_links < 2 || info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+        return Ok(None);
+    }
+    let folder = handle_information(parent)?;
+    if folder.volume_serial_number != info.volume_serial_number {
+        return Ok(None);
+    }
+    let Ok(links) = hard_links(child) else {
+        return Ok(None);
+    };
+    let fold = |name: &OsStr| super::fold_name(name.to_string_lossy().as_bytes());
+    let wanted = fold(leaf);
+    Ok(links.into_iter().find_map(|(folder_index, name)| {
+        use std::os::windows::ffi::OsStringExt;
+        let name = OsString::from_wide(&name);
+        (folder_index == folder.file_index() && fold(&name) == wanted).then_some(name)
+    }))
+}
+
 fn redirected() -> io::Error {
     io::Error::other("a folder of the working tree changed while it was being written")
 }
@@ -704,7 +833,7 @@ fn open_leaf_at(at: &Beneath, name: &OsStr, purpose: Purpose) -> io::Result<Opti
         Err(error) if missing(&error) => return Ok(None),
         Err(error) => return Err(error),
     };
-    if !in_parent(&file, parent)? {
+    if name_in_parent(&file, parent, name)?.is_none() {
         return Err(redirected());
     }
     let info = attribute_tag(&file)?;
@@ -764,8 +893,11 @@ fn reopen_same(at: &Beneath, first: &File, reopen: bool, access: u32) -> io::Res
         Err(error) => return Err(error),
     };
     // Opened by identity, it may have been renamed out of the held parent meanwhile (delete is
-    // shared): then not this leaf any more, and the caller tries again.
-    if file_id(&second)? != id || !in_parent(&second, at.parent_file())? {
+    // shared): then not this leaf any more, and the caller tries again. (Opened by its ID, a
+    // file with hard links may report any of its names as its final path, see `name_in_parent`.)
+    if file_id(&second)? != id
+        || name_in_parent(&second, at.parent_file(), at.leaf_name())?.is_none()
+    {
         return Ok(None);
     }
     Ok(Some(second))
@@ -1106,7 +1238,8 @@ fn classify_for_writing(
                 match reopen_same(at, &first, reopen, GENERIC_READ | GENERIC_WRITE) {
                     Ok(Some(_writable)) => {
                         let attributes = attribute_tag(&first)?.file_attributes;
-                        let name = on_disk_name(at.leaf_name(), &final_path(&first)?);
+                        let name = name_in_parent(&first, at.parent_file(), at.leaf_name())?
+                            .unwrap_or_else(|| at.leaf_name().to_os_string());
                         return Ok((attributes & SETTABLE_ATTRIBUTES, name));
                     }
                     Ok(None) => {}
@@ -1663,8 +1796,14 @@ fn read_walked(walked: io::Result<Walk<Beneath>>, limit: u64) -> io::Result<Opti
     }
 }
 
-/// See `worktree_guard::remove_and_prune_beneath`.
-pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<()> {
+/// See `worktree_guard::remove_and_prune_beneath`. The first `keep` folders of `rel` are never
+/// pruned.
+pub(super) fn remove_and_prune(
+    workdir: &Path,
+    rel: &Path,
+    keep: usize,
+    step: StepFn<'_>,
+) -> io::Result<()> {
     let Walk::Found(mut at) = walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? else {
         return Ok(());
     };
@@ -1675,7 +1814,7 @@ pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> 
     // while its parents stay held; it is then opened again, checked to be the plain folder in
     // its held parent, and deleted through that handle, which fails unless it is empty. Never
     // the work tree root.
-    for i in (1..at.dirs.len()).rev() {
+    for i in (keep + 1..at.dirs.len()).rev() {
         at.dirs.pop();
         at.names.truncate(i);
         let Ok(Some((dir, Found::Dir))) = open_leaf(&at, Purpose::Delete) else {
@@ -1754,10 +1893,12 @@ fn classify_for_replacing(at: &Beneath) -> io::Result<OsString> {
         match open_leaf(at, Purpose::Read)? {
             None => return Ok(at.leaf_name().to_os_string()),
             Some((first, Found::File { .. })) => {
-                return Ok(match final_path(&first) {
-                    Ok(path) => on_disk_name(at.leaf_name(), &path),
-                    Err(_) => at.leaf_name().to_os_string(),
-                })
+                return Ok(
+                    match name_in_parent(&first, at.parent_file(), at.leaf_name()) {
+                        Ok(Some(name)) => name,
+                        _ => at.leaf_name().to_os_string(),
+                    },
+                )
             }
             Some((_, Found::Link | Found::Dir)) => {
                 // Reopened to delete it; the deletion completes when the handle closes, here.
@@ -1889,7 +2030,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("d")).unwrap();
         std::fs::write(dir.path().join("d/f"), "old").unwrap();
         let _scanner = hold_open_like_a_scanner(&dir.path().join("d/f"));
-        remove_and_prune(dir.path(), Path::new("d/f"), &mut no_step).unwrap();
+        remove_and_prune(dir.path(), Path::new("d/f"), 0, &mut no_step).unwrap();
         assert!(
             std::fs::symlink_metadata(dir.path().join("d")).is_err(),
             "the emptied folder is still there"
@@ -2802,8 +2943,7 @@ mod tests {
     #[test]
     fn writing_a_hardlink_keeps_its_name_and_the_other_name_keeps_the_old_content() {
         // Both names in one folder: the final path may report either, and the new file must
-        // still get the name written. (A hardlink whose other name is in another folder fails
-        // the walker's in-the-held-parent check, as it did before #239.)
+        // still get the name written.
         let dir = TempDir::new().unwrap();
         let d = dir.path().join("d");
         std::fs::create_dir(&d).unwrap();
@@ -2813,6 +2953,115 @@ mod tests {
         assert_eq!(names_in(&d), ["a-other", "f"]);
         assert_eq!(std::fs::read_to_string(d.join("f")).unwrap(), "new");
         assert_eq!(std::fs::read_to_string(d.join("a-other")).unwrap(), "old");
+    }
+
+    /// A work tree whose `d/F.txt` is a hard link to `other/f.txt` in another folder, outside
+    /// the work tree but on the same volume ("old"); the other folder is the second value.
+    fn hardlinked_to_another_folder() -> (TempDir, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let other = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(other.path().join("f.txt"), "old").unwrap();
+        std::fs::hard_link(other.path().join("f.txt"), dir.path().join("d/F.txt")).unwrap();
+        (dir, other)
+    }
+
+    #[test]
+    fn a_hardlink_whose_other_name_is_in_another_folder_is_read() {
+        // #260: the final path of the handle (opened by name, or reopened by its file ID) may
+        // be the other name, which used to read as "a folder of the working tree changed".
+        let (dir, _other) = hardlinked_to_another_folder();
+        let read = read(dir.path(), Path::new("d/F.txt"), &mut no_step).unwrap();
+        assert!(
+            matches!(&read, Some(Leaf::File { bytes, .. }) if bytes == b"old"),
+            "{read:?}"
+        );
+        let mut file = open_file(dir.path(), Path::new("d/f.txt"), &mut no_step)
+            .unwrap()
+            .expect("opened");
+        let mut text = String::new();
+        file.read_to_string(&mut text).unwrap();
+        assert_eq!(text, "old");
+        assert!(!is_read_only(dir.path(), Path::new("d/F.txt"), &mut no_step).unwrap());
+    }
+
+    #[test]
+    fn writing_a_hardlink_whose_other_name_is_in_another_folder_replaces_only_this_name() {
+        // As git's checkout does: the name gets a new file, the other name keeps the old content
+        // (#260). The name's spelling on disk stays, whatever case the path is given in.
+        let (dir, other) = hardlinked_to_another_folder();
+        assert!(write(dir.path(), Path::new("d/f.txt"), b"new", &mut no_step).unwrap());
+        assert_eq!(names_in(&dir.path().join("d")), ["F.txt"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/F.txt")).unwrap(),
+            "new"
+        );
+        assert_eq!(
+            std::fs::read_to_string(other.path().join("f.txt")).unwrap(),
+            "old"
+        );
+
+        let (dir, other) = hardlinked_to_another_folder();
+        replace(
+            dir.path(),
+            Path::new("d/F.txt"),
+            new_content(),
+            &mut no_step,
+        )
+        .unwrap();
+        assert_eq!(names_in(&dir.path().join("d")), ["F.txt"]);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("d/F.txt")).unwrap(),
+            "new content"
+        );
+        assert_eq!(
+            std::fs::read_to_string(other.path().join("f.txt")).unwrap(),
+            "old"
+        );
+
+        let (dir, other) = hardlinked_to_another_folder();
+        assert!(remove(dir.path(), Path::new("d/F.txt"), &mut no_step).unwrap());
+        assert!(names_in(&dir.path().join("d")).is_empty());
+        assert_eq!(
+            std::fs::read_to_string(other.path().join("f.txt")).unwrap(),
+            "old"
+        );
+    }
+
+    #[test]
+    fn a_file_whose_names_are_all_elsewhere_is_not_in_the_held_folder() {
+        // The hard-link fallback of `name_in_parent` accepts only a name in the held folder
+        // itself: a file named `x` in two other folders is refused, though the held folder has
+        // an `x` of its own, as the final-path check refuses a file with one name.
+        let dir = TempDir::new().unwrap();
+        for folder in ["a", "b", "d", "e"] {
+            std::fs::create_dir(dir.path().join(folder)).unwrap();
+        }
+        std::fs::write(dir.path().join("a/x"), "elsewhere").unwrap();
+        std::fs::hard_link(dir.path().join("a/x"), dir.path().join("b/x")).unwrap();
+        std::fs::write(dir.path().join("d/x"), "the held folder's own x").unwrap();
+        std::fs::write(dir.path().join("e/x"), "named y in d").unwrap();
+        std::fs::hard_link(dir.path().join("e/x"), dir.path().join("d/y")).unwrap();
+        let held = open_pinned(&dir.path().join("d"), FILE_LIST_DIRECTORY).unwrap();
+        for elsewhere in ["a/x", "b/x"] {
+            let file = open_pinned(&dir.path().join(elsewhere), 0).unwrap();
+            assert_eq!(
+                name_in_parent(&file, &held, OsStr::new("x")).unwrap(),
+                None,
+                "{elsewhere}"
+            );
+        }
+        // The file named `y` in d, opened by its name in e: found as `y` in d, spelled as on disk.
+        let file = open_pinned(&dir.path().join("e/x"), 0).unwrap();
+        assert_eq!(
+            name_in_parent(&file, &held, OsStr::new("Y")).unwrap(),
+            Some(OsString::from("y"))
+        );
+        let own = open_pinned(&dir.path().join("d/x"), 0).unwrap();
+        assert_eq!(
+            name_in_parent(&own, &held, OsStr::new("x")).unwrap(),
+            Some(OsString::from("x"))
+        );
     }
 
     #[test]
@@ -2833,7 +3082,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("d")).unwrap();
         std::fs::write(dir.path().join("d/f"), "old").unwrap();
         make_read_only(&dir.path().join("d/f"));
-        remove_and_prune(dir.path(), Path::new("d/f"), &mut no_step).unwrap();
+        remove_and_prune(dir.path(), Path::new("d/f"), 0, &mut no_step).unwrap();
         assert!(
             std::fs::symlink_metadata(dir.path().join("d")).is_err(),
             "the read-only file or its folder is still there"

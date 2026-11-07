@@ -54,6 +54,10 @@ pub enum PickError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// libgit2 merged a file and a folder of the same name without a conflict; nothing was
+    /// changed (#410).
+    #[error(transparent)]
+    FileFolderConflict(#[from] crate::FileFolderConflict),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
@@ -592,13 +596,17 @@ fn step(
             crate::worktree_guard::GuardSource::Index(&merged),
         )],
     )?;
+    // libgit2 can miss a file/folder conflict and would commit without one of them (#410).
+    // After the link check, whose refusal is the more specific one for a link.
+    crate::file_folder::refuse_file_folder_conflict(&merged)?;
     // A checkout that stops part-way (a file another program holds open, a read-only file) is
     // rolled back, so the step can be tried again (#321). libgit2's own default strategy for a
     // pick is safe with conflicts allowed; a builder of our own must say so.
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.safe().allow_conflicts(true);
-    written.record(&mut checkout);
+    written.record(repo, &mut checkout);
+    written.expect_conflicts(repo, &merged);
     let applied = match kind {
         Kind::CherryPick => {
             let mut options = git2::CherrypickOptions::new();

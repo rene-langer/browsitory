@@ -267,27 +267,61 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
 - Stash file… refuses a case-only rename (`git mv README readme`; `CaseOnlyRename`,
   `refuse_case_only_rename`) where names fold. libgit2's ignore-case index (`core.ignorecase`)
   finds one name as the other, so the stash's index tree held both names and the revert changed
-  nothing. "Case-only" means what libgit2 compares as one entry (`same_in_icase_index`):
+  nothing. "Case-only" means what libgit2 compares as one entry (`icase_index_key`):
   `strcasecmp`/`git__strcasecmp` and a `git__tolower` hash (index.c, index_map.c), ASCII letters
-  only, byte by byte. `Straße`/`Strasse` and NFC/NFD spellings are two names there and stash
-  normally (tested off macOS; APFS takes each pair for one file, so such a rename isn't even
-  possible with `git mv` there, and isn't covered); `worktree_guard::fold_name` (the file-system fold the other stash checks use) is
-  not used for this. The check runs before the ignored-file check, since the staged deletion
-  `Old` can find a file at `Old` (the new `old` on a drive that folds names, or an ignored
+  only, byte by byte; on macOS and Windows also what the drive takes for one file (`stash_fold`,
+  #389). Seen on CI with a rename made by `mv` (`git mv` refuses where the drive folds) and
+  staged by libgit2: APFS folds `Straße`/`Strasse`, `Café`/`CAFÉ` and NFC/NFD spellings
+  (`worktree_guard::fold_name`); NTFS only `Café`/`CAFÉ` (letter-by-letter simple upper case,
+  `ntfs_fold`), not `ß`/`ss` or NFC/NFD. libgit2 kept the two names apart, so Stash all refused
+  with a misleading `IgnoredOverwritten("Straße")` (the deleted old name found the file) and
+  Stash file… with that or `RenameSourceRecreated`; now they get `CaseOnlyRename` like `README`
+  → `readme`. NFC/NFD only matters with `core.precomposeunicode` off: on (git's and libgit2's
+  default on macOS) both read the NFD name as NFC and see no rename. On Linux with
+  `core.ignorecase` the drive and libgit2 keep all of these apart and they stash normally
+  (`a_unicode_rename_the_drive_keeps_apart_stashes_normally`, which also covers `ß` and NFC/NFD
+  on Windows). `git add -A` after such an `mv` keeps the old name (its lstat finds the file) and
+  adds the new one, so the index holds two names of one file. Stash all handles that (libgit2's
+  reset removes the new name before writing the old one; Pop restores both entries), but Stash
+  file… on either name deleted the shared file until Pop, or wrote a stash that changed nothing
+  and Pop refused, so it refuses with `CasePair` (below). The check runs before the
+  ignored-file check, since the staged deletion `Old` can find a file at `Old` (the new `old` on a drive that folds names, or an ignored
   `Old` beside it) and would look like an ignored file removed from the index. "Where names
   fold" is `worktree_guard::try_folds_case`, as for every stash check (#337, #369): macOS, Windows, or
   `core.ignorecase`. The stash never probes the drive (`dir_folds_case`), so on a Linux
   casefold folder or a vfat mount without `core.ignorecase` the check doesn't run. Stash all
   refuses them too (#370; `refuse_staged_case_only_rename`, before `entry_in_the_way` and any
-  write): the index has a path HEAD doesn't, and HEAD a path differing from it only in ASCII
-  case that the index doesn't. Through libgit2's stash, Linux with `core.ignorecase` wrote a
-  stash whose index tree held both names and left the rename in place, and on macOS and Windows
+  write): the index has a path HEAD doesn't, and HEAD a path differing from it only in case
+  (`stash_fold`) that the index doesn't. Through libgit2's stash, Linux with `core.ignorecase`
+  wrote a stash whose index tree held both names and left the rename in place, and on macOS and Windows
   the deleted `Old` found the file `old` (`IgnoredOverwritten("Old")`, seen on CI). `git stash`
   stashes the rename and puts `Old` back on all three (on macOS its worktree tree holds both
   names); libgit2's stash can't, and the path-limited route refuses as
-  Stash file… does, so refusing is the consistent fix. A case pair HEAD and the index both hold
-  (`A` and `a`, committed on a case-sensitive drive) is no rename and isn't refused (libgit2's
-  stash may drop one of the pair there: #392).
+  Stash file… does, so refusing is the consistent fix.
+- A case pair (`A` and `a`, committed on a case-sensitive drive, then `core.ignorecase` on; on
+  macOS and Windows such a pair can't even be checked out) is no rename, but libgit2 1.9 can't
+  stash around it either (#392). Its forced checkout of HEAD (stash.c
+  `reset_index_and_workdir`, `GIT_CHECKOUT_FORCE`) keeps only one of the two in its ignore-case
+  index, even with nothing to check out
+  (`libgit2_forced_checkout_drops_one_of_a_case_pair_under_ignorecase` pins this): the other
+  became a staged deletion. Whether its file was deleted too depended on the order the
+  directory lists the two names in: the workdir iterator sorts with plain `strcasecmp` and no
+  tie-break (`filesystem_iterator_entry_cmp_icase`, iterator.c), the tree iterator breaks ties
+  case-sensitively, so on a tmpfs (newest first) or an ext4 htree (hash order) the walk paired
+  the tree's `A` with the file `a` for some names and not others. Locally (tmpfs and ext4, all
+  26 letter pairs, both write orders) the index lost one entry every time and the file only for
+  some names, which is how the ubuntu-latest runner could delete `a` where a local run kept the
+  file (the runner's report is #392). The path-limited
+  stash's checkout of a pair member did the same (one entry dropped, sometimes the file
+  deleted, Pop then refused with `StagedChanges`). git keeps both. `save_stash` therefore
+  refuses with `StashError::CasePair` where names fold (`try_folds_case`), before anything is
+  written: Stash all when HEAD or the index holds two paths `icase_index_key` takes for one
+  (checked after the rename check, so a case-only rename keeps its `CaseOnlyRename`), Stash
+  file… when it picks one of them (`refuse_case_only_rename` tells a pair, two names in HEAD or
+  in the index alone, from a rename, one name in each; there by `stash_fold`, so on macOS and
+  Windows also two names only the drive folds, see above). Stash file… on other paths keeps the
+  pair, since its checkout is limited to the stashed paths. Only whole paths count: `D/f` and
+  `d/g` are two entries to libgit2 and stash normally.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as
@@ -351,6 +385,28 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   so per worktree).
 - `git_merge` ignores the merge analysis: called when a fast-forward is possible it still writes
   `MERGE_HEAD`, which is what `FastForward::Never` relies on.
+- **libgit2 misses a file/folder conflict when a name sorts between (#410).** libgit2 1.9 finds
+  a file/folder conflict only when the file and the folder's entries are neighbours in sorted
+  order. `c` < `c.txt` < `c/g` (`.` sorts before `/`): merging a side that deletes `c.txt` and
+  adds `c/g` into a HEAD that added the file `c` gives a merged index with both `c` and `c/g` at
+  stage 0 and no conflict (without `c.txt`, `ab` against `ab/g`, it records the conflict `ab`
+  and checks the file out as `ab~HEAD`). git reports "CONFLICT (file/directory)", merges `c/g`
+  and leaves HEAD's file as the conflict `c~HEAD`. With libgit2 a cherry-pick, revert or rebase
+  step committed a tree without the file `c` while the work tree kept `c` and never got `c/g`;
+  a merge (squash, a diverged pull's merge) and a stash apply stopped part-way with "failed to
+  make directory 'c': directory exists". Every operation that writes a libgit2 merge (merge,
+  squash, cherry-pick, revert, each rebase step, stash apply and pop) runs
+  `file_folder::refuse_file_folder_conflict` on its in-memory merge (`merge_commits`,
+  `cherrypick_commit`, `revert_commit`; for a stash `merge_trees` redoing `git_stash_apply`'s
+  merges against HEAD's tree) before anything is written, and refuses with
+  `FileFolderConflict` (a stage-0 entry `p` while another entry lives below `p/`; libgit2's own
+  conflict entry `p` next to `p/…` is left alone). Producing git's outcome instead would mean
+  rewriting the index into git's `c~HEAD` conflict and doing the checkout and the operation's
+  state files ourselves for five operations, where libgit2's checkout of such an index fails; a
+  refusal keeps the user's work safe and points them to git. The test
+  `libgit2_still_merges_a_file_and_a_folder_without_a_conflict` (`tests/file_folder_conflict.rs`)
+  pins the libgit2 behaviour: when a libgit2 update fixes it, that test fails and the guard can
+  give way to libgit2's conflict.
 
 ## Threading model
 
@@ -1192,7 +1248,17 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   nothing is opened, created or contacted in the junction's target. On an SMB share the
   redirector resolves a relative name by path on the server, so every component and leaf must
   also sit in the held parent (`GetFinalPathNameByHandleW` of both), and a new file is deleted
-  again through its handle if misplaced. A write's rename is resolved by path on the server
+  again through its handle if misplaced. A file with hard links has one final path, which may
+  be any of its names (and is, after a reopen by ID): one in another folder then looked moved,
+  so writing or reading such a tracked file failed with "a folder of the working tree changed"
+  (#260). When the final path is elsewhere and the file has more than one name
+  (`GetFileInformationByHandle`), its names are listed (`NtQueryInformationFile`,
+  `FileHardLinkInformation`, parsed by `reparse::hard_links`), and one of them must be the leaf
+  (ignoring case) in the held parent, the folder compared by its file index on the same volume
+  (`name_in_parent`); a write then also takes the name's spelling from that entry. That still
+  proves the handle is the file named so in the held folder; a folder never has hard links, so
+  folders keep the final-path check alone, and where the names can't be listed (FAT/exFAT,
+  which have no hard links, many SMB shares) the leaf is refused as before. A write's rename is resolved by path on the server
   too, so afterwards the file's final path is compared with the work tree root's: only when it
   positively lies outside the work tree is the file deleted through its handle and the write
   reported as "a folder of the working tree changed". By then the name it landed on outside
@@ -1230,7 +1296,9 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   before; an existing file must reopen for reading and writing by its file ID (read-only →
   #209), its settable attributes (`FileBasicInfo`) are copied to the temporary file, and its
   on-disk name comes from `GetFinalPathNameByHandleW` when that equals the leaf ignoring case
-  (else the leaf as given: a short 8.3 name, or another name of a hardlinked file). The
+  (else the leaf as given: a short 8.3 name, or another name of a hardlinked file in the same
+  folder), or for a hardlinked file whose final path is in another folder from its name entry
+  in the held parent (#260, see above). The
   temporary file is created with
   `nt_open(FILE_CREATE)` in the held parent (checked with `in_parent`) and renamed through its
   own handle with `NtSetInformationFile(FileRenameInformationEx, REPLACE_IF_EXISTS |
@@ -1278,32 +1346,59 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   tree accepts a file already at its target.
 - Operations whose retry would refuse or skip the files a stopped checkout already wrote roll
   them back instead (#321, `partial_checkout`), on every platform, when a checkout stops
-  before it touched a file (Windows held file, read-only file or folder). libgit2 writes the
-  index on disk only once a checkout has finished; until then only its in-memory copy holds
-  the entries of the files written. `Written` records each path the checkout wrote or removed
-  through libgit2's progress callback (reported once done, so never the file it stopped at).
-  Known gap: an error *while* writing a file (a full disk) leaves that file truncated or empty;
-  it isn't among the recorded paths, so it isn't put back.
+  before it touched a file (Windows held file, read-only file or folder) or while it wrote one
+  (a full disk, an I/O error; #329). libgit2 writes the index on disk only once a checkout has
+  finished; until then only its in-memory copy holds the entries of the files written.
+  `Written::record` registers two libgit2 callbacks on the checkout:
+  - progress: each path the checkout wrote or removed, reported once done, so never the file
+    it stopped at;
+  - notify (`UPDATED`, called while libgit2 plans the checkout, before it writes anything):
+    each path it means to write, with its `symlink_metadata` (size, mtime, kind) and how many
+    of its folders exist. libgit2 opens a file with `O_TRUNC`, so a write that fails part-way
+    leaves it truncated; a planned path that was never reported done but no longer matches
+    its metadata is the file it stopped while writing, and is rolled back with the rest. A
+    planned path it never reached (on Windows the held file itself) is left alone.
+
+  Callers that check out a merge result with conflicts (cherry-pick, revert, rebase steps) also
+  call `Written::expect_conflicts` with that index before the checkout: it lists, beside each
+  conflict path, the entries named `<name>~*` and `<name>.lock`. libgit2 writes conflicts
+  last; it writes a side of a file/folder or rename conflict as `<name>~<label>`
+  (`f.txt~HEAD`, never over an existing entry) and reports only the conflict's path, and when
+  writing a conflict's merged content fails it leaves its temporary `<name>.lock`, which would
+  make the retry fail. Such an entry that is new after the stop is removed too. (A Windows
+  held file or a read-only folder stops a checkout earlier: libgit2 removes every conflicted
+  file before writing anything.)
   - Cherry-pick and revert (each step of a sequence too), rebase start (onto's checkout,
-    before HEAD is detached), pull fast-forward, and stash apply and pop (both of the stash's
-    checkouts, untracked files first): `roll_back` re-reads the index from disk and puts each
-    written path back as it has it. A path the index has is checked out from it (forced, just
-    those paths, after `prepare_forced_checkout` removed links in the way, so filters apply
-    and nothing is written through a link); a path it lacks (a file the checkout created) is
-    removed with `remove_and_prune_beneath`, unless the index has files below it. Every path
-    is tried even after one fails (tracked files first, then created ones, then tracked ones
-    again if a created one was in the way); the first error is reported. These are safe
-    checkouts from that index (each refuses a staged change first), which write over a
-    tracked file only when it matches the index, so no uncommitted change to a tracked file is
-    lost, and unrelated edits stay. An ignored file in the way of a file the checkout creates
-    is written over by libgit2 (git also treats ignored files as expendable), so the rollback
-    removes it rather than bringing it back. The message is #302's plain one,
+    before HEAD is detached) and each rebase step (#329), pull fast-forward, and stash apply
+    and pop (both of the stash's checkouts, untracked files first): `roll_back` re-reads the
+    index from disk and puts each written path back as it has it. A path the index has is
+    checked out from it (forced, just those paths, after `prepare_forced_checkout` removed
+    links in the way, so filters apply and nothing is written through a link); a path it lacks
+    (a file the checkout created, a conflict's side file) is removed with
+    `remove_and_prune_beneath_keeping`, unless the index has files below it. Pruning stops at
+    the folders that were there before the checkout, so an empty folder the user had stays
+    (#329). Every path is tried even after one fails (tracked files first, then created ones,
+    then tracked ones again if a created one was in the way); the first error is reported.
+    These are safe checkouts from that index (each refuses a staged change first), which write
+    over a tracked file only when it matches the index, so no uncommitted change to a tracked
+    file is lost, and unrelated edits stay. An ignored file in the way of a file the checkout
+    creates is written over by libgit2 (git also treats ignored files as expendable), so the
+    rollback removes it rather than bringing it back, by design; an ignored file at a path the
+    checkout hadn't reached yet stays as it was. The message is #302's plain one,
     `HeldDuring::RolledBack`: "'f.txt' is open in another program. Close it, then try
-    again." A pop keeps the stash.
+    again." Other errors (read-only, full disk) keep libgit2's message. A pop keeps the stash.
+  - A rebase step (`advance`, at start or on Continue) whose pick's checkout stops is rolled
+    back like a cherry-pick, and its `CHERRY_PICK_HEAD`/`MERGE_MSG` removed: HEAD stays at the
+    last step that landed (`expected_head`), the stop is `RebaseStop::Error`, and Continue
+    applies the step again. During `start_rebase` the rollback to the branch
+    (`restore_original_branch`) then starts from that clean tree; a held (or read-only) file
+    the step stopped at is the same there as on the branch (the checkout of `onto`, or an
+    earlier step, would have stopped at it first), so that checkout doesn't write it again.
   - Merge abort (also the cherry-pick and revert aborts, and a rebase abort that undoes its
     paused step) runs its forced checkout of HEAD's touched paths *before* it resets the
     index, so a stop leaves the index with what is still to abort. `roll_forward` then
-    finishes the paths reached (and the files the abort removed itself): their work-tree files
+    finishes the paths reached (the file it stopped while writing, and the files the abort
+    removed itself, too): their work-tree files
     are checked out from HEAD again without touching the index (libgit2's forced checkout of a
     tree drops every conflict of the index, also outside its path list), then each one's
     index entry is set to HEAD's, conflicts included. `MERGE_HEAD` and the other state files
@@ -1480,11 +1575,17 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   checks) and the external diff/merge tool, which writes `MERGED` by path itself, as git's
   `mergetool` does.
 - Residual risk, hardlinks: a tracked file that is a hardlink to a file outside the repository
-  is written in place by libgit2's checkouts (the shared inode changes, so the outside name
-  sees the new content). Browsitory's own writes (`write_beneath`) replace the name instead,
-  so the outside name keeps its content (#239). A hardlink is indistinguishable from a regular file by
-  path; it needs the user (or a local process) to have created it on the same filesystem, and
-  git behaves the same way.
+  (or in another folder of it) is written in place by libgit2's checkouts and patch applies
+  (the shared inode changes, so the other name sees the new content): Discard (file, hunk or
+  lines), branch switches, resets, merges and picks, stash, aborts, and Undo/Redo of a path the
+  index holds. git differs: its checkout and `git apply` unlink the name and create a new file,
+  so the other name keeps its content (#420). Browsitory's own writes (`write_beneath`,
+  `replace_beneath`: Save resolution, **Ignore**, Undo/Redo of a work-tree-only change) match
+  git: they replace the name, so the other name keeps its content (#239), on Windows too
+  (#260). Reads (Undo's snapshot, Mark resolved, the image preview, staging, which libgit2 does by
+  path) read the file through either name. A hardlink is indistinguishable from a regular
+  file by path; it needs the user (or a local process) to have created it on the same
+  filesystem.
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
   `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
   the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line

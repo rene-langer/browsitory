@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { waitUntilGoneInPage } from "../support/dom";
-import { expandSidebarSection } from "../support/sidebar";
+import { expandSidebarSection, sidebarRemoteFolder, sidebarSectionToggle } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-keyboard-remote.git");
@@ -13,7 +13,7 @@ const REMOTE_NAME = "kbd-origin";
 // Same retrying open as `command-palette.spec.ts`'s `openPalette` (Ctrl+K can arrive before the
 // workspace's key handler is attached right after `beforeTest`'s reload).
 async function runPaletteCommand(query: string): Promise<void> {
-  await $('section[aria-label="Branches"] button[aria-expanded]').waitForExist({ timeout: 10000 });
+  await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 10000 });
   const input = await $('input[aria-label="Command palette"]');
   await browser.waitUntil(
     async () => {
@@ -72,7 +72,7 @@ describe("Browsitory keyboard context menus", () => {
 
   it("opens a remote folder's menu from the keyboard", async () => {
     await expandSidebarSection("Branches");
-    const header = await $(`button=${REMOTE_NAME}`);
+    const header = await $(sidebarRemoteFolder(REMOTE_NAME));
     await header.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).focus(), header);
 

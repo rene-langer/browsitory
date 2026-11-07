@@ -400,13 +400,23 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     () => forgettingStaleOwnErrors(setRawState, [refreshError, reflogError, forgeError]),
     [refreshError, reflogError, forgeError],
   );
+  // Replies don't arrive in the order their requests were sent: the VSCode sidecar answers each
+  // request on its own thread, Tauri runs commands concurrently. So a read sent before a
+  // mutation landed can answer after a later read that already shows it, and its stale result
+  // would then stay on screen until the next refresh: a commit's own Undo button never appearing
+  // (#342). Each `refresh()` (when it sends its reads) and each `refreshUndoState()` takes a
+  // ticket; a result is applied only when no read sent after it has been applied already.
+  const readOrder = useRef({ issued: 0, refreshApplied: 0, undoApplied: 0 });
+  const takeReadTicket = useCallback(() => ++readOrder.current.issued, []);
   const refresh = useCallback(async () => {
+    let ticket = 0;
     try {
       const [graphBranchSelection, graphRemoteBranchSelection] = await Promise.all([
         client.getGraphBranchSelection(repoPath),
         client.getGraphRemoteBranchSelection(repoPath),
       ]);
       const limit = graphLimit.current;
+      ticket = takeReadTicket();
       const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, forgeRepositories, headInfo, undoState] =
         await Promise.all([
           client.getStatus(repoPath),
@@ -437,6 +447,15 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const reflog = selectedReference === null
         ? []
         : await client.getReflog(repoPath, selectedReference);
+      const order = readOrder.current;
+      if (ticket < order.refreshApplied) {
+        // A refresh that sent its reads later has already landed: these results are older.
+        setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1 }));
+        return;
+      }
+      order.refreshApplied = ticket;
+      const undoIsNewest = ticket > order.undoApplied;
+      if (undoIsNewest) order.undoApplied = ticket;
       const own = refreshError.take();
       setState((prev) => ({
         ...prev,
@@ -464,7 +483,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           ? { currentStep: headInfo.rebase.currentStep, totalSteps: headInfo.rebase.totalSteps }
           : null,
         forgeRepositories,
-        undoState,
+        undoState: undoIsNewest ? undoState : prev.undoState,
         error: errorAfterOwnSuccess(prev.error, own),
         refreshGeneration: prev.refreshGeneration + 1,
       }));
@@ -477,6 +496,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       // Still advances `refreshGeneration`: a mutation that landed before this refresh failed has
       // changed the working tree all the same, so open diffs shouldn't keep trusting what they
       // last fetched.
+      if (ticket !== 0 && ticket < readOrder.current.refreshApplied) {
+        // Superseded as above: a later refresh already succeeded.
+        setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1 }));
+        return;
+      }
       const message = credentialFailureMessage(err);
       refreshError.set(message);
       setState((prev) => ({
@@ -485,18 +509,23 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         refreshGeneration: prev.refreshGeneration + 1,
       }));
     }
-  }, [client, repoPath, refreshError, setState]);
+  }, [client, repoPath, refreshError, setState, takeReadTicket]);
 
   // Cheap focus-time re-check: another process (CLI, the other frontend) may have changed what
-  // undo would do. Errors are ignored — the next full refresh reports them.
+  // undo would do. Errors are ignored — the next full refresh reports them. Ordered with
+  // `refresh()`'s reads (see `readOrder`): a focus that lands during a commit must not put the
+  // pre-commit state back after the commit's refresh.
   const refreshUndoState = useCallback(async () => {
+    const ticket = takeReadTicket();
     try {
       const undoState = await client.getUndoState(repoPath);
+      if (ticket < readOrder.current.undoApplied) return;
+      readOrder.current.undoApplied = ticket;
       setState((prev) => ({ ...prev, undoState }));
     } catch {
       // ignored, see above
     }
-  }, [client, repoPath, setState]);
+  }, [client, repoPath, setState, takeReadTicket]);
 
   const loadMoreHistory = useCallback(async () => {
     graphLimit.current += GRAPH_PAGE_SIZE;
@@ -562,6 +591,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runMutation,
     runOptimisticMutation,
     runOptimisticMutationWithMessage,
+    setState,
+    state.worktrees,
   );
 
   const { initSubmodule, updateSubmodule } = useSubmoduleActions(client, repoPath, runMutation);
@@ -623,6 +654,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     state.upstream,
     state.fetchPrune,
     currentBranch,
+    state.remotes,
+    state.tags,
   );
 
   const {

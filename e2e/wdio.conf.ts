@@ -363,11 +363,9 @@ export const config: WebdriverIO.Config = {
       },
     },
   ],
-  // WebdriverIO 10 makes `$` strict by default: it throws when a selector matches more than one
-  // element. Several specs and helpers rely on the v9 behaviour, the first match (for example
-  // `section[aria-label='Branches'] button[aria-expanded]`, which also matches folder toggles).
-  // Keep the v9 behaviour until those selectors are made unique.
-  strictSelectors: false,
+  // `$` is strict (WebdriverIO 10's default): it throws when a selector matches more than one
+  // element, so a spec can't silently act on the wrong one. Make a selector unique; where the
+  // first match is really meant, say so with `$$(selector)[0]` (#394).
   framework: "mocha",
   reporters: ["spec"],
   mochaOpts: {

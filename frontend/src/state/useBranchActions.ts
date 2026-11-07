@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { coversEveryBranch, withRenamedBranch, withoutBranch } from "../lib/graphSelection";
 import type { RepoClient } from "../ipc/RepoClient";
+import { refNameClash, takenNameMessage } from "../lib/takenNames";
 import type { AppState } from "./useAppState";
 import type {
   RunMutation,
@@ -70,16 +71,38 @@ export function useBranchActions(
     [client, repoPath],
   );
 
+  // A name that is taken (or a folder of a taken one) is refused before the optimistic update:
+  // `buildBranchTree` would otherwise put the new row in the existing branch's place until the
+  // backend refused it (#413). `except` is the branch being renamed.
+  const refuseTaken = useCallback(
+    (name: string, except: string | null): string | null => {
+      const others = branchNamesRef.current.filter((candidate) => candidate !== except);
+      const clash = refNameClash(others, name);
+      if (clash === null) return null;
+      const message = takenNameMessage("branch", name, clash);
+      setState((prev) => ({ ...prev, error: message }));
+      return message;
+    },
+    [setState],
+  );
+
   const createBranch = useCallback(
-    (name: string, startPoint: string) =>
-      runOptimisticMutationWithMessage(
-        (prev) => ({ ...prev, branches: [...prev.branches, { name, isCurrent: false }] }),
+    async (name: string, startPoint: string) => {
+      const refused = refuseTaken(name, null);
+      if (refused !== null) return refused;
+      return runOptimisticMutationWithMessage(
+        (prev) =>
+          // Never in place of a branch that arrived since the check above.
+          refNameClash(prev.branches.map((branch) => branch.name), name) !== null
+            ? prev
+            : { ...prev, branches: [...prev.branches, { name, isCurrent: false }] },
         async () => {
           await client.createBranch(repoPath, name, startPoint);
           setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
         },
-      ),
-    [client, runOptimisticMutationWithMessage, repoPath, setState],
+      );
+    },
+    [client, refuseTaken, runOptimisticMutationWithMessage, repoPath, setState],
   );
   const switchBranch = useCallback(
     (name: string) =>
@@ -105,19 +128,27 @@ export function useBranchActions(
     [client, runOptimisticMutation, repoPath, updateSelection],
   );
   const renameBranch = useCallback(
-    (oldName: string, newName: string) =>
-      runOptimisticMutation(
-        (prev) => ({
-          ...prev,
-          branches: prev.branches.map((branch) => (branch.name === oldName ? { ...branch, name: newName } : branch)),
-        }),
+    async (oldName: string, newName: string) => {
+      if (refuseTaken(newName, oldName) !== null) return;
+      await runOptimisticMutation(
+        (prev) =>
+          refNameClash(
+            prev.branches.map((branch) => branch.name).filter((name) => name !== oldName),
+            newName,
+          ) !== null
+            ? prev
+            : {
+                ...prev,
+                branches: prev.branches.map((branch) => (branch.name === oldName ? { ...branch, name: newName } : branch)),
+              },
         async () => {
           await client.renameBranch(repoPath, oldName, newName);
           const next = withRenamedBranch(selectionRef.current, oldName, newName);
           if (next !== null) await updateSelection(next, "rename");
         },
-      ),
-    [client, runOptimisticMutation, repoPath, updateSelection],
+      );
+    },
+    [client, refuseTaken, runOptimisticMutation, repoPath, updateSelection],
   );
 
   const openCreateBranchDraft = useCallback(

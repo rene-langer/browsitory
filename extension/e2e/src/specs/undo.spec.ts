@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import * as vscode from "vscode";
 import { connectToWebview } from "../support/webviewPage";
 
@@ -37,8 +39,26 @@ describe("Browsitory VSCode extension undo", () => {
       await webview.clickByText("button", "Commit");
       await waitUntil(() => git("log", "-1", "--format=%s") === summary, "commit did not land");
 
-      const undoButton = `button[aria-label="Undo Commit “${summary}”"]`;
-      await webview.waitForSelector(undoButton, 15000);
+      // The label can show while a mutation is still pending, and a click on the then disabled
+      // button does nothing: wait until it is enabled too.
+      const undoButton = `button[aria-label="Undo Commit “${summary}”"]:not(:disabled)`;
+      try {
+        await webview.waitForSelector(undoButton, 15000);
+      } catch (error) {
+        // #342: say what the toolbar shows and what the undo history holds on disk.
+        const shown = await webview.attributes('[aria-label="Undo"] button', "aria-label").catch(String);
+        let stored = "";
+        try {
+          stored = fs.readFileSync(path.join(git("rev-parse", "--absolute-git-dir"), "browsitory", "undo.json"), "utf8");
+        } catch (readError) {
+          stored = String(readError);
+        }
+        const labels = stored.match(/"label":\s*"[^"]*"/g) ?? [];
+        throw new Error(
+          `${String(error)}\ntoolbar: ${JSON.stringify(shown)}\nundo.json labels: ${labels.join(", ")}\n` +
+            `page text:\n${await webview.bodyText().catch(String)}`,
+        );
+      }
       await webview.click(undoButton);
       await waitUntil(() => git("rev-parse", "HEAD") === tipBefore, "undo did not move HEAD back");
       if (!git("diff", "--cached", "--name-only").split("\n").includes(file)) {
@@ -48,7 +68,8 @@ describe("Browsitory VSCode extension undo", () => {
       await webview.close();
       await vscode.commands.executeCommand("workbench.action.closeAllEditors");
       try {
-        git("reset", "-q");
+        // A failed undo leaves the commit: drop it, so later specs see the fixture as before.
+        git("reset", "-q", tipBefore);
       } catch {
         // best effort cleanup
       }

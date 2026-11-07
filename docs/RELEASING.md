@@ -45,7 +45,7 @@ In the same release-prep pull request (or one before it):
    anything the changelog makes out of date. Check `docs/guide/install.md` against how this
    release ships (file names, pre-release or not, see `VSIX_PRE_RELEASE` below).
 3. CI's `Docs` workflow (`.github/workflows/docs.yml`) builds the site with
-   `mkdocs build --strict` on the pull request and publishes it to
+   `zensical build --strict` (plus `scripts/check-docs-nav.py`) on the pull request and publishes it to
    <https://rene-langer.github.io/browsitory/> once it is on `main`.
 
 The Marketplace and Open VSX pages show `extension/README.md`, with images loaded from `main`
