@@ -1122,6 +1122,39 @@ describe("App", () => {
     expect(screen.queryByRole("dialog", { name: "Push main" })).toBeNull();
   });
 
+  it("renames a branch inline with the name trimmed, and an unchanged name never reaches the client (#418)", async () => {
+    localStorage.clear();
+    const renameBranch = vi.fn(async () => {});
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [
+        { name: "main", isCurrent: true },
+        { name: "topic", isCurrent: false },
+      ],
+      listStashes: async () => [],
+      renameBranch,
+    });
+    render(<App client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Actions for topic" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename topic" }), { key: "Enter" });
+    expect(screen.queryByRole("textbox", { name: "Rename topic" })).toBeNull();
+    expect(renameBranch).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for topic" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+    const input = screen.getByRole("textbox", { name: "Rename topic" });
+    fireEvent.change(input, { target: { value: " topic/old " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(renameBranch).toHaveBeenCalledWith("/repos/a", "topic", "topic/old"));
+    localStorage.clear();
+  });
+
   it("refuses Create tag with a taken name inline, without listing the tag twice (#413)", async () => {
     localStorage.clear();
     const createTag = vi.fn(async () => {});

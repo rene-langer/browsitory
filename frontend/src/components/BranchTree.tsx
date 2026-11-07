@@ -1,4 +1,4 @@
-import { branchNameProblem } from "../lib/refName";
+import { branchNameProblem, remoteNameProblem } from "../lib/refName";
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactElement } from "react";
 import { ChevronRight, Cloud, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import type {
@@ -339,10 +339,12 @@ export function BranchTree({
                 autoFocus
                 aria-label={`Rename ${branch.name}`}
                 value={renameValue}
+                aria-invalid={renameProblem !== null}
+                aria-describedby={renameProblem !== null ? "rename-branch-problem" : undefined}
                 onChange={(event) => setRenameValue(event.target.value)}
                 onFocus={(event) => event.currentTarget.select()}
                 onBlur={() => {
-                  if (renameValue === branch.name) setRenaming(null);
+                  if (renameValue.trim() === branch.name) setRenaming(null);
                 }}
                 onKeyDown={(event) => handleRenameKeyDown(event, branch.name)}
               />
@@ -387,6 +389,11 @@ export function BranchTree({
               </button>
             )}
           </div>
+          {isRenaming && renameProblem !== null && (
+            <p id="rename-branch-problem" className={styles.draftProblem}>
+              {renameProblem}
+            </p>
+          )}
         </ListRow>
       );
     });
@@ -541,6 +548,12 @@ export function BranchTree({
     const fetchUrl = newFetchUrl.trim();
     const name = (newRemoteName.trim() || deriveRemoteName(fetchUrl, remotes.map((r) => r.name))).trim();
     if (name === "" || fetchUrl === "") return;
+    // The name field shows the same check as you type; a name derived from the URL is checked here.
+    const problem = remoteNameProblem(name);
+    if (problem !== null) {
+      setAddError(problem);
+      return;
+    }
     const failure = await onAddRemote(name, fetchUrl, newPushUrl.trim() || null);
     if (failure !== null) {
       setAddError(failure);
@@ -653,6 +666,8 @@ export function BranchTree({
   };
 
   const newBranchProblem = branchNameProblem(newBranchName.trim());
+  const renameProblem = renaming !== null ? branchNameProblem(renameValue.trim()) : null;
+  const newRemoteProblem = remoteNameProblem(newRemoteName.trim());
   const startPoint = createBranchDraft?.startPoint ?? "HEAD";
   const currentBranchName = branches.find((branch) => branch.isCurrent)?.name;
   // Read-only, so never disabled; on a detached HEAD the compare runs against HEAD.
@@ -694,11 +709,14 @@ export function BranchTree({
     onSetGraphRemoteBranchSelection(next);
   };
 
+  // Like the New branch form (#418): the name is trimmed, an unchanged one just closes the input
+  // without a backend call, and a name `branchNameProblem` rejects stays open with its message.
   const handleRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>, oldName: string) => {
     if (event.key === "Enter") {
-      if (renameValue.trim() === "") return;
-      onRenameBranch(oldName, renameValue);
+      const newName = renameValue.trim();
+      if (newName === "" || renameProblem !== null) return;
       setRenaming(null);
+      if (newName !== oldName) onRenameBranch(oldName, newName);
     } else if (event.key === "Escape") {
       event.stopPropagation();
       setRenaming(null);
@@ -879,12 +897,19 @@ export function BranchTree({
                 autoFocus
                 placeholder="origin"
                 value={newRemoteName}
+                aria-invalid={newRemoteProblem !== null}
+                aria-describedby={newRemoteProblem !== null ? "new-remote-name-problem" : undefined}
                 onChange={(event) => {
                   setNameTouched(true);
                   setNewRemoteName(event.target.value);
                 }}
               />
             </label>
+            {newRemoteProblem !== null && (
+              <p id="new-remote-name-problem" className={styles.draftProblem}>
+                {newRemoteProblem}
+              </p>
+            )}
             <label className={styles.label}>
               Fetch URL
               <input
@@ -927,7 +952,7 @@ export function BranchTree({
             </details>
             <button
               type="submit"
-              disabled={operationDisabled}
+              disabled={operationDisabled || newRemoteProblem !== null}
               title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
             >
               Add remote
