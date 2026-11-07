@@ -602,9 +602,15 @@ certificate.
   progress) — so a commit/stage queued on the single in-order repo worker never waits behind
   thousands of `path:`/`contents:` tree diffs; a time-boxed page just returns `next_cursor`
   and the frontend's paging round continues.
-- The cursor is `<offset>:<fingerprint of the start oids>`; resuming re-walks and skips
-  `offset` (polling cancel every 1,024 skipped commits), and any moved start point is
-  `StaleCursor` instead of a duplicate or a gap.
+- Exactly one branch in the graph selection (what "Isolate branch" sets) makes both
+  `graph::graph_log` and `search_commits` (without a `branch:` term) walk first parents only
+  (`graph::walks_first_parent`, #380): the branch's own commits and merges, not the merged side
+  branches. Merges keep every `parent_ids` entry; the frontend's `assignLanes` gives a merge
+  parent that isn't in the list no lane (`hiddenParentIds`, drawn as a short stub) instead of a
+  lane running to the bottom. No selection or several branches walk every ancestor.
+- The cursor is `<offset>:<fingerprint of the start oids and first-parent mode>`; resuming
+  re-walks and skips `offset` (polling cancel every 1,024 skipped commits), and any moved start
+  point is `StaleCursor` instead of a duplicate or a gap.
 - A refresh after any mutation (or a graph branch selection change) deliberately restarts an
   open search from page 1 rather than resuming its cursor.
 - One in-flight search per repo: `WorkerHandle::search_commits` bumps a shared

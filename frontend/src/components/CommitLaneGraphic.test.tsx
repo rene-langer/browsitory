@@ -10,6 +10,7 @@ describe("CommitLaneGraphic", () => {
       lane: 1,
       laneSegmentId: 1,
       parentConnections: [],
+      hiddenParentIds: [],
       passThroughLanes: [],
     };
 
@@ -29,6 +30,7 @@ describe("CommitLaneGraphic", () => {
         { parentId: "b", lane: 0, segmentId: 0 },
         { parentId: "c", lane: 1, segmentId: 1 },
       ],
+      hiddenParentIds: [],
       passThroughLanes: [{ lane: 0, segmentId: 0 }],
     };
 
@@ -39,12 +41,52 @@ describe("CommitLaneGraphic", () => {
     expect(lines.length).toBe(3);
   });
 
+  it("draws a short stub inside its own lane column for a merge parent not in the list", () => {
+    const layout: CommitLayout = {
+      commitId: "merge",
+      lane: 0,
+      laneSegmentId: 0,
+      parentConnections: [{ parentId: "first", lane: 0, segmentId: 0 }],
+      hiddenParentIds: ["side"],
+      passThroughLanes: [{ lane: 0, segmentId: 0 }],
+    };
+
+    const { container, getByTestId } = render(<CommitLaneGraphic layout={layout} totalLanes={1} />);
+
+    const stub = getByTestId("hidden-parent-stub");
+    expect(stub.querySelector("title")?.textContent).toBe("Merged from a branch not shown in this view");
+    // Upper own line + first-parent connector + the stub's line; no line to another lane.
+    expect(container.querySelectorAll("line")).toHaveLength(3);
+    for (const element of stub.querySelectorAll("line, circle")) {
+      const xs = ["x1", "x2", "cx"].map((a) => element.getAttribute(a)).filter((v) => v !== null);
+      for (const x of xs) {
+        expect(Number(x)).toBeLessThanOrEqual(16);
+      }
+    }
+  });
+
+  it("draws no stub when every parent is in the list", () => {
+    const layout: CommitLayout = {
+      commitId: "a",
+      lane: 0,
+      laneSegmentId: 0,
+      parentConnections: [{ parentId: "b", lane: 0, segmentId: 0 }],
+      hiddenParentIds: [],
+      passThroughLanes: [],
+    };
+
+    const { queryByTestId } = render(<CommitLaneGraphic layout={layout} totalLanes={1} />);
+
+    expect(queryByTestId("hidden-parent-stub")).toBeNull();
+  });
+
   it("sizes the svg to totalLanes", () => {
     const layout: CommitLayout = {
       commitId: "a",
       lane: 0,
       laneSegmentId: 0,
       parentConnections: [],
+      hiddenParentIds: [],
       passThroughLanes: [],
     };
 
@@ -64,6 +106,7 @@ describe("CommitLaneGraphic", () => {
       lane: 0,
       laneSegmentId: 0,
       parentConnections: [],
+      hiddenParentIds: [],
       passThroughLanes: [],
     };
 
@@ -81,6 +124,7 @@ describe("CommitLaneGraphic", () => {
       lane: 1,
       laneSegmentId: 1,
       parentConnections: [],
+      hiddenParentIds: [],
       passThroughLanes: [
         { lane: 0, segmentId: 0 },
         { lane: 1, segmentId: 1 },
@@ -114,6 +158,7 @@ describe("CommitLaneGraphic", () => {
       lane: 1,
       laneSegmentId: 7,
       parentConnections: [],
+      hiddenParentIds: [],
       passThroughLanes: [],
     };
 
@@ -136,6 +181,7 @@ describe("CommitLaneGraphic", () => {
       lane: 0,
       laneSegmentId: 0,
       parentConnections: [{ parentId: "p", lane: 2, segmentId: 2 }],
+      hiddenParentIds: [],
       passThroughLanes: [
         { lane: 0, segmentId: 0 },
         { lane: 1, segmentId: 1 },
@@ -172,6 +218,7 @@ describe("CommitLaneGraphic", () => {
       lane: 1,
       laneSegmentId: 1,
       parentConnections: [{ parentId: "shared-parent", lane: 0, segmentId: 0 }],
+      hiddenParentIds: [],
       passThroughLanes: [
         { lane: 0, segmentId: 0 },
         { lane: 1, segmentId: 1 },
@@ -197,6 +244,7 @@ describe("CommitLaneGraphic", () => {
       lane: 0,
       laneSegmentId: 0,
       parentConnections: [],
+      hiddenParentIds: [],
       passThroughLanes: [{ lane: 0, segmentId: 0 }],
     };
 

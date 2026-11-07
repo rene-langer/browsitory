@@ -36,6 +36,7 @@ describe("assignLanes", () => {
       lane: 0,
       laneSegmentId: 0,
       parentConnections: [{ parentId: "M1", lane: 0, segmentId: 0 }],
+      hiddenParentIds: [],
       passThroughLanes: [],
     });
     expect(layouts[1]).toEqual({
@@ -43,6 +44,7 @@ describe("assignLanes", () => {
       lane: 1,
       laneSegmentId: 1,
       parentConnections: [{ parentId: "M1", lane: 0, segmentId: 0 }],
+      hiddenParentIds: [],
       passThroughLanes: [{ lane: 0, segmentId: 0 }],
     });
     expect(layouts[2].lane).toBe(0);
@@ -65,6 +67,7 @@ describe("assignLanes", () => {
       lane: 1,
       laneSegmentId: 1,
       parentConnections: [{ parentId: "M1", lane: 0, segmentId: 0 }],
+      hiddenParentIds: [],
       passThroughLanes: [
         { lane: 0, segmentId: 0 },
         { lane: 1, segmentId: 1 },
@@ -94,6 +97,38 @@ describe("assignLanes", () => {
     expect(f1.lane).toBe(1);
     expect(f2.lane).toBe(1);
     expect(f1.laneSegmentId).not.toBe(f2.laneSegmentId);
+  });
+
+  it("gives a merge parent that is not in the list no lane, only a hidden-parent entry", () => {
+    // An isolated branch's first-parent line: M2 merged F3, which the walk left out.
+    const commits = [commit("After", ["M2"]), commit("M2", ["M1", "F3"]), commit("M1", ["Base"]), commit("Base", [])];
+
+    const layouts = assignLanes(commits);
+
+    expect(layouts.map((l) => l.lane)).toEqual([0, 0, 0, 0]);
+    expect(layouts[1].parentConnections).toEqual([{ parentId: "M1", lane: 0, segmentId: 0 }]);
+    expect(layouts[1].hiddenParentIds).toEqual(["F3"]);
+    // No lane runs on below the merge waiting for F3.
+    expect(layouts[2].passThroughLanes).toEqual([{ lane: 0, segmentId: 0 }]);
+    expect(layouts[3].passThroughLanes).toEqual([{ lane: 0, segmentId: 0 }]);
+    expect(layouts.flatMap((l) => l.hiddenParentIds)).toEqual(["F3"]);
+  });
+
+  it("keeps a lane for a merge parent that is in the list", () => {
+    const commits = [commit("M2", ["M1", "F1"]), commit("F1", ["M1"]), commit("M1", [])];
+
+    const layouts = assignLanes(commits);
+
+    expect(layouts[0].hiddenParentIds).toEqual([]);
+    expect(layouts[0].parentConnections).toHaveLength(2);
+  });
+
+  it("still runs a first parent past the end of the list down as a lane", () => {
+    // The page cut off below B: its first parent A isn't loaded yet, but B's line continues.
+    const layouts = assignLanes([commit("C", ["B"]), commit("B", ["A"])]);
+
+    expect(layouts[1].hiddenParentIds).toEqual([]);
+    expect(layouts[1].parentConnections).toEqual([{ parentId: "A", lane: 0, segmentId: 0 }]);
   });
 });
 

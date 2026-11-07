@@ -25,8 +25,10 @@ Press ↓ in the field to move into the results.
 - Dates are whole days in the commit's own timezone, inclusive.
 - `path:` and `contents:` look at what a commit changed compared with its first parent, so a
   merge counts as the changes it brought in.
-- Without `branch:`, the search covers the branches the graph shows (see
-  [Which branches the graph shows](history.md#which-branches-the-graph-shows)).
+- Without `branch:`, the search covers the commits the graph shows (see
+  [Which branches the graph shows](history.md#which-branches-the-graph-shows)): with a single
+  branch in the graph, only that branch's own line, as in the graph. `branch:NAME` always
+  searches every commit reachable from NAME, merged branches included.
 - Results load 100 at a time, and "Scanned N commits…" shows progress on large histories.
 - Selecting a result shows its diff as usual.
 - Esc or × goes back to the graph and the previous selection.

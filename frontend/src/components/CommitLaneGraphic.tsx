@@ -104,6 +104,27 @@ export function CommitLaneGraphic({
     />
   ));
 
+  // A merge whose other parent isn't in the list (the side branch of an isolated branch, or a
+  // parent past the loaded page) gets a short dashed stub ending in a small open ring, toward
+  // where a merged branch's lane would come in, instead of a lane to nowhere. It stays inside
+  // this lane's own column, so it never touches a neighbouring lane.
+  const ownX = laneCenterX(layout.lane);
+  const hiddenParentStub =
+    layout.hiddenParentIds.length > 0 ? (
+      <g
+        key="hidden-parent"
+        data-testid="hidden-parent-stub"
+        stroke={laneColor(layout.lane)}
+        strokeWidth={1.5}
+        fill="none"
+        opacity={opacityFor(layout.laneSegmentId, hoveredSegmentId)}
+      >
+        <title>Merged from a branch not shown in this view</title>
+        <line x1={ownX} y1={midY} x2={ownX + 5} y2={midY + 6} strokeDasharray="2 1.5" />
+        <circle cx={ownX + 5.5} cy={midY + 7.5} r={1.75} fill="var(--color-bg)" />
+      </g>
+    ) : null;
+
   return (
     <svg
       width={width}
@@ -115,6 +136,7 @@ export function CommitLaneGraphic({
       {otherPassThroughLines}
       {ownUpperLine}
       {connectionLines}
+      {hiddenParentStub}
       <circle
         cx={laneCenterX(layout.lane)}
         cy={midY}

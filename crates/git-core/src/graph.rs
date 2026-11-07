@@ -109,6 +109,18 @@ impl RefDecorations {
     }
 }
 
+/// True when a walk over `selected_branches` follows first parents only: exactly one branch is
+/// selected (what "Isolate branch" produces). That branch's line is then its merge commits plus
+/// the commits made directly on it; the commits of merged side branches are left out. No
+/// selection (every local branch) or several branches walk every ancestor (#380).
+pub(crate) fn walks_first_parent(selected_branches: Option<&[String]>) -> bool {
+    matches!(selected_branches, Some([_]))
+}
+
+/// The commits of `selected_branches` (`None` = every local branch), children before parents
+/// (`TOPOLOGICAL | TIME`), at most `limit`. With exactly one selected branch the walk follows
+/// first parents only (see [`walks_first_parent`]); a merge commit still lists all its
+/// `parent_ids`, so its other parents are usually not in the result.
 pub fn graph_log(
     repo: &Repository,
     limit: usize,
@@ -118,6 +130,9 @@ pub fn graph_log(
 
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+    if walks_first_parent(selected_branches) {
+        revwalk.simplify_first_parent()?;
+    }
     match selected_branches {
         // On a repo with no commits yet, there are no local branches to match, so this simply
         // pushes nothing — the loop below then runs zero times, giving an empty graph. Unlike
