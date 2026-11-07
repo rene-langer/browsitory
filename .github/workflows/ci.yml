@@ -381,15 +381,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-      # Caches ~/.cargo only (registry and the tauri-cli binary installed below), not target/:
+      # Caches ~/.cargo only (the registry), not target/:
       # the release builds for three OSes would take a large share of the 10 GB repository
       # cache limit and evict the caches the PR jobs use. This job runs only on main.
       - uses: Swatinem/rust-cache@v2
         with:
           cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --locked
       - uses: pnpm/action-setup@v6
         with:
           version: 9  # frontend/pnpm-lock.yaml pins pnpm@9.15.9
@@ -398,6 +396,8 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+      # The build-dist scripts run the @tauri-apps/cli that frontend/pnpm-lock.yaml locks, as
+      # release.yml's build-release does, so this job bundles with the release's CLI (#430).
       - name: Build distributable (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: scripts/build-dist.sh ${{ matrix.os == 'macos-latest' && '--target universal-apple-darwin' || '' }}

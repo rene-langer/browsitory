@@ -1,9 +1,10 @@
 # Build a standalone Browsitory distributable for Windows.
 #
-# Produces .msi and .exe (NSIS) installers via `cargo tauri build`. Every installer carries
+# Produces .msi and .exe (NSIS) installers via `tauri build`, run with the @tauri-apps/cli that
+# frontend/pnpm-lock.yaml locks (the one the release build runs, #430). Every installer carries
 # THIRD_PARTY_NOTICES.md as a Tauri resource (tauri.conf.json); a copy is also put next to them.
 #
-# Usage: scripts\build-dist.ps1 [extra cargo-tauri build args]
+# Usage: scripts\build-dist.ps1 [extra tauri build args]
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
@@ -13,19 +14,25 @@ if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-cargo tauri --version | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "tauri-cli not found; install with: cargo install tauri-cli"
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    Write-Error "node not found (https://nodejs.org)"
     exit 1
 }
 
 Write-Host "==> Installing frontend dependencies"
 pnpm --dir "$repoRoot\frontend" install --frozen-lockfile
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# Run with node from crates\tauri-app, where the CLI finds tauri.conf.json (`pnpm exec` would
+# run it in frontend\).
+$tauriCli = Join-Path $repoRoot "frontend\node_modules\@tauri-apps\cli\tauri.js"
 
 Write-Host "==> Building distributable"
 Push-Location "$repoRoot\crates\tauri-app"
 try {
-    cargo tauri build @args
+    node $tauriCli --version
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node $tauriCli build @args
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Pop-Location
