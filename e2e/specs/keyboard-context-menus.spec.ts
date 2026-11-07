@@ -11,8 +11,9 @@ const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-keyboard-remote.
 const REMOTE_NAME = "kbd-origin";
 
 // Same retrying open as `command-palette.spec.ts`'s `openPalette` (Ctrl+K can arrive before the
-// workspace's key handler is attached right after `beforeTest`'s reload).
-async function runPaletteCommand(query: string): Promise<void> {
+// workspace's key handler is attached right after `beforeTest`'s reload). `label` is the full
+// label of the command to run, typed as the query.
+async function runPaletteCommand(label: string): Promise<void> {
   await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 10000 });
   const input = await $('input[aria-label="Command palette"]');
   await browser.waitUntil(
@@ -26,7 +27,21 @@ async function runPaletteCommand(query: string): Promise<void> {
     },
     { timeout: 10000, interval: 0, timeoutMsg: "expected Ctrl/Cmd+K to open the command palette" },
   );
-  await input.setValue(query);
+  await input.setValue(label);
+  // The Branches section renders as soon as the repo is open, before the first `refresh()` after
+  // `beforeTest`'s reload has listed the remotes, and the palette has one entry per listed
+  // remote. Enter pressed before that entry exists runs nothing and leaves the palette open
+  // (#434), so wait until the highlighted option, the one Enter runs, is this command.
+  // `textContent` via `browser.execute`: `getText()` returns "" inside the palette's native
+  // <dialog> (see `command-palette.spec.ts`).
+  await browser.waitUntil(
+    async () =>
+      (await browser.execute((el) => {
+        const id = (el as HTMLElement).getAttribute("aria-activedescendant");
+        return id === null ? null : (document.getElementById(id)?.textContent ?? null);
+      }, input)) === label,
+    { timeout: 10000, timeoutMsg: `expected the command palette to highlight "${label}"` },
+  );
   await browser.keys(["Enter"]);
   await input.waitForDisplayed({ reverse: true, timeout: 10000 });
 }
