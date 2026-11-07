@@ -163,7 +163,7 @@ Semantic versioning; a `release/MAJOR.MINOR.PATCH` tag (no `v` prefix) triggers
 ## License policy
 
 Permissive dependencies only: MIT, Apache-2.0, ISC, BSD-2-Clause, BSD-3-Clause, MIT-0,
-Unicode-3.0, Zlib, BlueOak-1.0.0 and PSF-2.0 / Python-2.0. One deliberate exception,
+Unicode-3.0, Zlib, BlueOak-1.0.0, 0BSD and PSF-2.0 / Python-2.0. One deliberate exception,
 `libgit2-sys` (vendored libgit2), plus per-package owner decisions for a few Rust crates and
 dev-only npm packages; all are listed in `docs/LICENSE_COMPLIANCE.md`. Never add a licence or
 an exception on your own: ask the owner. Before adding a dependency: verify its license

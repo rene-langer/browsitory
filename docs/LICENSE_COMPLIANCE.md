@@ -1,8 +1,9 @@
 # License compliance
 
 Browsitory is MIT-licensed. The allowed licences are MIT, Apache-2.0, ISC, BSD-2-Clause,
-BSD-3-Clause, MIT-0, Unicode-3.0, Zlib, BlueOak-1.0.0 and PSF-2.0 / Python-2.0. Anything else
-needs a recorded owner decision: the libgit2 exception and the per-package exceptions below.
+BSD-3-Clause, MIT-0, Unicode-3.0, Zlib, BlueOak-1.0.0, 0BSD and PSF-2.0 / Python-2.0.
+Anything else needs a recorded owner decision: the libgit2 exception and the per-package
+exceptions below.
 
 The tables below list the direct dependencies, verified with `cargo info <crate>` (Rust) and
 `npm info <package> license` (JS) on 2026-08-12, against `crates/*/Cargo.toml`,
@@ -172,11 +173,11 @@ zensical-ui.
 |---|---|---|
 | Inlined icons (all pages) | Apache-2.0 | Pictogrammers' Material Design Icons (Pictogrammers Free License, icons Apache-2.0), including the repository link's icon: `mkdocs.yml` sets `theme.icon.repo: material/git` because the default is Font Awesome's `brands/git-alt` (CC-BY-4.0) (#423). |
 | Icons embedded in the theme CSS | Apache-2.0, MIT | Material Design Icons and GitHub Octicons (MIT), as `data:` URIs. One exception, see the Font Awesome row. |
-| Font Awesome `solid/caret-down`, embedded in the theme CSS | CC-BY-4.0 | The version selector's icon (`--md-version-icon`). We use no version selector, so it is never shown, but it is in the published stylesheets, with its attribution comment. Outside the policy. Open point, no owner decision yet (#423). |
+| Font Awesome `solid/caret-down`, embedded in the theme CSS | CC-BY-4.0 | The version selector's icon (`--md-version-icon`). We use no version selector, so it is never shown, but it is in the published stylesheets. Outside the policy. Owner decision 2026-11-07 (#423): accepted as an exception for the published docs site only; it is in neither the app nor the extension. CC-BY-4.0 asks for attribution, which the icon keeps in its own comment inside the CSS: "Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc." (version and year follow zensical-ui). Don't strip that comment from the published CSS. |
 | clipboard 2.0.11, escape-html 1.0.3 | MIT | In the theme's JavaScript bundle; listed in `assets/javascripts/LICENSE`, published next to it. |
 | rxjs 7.8.2 | Apache-2.0 | Same bundle and list. |
 | focus-visible 5.2.1 | W3C Software License | Same bundle and list. Outside the policy. Owner decision 2026-11-07 (#423): accepted as an exception for the published docs site only; it is in neither the app nor the extension. |
-| tslib helpers | 0BSD | rxjs's runtime helpers (`__extends`, `__generator`, ...) are in the same bundle (their error messages are in the minified code) but not in its `LICENSE` list. Outside the policy. Open point, no owner decision yet (#423). |
+| tslib helpers | 0BSD | rxjs's runtime helpers (`__extends`, `__generator`, ...) are in the same bundle (their error messages are in the minified code) but not in its `LICENSE` list. 0BSD is on the allowed list since 2026-11-07 (owner decision, #423). |
 
 ### Rust crates inside Zensical
 
@@ -250,6 +251,16 @@ with the copyright notice kept. They appear only in the npm dev trees: BlueOak-1
 `minimatch`, `lru-cache`, `path-scurry` and related packages; PSF-2.0 / Python-2.0 in
 `argparse` (through `js-yaml`).
 
+## 0BSD
+
+On the allowed list since 2026-11-07 (owner decision, #423). 0BSD (the Zero-Clause BSD
+licence) allows use, modification and redistribution without even the copyright notice. It
+appears in `tslib` (TypeScript's runtime helpers): in `@vscode/vsce`'s dependencies
+(`extension/`, packaging only; this needed a dev-tree exception until then) and inside the
+user guide site's theme JavaScript (see "Published site assets"). Some Rust crates offer it as
+one option among MIT/Apache-2.0 (`adler2`); `about.toml` lists it last, so the notices still
+carry MIT or Apache-2.0 for those.
+
 ## Rust exceptions
 
 Recorded in `deny.toml`'s `[licenses] exceptions`, pinned by crate name (not version, so a
@@ -292,7 +303,6 @@ not a lookalike such as `lightningcss-plugin`. Owner decision 2026-11-03 (#273).
 | mdn-data | 2 | CC0-1.0 | CSS data for `css-tree` (`jsdom`, tests only). |
 | spdx-license-ids | 3 | CC0-1.0 | SPDX id list for package metadata tools (`@wdio/cli`, `e2e/` only). |
 | spdx-exceptions | 2 | CC-BY-3.0 | SPDX exception list, same tools. |
-| tslib | 2 | 0BSD | TypeScript runtime helpers inside `@vscode/vsce`'s dependencies (`extension/` only). |
 | stream-buffers | 3 | Unlicense | `@wdio/local-runner` (`e2e/` only). |
 | @promptbook/utils | 0 | CC-BY-4.0 | `@wdio/utils` > `locate-app` (`e2e/` only). |
 | binaryextensions, editions, istextorbinary, textextensions, version-range | 6, 6, 9, 6, 4 | Artistic-2.0 | `@vscode/vsce` > secretlint > `istextorbinary` (packaging only). |
