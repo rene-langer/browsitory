@@ -606,7 +606,8 @@ pub fn unstage_hunk(
 struct FoundHunk {
     old_absent: bool,
     new_absent: bool,
-    mode: u32,
+    old_mode: u32,
+    new_mode: u32,
     lines: Vec<PatchLine>,
 }
 
@@ -635,15 +636,11 @@ fn find_hunk(
                 let old_absent =
                     matches!(delta.status(), git2::Delta::Untracked | git2::Delta::Added);
                 let new_absent = matches!(delta.status(), git2::Delta::Deleted);
-                let mode_side = if new_absent {
-                    delta.old_file()
-                } else {
-                    delta.new_file()
-                };
                 *found.borrow_mut() = Some(FoundHunk {
                     old_absent,
                     new_absent,
-                    mode: u32::from(mode_side.mode()),
+                    old_mode: u32::from(delta.old_file().mode()),
+                    new_mode: u32::from(delta.new_file().mode()),
                     lines: Vec::new(),
                 });
             }
@@ -758,7 +755,8 @@ fn apply_selection(
         path,
         old_absent: hunk.old_absent,
         new_absent: hunk.new_absent,
-        mode: hunk.mode,
+        old_mode: hunk.old_mode,
+        new_mode: hunk.new_mode,
         // Emptying the index side of an added/deleted file removes the entry, like `git add`
         // of a deletion. The working tree never loses a file here — deleting an untracked
         // file is `discard_file`'s job, behind its own confirmation.
