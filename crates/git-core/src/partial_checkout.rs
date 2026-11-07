@@ -15,6 +15,7 @@
 //! HEAD has them, so the abort can be tried again.
 
 use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -125,13 +126,14 @@ impl Written {
             return;
         };
         let mut record = self.0.borrow_mut();
+        let mut listings = Listings::default();
         for conflict in conflicts.flatten() {
             for entry in [conflict.ancestor, conflict.our, conflict.their]
                 .into_iter()
                 .flatten()
             {
                 let rel = path_from_bytes(&entry.path);
-                let siblings = side_names(workdir, &rel);
+                let siblings = listings.side_names(workdir, &rel);
                 let before = before(workdir, &rel);
                 record.conflicts.push((entry.path, before, siblings));
             }
@@ -158,11 +160,14 @@ impl Written {
         let Some(workdir) = record.workdir.clone() else {
             return;
         };
+        // A set, not `done.contains`: a checkout that stops late in a large repository has
+        // tens of thousands of both.
+        let done: HashSet<&[u8]> = record.done.iter().map(Vec::as_slice).collect();
         let changed: Vec<Vec<u8>> = record
             .planned
             .iter()
             .filter(|(path, before)| {
-                !record.done.contains(path)
+                !done.contains(path.as_slice())
                     && stamp(&workdir.join(path_from_bytes(path))) != before.stamp
             })
             .map(|(path, _)| path.clone())
@@ -184,14 +189,14 @@ impl Written {
         paths
     }
 
-    /// How many folders of `path` were there before the checkout (none when unknown).
-    fn folders_before(&self, path: &[u8]) -> usize {
-        self.0
-            .borrow()
-            .planned
-            .iter()
-            .find(|(planned, _)| planned == path)
-            .map_or(0, |(_, before)| before.folders)
+    /// How many folders of each planned path were there before the checkout (the first time
+    /// it was planned).
+    fn folders_before(&self) -> HashMap<Vec<u8>, usize> {
+        let mut folders = HashMap::new();
+        for (path, before) in &self.0.borrow().planned {
+            folders.entry(path.clone()).or_insert(before.folders);
+        }
+        folders
     }
 
     /// The `name~*` entries beside a conflict's paths that weren't there before the checkout,
@@ -201,15 +206,18 @@ impl Written {
         let Some(workdir) = record.workdir.as_deref() else {
             return Vec::new();
         };
+        let mut listings = Listings::default();
+        let mut seen = HashSet::new();
         let mut found: Vec<(PathBuf, usize)> = Vec::new();
         for (path, before, siblings) in &record.conflicts {
             let rel = path_from_bytes(path);
-            for name in side_names(workdir, &rel) {
+            for name in listings.side_names(workdir, &rel) {
+                // `siblings` holds only the few names that matched before.
                 if siblings.contains(&name) {
                     continue;
                 }
                 let side = rel.with_file_name(&name);
-                if !found.iter().any(|(known, _)| *known == side) {
+                if seen.insert(side.clone()) {
                     found.push((side, before.folders));
                 }
             }
@@ -218,32 +226,56 @@ impl Written {
     }
 }
 
-/// The names of the entries beside `rel` (relative to `workdir`) that libgit2 may write while
-/// it writes a conflict at `rel`: `<name>~<label>`, and `<name>.lock`, the temporary file a
-/// conflict's merged content goes through, which libgit2 leaves behind when writing it fails.
-fn side_names(workdir: &Path, rel: &Path) -> Vec<OsString> {
-    let Some(name) = rel.file_name() else {
-        return Vec::new();
-    };
-    let mut prefix = name.as_encoded_bytes().to_vec();
-    let mut lock = prefix.clone();
-    lock.extend_from_slice(b".lock");
-    prefix.push(b'~');
-    let folder = match rel.parent() {
-        Some(parent) => workdir.join(parent),
-        None => workdir.to_path_buf(),
-    };
-    let Ok(entries) = std::fs::read_dir(folder) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .map(|entry| entry.file_name())
-        .filter(|name| {
-            let name = name.as_encoded_bytes();
-            name.starts_with(&prefix) || name == lock.as_slice()
-        })
-        .collect()
+/// Each folder's entries, read once and grouped by the conflict name they may belong to, so
+/// many conflicts in one large folder don't read it again for each.
+#[derive(Default)]
+struct Listings(HashMap<PathBuf, HashMap<Vec<u8>, Vec<OsString>>>);
+
+impl Listings {
+    /// The names of the entries beside `rel` (relative to `workdir`) that libgit2 may write
+    /// while it writes a conflict at `rel`: `<name>~<label>`, and `<name>.lock`, the temporary
+    /// file a conflict's merged content goes through, which libgit2 leaves behind when writing
+    /// it fails.
+    fn side_names(&mut self, workdir: &Path, rel: &Path) -> Vec<OsString> {
+        let Some(name) = rel.file_name() else {
+            return Vec::new();
+        };
+        let folder = match rel.parent() {
+            Some(parent) => workdir.join(parent),
+            None => workdir.to_path_buf(),
+        };
+        let groups = self.0.entry(folder).or_insert_with_key(|folder| {
+            let mut groups: HashMap<Vec<u8>, Vec<OsString>> = HashMap::new();
+            let Ok(entries) = std::fs::read_dir(folder) else {
+                return groups;
+            };
+            for entry in entries.flatten() {
+                let entry = entry.file_name();
+                let bytes = entry.as_encoded_bytes();
+                // Under each name it may be a side of: the part before any `~`, and the
+                // name without `.lock`.
+                let mut keys: Vec<&[u8]> = bytes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, byte)| **byte == b'~')
+                    .map(|(at, _)| &bytes[..at])
+                    .collect();
+                if let Some(stem) = bytes.strip_suffix(b".lock") {
+                    keys.push(stem);
+                }
+                keys.sort();
+                keys.dedup();
+                for key in keys {
+                    groups.entry(key.to_vec()).or_default().push(entry.clone());
+                }
+            }
+            groups
+        });
+        groups
+            .get(name.as_encoded_bytes())
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
 /// Why a roll back or roll forward stopped. The caller then reports the operation's own error,
@@ -325,13 +357,15 @@ pub(crate) fn roll_back(repo: &Repository, written: &Written) -> Result<(), Unfi
     // A folder that still holds tracked files is left alone; so is a folder that was there
     // before the checkout, also when it empties (#329).
     let mut to_remove: Vec<(PathBuf, usize)> = Vec::new();
+    let folders_before = written.folders_before();
     for path in created.iter().rev() {
         let mut below = path.clone();
         below.push(b'/');
         if index.find_prefix(&below).is_ok() {
             continue;
         }
-        to_remove.push((path_from_bytes(path), written.folders_before(path)));
+        let keep = folders_before.get(path).copied().unwrap_or(0);
+        to_remove.push((path_from_bytes(path), keep));
     }
     // The sides of a conflict libgit2 wrote under altered names (`f.txt~HEAD`).
     to_remove.extend(written.side_files());
