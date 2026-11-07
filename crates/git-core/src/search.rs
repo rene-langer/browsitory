@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::graph::{walks_first_parent, GraphCommit, RefDecorations};
+use crate::graph::{GraphCommit, GraphSelection, RefDecorations};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchTerm {
@@ -253,9 +253,10 @@ pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 }
 
 /// One page of commits matching `query`, walking `TOPOLOGICAL | TIME` from the query's
-/// `branch:` term, or else from `refs` (`None` = every local branch; missing names are skipped).
-/// Without a `branch:` term, exactly one name in `refs` walks first parents only, like
-/// `graph_log` for the same selection, so search and graph list the same commits (#380).
+/// `branch:` term, or else from the graph's `selection` (local and remote branches alike, see
+/// [`GraphSelection`]; missing names are skipped). Without a `branch:` term, a selection of
+/// exactly one branch walks first parents only, like `graph_log` for the same selection, so
+/// search and graph list the same commits (#380, #385).
 ///
 /// A page ends after `limits.matches` matches, `limits.scan` commits scanned in this call, or
 /// once `limits.time` has elapsed (checked after each commit, so at least one is scanned); in
@@ -267,13 +268,13 @@ pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 pub fn search_commits(
     repo: &Repository,
     query: &SearchQuery,
-    refs: Option<&[String]>,
+    selection: &GraphSelection,
     cursor: Option<&str>,
     limits: PageLimits,
     cancel: &dyn Fn() -> bool,
 ) -> Result<SearchPage, SearchError> {
-    let starts = start_points(repo, query, refs)?;
-    let first_parent = !has_branch_term(query) && walks_first_parent(refs);
+    let starts = start_points(repo, query, selection)?;
+    let first_parent = !has_branch_term(query) && selection.walks_first_parent();
     let fingerprint = fingerprint(&starts, first_parent)?;
     let started = Instant::now();
     let offset = match cursor {
@@ -369,52 +370,31 @@ fn has_branch_term(query: &SearchQuery) -> bool {
 fn start_points(
     repo: &Repository,
     query: &SearchQuery,
-    refs: Option<&[String]>,
+    selection: &GraphSelection,
 ) -> Result<Vec<Oid>, SearchError> {
     let branch = query.terms.iter().find_map(|t| match t {
         SearchTerm::Branch(name) => Some(name),
         _ => None,
     });
-    let mut oids = Vec::new();
-    if let Some(name) = branch {
-        let resolved = ["refs/heads/", "refs/remotes/", "refs/tags/"]
-            .iter()
-            .find_map(|prefix| repo.find_reference(&format!("{prefix}{name}")).ok());
-        let commit = resolved
-            .and_then(|r| r.peel_to_commit().ok())
-            .ok_or_else(|| invalid(format!("No branch named \"{name}\".")))?;
-        oids.push(commit.id());
-    } else {
-        match refs {
-            None => {
-                for reference in repo.references_glob("refs/heads/*")? {
-                    if let Ok(commit) = reference?.peel_to_commit() {
-                        oids.push(commit.id());
-                    }
-                }
-            }
-            Some(names) => {
-                for name in names {
-                    // A persisted graph selection can name a branch deleted since: skip it.
-                    if let Ok(commit) = repo
-                        .find_reference(&format!("refs/heads/{name}"))
-                        .and_then(|r| r.peel_to_commit())
-                    {
-                        oids.push(commit.id());
-                    }
-                }
-            }
-        }
-    }
-    oids.sort();
-    oids.dedup();
-    Ok(oids)
+    let Some(name) = branch else {
+        // The same start points as the graph for this selection.
+        return Ok(selection.start_oids(repo)?);
+    };
+    let resolved = ["refs/heads/", "refs/remotes/", "refs/tags/"]
+        .iter()
+        .find_map(|prefix| repo.find_reference(&format!("{prefix}{name}")).ok());
+    let commit = resolved
+        .and_then(|r| r.peel_to_commit().ok())
+        .ok_or_else(|| invalid(format!("No branch named \"{name}\".")))?;
+    Ok(vec![commit.id()])
 }
 
 /// First 16 hex chars of the blob hash of the sorted, comma-joined start oids.
 /// Identifies a walk: its start oids and whether it follows first parents only, so a cursor from
 /// one walk never resumes the other (one selected branch and two branches at the same commit
-/// share their start oids but not their walk).
+/// share their start oids but not their walk). Start oids and first-parent mode determine the
+/// walk, so a remote branch added to or dropped from the selection (#385) changes the
+/// fingerprint exactly when it changes the walk.
 fn fingerprint(starts: &[Oid], first_parent: bool) -> Result<String, git2::Error> {
     let mut joined = starts
         .iter()

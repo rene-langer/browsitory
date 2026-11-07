@@ -293,7 +293,14 @@ fn a_search_waiting_at_the_gate_is_cancelled_before_it_runs() {
     let (state, keys) = state_with_repos(&[dir.path()]);
     let commit = hold_gate_with_hook(&state, &keys[0]);
     let search = tauri::async_runtime::spawn(
-        super::super::search::queue_search(&state, &keys[0], "base".into(), None, None).unwrap(),
+        super::super::search::queue_search(
+            &state,
+            &keys[0],
+            "base".into(),
+            git_core::graph::GraphSelection::default(),
+            None,
+        )
+        .unwrap(),
     );
 
     super::super::repo_worker(&state, &keys[0])
@@ -309,7 +316,14 @@ fn a_search_waiting_at_the_gate_is_cancelled_before_it_runs() {
     );
     // A search started after the cancel runs normally.
     let page = tauri::async_runtime::block_on(
-        super::super::search::queue_search(&state, &keys[0], "base".into(), None, None).unwrap(),
+        super::super::search::queue_search(
+            &state,
+            &keys[0],
+            "base".into(),
+            git_core::graph::GraphSelection::default(),
+            None,
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(page.commits.len(), 1);

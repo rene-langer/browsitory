@@ -1275,13 +1275,25 @@ describe("vscodeRepoClient", () => {
     await expect(promise).resolves.toEqual(result);
   });
 
+  it("wires getCommitGraph with the local and the remote selection", async () => {
+    const promise = vscodeRepoClient.getCommitGraph("/repo", 50, null, ["origin/feature"]);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_commit_graph",
+      params: { repoPath: "/repo", limit: 50, selectedBranches: null, remoteBranches: ["origin/feature"] },
+    });
+    respond(1, []);
+    await expect(promise).resolves.toEqual([]);
+  });
+
   it("wires searchCommits and cancelSearch", async () => {
-    const promise = vscodeRepoClient.searchCommits("/repo", "fix", ["main"], null);
+    const promise = vscodeRepoClient.searchCommits("/repo", "fix", ["main"], ["origin/x"], null);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "search_commits",
-      params: { repoPath: "/repo", query: "fix", refs: ["main"], cursor: null },
+      params: { repoPath: "/repo", query: "fix", refs: ["main"], remoteBranches: ["origin/x"], cursor: null },
     });
     const page = { commits: [], nextCursor: null, scanned: 3 };
     respond(1, page);

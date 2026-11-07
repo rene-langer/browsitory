@@ -36,6 +36,7 @@ function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps {
     onSetGraphBranchSelection: vi.fn(),
     graphRemoteBranchSelection: null,
     onSetGraphRemoteBranchSelection: vi.fn(),
+    onIsolateGraphBranch: vi.fn(),
     remoteBranchesInGraph: [],
     remotes: [],
     upstream: null,
@@ -226,11 +227,12 @@ describe("BranchTree — local branches", () => {
     expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeDisabled();
   });
 
-  it("a branch's context menu Isolate branch calls onSetGraphBranchSelection with only that branch", () => {
+  it("a branch's context menu Isolate branch isolates only that local branch", () => {
     const { props } = renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Isolate branch" }));
-    expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith(["feat/foo"]);
+    expect(props.onIsolateGraphBranch).toHaveBeenCalledWith("local", "feat/foo");
+    expect(props.onSetGraphBranchSelection).not.toHaveBeenCalled();
   });
 
   it("the header '+' menu's Show all branches is disabled with no saved selection, and restores every branch when a filter is active", () => {
@@ -1303,6 +1305,18 @@ describe("BranchTree — refs and remotes (4b)", () => {
     expect(item).toHaveAttribute("data-destructive", "true");
     fireEvent.click(item);
     expect(props.onOpenDeleteRemoteBranch).toHaveBeenCalledWith("origin", "topic");
+  });
+
+  it("a remote branch's context menu Isolate branch isolates that remote branch (#385)", async () => {
+    const { props } = renderTree({
+      remotes: originOnly,
+      onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const row = (await screen.findByRole("button", { name: "Show origin/topic in graph" })).closest("li")!;
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Isolate branch" }));
+    expect(props.onIsolateGraphBranch).toHaveBeenCalledWith("remote", "origin/topic");
   });
 
   it("disables Delete <remote>/<branch>… while another operation runs", async () => {

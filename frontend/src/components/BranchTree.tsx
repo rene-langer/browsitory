@@ -81,6 +81,7 @@ export function BranchTree({
   onSetGraphBranchSelection,
   graphRemoteBranchSelection,
   onSetGraphRemoteBranchSelection,
+  onIsolateGraphBranch,
   remoteBranchesInGraph,
   remotes,
   upstream,
@@ -142,9 +143,13 @@ export function BranchTree({
   onSetGraphBranchSelection: (selectedBranches: string[]) => void;
   // Same shape as `graphBranchSelection`/`onSetGraphBranchSelection` above, but scoped to
   // remote-tracking branches, keyed by their qualified `<remoteName>/<branchName>` name (see
-  // `useAppState`'s `AppState.graphRemoteBranchSelection`).
+  // `useAppState`'s `AppState.graphRemoteBranchSelection`). A selected remote branch's commits
+  // join the graph (#385); `null` walks none and shows every remote badge in the graph.
   graphRemoteBranchSelection: string[] | null;
   onSetGraphRemoteBranchSelection: (selectedBranches: string[]) => void;
+  // "Isolate branch" on a local or a remote branch: shows only that branch, clearing the other
+  // selection (see `useBranchActions`' `isolateGraphBranch`).
+  onIsolateGraphBranch: (kind: "local" | "remote", name: string) => void;
   // Every remote-tracking ref actually present in the currently-loaded commit graph (same source
   // CommitGraph.tsx's own null-selection fallback uses: `commits.flatMap((c) => c.remoteBranchRefs)`,
   // deduped). Used ONLY as the null-selection fallback below (the remote swatch's `aria-pressed`
@@ -603,6 +608,11 @@ export function BranchTree({
           ]
         : []),
       {
+        label: "Isolate branch",
+        title: "Show only this branch in the commit graph",
+        onSelect: () => onIsolateGraphBranch("remote", `${remoteName}/${branchName}`),
+      },
+      {
         label: `Delete ${remoteName}/${branchName}…`,
         destructive: true,
         disabled: operationDisabled,
@@ -742,7 +752,7 @@ export function BranchTree({
     items.push({
       label: "Isolate branch",
       title: "Show only this branch in the commit graph",
-      onSelect: () => onSetGraphBranchSelection([branch.name]),
+      onSelect: () => onIsolateGraphBranch("local", branch.name),
     });
     items.push({
       label: "Delete",

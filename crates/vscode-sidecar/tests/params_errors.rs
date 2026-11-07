@@ -122,6 +122,17 @@ fn a_missing_later_or_nested_field_is_named() {
             json!({ "repoPath": "/r" }),
             "missing field `limit`",
         ),
+        // The remote selection is required: an old caller can't silently drop it (#385).
+        (
+            "get_commit_graph",
+            json!({ "repoPath": "/r", "limit": 1, "selectedBranches": null }),
+            "missing field `remoteBranches`",
+        ),
+        (
+            "search_commits",
+            json!({ "repoPath": "/r", "query": "q", "refs": null, "cursor": null }),
+            "missing field `remoteBranches`",
+        ),
         (
             "get_commit_diff",
             json!({ "repoPath": "/r", "commitId": "c", "path": "a.txt" }),
@@ -172,7 +183,7 @@ fn extra_fields_absent_options_and_positional_arrays_are_accepted() {
         ),
         (
             "get_commit_graph",
-            json!({ "repoPath": "/nope", "limit": 1 }),
+            json!({ "repoPath": "/nope", "limit": 1, "remoteBranches": [] }),
         ),
         ("get_status", json!(["/nope"])),
     ] {

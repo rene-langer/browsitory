@@ -1,4 +1,5 @@
 use super::*;
+use git_core::graph::GraphSelection;
 
 fn two_commit_repo() -> (TempDir, Repository) {
     let (dir, repo) = init_repo();
@@ -18,7 +19,7 @@ fn search_all_pages(handle: &super::super::WorkerHandle, query: &str) -> (Vec<St
     let mut cursor = None;
     loop {
         let page = handle
-            .search_commits(query.into(), None, cursor.take())
+            .search_commits(query.into(), GraphSelection::default(), cursor.take())
             .unwrap();
         summaries.extend(page.commits.into_iter().map(|c| c.summary));
         match page.next_cursor {
@@ -47,7 +48,7 @@ fn an_invalid_search_query_replies_its_message() {
     assert_eq!(
         worker
             .handle()
-            .search_commits("author:".into(), None, None)
+            .search_commits("author:".into(), GraphSelection::default(), None)
             .unwrap_err(),
         "author: needs a value."
     );
@@ -65,7 +66,7 @@ fn a_search_superseded_before_it_runs_replies_cancelled() {
 
     assert_eq!(
         handle
-            .search_commits_claimed(stale, "alpha".into(), None, None)
+            .search_commits_claimed(stale, "alpha".into(), GraphSelection::default(), None)
             .unwrap_err(),
         "Search cancelled."
     );

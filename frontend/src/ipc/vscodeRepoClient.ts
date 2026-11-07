@@ -220,16 +220,16 @@ export const vscodeRepoClient: RepoClient = {
   openRepo: (path: string) => call<void>("open_repo", { path }),
   closeRepo: (repoPath: string) => call<void>("close_repo", { repoPath }),
   getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
-  getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null) =>
-    call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches }),
+  getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null, remoteBranches: string[]) =>
+    call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches, remoteBranches }),
   getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath: string | null = null) =>
     call<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts, oldPath }),
   getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>
     call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
   getFileHistory: (repoPath: string, path: string, limit: number) =>
     call<FileHistoryEntry[]>("get_file_history", { repoPath, path, limit }),
-  searchCommits: (repoPath: string, query: string, refs: string[] | null, cursor: string | null) =>
-    call<SearchPage>("search_commits", { repoPath, query, refs, cursor }),
+  searchCommits: (repoPath: string, query: string, refs: string[] | null, remoteBranches: string[], cursor: string | null) =>
+    call<SearchPage>("search_commits", { repoPath, query, refs, remoteBranches, cursor }),
   cancelSearch: (repoPath: string) => call<void>("cancel_search", { repoPath }),
   getCommitRenameDiff: (repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions) =>
     call<DiffHunk[]>("get_commit_rename_diff", { repoPath, commitId, oldPath, newPath, opts }),
