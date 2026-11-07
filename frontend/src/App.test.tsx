@@ -1122,6 +1122,37 @@ describe("App", () => {
     expect(screen.queryByRole("dialog", { name: "Push main" })).toBeNull();
   });
 
+  it("refuses Add remote with a taken name inline, without listing the remote twice (#408)", async () => {
+    const addRemote = vi.fn(async () => {});
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [{ name: "main", isCurrent: true }],
+      listStashes: async () => [],
+      listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }],
+      getCurrentUpstream: async () => null,
+      addRemote,
+    });
+    render(<App client={client} />);
+
+    await screen.findByRole("button", { name: "origin" });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add remote…" }));
+    const form = await screen.findByRole("form", { name: "Add remote" });
+    fireEvent.change(within(form).getByLabelText("Remote name"), { target: { value: "origin" } });
+    fireEvent.change(within(form).getByTestId("add-remote-fetch-url"), { target: { value: "../other.git" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Add remote" }));
+
+    expect(await within(form).findByText('A remote named "origin" already exists.')).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "origin" })).toHaveLength(1);
+    expect(addRemote).not.toHaveBeenCalled();
+    // The typed values stay for the user to correct.
+    expect(within(form).getByLabelText("Remote name")).toHaveValue("origin");
+  });
+
   it("deletes a remote branch from its menu through the confirmation dialog", async () => {
     localStorage.clear();
     const deleteRemoteBranch = vi.fn(async () => "delete-remote-1");

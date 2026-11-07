@@ -652,6 +652,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     state.upstream,
     state.fetchPrune,
     currentBranch,
+    state.remotes,
   );
 
   const {
