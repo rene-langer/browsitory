@@ -267,21 +267,33 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
 - Stash file… refuses a case-only rename (`git mv README readme`; `CaseOnlyRename`,
   `refuse_case_only_rename`) where names fold. libgit2's ignore-case index (`core.ignorecase`)
   finds one name as the other, so the stash's index tree held both names and the revert changed
-  nothing. "Case-only" means what libgit2 compares as one entry (`same_in_icase_index`):
+  nothing. "Case-only" means what libgit2 compares as one entry (`icase_index_key`):
   `strcasecmp`/`git__strcasecmp` and a `git__tolower` hash (index.c, index_map.c), ASCII letters
-  only, byte by byte. `Straße`/`Strasse` and NFC/NFD spellings are two names there and stash
-  normally (tested off macOS; APFS takes each pair for one file, so such a rename isn't even
-  possible with `git mv` there, and isn't covered); `worktree_guard::fold_name` (the file-system fold the other stash checks use) is
-  not used for this. The check runs before the ignored-file check, since the staged deletion
-  `Old` can find a file at `Old` (the new `old` on a drive that folds names, or an ignored
+  only, byte by byte; on macOS and Windows also what the drive takes for one file (`stash_fold`,
+  #389). Seen on CI with a rename made by `mv` (`git mv` refuses where the drive folds) and
+  staged by libgit2: APFS folds `Straße`/`Strasse`, `Café`/`CAFÉ` and NFC/NFD spellings
+  (`worktree_guard::fold_name`); NTFS only `Café`/`CAFÉ` (letter-by-letter simple upper case,
+  `ntfs_fold`), not `ß`/`ss` or NFC/NFD. libgit2 kept the two names apart, so Stash all refused
+  with a misleading `IgnoredOverwritten("Straße")` (the deleted old name found the file) and
+  Stash file… with that or `RenameSourceRecreated`; now they get `CaseOnlyRename` like `README`
+  → `readme`. NFC/NFD only matters with `core.precomposeunicode` off: on (git's and libgit2's
+  default on macOS) both read the NFD name as NFC and see no rename. On Linux with
+  `core.ignorecase` the drive and libgit2 keep all of these apart and they stash normally
+  (`a_unicode_rename_the_drive_keeps_apart_stashes_normally`, which also covers `ß` and NFC/NFD
+  on Windows). `git add -A` after such an `mv` keeps the old name (its lstat finds the file) and
+  adds the new one, so the index holds two names of one file. Stash all handles that (libgit2's
+  reset removes the new name before writing the old one; Pop restores both entries), but Stash
+  file… on either name deleted the shared file until Pop, or wrote a stash that changed nothing
+  and Pop refused, so it refuses with `CasePair` (below). The check runs before the
+  ignored-file check, since the staged deletion `Old` can find a file at `Old` (the new `old` on a drive that folds names, or an ignored
   `Old` beside it) and would look like an ignored file removed from the index. "Where names
   fold" is `worktree_guard::try_folds_case`, as for every stash check (#337, #369): macOS, Windows, or
   `core.ignorecase`. The stash never probes the drive (`dir_folds_case`), so on a Linux
   casefold folder or a vfat mount without `core.ignorecase` the check doesn't run. Stash all
   refuses them too (#370; `refuse_staged_case_only_rename`, before `entry_in_the_way` and any
-  write): the index has a path HEAD doesn't, and HEAD a path differing from it only in ASCII
-  case that the index doesn't. Through libgit2's stash, Linux with `core.ignorecase` wrote a
-  stash whose index tree held both names and left the rename in place, and on macOS and Windows
+  write): the index has a path HEAD doesn't, and HEAD a path differing from it only in case
+  (`stash_fold`) that the index doesn't. Through libgit2's stash, Linux with `core.ignorecase`
+  wrote a stash whose index tree held both names and left the rename in place, and on macOS and Windows
   the deleted `Old` found the file `old` (`IgnoredOverwritten("Old")`, seen on CI). `git stash`
   stashes the rename and puts `Old` back on all three (on macOS its worktree tree holds both
   names); libgit2's stash can't, and the path-limited route refuses as
@@ -303,10 +315,11 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   stash's checkout of a pair member did the same (one entry dropped, sometimes the file
   deleted, Pop then refused with `StagedChanges`). git keeps both. `save_stash` therefore
   refuses with `StashError::CasePair` where names fold (`try_folds_case`), before anything is
-  written: Stash all when HEAD or the index holds two paths `same_in_icase_index` takes for one
+  written: Stash all when HEAD or the index holds two paths `icase_index_key` takes for one
   (checked after the rename check, so a case-only rename keeps its `CaseOnlyRename`), Stash
   file… when it picks one of them (`refuse_case_only_rename` tells a pair, two names in HEAD or
-  in the index alone, from a rename, one name in each). Stash file… on other paths keeps the
+  in the index alone, from a rename, one name in each; there by `stash_fold`, so on macOS and
+  Windows also two names only the drive folds, see above). Stash file… on other paths keeps the
   pair, since its checkout is limited to the stashed paths. Only whole paths count: `D/f` and
   `d/g` are two entries to libgit2 and stash normally.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it

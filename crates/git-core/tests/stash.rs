@@ -3447,8 +3447,8 @@ fn rename_with_ignorecase(old: &str, new: &str) -> (tempfile::TempDir, git2::Rep
 #[test]
 fn only_an_ascii_case_change_counts_as_a_case_only_rename() {
     // #152 review: libgit2's ignore-case index compares names with `strcasecmp` (ASCII letters
-    // only, byte by byte), so only those renames are refused. `Straße` → `Strasse` and an NFC →
-    // NFD change are two different names to libgit2 and stash normally.
+    // only, byte by byte). `Straße` → `Strasse` and an NFC → NFD change are two different names
+    // to libgit2 and, off macOS, to the drive too, so they stash normally.
     let (_dir, mut repo) = rename_with_ignorecase("README.md", "readme.MD");
     let error =
         git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["readme.MD".into()]))
@@ -3460,7 +3460,8 @@ fn only_an_ascii_case_change_counts_as_a_case_only_rename() {
     assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
 
     // APFS takes `Straße` and `Strasse`, and NFC and NFD spellings, for one file name (`git mv`
-    // refuses there), so only elsewhere.
+    // refuses there, and a rename made with `mv` is refused as case-only, #389:
+    // `a_rename_the_drive_folds_is_refused_as_a_case_only_rename`), so only elsewhere.
     let renames = if cfg!(target_os = "macos") {
         vec![]
     } else {
@@ -3615,6 +3616,203 @@ fn stash_all_stashes_a_case_only_rename_where_names_do_not_fold() {
             assert_eq!(read(dir.path(), "other"), "x\n");
             assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
         }
+    }
+}
+
+/// Renames libgit2's ignore-case index keeps apart (not ASCII case), as `(old, new, macOS,
+/// Windows)`: the last two say whether that drive takes both names for one file (#389, seen on
+/// CI). APFS folds all four (NFC/NFD only matter with `core.precomposeunicode` off: with it on,
+/// git and libgit2 read the NFD name as NFC and see no rename at all); NTFS folds only the
+/// letter case of `é`. Linux with `core.ignorecase` keeps all apart.
+const UNICODE_RENAMES: [(&str, &str, bool, bool); 4] = [
+    ("Stra\u{df}e", "Strasse", true, false),
+    ("Caf\u{e9}", "Cafe\u{301}", true, false),
+    ("Cafe\u{301}", "Caf\u{e9}", true, false),
+    ("Caf\u{e9}", "CAF\u{c9}", true, true),
+];
+
+/// Whether this machine's drive takes the two names of a `UNICODE_RENAMES` row for one file.
+fn drive_folds((_, _, macos, windows): (&str, &str, bool, bool)) -> bool {
+    if cfg!(target_os = "macos") {
+        macos
+    } else if cfg!(windows) {
+        windows
+    } else {
+        false
+    }
+}
+
+/// HEAD has `old` and `other`, with `core.ignorecase` on and `core.precomposeunicode` off; then
+/// `old` is renamed to `new` on disk (`mv`, as `git mv` refuses where the drive folds them),
+/// staged by libgit2 (`by_git` false: a rename, as Browsitory's own staging gives) or by `git add
+/// -A` (`by_git`), and `other` is edited.
+fn unicode_rename(old: &str, new: &str, by_git: bool) -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    {
+        let mut config = repo.config().unwrap();
+        config.set_bool("core.ignorecase", true).unwrap();
+        config.set_bool("core.precomposeunicode", false).unwrap();
+    }
+    write_file(dir.path(), old, "content\n");
+    write_file(dir.path(), "other", "x\n");
+    commit_all(&repo, "base");
+    std::fs::rename(dir.path().join(old), dir.path().join(new)).unwrap();
+    drop(repo);
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    if by_git {
+        assert!(git(dir.path(), &["add", "-A"]).status.success());
+    } else {
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.update_all(["*"].iter(), None).unwrap();
+        index.write().unwrap();
+    }
+    write_file(dir.path(), "other", "changed\n");
+    (dir, repo)
+}
+
+/// The index's paths, sorted by bytes (an ignore-case index lists them ignoring case).
+fn index_paths(repo: &git2::Repository) -> Vec<String> {
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    let mut paths: Vec<String> = index
+        .iter()
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .collect();
+    paths.sort();
+    paths
+}
+
+#[test]
+fn a_rename_the_drive_folds_is_refused_as_a_case_only_rename() {
+    // #389: on macOS (`Straße` → `Strasse`, `Café` → `CAFÉ`, NFC ↔ NFD) and Windows (`Café` →
+    // `CAFÉ`) the two names are one file, but libgit2's index compares only ASCII case. Stash
+    // all refused with "Stashing would overwrite the ignored 'Straße'…" and Stash file… with
+    // that or `RenameSourceRecreated`, all misleading (seen on CI). Now refused as a case-only
+    // rename, like `README` → `readme` (#152, #370), before anything is written.
+    for rename in UNICODE_RENAMES {
+        if !drive_folds(rename) {
+            continue;
+        }
+        let (old, new, ..) = rename;
+        let mut runs = whole_stash_modes();
+        runs.push(with(|o| o.paths = vec![new.into()]));
+        runs.push(with(|o| o.paths = vec![old.into()]));
+        for opts in runs {
+            let (dir, mut repo) = unicode_rename(old, new, false);
+            assert_eq!(index_paths(&repo), [new, "other"], "{new:?}");
+            let index_before = std::fs::read(dir.path().join(".git/index")).unwrap();
+
+            let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+            let StashError::CaseOnlyRename { path, other } = &error else {
+                panic!("{new:?} {opts:?}: {error:?}");
+            };
+            let mut named = [path.as_str(), other.as_str()];
+            named.sort();
+            let mut expected = [old, new];
+            expected.sort();
+            assert_eq!(named, expected, "{opts:?}");
+            assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+            assert_eq!(
+                std::fs::read(dir.path().join(".git/index")).unwrap(),
+                index_before
+            );
+            assert_eq!(read(dir.path(), new), "content\n");
+            assert_eq!(read(dir.path(), "other"), "changed\n");
+        }
+    }
+}
+
+#[test]
+fn a_unicode_rename_the_drive_keeps_apart_stashes_normally() {
+    // #389: where the drive keeps the names apart (Linux, and on Windows `ß`/`ss` and NFC/NFD),
+    // the rename is two names to the drive and to libgit2: Stash all and Stash file… stash it
+    // and Pop brings it back.
+    for rename in UNICODE_RENAMES {
+        if drive_folds(rename) {
+            continue;
+        }
+        let (old, new, ..) = rename;
+        for paths in [vec![], vec![new.to_string()], vec![old.to_string()]] {
+            let (dir, mut repo) = unicode_rename(old, new, false);
+
+            git_core::stash::save_stash(
+                &mut repo,
+                &with(|o| {
+                    o.include_untracked = false;
+                    o.paths = paths.clone();
+                }),
+            )
+            .unwrap();
+
+            assert_eq!(read(dir.path(), old), "content\n", "{new:?} {paths:?}");
+            assert!(!dir.path().join(new).exists(), "{new:?} {paths:?}");
+            assert_eq!(index_paths(&repo), [old, "other"]);
+            assert_eq!(
+                git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+                StashApplyOutcome::Applied
+            );
+            assert_eq!(read(dir.path(), new), "content\n");
+            assert!(!dir.path().join(old).exists(), "{old:?}");
+            assert_eq!(index_paths(&repo), [new, "other"]);
+        }
+    }
+}
+
+#[test]
+fn stash_file_refuses_one_of_two_index_names_the_drive_folds() {
+    // #389: `git add -A` after the `mv` finds the old name too (the drive folds, so its lstat
+    // succeeds) and stages the new name as an addition: the index holds both names of one
+    // file. Stash file… on the new name deleted the file (the old name with it) until Pop; on
+    // the old name it wrote a stash that changed nothing and Pop refused with `StagedChanges`
+    // (seen on CI). Now refused as a case pair, nothing written. Stash all handles it: libgit2's
+    // reset removes the new name before it writes the old one, and Pop restores both entries.
+    for rename in UNICODE_RENAMES {
+        if !drive_folds(rename) {
+            continue;
+        }
+        let (old, new, ..) = rename;
+        for picked in [new, old] {
+            let (dir, mut repo) = unicode_rename(old, new, true);
+            let mut both = index_paths(&repo);
+            both.sort();
+            let mut expected = vec![old.to_string(), new.to_string(), "other".to_string()];
+            expected.sort();
+            assert_eq!(both, expected, "{new:?}");
+            let index_before = std::fs::read(dir.path().join(".git/index")).unwrap();
+
+            let error =
+                git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec![picked.into()]))
+                    .unwrap_err();
+
+            assert!(
+                matches!(error, StashError::CasePair { .. }),
+                "{picked:?}: {error:?}"
+            );
+            assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+            assert_eq!(
+                std::fs::read(dir.path().join(".git/index")).unwrap(),
+                index_before
+            );
+            assert_eq!(read(dir.path(), new), "content\n");
+        }
+
+        let (dir, mut repo) = unicode_rename(old, new, true);
+        let index_before = index_paths(&repo);
+        git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false)).unwrap();
+        assert_eq!(index_paths(&repo), [old, "other"], "{new:?}");
+        assert_eq!(read(dir.path(), old), "content\n");
+        assert_eq!(read(dir.path(), "other"), "x\n");
+        assert_eq!(
+            git_core::stash::pop_stash(&mut repo, 0, None, true).unwrap(),
+            StashApplyOutcome::Applied
+        );
+        assert_eq!(index_paths(&repo), index_before);
+        assert_eq!(read(dir.path(), new), "content\n");
+        assert_eq!(read(dir.path(), "other"), "changed\n");
     }
 }
 

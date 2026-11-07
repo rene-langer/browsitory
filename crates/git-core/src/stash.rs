@@ -98,7 +98,8 @@ pub enum StashError {
     /// Where names fold: HEAD or the index holds both `path` and `other`, which libgit2's
     /// ignore-case index takes for one entry (`A` and `a`, committed on a case-sensitive drive).
     /// The forced checkout after libgit2's stash dropped one of them from the index, and
-    /// depending on directory order from the worktree too (#392).
+    /// depending on directory order from the worktree too (#392). On macOS and Windows also two
+    /// index names only the drive folds, when Stash file… picks one (#389).
     #[error("Can't stash: '{path}' and '{other}' differ only in case, and stashing would remove one of them. Rename one of the two in the repository first, or stash only other files.")]
     CasePair { path: String, other: String },
     #[error("{0}")]
@@ -763,7 +764,7 @@ fn with_rename_partners(
             // path; `refuse_case_only_rename` refuses it later.
             if picked_alone
                 && partner == old
-                && !(folds_case && same_in_icase_index(old.as_bytes(), new.as_bytes()))
+                && !(folds_case && stash_fold(old.as_bytes()) == stash_fold(new.as_bytes()))
                 && workdir
                     .is_some_and(|workdir| std::fs::symlink_metadata(workdir.join(old)).is_ok())
             {
@@ -778,25 +779,68 @@ fn with_rename_partners(
     Ok(all)
 }
 
-/// True when libgit2's ignore-case index (`core.ignorecase`) takes `a` and `b` for one entry: it
-/// compares with `strcasecmp`/`git__strcasecmp` and hashes with `git__tolower` (index.c,
-/// index_map.c), byte by byte with ASCII letters folded only (the C locale; `git__tolower` on
-/// Windows). So `README`/`readme` are one entry, but `Straße`/`Strasse` or NFC/NFD spellings
-/// are two, unlike `worktree_guard::fold_name`, which follows the file systems.
-fn same_in_icase_index(a: &[u8], b: &[u8]) -> bool {
-    a.eq_ignore_ascii_case(b)
+/// The key under which libgit2's ignore-case index (`core.ignorecase`) takes two paths for one
+/// entry: it compares with `strcasecmp`/`git__strcasecmp` and hashes with `git__tolower`
+/// (index.c, index_map.c), byte by byte with ASCII letters folded only (the C locale;
+/// `git__tolower` on Windows). So `README`/`readme` are one entry, but `Straße`/`Strasse` or
+/// NFC/NFD spellings are two, unlike `worktree_guard::fold_name`, which follows the file systems.
+fn icase_index_key(path: &[u8]) -> Vec<u8> {
+    path.to_ascii_lowercase()
+}
+
+/// The key under which two tracked paths are one name to a stash where names fold
+/// (`try_folds_case`): libgit2's ignore-case index (`icase_index_key`, ASCII only) and, on
+/// macOS and Windows, the drive (#389). APFS takes `Straße`/`Strasse`, `Café`/`CAFÉ` and NFC/NFD
+/// spellings for one file (`worktree_guard::fold_name`); NTFS only upper-cases letter by letter
+/// (`Café`/`CAFÉ`, not `ß`/`ss` and not NFC/NFD; `ntfs_fold`). On Linux with `core.ignorecase`
+/// the drive keeps such names apart, and so does libgit2's index, so only ASCII case counts.
+fn stash_fold(path: &[u8]) -> Vec<u8> {
+    if cfg!(target_os = "macos") {
+        crate::worktree_guard::fold_name(path)
+    } else if cfg!(windows) {
+        ntfs_fold(path)
+    } else {
+        icase_index_key(path)
+    }
+}
+
+/// `path` as NTFS compares names: each letter mapped through its simple upper-case form (the
+/// volume's upcase table), so `é`/`É` meet but `ß` (whose upper case is the two letters `SS`) and
+/// a decomposed `é` stay apart. Not valid UTF-8: ASCII upper case only.
+fn ntfs_fold(path: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(path) else {
+        return path.to_ascii_uppercase();
+    };
+    text.chars()
+        .map(|c| {
+            let mut upper = c.to_uppercase();
+            match (upper.next(), upper.next()) {
+                (Some(single), None) => single,
+                _ => c,
+            }
+        })
+        .collect::<String>()
+        .into_bytes()
 }
 
 /// Where names fold (`try_folds_case`), refuses when a stashed tracked path differs only in
-/// ASCII case from a path HEAD or the index has (a case-only rename, `git mv Old old`).
-/// libgit2's index then finds one as the other (`same_in_icase_index`), so the stash's index tree would hold
-/// both names and the revert would find nothing to change: the stash is written but the rename
+/// case from a path HEAD or the index has (a case-only rename, `git mv Old old`). libgit2's index
+/// then finds one as the other (`icase_index_key`), so the stash's index tree would hold both
+/// names and the revert would find nothing to change: the stash is written but the rename
 /// stays. Stash all checks the whole index instead (`refuse_staged_case_only_rename`).
+///
+/// On macOS and Windows "only in case" is what the drive folds (`stash_fold`, #389): there
+/// `Straße` → `Strasse` (macOS) or `Café` → `CAFÉ` (both) are two entries to libgit2 but one
+/// file, and Stash file… was refused with a misleading `IgnoredOverwritten` or
+/// `RenameSourceRecreated`.
 ///
 /// When HEAD or the index alone holds both names (`A` and `a`, committed on a case-sensitive
 /// drive), it is a case pair, not a rename, and refused as `CasePair` (#392): the revert's
 /// ignore-case checkout dropped one of the pair from the index, or deleted its file, and Pop
-/// then refused with `StagedChanges`. A pair the stash doesn't touch stays as it is.
+/// then refused with `StagedChanges`. A pair the stash doesn't touch stays as it is. The same
+/// holds for two index names only the drive folds (`git add -A` after `mv Straße Strasse` on
+/// macOS stages `Strasse` as an addition and keeps `Straße`, #389): stashing one deleted the
+/// shared file until Pop, or wrote a stash that changed nothing and Pop refused.
 fn refuse_case_only_rename(
     repo: &Repository,
     base: &git2::Commit,
@@ -805,8 +849,7 @@ fn refuse_case_only_rename(
     if !crate::worktree_guard::try_folds_case(repo)? {
         return Ok(());
     }
-    // The key `same_in_icase_index` compares by.
-    let fold = |path: &[u8]| path.to_ascii_lowercase();
+    let fold = stash_fold;
     // The paths of HEAD (`.0`) and of the index (`.1`) under each key.
     type Variants = (
         std::collections::BTreeSet<Vec<u8>>,
@@ -857,8 +900,9 @@ fn refuse_case_only_rename(
 }
 
 /// Stash all's form of `refuse_case_only_rename` (#370): where names fold, refuses when the
-/// index has a path HEAD doesn't while HEAD has a path differing from it only in ASCII case that
-/// the index doesn't (`git mv Old old`, or `git mv Dir dir` for `Dir/f`). libgit2's stash found
+/// index has a path HEAD doesn't while HEAD has a path differing from it only in case
+/// (`stash_fold`) that the index doesn't (`git mv Old old`, or `git mv Dir dir` for `Dir/f`;
+/// on macOS also `mv Straße Strasse` staged by libgit2, #389). libgit2's stash found
 /// one name as the other: on Linux with `core.ignorecase` it wrote a stash whose index tree held
 /// both names and left the rename in place; on macOS and Windows the deleted `Old` found the
 /// file `old` and was refused as an ignored file removed from the index. git stashes the rename
@@ -869,7 +913,7 @@ fn refuse_case_only_rename(
 /// no rename, but refused too (`CasePair`, #392): libgit2's forced checkout after the stash
 /// (`reset_index_and_workdir`) keeps only one of them in its ignore-case index, so the other
 /// became a staged deletion, and depending on the directory's read order its file was deleted
-/// as well. Only whole paths count, as in `same_in_icase_index` (`D/f` and `d/g` are kept).
+/// as well. Only whole paths count, as in `icase_index_key` (`D/f` and `d/g` are kept).
 fn refuse_staged_case_only_rename(
     repo: &Repository,
     index: &git2::Index,
@@ -880,23 +924,20 @@ fn refuse_staged_case_only_rename(
     let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) else {
         return Ok(()); // Unborn: nothing to rename from.
     };
-    // HEAD's paths, by the key `same_in_icase_index` compares with.
+    // HEAD's paths, by the key a rename compares with (`stash_fold`).
     let mut in_head: std::collections::HashMap<Vec<u8>, Vec<Vec<u8>>> =
         std::collections::HashMap::new();
     head.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
         if entry.kind() != Some(git2::ObjectType::Tree) {
             let path = [root.as_bytes(), entry.name_bytes()].concat();
-            in_head
-                .entry(path.to_ascii_lowercase())
-                .or_default()
-                .push(path);
+            in_head.entry(stash_fold(&path)).or_default().push(path);
         }
         git2::TreeWalkResult::Ok
     })?;
     let paths: Vec<Vec<u8>> = index.iter().map(|entry| entry.path).collect();
     let in_index: std::collections::HashSet<&[u8]> = paths.iter().map(Vec::as_slice).collect();
     for path in &paths {
-        let Some(variants) = in_head.get(&path.to_ascii_lowercase()) else {
+        let Some(variants) = in_head.get(&stash_fold(path)) else {
             continue;
         };
         if variants.contains(path) {
@@ -913,11 +954,13 @@ fn refuse_staged_case_only_rename(
         }
     }
     // No rename, but HEAD or the index holds two paths libgit2's index takes for one (#392).
+    // Only ASCII case counts here: a pair only the drive folds (`Straße` and `Strasse` in the
+    // index on macOS) stashes fine, since libgit2's checkout removes before it writes (#389).
     let mut names =
         std::collections::BTreeMap::<Vec<u8>, std::collections::BTreeSet<Vec<u8>>>::new();
     for path in in_head.into_values().flatten().chain(paths) {
         names
-            .entry(path.to_ascii_lowercase())
+            .entry(icase_index_key(&path))
             .or_default()
             .insert(path);
     }
