@@ -656,23 +656,44 @@ export interface RepoClient {
   updateWorkspace(id: string, name: string, members: string[]): Promise<void>;
   deleteWorkspace(id: string): Promise<void>;
   getStatus(repoPath: string): Promise<StatusEntry[]>;
-  getCommitGraph(repoPath: string, limit: number, selectedBranches: string[] | null): Promise<GraphCommit[]>;
+  /**
+   * The commits of `selectedBranches` (`null` = every local branch, `[]` = none) plus those of
+   * `remoteBranches` (`<remote>/<branch>`; `[]` = none, the default graph). Exactly one branch
+   * in total walks first parents only. Missing branches are skipped.
+   */
+  getCommitGraph(
+    repoPath: string,
+    limit: number,
+    selectedBranches: string[] | null,
+    remoteBranches: string[],
+  ): Promise<GraphCommit[]>;
   getGraphBranchSelection(repoPath: string): Promise<string[] | null>;
   setGraphBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
+  /** Forgets the saved selection: back to every local branch, also ones created later (#402). */
+  clearGraphBranchSelection(repoPath: string): Promise<void>;
   getGraphRemoteBranchSelection(repoPath: string): Promise<string[] | null>;
   setGraphRemoteBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
+  /** Forgets the saved remote selection: no remote commits, every remote badge (#402). */
+  clearGraphRemoteBranchSelection(repoPath: string): Promise<void>;
   /** `oldPath` (with `staged`): a staged rename's old path, so only its edits show. */
   getWorkingDiff(repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath?: string | null): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getFileHistory(repoPath: string, path: string, limit: number): Promise<FileHistoryEntry[]>;
   /**
-   * One page of commits matching `query` (see the search syntax help). `refs` has the same
-   * meaning as `getCommitGraph`'s `selectedBranches` (`null` = every local branch); a
-   * `branch:` term overrides it. `cursor` is a previous page's `nextCursor`, or `null` for the
+   * One page of commits matching `query` (see the search syntax help). `refs` and
+   * `remoteBranches` mean what `getCommitGraph`'s `selectedBranches` and `remoteBranches` mean,
+   * so search walks the graph's commits; a `branch:` term overrides both. `cursor` is a
+   * previous page's `nextCursor`, or `null` for the
    * first page. Rejects with the query error text, or "Search cancelled." when a newer search
    * (or `cancelSearch`) superseded this one.
    */
-  searchCommits(repoPath: string, query: string, refs: string[] | null, cursor: string | null): Promise<SearchPage>;
+  searchCommits(
+    repoPath: string,
+    query: string,
+    refs: string[] | null,
+    remoteBranches: string[],
+    cursor: string | null,
+  ): Promise<SearchPage>;
   /** Stops the repo's in-flight search, if any. */
   cancelSearch(repoPath: string): Promise<void>;
   getCommitRenameDiff(repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions): Promise<DiffHunk[]>;

@@ -1,4 +1,5 @@
 use super::{emit_hook_events, repo_worker, AppState};
+use git_core::graph::GraphSelection;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitOutcomeDto, CommitSignatureDto, DiffHunkDto, DiffOptionsDto,
     FileHistoryEntryDto, GraphCommitDto, StatusEntryDto, TrailerDto,
@@ -24,10 +25,15 @@ pub async fn get_commit_graph(
     repo_path: String,
     limit: usize,
     selected_branches: Option<Vec<String>>,
+    remote_branches: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<GraphCommitDto>, String> {
+    let selection = GraphSelection {
+        local: selected_branches,
+        remote: remote_branches,
+    };
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_commit_graph(limit, selected_branches))
+        .call(move |w| w.get_commit_graph(limit, selection))
         .await?
         .into_iter()
         .map(GraphCommitDto::from)
@@ -48,6 +54,12 @@ pub fn set_graph_branch_selection(
         .map_err(|error| error.to_string())
 }
 
+/// Forgets the saved selection, back to every local branch (#402).
+#[tauri::command]
+pub fn clear_graph_branch_selection(repo_path: String) -> Result<(), String> {
+    config::clear_graph_branch_selection(Path::new(&repo_path)).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn get_graph_remote_branch_selection(repo_path: String) -> Result<Option<Vec<String>>, String> {
     config::get_graph_remote_branch_selection(Path::new(&repo_path))
@@ -60,6 +72,13 @@ pub fn set_graph_remote_branch_selection(
     selected_branches: Vec<String>,
 ) -> Result<(), String> {
     config::set_graph_remote_branch_selection(Path::new(&repo_path), &selected_branches)
+        .map_err(|error| error.to_string())
+}
+
+/// Forgets the saved remote selection, back to no remote commits and every remote badge (#402).
+#[tauri::command]
+pub fn clear_graph_remote_branch_selection(repo_path: String) -> Result<(), String> {
+    config::clear_graph_remote_branch_selection(Path::new(&repo_path))
         .map_err(|error| error.to_string())
 }
 

@@ -581,15 +581,27 @@ describe("tauriRepoClient commit search", () => {
     vi.mocked(logError).mockClear();
   });
 
+  it("invokes get_commit_graph with the local and the remote selection", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce([]);
+    await tauriRepoClient.getCommitGraph("/repo", 50, [], ["origin/feature"]);
+    expect(invoke).toHaveBeenLastCalledWith("get_commit_graph", {
+      repoPath: "/repo",
+      limit: 50,
+      selectedBranches: [],
+      remoteBranches: ["origin/feature"],
+    });
+  });
+
   it("invokes search_commits without logging its errors, and cancel_search", async () => {
     vi.mocked(invoke).mockRejectedValueOnce("Search cancelled.");
-    await expect(tauriRepoClient.searchCommits("/repo", "author:ada", null, "100:abc")).rejects.toBe(
+    await expect(tauriRepoClient.searchCommits("/repo", "author:ada", null, ["origin/x"], "100:abc")).rejects.toBe(
       "Search cancelled.",
     );
     expect(invoke).toHaveBeenLastCalledWith("search_commits", {
       repoPath: "/repo",
       query: "author:ada",
       refs: null,
+      remoteBranches: ["origin/x"],
       cursor: "100:abc",
     });
     expect(logError).not.toHaveBeenCalled();

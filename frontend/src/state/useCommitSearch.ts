@@ -38,6 +38,8 @@ export function useCommitSearch(
   repoPath: string,
   refreshGeneration: number,
   refs: string[] | null,
+  // The graph's remote selection (`null` = none walked), so search walks the graph's commits.
+  remoteRefs: string[] | null,
   selectedRow: SelectedRow,
   selectRow: (row: SelectedRow) => void,
   options?: { debounceMs?: number },
@@ -57,6 +59,7 @@ export function useCommitSearch(
   const resultsRef = useRef(results);
   const selectedRowRef = useRef(selectedRow);
   const refsRef = useRef(refs);
+  const remoteRefsRef = useRef(remoteRefs);
   useEffect(() => {
     resultsRef.current = results;
   }, [results]);
@@ -65,7 +68,8 @@ export function useCommitSearch(
   }, [selectedRow]);
   useEffect(() => {
     refsRef.current = refs;
-  }, [refs]);
+    remoteRefsRef.current = remoteRefs;
+  }, [refs, remoteRefs]);
 
   const clearTimer = () => {
     if (timer.current !== null) {
@@ -85,7 +89,7 @@ export function useCommitSearch(
       const rowAtStart = rowKey(selectedRowRef.current);
       try {
         do {
-          const page = await client.searchCommits(repoPath, q, refsRef.current, cursor);
+          const page = await client.searchCommits(repoPath, q, refsRef.current, remoteRefsRef.current ?? [], cursor);
           if (gen !== generation.current) return;
           found += page.commits.length;
           cursor = page.nextCursor;

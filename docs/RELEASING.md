@@ -52,6 +52,88 @@ The Marketplace and Open VSX pages show `extension/README.md`, with images loade
 (`raw.githubusercontent.com/.../main/docs/guide/assets/`), so merge the new screenshots before
 the release is published.
 
+### Updater manifest (`latest.json`)
+
+Every installed desktop app checks
+`https://github.com/rene-langer/browsitory/releases/latest/download/latest.json`
+(`plugins.updater.endpoints` in `crates/tauri-app/tauri.conf.json`). A bad manifest or bundle
+link makes updating fail for every installed copy until the next release fixes it; a changed
+endpoint or `pubkey` strands them for good. `build-release` writes the manifest with
+`tauri-apps/tauri-action`: each of its three jobs uploads its bundles and `.sig` files to the
+draft release and merges its platforms into the draft's `latest.json`.
+
+What `tauri-action` v1 (since 0.4.0, #363) does differently from v0:
+
+- **Download URLs.** Each `url` in `latest.json` is the bundle's API asset URL,
+  `https://api.github.com/repos/rene-langer/browsitory/releases/assets/<id>`, not the browser
+  URL `https://github.com/rene-langer/browsitory/releases/download/<tag>/<file>` of v0. v1 has no
+  input to keep the old form: it builds the URL from `githubBaseUrl`, which also sets the API it
+  uploads to. The updater (`tauri-plugin-updater` 2.14.1, also in 0.3.0 and 0.3.1) downloads with
+  `Accept: application/octet-stream` and its own User-Agent; the API answers that request with a
+  redirect to the file (checked against 0.3.1's assets: the same bytes as the browser URL).
+  Without that header the API returns the asset's JSON description, which fails the signature
+  check. The asset ids stay the same when the draft is published.
+- **Rate limit.** These downloads are unauthenticated API requests: 60 per hour per IP address,
+  shared with any other unauthenticated GitHub API use from that address. Only the download
+  counts, one request per update; the update check reads `latest.json` from `github.com`, which
+  is not limited this way. Many installs behind one address updating within the same hour can
+  get a `403` ("Download request failed"); updating works again after the hour. A network that
+  allows `github.com` but blocks `api.github.com` can't download updates any more.
+- **macOS bundle name.** `Browsitory_<version>_universal.app.tar.gz` (v0:
+  `Browsitory_universal.app.tar.gz`). Nothing depends on it; `latest.json` links to it.
+- **Drafts only.** With `releaseDraft: true`, v1 only uses a draft release for the tag. After
+  publishing, re-running a `build-release` job fails (or creates a second draft for the tag;
+  delete that) and doesn't touch the published release. Don't re-run `build-release` after
+  publishing. Re-running the publish jobs (#344) is unaffected: they don't run `tauri-action`.
+- **Name and body.** v1 overwrites the name and body of an existing release only if it is
+  published, never a draft, so re-running `build-release` before publishing keeps notes written
+  into the draft. It does replace that platform's assets (new asset ids) and its entries in
+  `latest.json`. The `notes` in `latest.json` are always `releaseBody` from `release.yml`, not
+  the notes edited on the release page.
+
+**Before publishing the draft**, check the manifest:
+
+```bash
+tag=release/X.Y.Z
+dir="$(mktemp -d)"
+gh release download "$tag" -D "$dir" -p latest.json -p '*.sig'
+gh release view "$tag" --json assets -q '.assets[] | [.apiUrl, .name] | @tsv' > "$dir/assets.tsv"
+jq -r '.version' "$dir/latest.json"
+jq -r '.platforms | to_entries[] | [.key, .value.url, .value.signature] | @tsv' "$dir/latest.json" |
+  while IFS=$'\t' read -r platform url sig; do
+    name="$(awk -F'\t' -v u="$url" '$1 == u { print $2 }' "$dir/assets.tsv")"
+    if [ -n "$name" ] && [ "$sig" = "$(cat "$dir/$name.sig")" ]; then ok=ok; else ok=BAD; fi
+    printf '%-22s %-42s %s\n' "$platform" "${name:-$url}" "$ok"
+  done
+```
+
+It must print the version `X.Y.Z` and `ok` for each of `linux-x86_64`, `linux-x86_64-appimage`,
+`linux-x86_64-deb`, `linux-x86_64-rpm`, `windows-x86_64`, `windows-x86_64-msi`,
+`windows-x86_64-nsis`, `darwin-aarch64`, `darwin-x86_64`, `darwin-aarch64-app` and
+`darwin-x86_64-app` (v1 also writes `darwin-universal` and `darwin-universal-app`). `ok` means
+the URL is the API URL of an asset of this release and the signature is that asset's `.sig`. A
+missing platform means two jobs wrote `latest.json` at the same time: re-run that platform's
+`build-release` job (the draft is still a draft).
+
+**After publishing**, check what an installed app sees:
+
+1. `curl -sL https://github.com/rene-langer/browsitory/releases/latest/download/latest.json`
+   shows the new version.
+2. Download one bundle the way the updater does; it prints `200` and the bundle's size:
+   `curl -sSL -o /dev/null -w '%{http_code} %{size_download}\n' -A tauri-plugin-updater -H
+   'Accept: application/octet-stream' '<a url from latest.json>'`.
+3. Updater smoke test: install the previous release and update it through the app, on Linux,
+   and on macOS and Windows where possible.
+
+**0.4.0 only (#363):** 0.4.0 is the first release built with v1. #363 stays open until an
+installed 0.3.1 updates to 0.4.0 through the app on Linux, macOS and Windows, after the checks
+above. If the download fails while `latest.json` is right otherwise, put back the v0 URLs by
+hand: replace each `url` with the browser URL
+`https://github.com/rene-langer/browsitory/releases/download/release%2FX.Y.Z/<file>`, keep the
+signatures (they sign the bundle, not the URL), and upload the file with
+`gh release upload release/X.Y.Z latest.json --clobber`. (The check above then reports `BAD`
+for those URLs; that is expected.)
+
 ### Publishing the extension
 
 The same tag builds one `.vsix` per platform (`build-vsix-release`, version stamped from the
@@ -79,7 +161,8 @@ higher than every pre-release version already published. `vsix-smoke` in `ci.yml
 same way (stable now); change it with the switch.
 
 **GitHub release:** publish the draft as a normal release, not a pre-release. The app's updater
-reads `releases/latest/download/latest.json`, and GitHub's `latest` skips pre-releases.
+reads `releases/latest/download/latest.json`, and GitHub's `latest` skips pre-releases. Check
+the [updater manifest](#updater-manifest-latestjson) before and after publishing.
 
 **Never re-tag a published version at a different commit.** Both registries refuse to replace a
 published version. `--skip-duplicate` only makes re-running the *same* commit's release safe; a

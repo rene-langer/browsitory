@@ -20,6 +20,13 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+interface SearchProps {
+  generation: number;
+  refs: string[] | null;
+  remoteRefs?: string[] | null;
+  selected: SelectedRow;
+}
+
 function setup(
   searchCommits: RepoClient["searchCommits"],
   { row = "uncommitted" as SelectedRow, debounceMs = 0 } = {},
@@ -28,9 +35,13 @@ function setup(
   const client = { searchCommits, cancelSearch } as unknown as RepoClient;
   const selectRow = vi.fn();
   const hook = renderHook(
-    ({ generation, refs, selected }: { generation: number; refs: string[] | null; selected: SelectedRow }) =>
-      useCommitSearch(client, "/repo", generation, refs, selected, selectRow, { debounceMs }),
-    { initialProps: { generation: 0, refs: ["main"] as string[] | null, selected: row } },
+    ({
+      generation,
+      refs,
+      remoteRefs = null,
+      selected,
+    }: SearchProps) => useCommitSearch(client, "/repo", generation, refs, remoteRefs, selected, selectRow, { debounceMs }),
+    { initialProps: { generation: 0, refs: ["main"], selected: row } as SearchProps },
   );
   return { ...hook, selectRow, cancelSearch };
 }
@@ -51,7 +62,18 @@ describe("useCommitSearch", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
 
     expect(searchCommits).toHaveBeenCalledTimes(1);
-    expect(searchCommits).toHaveBeenCalledWith("/repo", "au", ["main"], null);
+    expect(searchCommits).toHaveBeenCalledWith("/repo", "au", ["main"], [], null);
+  });
+
+  it("searches the graph's remote selection too (#385)", async () => {
+    const searchCommits = vi.fn(async () => page([], null, 0));
+    const { result, rerender } = setup(searchCommits);
+    rerender({ generation: 0, refs: [], remoteRefs: ["origin/feature"], selected: "uncommitted" });
+
+    act(() => result.current.setQuery("x"));
+
+    await waitFor(() => expect(searchCommits).toHaveBeenCalledTimes(1));
+    expect(searchCommits).toHaveBeenCalledWith("/repo", "x", [], ["origin/feature"], null);
   });
 
   it("keeps paging until a round is full or the walk ends, reporting scanned progress", async () => {
@@ -65,7 +87,7 @@ describe("useCommitSearch", () => {
     await waitFor(() => expect(result.current.results?.scanned).toBe(20_000));
     expect(result.current.results?.loading).toBe(true);
     expect(result.current.results?.commits.map((c) => c.id)).toEqual(["c1"]);
-    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], "20000:fp");
+    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], [], "20000:fp");
 
     await act(async () => second.resolve(page(["c2"], null, 25_000)));
     expect(result.current.results).toMatchObject({ loading: false, nextCursor: null, scanned: 25_000 });
@@ -85,7 +107,7 @@ describe("useCommitSearch", () => {
 
     act(() => result.current.loadMore());
     await waitFor(() => expect(result.current.results?.nextCursor).toBeNull());
-    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], "100:fp");
+    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], [], "100:fp");
     expect(result.current.results?.commits).toHaveLength(SEARCH_ROUND_SIZE + 1);
   });
 
@@ -140,7 +162,7 @@ describe("useCommitSearch", () => {
 
     act(() => result.current.retry());
     await waitFor(() => expect(result.current.results?.commits.map((c) => c.id)).toEqual(["fresh"]));
-    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], null);
+    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], [], null);
     expect(result.current.results?.error).toBeNull();
   });
 
@@ -154,7 +176,7 @@ describe("useCommitSearch", () => {
     rerender({ generation: 1, refs: ["main"], selected: { commitId: "c1" } });
 
     await waitFor(() => expect(searchCommits).toHaveBeenCalledTimes(2));
-    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], null);
+    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], [], null);
     expect(selectRow).not.toHaveBeenCalled();
   });
 

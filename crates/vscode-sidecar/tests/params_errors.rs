@@ -102,6 +102,18 @@ fn a_field_of_the_wrong_type_names_the_expected_type() {
             json!({ "repoPath": "/r", "commitIds": "abc" }),
             "invalid type: string \"abc\", expected a sequence",
         ),
+        // A setter can't clear a saved graph selection by sending `null`: only
+        // `clear_graph_branch_selection`/`clear_graph_remote_branch_selection` do (#402).
+        (
+            "set_graph_branch_selection",
+            json!({ "repoPath": "/r", "selectedBranches": null }),
+            "invalid type: null, expected a sequence",
+        ),
+        (
+            "set_graph_remote_branch_selection",
+            json!({ "repoPath": "/r", "selectedBranches": null }),
+            "invalid type: null, expected a sequence",
+        ),
         // A `#[serde(default)]` field may be absent, but not `null`.
         (
             "continue_sequence",
@@ -121,6 +133,17 @@ fn a_missing_later_or_nested_field_is_named() {
             "get_commit_graph",
             json!({ "repoPath": "/r" }),
             "missing field `limit`",
+        ),
+        // The remote selection is required: an old caller can't silently drop it (#385).
+        (
+            "get_commit_graph",
+            json!({ "repoPath": "/r", "limit": 1, "selectedBranches": null }),
+            "missing field `remoteBranches`",
+        ),
+        (
+            "search_commits",
+            json!({ "repoPath": "/r", "query": "q", "refs": null, "cursor": null }),
+            "missing field `remoteBranches`",
         ),
         (
             "get_commit_diff",
@@ -172,7 +195,7 @@ fn extra_fields_absent_options_and_positional_arrays_are_accepted() {
         ),
         (
             "get_commit_graph",
-            json!({ "repoPath": "/nope", "limit": 1 }),
+            json!({ "repoPath": "/nope", "limit": 1, "remoteBranches": [] }),
         ),
         ("get_status", json!(["/nope"])),
     ] {

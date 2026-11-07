@@ -10,7 +10,8 @@ right-click a branch, a remote folder, or a remote branch to bring up its action
   then shows only that branch's own commits and merges, see
   [Which branches the graph shows](history.md#which-branches-the-graph-shows)), and for the
   current branch **Set upstream…** and **Push to ⟨remote⟩**;
-- a remote branch: checkout, **Set as upstream for current branch**, or **Delete ⟨remote⟩/⟨branch⟩…**;
+- a remote branch: checkout, **Set as upstream for current branch**, **Isolate branch** (as for
+  a local branch), or **Delete ⟨remote⟩/⟨branch⟩…**;
 - a remote: fetch, **Push current branch here**, edit, manage credentials, or remove.
 
 The **+** button in the section header opens **New branch…**, **Add remote…** and **Show all

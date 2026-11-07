@@ -10,6 +10,7 @@ import type {
 } from "../ipc/RepoClient";
 import { branchSwatchColor } from "../lib/laneColors";
 import { buildBranchTree, type BranchTreeNode } from "../lib/branchTree";
+import { coversEveryBranch } from "../lib/graphSelection";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { FormDialog } from "./primitives/FormDialog";
@@ -79,8 +80,11 @@ export function BranchTree({
   operationDisabledReason,
   graphBranchSelection,
   onSetGraphBranchSelection,
+  onClearGraphBranchSelection,
+  onShowAllGraphBranches,
   graphRemoteBranchSelection,
   onSetGraphRemoteBranchSelection,
+  onIsolateGraphBranch,
   remoteBranchesInGraph,
   remotes,
   upstream,
@@ -140,11 +144,21 @@ export function BranchTree({
   // `git-core` and `useAppState`'s `AppState.graphBranchSelection`).
   graphBranchSelection: string[] | null;
   onSetGraphBranchSelection: (selectedBranches: string[]) => void;
+  // Forgets the saved local selection (`null` again). A dot click that turns every local
+  // branch on calls it instead of saving their names, so later branches show too and a repo
+  // with one branch keeps the full walk (#402).
+  onClearGraphBranchSelection: () => void;
+  // "Show all branches": forgets both selections, back to the default graph (#402).
+  onShowAllGraphBranches: () => void;
   // Same shape as `graphBranchSelection`/`onSetGraphBranchSelection` above, but scoped to
   // remote-tracking branches, keyed by their qualified `<remoteName>/<branchName>` name (see
-  // `useAppState`'s `AppState.graphRemoteBranchSelection`).
+  // `useAppState`'s `AppState.graphRemoteBranchSelection`). A selected remote branch's commits
+  // join the graph (#385); `null` walks none and shows every remote badge in the graph.
   graphRemoteBranchSelection: string[] | null;
   onSetGraphRemoteBranchSelection: (selectedBranches: string[]) => void;
+  // "Isolate branch" on a local or a remote branch: shows only that branch, clearing the other
+  // selection (see `useBranchActions`' `isolateGraphBranch`).
+  onIsolateGraphBranch: (kind: "local" | "remote", name: string) => void;
   // Every remote-tracking ref actually present in the currently-loaded commit graph (same source
   // CommitGraph.tsx's own null-selection fallback uses: `commits.flatMap((c) => c.remoteBranchRefs)`,
   // deduped). Used ONLY as the null-selection fallback below (the remote swatch's `aria-pressed`
@@ -603,6 +617,11 @@ export function BranchTree({
           ]
         : []),
       {
+        label: "Isolate branch",
+        title: "Show only this branch in the commit graph",
+        onSelect: () => onIsolateGraphBranch("remote", `${remoteName}/${branchName}`),
+      },
+      {
         label: `Delete ${remoteName}/${branchName}…`,
         destructive: true,
         disabled: operationDisabled,
@@ -661,7 +680,10 @@ export function BranchTree({
   const toggleGraphBranch = (name: string) => {
     const shown = graphBranchSelection ?? branches.map((b) => b.name);
     const next = shown.includes(name) ? shown.filter((n) => n !== name) : [...shown, name];
-    onSetGraphBranchSelection(next);
+    // Every local branch shown is the default graph: no saved list, so later branches join it
+    // and a single branch isn't walked by first parents only (#402). The remote selection stays.
+    if (branches.length > 0 && coversEveryBranch(next, branches.map((b) => b.name))) onClearGraphBranchSelection();
+    else onSetGraphBranchSelection(next);
   };
 
   const toggleGraphRemoteBranch = (qualifiedName: string) => {
@@ -742,7 +764,7 @@ export function BranchTree({
     items.push({
       label: "Isolate branch",
       title: "Show only this branch in the commit graph",
-      onSelect: () => onSetGraphBranchSelection([branch.name]),
+      onSelect: () => onIsolateGraphBranch("local", branch.name),
     });
     items.push({
       label: "Delete",
@@ -1071,8 +1093,8 @@ export function BranchTree({
               { label: "Add remote…", onSelect: onOpenAddRemoteDraft },
               {
                 label: "Show all branches",
-                disabled: graphBranchSelection === null,
-                onSelect: () => onSetGraphBranchSelection(branches.map((b) => b.name)),
+                disabled: graphBranchSelection === null && graphRemoteBranchSelection === null,
+                onSelect: onShowAllGraphBranches,
               },
             ]}
           />

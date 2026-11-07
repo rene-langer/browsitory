@@ -382,6 +382,28 @@ describe("vscodeRepoClient", () => {
     await expect(setPromise).resolves.toBeNull();
   });
 
+  it("wires clearGraphBranchSelection and clearGraphRemoteBranchSelection (#402)", async () => {
+    const localPromise = vscodeRepoClient.clearGraphBranchSelection("/repo");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "clear_graph_branch_selection",
+      params: { repoPath: "/repo" },
+    });
+    respond(1, null);
+    await expect(localPromise).resolves.toBeNull();
+
+    const remotePromise = vscodeRepoClient.clearGraphRemoteBranchSelection("/repo");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "clear_graph_remote_branch_selection",
+      params: { repoPath: "/repo" },
+    });
+    respond(2, null);
+    await expect(remotePromise).resolves.toBeNull();
+  });
+
   it("wires getCommitFiles", async () => {
     const promise = vscodeRepoClient.getCommitFiles("/repo", "abc123");
     expect(postMessage).toHaveBeenCalledWith({
@@ -1275,13 +1297,25 @@ describe("vscodeRepoClient", () => {
     await expect(promise).resolves.toEqual(result);
   });
 
+  it("wires getCommitGraph with the local and the remote selection", async () => {
+    const promise = vscodeRepoClient.getCommitGraph("/repo", 50, null, ["origin/feature"]);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_commit_graph",
+      params: { repoPath: "/repo", limit: 50, selectedBranches: null, remoteBranches: ["origin/feature"] },
+    });
+    respond(1, []);
+    await expect(promise).resolves.toEqual([]);
+  });
+
   it("wires searchCommits and cancelSearch", async () => {
-    const promise = vscodeRepoClient.searchCommits("/repo", "fix", ["main"], null);
+    const promise = vscodeRepoClient.searchCommits("/repo", "fix", ["main"], ["origin/x"], null);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "search_commits",
-      params: { repoPath: "/repo", query: "fix", refs: ["main"], cursor: null },
+      params: { repoPath: "/repo", query: "fix", refs: ["main"], remoteBranches: ["origin/x"], cursor: null },
     });
     const page = { commits: [], nextCursor: null, scanned: 3 };
     respond(1, page);

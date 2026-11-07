@@ -108,6 +108,7 @@ export function RepoWorkspace({
     repoPath,
     appState.state.refreshGeneration,
     appState.state.graphBranchSelection,
+    appState.state.graphRemoteBranchSelection,
     appState.state.selectedRow,
     appState.selectRow,
   );
@@ -558,8 +559,11 @@ export function RepoWorkspace({
               operationDisabledReason={operationDisabledReason}
               graphBranchSelection={appState.state.graphBranchSelection}
               onSetGraphBranchSelection={appState.setGraphBranchSelection}
+              onClearGraphBranchSelection={appState.clearGraphBranchSelection}
+              onShowAllGraphBranches={appState.showAllGraphBranches}
               graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
               onSetGraphRemoteBranchSelection={appState.setGraphRemoteBranchSelection}
+              onIsolateGraphBranch={appState.isolateGraphBranch}
               remoteBranchesInGraph={Array.from(new Set(appState.state.commits.flatMap((c) => c.remoteBranchRefs)))}
               remotes={appState.state.remotes}
               upstream={appState.state.upstream}

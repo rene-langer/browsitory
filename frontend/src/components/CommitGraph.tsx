@@ -88,7 +88,8 @@ export function CommitGraph({
   onLoadMore?: () => void;
   // `null`/omitted means "show every remote badge present" — mirrors BranchTree's local
   // `graphBranchSelection ?? branches.map(...)` fallback, but computed here from the commits
-  // actually on screen since remote selection never narrows which commits are fetched.
+  // actually on screen: `null` walks no remote branch, so there is no list to derive it from.
+  // Non-null: those remote branches' commits are in the graph too (#385), only their badges show.
   graphRemoteBranchSelection?: string[] | null;
   /** Ctrl/Cmd+F while the list has focus: focus the commit search field. */
   onRequestSearch?: () => void;

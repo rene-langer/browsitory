@@ -255,6 +255,147 @@ describe("useAppState", () => {
     expect(selectedBranchesSeen).toEqual([["main"], ["main"]]);
   });
 
+  it("passes the saved remote selection to getCommitGraph, and none when nothing is saved (#385)", async () => {
+    let savedRemote: string[] | null = null;
+    const remoteSeen: string[][] = [];
+    const client = transferClient({
+      getGraphRemoteBranchSelection: async () => savedRemote,
+      setGraphRemoteBranchSelection: async (_repoPath, branches) => {
+        savedRemote = branches;
+      },
+      getCommitGraph: async (_repoPath, _limit, _selectedBranches, remoteBranches) => {
+        remoteSeen.push(remoteBranches);
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+    await act(() => result.current.setGraphRemoteBranchSelection(["origin/feature"]));
+
+    expect(remoteSeen).toEqual([[], ["origin/feature"]]);
+  });
+
+  describe("isolateGraphBranch", () => {
+    function isolateClient(initialLocal: string[] | null, initialRemote: string[] | null) {
+      const saved = { local: initialLocal, remote: initialRemote };
+      const writes: string[] = [];
+      const graphCalls: [string[] | null, string[]][] = [];
+      const client = transferClient({
+        getGraphBranchSelection: async () => saved.local,
+        getGraphRemoteBranchSelection: async () => saved.remote,
+        setGraphBranchSelection: async (_repoPath, branches) => {
+          writes.push(`local:${branches.join(",")}`);
+          saved.local = branches;
+        },
+        setGraphRemoteBranchSelection: async (_repoPath, branches) => {
+          writes.push(`remote:${branches.join(",")}`);
+          saved.remote = branches;
+        },
+        getCommitGraph: async (_repoPath, _limit, selectedBranches, remoteBranches) => {
+          graphCalls.push([selectedBranches, remoteBranches]);
+          return [];
+        },
+      });
+      return { client, writes, graphCalls };
+    }
+
+    it("on a remote branch selects only it, with no local branch", async () => {
+      const { client, writes, graphCalls } = isolateClient(null, null);
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+
+      await act(() => result.current.isolateGraphBranch("remote", "origin/feature"));
+
+      expect(writes).toEqual(["local:", "remote:origin/feature"]);
+      expect(graphCalls.at(-1)).toEqual([[], ["origin/feature"]]);
+    });
+
+    it("on a local branch clears a saved remote selection, so no remote branch joins the walk", async () => {
+      const { client, writes, graphCalls } = isolateClient(null, ["origin/feature"]);
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+
+      await act(() => result.current.isolateGraphBranch("local", "main"));
+
+      expect(writes).toEqual(["local:main", "remote:"]);
+      expect(graphCalls.at(-1)).toEqual([["main"], []]);
+    });
+
+    it("on a local branch keeps a never-saved remote selection (every remote badge stays)", async () => {
+      const { client, writes, graphCalls } = isolateClient(null, null);
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+
+      await act(() => result.current.isolateGraphBranch("local", "main"));
+
+      expect(writes).toEqual(["local:main"]);
+      expect(graphCalls.at(-1)).toEqual([["main"], []]);
+      expect(result.current.state.graphRemoteBranchSelection).toBeNull();
+    });
+  });
+
+  // #402: going back to the default forgets the saved selections; it doesn't save today's names.
+  describe("clearing the graph selection", () => {
+    function clearClient(initialLocal: string[] | null, initialRemote: string[] | null) {
+      const saved = { local: initialLocal, remote: initialRemote };
+      const writes: string[] = [];
+      const graphCalls: [string[] | null, string[]][] = [];
+      const client = transferClient({
+        getGraphBranchSelection: async () => saved.local,
+        getGraphRemoteBranchSelection: async () => saved.remote,
+        setGraphBranchSelection: async (_repoPath, branches) => {
+          writes.push(`local:${branches.join(",")}`);
+          saved.local = branches;
+        },
+        setGraphRemoteBranchSelection: async (_repoPath, branches) => {
+          writes.push(`remote:${branches.join(",")}`);
+          saved.remote = branches;
+        },
+        clearGraphBranchSelection: async () => {
+          writes.push("clear local");
+          saved.local = null;
+        },
+        clearGraphRemoteBranchSelection: async () => {
+          writes.push("clear remote");
+          saved.remote = null;
+        },
+        getCommitGraph: async (_repoPath, _limit, selectedBranches, remoteBranches) => {
+          graphCalls.push([selectedBranches, remoteBranches]);
+          return [];
+        },
+      });
+      return { client, writes, graphCalls };
+    }
+
+    it("showAllGraphBranches forgets both selections and reloads the default graph once", async () => {
+      const { client, writes, graphCalls } = clearClient(["main"], ["origin/feature"]);
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      const callsBefore = graphCalls.length;
+
+      await act(() => result.current.showAllGraphBranches());
+
+      expect(writes).toEqual(["clear local", "clear remote"]);
+      expect(graphCalls.slice(callsBefore)).toEqual([[null, []]]);
+      expect(result.current.state.graphBranchSelection).toBeNull();
+      expect(result.current.state.graphRemoteBranchSelection).toBeNull();
+    });
+
+    it("clearGraphBranchSelection forgets only the local selection", async () => {
+      const { client, writes, graphCalls } = clearClient([], ["origin/feature"]);
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+
+      await act(() => result.current.clearGraphBranchSelection());
+
+      expect(writes).toEqual(["clear local"]);
+      expect(graphCalls.at(-1)).toEqual([null, ["origin/feature"]]);
+      expect(result.current.state.graphBranchSelection).toBeNull();
+      expect(result.current.state.graphRemoteBranchSelection).toEqual(["origin/feature"]);
+    });
+  });
+
   it("refresh populates repository state including remotes and upstream", async () => {
     const entry: StatusEntry = { path: "a.txt", oldPath: null, staged: false, kind: "Modified" };
     const graphCommit: GraphCommit = {

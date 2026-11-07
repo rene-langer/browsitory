@@ -1,3 +1,4 @@
+use git_core::graph::GraphSelection;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitOutcomeDto, CommitSignatureDto, DiffHunkDto, DiffOptionsDto,
     FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
@@ -27,6 +28,9 @@ pub(super) struct GetCommitGraphParams {
     repo_path: String,
     limit: usize,
     selected_branches: Option<Vec<String>>,
+    /// Required, so a caller that doesn't know about remote branches fails loudly instead of
+    /// silently dropping them from the graph (#385).
+    remote_branches: Vec<String>,
 }
 
 pub(super) fn get_commit_graph(
@@ -34,7 +38,13 @@ pub(super) fn get_commit_graph(
     repos: &Repos,
 ) -> Result<Value, String> {
     let commits: Vec<GraphCommitDto> = worker_handle(repos, &params.repo_path)?
-        .get_commit_graph(params.limit, params.selected_branches)?
+        .get_commit_graph(
+            params.limit,
+            GraphSelection {
+                local: params.selected_branches,
+                remote: params.remote_branches,
+            },
+        )?
         .into_iter()
         .map(GraphCommitDto::from)
         .collect();
@@ -156,6 +166,13 @@ pub(super) fn set_graph_branch_selection(
     Ok(Value::Null)
 }
 
+/// Forgets the saved selection, back to every local branch (#402).
+pub(super) fn clear_graph_branch_selection(params: RepoPathParams) -> Result<Value, String> {
+    config::clear_graph_branch_selection(Path::new(&params.repo_path))
+        .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
 pub(super) fn get_graph_remote_branch_selection(params: RepoPathParams) -> Result<Value, String> {
     let selection = config::get_graph_remote_branch_selection(Path::new(&params.repo_path))
         .map_err(|error| error.to_string())?;
@@ -177,6 +194,13 @@ pub(super) fn set_graph_remote_branch_selection(
         &params.selected_branches,
     )
     .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+/// Forgets the saved remote selection, back to no remote commits and every remote badge (#402).
+pub(super) fn clear_graph_remote_branch_selection(params: RepoPathParams) -> Result<Value, String> {
+    config::clear_graph_remote_branch_selection(Path::new(&params.repo_path))
+        .map_err(|error| error.to_string())?;
     Ok(Value::Null)
 }
 

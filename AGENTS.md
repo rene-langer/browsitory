@@ -196,3 +196,9 @@ the `superpowers` plugin's `writing-plans`, `subagent-driven-development` / `exe
 and `test-driven-development` skills. Those files are a record of past decisions, not current
 truth: if one disagrees with the code, `AGENTS.md` or `docs/ARCHITECTURE.md`, the latter win.
 `.claude/skills/browsitory-conventions` lists the Browsitory rules generic skills don't cover.
+
+Findings outside the task: a bug, gap or other problem you notice while working on something
+else and don't fix in the same change must become a GitHub issue (`gh issue create`). Check for
+an existing issue first (`gh issue list --search ...`) and comment there instead of filing a
+duplicate. The issue states what you found, where (`path:line`), how to reproduce it if known,
+and which task surfaced it. Mention the issue number in your final report.

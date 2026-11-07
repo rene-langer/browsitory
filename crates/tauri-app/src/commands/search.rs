@@ -1,5 +1,6 @@
 use std::future::Future;
 
+use git_core::graph::GraphSelection;
 use git_core::search::SearchPage;
 use tauri::State;
 
@@ -11,10 +12,15 @@ pub async fn search_commits(
     repo_path: String,
     query: String,
     refs: Option<Vec<String>>,
+    remote_branches: Vec<String>,
     cursor: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<SearchPageDto, String> {
-    Ok(queue_search(&state, &repo_path, query, refs, cursor)?
+    let selection = GraphSelection {
+        local: refs,
+        remote: remote_branches,
+    };
+    Ok(queue_search(&state, &repo_path, query, selection, cursor)?
         .await?
         .into())
 }
@@ -25,12 +31,12 @@ pub(crate) fn queue_search(
     state: &AppState,
     repo_path: &str,
     query: String,
-    refs: Option<Vec<String>>,
+    selection: GraphSelection,
     cursor: Option<String>,
 ) -> Result<impl Future<Output = Result<SearchPage, String>> + Send + 'static, String> {
     let worker = repo_worker(state, repo_path)?;
     let generation = worker.signal().claim_search_generation();
-    Ok(worker.call(move |w| w.search_commits_claimed(generation, query, refs, cursor)))
+    Ok(worker.call(move |w| w.search_commits_claimed(generation, query, selection, cursor)))
 }
 
 /// Stops the repo's in-flight search, if any. Never queued behind it — see

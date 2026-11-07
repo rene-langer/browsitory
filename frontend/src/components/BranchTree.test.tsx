@@ -34,8 +34,11 @@ function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps {
     operationDisabledReason: null,
     graphBranchSelection: null,
     onSetGraphBranchSelection: vi.fn(),
+    onClearGraphBranchSelection: vi.fn(),
+    onShowAllGraphBranches: vi.fn(),
     graphRemoteBranchSelection: null,
     onSetGraphRemoteBranchSelection: vi.fn(),
+    onIsolateGraphBranch: vi.fn(),
     remoteBranchesInGraph: [],
     remotes: [],
     upstream: null,
@@ -226,14 +229,15 @@ describe("BranchTree — local branches", () => {
     expect(screen.getByRole("menuitem", { name: "Checkout" })).toBeDisabled();
   });
 
-  it("a branch's context menu Isolate branch calls onSetGraphBranchSelection with only that branch", () => {
+  it("a branch's context menu Isolate branch isolates only that local branch", () => {
     const { props } = renderTree();
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Isolate branch" }));
-    expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith(["feat/foo"]);
+    expect(props.onIsolateGraphBranch).toHaveBeenCalledWith("local", "feat/foo");
+    expect(props.onSetGraphBranchSelection).not.toHaveBeenCalled();
   });
 
-  it("the header '+' menu's Show all branches is disabled with no saved selection, and restores every branch when a filter is active", () => {
+  it("the header '+' menu's Show all branches is disabled with no saved selection, and restores the default graph when a filter is active", () => {
     const { props, rerender } = renderTree();
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByRole("menuitem", { name: "Show all branches" })).toBeDisabled();
@@ -241,7 +245,16 @@ describe("BranchTree — local branches", () => {
     // The open menu follows the new props.
     rerender(<BranchTree {...props} graphBranchSelection={["feat/foo"]} />);
     fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
-    expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith(["main", "feat/foo"]);
+    // #402: forgets the selection rather than saving today's branch names.
+    expect(props.onShowAllGraphBranches).toHaveBeenCalledTimes(1);
+    expect(props.onSetGraphBranchSelection).not.toHaveBeenCalled();
+  });
+
+  it("Show all branches is enabled when only a remote selection is saved", () => {
+    const { props } = renderTree({ graphRemoteBranchSelection: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
+    expect(props.onShowAllGraphBranches).toHaveBeenCalledTimes(1);
   });
 
   it("a second click on a menu button closes its menu", () => {
@@ -337,15 +350,45 @@ describe("BranchTree — local branches", () => {
   // The graph checkboxes stay visible inline regardless of the popover/menu, so this transfers
   // unchanged too.
   it("a branch absent from an explicit selection renders its swatch unpressed; toggling it adds it back", () => {
-    const onSetGraphBranchSelection = vi.fn();
-    renderTree({ graphBranchSelection: ["main"], onSetGraphBranchSelection });
+    const { props } = renderTree({
+      branches: [
+        { name: "main", isCurrent: true },
+        { name: "feat/foo", isCurrent: false },
+        { name: "dev", isCurrent: false },
+      ],
+      graphBranchSelection: ["main"],
+    });
 
     expect(screen.getByRole("button", { name: "Show main in graph" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Show feat/foo in graph" })).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(screen.getByRole("button", { name: "Show feat/foo in graph" }));
 
-    expect(onSetGraphBranchSelection).toHaveBeenCalledWith(["main", "feat/foo"]);
+    expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith(["main", "feat/foo"]);
+    expect(props.onClearGraphBranchSelection).not.toHaveBeenCalled();
+  });
+
+  // #402: a saved list of every branch would hide later branches, and with one branch walk
+  // first parents only, so turning the last one back on forgets the selection instead.
+  it("toggling on the last branch missing from the selection clears it instead of saving every name", () => {
+    const { props } = renderTree({ graphBranchSelection: ["main"] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Show feat/foo in graph" }));
+
+    expect(props.onClearGraphBranchSelection).toHaveBeenCalledTimes(1);
+    expect(props.onSetGraphBranchSelection).not.toHaveBeenCalled();
+  });
+
+  it("in a repo with one branch, its dot off saves an empty selection and back on clears it", () => {
+    const { props, rerender } = renderTree({ branches: [{ name: "main", isCurrent: true }] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Show main in graph" }));
+    expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith([]);
+
+    rerender(<BranchTree {...props} graphBranchSelection={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show main in graph" }));
+    expect(props.onClearGraphBranchSelection).toHaveBeenCalledTimes(1);
+    expect(props.onSetGraphBranchSelection).toHaveBeenCalledTimes(1);
   });
 
   // Transformation: open-popover-then-click-Delete-twice → right-click-then-click-Delete-menuitem.
@@ -1303,6 +1346,18 @@ describe("BranchTree — refs and remotes (4b)", () => {
     expect(item).toHaveAttribute("data-destructive", "true");
     fireEvent.click(item);
     expect(props.onOpenDeleteRemoteBranch).toHaveBeenCalledWith("origin", "topic");
+  });
+
+  it("a remote branch's context menu Isolate branch isolates that remote branch (#385)", async () => {
+    const { props } = renderTree({
+      remotes: originOnly,
+      onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]),
+    });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const row = (await screen.findByRole("button", { name: "Show origin/topic in graph" })).closest("li")!;
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Isolate branch" }));
+    expect(props.onIsolateGraphBranch).toHaveBeenCalledWith("remote", "origin/topic");
   });
 
   it("disables Delete <remote>/<branch>… while another operation runs", async () => {

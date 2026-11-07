@@ -127,16 +127,19 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke("update_workspace", { id, name, members }),
   deleteWorkspace: (id: string) => loggedInvoke("delete_workspace", { id }),
   getStatus: (repoPath: string) => loggedInvoke<StatusEntry[]>("get_status", { repoPath }),
-  getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null) =>
-    loggedInvoke<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches }),
+  getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null, remoteBranches: string[]) =>
+    loggedInvoke<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches, remoteBranches }),
   getGraphBranchSelection: (repoPath: string) =>
     loggedInvoke<string[] | null>("get_graph_branch_selection", { repoPath }),
   setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>
     loggedInvoke("set_graph_branch_selection", { repoPath, selectedBranches }),
+  clearGraphBranchSelection: (repoPath: string) => loggedInvoke("clear_graph_branch_selection", { repoPath }),
   getGraphRemoteBranchSelection: (repoPath: string) =>
     loggedInvoke<string[] | null>("get_graph_remote_branch_selection", { repoPath }),
   setGraphRemoteBranchSelection: (repoPath: string, selectedBranches: string[]) =>
     loggedInvoke("set_graph_remote_branch_selection", { repoPath, selectedBranches }),
+  clearGraphRemoteBranchSelection: (repoPath: string) =>
+    loggedInvoke("clear_graph_remote_branch_selection", { repoPath }),
   getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath: string | null = null) =>
     loggedInvoke<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts, oldPath }),
   getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>
@@ -145,8 +148,8 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<FileHistoryEntry[]>("get_file_history", { repoPath, path, limit }),
   // Plain `invoke` on purpose: query errors and cancellations are expected while typing and are
   // shown in the UI, not logged.
-  searchCommits: (repoPath: string, query: string, refs: string[] | null, cursor: string | null) =>
-    invoke<SearchPage>("search_commits", { repoPath, query, refs, cursor }),
+  searchCommits: (repoPath: string, query: string, refs: string[] | null, remoteBranches: string[], cursor: string | null) =>
+    invoke<SearchPage>("search_commits", { repoPath, query, refs, remoteBranches, cursor }),
   cancelSearch: (repoPath: string) => loggedInvoke<void>("cancel_search", { repoPath }),
   getCommitRenameDiff: (repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions) =>
     loggedInvoke<DiffHunk[]>("get_commit_rename_diff", { repoPath, commitId, oldPath, newPath, opts }),

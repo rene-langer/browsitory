@@ -611,13 +611,33 @@ certificate.
   progress) — so a commit/stage queued on the single in-order repo worker never waits behind
   thousands of `path:`/`contents:` tree diffs; a time-boxed page just returns `next_cursor`
   and the frontend's paging round continues.
-- Exactly one branch in the graph selection (what "Isolate branch" sets) makes both
-  `graph::graph_log` and `search_commits` (without a `branch:` term) walk first parents only
-  (`graph::walks_first_parent`, #380): the branch's own commits and merges, not the merged side
-  branches. Merges keep every `parent_ids` entry; the frontend's `assignLanes` gives a merge
-  parent that isn't in the list no lane (`hiddenParentIds`, drawn as a short stub) instead of a
-  lane running to the bottom. No selection or several branches walk every ancestor.
-- The cursor is `<offset>:<fingerprint of the start oids and first-parent mode>`; resuming
+- The graph and a search without a `branch:` term walk the same start points,
+  `graph::GraphSelection::start_oids`: the selected local branches (`local: None`, nothing
+  saved, is every local branch; `Some([])` none) plus the selected remote branches (`remote`,
+  `<remote>/<branch>` names pushed as `refs/remotes/…`; empty, also for a never-saved remote
+  selection, walks none, so the default graph has no remote-only commits, #385). Missing names
+  are skipped (#97). Both selections are required parameters of `get_commit_graph` and
+  `search_commits` on both transports (`remoteBranches` has no default), so a caller can't drop
+  the remote one by leaving it out.
+- Exactly one branch in the graph selection, local and remote together (what "Isolate branch"
+  sets), makes both `graph::graph_log` and `search_commits` (without a `branch:` term) walk
+  first parents only (`GraphSelection::walks_first_parent`, #380): the branch's own commits and
+  merges, not the merged side branches. `local: None` never counts as one. Merges keep every
+  `parent_ids` entry; the frontend's `assignLanes` gives a merge parent that isn't in the list
+  no lane (`hiddenParentIds`, drawn as a short stub) instead of a lane running to the bottom.
+  No selection or several branches walk every ancestor. "Isolate branch" saves both selections
+  (`isolateGraphBranch`): on a remote branch, local `[]` and remote `[name]`; on a local branch,
+  local `[name]`, and remote `[]` only when a non-empty remote selection was saved (a
+  never-saved one walks nothing and keeps every remote badge).
+- Going back to the default clears a saved selection (`clear_graph_branch_selection`,
+  `clear_graph_remote_branch_selection`, #402) instead of saving today's branch names, which
+  would hide branches created later and, with one local branch, walk first parents only. The
+  setters take a list, never `null`, so only these calls clear. "Show all branches"
+  (`showAllGraphBranches`) clears both in one mutation. A dot click that turns every local
+  branch on, and deleting a branch when every remaining one would be selected, clear the local
+  one only (`coversEveryBranch` in `frontend/src/lib/graphSelection.ts`).
+- The cursor is `<offset>:<fingerprint of the start oids and first-parent mode>` (the two
+  things that decide the walk, so a changed remote selection changes it too); resuming
   re-walks and skips `offset` (polling cancel every 1,024 skipped commits), and any moved start
   point is `StaleCursor` instead of a duplicate or a gap.
 - A refresh after any mutation (or a graph branch selection change) deliberately restarts an

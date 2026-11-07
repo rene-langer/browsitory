@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withRenamedBranch, withoutBranch } from "./graphSelection";
+import { coversEveryBranch, withRenamedBranch, withoutBranch } from "./graphSelection";
 
 describe("withoutBranch", () => {
   it("needs no write when nothing is selected or the branch is not in the selection", () => {
@@ -19,5 +19,15 @@ describe("withRenamedBranch", () => {
     expect(withRenamedBranch(["a", "b"], "a", "z")).toEqual(["z", "b"]);
     expect(withRenamedBranch(["b"], "a", "z")).toBeNull();
     expect(withRenamedBranch(null, "a", "z")).toBeNull();
+  });
+});
+
+describe("coversEveryBranch", () => {
+  it("is true when every branch is named, stale names or not", () => {
+    expect(coversEveryBranch(["a", "b"], ["b", "a"])).toBe(true);
+    expect(coversEveryBranch(["a", "b", "gone"], ["a", "b"])).toBe(true);
+  });
+  it("is false when a branch is missing", () => {
+    expect(coversEveryBranch(["a"], ["a", "b"])).toBe(false);
   });
 });
