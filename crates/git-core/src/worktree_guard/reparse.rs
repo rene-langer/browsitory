@@ -82,9 +82,100 @@ pub(crate) fn link_target(buf: &[u8]) -> Option<Vec<u16>> {
     Some([wide(r"\\?\").as_slice(), rest].concat())
 }
 
+/// The names of a file with hard links, from the `FILE_LINKS_INFORMATION` buffer
+/// `NtQueryInformationFile(FileHardLinkInformation)` fills (#260): for each name, the file ID of
+/// the folder it is in (`ParentFileId`, the 64-bit file reference) and the name itself. `None`
+/// for a malformed buffer.
+pub(crate) fn hard_links(buf: &[u8]) -> Option<Vec<(u64, Vec<u16>)>> {
+    let u32_at = |at: usize| Some(u32::from_le_bytes(buf.get(at..at + 4)?.try_into().ok()?));
+    let u64_at = |at: usize| Some(u64::from_le_bytes(buf.get(at..at + 8)?.try_into().ok()?));
+    // `BytesNeeded`, `EntriesReturned`, then the first `FILE_LINK_ENTRY_INFORMATION` (8-byte
+    // aligned): `NextEntryOffset` (0 for the last), padding, `ParentFileId`, `FileNameLength`
+    // (in UTF-16 units), `FileName`.
+    let count = u32_at(4)?;
+    let mut links = Vec::new();
+    let mut entry = 8usize;
+    for _ in 0..count {
+        let parent = u64_at(entry + 8)?;
+        let units = usize::try_from(u32_at(entry + 16)?).ok()?;
+        let start = entry + 20;
+        let name = buf
+            .get(start..start.checked_add(units.checked_mul(2)?)?)?
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&unit| u16::from_le_bytes(unit))
+            .collect();
+        links.push((parent, name));
+        match u32_at(entry)? {
+            0 => break,
+            next => entry = entry.checked_add(usize::try_from(next).ok()?)?,
+        }
+    }
+    Some(links)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `FILE_LINKS_INFORMATION` buffer listing `links`, each entry 8-byte aligned.
+    fn links_buffer(links: &[(u64, &str)]) -> Vec<u8> {
+        let mut entries = Vec::new();
+        for (i, (parent, name)) in links.iter().enumerate() {
+            let name: Vec<u16> = name.encode_utf16().collect();
+            let size = (20 + name.len() * 2).next_multiple_of(8);
+            let next = if i + 1 == links.len() { 0 } else { size };
+            let mut entry = Vec::new();
+            entry.extend_from_slice(&u32::try_from(next).unwrap().to_le_bytes());
+            entry.extend_from_slice(&0u32.to_le_bytes());
+            entry.extend_from_slice(&parent.to_le_bytes());
+            entry.extend_from_slice(&u32::try_from(name.len()).unwrap().to_le_bytes());
+            for unit in name {
+                entry.extend_from_slice(&unit.to_le_bytes());
+            }
+            entry.resize(size, 0);
+            entries.extend(entry);
+        }
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&u32::try_from(8 + entries.len()).unwrap().to_le_bytes());
+        buf.extend_from_slice(&u32::try_from(links.len()).unwrap().to_le_bytes());
+        buf.extend(entries);
+        buf
+    }
+
+    fn names(buf: &[u8]) -> Option<Vec<(u64, String)>> {
+        hard_links(buf).map(|links| {
+            links
+                .into_iter()
+                .map(|(parent, name)| (parent, String::from_utf16(&name).unwrap()))
+                .collect()
+        })
+    }
+
+    #[test]
+    fn hard_links_are_read_with_their_folders() {
+        let buf = links_buffer(&[(0x5_0000_0000_0024, "f.txt"), (7, "other name.txt")]);
+        assert_eq!(
+            names(&buf),
+            Some(vec![
+                (0x5_0000_0000_0024, "f.txt".to_string()),
+                (7, "other name.txt".to_string())
+            ])
+        );
+        assert_eq!(names(&links_buffer(&[])), Some(vec![]));
+    }
+
+    #[test]
+    fn malformed_hard_link_buffers_have_no_links() {
+        let buf = links_buffer(&[(1, "f.txt"), (2, "g.txt")]);
+        for cut in [0, 7, 15, 27, 33, buf.len() - 3] {
+            assert_eq!(names(&buf[..cut]), None, "cut at {cut}");
+        }
+        let mut long = buf.clone();
+        long[24..28].copy_from_slice(&u32::MAX.to_le_bytes()); // a name past the end
+        assert_eq!(names(&long), None);
+    }
 
     const SYMLINK: u32 = 0xA000_000C;
     const MOUNT_POINT: u32 = 0xA000_0003;
