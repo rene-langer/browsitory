@@ -78,7 +78,7 @@ extension-host typings; none are loaded by the packaged extension itself.
 |---|---|---|
 | @types/node | MIT | dev only; same package as the frontend row above. |
 | @types/vscode 1.134.0 | MIT | dev only; VSCode extension-host API types. |
-| @vscode/vsce 3.9.2 | MIT | dev only; packages target-specific VSIX artifacts, and `release.yml` runs it to publish them to the Visual Studio Marketplace. Source: `npm info @vscode/vsce@3.9.2 license`, verified 2026-08-31 (re-checked 2026-11-02). |
+| @vscode/vsce 4.1.0 | MIT | dev only; packages target-specific VSIX artifacts, and `release.yml` runs it to publish them to the Visual Studio Marketplace. Source: `npm info @vscode/vsce@4.1.0 license`, verified 2026-11-07. |
 | typescript | Apache-2.0 | dev only; same package as the frontend row above. |
 | vitest | MIT | dev only; same package as the frontend row above. |
 
@@ -257,12 +257,11 @@ not a lookalike such as `lightningcss-plugin`. Owner decision 2026-11-03 (#273).
 | lightningcss, lightningcss-*-* | 1 | MPL-2.0 | Vite's CSS minifier and its per-platform native binaries (`frontend/`, `extension/`'s vitest). A build tool; its output isn't covered. |
 | caniuse-lite | 1 | CC-BY-4.0 | Browser support data for browserslist (`eslint-plugin-react-hooks` > `@babel/core`). |
 | mdn-data | 2 | CC0-1.0 | CSS data for `css-tree` (`jsdom`, tests only). |
-| spdx-license-ids | 3 | CC0-1.0 | SPDX id list for package metadata tools (`@vscode/vsce`, `@wdio/cli`). |
+| spdx-license-ids | 3 | CC0-1.0 | SPDX id list for package metadata tools (`@wdio/cli`, `e2e/` only). |
 | spdx-exceptions | 2 | CC-BY-3.0 | SPDX exception list, same tools. |
 | tslib | 2 | 0BSD | TypeScript runtime helpers inside `@vscode/vsce`'s and WebdriverIO's dependencies. |
 | stream-buffers | 3 | Unlicense | `@wdio/local-runner` (`e2e/` only). |
 | @promptbook/utils | 0 | CC-BY-4.0 | `@wdio/utils` > `locate-app` (`e2e/` only). |
-| @azu/style-format | 1 | WTFPL | `@vscode/vsce` > secretlint formatter (packaging only). |
 | binaryextensions, editions, istextorbinary, textextensions, version-range | 6, 6, 9, 6, 4 | Artistic-2.0 | `@vscode/vsce` > secretlint > `istextorbinary` (packaging only). |
 | @vscode/vsce-sign, @vscode/vsce-sign-*-* | 2 | Microsoft licence terms (`SEE LICENSE IN LICENSE.txt`, reported as Unknown) | Required by Microsoft's own publishing tool `@vscode/vsce`. Used only to package and publish, locally and in CI; never redistributed in the VSIX or the app. |
 
