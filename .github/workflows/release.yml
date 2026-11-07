@@ -252,12 +252,12 @@ jobs:
         with:
           sparse-checkout: THIRD_PARTY_NOTICES.md
           sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: browsitory-vsix-*
           merge-multiple: true
           path: release-vsix
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           draft: true
@@ -312,7 +312,7 @@ jobs:
       # --ignore-scripts and before signing in, so no install script runs with the Azure session.
       - run: pnpm --dir extension install --frozen-lockfile --ignore-scripts
         if: env.HAS_AZURE == 'true'
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         if: env.HAS_AZURE == 'true'
         with:
           pattern: browsitory-vsix-*
@@ -413,7 +413,7 @@ jobs:
         if: env.HAS_OVSX == 'true'
         with:
           node-version: 24
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         if: env.HAS_OVSX == 'true'
         with:
           pattern: browsitory-vsix-*

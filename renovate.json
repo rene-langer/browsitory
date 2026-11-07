@@ -48,6 +48,12 @@
       "groupName": "GitHub Actions"
     },
     {
+      "description": "GitHub Actions majors (actions, and the node/pnpm versions in setup steps): one PR per dependency, so each can be approved on its own",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major"],
+      "groupName": null
+    },
+    {
       "matchManagers": ["rust-toolchain"],
       "groupName": "Rust toolchain"
     },
