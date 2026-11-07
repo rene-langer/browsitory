@@ -10,6 +10,7 @@ export function Panel({
   headingLevel = 2,
   footer,
   bodyLabel,
+  bodyClassName,
 }: {
   title?: string;
   actions?: ReactNode;
@@ -27,6 +28,9 @@ export function Panel({
   /** With `footer`: makes the scrolling body a labelled, focusable region, so keyboard users can
    * scroll it. Being the first focusable element, it then also takes a dialog's initial focus. */
   bodyLabel?: string;
+  /** With `footer`: an extra class for the scrolling body, e.g. to lay it out as a flex column
+   * whose one child fills the height left and scrolls on its own (#383). */
+  bodyClassName?: string;
 }) {
   const scrolling = footer !== undefined;
   return (
@@ -44,7 +48,7 @@ export function Panel({
       {scrolling ? (
         <>
           <div
-            className={`${styles.body} ${styles.scrollBody}`}
+            className={[styles.body, styles.scrollBody, bodyClassName].filter(Boolean).join(" ")}
             {...(bodyLabel !== undefined ? { role: "region", "aria-label": bodyLabel, tabIndex: 0 } : {})}
           >
             {children}

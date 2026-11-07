@@ -40,6 +40,9 @@ export function ThirdPartyLicencesDialog({ load, onClose }: { load: () => Promis
       <Panel
         title="Third-party licences"
         ariaLabel="Third-party licences"
+        // The licence text fills the space the body has left and is the only thing that scrolls
+        // (#383): no scroll area around a scroll area on a short window.
+        bodyClassName={styles.body}
         // In the footer, Close stays in view however long the dialog gets.
         footer={
           <button type="button" onClick={onClose}>
