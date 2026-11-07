@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { expect } from "@wdio/globals";
 import { waitUntilGoneInPage } from "../support/dom";
+import { sidebarSectionToggle } from "../support/sidebar";
 
 const E2E_WORKSPACE_ROOT = path.join(os.tmpdir(), "browsitory-e2e-workspace-root");
 const E2E_WORKSPACE_REPO_A = path.join(E2E_WORKSPACE_ROOT, "repo-a");
@@ -12,7 +13,7 @@ const E2E_CONFIG_FILE = path.join(os.tmpdir(), "browsitory-e2e-config", "config.
 const E2E_RESTORE_OPEN_REPOS_ONCE = "browsitory-e2e-restore-open-repos-once";
 
 async function waitForAppReady(): Promise<void> {
-  await $('section[aria-label="Branches"] button[aria-expanded]').waitForExist({ timeout: 10000 });
+  await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 10000 });
 }
 
 async function openPickerOverlay(): Promise<void> {

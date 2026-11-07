@@ -5,7 +5,7 @@ import path from "node:path";
 import { expect } from "@wdio/globals";
 import { waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
 import { waitForMergeCommit } from "../support/git";
-import { expandSidebarSection } from "../support/sidebar";
+import { expandSidebarSection, sidebarBranchRow } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
@@ -84,7 +84,7 @@ describe("Browsitory merge with conflict resolution", () => {
     // rebase.spec.ts's comment on why a synthetic `contextmenu` DOM event is used instead of
     // WebdriverIO's `.click({ button: "right" })`). The row itself (a `role="button"` `<li>`, not
     // a nested `<button>` — see `ListRow.tsx`) owns the handler, so dispatch on it directly.
-    const branchRow = await $("li*=e2e-merge-feature");
+    const branchRow = await $(sidebarBranchRow("e2e-merge-feature"));
     await branchRow.waitForExist({ timeout: 10000 });
     await browser.execute((el) => {
       el.dispatchEvent(
@@ -178,7 +178,7 @@ describe("Browsitory merge with conflict resolution", () => {
     // `AccordionSection`'s open state persists in localStorage, which survives a page refresh.
     await expandSidebarSection("Branches");
 
-    const branchRow = await $("li*=e2e-merge-adddelete-feature");
+    const branchRow = await $(sidebarBranchRow("e2e-merge-adddelete-feature"));
     await branchRow.waitForExist({ timeout: 10000 });
     // The row itself owns the context-menu handler (see the previous test's comment).
     await browser.execute((el) => {
@@ -261,14 +261,13 @@ describe("Browsitory merge with conflict resolution", () => {
     await browser.refresh();
     await expandSidebarSection("Branches");
 
-    const branchRow = await $("li*=e2e-merge-abort-feature");
+    const branchRow = await $(sidebarBranchRow("e2e-merge-abort-feature"));
     await branchRow.waitForExist({ timeout: 10000 });
-    const branchButton = await branchRow.$("button");
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
       );
-    }, branchButton);
+    }, branchRow);
 
     const mergeButton = await $("button*=Merge into current branch");
     await mergeButton.waitForExist({ timeout: 10000 });
@@ -278,7 +277,8 @@ describe("Browsitory merge with conflict resolution", () => {
     const conflictedRow = await $("span*=abort.txt (Conflicted)");
     await conflictedRow.waitForExist({ timeout: 10000 });
 
-    const abortMergeButton = await $("button=Abort merge");
+    // The commit box offers "Abort merge" too; this is the operation status strip's.
+    const abortMergeButton = await $("div[aria-label='Operation status']").$("button=Abort merge");
     await abortMergeButton.waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), abortMergeButton);
 

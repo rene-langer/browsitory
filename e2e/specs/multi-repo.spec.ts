@@ -1,12 +1,13 @@
 import path from "node:path";
 import os from "node:os";
 import { expect } from "@wdio/globals";
+import { sidebarSectionToggle } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const E2E_SECOND_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-second-repo");
 
 async function waitForAppReady(): Promise<void> {
-  await $('section[aria-label="Branches"] button[aria-expanded]').waitForExist({ timeout: 10000 });
+  await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 10000 });
 }
 
 describe("Browsitory multi-repo tabs", () => {

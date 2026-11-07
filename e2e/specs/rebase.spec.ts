@@ -258,7 +258,8 @@ describe("Browsitory interactive rebase", () => {
     const conflictedRow = await $("span*=rebase-conflict-abort.txt (Conflicted)");
     await conflictedRow.waitForExist({ timeout: 10000 });
 
-    const abortButton = await $("button=Abort rebase");
+    // The operation status strip has an "Abort rebase" button too; this is the panel's.
+    const abortButton = await $("section[aria-label='Rebase in progress']").$("button=Abort rebase");
     await abortButton.click();
 
     await waitUntilGoneInPage("h2", "Rebase in progress", { contains: true });

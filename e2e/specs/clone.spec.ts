@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { sidebarSectionToggle } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const SOURCE = path.join(os.tmpdir(), "browsitory-e2e-clone-source.git");
@@ -24,7 +25,7 @@ describe("Browsitory clone", () => {
   });
 
   it("clones a repository from the picker and opens it in a new tab", async () => {
-    await $('section[aria-label="Branches"] button[aria-expanded]').waitForExist({ timeout: 10000 });
+    await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 10000 });
     await browser.execute((el) => (el as HTMLElement).click(), await $('button[aria-label="Open another repository"]'));
     const cloneButton = await $("button=Clone…");
     await cloneButton.waitForExist({ timeout: 10000 });
