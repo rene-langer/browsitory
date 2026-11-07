@@ -38,8 +38,14 @@ fn index(dir: &std::path::Path) -> String {
 }
 
 fn status(dir: &std::path::Path) -> String {
-    show(&git(dir, &["-c", "core.quotepath=false", "status", "--porcelain"]).stdout)
-        .replace('\n', ";")
+    show(
+        &git(
+            dir,
+            &["-c", "core.quotepath=false", "status", "--porcelain"],
+        )
+        .stdout,
+    )
+    .replace('\n', ";")
 }
 
 fn content(dir: &std::path::Path, old: &str, new: &str) -> String {
@@ -76,10 +82,7 @@ fn probe_389() {
                 }
                 let cfgs = format!(
                     "icase={:?} precompose={:?}",
-                    repo.config()
-                        .unwrap()
-                        .get_bool("core.ignorecase")
-                        .ok(),
+                    repo.config().unwrap().get_bool("core.ignorecase").ok(),
                     repo.config()
                         .unwrap()
                         .get_bool("core.precomposeunicode")
