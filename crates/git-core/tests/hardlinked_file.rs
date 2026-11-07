@@ -84,7 +84,10 @@ fn a_hardlinked_file_is_marked_resolved() {
     common::write_file(fx.path(), "d/f.txt", "by hand\n");
     fx.link("d/f.txt");
     let outcome = git_core::merge::mark_resolved(&fx.repo, "d/f.txt", false).unwrap();
-    assert!(matches!(outcome, MarkResolvedOutcome::Resolved), "{outcome:?}");
+    assert!(
+        matches!(outcome, MarkResolvedOutcome::Resolved),
+        "{outcome:?}"
+    );
     assert!(!fx.repo.index().unwrap().has_conflicts());
     assert_eq!(fx.other_content(), "by hand\n");
 }
