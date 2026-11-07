@@ -2,7 +2,7 @@
   "name": "e2e",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@9.15.9",
+  "packageManager": "pnpm@12.18.0",
   "scripts": {
     "test": "wdio run wdio.conf.ts",
     "screenshots": "wdio run wdio.screenshots.conf.ts",

@@ -39,6 +39,11 @@
       "groupName": "JS dependencies (non-major)"
     },
     {
+      "description": "pnpm's minimumReleaseAge (default 1 day) fails an install, --frozen-lockfile included, on a version published less than a day ago: propose none sooner (#361)",
+      "matchManagers": ["npm"],
+      "minimumReleaseAge": "1 day"
+    },
+    {
       "matchManagers": ["pip-compile"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "Python docs tools (non-major)"

@@ -289,11 +289,12 @@ every pull request, every push to `main` and the weekly scheduled run:
   for other platforms) in the npm registry by exact `name@version`. A published version can't
   change, so this is as reliable as installing every platform. Installing them instead
   (pnpm's `supportedArchitectures`, or `pnpm install --force`) would download every
-  platform's native binaries, hundreds of MB, on every run, and would need a different
-  setting for pnpm 9 and pnpm 11. Such a binary counts as production when a production
-  package depends on it.
-- The npm check fails closed: an unknown pnpm lockfile format, an installed package missing
-  from the lockfile, or a failed registry lookup stops it with an error naming the problem.
+  platform's native binaries, hundreds of MB, on every run. Such a binary counts as
+  production when a production package depends on it. The lockfile's "env lockfile" document
+  (pnpm itself, at the version `packageManager` pins) is not a dependency and is skipped.
+- The npm check fails closed: an unknown pnpm lockfile format or document layout, an
+  installed package missing from the lockfile, or a failed registry lookup stops it with an
+  error naming the problem.
   Licence ids and `OR`/`AND` must use SPDX spelling (`mit` or `MIT or ISC` fail), and an
   old-style `licenses` array counts as all of its licences together.
 - An exception or clarification that no longer matches anything fails both checks, so the
