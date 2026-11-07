@@ -3550,13 +3550,13 @@ fn stash_all_refuses_a_case_only_rename_where_names_fold() {
             let index_before = std::fs::read(dir.path().join(".git/index")).unwrap();
 
             let result = git_core::stash::save_stash(&mut repo, &opts); // PROBE
-            let error = result.unwrap_or_else(|()| {
+            let Err(error) = result else {
                 panic!(
                     "PROBE {new} {opts:?}: stashed; worktree {:?}; status {:?}",
                     top_level(dir.path()),
                     git_status(dir.path())
                 )
-            });
+            };
 
             assert_eq!(
                 error.to_string(),
