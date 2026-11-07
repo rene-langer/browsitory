@@ -93,29 +93,35 @@ impl Written {
     /// Records into `self` each path the checkout `builder` configures writes or removes in
     /// `repo`'s work tree. libgit2 reports a path once it is done with it, so the file it
     /// stopped at is never among them; that one is found by comparing the planned paths with
-    /// how they were.
+    /// how they were. Installs the builder's notify and progress callbacks, which also give a
+    /// file with other hard links a name of its own before libgit2 writes it (#420, see
+    /// `hardlink`).
     pub(crate) fn record(&self, repo: &Repository, builder: &mut git2::build::CheckoutBuilder<'_>) {
-        let written = self.clone();
-        builder.progress(move |path, _, _| {
-            if let Some(path) = path {
-                written.push(path_bytes(path));
-            }
-        });
-        let Some(workdir) = repo.workdir() else {
+        crate::hardlink::install(repo, builder, Some(self.clone()));
+    }
+
+    pub(crate) fn set_workdir(&self, workdir: &Path) {
+        self.0.borrow_mut().workdir = Some(workdir.to_path_buf());
+    }
+
+    /// Records `path`, which the checkout plans to write, as it is now below `workdir`.
+    pub(crate) fn plan(&self, workdir: &Path, path: &Path) {
+        let entry = (path_bytes(path), before(workdir, path));
+        self.0.borrow_mut().planned.push(entry);
+    }
+
+    /// Takes the planned `path` as it is now: it was replaced by a copy of itself before the
+    /// checkout wrote anything (#420), which is no write of the checkout's.
+    pub(crate) fn restamp(&self, path: &Path) {
+        let mut record = self.0.borrow_mut();
+        let Some(workdir) = record.workdir.clone() else {
             return;
         };
-        self.0.borrow_mut().workdir = Some(workdir.to_path_buf());
-        // Called while libgit2 plans the checkout, before it writes anything.
-        let planned = self.clone();
-        let root = workdir.to_path_buf();
-        builder.notify_on(git2::CheckoutNotificationType::UPDATED);
-        builder.notify(move |_, path, _, _, _| {
-            if let Some(path) = path {
-                let entry = (path_bytes(path), before(&root, path));
-                planned.0.borrow_mut().planned.push(entry);
-            }
-            true
-        });
+        let key = path_bytes(path);
+        let full = workdir.join(path);
+        for (_, before) in record.planned.iter_mut().filter(|(p, _)| *p == key) {
+            before.stamp = stamp(&full);
+        }
     }
 
     /// Before a checkout of `index` (a merge's result, conflicts included): remembers what is
@@ -449,6 +455,7 @@ fn check_out_paths(
     for path in paths {
         builder.path(path.as_slice());
     }
+    crate::hardlink::on_checkout(repo, &mut builder);
     checkout(&mut builder)?;
     Ok(())
 }
@@ -478,13 +485,13 @@ where
 }
 
 #[cfg(unix)]
-fn path_bytes(path: &Path) -> Vec<u8> {
+pub(crate) fn path_bytes(path: &Path) -> Vec<u8> {
     use std::os::unix::ffi::OsStrExt;
     path.as_os_str().as_bytes().to_vec()
 }
 
 #[cfg(not(unix))]
-fn path_bytes(path: &Path) -> Vec<u8> {
+pub(crate) fn path_bytes(path: &Path) -> Vec<u8> {
     path.to_string_lossy().replace('\\', "/").into_bytes()
 }
 
@@ -533,6 +540,85 @@ mod tests {
         written.push(b"c.txt".to_vec());
         written.push(b"n/new.txt".to_vec());
         Some((dir, repo, written))
+    }
+
+    /// #420 with #329: a planned file with another hard link, given a name of its own before
+    /// the checkout wrote anything and then not reached, is not taken for a file the checkout
+    /// wrote; the file written before the stop is. The rollback leaves the other name as it was.
+    #[test]
+    fn a_hardlinked_file_the_stopped_checkout_did_not_reach_is_not_recorded_as_written() {
+        if unsafe { libc::geteuid() } == 0 {
+            assert!(std::env::var_os("CI").is_none(), "running as root on CI");
+            eprintln!("SKIP: running as root, who ignores read-only folders");
+            return;
+        }
+        let dir = tempfile::TempDir::new().unwrap();
+        let out = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let commit = |files: &[(&str, &str)]| {
+            for (rel, content) in files {
+                let full = dir.path().join(rel);
+                std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+                std::fs::write(full, content).unwrap();
+            }
+            let mut index = repo.index().unwrap();
+            index
+                .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+                .unwrap();
+            index.write().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let sig = git2::Signature::now("t", "t@example.com").unwrap();
+            let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+            let parents: Vec<&git2::Commit> = parent.iter().collect();
+            let id = repo
+                .commit(Some("HEAD"), &sig, &sig, "c", &tree, &parents)
+                .unwrap();
+            repo.find_commit(id).unwrap()
+        };
+        let base = commit(&[("a.txt", "a\n"), ("d/m.txt", "m\n"), ("z.txt", "z\n")]);
+        let side = commit(&[
+            ("a.txt", "side a\n"),
+            ("d/m.txt", "side m\n"),
+            ("z.txt", "side z\n"),
+        ]);
+        repo.reset(base.as_object(), git2::ResetType::Hard, None)
+            .unwrap();
+        std::fs::copy(dir.path().join("z.txt"), out.path().join("z")).unwrap();
+        // An hour old, so the copy made before the checkout differs from it in any case.
+        std::fs::File::options()
+            .write(true)
+            .open(out.path().join("z"))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+            .unwrap();
+        std::fs::remove_file(dir.path().join("z.txt")).unwrap();
+        std::fs::hard_link(out.path().join("z"), dir.path().join("z.txt")).unwrap();
+        let read_only = |mode| {
+            for rel in ["d/m.txt", "d"] {
+                let perms =
+                    std::fs::Permissions::from_mode(if rel == "d" { mode | 0o111 } else { mode });
+                std::fs::set_permissions(dir.path().join(rel), perms).unwrap();
+            }
+        };
+        read_only(0o444);
+
+        let written = Written::default();
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        written.record(&repo, &mut checkout);
+        let result = repo.checkout_tree(side.as_object(), Some(&mut checkout));
+        read_only(0o644);
+
+        assert!(result.is_err());
+        let paths = written.paths();
+        assert!(paths.contains(&b"a.txt".to_vec()), "{paths:?}");
+        assert!(!paths.contains(&b"z.txt".to_vec()), "{paths:?}");
+        roll_back(&repo, &written).unwrap();
+        let read = |path: &Path| std::fs::read_to_string(path).unwrap();
+        assert_eq!(read(&dir.path().join("a.txt")), "a\n");
+        assert_eq!(read(&dir.path().join("z.txt")), "z\n");
+        assert_eq!(read(&out.path().join("z")), "z\n");
+        std::fs::write(dir.path().join("z.txt"), "mine\n").unwrap();
+        assert_eq!(read(&out.path().join("z")), "z\n");
     }
 
     /// A created file that can't be removed doesn't stop the tracked files from coming back

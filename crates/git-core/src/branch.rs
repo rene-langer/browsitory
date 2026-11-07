@@ -114,8 +114,11 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&tree)],
     )?;
+    // A file with other hard links gets a name of its own before it is written (#420).
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    crate::hardlink::on_checkout(repo, &mut checkout);
     // A file another program holds open: say so, not libgit2's raw error (#303).
-    repo.checkout_tree(target.as_object(), None)
+    repo.checkout_tree(target.as_object(), Some(&mut checkout))
         .map_err(crate::worktree_guard::held_open::<BranchError>(
             repo.workdir(),
             crate::HeldDuring::Switch,
@@ -135,8 +138,11 @@ pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchE
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&tree)],
     )?;
+    // A file with other hard links gets a name of its own before it is written (#420).
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    crate::hardlink::on_checkout(repo, &mut checkout);
     // A file another program holds open: say so, not libgit2's raw error (#303).
-    repo.checkout_tree(target.as_object(), None)
+    repo.checkout_tree(target.as_object(), Some(&mut checkout))
         .map_err(crate::worktree_guard::held_open::<BranchError>(
             repo.workdir(),
             crate::HeldDuring::Switch,

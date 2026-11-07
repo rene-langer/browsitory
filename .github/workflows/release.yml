@@ -97,7 +97,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Pinned, not ubuntu-latest (#386): the AppImage, .deb and .rpm need at least the glibc
+          # of the image they are built on (2.39 on Ubuntu 24.04), so building on a newer image
+          # would drop the distributions in between. Move it on purpose, together with
+          # build-vsix-release below, ci.yml's build-dist and build-vsix, and
+          # docs/guide/install.md.
+          - os: ubuntu-24.04
             args: ""
           - os: macos-latest
             # Universal binary (arm64 + x86_64) in one .dmg.
@@ -122,7 +127,7 @@ jobs:
             fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
           "
       - name: Install Tauri system dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
@@ -140,6 +145,14 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
+      # tauri-action looks for @tauri-apps/cli in a package.json in projectPath; crates/tauri-app
+      # has none, so without tauriScript it would `npm install -g` the newest 2.x (#397).
+      # tauriScript runs the CLI that frontend/pnpm-lock.yaml locks instead, with node, so it
+      # still runs in projectPath (tauri-action splits tauriScript on spaces, so the path must
+      # have none).
+      - name: Show the locked Tauri CLI version
+        working-directory: crates/tauri-app
+        run: node ../../frontend/node_modules/@tauri-apps/cli/tauri.js --version
       # Creates the draft release (the first matrix job to finish creates it, the others find it)
       # and uploads the bundles and latest.json, the manifest every installed app's updater reads.
       # v1 (#363) differs from v0 in ways docs/RELEASING.md's "Updater manifest" describes:
@@ -153,6 +166,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PKEY_PASSWORD }}
         with:
           projectPath: crates/tauri-app
+          tauriScript: node ../../frontend/node_modules/@tauri-apps/cli/tauri.js
           tagName: ${{ github.ref_name }}
           releaseName: "Browsitory ${{ github.ref_name }}"
           # Starting text of the draft release (and the `notes` of latest.json); the owner adds
@@ -178,7 +192,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Pinned for the same reason as build-release (#386): the linux-x64 VSIX's
+          # vscode-sidecar needs at least the build image's glibc.
+          - os: ubuntu-24.04
             rust_target: x86_64-unknown-linux-gnu
             vsix_target: linux-x64
             sidecar_suffix: ""
@@ -257,11 +273,29 @@ jobs:
     timeout-minutes: 15
     steps:
       # For THIRD_PARTY_NOTICES.md: every installer and .vsix already carries it; the release
-      # page gets a copy too, so the licences can be read without installing anything.
+      # page gets a copy too, so the licences can be read without installing anything. And for
+      # the manifest check below.
       - uses: actions/checkout@v7
         with:
-          sparse-checkout: THIRD_PARTY_NOTICES.md
+          sparse-checkout: |
+            THIRD_PARTY_NOTICES.md
+            scripts/check-updater-manifest.py
           sparse-checkout-cone-mode: false
+      # All build-release jobs are done, so latest.json is final. Each of them rewrites it, and
+      # two finishing at the same moment can lose a platform (#398). Fails before the
+      # marketplace jobs run, while the release is still a draft; see docs/RELEASING.md's
+      # "Updater manifest" for what it checks and what to do when it fails.
+      - name: Check the updater manifest (latest.json)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dir="$RUNNER_TEMP/updater-manifest"
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D "$dir" \
+            -p latest.json -p '*.sig'
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json assets \
+            > "$dir/assets.json"
+          python3 -I scripts/check-updater-manifest.py --version "${GITHUB_REF_NAME#release/}" \
+            --repo "$GITHUB_REPOSITORY" --assets "$dir/assets.json" "$dir"
       - uses: actions/download-artifact@v8
         with:
           pattern: browsitory-vsix-*

@@ -627,6 +627,7 @@ impl WorktreeChange {
         for path in &self.from_index {
             checkout.path(path);
         }
+        crate::hardlink::on_checkout(repo, &mut checkout);
         let workdir = repo.workdir().ok_or(UndoError::Bare)?;
         // A file another program holds open: the walker's message, not libgit2's raw error
         // (#268). Files checked out before it stay written; trying again finishes the restore.

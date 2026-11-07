@@ -579,6 +579,25 @@ pub(super) fn clear_hazard(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::
     }
 }
 
+/// How many names the regular file at `full` has (`st_nlink` of an `lstat`); 1 for anything
+/// else, and for a missing path. See `worktree_guard::separate_hard_link`.
+pub(super) fn link_count(full: &Path) -> io::Result<u64> {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::symlink_metadata(full) {
+        Ok(meta) if meta.file_type().is_file() => Ok(meta.nlink()),
+        Ok(_) => Ok(1),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(1)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// See `worktree_guard::read_beneath`.
 pub(super) fn read(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<Option<Leaf>> {
     let Walk::Found(at) = walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? else {

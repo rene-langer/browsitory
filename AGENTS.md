@@ -19,7 +19,9 @@ cargo build --workspace                          # build all Rust crates
 cargo test --workspace                            # run all Rust tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check                        # format check (CI)
-cargo tauri dev                                    # run the desktop app (from crates/tauri-app)
+node ../../frontend/node_modules/@tauri-apps/cli/tauri.js dev  # run the desktop app (from
+                                                   # crates/tauri-app, after `pnpm install` in
+                                                   # frontend/): the Tauri CLI the lockfile pins
 scripts/build-dist.sh                              # build standalone distributable (Linux/macOS)
 scripts\build-dist.ps1                             # build standalone distributable (Windows)
 ```
@@ -30,7 +32,7 @@ Single Rust test: `cargo test -p git-core --test status` or
 ```bash
 cd frontend
 pnpm install
-pnpm dev                                           # Vite dev server (used by `cargo tauri dev`)
+pnpm dev                                           # Vite dev server (used by `tauri dev`)
 pnpm build
 pnpm lint
 pnpm test -- --run

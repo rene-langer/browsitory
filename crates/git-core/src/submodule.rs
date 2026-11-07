@@ -174,11 +174,20 @@ fn guarded_update(
             // file, so libgit2's safe checkout would take the missing files for deletions.
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.safe().recreate_missing(true);
+            crate::hardlink::on_checkout(&sub, &mut checkout);
             sub.checkout_tree(commit.as_object(), Some(&mut checkout))
                 .map_err(held())?;
             sub.set_head_detached(target)?;
         } else {
-            submodule.update(false, None).map_err(held())?;
+            // libgit2's default (safe) checkout, with a file with other hard links given a name
+            // of its own before it is written (#420).
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            crate::hardlink::on_checkout(&sub, &mut checkout);
+            let mut options = git2::SubmoduleUpdateOptions::new();
+            options.checkout(checkout);
+            submodule
+                .update(false, Some(&mut options))
+                .map_err(held())?;
         }
         return Ok(());
     }
@@ -194,6 +203,7 @@ fn guarded_update(
     // must be recreated explicitly.
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.safe().recreate_missing(true);
+    crate::hardlink::on_checkout(&sub, &mut checkout);
     sub.checkout_head(Some(&mut checkout)).map_err(held())?;
     Ok(())
 }

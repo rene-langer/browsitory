@@ -116,6 +116,9 @@ jobs:
       # Release tooling (release.yml's publish jobs, #344); no network, the HTTP calls are faked.
       - name: verify-marketplace-listing.py unit tests
         run: python3 scripts/test_verify_marketplace_listing.py
+      # Release tooling too (release.yml's publish-vsix-release, #398); files only, no network.
+      - name: check-updater-manifest.py unit tests
+        run: python3 scripts/test_check_updater_manifest.py
       - name: Changelog entry (fragment in changelog.d/ or CHANGELOG.md)
         env:
           # A dispatched run has no pull request: the default branch is the base, and there are
@@ -358,13 +361,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # ubuntu-24.04, not ubuntu-latest: the image release.yml's build-release builds the
+        # shipped Linux bundles on (it sets their glibc floor, #386), so this job builds what the
+        # release ships.
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - name: Install Tauri system dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         # Bounded download retries that skip a slow mirror (#353). The script's download phases
         # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
         # the cache (under 1 min so far); see the script's "Time budget".
@@ -376,15 +382,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-      # Caches ~/.cargo only (registry and the tauri-cli binary installed below), not target/:
+      # Caches ~/.cargo only (the registry), not target/:
       # the release builds for three OSes would take a large share of the 10 GB repository
       # cache limit and evict the caches the PR jobs use. This job runs only on main.
       - uses: Swatinem/rust-cache@v2
         with:
           cache-targets: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --locked
       - uses: pnpm/action-setup@v6
         with:
           version: 12
@@ -393,6 +397,8 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+      # The build-dist scripts run the @tauri-apps/cli that frontend/pnpm-lock.yaml locks, as
+      # release.yml's build-release does, so this job bundles with the release's CLI (#430).
       - name: Build distributable (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: scripts/build-dist.sh ${{ matrix.os == 'macos-latest' && '--target universal-apple-darwin' || '' }}
@@ -415,7 +421,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Same pinned image as release.yml's build-vsix-release (#386).
+          - os: ubuntu-24.04
             rust_target: x86_64-unknown-linux-gnu
             vsix_target: linux-x64
             sidecar_suffix: ""
@@ -617,11 +624,20 @@ jobs:
         # take at most 3 x (45 + 10) + 3 x (150 + 10) s = about 11 min, plus the install from
         # the cache (under 1 min so far); see the script's "Time budget".
         timeout-minutes: 15
+        # WebKitWebDriver's package is webkit2gtk-driver on Ubuntu 24.04 and webkitgtk-webdriver
+        # from 26.04 on (each image has only its own name), so ubuntu-latest's move to 26.04
+        # needs no edit here (#386).
         run: |
+          . /etc/os-release
+          if dpkg --compare-versions "$VERSION_ID" gt 24.04; then
+            webdriver=webkitgtk-webdriver
+          else
+            webdriver=webkit2gtk-driver
+          fi
           scripts/ci-apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential \
-            webkit2gtk-driver xvfb dbus
+            "$webdriver" xvfb dbus
       - uses: dtolnay/rust-toolchain@stable
       # Own cache (job-id key): this build enables the custom-protocol and
       # forge-fixture-override features, so it must not share a cache with a plain build.

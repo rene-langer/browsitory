@@ -284,6 +284,9 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     if opts.include_untracked {
         flags |= StashFlags::INCLUDE_UNTRACKED;
     }
+    // libgit2's reset after stashing writes each changed file in place; give one with other
+    // hard links a name of its own first, as git's reset does (#420).
+    crate::hardlink::before_writing(repo, &changed_paths(repo, false)?);
     // `stash_save2` (not `stash_save`) because it accepts a `None` message, letting libgit2
     // generate its own default ("WIP on <branch>: <short> <summary>").
     repo.stash_save2(&signature, message, Some(flags))
@@ -656,6 +659,7 @@ fn save_path_limited_stash(
         for path in &checkout_paths {
             checkout.path(*path);
         }
+        crate::hardlink::on_checkout(repo, &mut checkout);
         if opts.keep_index {
             index.read(true)?;
             repo.checkout_index(Some(&mut index), Some(&mut checkout))?;

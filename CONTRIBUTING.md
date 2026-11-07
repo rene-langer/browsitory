@@ -14,14 +14,17 @@ by two hosts: a Tauri desktop app (`crates/tauri-app`) and a VSCode extension (`
 ## Run the desktop app from source
 
 You need Rust, Node.js 22 or newer (CI uses 24; packaging the extension with `vsce` needs 22),
-[pnpm](https://pnpm.io) 11 or newer (it switches to the version each `package.json` pins), the [Tauri CLI](https://tauri.app/)
-(`cargo install tauri-cli`) and the Tauri prerequisites for your system.
+[pnpm](https://pnpm.io) 11 or newer (it switches to the version each `package.json` pins) and
+the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your system. The Tauri CLI
+comes with the frontend's dependencies (`@tauri-apps/cli`, locked in `frontend/pnpm-lock.yaml`),
+the same version the release build uses; run it with `node` from `crates/tauri-app`, where it
+finds `tauri.conf.json`.
 
 ```bash
 git clone https://github.com/rene-langer/browsitory.git
 cd browsitory
 cd frontend && pnpm install && cd ../crates/tauri-app
-cargo tauri dev
+node ../../frontend/node_modules/@tauri-apps/cli/tauri.js dev
 ```
 
 ## Build a distributable
@@ -31,7 +34,7 @@ scripts/build-dist.sh      # Linux/macOS: .deb/.rpm/.AppImage or .dmg
 scripts\build-dist.ps1     # Windows: .msi/.exe
 ```
 
-Bundles land in `crates/tauri-app/target/release/bundle/`.
+Bundles land in `target/release/bundle/`, with a copy of `THIRD_PARTY_NOTICES.md`.
 
 ## Tests and checks
 
