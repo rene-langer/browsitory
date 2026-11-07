@@ -1676,3 +1676,40 @@ pub fn drop_stash(
     repo.stash_drop(index)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ntfs_fold_meets_letter_case_only() {
+        // #389, as NTFS showed on CI: `Café`/`CAFÉ` are one file name, `Straße`/`STRASSE` and
+        // NFC/NFD spellings are two.
+        let same = |a: &str, b: &str| ntfs_fold(a.as_bytes()) == ntfs_fold(b.as_bytes());
+        assert!(same("README", "readme"));
+        assert!(same("Caf\u{e9}", "CAF\u{c9}"));
+        assert!(!same("Stra\u{df}e", "STRASSE"));
+        assert!(!same("Stra\u{df}e", "Strasse"));
+        assert!(!same("Caf\u{e9}", "Cafe\u{301}"));
+        assert!(!same("a", "b"));
+        assert_eq!(
+            ntfs_fold("Stra\u{df}e".as_bytes()),
+            "STRA\u{df}E".as_bytes()
+        );
+        // Not UTF-8: ASCII letters only.
+        assert_eq!(ntfs_fold(b"ab\xff"), b"AB\xff");
+    }
+
+    #[test]
+    fn stash_fold_follows_the_drive() {
+        let same = |a: &str, b: &str| stash_fold(a.as_bytes()) == stash_fold(b.as_bytes());
+        assert!(same("Dir/Old", "dir/old"));
+        assert!(!same("Old", "new"));
+        assert_eq!(same("Stra\u{df}e", "Strasse"), cfg!(target_os = "macos"));
+        assert_eq!(same("Caf\u{e9}", "Cafe\u{301}"), cfg!(target_os = "macos"));
+        assert_eq!(
+            same("Caf\u{e9}", "CAF\u{c9}"),
+            cfg!(any(target_os = "macos", windows))
+        );
+    }
+}
