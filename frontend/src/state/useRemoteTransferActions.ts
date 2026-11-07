@@ -11,7 +11,7 @@ import type {
   RunOptimisticMutationWithMessage,
   RunOptimisticMutationWithOutcome,
 } from "./useMutationRunner";
-import type { UpstreamInfo } from "../ipc/RepoClient";
+import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import type { AppState, RemoteDialog } from "./useAppState";
 import { hookFailedMessage, type PushRequest } from "../lib/hookFailure";
 
@@ -54,6 +54,11 @@ function transferFailureMessage(progress: TransferProgress, upstreamLabel: strin
   if (progress.operation === "Pull") return "Pull failed";
   if (progress.operation === "Fetch" || progress.operation === "FetchAll") return "Fetch failed";
   return "Transfer failed";
+}
+
+/** The Add remote form's error for a name `state.remotes` already lists (#408). */
+function remoteNameTakenMessage(name: string): string {
+  return `A remote named "${name}" already exists.`;
 }
 
 /** One remote that failed during a Fetch all, as its `RemoteFailed` event reported it. */
@@ -146,6 +151,7 @@ export function useRemoteTransferActions(
   upstream: UpstreamInfo | null,
   fetchPrune: boolean | null,
   currentBranch: string | null,
+  remotes: RemoteInfo[],
 ): RemoteTransferActions {
   const activeTransferId = useRef<string | null>(null);
   const transferRequestPending = useRef(false);
@@ -167,6 +173,10 @@ export function useRemoteTransferActions(
   useEffect(() => {
     currentBranchRef.current = currentBranch;
   }, [currentBranch]);
+  const remotesRef = useRef<RemoteInfo[]>(remotes);
+  useEffect(() => {
+    remotesRef.current = remotes;
+  }, [remotes]);
   // Remotes a Fetch all reported as failed (`RemoteFailed`), for the active operation only.
   const failedRemotes = useRef<FailedRemote[]>([]);
 
@@ -255,15 +265,28 @@ export function useRemoteTransferActions(
   }, [client, refresh, repoPath, setState]);
 
   const addRemote = useCallback(
-    (name: string, fetchUrl: string, pushUrl: string | null) =>
-      runOptimisticMutationWithMessage(
-        (prev) => ({
-          ...prev,
-          remotes: [...prev.remotes, { name, fetchUrl, pushUrl, authMode: null, authUsername: null }],
-        }),
+    async (name: string, fetchUrl: string, pushUrl: string | null) => {
+      // A taken name is refused here, before the optimistic append: appending it would render the
+      // remote twice (with a duplicate React key in `BranchTree`) until the backend refused it, with
+      // libgit2's raw "already exists" error (#408).
+      if (remotesRef.current.some((remote) => remote.name === name)) {
+        const message = remoteNameTakenMessage(name);
+        setState((prev) => ({ ...prev, error: message }));
+        return message;
+      }
+      return runOptimisticMutationWithMessage(
+        (prev) =>
+          // Belt and braces for a name that arrived since the check above: never list it twice.
+          prev.remotes.some((remote) => remote.name === name)
+            ? prev
+            : {
+                ...prev,
+                remotes: [...prev.remotes, { name, fetchUrl, pushUrl, authMode: null, authUsername: null }],
+              },
         () => client.addRemote(repoPath, name, fetchUrl, pushUrl),
-      ),
-    [client, runOptimisticMutationWithMessage, repoPath],
+      );
+    },
+    [client, runOptimisticMutationWithMessage, repoPath, setState],
   );
   const renameRemote = useCallback(
     (oldName: string, newName: string) =>

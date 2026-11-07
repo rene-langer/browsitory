@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo, TagInfo, WorktreeInfo } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
@@ -54,6 +54,57 @@ describe("useAppState", () => {
       resolveAdd?.();
       await addPromise;
     });
+  });
+
+  it("addRemote refuses a name the list already holds without listing it twice or calling the backend (#408)", async () => {
+    const origin: RemoteInfo = { name: "origin", fetchUrl: "../origin.git", pushUrl: null, authMode: null, authUsername: null };
+    const addRemote = vi.fn(async () => {});
+    const client = transferClient({ listRemotes: async () => [origin], addRemote });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let addPromise!: Promise<string | null>;
+    act(() => {
+      addPromise = result.current.addRemote("origin", "../other.git", null);
+    });
+    // Synchronously after the call: no optimistic duplicate.
+    expect(result.current.state.remotes).toEqual([origin]);
+
+    let outcome: string | null = null;
+    await act(async () => {
+      outcome = await addPromise;
+    });
+    expect(outcome).toBe('A remote named "origin" already exists.');
+    expect(result.current.state.error).toBe('A remote named "origin" already exists.');
+    expect(result.current.state.remotes).toEqual([origin]);
+    expect(result.current.state.pending).toBe(false);
+    expect(addRemote).not.toHaveBeenCalled();
+  });
+
+  it("addRemote rolls the optimistic remote back when the backend refuses it", async () => {
+    const origin: RemoteInfo = { name: "origin", fetchUrl: "../origin.git", pushUrl: null, authMode: null, authUsername: null };
+    let rejectAdd: ((err: Error) => void) | null = null;
+    const client = transferClient({
+      listRemotes: async () => [origin],
+      addRemote: async () => new Promise<void>((_resolve, reject) => { rejectAdd = reject; }),
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    let addPromise!: Promise<string | null>;
+    act(() => {
+      addPromise = result.current.addRemote("upstream", "not-a-url", null);
+    });
+    expect(result.current.state.remotes.map((remote) => remote.name)).toEqual(["origin", "upstream"]);
+
+    let outcome: string | null = null;
+    await act(async () => {
+      rejectAdd?.(new Error("invalid fetch URL"));
+      outcome = await addPromise;
+    });
+    expect(outcome).toBe("invalid fetch URL");
+    expect(result.current.state.remotes).toEqual([origin]);
+    expect(result.current.state.pending).toBe(false);
   });
 
   it("removeRemote removes the remote from state before the backend call resolves, restores it on failure", async () => {
