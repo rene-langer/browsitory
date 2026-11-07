@@ -232,6 +232,7 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
         )?;
         let mut checkout = git2::build::CheckoutBuilder::new();
         checkout.force().path(rel).disable_pathspec_match(true);
+        crate::hardlink::on_checkout(repo, &mut checkout);
         // A file another program holds open: say so, not libgit2's raw error (#268).
         repo.checkout_index(None, Some(&mut checkout))
             .map_err(|error| {
@@ -774,6 +775,7 @@ fn apply_selection(
         direction,
     )?;
     let parsed = git2::Diff::from_buffer(&patch).map_err(not_applicable_or_index)?;
+    crate::hardlink::before_apply(repo, &parsed, location);
     repo.apply(&parsed, location, None)
         .map_err(not_applicable_or_index)
 }

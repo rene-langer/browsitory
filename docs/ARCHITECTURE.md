@@ -1359,6 +1359,14 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
     its metadata is the file it stopped while writing, and is rolled back with the rest. A
     planned path it never reached (on Windows the held file itself) is left alone.
 
+  The same two callbacks give a planned file with other hard links a name of its own before
+  libgit2 writes anything (#420, see "Hardlinks" below); `Written::record` installs them
+  through `hardlink::install`, so the two uses share one notify and one progress callback.
+  Such a file is copied in the progress callback's "0 of n" baseline, after the notify calls
+  recorded its metadata, so its planned entry is taken again right after the copy
+  (`Written::restamp`): the copy's new mtime is not a write of the checkout's, and a file the
+  checkout never reached is still left alone.
+
   Callers that check out a merge result with conflicts (cherry-pick, revert, rebase steps) also
   call `Written::expect_conflicts` with that index before the checkout: it lists, beside each
   conflict path, the entries named `<name>~*` and `<name>.lock`. libgit2 writes conflicts
@@ -1574,18 +1582,49 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   stat-only checks (the refusal checks listed here, undo's `symlink_metadata` / `read_dir`
   checks) and the external diff/merge tool, which writes `MERGED` by path itself, as git's
   `mergetool` does.
-- Residual risk, hardlinks: a tracked file that is a hardlink to a file outside the repository
-  (or in another folder of it) is written in place by libgit2's checkouts and patch applies
-  (the shared inode changes, so the other name sees the new content): Discard (file, hunk or
-  lines), branch switches, resets, merges and picks, stash, aborts, and Undo/Redo of a path the
-  index holds. git differs: its checkout and `git apply` unlink the name and create a new file,
-  so the other name keeps its content (#420). Browsitory's own writes (`write_beneath`,
-  `replace_beneath`: Save resolution, **Ignore**, Undo/Redo of a work-tree-only change) match
-  git: they replace the name, so the other name keeps its content (#239), on Windows too
-  (#260). Reads (Undo's snapshot, Mark resolved, the image preview, staging, which libgit2 does by
-  path) read the file through either name. A hardlink is indistinguishable from a regular
-  file by path; it needs the user (or a local process) to have created it on the same
-  filesystem.
+- Hardlinks: a tracked file that is a hardlink to a file outside the repository (or in another
+  folder of it) gets the new content under its work-tree name only, and the other name keeps
+  its content, as with git, whose checkout and `git apply` unlink the name and create a new
+  file. Browsitory's own writes (`write_beneath`, `replace_beneath`: Save resolution,
+  **Ignore**, Undo/Redo of a work-tree-only change) replace the name (#239), on Windows too
+  (#260). libgit2 writes a file it checks out in place (`O_TRUNC`, the shared file changes), so
+  before it writes, `hardlink` gives each file it is about to write that has more than one
+  name a name of its own (#420): `worktree_guard::separate_hard_link` reads it and writes it
+  back through `write_beneath`'s path (a new file renamed over the name, content and mode or
+  Windows attributes kept), so a folder swapped for a symlink or junction is still refused
+  and nothing is written through it. The link count is an `lstat`'s `st_nlink` (Windows:
+  `nNumberOfLinks` of a handle opened on the name itself, attributes only, not following a
+  reparse point). Where:
+  - every checkout Browsitory configures (`hardlink::on_checkout`, or `Written::record`, see
+    "partial checkout" above): Discard file, branch switch and detached checkout, hard reset,
+    merges (fast-forward, merge, squash, taking a side), cherry-pick, revert and rebase steps,
+    rebase start, pull fast-forward, stash apply and pop and the path-limited stash's reset,
+    aborts, Undo/Redo of a path the index holds, the rollbacks' own checkouts, submodule
+    checkout and update. The files come from the notify callback (`UPDATED`, sent while
+    libgit2 plans the checkout for each file it will write, forced overwrites included) and
+    are separated when the progress callback reports the "0 of n" baseline (no path), which
+    libgit2 sends once the checkout is planned and before it removes or writes anything; an
+    operation that runs several checkouts with one builder (stash apply) gets a baseline per
+    checkout. A checkout refused while planning (a local change in the way) separates nothing,
+    as git changes nothing then. Only planned files are looked at, one `lstat` each; no extra
+    walk of the tree.
+  - Discard hunk and Discard lines (`stage::apply_selection`, `hardlink::before_apply`):
+    libgit2's apply checks out its result with options of its own, so the patch's work-tree
+    paths are separated before it, once a `check` apply shows the patch applies (a stale
+    selection changes nothing, links included).
+  - Stash of everything (`stash_save2`): its reset takes no checkout options, so the tracked
+    changed paths (one status, the same `changed_paths` the path-limited route uses) are
+    separated before it (`hardlink::before_writing`).
+  - Conflicted files written with markers go through libgit2's lock file, renamed over the
+    name, which replaces the name already.
+  Best effort: a file the copy can't write (read-only, held open on Windows, beyond a link) is
+  left to libgit2's write as before. A fresh clone and a new worktree write into folders with
+  nothing of the user's and take no hook. The copy is held in memory (libgit2 holds the blob it
+  writes there too) and isn't atomic with libgit2's write: a process writing the file in
+  between loses that write, as it would to libgit2's. Reads (Undo's snapshot, Mark resolved,
+  the image preview, staging, which libgit2 does by path) read the file through either name. A
+  hardlink is indistinguishable from a regular file by path; it needs the user (or a local
+  process) to have created it on the same filesystem.
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
   `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
   the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line

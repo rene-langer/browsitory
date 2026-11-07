@@ -51,7 +51,9 @@ use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 
-use super::reparse::{self, leaf_action, LeafAction, FILE_ATTRIBUTE_DIRECTORY};
+use super::reparse::{
+    self, leaf_action, LeafAction, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+};
 use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
@@ -1625,6 +1627,28 @@ pub(super) fn clear_hazard(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::
         Some((link, Found::Link)) => delete_by_handle(&link),
         _ => Ok(()),
     }
+}
+
+/// How many names the regular file at `full` has (`nNumberOfLinks`, from a handle of the name
+/// itself, opened for its attributes only, never following a reparse point at the leaf); 1 for
+/// anything else, and for a missing path. See `worktree_guard::separate_hard_link`.
+pub(super) fn link_count(full: &Path) -> io::Result<u64> {
+    match std::fs::symlink_metadata(full) {
+        Ok(meta) if meta.file_type().is_file() => {}
+        Ok(_) => return Ok(1),
+        Err(error) if missing(&error) => return Ok(1),
+        Err(error) => return Err(error),
+    }
+    let file = OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        .open(full)?;
+    let info = handle_information(&file)?;
+    if info.file_attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+        return Ok(1);
+    }
+    Ok(u64::from(info.number_of_links))
 }
 
 /// See `worktree_guard::read_beneath`.

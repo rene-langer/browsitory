@@ -1435,7 +1435,9 @@ fn rewind_to(repo: &Repository, original: &Commit<'_>, reflog: &str) -> Result<(
         &[crate::worktree_guard::Incoming::Checkout(&tree)],
         Some(&tree),
     )?;
-    repo.checkout_tree(original.as_object(), None)?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    crate::hardlink::on_checkout(repo, &mut checkout);
+    repo.checkout_tree(original.as_object(), Some(&mut checkout))?;
     if repo.head_detached()? {
         // With the reflog message, unlike `set_head_detached` ("checkout: moving from …").
         repo.reference("HEAD", original.id(), true, reflog)?;
