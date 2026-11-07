@@ -1,4 +1,5 @@
 .intro {
+  flex: none;
   margin: 0 0 var(--space-3);
 }
 
@@ -6,8 +7,17 @@
   color: var(--color-text-muted);
 }
 
+/* The panel body (sized by the Overlay's max-height) is a flex column, so the licence text
+   below shrinks to the height left under the intro and scrolls on its own: one scroll area at
+   any window height (#383). */
+.body {
+  display: flex;
+  flex-direction: column;
+}
+
 .text {
-  max-height: 60vh;
+  flex: 0 1 auto;
+  min-height: 0;
   max-width: min(80ch, 80vw);
   overflow: auto;
   margin: 0;

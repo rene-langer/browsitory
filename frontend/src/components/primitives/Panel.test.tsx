@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Panel } from "./Panel";
+import styles from "./Panel.module.css";
 
 describe("Panel", () => {
   it("renders a title and children", () => {
@@ -87,5 +88,16 @@ describe("Panel", () => {
     );
 
     expect(screen.queryByRole("region", { name: "Notes text" })).not.toBeInTheDocument();
+  });
+
+  it("adds bodyClassName to the scrolling body, keeping its own classes", () => {
+    render(
+      <Panel title="Notes" footer={<button>Close</button>} bodyLabel="Notes text" bodyClassName="fill">
+        <p>content</p>
+      </Panel>,
+    );
+
+    const body = screen.getByRole("region", { name: "Notes text" });
+    expect(body).toHaveClass("fill", styles.body, styles.scrollBody);
   });
 });
