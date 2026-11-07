@@ -158,6 +158,8 @@ export interface WebviewSession {
   waitForText(tag: string, text: string, timeoutMs?: number): Promise<void>;
   /** The page's visible text, for failure messages. */
   bodyText(): Promise<string>;
+  /** The `name` attribute of every match of `selector` (missing attributes as ""). */
+  attributes(selector: string, name: string): Promise<string[]>;
   /** Detaches from the webview target and closes the underlying CDP socket. Idempotent. */
   close(): Promise<void>;
 }
@@ -294,6 +296,14 @@ class CdpWebviewSession implements WebviewSession {
   /** The page's visible text, for failure messages. */
   async bodyText(): Promise<string> {
     return this.evaluate<string>("document.body ? document.body.innerText : ''");
+  }
+
+  async attributes(selector: string, name: string): Promise<string[]> {
+    return this.evaluate<string[]>(`
+      Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map(function (el) {
+        return el.getAttribute(${JSON.stringify(name)}) || "";
+      })
+    `);
   }
 
   async close(): Promise<void> {
