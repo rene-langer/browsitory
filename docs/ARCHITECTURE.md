@@ -1312,32 +1312,59 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   tree accepts a file already at its target.
 - Operations whose retry would refuse or skip the files a stopped checkout already wrote roll
   them back instead (#321, `partial_checkout`), on every platform, when a checkout stops
-  before it touched a file (Windows held file, read-only file or folder). libgit2 writes the
-  index on disk only once a checkout has finished; until then only its in-memory copy holds
-  the entries of the files written. `Written` records each path the checkout wrote or removed
-  through libgit2's progress callback (reported once done, so never the file it stopped at).
-  Known gap: an error *while* writing a file (a full disk) leaves that file truncated or empty;
-  it isn't among the recorded paths, so it isn't put back.
+  before it touched a file (Windows held file, read-only file or folder) or while it wrote one
+  (a full disk, an I/O error; #329). libgit2 writes the index on disk only once a checkout has
+  finished; until then only its in-memory copy holds the entries of the files written.
+  `Written::record` registers two libgit2 callbacks on the checkout:
+  - progress: each path the checkout wrote or removed, reported once done, so never the file
+    it stopped at;
+  - notify (`UPDATED`, called while libgit2 plans the checkout, before it writes anything):
+    each path it means to write, with its `symlink_metadata` (size, mtime, kind) and how many
+    of its folders exist. libgit2 opens a file with `O_TRUNC`, so a write that fails part-way
+    leaves it truncated; a planned path that was never reported done but no longer matches
+    its metadata is the file it stopped while writing, and is rolled back with the rest. A
+    planned path it never reached (on Windows the held file itself) is left alone.
+
+  Callers that check out a merge result with conflicts (cherry-pick, revert, rebase steps) also
+  call `Written::expect_conflicts` with that index before the checkout: it lists, beside each
+  conflict path, the entries named `<name>~*` and `<name>.lock`. libgit2 writes conflicts
+  last; it writes a side of a file/folder or rename conflict as `<name>~<label>`
+  (`f.txt~HEAD`, never over an existing entry) and reports only the conflict's path, and when
+  writing a conflict's merged content fails it leaves its temporary `<name>.lock`, which would
+  make the retry fail. Such an entry that is new after the stop is removed too. (A Windows
+  held file or a read-only folder stops a checkout earlier: libgit2 removes every conflicted
+  file before writing anything.)
   - Cherry-pick and revert (each step of a sequence too), rebase start (onto's checkout,
-    before HEAD is detached), pull fast-forward, and stash apply and pop (both of the stash's
-    checkouts, untracked files first): `roll_back` re-reads the index from disk and puts each
-    written path back as it has it. A path the index has is checked out from it (forced, just
-    those paths, after `prepare_forced_checkout` removed links in the way, so filters apply
-    and nothing is written through a link); a path it lacks (a file the checkout created) is
-    removed with `remove_and_prune_beneath`, unless the index has files below it. Every path
-    is tried even after one fails (tracked files first, then created ones, then tracked ones
-    again if a created one was in the way); the first error is reported. These are safe
-    checkouts from that index (each refuses a staged change first), which write over a
-    tracked file only when it matches the index, so no uncommitted change to a tracked file is
-    lost, and unrelated edits stay. An ignored file in the way of a file the checkout creates
-    is written over by libgit2 (git also treats ignored files as expendable), so the rollback
-    removes it rather than bringing it back. The message is #302's plain one,
+    before HEAD is detached) and each rebase step (#329), pull fast-forward, and stash apply
+    and pop (both of the stash's checkouts, untracked files first): `roll_back` re-reads the
+    index from disk and puts each written path back as it has it. A path the index has is
+    checked out from it (forced, just those paths, after `prepare_forced_checkout` removed
+    links in the way, so filters apply and nothing is written through a link); a path it lacks
+    (a file the checkout created, a conflict's side file) is removed with
+    `remove_and_prune_beneath_keeping`, unless the index has files below it. Pruning stops at
+    the folders that were there before the checkout, so an empty folder the user had stays
+    (#329). Every path is tried even after one fails (tracked files first, then created ones,
+    then tracked ones again if a created one was in the way); the first error is reported.
+    These are safe checkouts from that index (each refuses a staged change first), which write
+    over a tracked file only when it matches the index, so no uncommitted change to a tracked
+    file is lost, and unrelated edits stay. An ignored file in the way of a file the checkout
+    creates is written over by libgit2 (git also treats ignored files as expendable), so the
+    rollback removes it rather than bringing it back, by design; an ignored file at a path the
+    checkout hadn't reached yet stays as it was. The message is #302's plain one,
     `HeldDuring::RolledBack`: "'f.txt' is open in another program. Close it, then try
-    again." A pop keeps the stash.
+    again." Other errors (read-only, full disk) keep libgit2's message. A pop keeps the stash.
+  - A rebase step (`advance`, at start or on Continue) whose pick's checkout stops is rolled
+    back like a cherry-pick, and its `CHERRY_PICK_HEAD`/`MERGE_MSG` removed: HEAD stays at the
+    last step that landed (`expected_head`), the stop is `RebaseStop::Error`, and Continue
+    applies the step again. During `start_rebase` the rollback to the branch
+    (`restore_original_branch`) then starts from that clean tree; a held (or read-only) file
+    the step stopped at is the same there as on the branch (the checkout of `onto`, or an
+    earlier step, would have stopped at it first), so that checkout doesn't write it again.
   - Merge abort (also the cherry-pick and revert aborts, and a rebase abort that undoes its
     paused step) runs its forced checkout of HEAD's touched paths *before* it resets the
     index, so a stop leaves the index with what is still to abort. `roll_forward` then
-    finishes the paths reached (and the files the abort removed itself): their work-tree files
+    finishes the paths reached (the file it stopped while writing, and the files the abort
+    removed itself, too): their work-tree files
     are checked out from HEAD again without touching the index (libgit2's forced checkout of a
     tree drops every conflict of the index, also outside its path list), then each one's
     index entry is set to HEAD's, conflicts included. `MERGE_HEAD` and the other state files

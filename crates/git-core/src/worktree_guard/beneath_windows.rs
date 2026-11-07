@@ -1663,8 +1663,14 @@ fn read_walked(walked: io::Result<Walk<Beneath>>, limit: u64) -> io::Result<Opti
     }
 }
 
-/// See `worktree_guard::remove_and_prune_beneath`.
-pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<()> {
+/// See `worktree_guard::remove_and_prune_beneath`. The first `keep` folders of `rel` are never
+/// pruned.
+pub(super) fn remove_and_prune(
+    workdir: &Path,
+    rel: &Path,
+    keep: usize,
+    step: StepFn<'_>,
+) -> io::Result<()> {
     let Walk::Found(mut at) = walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? else {
         return Ok(());
     };
@@ -1675,7 +1681,7 @@ pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> 
     // while its parents stay held; it is then opened again, checked to be the plain folder in
     // its held parent, and deleted through that handle, which fails unless it is empty. Never
     // the work tree root.
-    for i in (1..at.dirs.len()).rev() {
+    for i in (keep + 1..at.dirs.len()).rev() {
         at.dirs.pop();
         at.names.truncate(i);
         let Ok(Some((dir, Found::Dir))) = open_leaf(&at, Purpose::Delete) else {
@@ -1889,7 +1895,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("d")).unwrap();
         std::fs::write(dir.path().join("d/f"), "old").unwrap();
         let _scanner = hold_open_like_a_scanner(&dir.path().join("d/f"));
-        remove_and_prune(dir.path(), Path::new("d/f"), &mut no_step).unwrap();
+        remove_and_prune(dir.path(), Path::new("d/f"), 0, &mut no_step).unwrap();
         assert!(
             std::fs::symlink_metadata(dir.path().join("d")).is_err(),
             "the emptied folder is still there"
@@ -2833,7 +2839,7 @@ mod tests {
         std::fs::create_dir(dir.path().join("d")).unwrap();
         std::fs::write(dir.path().join("d/f"), "old").unwrap();
         make_read_only(&dir.path().join("d/f"));
-        remove_and_prune(dir.path(), Path::new("d/f"), &mut no_step).unwrap();
+        remove_and_prune(dir.path(), Path::new("d/f"), 0, &mut no_step).unwrap();
         assert!(
             std::fs::symlink_metadata(dir.path().join("d")).is_err(),
             "the read-only file or its folder is still there"
