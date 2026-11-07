@@ -106,6 +106,10 @@ pub enum StashError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// libgit2 would merge a file and a folder of the same name without a conflict; nothing was
+    /// changed and the stash is kept (#410).
+    #[error(transparent)]
+    FileFolderConflict(#[from] crate::FileFolderConflict),
     /// `core.ignorecase` can't be read, so the case checks can't run and libgit2's checkout
     /// could stop half-way (#225, #369). Nothing is written.
     #[error(transparent)]
@@ -1432,6 +1436,7 @@ pub fn apply_stash(
     }
     refuse_untracked_file_over_folder(repo, index)?;
     refuse_untracked_below_tracked_file(repo, index)?;
+    refuse_file_folder_merge(repo, index, restore_index)?;
     let mut options = git2::StashApplyOptions::new();
     if restore_index {
         options.reinstantiate_index();
@@ -1482,6 +1487,49 @@ pub fn apply_stash(
     } else {
         Ok(StashApplyOutcome::Conflicted { files })
     }
+}
+
+/// Refuses when libgit2's merges of `stash@{index}` would hold a file and a folder of the same
+/// name without a conflict (#410), before anything is written. Redoes in memory the merges
+/// libgit2's `git_stash_apply` checks out and stages: the stash's worktree tree onto the index
+/// (against the stash's base), and with `restore_index` its index tree. libgit2 merges onto the
+/// index and refuses unless it matches HEAD (`StagedChanges`), so HEAD's tree stands in for it;
+/// when they differ there is nothing to check. The untracked files merge with no ancestor, so
+/// a file there can't hide a deletion; `refuse_untracked_file_over_folder` and
+/// `refuse_untracked_below_tracked_file` cover their file/folder cases.
+fn refuse_file_folder_merge(
+    repo: &Repository,
+    index: usize,
+    restore_index: bool,
+) -> Result<(), StashError> {
+    let Some(id) = repo
+        .reflog("refs/stash")
+        .ok()
+        .and_then(|reflog| reflog.get(index).map(|entry| entry.id_new()))
+    else {
+        return Ok(());
+    };
+    let Ok(head_tree) = repo.head().and_then(|head| head.peel_to_tree()) else {
+        return Ok(());
+    };
+    let staged = repo.diff_tree_to_index(Some(&head_tree), None, None)?;
+    if staged.deltas().len() > 0 {
+        return Ok(());
+    }
+    let stash = repo.find_commit(id)?;
+    let base = stash.parent(0)?.tree()?;
+    let modified = repo.merge_trees(&base, &head_tree, &stash.tree()?, None)?;
+    crate::file_folder::refuse_file_folder_conflict(&modified)?;
+    if restore_index {
+        let index_commit = stash.parent(1)?;
+        let index_tree = index_commit.tree()?;
+        if index_tree.id() != base.id() {
+            let index_base = index_commit.parent(0)?.tree()?;
+            let unstashed = repo.merge_trees(&index_base, &head_tree, &index_tree, None)?;
+            crate::file_folder::refuse_file_folder_conflict(&unstashed)?;
+        }
+    }
+    Ok(())
 }
 
 /// Refuses when `stash@{index}` holds an untracked file where the worktree has a real folder;
