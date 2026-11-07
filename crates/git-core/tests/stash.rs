@@ -3540,26 +3540,17 @@ fn case_only_rename(
 #[test]
 fn stash_all_refuses_a_case_only_rename_where_names_fold() {
     // #370: Stash all went through libgit2's stash. On Linux with `core.ignorecase` its index
-    // found `Old` as `old`: the stash held both names and the revert left the rename in place.
-    // Now refused like Stash file… (#152), before anything is written, in every mode and on
-    // every OS.
-    if !cfg!(windows) {
-        return; // PROBE
-    }
+    // found `Old` as `old`: a stash was written but the revert left the rename in place. On
+    // macOS and Windows (CI) the deleted `Old` found the file `old` and Stash all refused with
+    // "Stashing would overwrite the ignored 'Old'…". Now refused like Stash file… (#152),
+    // before anything is written, in every mode and on every OS.
     for rename in CASE_ONLY_RENAMES {
         for opts in whole_stash_modes() {
             let (dir, mut repo, old, new) = case_only_rename(rename, true);
             let status_before = git_core::status::status(&repo).unwrap();
             let index_before = std::fs::read(dir.path().join(".git/index")).unwrap();
 
-            let result = git_core::stash::save_stash(&mut repo, &opts); // PROBE
-            let Err(error) = result else {
-                panic!(
-                    "PROBE {new} {opts:?}: stashed; worktree {:?}; status {:?}",
-                    top_level(dir.path()),
-                    git_status(dir.path())
-                )
-            };
+            let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
 
             assert_eq!(
                 error.to_string(),

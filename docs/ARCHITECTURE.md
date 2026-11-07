@@ -282,10 +282,12 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   write): the index has a path HEAD doesn't, and HEAD a path differing from it only in ASCII
   case that the index doesn't. Through libgit2's stash, Linux with `core.ignorecase` wrote a
   stash whose index tree held both names and left the rename in place, and on macOS and Windows
-  the deleted `Old` found the file `old` (`IgnoredOverwritten("Old")`). `git stash` stashes the
-  rename and puts `Old` back; libgit2's stash can't, and the path-limited route refuses as
+  the deleted `Old` found the file `old` (`IgnoredOverwritten("Old")`, seen on CI). `git stash`
+  stashes the rename and puts `Old` back on all three (on macOS its worktree tree holds both
+  names); libgit2's stash can't, and the path-limited route refuses as
   Stash file… does, so refusing is the consistent fix. A case pair HEAD and the index both hold
-  (`A` and `a`, committed on a case-sensitive drive) is no rename and isn't refused.
+  (`A` and `a`, committed on a case-sensitive drive) is no rename and isn't refused (libgit2's
+  stash may drop one of the pair there: #392).
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as

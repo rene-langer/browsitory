@@ -220,8 +220,7 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     }
     // Before `entry_in_the_way`, which on macOS and Windows takes the deleted `Old` of a
     // case-only rename for an ignored file removed from the index (#370).
-    // PROBE: check disabled to observe CI behaviour.
-    let _ = refuse_staged_case_only_rename;
+    refuse_staged_case_only_rename(repo, &index)?;
     // The reset after stashing would delete an untracked file (#186), an ignored file or folder
     // (#208) or a nested repository (#211) in the way of a tracked path. The path-limited stash
     // checks only its own paths.
