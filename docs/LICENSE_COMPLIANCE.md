@@ -141,33 +141,57 @@ library is involved, so this table has no dependency row for one.
 
 ## Python, user guide site (`docs/requirements.txt`)
 
-Build-only. `.github/workflows/docs.yml` installs these into a throwaway virtual environment to
-build the user guide site from `docs/guide/` (`mkdocs.yml`) and publishes only the generated
-HTML. Nothing of them ships in the desktop app or the VSCode extension, and the site itself
-holds only our own text plus the theme's MIT-licensed CSS and JavaScript. The two direct
-dependencies are named, without versions, in `docs/requirements.in`. `docs/requirements.txt`,
-generated from it with `pip-compile --generate-hashes`, pins every package, direct and
-transitive, to an exact version with hashes; Renovate updates it. Owner approved MkDocs
-with the Material theme as a build-only docs tool on 2026-11-04 (#320). Licences read from each
-package's metadata (`License-Expression`, else `License` and the classifiers) with
-`importlib.metadata` on 2026-11-04; re-check them when a Renovate PR adds a package or changes
-one's licence.
+Build-only. `.github/workflows/docs.yml` installs these into a throwaway virtual environment on
+the CI runner to build the user guide site from `docs/guide/` (`mkdocs.yml`) and publishes only
+the generated HTML. Nothing of them ships in the desktop app or the VSCode extension. The one
+direct dependency, Zensical, is named without a version in `docs/requirements.in`.
+`docs/requirements.txt`, generated from it with `pip-compile --generate-hashes`, pins every
+package, direct and transitive, to an exact version with hashes; Renovate updates it. Owner
+approved MkDocs with the Material theme as a build-only docs tool on 2026-11-04 (#320), and its
+successor Zensical, from the same team, on 2026-11-07 (#340). Licences read from each package's
+metadata (`License-Expression`, else `License` and the classifiers) with `importlib.metadata`
+on 2026-11-07; re-check them when a Renovate PR adds a package or changes one's licence.
 
 | Package | License | Notes |
 |---|---|---|
-| mkdocs 1.6.1 | BSD-2-Clause | Direct. The site generator. |
-| mkdocs-material 9.8.0 | MIT | Direct. The theme, with search. Its maintainers announced end of life on 2027-05-05, with Zensical as the successor (<https://github.com/squidfunk/mkdocs-material/releases/tag/9.8.0>). The move to Zensical is tracked in #340. |
-| certifi 2026.10.23 | MPL-2.0 | Through `requests` (needed by mkdocs-material). MPL-2.0 is file-level copyleft: it only covers changes to certifi itself, which we neither make nor distribute, and it runs on the CI runner only. Owner decision 2026-11-04, #320: accepted as a build-only exception. |
-| pathspec 1.1.1 | MPL-2.0 | Through `mkdocs` itself. Same reasoning as certifi. Owner decision 2026-11-04, #320: accepted as a build-only exception. |
-| babel, click, idna, markdown, markupsafe, python-dateutil, colorama, jinja2 | BSD-3-Clause | Transitive. colorama and jinja2 declare it only through the "BSD License" classifier; their licence files are BSD-3-Clause. |
+| zensical 0.1.0 | MIT | Direct. The site generator; reads `mkdocs.yml`. Ships a compiled Rust extension (`zensical.abi3.so`), whose crates are listed below. |
+| zensical-ui 0.0.41 | MIT | Through `zensical`. The theme (templates, CSS, JavaScript, icons); `theme.variant: classic` keeps the Material for MkDocs look. |
+| pathspec 1.1.1 | MPL-2.0 | Through `zensical`. MPL-2.0 is file-level copyleft: it only covers changes to pathspec itself, which we neither make nor distribute, and it runs on the CI runner only. Owner decision 2026-11-04, #320: accepted as a build-only exception. |
+| click, markdown, markupsafe, jinja2 | BSD-3-Clause | Transitive. jinja2 declares it only through the "BSD License" classifier; its licence file is BSD-3-Clause. |
 | pygments | BSD-2-Clause | Transitive. |
-| backrefs, charset-normalizer, mergedeep, mkdocs-get-deps, mkdocs-material-extensions, paginate, platformdirs, pymdown-extensions, pyyaml, pyyaml-env-tag, urllib3 | MIT | Transitive. mergedeep declares it only through its classifier. |
-| ghp-import, requests, tzdata, watchdog | Apache-2.0 | Transitive. |
-| packaging | Apache-2.0 OR BSD-2-Clause | Transitive. |
+| pymdown-extensions, pyyaml, tomli | MIT | Transitive. |
+
+The published site holds our own text plus zensical-ui's CSS, JavaScript and inlined icons.
+Most icons come from Pictogrammers' Material Design Icons (Pictogrammers Free License, icons
+Apache-2.0); the repository link's default icon is Font Awesome's `brands/git-alt` (CC-BY-4.0).
+The JavaScript bundle includes third-party packages listed in `assets/javascripts/LICENSE`,
+published next to it: clipboard and escape-html (MIT), rxjs (Apache-2.0) and focus-visible
+(W3C). W3C and CC-BY-4.0 are outside the policy (the Material for MkDocs build had both too);
+the owner decision is tracked in #423.
+
+### Rust crates inside Zensical
+
+Read from the CycloneDX SBOM that ships in the wheel
+(`zensical-<version>.dist-info/sboms/zensical.cyclonedx.json`, 321 crates for 0.1.0) on
+2026-11-07. Every crate is under a licence in the policy, or offers one (`MIT OR Apache-2.0`,
+`Unlicense OR MIT`, `Apache-2.0 OR GPL-2.0-only`, `Apache-2.0 OR BSL-1.0`, ...), except the
+five below. Each is an owner decision 2026-11-07 (#340), build-only (docs site build on CI),
+not shipped: accepted as an exception limited to this docs build tool. Zensical builds the site
+on the CI runner, and the published site holds none of its Rust code. Re-read the SBOM when Renovate updates Zensical;
+a new crate outside the policy needs a new owner decision.
+
+| Crate | License | How it reaches us |
+|---|---|---|
+| jpeg-encoder 0.7.1 | (MIT OR Apache-2.0) AND IJG | Direct dependency of `zensical` (image handling). Compiled in. |
+| notify 8.2.0 | CC0-1.0 | `zensical-watch` 0.0.10 → `zensical` (file watching for `zensical serve`). Compiled in. |
+| webpki-roots 1.0.11 | CDLA-Permissive-2.0 | `ureq` 3.4.0 → `zensical` (root certificates for HTTPS). Compiled in. |
+| dragonbox_ecma 0.0.5 | Apache-2.0 WITH LLVM-exception OR BSL-1.0 | `oxc_codegen` 0.81.0 → `zensical` (JavaScript code generation). |
+| target-lexicon 0.13.5 | Apache-2.0 WITH LLVM-exception | `pyo3-build-config` → `pyo3-ffi` → `pyo3` → `zensical`. Build time of the wheel only. The same crate is approved for the app's Rust build (see "Rust exceptions"); this decision extends it to this tree. |
 
 No script enforces these licences. `scripts/check-license-compliance.py` and
-`scripts/check-dependency-licenses.py` cover Rust and npm only, so CI does not check this table
-or the packages in `docs/requirements.txt`; it is kept up to date by hand.
+`scripts/check-dependency-licenses.py` cover Rust and npm only (`cargo deny` reads our
+`Cargo.lock`, not Zensical's crates), so CI checks neither these tables nor the packages in
+`docs/requirements.txt`; they are kept up to date by hand.
 
 ## The one exception: libgit2 via `git2`
 

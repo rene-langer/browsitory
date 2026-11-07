@@ -55,13 +55,14 @@ cd frontend && pnpm test -- --run && pnpm lint
 ## Documentation
 
 - The user guide lives in [docs/guide/](docs/guide/README.md), one Markdown page per topic. It
-  is published to <https://rene-langer.github.io/browsitory/> with MkDocs (`mkdocs.yml`) by
-  `.github/workflows/docs.yml`. Build it locally:
+  is published to <https://rene-langer.github.io/browsitory/> with
+  [Zensical](https://zensical.org/), which reads `mkdocs.yml`, by `.github/workflows/docs.yml`. Build it locally:
 
   ```bash
   python3 -m venv .venv
   .venv/bin/pip install --require-hashes -r docs/requirements.txt
-  .venv/bin/mkdocs serve        # or: .venv/bin/mkdocs build --strict
+  .venv/bin/zensical serve      # live preview
+  .venv/bin/zensical build --strict && python3 scripts/check-docs-nav.py   # what CI checks
   ```
 
 - The screenshots in `docs/guide/assets/` come from a script; see
