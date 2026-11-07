@@ -301,6 +301,55 @@ fn a_cherry_pick_stopped_part_way_is_rolled_back_and_finishes_when_tried_again()
     );
 }
 
+/// Makes `rel` a hard link to `name` in `out` (outside the work tree), keeping its content.
+fn hard_link_out(dir: &Path, rel: &str, out: &Path, name: &str) {
+    let path = dir.join(rel);
+    std::fs::copy(&path, out.join(name)).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    std::fs::hard_link(out.join(name), &path).unwrap();
+}
+
+/// #420 with #329: `a.txt` (written before the checkout stops at `d/m.txt`) and `z.txt` (not
+/// reached) are hard links to files outside the work tree. Each is given a name of its own
+/// before libgit2 writes anything; the rollback puts `a.txt` back and leaves `z.txt`, and the
+/// other names keep their content throughout, also once the pick is tried again.
+#[test]
+fn a_cherry_pick_stopped_part_way_with_hardlinked_files_is_rolled_back_and_keeps_the_other_names() {
+    let f = fixture(true);
+    let out = TempDir::new().unwrap();
+    hard_link_out(f.dir.path(), "a.txt", out.path(), "a");
+    hard_link_out(f.dir.path(), "z.txt", out.path(), "z");
+    let before = state(f.dir.path(), &f.repo);
+    let others = || files(out.path());
+    let outside = map(&[("a", "a\n"), ("z", "z\n")]);
+    let Some(stopper) = stop_at_m(f.dir.path()) else {
+        return;
+    };
+
+    let error = git_core::pick::cherry_pick(&f.repo, &f.side.to_string(), None, Default::default())
+        .unwrap_err();
+
+    drop(stopper);
+    assert_held_and_rolled_back(&error);
+    assert_eq!(state(f.dir.path(), &f.repo), before);
+    assert_eq!(f.repo.state(), git2::RepositoryState::Clean);
+    assert_eq!(others(), outside);
+
+    let outcome =
+        git_core::pick::cherry_pick(&f.repo, &f.side.to_string(), None, Default::default())
+            .unwrap();
+
+    assert!(
+        matches!(outcome, git_core::pick::PickOutcome::Committed { .. }),
+        "{outcome:?}"
+    );
+    let mut expected = map(SIDE);
+    expected.insert("main.txt".into(), "main\n".into());
+    assert_eq!(files(f.dir.path()), expected);
+    assert_eq!(status(&f.repo), vec![]);
+    assert_eq!(others(), outside);
+}
+
 #[test]
 fn a_revert_stopped_part_way_is_rolled_back_and_finishes_when_tried_again() {
     let f = fixture(true);

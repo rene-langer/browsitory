@@ -6,6 +6,7 @@ pub mod diff;
 mod file_folder;
 pub mod forge;
 pub mod graph;
+mod hardlink;
 pub mod history;
 pub mod hooks;
 pub mod launch;

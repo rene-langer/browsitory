@@ -1639,6 +1639,35 @@ pub(crate) fn replace_beneath(workdir: &Path, rel: &str, content: Content<'_>) -
     beneath::replace(workdir, Path::new(rel), content, &mut no_step)
 }
 
+/// How many names the regular file at `full` has; 1 for anything else and for a missing path
+/// (see [`separate_hard_link`]).
+pub(crate) fn link_count(full: &Path) -> io::Result<u64> {
+    beneath::link_count(full)
+}
+
+/// Gives the regular file `rel` a name of its own when it has other hard links (#420): it is
+/// read and written back whole through [`write_beneath`]'s path (a new file renamed over the
+/// name), so the content and mode (Windows: attributes) stay, and the other names keep the
+/// file as it was. libgit2 writes a file it checks out in place (`O_TRUNC`), which would change
+/// every name; git's checkout and `git apply` replace the name. `Ok(true)` when the file was
+/// replaced; `Ok(false)` for a file with one name, a missing path, a link or folder, or a path
+/// beyond a link (nothing is written through one: the walk refuses a folder swapped for a
+/// symlink or junction, as for any write).
+///
+/// The link count comes from an `lstat` of the path (Windows: the handle of the name itself,
+/// opened for its attributes only), as libgit2's own stat of the file before writing it; the
+/// copy then goes through the walker. The file is read into memory, as libgit2 holds the blob
+/// it writes there.
+pub(crate) fn separate_hard_link(workdir: &Path, rel: &Path) -> io::Result<bool> {
+    if !plain_relative(rel) || beneath::link_count(&workdir.join(rel))? <= 1 {
+        return Ok(false);
+    }
+    let Some(Leaf::File { bytes, .. }) = beneath::read(workdir, rel, &mut no_step)? else {
+        return Ok(false);
+    };
+    beneath::write(workdir, rel, &bytes, &mut no_step)
+}
+
 /// Opens the regular file `rel` below `workdir` for reading without following a symlink at any
 /// component below `workdir`, and without blocking on a FIFO. `None` when any component is a
 /// symlink, a component is not a directory, the path is missing, or the leaf is not a regular
@@ -3267,5 +3296,79 @@ mod tests {
         swapper.join().unwrap();
         eprintln!("loaded {loaded} inside reads, {leaks} leaks");
         assert_eq!(leaks, 0);
+    }
+
+    /// `h/x.sh` in a new work tree, a hard link to `other` in a folder outside it, both
+    /// holding `old`.
+    fn hard_linked() -> (TempDir, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let out = TempDir::new().unwrap();
+        std::fs::write(out.path().join("other"), "old").unwrap();
+        std::fs::create_dir(dir.path().join("h")).unwrap();
+        std::fs::hard_link(out.path().join("other"), dir.path().join("h/x.sh")).unwrap();
+        (dir, out)
+    }
+
+    #[test]
+    fn separate_hard_link_gives_the_file_a_name_of_its_own() {
+        let (dir, out) = hard_linked();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::Permissions::from_mode(0o750);
+            std::fs::set_permissions(dir.path().join("h/x.sh"), mode).unwrap();
+        }
+        assert_eq!(link_count(&dir.path().join("h/x.sh")).unwrap(), 2);
+
+        assert!(separate_hard_link(dir.path(), Path::new("h/x.sh")).unwrap());
+
+        assert_eq!(link_count(&dir.path().join("h/x.sh")).unwrap(), 1);
+        assert_eq!(link_count(&out.path().join("other")).unwrap(), 1);
+        assert_eq!(std::fs::read(dir.path().join("h/x.sh")).unwrap(), b"old");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = std::fs::metadata(dir.path().join("h/x.sh")).unwrap();
+            assert_eq!(meta.permissions().mode() & 0o777, 0o750);
+        }
+        std::fs::write(dir.path().join("h/x.sh"), "new").unwrap();
+        assert_eq!(std::fs::read(out.path().join("other")).unwrap(), b"old");
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("h")).unwrap().count(),
+            1,
+            "no temporary file left"
+        );
+    }
+
+    #[test]
+    fn separate_hard_link_leaves_a_file_with_one_name_and_a_missing_path() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("f"), "one").unwrap();
+        let before = std::fs::metadata(dir.path().join("f"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert!(!separate_hard_link(dir.path(), Path::new("f")).unwrap());
+        assert!(!separate_hard_link(dir.path(), Path::new("missing/f")).unwrap());
+        assert!(!separate_hard_link(dir.path(), Path::new("../f")).unwrap());
+        let after = std::fs::metadata(dir.path().join("f"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn separate_hard_link_writes_nothing_beyond_a_linked_folder() {
+        // `l` is a link (Windows: a junction) to the outside folder holding the hard-linked
+        // `other`: nothing is written there.
+        let (dir, out) = hard_linked();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(out.path(), dir.path().join("l")).unwrap();
+        #[cfg(windows)]
+        junction(&dir.path().join("l"), out.path());
+        assert!(!separate_hard_link(dir.path(), Path::new("l/other")).unwrap());
+        assert_eq!(link_count(&out.path().join("other")).unwrap(), 2);
+        assert_eq!(std::fs::read_dir(out.path()).unwrap().count(), 1);
     }
 }

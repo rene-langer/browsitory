@@ -251,12 +251,13 @@ pub fn start_merge(
         // (modified/untracked files in the way) leaves the repo exactly as it was, matching
         // `branch::switch_branch`'s own ordering for the same reason.
         // A file another program holds open: say so, not libgit2's raw error (#303).
-        repo.checkout_tree(their_commit.as_object(), None).map_err(
-            crate::worktree_guard::held_open::<MergeError>(
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        crate::hardlink::on_checkout(repo, &mut checkout);
+        repo.checkout_tree(their_commit.as_object(), Some(&mut checkout))
+            .map_err(crate::worktree_guard::held_open::<MergeError>(
                 repo.workdir(),
                 crate::HeldDuring::FastForward,
-            ),
-        )?;
+            ))?;
         let mut head_ref = repo.head()?;
         head_ref.set_target(their_commit.id(), "merge: Fast-forward")?;
         return Ok(MergeOutcome::FastForwarded);
@@ -268,7 +269,10 @@ pub fn start_merge(
         ));
     }
 
-    repo.merge(&[&their_annotated], None, None)?;
+    // libgit2's default strategy for a merge (safe); with our callbacks (#420).
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    crate::hardlink::on_checkout(repo, &mut checkout);
+    repo.merge(&[&their_annotated], None, Some(&mut checkout))?;
 
     let files = conflicted_files(&repo.index()?)?;
     if files.is_empty() {
@@ -289,7 +293,9 @@ fn squash_merge(
 ) -> Result<MergeOutcome, MergeError> {
     // Built before `repo.merge` so a failure here leaves the repository untouched.
     let message = build_squash_message(repo, their_id)?;
-    repo.merge(&[their_annotated], None, None)?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    crate::hardlink::on_checkout(repo, &mut checkout);
+    repo.merge(&[their_annotated], None, Some(&mut checkout))?;
     let files = conflicted_files(&repo.index()?)?;
     std::fs::write(repo.path().join("SQUASH_MSG"), message)?;
     crate::commit::clear_commit_state(repo)?;
@@ -565,6 +571,7 @@ pub fn resolve_whole_file(
                 ConflictSide::Ours => checkout.use_ours(true),
                 ConflictSide::Theirs => checkout.use_theirs(true),
             };
+            crate::hardlink::on_checkout(repo, &mut checkout);
             // A file another program holds open: say so, not libgit2's raw error (#268).
             repo.checkout_index(None, Some(&mut checkout))
                 .map_err(|error| {

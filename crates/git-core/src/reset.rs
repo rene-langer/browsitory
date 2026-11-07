@@ -58,6 +58,7 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
             )?;
             let mut checkout = git2::build::CheckoutBuilder::new();
             checkout.force();
+            crate::hardlink::on_checkout(repo, &mut checkout);
             // A file another program holds open: say so, not libgit2's raw error (#303).
             repo.checkout_tree(tree.as_object(), Some(&mut checkout))
                 .map_err(crate::worktree_guard::held_open::<ResetError>(
