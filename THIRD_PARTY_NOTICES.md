@@ -7901,7 +7901,7 @@ JavaScript packages bundled into the app's user interface.
 
 - **Apache-2.0 OR MIT**: @tauri-apps/api 2.12.4
 - **ISC**: @ungap/structured-clone 1.4.0, lucide-react 1.70.0
-- **MIT**: @shikijs/core 4.6.0, @shikijs/engine-javascript 4.6.0, @shikijs/engine-oniguruma 4.6.0, @shikijs/langs 4.6.0, @shikijs/primitive 4.6.0, @shikijs/themes 4.6.0, @shikijs/types 4.6.0, @shikijs/vscode-textmate 10.1.0, ccount 2.0.1, character-entities-html4 2.1.0, character-entities-legacy 3.0.0, comma-separated-tokens 2.0.3, csstype 3.2.3, dequal 2.0.3, devlop 1.1.0, hast-util-to-html 9.0.6, hast-util-whitespace 3.0.0, html-void-elements 3.0.0, mdast-util-to-hast 13.2.1, micromark-util-character 2.1.1, micromark-util-encode 2.0.1, micromark-util-sanitize-uri 2.0.1, micromark-util-symbol 2.0.1, micromark-util-types 2.0.3, oniguruma-parser 0.12.2, oniguruma-to-es 4.3.6, property-information 7.2.0, react 19.3.1, react-dom 19.3.1, regex 6.1.0, regex-recursion 6.0.2, regex-utilities 2.3.0, scheduler 0.28.0, shiki 4.6.0, space-separated-tokens 2.0.2, stringify-entities 4.0.4, trim-lines 3.0.1, unist-util-is 6.0.1, unist-util-position 5.0.0, unist-util-stringify-position 4.0.0, unist-util-visit 5.2.0, unist-util-visit-parents 6.1.0, vfile 6.0.3, vfile-message 4.0.4, zwitch 2.0.4
+- **MIT**: @shikijs/core 4.6.0, @shikijs/engine-javascript 4.6.0, @shikijs/engine-oniguruma 4.6.0, @shikijs/langs 4.6.0, @shikijs/primitive 4.6.0, @shikijs/themes 4.6.0, @shikijs/types 4.6.0, @shikijs/vscode-textmate 10.1.0, ccount 2.0.1, character-entities-html4 2.1.0, character-entities-legacy 3.0.0, comma-separated-tokens 2.0.3, dequal 2.0.3, devlop 1.1.0, hast-util-to-html 9.0.6, hast-util-whitespace 3.0.0, html-void-elements 3.0.0, mdast-util-to-hast 13.2.1, micromark-util-character 2.1.1, micromark-util-encode 2.0.1, micromark-util-sanitize-uri 2.0.1, micromark-util-symbol 2.0.1, micromark-util-types 2.0.3, oniguruma-parser 0.12.2, oniguruma-to-es 4.3.6, property-information 7.2.0, react 19.3.1, react-dom 19.3.1, regex 6.1.0, regex-recursion 6.0.2, regex-utilities 2.3.0, scheduler 0.28.0, shiki 4.6.0, space-separated-tokens 2.0.2, stringify-entities 4.0.4, trim-lines 3.0.1, unist-util-is 6.0.1, unist-util-position 5.0.0, unist-util-stringify-position 4.0.0, unist-util-visit 5.2.0, unist-util-visit-parents 6.1.0, vfile 6.0.3, vfile-message 4.0.4, zwitch 2.0.4
 - **MIT OR Apache-2.0**: @tauri-apps/plugin-log 2.10.1, @tauri-apps/plugin-process 2.4.0, @tauri-apps/plugin-updater 2.14.1
 
 ### Apache-2.0 OR MIT: @tauri-apps/api 2.12.4
@@ -8117,32 +8117,6 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
 CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-```
-
-### MIT: csstype 3.2.3
-
-Used by: csstype 3.2.3.
-
-```text
-Copyright (c) 2017-2018 Fredrik Nicol
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 ```
 
 ### MIT: dequal 2.0.3

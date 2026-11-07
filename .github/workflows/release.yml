@@ -67,10 +67,9 @@ jobs:
       - run: cargo test --workspace
       - uses: pnpm/action-setup@v6
         with:
-          # pnpm 11 runs each project with the version its package.json pins (9.15.9 for
-          # frontend, 11.28.10 for extension), so this job can install both. See ci.yml's
-          # `licenses` job.
-          version: 11
+          # pnpm runs each project with the exact version its package.json pins (see ci.yml's
+          # `licenses` job).
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -134,7 +133,7 @@ jobs:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -207,7 +206,7 @@ jobs:
           targets: ${{ matrix.rust_target }}
       - uses: pnpm/action-setup@v6
         with:
-          version: 11
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -300,7 +299,7 @@ jobs:
       - uses: pnpm/action-setup@v6
         if: env.HAS_AZURE == 'true'
         with:
-          version: 11
+          version: 12
       - uses: actions/setup-node@v7
         if: env.HAS_AZURE == 'true'
         with:
@@ -500,7 +499,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
-          version: 11
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24

@@ -184,6 +184,39 @@ snapshots:
   string-width@4.2.3: {}
 """
 
+ENV_DOCUMENT = """\
+---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    configDependencies: {}
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.18.0
+        version: 12.18.0
+
+packages:
+
+  '@pnpm/exe.linux-x64@12.18.0':
+    resolution: {integrity: sha512-a}
+    cpu: [x64]
+    os: [linux]
+
+  pnpm@12.18.0:
+    resolution: {integrity: sha512-b}
+
+snapshots:
+
+  '@pnpm/exe.linux-x64@12.18.0':
+    optional: true
+
+  pnpm@12.18.0:
+    optionalDependencies:
+      '@pnpm/exe.linux-x64': 12.18.0
+"""
+
 
 class LockfileTests(unittest.TestCase):
     def test_packages_and_children(self):
@@ -202,6 +235,17 @@ class LockfileTests(unittest.TestCase):
             {("@scope/thing", "2.0.0"), ("lightningcss-darwin-arm64", "1.33.0")},
         )
         self.assertEqual(children[("@scope/thing", "2.0.0")], {("string-width", "4.2.3")})
+
+    def test_env_lockfile_document_is_skipped(self):
+        # pnpm 11+ writes the env lockfile (the pinned pnpm itself) as a first YAML document.
+        with_env = ENV_DOCUMENT + "\n---\n" + LOCKFILE
+        self.assertEqual(cdl.parse_lockfile(with_env), cdl.parse_lockfile(LOCKFILE))
+
+    def test_unexpected_documents_fail(self):
+        # Two project documents, or a first document that isn't an env lockfile.
+        for text in (LOCKFILE + "\n---\n" + LOCKFILE, ENV_DOCUMENT + "\n---\n" + ENV_DOCUMENT + "\n---\n" + LOCKFILE):
+            with self.assertRaises(cdl.CheckError):
+                cdl.parse_lockfile(text)
 
     def test_unknown_lockfile_version_fails(self):
         for first_line in ("lockfileVersion: '10.0'", "lockfileVersion: 6.0", "packages:"):

@@ -288,8 +288,44 @@ class CheckError(Exception):
     """The check couldn't run reliably (unknown lockfile format, failed registry lookup)."""
 
 
-# Lockfile formats parse_lockfile understands. pnpm 9, 10 and 11 all write 9.0.
+# Lockfile formats parse_lockfile understands. pnpm 9, 10, 11 and 12 all write 9.0.
 KNOWN_LOCKFILE_VERSIONS = {"9.0"}
+# The only importer fields of pnpm's env lockfile (see _project_document).
+ENV_LOCKFILE_FIELDS = {"configDependencies", "packageManagerDependencies"}
+
+
+def _is_env_document(doc: str) -> bool:
+    """True when every importer field in `doc` is an env-lockfile one (no project dependencies)."""
+    fields = set()
+    section = None
+    for line in doc.splitlines():
+        if line and not line.startswith(" "):
+            section = line.rstrip(":").strip()
+        elif section == "importers" and line.startswith("    ") and not line.startswith("     "):
+            fields.add(line.strip().split(":", 1)[0])
+    return bool(fields) and fields <= ENV_LOCKFILE_FIELDS
+
+
+def _project_document(text: str) -> str:
+    """The project's lockfile document in pnpm-lock.yaml.
+
+    pnpm 11+ may write two YAML documents: first an "env lockfile" (the pnpm version that
+    `packageManager` pins, with its per-platform binaries, and config dependencies), then
+    `---` and the project's own lockfile. The env packages are pnpm itself, never installed
+    into node_modules, so only the second document counts. Anything else fails closed.
+    """
+    docs: list[list[str]] = [[]]
+    for line in text.splitlines(keepends=True):
+        if line.rstrip("\r\n") == "---":
+            docs.append([])
+        else:
+            docs[-1].append(line)
+    found = ["".join(doc) for doc in docs if "".join(doc).strip()]
+    if len(found) == 1:
+        return found[0]
+    if len(found) == 2 and _is_env_document(found[0]):
+        return found[1]
+    raise CheckError(f"unexpected pnpm lockfile layout ({len(found)} YAML documents); update parse_lockfile")
 
 
 def parse_lockfile(text: str) -> tuple[set[tuple[str, str]], dict[tuple[str, str], set[tuple[str, str]]]]:
@@ -299,6 +335,7 @@ def parse_lockfile(text: str) -> tuple[set[tuple[str, str]], dict[tuple[str, str
     in a fixed two-space layout. Raises CheckError on anything else, so a format change can't
     silently skip packages.
     """
+    text = _project_document(text)
     first = text.split("\n", 1)[0].strip()
     version = first.partition(":")[2].strip().strip("'\"")
     if not first.startswith("lockfileVersion:") or version not in KNOWN_LOCKFILE_VERSIONS:

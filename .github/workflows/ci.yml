@@ -35,7 +35,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - uses: pnpm/action-setup@v6
         with:
-          version: 9  # frontend/pnpm-lock.yaml pins pnpm@9.15.9 (see docs/ARCHITECTURE.md testing-strategy)
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -71,12 +71,10 @@ jobs:
         run: cargo deny check licenses
       - uses: pnpm/action-setup@v6
         with:
-          # pnpm 11 runs each project with the pnpm version its package.json `packageManager`
-          # pins (9.15.9 for frontend, e2e and extension/e2e; 11.28.10 for extension), so one
-          # job can install all four. The other jobs set up the pinned version directly. The
-          # pnpm cache below is keyed to pnpm 11's store path, so the pnpm 9 installs may not
-          # hit it; that costs a few seconds, so it's left as is.
-          version: 11
+          # Every `version:` input here and in the other workflows names the pnpm major only; pnpm
+          # then switches to the exact version each project's package.json `packageManager` pins
+          # (the same 12.x in all four projects, see docs/ARCHITECTURE.md's testing strategy).
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -306,7 +304,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
-          version: 9  # frontend/pnpm-lock.yaml pins pnpm@9.15.9
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -338,7 +336,7 @@ jobs:
         run: cargo build -p vscode-sidecar
       - uses: pnpm/action-setup@v6
         with:
-          version: 11  # extension/package.json pins pnpm@11.28.10, independent of frontend/e2e's pnpm@9.15.9 pin
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -389,7 +387,7 @@ jobs:
         run: cargo install tauri-cli --locked
       - uses: pnpm/action-setup@v6
         with:
-          version: 9  # frontend/pnpm-lock.yaml pins pnpm@9.15.9
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -442,7 +440,7 @@ jobs:
           targets: ${{ matrix.rust_target }}
       - uses: pnpm/action-setup@v6
         with:
-          version: 11  # extension/package.json pins pnpm@11.28.10
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -497,7 +495,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v6
         with:
-          version: 11  # extension/package.json pins pnpm@11.28.10
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -557,7 +555,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v6
         with:
-          version: 11  # extension/package.json pins pnpm@11.28.10
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -637,7 +635,7 @@ jobs:
         run: cargo install tauri-driver --locked
       - uses: pnpm/action-setup@v6
         with:
-          version: 9  # frontend/e2e's pnpm-lock.yaml pins pnpm@9.15.9
+          version: 12
       - uses: actions/setup-node@v7
         with:
           node-version: 24
