@@ -259,7 +259,7 @@ not a lookalike such as `lightningcss-plugin`. Owner decision 2026-11-03 (#273).
 | mdn-data | 2 | CC0-1.0 | CSS data for `css-tree` (`jsdom`, tests only). |
 | spdx-license-ids | 3 | CC0-1.0 | SPDX id list for package metadata tools (`@wdio/cli`, `e2e/` only). |
 | spdx-exceptions | 2 | CC-BY-3.0 | SPDX exception list, same tools. |
-| tslib | 2 | 0BSD | TypeScript runtime helpers inside `@vscode/vsce`'s and WebdriverIO's dependencies. |
+| tslib | 2 | 0BSD | TypeScript runtime helpers inside `@vscode/vsce`'s dependencies (`extension/` only). |
 | stream-buffers | 3 | Unlicense | `@wdio/local-runner` (`e2e/` only). |
 | @promptbook/utils | 0 | CC-BY-4.0 | `@wdio/utils` > `locate-app` (`e2e/` only). |
 | binaryextensions, editions, istextorbinary, textextensions, version-range | 6, 6, 9, 6, 4 | Artistic-2.0 | `@vscode/vsce` > secretlint > `istextorbinary` (packaging only). |
