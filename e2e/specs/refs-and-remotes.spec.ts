@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { waitUntilGoneInPage } from "../support/dom";
-import { expandSidebarSection } from "../support/sidebar";
+import { expandSidebarSection, sidebarRemoteFolder } from "../support/sidebar";
 
 // Owns everything it touches: the remote `publish-origin`, the local branch `e2e-publish` and
 // the bare directory. It never uses Fetch all (other specs may leave unreachable remotes in the
@@ -120,7 +120,7 @@ describe("Browsitory refs and remotes", () => {
     );
 
     // Expand the remote folder and delete the branch from its row's menu.
-    const remoteFolder = await $(`button=${REMOTE}`);
+    const remoteFolder = await $(sidebarRemoteFolder(REMOTE));
     await remoteFolder.waitForExist({ timeout: 10000 });
     await remoteFolder.click();
     await contextMenu(`//button[@aria-label="Show ${REMOTE}/${BRANCH} in graph"]/ancestor::li[1]`);

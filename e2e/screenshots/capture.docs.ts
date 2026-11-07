@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { expandSidebarSection } from "../support/sidebar";
+import { waitUntilInPage } from "../support/dom";
+import { expandSidebarSection, sidebarBranchRow, sidebarRemoteFolder, sidebarSectionToggle } from "../support/sidebar";
 import { DEMO_REPO_PATH, startConflict } from "./demoRepo";
 
 // Captures the documentation screenshots into docs/guide/assets/ (see ./README.md). Run it with
@@ -23,7 +24,7 @@ async function click(selector: string): Promise<void> {
 }
 
 async function collapseSidebarSection(title: string): Promise<void> {
-  const trigger = await $(`section[aria-label='${title}'] button[aria-expanded]`);
+  const trigger = await $(sidebarSectionToggle(title));
   await trigger.waitForExist({ timeout: 10000 });
   if ((await trigger.getAttribute("aria-expanded")) === "true") {
     await browser.execute((el) => (el as HTMLElement).click(), trigger);
@@ -53,7 +54,7 @@ describe("Documentation screenshots", () => {
     // Start from default sidebar state; the E2E build has just opened its own fixture repo.
     await browser.execute(() => localStorage.clear());
     await browser.refresh();
-    await $('section[aria-label="Branches"] button[aria-expanded]').waitForExist({ timeout: 15000 });
+    await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 15000 });
     await setTheme("light");
 
     // Open the demo from the picker's recent list, then close the E2E fixture's tab.
@@ -81,7 +82,7 @@ describe("Documentation screenshots", () => {
 
   it("staging", async () => {
     await click("span*=src/app.js (Modified)");
-    await $(".diff-line-add").waitForExist({ timeout: 10000 });
+    await waitUntilInPage(".diff-line-add");
     const message = await $("textarea[placeholder='Commit message']");
     await browser.execute(
       (el) => {
@@ -96,14 +97,14 @@ describe("Documentation screenshots", () => {
 
   it("commit-diff", async () => {
     await click("li*=Limit the tile cache to 200 entries");
-    await $(".diff-line-add").waitForExist({ timeout: 10000 });
+    await waitUntilInPage(".diff-line-add");
     await shoot("commit-diff");
   });
 
   it("branches", async () => {
     await expandSidebarSection("Branches");
-    await $("li*=feature/offline-tiles").waitForExist({ timeout: 10000 });
-    const origin = await $("button=origin");
+    await $(sidebarBranchRow("feature/offline-tiles")).waitForExist({ timeout: 10000 });
+    const origin = await $(sidebarRemoteFolder("origin"));
     await origin.waitForExist({ timeout: 10000 });
     if ((await origin.getAttribute("aria-expanded")) !== "true") {
       await browser.execute((el) => (el as HTMLElement).click(), origin);
@@ -136,7 +137,8 @@ describe("Documentation screenshots", () => {
     const input = await $('input[aria-label="Command palette"]');
     await input.waitForDisplayed({ timeout: 10000 });
     await input.setValue("branch");
-    await $("li*=Branch").waitForExist({ timeout: 10000 });
+    // Any matching command will do: the palette lists several.
+    await waitUntilInPage("li", "Branch", { contains: true });
     await browser.saveScreenshot(path.join(ASSETS, "command-palette.png"));
     await browser.keys(["Escape"]);
     await input.waitForDisplayed({ reverse: true, timeout: 10000 });
@@ -150,7 +152,8 @@ describe("Documentation screenshots", () => {
     await input.waitForDisplayed({ timeout: 10000 });
     await input.setValue("Refresh");
     await browser.keys(["Enter"]);
-    await $("button*=Abort merge").waitForExist({ timeout: 10000 });
+    // The status strip and the commit box both offer it.
+    await waitUntilInPage("button", "Abort merge", { contains: true });
     await click("li*=Uncommitted changes");
     // Bring the conflicted file's resolve controls into view.
     const conflicted = await $("span*=src/search.js (Conflicted)");

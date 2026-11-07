@@ -1,4 +1,5 @@
 import { expect } from "@wdio/globals";
+import { sidebarSectionToggle } from "../support/sidebar";
 
 // App.tsx's Ctrl/Cmd+K handler no-ops until `state.repoPath` is set (see its early return), and
 // `wdio.conf.ts`'s `beforeTest` reloads the page before every `it`, so the repo's async auto-open
@@ -8,7 +9,7 @@ import { expect } from "@wdio/globals";
 // `pull-requests.spec.ts`/`remote-management.spec.ts`/etc. all wait on a section's trigger or
 // form before their first interaction).
 async function waitForAppReady(): Promise<void> {
-  await $('section[aria-label="Branches"] button[aria-expanded]').waitForExist({ timeout: 10000 });
+  await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 10000 });
 }
 
 // Sends Ctrl/Cmd+K until the palette is showing. Even after `waitForAppReady`, a keypress sent
@@ -91,7 +92,7 @@ describe("command palette", () => {
   });
 
   it("a navigate command expands the target sidebar section", async () => {
-    const trigger = await $('section[aria-label="Worktrees"] button[aria-expanded]');
+    const trigger = await $(sidebarSectionToggle("Worktrees"));
     await trigger.waitForExist({ timeout: 10000 });
     // This section is always rendered (even with no linked worktrees), so no worktree fixture
     // data is needed here. Its open/closed state is persisted to localStorage (see

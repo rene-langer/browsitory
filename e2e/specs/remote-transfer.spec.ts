@@ -4,7 +4,7 @@ import { createServer } from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { expandSidebarSection } from "../support/sidebar";
+import { ADD_REMOTE_NAME_INPUT, expandSidebarSection, sidebarRemoteFolder } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-remote.git");
@@ -52,14 +52,15 @@ async function startCredentialChallengeServer(): Promise<{
 // `ContextMenu`, closes itself immediately after the click, so no reference to the item survives
 // past this call.
 async function clickRemoteContextItem(remoteName: string, itemLabel: string) {
-  const remoteHeader = await $(`button=${remoteName}`);
+  const remoteHeader = await $(sidebarRemoteFolder(remoteName));
   await remoteHeader.waitForExist({ timeout: 10000 });
   await browser.execute((el) => {
     el.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
     );
   }, remoteHeader);
-  const menuItem = await $(`button=${itemLabel}`);
+  // The context menu's item, not the sync bar's button of the same name (Fetch).
+  const menuItem = await $("[role='menu']").$(`button=${itemLabel}`);
   await menuItem.waitForExist({ timeout: 10000 });
   await menuItem.waitForEnabled({ timeout: 10000 });
   await menuItem.click();
@@ -119,7 +120,7 @@ describe("Browsitory remote transfer", () => {
     await addButton.click();
     await (await $("button=Add remote…")).click();
 
-    const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
+    const remoteNameInput = await $(ADD_REMOTE_NAME_INPUT);
     await remoteNameInput.waitForExist({ timeout: 10000 });
     const addRemoteButton = await (await $("form[aria-label='Add remote']")).$("button=Add remote");
     await addRemoteButton.waitForEnabled({ timeout: 10000 });
@@ -127,7 +128,7 @@ describe("Browsitory remote transfer", () => {
     await (await $("[data-testid='add-remote-fetch-url']")).setValue(BARE_REMOTE_PATH);
     await addRemoteButton.click();
 
-    const remoteFolderHeader = await $("button=transfer-origin");
+    const remoteFolderHeader = await $(sidebarRemoteFolder("transfer-origin"));
     await remoteFolderHeader.waitForExist({ timeout: 10000 });
     await clickRemoteContextItem("transfer-origin", "Fetch");
 
@@ -168,13 +169,13 @@ describe("Browsitory remote transfer", () => {
         await addButton.click();
         await (await $("button=Add remote…")).click();
       }
-      const remoteNameInput = await $("form[aria-label='Add remote'] input:nth-of-type(1)");
+      const remoteNameInput = await $(ADD_REMOTE_NAME_INPUT);
       const addRemoteButton = await (await $("form[aria-label='Add remote']")).$("button=Add remote");
       await addRemoteButton.waitForEnabled({ timeout: 10000 });
       await remoteNameInput.setValue("credential-origin");
       await (await $("[data-testid='add-remote-fetch-url']")).setValue(challenge.url);
       await addRemoteButton.click();
-      await (await $("button=credential-origin")).waitForExist({ timeout: 10000 });
+      await (await $(sidebarRemoteFolder("credential-origin"))).waitForExist({ timeout: 10000 });
 
       // This is the non-secret metadata the UI normally persists before saving a token. No
       // token is saved, so the loopback server invokes the real missing-credential callback.
@@ -213,7 +214,8 @@ describe("Browsitory remote transfer", () => {
     await upstreamBranch.setValue("main");
     await (await upstreamDialog.$("button=Set upstream")).click();
 
-    const pullButton = await $("button=Pull");
+    // The sidebar's Upstream Pull, next to the upstream just set; the sync bar has one too.
+    const pullButton = await $("div[aria-label='Upstream actions']").$("button=Pull");
     await pullButton.waitForEnabled({ timeout: 10000 });
     await pullButton.click();
 
@@ -298,7 +300,7 @@ describe("Browsitory remote transfer", () => {
 
     const createTagButton = await $("button=Create tag");
     await createTagButton.waitForEnabled({ timeout: 10000 });
-    await (await $("form[aria-label='Create tag'] input")).setValue("e2e-transfer-tag");
+    await (await $("//form[@aria-label='Create tag']//label[contains(., 'Tag name')]//input")).setValue("e2e-transfer-tag");
     await createTagButton.click();
     await browser.waitUntil(
       () => {
