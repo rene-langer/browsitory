@@ -1,5 +1,4 @@
-# Build-only tools for the user guide site (mkdocs.yml). Never shipped.
+# Build-only tools for the user guide site (mkdocs.yml, read by Zensical). Never shipped.
 # Lock file: docs/requirements.txt, regenerated with:
 #   pip-compile --generate-hashes --strip-extras docs/requirements.in
-mkdocs
-mkdocs-material
+zensical

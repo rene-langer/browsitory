@@ -37,6 +37,6 @@ extension/e2e/.vscode-test
 # graphify output (local, regenerate with /graphify)
 graphify-out/
 
-# User guide site (mkdocs build) and its local virtual environment
+# User guide site (zensical build) and its local virtual environment
 /site
 /.venv
