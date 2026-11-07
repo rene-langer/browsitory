@@ -10,6 +10,7 @@ import type {
 } from "../ipc/RepoClient";
 import { branchSwatchColor } from "../lib/laneColors";
 import { buildBranchTree, type BranchTreeNode } from "../lib/branchTree";
+import { coversEveryBranch } from "../lib/graphSelection";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { FormDialog } from "./primitives/FormDialog";
@@ -79,6 +80,8 @@ export function BranchTree({
   operationDisabledReason,
   graphBranchSelection,
   onSetGraphBranchSelection,
+  onClearGraphBranchSelection,
+  onShowAllGraphBranches,
   graphRemoteBranchSelection,
   onSetGraphRemoteBranchSelection,
   onIsolateGraphBranch,
@@ -141,6 +144,12 @@ export function BranchTree({
   // `git-core` and `useAppState`'s `AppState.graphBranchSelection`).
   graphBranchSelection: string[] | null;
   onSetGraphBranchSelection: (selectedBranches: string[]) => void;
+  // Forgets the saved local selection (`null` again). A dot click that turns every local
+  // branch on calls it instead of saving their names, so later branches show too and a repo
+  // with one branch keeps the full walk (#402).
+  onClearGraphBranchSelection: () => void;
+  // "Show all branches": forgets both selections, back to the default graph (#402).
+  onShowAllGraphBranches: () => void;
   // Same shape as `graphBranchSelection`/`onSetGraphBranchSelection` above, but scoped to
   // remote-tracking branches, keyed by their qualified `<remoteName>/<branchName>` name (see
   // `useAppState`'s `AppState.graphRemoteBranchSelection`). A selected remote branch's commits
@@ -671,7 +680,10 @@ export function BranchTree({
   const toggleGraphBranch = (name: string) => {
     const shown = graphBranchSelection ?? branches.map((b) => b.name);
     const next = shown.includes(name) ? shown.filter((n) => n !== name) : [...shown, name];
-    onSetGraphBranchSelection(next);
+    // Every local branch shown is the default graph: no saved list, so later branches join it
+    // and a single branch isn't walked by first parents only (#402). The remote selection stays.
+    if (branches.length > 0 && coversEveryBranch(next, branches.map((b) => b.name))) onClearGraphBranchSelection();
+    else onSetGraphBranchSelection(next);
   };
 
   const toggleGraphRemoteBranch = (qualifiedName: string) => {
@@ -1081,8 +1093,8 @@ export function BranchTree({
               { label: "Add remote…", onSelect: onOpenAddRemoteDraft },
               {
                 label: "Show all branches",
-                disabled: graphBranchSelection === null,
-                onSelect: () => onSetGraphBranchSelection(branches.map((b) => b.name)),
+                disabled: graphBranchSelection === null && graphRemoteBranchSelection === null,
+                onSelect: onShowAllGraphBranches,
               },
             ]}
           />

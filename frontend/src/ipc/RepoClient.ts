@@ -669,8 +669,12 @@ export interface RepoClient {
   ): Promise<GraphCommit[]>;
   getGraphBranchSelection(repoPath: string): Promise<string[] | null>;
   setGraphBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
+  /** Forgets the saved selection: back to every local branch, also ones created later (#402). */
+  clearGraphBranchSelection(repoPath: string): Promise<void>;
   getGraphRemoteBranchSelection(repoPath: string): Promise<string[] | null>;
   setGraphRemoteBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
+  /** Forgets the saved remote selection: no remote commits, every remote badge (#402). */
+  clearGraphRemoteBranchSelection(repoPath: string): Promise<void>;
   /** `oldPath` (with `staged`): a staged rename's old path, so only its edits show. */
   getWorkingDiff(repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath?: string | null): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string, opts: DiffOptions): Promise<DiffHunk[]>;

@@ -133,10 +133,13 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<string[] | null>("get_graph_branch_selection", { repoPath }),
   setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>
     loggedInvoke("set_graph_branch_selection", { repoPath, selectedBranches }),
+  clearGraphBranchSelection: (repoPath: string) => loggedInvoke("clear_graph_branch_selection", { repoPath }),
   getGraphRemoteBranchSelection: (repoPath: string) =>
     loggedInvoke<string[] | null>("get_graph_remote_branch_selection", { repoPath }),
   setGraphRemoteBranchSelection: (repoPath: string, selectedBranches: string[]) =>
     loggedInvoke("set_graph_remote_branch_selection", { repoPath, selectedBranches }),
+  clearGraphRemoteBranchSelection: (repoPath: string) =>
+    loggedInvoke("clear_graph_remote_branch_selection", { repoPath }),
   getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath: string | null = null) =>
     loggedInvoke<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts, oldPath }),
   getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>

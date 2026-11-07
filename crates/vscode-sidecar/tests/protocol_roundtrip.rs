@@ -654,6 +654,20 @@ fn graph_branch_selection_round_trips() {
         serde_json::json!({"repoPath": repo_path}),
     );
     assert_eq!(after["result"], serde_json::json!(["main", "feature"]));
+
+    // #402: clearing goes back to "nothing saved" (`null`), not to an empty list.
+    let cleared = sidecar.call(
+        4,
+        "clear_graph_branch_selection",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(cleared["result"], serde_json::Value::Null);
+    let after_clear = sidecar.call(
+        5,
+        "get_graph_branch_selection",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(after_clear["result"], serde_json::Value::Null);
 }
 
 #[test]
@@ -683,6 +697,20 @@ fn graph_remote_branch_selection_round_trips() {
         serde_json::json!({"repoPath": repo_path}),
     );
     assert_eq!(after["result"], serde_json::json!(["origin/main"]));
+
+    // #402: clearing goes back to "nothing saved" (`null`), not to an empty list.
+    let cleared = sidecar.call(
+        4,
+        "clear_graph_remote_branch_selection",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(cleared["result"], serde_json::Value::Null);
+    let after_clear = sidecar.call(
+        5,
+        "get_graph_remote_branch_selection",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(after_clear["result"], serde_json::Value::Null);
 }
 
 #[test]

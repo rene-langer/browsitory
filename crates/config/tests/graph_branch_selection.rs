@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use config::{get_graph_branch_selection_at, set_graph_branch_selection_at};
+use config::{
+    clear_graph_branch_selection_at, get_graph_branch_selection_at,
+    get_graph_remote_branch_selection_at, set_graph_branch_selection_at,
+    set_graph_remote_branch_selection_at,
+};
 
 #[test]
 fn get_graph_branch_selection_at_returns_none_for_a_repo_with_no_saved_selection() {
@@ -62,5 +66,45 @@ fn set_graph_branch_selection_at_keeps_selections_for_other_repos_separate() {
     assert_eq!(
         get_graph_branch_selection_at(&config_file, Path::new("/repo/b")).unwrap(),
         Some(vec!["dev".to_string()])
+    );
+}
+
+#[test]
+fn clear_graph_branch_selection_at_forgets_only_that_repos_local_selection() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+    let repo_a = Path::new("/repo/a");
+    let repo_b = Path::new("/repo/b");
+    set_graph_branch_selection_at(&config_file, repo_a, &["main".to_string()]).unwrap();
+    set_graph_branch_selection_at(&config_file, repo_b, &["dev".to_string()]).unwrap();
+    set_graph_remote_branch_selection_at(&config_file, repo_a, &["origin/main".to_string()])
+        .unwrap();
+
+    clear_graph_branch_selection_at(&config_file, repo_a).unwrap();
+
+    assert_eq!(
+        get_graph_branch_selection_at(&config_file, repo_a).unwrap(),
+        None
+    );
+    assert_eq!(
+        get_graph_branch_selection_at(&config_file, repo_b).unwrap(),
+        Some(vec!["dev".to_string()])
+    );
+    assert_eq!(
+        get_graph_remote_branch_selection_at(&config_file, repo_a).unwrap(),
+        Some(vec!["origin/main".to_string()])
+    );
+}
+
+#[test]
+fn clear_graph_branch_selection_at_is_a_no_op_without_a_saved_selection() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+
+    clear_graph_branch_selection_at(&config_file, Path::new("/repo/a")).unwrap();
+
+    assert_eq!(
+        get_graph_branch_selection_at(&config_file, Path::new("/repo/a")).unwrap(),
+        None
     );
 }

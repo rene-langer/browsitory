@@ -386,6 +386,54 @@ describe("useAppState — refs and remotes (4b)", () => {
 
   it("removes a deleted branch from the saved graph selection", async () => {
     const setGraphBranchSelection = vi.fn(async () => {});
+    const clearGraphBranchSelection = vi.fn(async () => {});
+    const client = transferClient({
+      listBranches: async () => [
+        { name: "main", isCurrent: true },
+        { name: "topic", isCurrent: false },
+        { name: "other", isCurrent: false },
+      ],
+      getGraphBranchSelection: async () => ["main", "topic"],
+      deleteBranch: async () => {},
+      setGraphBranchSelection,
+      clearGraphBranchSelection,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.deleteBranch("topic", false));
+
+    expect(setGraphBranchSelection).toHaveBeenCalledWith(TEST_REPO_PATH, ["main"]);
+    expect(clearGraphBranchSelection).not.toHaveBeenCalled();
+  });
+
+  // #402: a saved list of every remaining branch would hide later branches, and with one branch
+  // left walk first parents only, so the selection is forgotten instead.
+  it("deleting the only selected branch clears the selection, back to every branch", async () => {
+    const setGraphBranchSelection = vi.fn(async () => {});
+    const clearGraphBranchSelection = vi.fn(async () => {});
+    const client = transferClient({
+      listBranches: async () => [
+        { name: "main", isCurrent: true },
+        { name: "topic", isCurrent: false },
+      ],
+      getGraphBranchSelection: async () => ["topic"],
+      deleteBranch: async () => {},
+      setGraphBranchSelection,
+      clearGraphBranchSelection,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.deleteBranch("topic", false));
+
+    expect(clearGraphBranchSelection).toHaveBeenCalledWith(TEST_REPO_PATH);
+    expect(setGraphBranchSelection).not.toHaveBeenCalled();
+  });
+
+  it("deleting a branch from a selection of every branch clears it", async () => {
+    const setGraphBranchSelection = vi.fn(async () => {});
+    const clearGraphBranchSelection = vi.fn(async () => {});
     const client = transferClient({
       listBranches: async () => [
         { name: "main", isCurrent: true },
@@ -394,33 +442,15 @@ describe("useAppState — refs and remotes (4b)", () => {
       getGraphBranchSelection: async () => ["main", "topic"],
       deleteBranch: async () => {},
       setGraphBranchSelection,
+      clearGraphBranchSelection,
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
 
     await act(() => result.current.deleteBranch("topic", false));
 
-    expect(setGraphBranchSelection).toHaveBeenCalledWith(TEST_REPO_PATH, ["main"]);
-  });
-
-  it("deleting the only selected branch shows all remaining branches again", async () => {
-    const setGraphBranchSelection = vi.fn(async () => {});
-    const client = transferClient({
-      listBranches: async () => [
-        { name: "main", isCurrent: true },
-        { name: "topic", isCurrent: false },
-        { name: "other", isCurrent: false },
-      ],
-      getGraphBranchSelection: async () => ["topic"],
-      deleteBranch: async () => {},
-      setGraphBranchSelection,
-    });
-    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
-    await act(() => result.current.refresh());
-
-    await act(() => result.current.deleteBranch("topic", false));
-
-    expect(setGraphBranchSelection).toHaveBeenCalledWith(TEST_REPO_PATH, ["main", "other"]);
+    expect(clearGraphBranchSelection).toHaveBeenCalledWith(TEST_REPO_PATH);
+    expect(setGraphBranchSelection).not.toHaveBeenCalled();
   });
 
   it("leaves the selection alone when the delete fails", async () => {

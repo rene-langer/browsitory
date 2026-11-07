@@ -559,6 +559,8 @@ export function RepoWorkspace({
               operationDisabledReason={operationDisabledReason}
               graphBranchSelection={appState.state.graphBranchSelection}
               onSetGraphBranchSelection={appState.setGraphBranchSelection}
+              onClearGraphBranchSelection={appState.clearGraphBranchSelection}
+              onShowAllGraphBranches={appState.showAllGraphBranches}
               graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
               onSetGraphRemoteBranchSelection={appState.setGraphRemoteBranchSelection}
               onIsolateGraphBranch={appState.isolateGraphBranch}

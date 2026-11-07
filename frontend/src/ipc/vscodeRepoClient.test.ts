@@ -382,6 +382,28 @@ describe("vscodeRepoClient", () => {
     await expect(setPromise).resolves.toBeNull();
   });
 
+  it("wires clearGraphBranchSelection and clearGraphRemoteBranchSelection (#402)", async () => {
+    const localPromise = vscodeRepoClient.clearGraphBranchSelection("/repo");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "clear_graph_branch_selection",
+      params: { repoPath: "/repo" },
+    });
+    respond(1, null);
+    await expect(localPromise).resolves.toBeNull();
+
+    const remotePromise = vscodeRepoClient.clearGraphRemoteBranchSelection("/repo");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "clear_graph_remote_branch_selection",
+      params: { repoPath: "/repo" },
+    });
+    respond(2, null);
+    await expect(remotePromise).resolves.toBeNull();
+  });
+
   it("wires getCommitFiles", async () => {
     const promise = vscodeRepoClient.getCommitFiles("/repo", "abc123");
     expect(postMessage).toHaveBeenCalledWith({

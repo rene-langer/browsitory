@@ -59,9 +59,10 @@ pub use remote::*;
 pub use search::{cancel_search, search_commits};
 pub use stash::{apply_stash, drop_stash, get_stash_files, list_stashes, pop_stash, save_stash};
 pub use status::{
-    commit, discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame,
-    get_commit_diff, get_commit_files, get_commit_graph, get_commit_message,
-    get_commit_rename_diff, get_commit_signature, get_file_history, get_graph_branch_selection,
+    clear_graph_branch_selection, clear_graph_remote_branch_selection, commit,
+    discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame, get_commit_diff,
+    get_commit_files, get_commit_graph, get_commit_message, get_commit_rename_diff,
+    get_commit_signature, get_file_history, get_graph_branch_selection,
     get_graph_remote_branch_selection, get_status, get_working_diff, ignore_path,
     set_graph_branch_selection, set_graph_remote_branch_selection, stage_file, stage_hunk,
     stage_lines, unstage_file, unstage_hunk, unstage_lines,

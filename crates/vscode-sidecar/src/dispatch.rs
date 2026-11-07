@@ -156,6 +156,7 @@ methods!(|params, repos, stdout| {
     "delete_workspace" => delete_workspace(DeleteWorkspaceParams),
     "get_graph_branch_selection" => get_graph_branch_selection(RepoPathParams),
     "set_graph_branch_selection" => set_graph_branch_selection(SetGraphBranchSelectionParams),
+    "clear_graph_branch_selection" => clear_graph_branch_selection(RepoPathParams),
     "get_diff_settings" => get_diff_settings(),
     "set_diff_settings" => set_diff_settings(SetDiffSettingsParams),
     "get_external_tool_settings" => get_external_tool_settings(),
@@ -174,6 +175,7 @@ methods!(|params, repos, stdout| {
     "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(
         SetGraphRemoteBranchSelectionParams
     ),
+    "clear_graph_remote_branch_selection" => clear_graph_remote_branch_selection(RepoPathParams),
     "get_commit_files" => get_commit_files(GetCommitFilesParams, repos),
     "get_commit_message" => get_commit_message(GetCommitFilesParams, repos),
     "get_commit_signature" => get_commit_signature(GetCommitFilesParams, repos),

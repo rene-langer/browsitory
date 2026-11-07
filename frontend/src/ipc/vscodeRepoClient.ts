@@ -259,10 +259,13 @@ export const vscodeRepoClient: RepoClient = {
     call<string[] | null>("get_graph_branch_selection", { repoPath }),
   setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>
     call<void>("set_graph_branch_selection", { repoPath, selectedBranches }),
+  clearGraphBranchSelection: (repoPath: string) => call<void>("clear_graph_branch_selection", { repoPath }),
   getGraphRemoteBranchSelection: (repoPath: string) =>
     call<string[] | null>("get_graph_remote_branch_selection", { repoPath }),
   setGraphRemoteBranchSelection: (repoPath: string, selectedBranches: string[]) =>
     call<void>("set_graph_remote_branch_selection", { repoPath, selectedBranches }),
+  clearGraphRemoteBranchSelection: (repoPath: string) =>
+    call<void>("clear_graph_remote_branch_selection", { repoPath }),
   getCommitFiles: (repoPath: string, commitId: string) =>
     call<string[]>("get_commit_files", { repoPath, commitId }),
   getRangeFiles: (repoPath: string, fromId: string, toId: string) =>
