@@ -40,8 +40,10 @@ pub(crate) struct FileRef<'a> {
     pub old_absent: bool,
     /// Forward new side absent (deleted file).
     pub new_absent: bool,
-    /// Octal mode of the side that exists, e.g. 0o100644.
-    pub mode: u32,
+    /// Octal mode of the forward old side, e.g. 0o100644 (0 when that side is absent).
+    pub old_mode: u32,
+    /// Octal mode of the forward new side (0 when that side is absent).
+    pub new_mode: u32,
     /// Whether a patch that empties a side absent in the forward diff may delete the file
     /// (index operations) rather than leave it empty (workdir discard never deletes a file).
     pub allow_delete: bool,
@@ -117,16 +119,30 @@ pub(crate) fn build(
     // line is gone (and the caller allows it) does the patch delete the file. Otherwise — a
     // partial selection, or `allow_delete: false` — the file stays, possibly empty.
     let deletes_file = postimage_absent && new_count == 0 && file.allow_delete;
+    // The patch keeps the mode of the side it patches (the preimage), like `git add -p` and
+    // `git checkout -p`: a hunk never stages or reverts a mode change on its own (#427). A
+    // created file takes the mode of the side it is created from.
+    let (preimage_mode, postimage_mode) = match direction {
+        Direction::Forward => (file.old_mode, file.new_mode),
+        Direction::Reverse => (file.new_mode, file.old_mode),
+    };
 
     let mut out = Vec::new();
     let p = file.path;
     out.extend_from_slice(format!("diff --git a/{p} b/{p}\n").as_bytes());
     if preimage_absent {
-        out.extend_from_slice(format!("new file mode {:o}\n--- /dev/null\n", file.mode).as_bytes());
+        let mode = postimage_mode;
+        out.extend_from_slice(format!("new file mode {mode:o}\n--- /dev/null\n").as_bytes());
     } else if deletes_file {
-        out.extend_from_slice(format!("deleted file mode {:o}\n--- a/{p}\n", file.mode).as_bytes());
+        let mode = preimage_mode;
+        out.extend_from_slice(format!("deleted file mode {mode:o}\n--- a/{p}\n").as_bytes());
     } else {
-        out.extend_from_slice(format!("--- a/{p}\n").as_bytes());
+        // Without a mode libgit2 writes the postimage as 100644. Its parser reads the mode
+        // from the `index` line and never checks the object ids there on apply; `old mode` /
+        // `new mode` lines would need an `index` line after them anyway.
+        out.extend_from_slice(
+            format!("index 0000000..0000000 {preimage_mode:o}\n--- a/{p}\n").as_bytes(),
+        );
     }
     if deletes_file {
         out.extend_from_slice(b"+++ /dev/null\n");
@@ -212,9 +228,42 @@ mod tests {
             path: "f.txt",
             old_absent: false,
             new_absent: false,
-            mode: 0o100644,
+            old_mode: 0o100644,
+            new_mode: 0o100644,
             allow_delete: true,
         }
+    }
+
+    #[test]
+    fn a_modification_keeps_the_mode_of_the_side_it_patches() {
+        // Forward old side 100644, new side 100755 (an exec bit change pending alongside).
+        let f = FileRef {
+            new_mode: 0o100755,
+            ..file()
+        };
+        let h = HunkRef {
+            old_start: 1,
+            new_start: 1,
+        };
+        let forward =
+            String::from_utf8(build(&f, &h, &lines(), &[4], Direction::Forward).unwrap()).unwrap();
+        assert!(
+            forward.starts_with(
+                "diff --git a/f.txt b/f.txt\nindex 0000000..0000000 100644\n--- a/f.txt\n"
+            ),
+            "{forward}"
+        );
+        let reverse =
+            String::from_utf8(build(&f, &h, &lines(), &[4], Direction::Reverse).unwrap()).unwrap();
+        assert!(
+            reverse.contains("\nindex 0000000..0000000 100755\n--- a/f.txt\n"),
+            "{reverse}"
+        );
+        // libgit2 reads the mode from that line for both sides.
+        let parsed = git2::Diff::from_buffer(reverse.as_bytes()).unwrap();
+        let delta = parsed.deltas().next().unwrap();
+        assert_eq!(u32::from(delta.old_file().mode()), 0o100755);
+        assert_eq!(u32::from(delta.new_file().mode()), 0o100755);
     }
 
     fn lines() -> Vec<PatchLine> {
