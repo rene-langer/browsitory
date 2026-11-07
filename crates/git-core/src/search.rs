@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
-use crate::graph::{GraphCommit, RefDecorations};
+use crate::graph::{walks_first_parent, GraphCommit, RefDecorations};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchTerm {
@@ -254,6 +254,8 @@ pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 
 /// One page of commits matching `query`, walking `TOPOLOGICAL | TIME` from the query's
 /// `branch:` term, or else from `refs` (`None` = every local branch; missing names are skipped).
+/// Without a `branch:` term, exactly one name in `refs` walks first parents only, like
+/// `graph_log` for the same selection, so search and graph list the same commits (#380).
 ///
 /// A page ends after `limits.matches` matches, `limits.scan` commits scanned in this call, or
 /// once `limits.time` has elapsed (checked after each commit, so at least one is scanned); in
@@ -271,7 +273,8 @@ pub fn search_commits(
     cancel: &dyn Fn() -> bool,
 ) -> Result<SearchPage, SearchError> {
     let starts = start_points(repo, query, refs)?;
-    let fingerprint = fingerprint(&starts)?;
+    let first_parent = !has_branch_term(query) && walks_first_parent(refs);
+    let fingerprint = fingerprint(&starts, first_parent)?;
     let started = Instant::now();
     let offset = match cursor {
         None => 0,
@@ -307,6 +310,9 @@ pub fn search_commits(
 
     let mut revwalk = repo.revwalk()?;
     revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+    if first_parent {
+        revwalk.simplify_first_parent()?;
+    }
     for oid in &starts {
         revwalk.push(*oid)?;
     }
@@ -351,6 +357,13 @@ pub fn search_commits(
         next_cursor,
         scanned: position,
     })
+}
+
+fn has_branch_term(query: &SearchQuery) -> bool {
+    query
+        .terms
+        .iter()
+        .any(|t| matches!(t, SearchTerm::Branch(_)))
 }
 
 fn start_points(
@@ -399,12 +412,18 @@ fn start_points(
 }
 
 /// First 16 hex chars of the blob hash of the sorted, comma-joined start oids.
-fn fingerprint(starts: &[Oid]) -> Result<String, git2::Error> {
-    let joined = starts
+/// Identifies a walk: its start oids and whether it follows first parents only, so a cursor from
+/// one walk never resumes the other (one selected branch and two branches at the same commit
+/// share their start oids but not their walk).
+fn fingerprint(starts: &[Oid], first_parent: bool) -> Result<String, git2::Error> {
+    let mut joined = starts
         .iter()
         .map(|o| o.to_string())
         .collect::<Vec<_>>()
         .join(",");
+    if first_parent {
+        joined.push_str(";first-parent");
+    }
     let hash = Oid::hash_object(ObjectType::Blob, joined.as_bytes())?;
     Ok(hash.to_string()[..16].to_string())
 }

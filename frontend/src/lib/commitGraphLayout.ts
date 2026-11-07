@@ -9,6 +9,12 @@ export interface CommitLayout {
   laneSegmentId: number;
   parentConnections: { parentId: string; lane: number; segmentId: number }[];
   passThroughLanes: { lane: number; segmentId: number }[];
+  // Merge parents (never the first parent) that aren't in the list and that no lane is waiting
+  // for: the side branch of a merge on an isolated branch (its first-parent walk leaves side
+  // branches out, #380), or one past the loaded page. They get no lane, which would otherwise
+  // run down past every later row to a commit that never shows; the row draws a short stub
+  // instead.
+  hiddenParentIds: string[];
 }
 
 // `commits` must be in reverse-topological order (children before parents), as `graph_log`'s
@@ -23,6 +29,7 @@ export function assignLanes(commits: GraphCommit[]): CommitLayout[] {
   const laneSegments: number[] = [];
   let nextSegmentId = 0;
   const layouts: CommitLayout[] = [];
+  const listed = new Set(commits.map((commit) => commit.id));
 
   const claimLane = (id: string): number => {
     const existing = lanes.indexOf(id);
@@ -49,11 +56,14 @@ export function assignLanes(commits: GraphCommit[]): CommitLayout[] {
     const laneSegmentId = laneSegments[lane];
 
     const parentConnections: { parentId: string; lane: number; segmentId: number }[] = [];
+    const hiddenParentIds: string[] = [];
     let laneStillNeeded = false;
 
     commit.parentIds.forEach((parentId, parentIndex) => {
       const alreadyWaiting = lanes.indexOf(parentId) !== -1;
-      if (parentIndex === 0 && !alreadyWaiting) {
+      if (parentIndex > 0 && !alreadyWaiting && !listed.has(parentId)) {
+        hiddenParentIds.push(parentId);
+      } else if (parentIndex === 0 && !alreadyWaiting) {
         // Straight continuation: this commit's own lane keeps going, now waiting for its
         // first parent — the common case for most rows in a mostly-linear history.
         lanes[lane] = parentId;
@@ -75,7 +85,14 @@ export function assignLanes(commits: GraphCommit[]): CommitLayout[] {
       lanes[lane] = null;
     }
 
-    layouts.push({ commitId: commit.id, lane, laneSegmentId, parentConnections, passThroughLanes });
+    layouts.push({
+      commitId: commit.id,
+      lane,
+      laneSegmentId,
+      parentConnections,
+      passThroughLanes,
+      hiddenParentIds,
+    });
   }
 
   return layouts;

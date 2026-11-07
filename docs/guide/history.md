@@ -22,6 +22,14 @@ the graph or take it out; this works for remote branches too. A branch's menu ha
 branch**, which shows only that branch. **Show all branches** in the **+** menu of the Branches
 section goes back to every local branch. Browsitory remembers the choice per repository.
 
+When the graph shows a single local branch (after **Isolate branch**, for example), it shows
+only that branch's own line: the commits made directly on it and its merge commits, newest
+first. The commits of the branches merged into it are left out, so the list answers "what landed
+on this branch, and when?". A merge commit still lists all its parents in the commit details; in
+the graph it has a short dashed stub ("Merged from a branch not shown in this view") in place of
+the merged branch. With two or more branches, or all of them, the graph shows every commit they
+reach, merged branches included.
+
 ## Image previews
 
 A changed PNG, JPEG, GIF, WebP or SVG file shows the old and new image side by side (**Before**

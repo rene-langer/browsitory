@@ -4,7 +4,7 @@ use std::cell::Cell;
 use std::path::Path;
 use std::time::Duration;
 
-use common::{commit_all, init_repo, write_file};
+use common::{commit_all, commit_tree, init_repo, write_file};
 use git2::{Oid, Repository, Signature, Time};
 use git_core::search::{parse_query, search_commits, PageLimits, SearchError, SearchPage};
 
@@ -294,6 +294,71 @@ fn refs_selection_limits_the_walk_and_skips_missing_refs() {
         ["feature work"]
     );
     assert_eq!(found(None), ["feature work"]);
+}
+
+/// `trunk`: base → direct → merge(direct, side) → after; `side`: base → side work. Every
+/// message contains "work".
+fn merged_side_branch(repo: &Repository) {
+    const FILE: u32 = 0o100644;
+    let base = commit_tree(repo, &[("a.txt", "a", FILE)], &[], "base work");
+    let direct = commit_tree(repo, &[("a.txt", "d", FILE)], &[base], "direct work");
+    let side = commit_tree(repo, &[("a.txt", "s", FILE)], &[base], "side work");
+    let merge = commit_tree(repo, &[("a.txt", "m", FILE)], &[direct, side], "merge work");
+    let after = commit_tree(repo, &[("a.txt", "x", FILE)], &[merge], "after work");
+    repo.reference("refs/heads/trunk", after, true, "test")
+        .unwrap();
+    repo.reference("refs/heads/side", side, true, "test")
+        .unwrap();
+    repo.reference("refs/heads/trunk-alias", after, true, "test")
+        .unwrap();
+}
+
+#[test]
+fn one_selected_branch_searches_its_first_parent_line_like_the_graph() {
+    let (_dir, repo) = init_repo();
+    merged_side_branch(&repo);
+    let found = |query: &str, refs: &[&str]| -> Vec<String> {
+        let refs: Vec<String> = refs.iter().map(|r| r.to_string()).collect();
+        search_with(&repo, query, Some(&refs))
+            .unwrap()
+            .commits
+            .into_iter()
+            .map(|c| c.summary)
+            .collect()
+    };
+
+    assert_eq!(
+        found("work", &["trunk"]),
+        ["after work", "merge work", "direct work", "base work"]
+    );
+    // Several branches, or an explicit `branch:` term, still walk every ancestor.
+    assert_eq!(found("work", &["trunk", "side"]).len(), 5);
+    assert_eq!(found("work branch:trunk", &["trunk"]).len(), 5);
+    assert_eq!(summaries(&repo, "work").len(), 5);
+}
+
+#[test]
+fn a_cursor_from_a_first_parent_walk_does_not_resume_a_full_walk() {
+    let (_dir, repo) = init_repo();
+    merged_side_branch(&repo);
+    let query = parse_query("work").unwrap();
+    let limits = PageLimits {
+        matches: 1,
+        scan: 100,
+        time: Duration::MAX,
+    };
+    let one = ["trunk".to_string()];
+    // Same start commit, but two selected branches: a full walk.
+    let two = ["trunk".to_string(), "trunk-alias".to_string()];
+
+    let first = search_commits(&repo, &query, Some(&one), None, limits, &|| false).unwrap();
+    let cursor = first.next_cursor.expect("more to scan");
+
+    assert!(matches!(
+        search_commits(&repo, &query, Some(&two), Some(&cursor), limits, &|| false),
+        Err(SearchError::StaleCursor)
+    ));
+    assert!(search_commits(&repo, &query, Some(&one), Some(&cursor), limits, &|| false).is_ok());
 }
 
 #[test]

@@ -1,6 +1,6 @@
 mod common;
 
-use common::{commit_all, init_repo, write_file};
+use common::{commit_all, commit_tree, init_repo, write_file};
 
 #[test]
 fn graph_log_returns_an_empty_vec_for_a_repository_with_no_commits() {
@@ -314,4 +314,66 @@ fn graph_log_skips_a_selected_branch_that_no_longer_exists() {
             .unwrap()
             .is_empty()
     );
+}
+
+/// `trunk`: base → direct → merge(direct, feature 3) → after; `feature`: base → feature 1..3.
+/// Returns the ids `[base, direct, feature 1, feature 2, feature 3, merge, after]`.
+fn merged_feature_history(repo: &git2::Repository) -> Vec<git2::Oid> {
+    const FILE: u32 = 0o100644;
+    let base = commit_tree(repo, &[("a.txt", "a", FILE)], &[], "base");
+    let direct = commit_tree(repo, &[("a.txt", "a2", FILE)], &[base], "direct on trunk");
+    let f1 = commit_tree(repo, &[("a.txt", "f1", FILE)], &[base], "feature 1");
+    let f2 = commit_tree(repo, &[("a.txt", "f2", FILE)], &[f1], "feature 2");
+    let f3 = commit_tree(repo, &[("a.txt", "f3", FILE)], &[f2], "feature 3");
+    let merge = commit_tree(
+        repo,
+        &[("a.txt", "m", FILE)],
+        &[direct, f3],
+        "merge feature",
+    );
+    let after = commit_tree(repo, &[("a.txt", "m2", FILE)], &[merge], "after merge");
+    repo.reference("refs/heads/trunk", after, true, "test")
+        .unwrap();
+    repo.reference("refs/heads/feature", f3, true, "test")
+        .unwrap();
+    vec![base, direct, f1, f2, f3, merge, after]
+}
+
+#[test]
+fn graph_log_of_one_selected_branch_follows_first_parents_only() {
+    let (_dir, repo) = init_repo();
+    let ids = merged_feature_history(&repo);
+
+    let commits = git_core::graph::graph_log(&repo, 50, Some(&["trunk".to_string()])).unwrap();
+
+    let summaries: Vec<&str> = commits.iter().map(|c| c.summary.as_str()).collect();
+    assert_eq!(
+        summaries,
+        ["after merge", "merge feature", "direct on trunk", "base"]
+    );
+    // The merge keeps both parents, though its second parent is not in the list.
+    assert_eq!(
+        commits[1].parent_ids,
+        [ids[1].to_string(), ids[4].to_string()]
+    );
+}
+
+#[test]
+fn graph_log_of_several_or_all_branches_still_walks_every_ancestor() {
+    let (_dir, repo) = init_repo();
+    merged_feature_history(&repo);
+
+    let both = git_core::graph::graph_log(
+        &repo,
+        50,
+        Some(&["trunk".to_string(), "feature".to_string()]),
+    )
+    .unwrap();
+    let all = git_core::graph::graph_log(&repo, 50, None).unwrap();
+
+    for commits in [both, all] {
+        assert_eq!(commits.len(), 7);
+        assert!(commits.iter().any(|c| c.summary == "feature 2"));
+        assert_eq!(commits.last().unwrap().summary, "base");
+    }
 }
