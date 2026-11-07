@@ -1248,7 +1248,17 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   nothing is opened, created or contacted in the junction's target. On an SMB share the
   redirector resolves a relative name by path on the server, so every component and leaf must
   also sit in the held parent (`GetFinalPathNameByHandleW` of both), and a new file is deleted
-  again through its handle if misplaced. A write's rename is resolved by path on the server
+  again through its handle if misplaced. A file with hard links has one final path, which may
+  be any of its names (and is, after a reopen by ID): one in another folder then looked moved,
+  so writing or reading such a tracked file failed with "a folder of the working tree changed"
+  (#260). When the final path is elsewhere and the file has more than one name
+  (`GetFileInformationByHandle`), its names are listed (`NtQueryInformationFile`,
+  `FileHardLinkInformation`, parsed by `reparse::hard_links`), and one of them must be the leaf
+  (ignoring case) in the held parent, the folder compared by its file index on the same volume
+  (`name_in_parent`); a write then also takes the name's spelling from that entry. That still
+  proves the handle is the file named so in the held folder; a folder never has hard links, so
+  folders keep the final-path check alone, and where the names can't be listed (FAT/exFAT,
+  which have no hard links, many SMB shares) the leaf is refused as before. A write's rename is resolved by path on the server
   too, so afterwards the file's final path is compared with the work tree root's: only when it
   positively lies outside the work tree is the file deleted through its handle and the write
   reported as "a folder of the working tree changed". By then the name it landed on outside
@@ -1286,7 +1296,9 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   before; an existing file must reopen for reading and writing by its file ID (read-only →
   #209), its settable attributes (`FileBasicInfo`) are copied to the temporary file, and its
   on-disk name comes from `GetFinalPathNameByHandleW` when that equals the leaf ignoring case
-  (else the leaf as given: a short 8.3 name, or another name of a hardlinked file). The
+  (else the leaf as given: a short 8.3 name, or another name of a hardlinked file in the same
+  folder), or for a hardlinked file whose final path is in another folder from its name entry
+  in the held parent (#260, see above). The
   temporary file is created with
   `nt_open(FILE_CREATE)` in the held parent (checked with `in_parent`) and renamed through its
   own handle with `NtSetInformationFile(FileRenameInformationEx, REPLACE_IF_EXISTS |
@@ -1563,11 +1575,17 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   checks) and the external diff/merge tool, which writes `MERGED` by path itself, as git's
   `mergetool` does.
 - Residual risk, hardlinks: a tracked file that is a hardlink to a file outside the repository
-  is written in place by libgit2's checkouts (the shared inode changes, so the outside name
-  sees the new content). Browsitory's own writes (`write_beneath`) replace the name instead,
-  so the outside name keeps its content (#239). A hardlink is indistinguishable from a regular file by
-  path; it needs the user (or a local process) to have created it on the same filesystem, and
-  git behaves the same way.
+  (or in another folder of it) is written in place by libgit2's checkouts and patch applies
+  (the shared inode changes, so the other name sees the new content): Discard (file, hunk or
+  lines), branch switches, resets, merges and picks, stash, aborts, and Undo/Redo of a path the
+  index holds. git differs: its checkout and `git apply` unlink the name and create a new file,
+  so the other name keeps its content (#420). Browsitory's own writes (`write_beneath`,
+  `replace_beneath`: Save resolution, **Ignore**, Undo/Redo of a work-tree-only change) match
+  git: they replace the name, so the other name keeps its content (#239), on Windows too
+  (#260). Reads (Undo's snapshot, Mark resolved, the image preview, staging, which libgit2 does by
+  path) read the file through either name. A hardlink is indistinguishable from a regular
+  file by path; it needs the user (or a local process) to have created it on the same
+  filesystem.
 - Folder/link pairs in the index (#157): `stage_file` of `d/f` below a symlinked `d` removes
   `d/f`'s stage-0 entry (stages its deletion; git sees no file there) and reads nothing through
   the link; conflict entries there are still refused (`BeyondSymlink`), as are hunk and line
