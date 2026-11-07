@@ -598,7 +598,8 @@ fn step(
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.safe().allow_conflicts(true);
-    written.record(&mut checkout);
+    written.record(repo, &mut checkout);
+    written.expect_conflicts(repo, &merged);
     let applied = match kind {
         Kind::CherryPick => {
             let mut options = git2::CherrypickOptions::new();

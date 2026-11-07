@@ -1594,10 +1594,20 @@ pub(crate) fn probe_beneath(workdir: &Path, rel: &str) -> io::Result<Probe> {
 /// including) the work tree. Does nothing beyond a link: a path below one doesn't exist for git.
 /// `rel` is a `Path`, so on Unix a name that isn't UTF-8 works too (#262).
 pub(crate) fn remove_and_prune_beneath(workdir: &Path, rel: &Path) -> io::Result<()> {
+    remove_and_prune_beneath_keeping(workdir, rel, 0)
+}
+
+/// [`remove_and_prune_beneath`], but the first `keep` folders of `rel` are never pruned (a
+/// folder that was there before, empty or not, #329).
+pub(crate) fn remove_and_prune_beneath_keeping(
+    workdir: &Path,
+    rel: &Path,
+    keep: usize,
+) -> io::Result<()> {
     if !plain_relative(rel) {
         return Ok(());
     }
-    beneath::remove_and_prune(workdir, rel, &mut no_step)
+    beneath::remove_and_prune(workdir, rel, keep, &mut no_step)
 }
 
 /// Replaces whatever is at `rel` (a file, link or empty folder) with `content`. A link that

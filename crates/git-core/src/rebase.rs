@@ -405,7 +405,7 @@ pub fn start_rebase(
     // rolled back, so the rebase can be started again (#321).
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
-    written.record(&mut checkout);
+    written.record(repo, &mut checkout);
     repo.checkout_tree(onto_commit.as_object(), Some(&mut checkout))
         .map_err(|error| {
             let restored = crate::partial_checkout::roll_back(repo, &written);
@@ -437,7 +437,11 @@ pub fn start_rebase(
         Ok(result) => Ok((state, result)),
         Err(err) => {
             // Best-effort: report the *original* failure even if the rollback itself fails,
-            // since that's the actionable one.
+            // since that's the actionable one. A step whose checkout stopped part-way was
+            // already rolled back in `advance` (#329), so this checkout starts from the clean
+            // tree of the last step that landed. A file held open (or read-only) that the step
+            // stopped at is the same there as on the branch (the checkout of `onto`, or an
+            // earlier step, would have stopped at it otherwise), so it isn't written again.
             let _ = restore_original_branch(repo, &state.original_branch_ref, state.original_tip);
             Err(err)
         }
@@ -733,7 +737,29 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
                 crate::worktree_guard::GuardSource::Index(&merged),
             )],
         )?;
-        repo.cherrypick(&commit, None)?;
+        // A checkout that stops part-way (a file another program holds open, a read-only file,
+        // a full disk) is rolled back, like `pick::apply`'s (#329): the step is then as if never
+        // started, HEAD stays at `expected_head`, and Continue applies it again. libgit2's own
+        // default strategy for a pick is safe with conflicts allowed; a builder of our own must
+        // say so.
+        let written = crate::partial_checkout::Written::default();
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.safe().allow_conflicts(true);
+        written.record(repo, &mut checkout);
+        written.expect_conflicts(repo, &merged);
+        let mut options = git2::CherrypickOptions::new();
+        options.checkout_builder(checkout);
+        if let Err(error) = repo.cherrypick(&commit, Some(&mut options)) {
+            let restored = crate::partial_checkout::roll_back(repo, &written);
+            // libgit2 removes the pick's state files on an error; make sure.
+            let _ = crate::commit::clear_operation_files(repo);
+            return Err(crate::partial_checkout::report::<RebaseError>(
+                repo,
+                restored,
+                crate::HeldDuring::RolledBack,
+                error,
+            ));
+        }
 
         if repo.index()?.has_conflicts() {
             state.stop = RebaseStop::Conflict;
@@ -1050,7 +1076,7 @@ fn restore_original_branch(
     // rewrites everything, so nothing is rolled back; the message says whether the checkout
     // had already put some files back (#321).
     let written = crate::partial_checkout::Written::default();
-    written.record(&mut checkout);
+    written.record(repo, &mut checkout);
     repo.checkout_tree(tree.as_object(), Some(&mut checkout))
         .map_err(|error| {
             let during = if written.is_empty() {

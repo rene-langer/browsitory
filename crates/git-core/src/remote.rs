@@ -922,7 +922,7 @@ pub fn pull_after_fetch(
     // A checkout that stops part-way (a file another program holds open, a read-only file) is
     // rolled back, so the pull can be tried again (#321).
     let written = crate::partial_checkout::Written::default();
-    written.record(&mut checkout);
+    written.record(repo, &mut checkout);
     repo.checkout_tree(upstream_commit.as_object(), Some(&mut checkout))
         .map_err(|error| {
             let restored = crate::partial_checkout::roll_back(repo, &written);

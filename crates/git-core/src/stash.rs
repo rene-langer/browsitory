@@ -1442,7 +1442,7 @@ pub fn apply_stash(
     // tried again (#321): libgit2 checks out from the index, which it writes only at the end.
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
-    written.record(&mut checkout);
+    written.record(repo, &mut checkout);
     options.checkout_options(checkout);
     let applied = repo.stash_apply(index, Some(&mut options));
     let repo: &Repository = repo;

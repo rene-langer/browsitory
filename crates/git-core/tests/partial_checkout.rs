@@ -148,6 +148,11 @@ struct Fixture {
 /// `main_work`, the main branch then gets a commit of its own adding `main.txt`. HEAD is on the
 /// main branch.
 fn fixture(main_work: bool) -> Fixture {
+    fixture_with(main_work, &[])
+}
+
+/// [`fixture`], with `extra` files added by the side commit too (staged even when ignored).
+fn fixture_with(main_work: bool, extra: &[(&str, &str)]) -> Fixture {
     let (dir, repo) = init_repo();
     for (path, content) in BASE {
         write_file(dir.path(), path, content);
@@ -156,6 +161,12 @@ fn fixture(main_work: bool) -> Fixture {
     let main = repo.head().unwrap().shorthand().unwrap().to_string();
     git_core::branch::create_branch(&repo, "side", "HEAD").unwrap();
     write_side_changes(dir.path());
+    let mut index = repo.index().unwrap();
+    for (path, content) in extra {
+        write_file(dir.path(), path, content);
+        index.add_path(Path::new(path)).unwrap();
+    }
+    index.write().unwrap();
     let side = commit_everything(&repo, "side");
     git_core::branch::switch_branch(&repo, &main).unwrap();
     if main_work {
@@ -637,4 +648,179 @@ fn a_rebase_abort_stopped_before_writing_anything_says_so_plainly() {
     assert!(abort.restored);
     assert_eq!(repo.head().unwrap().shorthand().ok(), Some(main.as_str()));
     assert_eq!(common::read(dir.path(), "f.txt"), "main\n");
+}
+
+/// An empty folder the user had stays when the rollback removes a file the checkout created
+/// in it, and the folders the checkout created below it go (#329).
+#[test]
+fn a_rolled_back_cherry_pick_keeps_an_empty_folder_the_user_had() {
+    let f = fixture_with(true, &[("b/x/new.txt", "new\n")]);
+    std::fs::create_dir(f.dir.path().join("b")).unwrap();
+    let before = state(f.dir.path(), &f.repo);
+    let Some(stopper) = stop_at_m(f.dir.path()) else {
+        return;
+    };
+
+    let error = git_core::pick::cherry_pick(&f.repo, &f.side.to_string(), None, Default::default())
+        .unwrap_err();
+
+    drop(stopper);
+    assert_held_and_rolled_back(&error);
+    assert_eq!(state(f.dir.path(), &f.repo), before);
+    assert!(f.dir.path().join("b").is_dir());
+    assert!(!f.dir.path().join("b/x").exists());
+}
+
+/// Documents git's rule (#329): an ignored file in the way of a file the checkout creates is
+/// expendable, so one the checkout already wrote over is removed by the rollback, not brought
+/// back. An ignored file the checkout hadn't reached yet stays as it was.
+#[test]
+fn a_rolled_back_cherry_pick_removes_an_ignored_file_it_wrote_over_only() {
+    let f = fixture_with(true, &[("build.log", "side log\n"), ("y.log", "side y\n")]);
+    // `build.log` comes before `d/m.txt`, where the checkout stops; `y.log` after it.
+    write_file(f.dir.path(), "build.log", "my own log\n");
+    write_file(f.dir.path(), "y.log", "my own y\n");
+    let mut before = state(f.dir.path(), &f.repo);
+    let Some(stopper) = stop_at_m(f.dir.path()) else {
+        return;
+    };
+
+    let error = git_core::pick::cherry_pick(&f.repo, &f.side.to_string(), None, Default::default())
+        .unwrap_err();
+
+    drop(stopper);
+    assert_held_and_rolled_back(&error);
+    before.files.remove("build.log");
+    assert_eq!(state(f.dir.path(), &f.repo), before);
+    assert_eq!(common::read(f.dir.path(), "y.log"), "my own y\n");
+}
+
+/// The main branch with commit `A` (adds `x.txt`) and `B` (the side's changes to `a.txt`,
+/// `d/m.txt` and `z.txt`) on top of `BASE`, and the branch `onto` adding `o.txt` to `BASE`.
+/// `B` reverts `d/m.txt` again when `revert_m`, in a commit of its own (`C`).
+fn rebase_fixture(revert_m: bool) -> (TempDir, Repository, String, Vec<Oid>) {
+    let (dir, repo) = init_repo();
+    for (path, content) in BASE {
+        write_file(dir.path(), path, content);
+    }
+    commit_all(&repo, "base");
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    git_core::branch::create_branch(&repo, "onto", "HEAD").unwrap();
+    write_file(dir.path(), "o.txt", "o\n");
+    commit_all(&repo, "onto");
+    git_core::branch::switch_branch(&repo, &main).unwrap();
+    let mut commits = Vec::new();
+    if !revert_m {
+        write_file(dir.path(), "x.txt", "x\n");
+        commits.push(commit_everything(&repo, "A"));
+    }
+    write_file(dir.path(), "a.txt", "side a, longer\n");
+    write_file(dir.path(), "d/m.txt", "side m, longer\n");
+    write_file(dir.path(), "z.txt", "side z, longer\n");
+    commits.push(commit_everything(&repo, "B"));
+    if revert_m {
+        write_file(dir.path(), "d/m.txt", "m\n");
+        commits.push(commit_everything(&repo, "C"));
+    }
+    (dir, repo, main, commits)
+}
+
+fn plan(steps: &[(Oid, RebaseAction)]) -> Vec<RebasePlanEntry> {
+    steps
+        .iter()
+        .map(|(commit, action)| RebasePlanEntry {
+            commit_id: commit.to_string(),
+            action: action.clone(),
+            combined_message: None,
+        })
+        .collect()
+}
+
+/// A later step of a rebase whose checkout stops part-way is rolled back like a cherry-pick
+/// (#329): HEAD stays at the last step that landed, the work tree and index match it, and
+/// Continue applies the step again.
+#[test]
+fn a_rebase_step_stopped_part_way_is_rolled_back_and_continue_finishes_it() {
+    let (dir, repo, main, commits) = rebase_fixture(false);
+    let steps = [
+        (commits[0], RebaseAction::Edit),
+        (commits[1], RebaseAction::Pick),
+    ];
+    let (mut state, result) = git_core::rebase::start_rebase(&repo, "onto", plan(&steps)).unwrap();
+    assert_eq!(result, RebaseStepResult::PausedForEdit);
+    write_file(dir.path(), "notes.txt", "my own notes\n");
+    let Some(stopper) = stop_at_m(dir.path()) else {
+        return;
+    };
+
+    let error = git_core::rebase::rebase_continue(&repo, &mut state).unwrap_err();
+
+    drop(stopper);
+    assert_held_and_rolled_back(&error);
+    if cfg!(windows) {
+        assert!(
+            matches!(&error, git_core::rebase::RebaseError::HeldOpen(held) if held.path == "d/m.txt"),
+            "{error:?}"
+        );
+    }
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+    assert!(repo.head_detached().unwrap());
+    assert_eq!(
+        repo.head().unwrap().target(),
+        Some(state.expected_head),
+        "the edited step landed, the next one didn't"
+    );
+    let mut expected = map(BASE);
+    expected.insert("o.txt".into(), "o\n".into());
+    expected.insert("x.txt".into(), "x\n".into());
+    expected.insert("notes.txt".into(), "my own notes\n".into());
+    assert_eq!(files(dir.path()), expected);
+    let untracked = vec![("notes.txt".to_string(), git2::Status::WT_NEW)];
+    assert_eq!(status(&Repository::open(dir.path()).unwrap()), untracked);
+    assert_eq!(status(&repo), untracked);
+
+    let result = git_core::rebase::rebase_continue(&repo, &mut state).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some(main.as_str()));
+    expected.insert("a.txt".into(), "side a, longer\n".into());
+    expected.insert("d/m.txt".into(), "side m, longer\n".into());
+    expected.insert("z.txt".into(), "side z, longer\n".into());
+    assert_eq!(files(dir.path()), expected);
+    assert_eq!(status(&repo), untracked);
+}
+
+/// A rebase start whose first steps' checkout stops part-way (at a file the branch and `onto`
+/// have alike, so the checkout of `onto` passed it) is rolled back to the branch, and says so
+/// (#329).
+#[test]
+fn a_rebase_start_whose_step_stopped_part_way_is_rolled_back_and_finishes_when_tried_again() {
+    let (dir, repo, main, commits) = rebase_fixture(true);
+    let steps = [
+        (commits[0], RebaseAction::Pick),
+        (commits[1], RebaseAction::Pick),
+    ];
+    write_file(dir.path(), "notes.txt", "my own notes\n");
+    let before = state(dir.path(), &repo);
+    let Some(stopper) = stop_at_m(dir.path()) else {
+        return;
+    };
+
+    let error = git_core::rebase::start_rebase(&repo, "onto", plan(&steps)).unwrap_err();
+
+    drop(stopper);
+    assert_held_and_rolled_back(&error);
+    assert_eq!(state(dir.path(), &repo), before);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+
+    let (_state, result) = git_core::rebase::start_rebase(&repo, "onto", plan(&steps)).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    assert_eq!(repo.head().unwrap().shorthand().ok(), Some(main.as_str()));
+    let mut expected = map(BASE);
+    expected.insert("o.txt".into(), "o\n".into());
+    expected.insert("a.txt".into(), "side a, longer\n".into());
+    expected.insert("z.txt".into(), "side z, longer\n".into());
+    expected.insert("notes.txt".into(), "my own notes\n".into());
+    assert_eq!(files(dir.path()), expected);
 }

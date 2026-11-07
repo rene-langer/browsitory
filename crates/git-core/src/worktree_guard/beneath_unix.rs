@@ -746,8 +746,14 @@ fn file_stat(stat: &libc::stat) -> super::FileStat {
     }
 }
 
-/// See `worktree_guard::remove_and_prune_beneath`.
-pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> io::Result<()> {
+/// See `worktree_guard::remove_and_prune_beneath`. The first `keep` folders of `rel` are never
+/// pruned.
+pub(super) fn remove_and_prune(
+    workdir: &Path,
+    rel: &Path,
+    keep: usize,
+    step: StepFn<'_>,
+) -> io::Result<()> {
     let Walk::Found(at) = walk(workdir, rel, OnLink::Refuse, OnMissing::Stop, step)? else {
         return Ok(());
     };
@@ -760,7 +766,7 @@ pub(super) fn remove_and_prune(workdir: &Path, rel: &Path, step: StepFn<'_>) -> 
     }
     // Upwards through the held folders: each is removed by name in its own held parent, only
     // while empty (`AT_REMOVEDIR`), and never the work tree root.
-    for i in (1..at.dirs.len()).rev() {
+    for i in (keep + 1..at.dirs.len()).rev() {
         if unlink_at(at.dirs[i - 1].as_raw_fd(), &at.names[i - 1], true).is_err() {
             break;
         }
@@ -1612,7 +1618,7 @@ mod tests {
         let (dir, _outside) = tree();
         std::fs::create_dir_all(dir.path().join("a/b")).unwrap();
         std::fs::write(dir.path().join("a/b/c"), "c").unwrap();
-        remove_and_prune(dir.path(), Path::new("a/b/c"), &mut no_step).unwrap();
+        remove_and_prune(dir.path(), Path::new("a/b/c"), 0, &mut no_step).unwrap();
         assert!(!dir.path().join("a").exists());
         assert!(dir.path().join("d/f").exists());
 
@@ -1620,9 +1626,16 @@ mod tests {
         let lone = TempDir::new().unwrap();
         std::fs::create_dir(lone.path().join("x")).unwrap();
         std::fs::write(lone.path().join("x/y"), "y").unwrap();
-        remove_and_prune(lone.path(), Path::new("x/y"), &mut no_step).unwrap();
+        remove_and_prune(lone.path(), Path::new("x/y"), 0, &mut no_step).unwrap();
         assert!(lone.path().is_dir());
         assert!(!lone.path().join("x").exists());
+
+        // The first `keep` folders stay, also when empty (#329).
+        std::fs::create_dir_all(dir.path().join("k/l/m")).unwrap();
+        std::fs::write(dir.path().join("k/l/m/f"), "f").unwrap();
+        remove_and_prune(dir.path(), Path::new("k/l/m/f"), 1, &mut no_step).unwrap();
+        assert!(dir.path().join("k").is_dir());
+        assert!(!dir.path().join("k/l").exists());
     }
 
     #[test]
@@ -1631,6 +1644,7 @@ mod tests {
         remove_and_prune(
             dir.path(),
             Path::new("d/f"),
+            0,
             &mut swap_on(dir.path(), "d", outside.path()),
         )
         .unwrap();

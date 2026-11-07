@@ -1103,7 +1103,7 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
         for path in to_checkout {
             checkout.path(path);
         }
-        written.record(&mut checkout);
+        written.record(repo, &mut checkout);
         checked_out = repo.checkout_head(Some(&mut checkout));
     }
     let failed = match (not_removed, checked_out) {
