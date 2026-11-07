@@ -141,6 +141,14 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
+      # tauri-action looks for @tauri-apps/cli in a package.json in projectPath; crates/tauri-app
+      # has none, so without tauriScript it would `npm install -g` the newest 2.x (#397).
+      # tauriScript runs the CLI that frontend/pnpm-lock.yaml locks instead, with node, so it
+      # still runs in projectPath (tauri-action splits tauriScript on spaces, so the path must
+      # have none).
+      - name: Show the locked Tauri CLI version
+        working-directory: crates/tauri-app
+        run: node ../../frontend/node_modules/@tauri-apps/cli/tauri.js --version
       # Creates the draft release (the first matrix job to finish creates it, the others find it)
       # and uploads the bundles and latest.json, the manifest every installed app's updater reads.
       # v1 (#363) differs from v0 in ways docs/RELEASING.md's "Updater manifest" describes:
@@ -154,6 +162,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PKEY_PASSWORD }}
         with:
           projectPath: crates/tauri-app
+          tauriScript: node ../../frontend/node_modules/@tauri-apps/cli/tauri.js
           tagName: ${{ github.ref_name }}
           releaseName: "Browsitory ${{ github.ref_name }}"
           # Starting text of the draft release (and the `notes` of latest.json); the owner adds
@@ -258,11 +267,29 @@ jobs:
     timeout-minutes: 15
     steps:
       # For THIRD_PARTY_NOTICES.md: every installer and .vsix already carries it; the release
-      # page gets a copy too, so the licences can be read without installing anything.
+      # page gets a copy too, so the licences can be read without installing anything. And for
+      # the manifest check below.
       - uses: actions/checkout@v7
         with:
-          sparse-checkout: THIRD_PARTY_NOTICES.md
+          sparse-checkout: |
+            THIRD_PARTY_NOTICES.md
+            scripts/check-updater-manifest.py
           sparse-checkout-cone-mode: false
+      # All build-release jobs are done, so latest.json is final. Each of them rewrites it, and
+      # two finishing at the same moment can lose a platform (#398). Fails before the
+      # marketplace jobs run, while the release is still a draft; see docs/RELEASING.md's
+      # "Updater manifest" for what it checks and what to do when it fails.
+      - name: Check the updater manifest (latest.json)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dir="$RUNNER_TEMP/updater-manifest"
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D "$dir" \
+            -p latest.json -p '*.sig'
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json assets \
+            > "$dir/assets.json"
+          python3 -I scripts/check-updater-manifest.py --version "${GITHUB_REF_NAME#release/}" \
+            --repo "$GITHUB_REPOSITORY" --assets "$dir/assets.json" "$dir"
       - uses: actions/download-artifact@v8
         with:
           pattern: browsitory-vsix-*
