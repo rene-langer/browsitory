@@ -69,9 +69,3 @@
   background: var(--color-danger-bg);
   color: var(--color-danger-text);
 }
-
-.footer {
-  display: flex;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}

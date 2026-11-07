@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Overlay } from "./Overlay";
 
@@ -152,6 +152,45 @@ describe("Overlay", () => {
         cleanup();
         restore();
       }
+    });
+  });
+
+  describe("backdrop click", () => {
+    function renderOverlay(closeOnBackdropClick?: boolean) {
+      const onClose = vi.fn();
+      render(
+        <Overlay onClose={onClose} closeOnBackdropClick={closeOnBackdropClick}>
+          <p>content</p>
+        </Overlay>,
+      );
+      const dialog = screen.getByRole("dialog");
+      dialog.getBoundingClientRect = () => new DOMRect(100, 100, 400, 300);
+      return { onClose, dialog };
+    }
+
+    it("closes on a click outside the dialog's box when asked to", () => {
+      const { onClose, dialog } = renderOverlay(true);
+
+      fireEvent.click(dialog, { clientX: 50, clientY: 50 });
+
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("ignores clicks on the content and on the dialog's own box", () => {
+      const { onClose, dialog } = renderOverlay(true);
+
+      fireEvent.click(screen.getByText("content"));
+      fireEvent.click(dialog, { clientX: 100, clientY: 250 });
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("ignores backdrop clicks by default", () => {
+      const { onClose, dialog } = renderOverlay();
+
+      fireEvent.click(dialog, { clientX: 50, clientY: 50 });
+
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 });

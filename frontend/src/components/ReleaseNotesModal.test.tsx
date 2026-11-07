@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ReleaseNotesModal, type ReleaseNotesEntry, type ReleaseNotesItem } from "./ReleaseNotesModal";
 
@@ -191,5 +191,79 @@ describe("ReleaseNotesModal", () => {
     screen.getByRole("button", { name: "Close" }).click();
 
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  describe("long notes (#378, #379)", () => {
+    const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+    // jsdom has no showModal. Like a browser, this one focuses the dialog's first focusable
+    // element, and the browser then scrolls that element into view.
+    function installShowModal(): () => void {
+      const proto = window.HTMLDialogElement.prototype;
+      const originalShowModal = proto.showModal;
+      const originalClose = proto.close;
+      proto.showModal = function (this: HTMLDialogElement) {
+        this.setAttribute("open", "");
+        this.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+      };
+      proto.close = function (this: HTMLDialogElement) {
+        this.removeAttribute("open");
+      };
+      return () => {
+        proto.showModal = originalShowModal;
+        proto.close = originalClose;
+      };
+    }
+
+    it("keeps the buttons outside the scrolling notes, so they are always in view", () => {
+      render(
+        <ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} onOpenUserGuide={vi.fn()} onOpenThirdPartyLicences={vi.fn()} />,
+      );
+
+      const notes = screen.getByRole("region", { name: "Release notes text" });
+      expect(within(notes).getByText("Feature A")).toBeInTheDocument();
+      for (const name of ["Close", "User guide", "Third-party licences"]) {
+        expect(notes).not.toContainElement(screen.getByRole("button", { name }));
+      }
+    });
+
+    it("opens with the focus at the top of the notes, not on the Close button at the end", () => {
+      const restore = installShowModal();
+      try {
+        render(<ReleaseNotesModal entries={ENTRIES} onClose={vi.fn()} />);
+
+        // The notes region comes first, so the initial focus (and the scroll that follows it)
+        // stays at the top: the newest release is what the user sees.
+        const notes = screen.getByRole("region", { name: "Release notes text" });
+        expect(notes).toHaveFocus();
+        expect(notes.scrollTop).toBe(0);
+      } finally {
+        cleanup();
+        restore();
+      }
+    });
+
+    it("closes on a click on the backdrop, but not on a click inside", () => {
+      const onClose = vi.fn();
+      render(<ReleaseNotesModal entries={ENTRIES} onClose={onClose} />);
+      const dialog = screen.getByRole("dialog", { name: "Release notes" });
+      dialog.getBoundingClientRect = () => new DOMRect(100, 100, 400, 300);
+
+      fireEvent.click(screen.getByText("Feature A"));
+      fireEvent.click(dialog, { clientX: 200, clientY: 200 });
+      expect(onClose).not.toHaveBeenCalled();
+
+      fireEvent.click(dialog, { clientX: 20, clientY: 20 });
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("closes on Escape (the dialog's own close event)", () => {
+      const onClose = vi.fn();
+      render(<ReleaseNotesModal entries={ENTRIES} onClose={onClose} />);
+
+      screen.getByRole("dialog", { name: "Release notes" }).dispatchEvent(new Event("close"));
+
+      expect(onClose).toHaveBeenCalledOnce();
+    });
   });
 });

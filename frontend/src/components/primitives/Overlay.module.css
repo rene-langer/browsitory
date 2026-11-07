@@ -13,6 +13,15 @@
   overflow: auto;
 }
 
+/* A flex column (only while open: a closed dialog must stay `display: none`), so a child that
+   opts in with `min-height: 0` (a `Panel` with a footer) shrinks to the max-height above and
+   scrolls inside itself. Other children keep their content height and the dialog scrolls, as
+   before. */
+.overlay[open] {
+  display: flex;
+  flex-direction: column;
+}
+
 .overlay::backdrop {
   background: var(--color-scrim);
 }

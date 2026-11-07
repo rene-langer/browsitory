@@ -46,4 +46,13 @@ describe("ThirdPartyLicencesDialog", () => {
 
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("keeps Close outside the scrolling content, so it stays in view", async () => {
+    render(<ThirdPartyLicencesDialog load={() => Promise.resolve("notices")} onClose={vi.fn()} />);
+
+    const text = await screen.findByRole("region", { name: "Licence texts" });
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.closest("footer")).not.toBeNull();
+    expect(text.parentElement).not.toContainElement(close);
+  });
 });
