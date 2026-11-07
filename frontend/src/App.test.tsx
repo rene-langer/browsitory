@@ -1122,6 +1122,70 @@ describe("App", () => {
     expect(screen.queryByRole("dialog", { name: "Push main" })).toBeNull();
   });
 
+  it("refuses Create tag with a taken name inline, without listing the tag twice (#413)", async () => {
+    localStorage.clear();
+    const createTag = vi.fn(async () => {});
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [{ name: "main", isCurrent: true }],
+      listStashes: async () => [],
+      listTags: async () => [
+        { name: "v1", targetId: "c1", commitId: "c1", annotated: false, message: null, taggerName: null, timestamp: null },
+      ],
+      createTag,
+    });
+    render(<App client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Tags/ }));
+    await screen.findByLabelText("Select v1");
+    const form = screen.getByRole("form", { name: "Create tag" });
+    fireEvent.change(within(form).getByLabelText("Tag name"), { target: { value: "v1" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Create tag" }));
+
+    expect(await within(form).findByText('A tag named "v1" already exists.')).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Select v1")).toHaveLength(1);
+    expect(createTag).not.toHaveBeenCalled();
+    localStorage.clear();
+  });
+
+  it("refuses Create worktree with a taken name inline, without listing the worktree twice (#413)", async () => {
+    localStorage.clear();
+    const createWorktree = vi.fn(async () => {});
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [{ name: "main", isCurrent: true }],
+      listStashes: async () => [],
+      listWorktrees: async () => [
+        { name: "main", path: "/repos/a", head: "main", isMain: true, isLocked: false, isPrunable: false },
+        { name: "feature", path: "/repos/a-feature", head: "feature", isMain: false, isLocked: false, isPrunable: false },
+      ],
+      createWorktree,
+    });
+    render(<App client={client} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Worktrees/ }));
+    await screen.findByText("/repos/a-feature");
+    const form = screen.getByRole("form", { name: "Create worktree" });
+    fireEvent.change(within(form).getByLabelText("Worktree name"), { target: { value: "feature" } });
+    fireEvent.change(within(form).getByLabelText("Worktree path"), { target: { value: "/repos/a-other" } });
+    fireEvent.change(within(form).getByLabelText("Branch"), { target: { value: "other" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Create worktree" }));
+
+    expect(await within(form).findByText('A worktree named "feature" already exists.')).toBeInTheDocument();
+    expect(screen.queryByText("/repos/a-other")).toBeNull();
+    expect(screen.getAllByText("/repos/a-feature")).toHaveLength(1);
+    expect(createWorktree).not.toHaveBeenCalled();
+    localStorage.clear();
+  });
+
   it("refuses Add remote with a taken name inline, without listing the remote twice (#408)", async () => {
     const addRemote = vi.fn(async () => {});
     const client = fakeClient({

@@ -54,6 +54,21 @@ describe("WorktreePanel", () => {
     expect(screen.getByText(/No worktrees/)).toBeInTheDocument();
   });
 
+  // `list_worktrees` lists an old entry whose folder was deleted and a newer one made there:
+  // both rows render, with keys that stay unique (#413).
+  it("renders two entries for one folder without a duplicate key", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stale: WorktreeInfo = { ...linkedWorktree, name: "feature-old", head: "", isPrunable: true };
+    try {
+      renderPanel({ worktrees: [mainWorktree, stale, linkedWorktree] });
+
+      expect(screen.getAllByText("/repos/project-feature")).toHaveLength(2);
+      expect(consoleError.mock.calls.flat().join(" ")).not.toMatch(/same key/);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("renders main and linked worktree paths but disables removal for the main worktree", () => {
     renderPanel();
 
