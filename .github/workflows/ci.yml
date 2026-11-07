@@ -118,6 +118,9 @@ jobs:
       # Release tooling (release.yml's publish jobs, #344); no network, the HTTP calls are faked.
       - name: verify-marketplace-listing.py unit tests
         run: python3 scripts/test_verify_marketplace_listing.py
+      # Release tooling too (release.yml's publish-vsix-release, #398); files only, no network.
+      - name: check-updater-manifest.py unit tests
+        run: python3 scripts/test_check_updater_manifest.py
       - name: Changelog entry (fragment in changelog.d/ or CHANGELOG.md)
         env:
           # A dispatched run has no pull request: the default branch is the base, and there are

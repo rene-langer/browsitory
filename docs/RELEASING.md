@@ -8,7 +8,10 @@ instructions stay short; `AGENTS.md` keeps the rules an agent must not break.
 Semantic versioning. Pushing a `release/MAJOR.MINOR.PATCH` tag (no `v` prefix) triggers
 `.github/workflows/release.yml`: builds standalone distributables for Linux/macOS/Windows
 (`tauri-apps/tauri-action`, same build as `scripts/build-dist.*`) and publishes a draft GitHub
-Release. The workflow stamps the version into `crates/tauri-app/tauri.conf.json` at build time.
+Release. `tauri-action` runs the Tauri CLI that `frontend/pnpm-lock.yaml` locks
+(`@tauri-apps/cli`, through its `tauriScript` input), so a re-run builds with the same CLI;
+without `tauriScript` it would install the newest 2.x (#397). Bumping that lockfile entry
+changes the CLI the next release builds with. The workflow stamps the version into `crates/tauri-app/tauri.conf.json` at build time.
 Every installer carries `THIRD_PARTY_NOTICES.md` (a Tauri resource), and
 `publish-vsix-release` also attaches it to the draft release. It is generated, so a release
 needs no extra step for it (see `docs/LICENSE_COMPLIANCE.md`). The `verify` job runs first on
@@ -91,29 +94,32 @@ What `tauri-action` v1 (since 0.4.0, #363) does differently from v0:
   `latest.json`. The `notes` in `latest.json` are always `releaseBody` from `release.yml`, not
   the notes edited on the release page.
 
-**Before publishing the draft**, check the manifest:
+**Before publishing the draft**, the manifest is checked automatically (#398): a step of
+`publish-vsix-release`, which runs once all three `build-release` jobs are done, runs
+`scripts/check-updater-manifest.py` on the draft's `latest.json`, its `.sig` files and its asset
+list, before that job uploads anything. It fails the run before the marketplace jobs start and
+lists every problem it found. It checks:
+
+- `version` is `X.Y.Z`;
+- each of `linux-x86_64`, `linux-x86_64-appimage`, `linux-x86_64-deb`, `linux-x86_64-rpm`,
+  `windows-x86_64`, `windows-x86_64-msi`, `windows-x86_64-nsis`, `darwin-aarch64`,
+  `darwin-x86_64`, `darwin-aarch64-app` and `darwin-x86_64-app` is present (v1 also writes
+  `darwin-universal` and `darwin-universal-app`; any extra platform is checked the same way);
+- each `url` is the API URL of an uploaded asset of this release, of the platform's kind (for
+  example `.msi` for `windows-x86_64-msi`, `.app.tar.gz` for the `darwin-*` keys);
+- each `signature` is the content of that asset's `.sig`.
+
+A missing platform means two jobs wrote `latest.json` at the same time: re-run that platform's
+`build-release` job (the draft is still a draft). GitHub re-runs the jobs that depend on it too,
+so `publish-vsix-release` checks the manifest again. To run the same check by hand:
 
 ```bash
 tag=release/X.Y.Z
 dir="$(mktemp -d)"
 gh release download "$tag" -D "$dir" -p latest.json -p '*.sig'
-gh release view "$tag" --json assets -q '.assets[] | [.apiUrl, .name] | @tsv' > "$dir/assets.tsv"
-jq -r '.version' "$dir/latest.json"
-jq -r '.platforms | to_entries[] | [.key, .value.url, .value.signature] | @tsv' "$dir/latest.json" |
-  while IFS=$'\t' read -r platform url sig; do
-    name="$(awk -F'\t' -v u="$url" '$1 == u { print $2 }' "$dir/assets.tsv")"
-    if [ -n "$name" ] && [ "$sig" = "$(cat "$dir/$name.sig")" ]; then ok=ok; else ok=BAD; fi
-    printf '%-22s %-42s %s\n' "$platform" "${name:-$url}" "$ok"
-  done
+gh release view "$tag" --json assets > "$dir/assets.json"
+python3 scripts/check-updater-manifest.py --version "${tag#release/}" --assets "$dir/assets.json" "$dir"
 ```
-
-It must print the version `X.Y.Z` and `ok` for each of `linux-x86_64`, `linux-x86_64-appimage`,
-`linux-x86_64-deb`, `linux-x86_64-rpm`, `windows-x86_64`, `windows-x86_64-msi`,
-`windows-x86_64-nsis`, `darwin-aarch64`, `darwin-x86_64`, `darwin-aarch64-app` and
-`darwin-x86_64-app` (v1 also writes `darwin-universal` and `darwin-universal-app`). `ok` means
-the URL is the API URL of an asset of this release and the signature is that asset's `.sig`. A
-missing platform means two jobs wrote `latest.json` at the same time: re-run that platform's
-`build-release` job (the draft is still a draft).
 
 **After publishing**, check what an installed app sees:
 
@@ -131,8 +137,8 @@ above. If the download fails while `latest.json` is right otherwise, put back th
 hand: replace each `url` with the browser URL
 `https://github.com/rene-langer/browsitory/releases/download/release%2FX.Y.Z/<file>`, keep the
 signatures (they sign the bundle, not the URL), and upload the file with
-`gh release upload release/X.Y.Z latest.json --clobber`. (The check above then reports `BAD`
-for those URLs; that is expected.)
+`gh release upload release/X.Y.Z latest.json --clobber`. (The check above then reports those
+URLs as not API asset URLs; that is expected.)
 
 ### Publishing the extension
 
