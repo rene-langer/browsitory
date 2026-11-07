@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Copy } from "lucide-react";
 import type { RemoteInfo } from "../ipc/RepoClient";
+import { remoteNameProblem } from "../lib/refName";
 import { FormDialog } from "./primitives/FormDialog";
 import styles from "./BranchTree.module.css";
 
@@ -24,6 +25,8 @@ export function EditRemoteDialog({
   const [name, setName] = useState(remote.name);
   const [fetchUrl, setFetchUrl] = useState(remote.fetchUrl);
   const [pushUrl, setPushUrl] = useState(remote.pushUrl ?? "");
+  // The same check and message as the Add remote form (#418).
+  const nameProblem = remoteNameProblem(name.trim());
 
   return (
     <FormDialog ariaLabel={`Edit ${remote.name}`} onCancel={onClose}>
@@ -32,16 +35,32 @@ export function EditRemoteDialog({
           event.preventDefault();
           const nextName = name.trim();
           const nextFetchUrl = fetchUrl.trim();
-          if (nextName === "" || nextFetchUrl === "") return;
+          const nextPushUrl = pushUrl.trim() || null;
+          if (nextName === "" || nextFetchUrl === "" || nameProblem !== null) return;
+          // Nothing changed: Save is a Cancel, with no backend call.
+          if (nextName === remote.name && nextFetchUrl === remote.fetchUrl && nextPushUrl === remote.pushUrl) {
+            onClose();
+            return;
+          }
           if (nextName !== remote.name && !(await onRename(remote.name, nextName))) return;
-          await onUpdateUrls(nextName, nextFetchUrl, pushUrl.trim() || null);
+          await onUpdateUrls(nextName, nextFetchUrl, nextPushUrl);
           onClose();
         }}
       >
         <label className={styles.label}>
           Remote name
-          <input value={name} onChange={(event) => setName(event.target.value)} />
+          <input
+            value={name}
+            aria-invalid={nameProblem !== null}
+            aria-describedby={nameProblem !== null ? "edit-remote-name-problem" : undefined}
+            onChange={(event) => setName(event.target.value)}
+          />
         </label>
+        {nameProblem !== null && (
+          <p id="edit-remote-name-problem" className={styles.draftProblem}>
+            {nameProblem}
+          </p>
+        )}
         <label className={styles.label}>
           Fetch URL
           <input value={fetchUrl} onChange={(event) => setFetchUrl(event.target.value)} />
@@ -72,7 +91,9 @@ export function EditRemoteDialog({
             <Copy size={12} aria-hidden="true" />
           </button>
         )}
-        <button type="submit">Save remote</button>
+        <button type="submit" disabled={nameProblem !== null}>
+          Save remote
+        </button>
         <button type="button" onClick={onClose}>
           Cancel
         </button>

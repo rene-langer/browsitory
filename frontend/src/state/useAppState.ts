@@ -591,6 +591,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runMutation,
     runOptimisticMutation,
     runOptimisticMutationWithMessage,
+    setState,
+    state.worktrees,
   );
 
   const { initSubmodule, updateSubmodule } = useSubmoduleActions(client, repoPath, runMutation);
@@ -653,6 +655,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     state.fetchPrune,
     currentBranch,
     state.remotes,
+    state.tags,
   );
 
   const {
