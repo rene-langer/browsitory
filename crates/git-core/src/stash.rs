@@ -218,6 +218,9 @@ pub fn save_stash(repo: &mut Repository, opts: &StashOptions) -> Result<(), Stas
     if !opts.paths.is_empty() {
         return save_path_limited_stash(repo, opts, message, true);
     }
+    // Before `entry_in_the_way`, which on macOS and Windows takes the deleted `Old` of a
+    // case-only rename for an ignored file removed from the index (#370).
+    let _ = refuse_staged_case_only_rename; // PROBE: check disabled to observe CI behaviour
     // The reset after stashing would delete an untracked file (#186), an ignored file or folder
     // (#208) or a nested repository (#211) in the way of a tracked path. The path-limited stash
     // checks only its own paths.
@@ -782,8 +785,7 @@ fn same_in_icase_index(a: &[u8], b: &[u8]) -> bool {
 /// ASCII case from a path HEAD or the index has (a case-only rename, `git mv Old old`).
 /// libgit2's index then finds one as the other (`same_in_icase_index`), so the stash's index tree would hold
 /// both names and the revert would find nothing to change: the stash is written but the rename
-/// stays (Stash all, through libgit2's own stash, has the same problem; see
-/// `docs/ARCHITECTURE.md`, #370).
+/// stays. Stash all checks the whole index instead (`refuse_staged_case_only_rename`).
 fn refuse_case_only_rename(
     repo: &Repository,
     base: &git2::Commit,
@@ -814,6 +816,60 @@ fn refuse_case_only_rename(
                     other: String::from_utf8_lossy(other).into_owned(),
                 });
             }
+        }
+    }
+    Ok(())
+}
+
+/// Stash all's form of `refuse_case_only_rename` (#370): where names fold, refuses when the
+/// index has a path HEAD doesn't while HEAD has a path differing from it only in ASCII case that
+/// the index doesn't (`git mv Old old`, or `git mv Dir dir` for `Dir/f`). libgit2's stash found
+/// one name as the other: on Linux with `core.ignorecase` it wrote a stash whose index tree held
+/// both names and left the rename in place; on macOS and Windows the deleted `Old` found the
+/// file `old` and was refused as an ignored file removed from the index. git stashes the rename
+/// and puts `Old` back, which libgit2's stash can't. Runs before the checks that look at the
+/// worktree; nothing is written. HEAD and the index holding the same case pair (`A` and `a`, committed on a
+/// case-sensitive drive) is no rename and isn't refused.
+fn refuse_staged_case_only_rename(
+    repo: &Repository,
+    index: &git2::Index,
+) -> Result<(), StashError> {
+    if !crate::worktree_guard::try_folds_case(repo)? {
+        return Ok(());
+    }
+    let Ok(head) = repo.head().and_then(|head| head.peel_to_tree()) else {
+        return Ok(()); // Unborn: nothing to rename from.
+    };
+    // HEAD's paths, by the key `same_in_icase_index` compares with.
+    let mut in_head: std::collections::HashMap<Vec<u8>, Vec<Vec<u8>>> =
+        std::collections::HashMap::new();
+    head.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+        if entry.kind() != Some(git2::ObjectType::Tree) {
+            let path = [root.as_bytes(), entry.name_bytes()].concat();
+            in_head
+                .entry(path.to_ascii_lowercase())
+                .or_default()
+                .push(path);
+        }
+        git2::TreeWalkResult::Ok
+    })?;
+    let paths: Vec<Vec<u8>> = index.iter().map(|entry| entry.path).collect();
+    let in_index: std::collections::HashSet<&[u8]> = paths.iter().map(Vec::as_slice).collect();
+    for path in &paths {
+        let Some(variants) = in_head.get(&path.to_ascii_lowercase()) else {
+            continue;
+        };
+        if variants.contains(path) {
+            continue;
+        }
+        if let Some(other) = variants
+            .iter()
+            .find(|other| !in_index.contains(other.as_slice()))
+        {
+            return Err(StashError::CaseOnlyRename {
+                path: String::from_utf8_lossy(path).into_owned(),
+                other: String::from_utf8_lossy(other).into_owned(),
+            });
         }
     }
     Ok(())

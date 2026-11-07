@@ -3509,6 +3509,139 @@ fn a_case_only_rename_is_refused_before_the_ignored_file_check() {
     assert_eq!(read(dir.path(), "Old"), "ignored\n");
 }
 
+/// Case-only renames as `(moved, to, file)`: `git mv {moved} {to}` turns the committed
+/// `{moved}{file}` into `{to}{file}`. A file, and a folder holding one.
+const CASE_ONLY_RENAMES: [(&str, &str, &str); 2] = [("Old", "old", ""), ("Dir", "dir", "/f")];
+
+/// HEAD has `{moved}{file}` (four lines) and `other`, with `core.ignorecase` set to
+/// `ignore_case`; then `git mv {moved} {to}` and `other` edited. Returns the paths before and
+/// after the rename.
+fn case_only_rename(
+    (moved, to, file): (&str, &str, &str),
+    ignore_case: bool,
+) -> (tempfile::TempDir, git2::Repository, String, String) {
+    let (old, new) = (format!("{moved}{file}"), format!("{to}{file}"));
+    let (dir, repo) = init_repo();
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", ignore_case)
+        .unwrap();
+    write_file(dir.path(), &old, "a\nb\nc\nd\n");
+    write_file(dir.path(), "other", "x\n");
+    commit_all(&repo, "base");
+    assert!(git(dir.path(), &["mv", moved, to]).status.success());
+    write_file(dir.path(), "other", "changed\n");
+    (dir, repo, old, new)
+}
+
+#[test]
+fn stash_all_refuses_a_case_only_rename_where_names_fold() {
+    // #370: Stash all went through libgit2's stash. On Linux with `core.ignorecase` its index
+    // found `Old` as `old`: the stash held both names and the revert left the rename in place.
+    // Now refused like Stash file… (#152), before anything is written, in every mode and on
+    // every OS.
+    for rename in CASE_ONLY_RENAMES {
+        for opts in whole_stash_modes() {
+            let (dir, mut repo, old, new) = case_only_rename(rename, true);
+            let status_before = git_core::status::status(&repo).unwrap();
+            let index_before = std::fs::read(dir.path().join(".git/index")).unwrap();
+
+            let error = git_core::stash::save_stash(&mut repo, &opts).unwrap_err();
+
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "Can't stash '{new}': it differs from '{old}' only in case. Commit the rename first, or undo it."
+                ),
+                "{opts:?}"
+            );
+            assert!(matches!(error, StashError::CaseOnlyRename { .. }));
+            assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+            assert_eq!(git_core::status::status(&repo).unwrap(), status_before);
+            assert_eq!(
+                std::fs::read(dir.path().join(".git/index")).unwrap(),
+                index_before
+            );
+            assert_eq!(top_level(dir.path()), [rename.1, "other"], "{opts:?}");
+            assert_eq!(read(dir.path(), &new), "a\nb\nc\nd\n");
+            assert_eq!(read(dir.path(), "other"), "changed\n");
+        }
+    }
+}
+
+#[test]
+fn git_stash_reverts_a_case_only_rename_where_names_fold() {
+    // What git does with the same rename (#370): it stashes it and puts the old name back.
+    // Browsitory refuses instead (see above).
+    for rename in CASE_ONLY_RENAMES {
+        let (dir, _repo, old, new) = case_only_rename(rename, true);
+
+        assert!(git_stash_push(dir.path(), true));
+
+        assert_eq!(git_status(dir.path()), "", "{new}");
+        assert_eq!(top_level(dir.path()), [rename.0, "other"]);
+        assert_eq!(read(dir.path(), &old), "a\nb\nc\nd\n");
+        assert_eq!(read(dir.path(), "other"), "x\n");
+        let tree = git(dir.path(), &["ls-tree", "-r", "--name-only", "stash@{0}"]);
+        assert_eq!(
+            String::from_utf8_lossy(&tree.stdout),
+            format!("{new}\nother\n")
+        );
+    }
+}
+
+#[test]
+fn stash_all_stashes_a_case_only_rename_where_names_do_not_fold() {
+    // Without `core.ignorecase`, on a case-sensitive drive, the rename is two different names.
+    if cfg!(any(target_os = "macos", windows)) {
+        return;
+    }
+    for rename in CASE_ONLY_RENAMES {
+        for opts in whole_stash_modes() {
+            let (dir, mut repo, old, new) = case_only_rename(rename, false);
+
+            git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+            if opts.keep_index {
+                assert_eq!(read(dir.path(), &new), "a\nb\nc\nd\n", "{opts:?}");
+            } else {
+                assert_eq!(git_status(dir.path()), "", "{new} {opts:?}");
+                assert_eq!(top_level(dir.path()), [rename.0, "other"]);
+                assert_eq!(read(dir.path(), &old), "a\nb\nc\nd\n");
+            }
+            assert_eq!(read(dir.path(), "other"), "x\n");
+            assert_eq!(git_core::stash::list_stashes(&mut repo).unwrap().len(), 1);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stash_all_does_not_take_a_committed_case_pair_for_a_rename() {
+    // Only a case-sensitive drive holds both `A` and `a`. With `core.ignorecase` turned on
+    // afterwards, HEAD and the index have the same two names: no rename, so the case-only check
+    // (#370) leaves an unrelated edit alone. (Committed with the setting off; an open
+    // repository keeps its index's case mode, so reopen it.)
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "A", "upper\n");
+    write_file(dir.path(), "a", "lower\n");
+    write_file(dir.path(), "other", "x\n");
+    commit_all(&repo, "base");
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    drop(repo);
+    let mut repo = git2::Repository::open(dir.path()).unwrap();
+    write_file(dir.path(), "other", "changed\n");
+
+    git_core::stash::save_stash(&mut repo, &with(|o| o.include_untracked = false)).unwrap();
+
+    assert_eq!(read(dir.path(), "other"), "x\n");
+    assert_eq!(read(dir.path(), "A"), "upper\n");
+    assert_eq!(read(dir.path(), "a"), "lower\n");
+}
+
 #[test]
 fn stash_all_stashes_a_rename_whose_old_path_exists_again() {
     // #152 review: Stash all takes the path-limited route here (the new `old` is a file removed

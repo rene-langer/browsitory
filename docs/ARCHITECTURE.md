@@ -278,7 +278,14 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   fold" is `worktree_guard::try_folds_case`, as for every stash check (#337, #369): macOS, Windows, or
   `core.ignorecase`. The stash never probes the drive (`dir_folds_case`), so on a Linux
   casefold folder or a vfat mount without `core.ignorecase` the check doesn't run. Stash all
-  doesn't refuse case-only renames yet: #370.
+  refuses them too (#370; `refuse_staged_case_only_rename`, before `entry_in_the_way` and any
+  write): the index has a path HEAD doesn't, and HEAD a path differing from it only in ASCII
+  case that the index doesn't. Through libgit2's stash, Linux with `core.ignorecase` wrote a
+  stash whose index tree held both names and left the rename in place, and on macOS and Windows
+  the deleted `Old` found the file `old` (`IgnoredOverwritten("Old")`). `git stash` stashes the
+  rename and puts `Old` back; libgit2's stash can't, and the path-limited route refuses as
+  Stash file… does, so refusing is the consistent fix. A case pair HEAD and the index both hold
+  (`A` and `a`, committed on a case-sensitive drive) is no rename and isn't refused.
 - libgit2's stash apply checks the untracked tree out *before* the tracked changes (git does it
   the other way round), so a stash holding an untracked file `d` and the deletion of the folder
   `d/` can't be applied while `d/` exists: libgit2 reports success, leaves the file as
