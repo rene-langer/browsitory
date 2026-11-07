@@ -141,7 +141,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm --dir frontend install --frozen-lockfile
-      - uses: tauri-apps/tauri-action@v0
+      # Creates the draft release (the first matrix job to finish creates it, the others find it)
+      # and uploads the bundles and latest.json, the manifest every installed app's updater reads.
+      # v1 (#363) differs from v0 in ways docs/RELEASING.md's "Updater manifest" describes:
+      # latest.json links each bundle by its API asset URL
+      # (https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>), and the macOS
+      # .app.tar.gz carries the version in its name.
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PKEY }}
@@ -150,10 +156,15 @@ jobs:
           projectPath: crates/tauri-app
           tagName: ${{ github.ref_name }}
           releaseName: "Browsitory ${{ github.ref_name }}"
-          # Starting text of the draft release; the owner adds the release notes before publishing.
+          # Starting text of the draft release (and the `notes` of latest.json); the owner adds
+          # the release notes before publishing. v1 overwrites the name and body of an existing
+          # release only if it is published, never of a draft; with releaseDraft: true it only
+          # ever uses a draft, so a re-run keeps hand-written notes.
           releaseBody: |
             How to install and use Browsitory: https://rene-langer.github.io/browsitory/
             What changed: https://github.com/rene-langer/browsitory/blob/${{ github.ref_name }}/CHANGELOG.md
+          # Once the release is published, v1 no longer uploads into it: a re-run of this job
+          # then fails (or leaves a second draft to delete). Don't re-run it after publishing.
           releaseDraft: true
           prerelease: false
           # tauri.release.conf.json only sets bundle.createUpdaterArtifacts: true — kept out of
