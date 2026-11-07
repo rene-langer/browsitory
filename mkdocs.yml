@@ -35,6 +35,10 @@ theme:
   # Zensical's Material-compatible look (fonts, layout); its default is "modern".
   variant: classic
   language: en
+  icon:
+    # The default repository icon is Font Awesome's (CC-BY-4.0, outside the licence policy);
+    # Material Design Icons are Apache-2.0 (#423).
+    repo: material/git
   features:
     - navigation.sections
     - navigation.footer
