@@ -51,6 +51,10 @@ pub enum MergeError {
     FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// libgit2 merged a file and a folder of the same name without a conflict; nothing was
+    /// changed (#410).
+    #[error(transparent)]
+    FileFolderConflict(#[from] crate::FileFolderConflict),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
@@ -125,8 +129,10 @@ impl NotStagedReason {
 }
 
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
-/// fast-forward checks out `theirs`' tree, any other merge writes the merged index.
-fn refuse_linked_folders(
+/// fast-forward checks out `theirs`' tree, any other merge writes the merged index. A merged
+/// index that holds a file and a folder of the same name libgit2 didn't see as a conflict is
+/// refused too (#410).
+fn refuse_unsafe_merge(
     repo: &Repository,
     theirs: &git2::Commit,
     fast_forward: bool,
@@ -138,10 +144,12 @@ fn refuse_linked_folders(
     }
     let ours = repo.head()?.peel_to_commit()?;
     let merged = repo.merge_commits(&ours, theirs, None)?;
-    crate::worktree_guard::refuse_linked_folders(
+    // The link check first: its refusal is the more specific one when the "file" is a link.
+    crate::worktree_guard::refuse_linked_folders::<MergeError>(
         repo,
         &[Incoming::Merge(GuardSource::Index(&merged))],
-    )
+    )?;
+    Ok(crate::file_folder::refuse_file_folder_conflict(&merged)?)
 }
 
 /// Refuses a path whose existing parent folders include a symlink, so a resolution can never
@@ -227,8 +235,9 @@ pub fn start_merge(
         return Ok(MergeOutcome::UpToDate);
     }
 
-    // Safe checkouts create files through a symlinked folder (#114).
-    refuse_linked_folders(
+    // Safe checkouts create files through a symlinked folder (#114); libgit2 can miss a
+    // file/folder conflict (#410).
+    refuse_unsafe_merge(
         repo,
         &their_commit,
         analysis.is_fast_forward() && !opts.squash && opts.fast_forward != FastForward::Never,

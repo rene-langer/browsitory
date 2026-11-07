@@ -3,6 +3,7 @@ pub mod branch;
 pub mod clone;
 pub mod commit;
 pub mod diff;
+mod file_folder;
 pub mod forge;
 pub mod graph;
 pub mod history;
@@ -30,6 +31,7 @@ pub mod tools;
 pub mod undo;
 pub mod worktree;
 pub(crate) mod worktree_guard;
+pub use file_folder::FileFolderConflict;
 pub use worktree_guard::{CaseCollision, CaseConfigUnreadable, HeldDuring, HeldOpen, LinkedFolder};
 
 // Hide the developer's / CI runner's global and system git config from every test (#111).

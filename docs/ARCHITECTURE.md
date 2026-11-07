@@ -385,6 +385,28 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   so per worktree).
 - `git_merge` ignores the merge analysis: called when a fast-forward is possible it still writes
   `MERGE_HEAD`, which is what `FastForward::Never` relies on.
+- **libgit2 misses a file/folder conflict when a name sorts between (#410).** libgit2 1.9 finds
+  a file/folder conflict only when the file and the folder's entries are neighbours in sorted
+  order. `c` < `c.txt` < `c/g` (`.` sorts before `/`): merging a side that deletes `c.txt` and
+  adds `c/g` into a HEAD that added the file `c` gives a merged index with both `c` and `c/g` at
+  stage 0 and no conflict (without `c.txt`, `ab` against `ab/g`, it records the conflict `ab`
+  and checks the file out as `ab~HEAD`). git reports "CONFLICT (file/directory)", merges `c/g`
+  and leaves HEAD's file as the conflict `c~HEAD`. With libgit2 a cherry-pick, revert or rebase
+  step committed a tree without the file `c` while the work tree kept `c` and never got `c/g`;
+  a merge (squash, a diverged pull's merge) and a stash apply stopped part-way with "failed to
+  make directory 'c': directory exists". Every operation that writes a libgit2 merge (merge,
+  squash, cherry-pick, revert, each rebase step, stash apply and pop) runs
+  `file_folder::refuse_file_folder_conflict` on its in-memory merge (`merge_commits`,
+  `cherrypick_commit`, `revert_commit`; for a stash `merge_trees` redoing `git_stash_apply`'s
+  merges against HEAD's tree) before anything is written, and refuses with
+  `FileFolderConflict` (a stage-0 entry `p` while another entry lives below `p/`; libgit2's own
+  conflict entry `p` next to `p/…` is left alone). Producing git's outcome instead would mean
+  rewriting the index into git's `c~HEAD` conflict and doing the checkout and the operation's
+  state files ourselves for five operations, where libgit2's checkout of such an index fails; a
+  refusal keeps the user's work safe and points them to git. The test
+  `libgit2_still_merges_a_file_and_a_folder_without_a_conflict` (`tests/file_folder_conflict.rs`)
+  pins the libgit2 behaviour: when a libgit2 update fixes it, that test fails and the guard can
+  give way to libgit2's conflict.
 
 ## Threading model
 

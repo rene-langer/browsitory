@@ -23,6 +23,10 @@ pub enum RebaseError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// libgit2 merged a file and a folder of the same name without a conflict; nothing the
+    /// step would write was written (#410).
+    #[error(transparent)]
+    FileFolderConflict(#[from] crate::FileFolderConflict),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
@@ -737,6 +741,9 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
                 crate::worktree_guard::GuardSource::Index(&merged),
             )],
         )?;
+        // libgit2 can miss a file/folder conflict and would land the step without one of them
+        // (#410). After the link check, whose refusal is the more specific one for a link.
+        crate::file_folder::refuse_file_folder_conflict(&merged)?;
         // A checkout that stops part-way (a file another program holds open, a read-only file,
         // a full disk) is rolled back, like `pick::apply`'s (#329): the step is then as if never
         // started, HEAD stays at `expected_head`, and Continue applies it again. libgit2's own
