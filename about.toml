@@ -30,6 +30,7 @@ accepted = [
     "Zlib",
     "Unicode-3.0",
     "BlueOak-1.0.0",
+    "0BSD",
 ]
 
 # Owner decision (deny.toml's exceptions; docs/LICENSE_COMPLIANCE.md): used unmodified, its

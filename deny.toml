@@ -26,6 +26,7 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "BlueOak-1.0.0",
+    "0BSD",
     "PSF-2.0",
     "Python-2.0",
 ]
