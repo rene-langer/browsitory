@@ -4035,6 +4035,64 @@ fn git_stash_keeps_a_committed_case_pair_where_names_fold() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn stash_file_refuses_a_case_pair_held_by_head_or_the_index_alone() {
+    // #392: a pair is two names in HEAD alone (`git rm --cached a`) or in the index alone (`a`
+    // staged next to the committed `A`), not one in each, which is a rename.
+    let head_only = || {
+        let (dir, repo) = committed_case_pair(("A", "a"), true);
+        assert!(git(dir.path(), &["rm", "-q", "--cached", "a"])
+            .status
+            .success());
+        (dir, repo)
+    };
+    let index_only = || {
+        // Staged while the index still compares exact case, then `core.ignorecase` on.
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "A", "first\n");
+        write_file(dir.path(), "other", "x\n");
+        commit_all(&repo, "base");
+        write_file(dir.path(), "a", "second\n");
+        stage(&repo, "a");
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", true)
+            .unwrap();
+        drop(repo);
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        assert_eq!(index_paths(&repo), ["A", "a", "other"]);
+        (dir, repo)
+    };
+    for (dir, mut repo) in [head_only(), index_only()] {
+        write_file(dir.path(), "A", "edited\n");
+
+        let error = git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["A".into()]))
+            .unwrap_err();
+
+        assert!(matches!(error, StashError::CasePair { .. }), "{error:?}");
+        assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
+        assert_eq!(read(dir.path(), "A"), "edited\n");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stash_file_refuses_a_rename_whose_old_path_exists_again_under_ignorecase() {
+    // A rename that isn't case-only stays `RenameSourceRecreated` with `core.ignorecase` on: only
+    // a case-only rename skips that check, for `CaseOnlyRename` to refuse it.
+    let (dir, mut repo) = rename_with_ignorecase("old", "new");
+    write_file(dir.path(), "old", "recreated\n");
+
+    let error = git_core::stash::save_stash(&mut repo, &with(|o| o.paths = vec!["new".into()]))
+        .unwrap_err();
+
+    assert!(
+        matches!(error, StashError::RenameSourceRecreated { ref path, ref old } if path == "new" && old == "old"),
+        "{error:?}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn stash_all_does_not_take_folders_differing_in_case_for_a_pair() {
     // `D/f` and `d/g` are two different paths to libgit2's index (it compares whole paths), and
     // its reset keeps both: not refused.
