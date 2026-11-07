@@ -26,3 +26,26 @@
 .body {
   padding: var(--space-3) var(--space-5) var(--space-5);
 }
+
+/* With a footer: the panel fits the height its container gives it (an Overlay's dialog is a
+   flex column with a max-height) and only the body scrolls, so the footer stays in view. */
+.withFooter {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.scrollBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: var(--space-3);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  border-top: 1px solid var(--color-border);
+}

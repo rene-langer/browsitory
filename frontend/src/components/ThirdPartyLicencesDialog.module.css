@@ -18,7 +18,3 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-
-.closeButton {
-  margin-top: var(--space-3);
-}

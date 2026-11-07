@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Overlay } from "./Overlay";
 
@@ -152,6 +152,81 @@ describe("Overlay", () => {
         cleanup();
         restore();
       }
+    });
+  });
+
+  describe("backdrop click", () => {
+    function renderOverlay(closeOnBackdropClick?: boolean) {
+      const onClose = vi.fn();
+      render(
+        <Overlay onClose={onClose} closeOnBackdropClick={closeOnBackdropClick}>
+          <p>content</p>
+        </Overlay>,
+      );
+      const dialog = screen.getByRole("dialog");
+      dialog.getBoundingClientRect = () => new DOMRect(100, 100, 400, 300);
+      return { onClose, dialog };
+    }
+
+    // A real click is a press then a release; both reach the dialog for a backdrop click.
+    function backdropClick(dialog: HTMLElement, x: number, y: number) {
+      fireEvent.mouseDown(dialog, { clientX: x, clientY: y });
+      fireEvent.click(dialog, { clientX: x, clientY: y });
+    }
+
+    it("closes on a click outside the dialog's box when asked to", () => {
+      const { onClose, dialog } = renderOverlay(true);
+
+      backdropClick(dialog, 50, 50);
+
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("ignores clicks on the content and on the dialog's own box", () => {
+      const { onClose, dialog } = renderOverlay(true);
+
+      fireEvent.mouseDown(screen.getByText("content"));
+      fireEvent.click(screen.getByText("content"));
+      backdropClick(dialog, 100, 250);
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("doesn't close when a press in the content (e.g. selecting text) is released over the backdrop", () => {
+      const { onClose, dialog } = renderOverlay(true);
+
+      // The click of such a drag targets the common ancestor, the dialog, outside its box.
+      fireEvent.mouseDown(screen.getByText("content"), { clientX: 200, clientY: 200 });
+      fireEvent.click(dialog, { clientX: 50, clientY: 50 });
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("doesn't close when a press on the backdrop is released in the content", () => {
+      const { onClose, dialog } = renderOverlay(true);
+
+      fireEvent.mouseDown(dialog, { clientX: 50, clientY: 50 });
+      fireEvent.click(dialog, { clientX: 200, clientY: 200 });
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("needs a fresh press on the backdrop for each click", () => {
+      const { onClose, dialog } = renderOverlay(true);
+
+      fireEvent.mouseDown(dialog, { clientX: 50, clientY: 50 });
+      fireEvent.click(dialog, { clientX: 200, clientY: 200 });
+      fireEvent.click(dialog, { clientX: 50, clientY: 50 });
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("ignores backdrop clicks by default", () => {
+      const { onClose, dialog } = renderOverlay();
+
+      backdropClick(dialog, 50, 50);
+
+      expect(onClose).not.toHaveBeenCalled();
     });
   });
 });

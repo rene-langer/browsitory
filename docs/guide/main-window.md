@@ -26,8 +26,9 @@ the right:
 - The gear button opens **Preferences**: the commit message settings, and your editor, terminal
   and diff tools (see [External tools](external-tools.md)).
 - The sparkle button (**What's new**) opens the **Release notes**: what changed in each version. They also open
-  by themselves the first time you start a new version. **User guide** at the bottom opens
-  this guide in your browser.
+  by themselves the first time you start a new version. The buttons at the bottom stay in view
+  while you scroll: **Close** (or Escape, or a click outside the dialog) closes them, and
+  **User guide** opens this guide in your browser.
 
 **Updates (desktop app).** Browsitory checks for a new version when it starts and every six
 hours, and downloads it in the background. When it is ready, a banner says "Update v… ready".

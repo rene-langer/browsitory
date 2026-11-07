@@ -36,8 +36,17 @@ export function ThirdPartyLicencesDialog({ load, onClose }: { load: () => Promis
   }, []);
 
   return (
-    <Overlay onClose={onClose} ariaLabel="Third-party licences">
-      <Panel title="Third-party licences" ariaLabel="Third-party licences">
+    <Overlay onClose={onClose} ariaLabel="Third-party licences" closeOnBackdropClick>
+      <Panel
+        title="Third-party licences"
+        ariaLabel="Third-party licences"
+        // In the footer, Close stays in view however long the dialog gets.
+        footer={
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+        }
+      >
         <p className={styles.intro}>
           Browsitory includes open source software. These are its licences and copyright notices.
         </p>
@@ -60,9 +69,6 @@ export function ThirdPartyLicencesDialog({ load, onClose }: { load: () => Promis
             {state.text}
           </pre>
         )}
-        <button type="button" className={styles.closeButton} onClick={onClose}>
-          Close
-        </button>
       </Panel>
     </Overlay>
   );

@@ -96,9 +96,29 @@ export function ReleaseNotesModal({
 }) {
   // A release with only developer-only changes has no groups; it isn't shown.
   const shown = entries.filter((entry) => entry.groups.length > 0);
+  // The buttons sit in the panel's footer, which stays in view while the notes scroll: the
+  // user can close at any time (#379), and the dialog's initial focus doesn't scroll the
+  // notes to the end (#378).
+  const footer = (
+    <>
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+      {onOpenUserGuide !== undefined && (
+        <button type="button" onClick={onOpenUserGuide}>
+          User guide
+        </button>
+      )}
+      {onOpenThirdPartyLicences !== undefined && (
+        <button type="button" onClick={onOpenThirdPartyLicences}>
+          Third-party licences
+        </button>
+      )}
+    </>
+  );
   return (
-    <Overlay onClose={onClose} ariaLabel="Release notes">
-      <Panel title="Release notes" ariaLabel="Release notes">
+    <Overlay onClose={onClose} ariaLabel="Release notes" closeOnBackdropClick>
+      <Panel title="Release notes" ariaLabel="Release notes" footer={footer} bodyLabel="Release notes text">
         {shown.length === 0 ? (
           <p className={styles.empty}>No release notes yet.</p>
         ) : (
@@ -124,21 +144,6 @@ export function ReleaseNotesModal({
             </section>
           ))
         )}
-        <div className={styles.footer}>
-          <button type="button" onClick={onClose}>
-            Close
-          </button>
-          {onOpenUserGuide !== undefined && (
-            <button type="button" onClick={onOpenUserGuide}>
-              User guide
-            </button>
-          )}
-          {onOpenThirdPartyLicences !== undefined && (
-            <button type="button" onClick={onOpenThirdPartyLicences}>
-              Third-party licences
-            </button>
-          )}
-        </div>
       </Panel>
     </Overlay>
   );

@@ -63,4 +63,29 @@ describe("Panel", () => {
     );
     expect(screen.getByRole("heading", { level: 3, name: "octocat/hello-world" })).toBeInTheDocument();
   });
+
+  it("renders a footer after the body, outside it, and labels the scrolling body when asked", () => {
+    render(
+      <Panel title="Notes" footer={<button>Close</button>} bodyLabel="Notes text">
+        <p>content</p>
+      </Panel>,
+    );
+
+    const body = screen.getByRole("region", { name: "Notes text" });
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(body).toHaveTextContent("content");
+    expect(body).toHaveAttribute("tabindex", "0");
+    expect(body).not.toContainElement(close);
+    expect(body.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("doesn't make the body a region without a footer", () => {
+    render(
+      <Panel title="Notes" bodyLabel="Notes text">
+        <p>content</p>
+      </Panel>,
+    );
+
+    expect(screen.queryByRole("region", { name: "Notes text" })).not.toBeInTheDocument();
+  });
 });
