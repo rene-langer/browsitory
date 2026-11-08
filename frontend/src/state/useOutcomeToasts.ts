@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { AppState } from "./useAppState";
 
-/** Toasts for a finished pull, merge or stash apply/pop (`RepoWorkspace`). */
+/** Toasts for a finished pull, merge, stash apply/pop or one-click history edit (`RepoWorkspace`). */
 export function useOutcomeToasts(state: AppState, pushToast: (message: string) => void) {
   const pullOutcome = state.pullOutcome;
   useEffect(() => {
@@ -29,4 +29,8 @@ export function useOutcomeToasts(state: AppState, pushToast: (message: string) =
           : "Stash applied with conflicts. Resolve the files.",
       );
   }, [stashOutcome, pushToast]);
+  const historyEditOutcome = state.historyEditOutcome;
+  useEffect(() => {
+    if (historyEditOutcome !== null) pushToast(historyEditOutcome.message);
+  }, [historyEditOutcome, pushToast]);
 }

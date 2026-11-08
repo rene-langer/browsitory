@@ -20,6 +20,10 @@ Drop and Interactive rebase… work for any selection. Selections that include a
 root commit, or commits that aren't on the current branch, can't be rebased. Esc collapses a
 selection back to one commit.
 
+**One commit, one step.** To reword, squash, fixup, move or drop a single commit, its right-click
+menu runs that edit directly, without the planner (see
+[Editing older commits](rewriting-commits.md)).
+
 **A paused rebase survives restarts.** Browsitory stores a paused rebase in the repository's
 `.git/browsitory/` folder, so quitting the app, closing the tab, reloading the VSCode window or a
 backend crash doesn't lose it: when the repository opens again the status strip and the commit

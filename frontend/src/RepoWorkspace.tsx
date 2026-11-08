@@ -36,6 +36,7 @@ import { PushBranchDialog } from "./components/PushBranchDialog";
 import { StashDialog } from "./components/StashDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import { CreateTagDialog } from "./components/CreateTagDialog";
+import { RewordDialog } from "./components/RewordDialog";
 import { DeleteRemoteTagDialog } from "./components/DeleteRemoteTagDialog";
 import { RemoteDialogs } from "./components/RemoteDialogs";
 import type { RepoClient } from "./ipc/RepoClient";
@@ -325,6 +326,12 @@ export function RepoWorkspace({
   const createTagCommit =
     createTagDialog === null ? undefined : appState.state.commits.find((commit) => commit.id === createTagDialog.commitId);
   const mergeDialogBranch = appState.state.mergeDialog?.branchName ?? null;
+  const rewordDialog = appState.state.rewordDialog;
+  const rewordCommitId = rewordDialog?.commitId ?? null;
+  const loadRewordMessage = useCallback(
+    () => (rewordCommitId === null ? Promise.resolve("") : client.getCommitMessage(repoPath, rewordCommitId)),
+    [client, repoPath, rewordCommitId],
+  );
   useOutcomeToasts(appState.state, pushToast);
 
   // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
@@ -527,6 +534,24 @@ export function RepoWorkspace({
             return null;
           }}
           onCancel={appState.closeCreateTagDialog}
+        />
+      )}
+      {active && rewordDialog !== null && (
+        <RewordDialog
+          key={rewordDialog.commitId}
+          shortId={
+            appState.state.commits.find((commit) => commit.id === rewordDialog.commitId)?.shortId ??
+            rewordDialog.commitId.slice(0, 7)
+          }
+          loadMessage={loadRewordMessage}
+          disabled={repositoryOperationDisabled}
+          disabledReason={operationDisabledReason}
+          onReword={(message) => {
+            const { commitId, onto } = rewordDialog;
+            appState.closeRewordDialog();
+            void appState.editHistory(commitId, onto, { kind: "Reword", message });
+          }}
+          onCancel={appState.closeRewordDialog}
         />
       )}
       {active && appState.state.deleteRemoteTagDialog !== null && (
@@ -902,6 +927,8 @@ export function RepoWorkspace({
                         appState.setAmendMode(true);
                         setFocusCommitMessage(true);
                       }}
+                      onEditHistory={(commitId, onto, request) => void appState.editHistory(commitId, onto, request)}
+                      onRewordCommit={appState.openRewordDialog}
                       graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
                       remotes={appState.state.remotes}
                       onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}

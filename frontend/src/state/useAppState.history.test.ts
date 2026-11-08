@@ -33,6 +33,66 @@ describe("history actions", () => {
     expect(result.current.state.rebaseProgress).toBeNull();
   });
 
+  describe("one-click history edits (#442)", () => {
+    const span = ["p", "c", "d"].map((id) => ({ id, shortId: `${id}123456`, summary: id, authorName: "A", timestamp: 1 }));
+    const pick = (commitId: string) => ({ commitId, action: { kind: "Pick" }, combinedMessage: null });
+
+    it("squashes with the parent's and the commit's full messages, then toasts", async () => {
+      const commitsSince = vi.fn(async () => span);
+      const getCommitMessage = vi.fn(async (_repo: string, id: string) => (id === "p" ? "Parent\n\nbody\n" : "Child\n"));
+      const startRebase = vi.fn(async () => ({ kind: "Done" }) as const);
+      const { result } = renderHook(() =>
+        useAppState(transferClient({ commitsSince, getCommitMessage, startRebase }), TEST_REPO_PATH),
+      );
+      let outcome: unknown;
+      await act(async () => {
+        outcome = await result.current.editHistory("c", "g", { kind: "Squash" });
+      });
+      expect(commitsSince).toHaveBeenCalledWith(TEST_REPO_PATH, "g");
+      expect(startRebase).toHaveBeenCalledWith(TEST_REPO_PATH, "g", [
+        { commitId: "p", action: { kind: "Pick" }, combinedMessage: "Parent\n\nbody\n\nChild\n" },
+        { commitId: "c", action: { kind: "Squash" }, combinedMessage: null },
+        pick("d"),
+      ]);
+      expect(outcome).toEqual({ kind: "Done" });
+      expect(result.current.state.historyEditOutcome).toEqual({ message: "Squashed c123456 into its parent" });
+    });
+
+    it("leaves a paused edit to the rebase panel, without a toast", async () => {
+      const startRebase = vi.fn(async () => ({ kind: "Conflicted" as const, files: ["f"] }));
+      const { result } = renderHook(() =>
+        useAppState(transferClient({ commitsSince: async () => span.slice(1), startRebase }), TEST_REPO_PATH),
+      );
+      await act(async () => {
+        await result.current.editHistory("c", "p", { kind: "MoveUp" });
+      });
+      expect(startRebase).toHaveBeenCalledWith(TEST_REPO_PATH, "p", [pick("d"), pick("c")]);
+      expect(result.current.state.historyEditOutcome).toBeNull();
+    });
+
+    it("refuses without starting when the history changed since the menu opened", async () => {
+      const startRebase = vi.fn();
+      const { result } = renderHook(() =>
+        useAppState(transferClient({ commitsSince: async () => span, startRebase }), TEST_REPO_PATH),
+      );
+      let outcome: unknown;
+      await act(async () => {
+        outcome = await result.current.editHistory("d", "p", { kind: "Drop" });
+      });
+      expect(outcome).toBeNull();
+      expect(startRebase).not.toHaveBeenCalled();
+      expect(result.current.state.error).toBe("The history changed. Refresh and try again.");
+    });
+
+    it("opens and closes the Reword dialog", () => {
+      const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
+      act(() => result.current.openRewordDialog("c", "p"));
+      expect(result.current.state.rewordDialog).toEqual({ commitId: "c", onto: "p" });
+      act(() => result.current.closeRewordDialog());
+      expect(result.current.state.rewordDialog).toBeNull();
+    });
+  });
+
   it("cherryPick calls the client then refreshes", async () => {
     const cherryPick = vi.fn(async () => ({ kind: "Committed", commitId: "n1" }) as const);
     const getStatus = vi.fn(async () => []);

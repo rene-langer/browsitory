@@ -1,4 +1,5 @@
 import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit } from "../ipc/RepoClient";
+import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
@@ -496,6 +497,34 @@ export function buildCommands(
           keywords: ["reset", "soft", "mixed", "hard"],
           run: () => goToCommitMenu(selectedCommit.id),
         });
+      }
+      // The commit menu's one-click history edits (#442), only where the menu enables them.
+      // HEAD's Reword… is "Amend last commit" below.
+      const commitId = selectedCommit.id;
+      const short = selectedCommit.shortId;
+      const checks = historyEditChecks(
+        {
+          commits: state.commits,
+          headInfo: state.headInfo,
+          currentBranch: state.branches.find((branch) => branch.isCurrent)?.name ?? null,
+          status: state.status,
+        },
+        commitId,
+      );
+      const edit = (request: HistoryEditRequest) => (onto: string) => void appState.editHistory(commitId, onto, request);
+      const edits: [string, string, HistoryEditCheck, string[], (onto: string) => void][] = [
+        ["reword-selected", `Reword ${short}…`, isHead ? { ok: false, reason: "" } : checks.Reword, ["reword", "message"],
+          (onto) => appState.openRewordDialog(commitId, onto)],
+        ["squash-selected", `Squash ${short} with parent`, checks.Squash, ["squash", "combine", "parent"], edit({ kind: "Squash" })],
+        ["fixup-selected", `Fixup ${short} into parent`, checks.Fixup, ["fixup", "squash", "parent"], edit({ kind: "Fixup" })],
+        ["move-up-selected", `Move ${short} up`, checks.MoveUp, ["move", "up", "reorder"], edit({ kind: "MoveUp" })],
+        ["move-down-selected", `Move ${short} down`, checks.MoveDown, ["move", "down", "reorder"], edit({ kind: "MoveDown" })],
+        ["drop-selected", `Drop ${short}`, checks.Drop, ["drop", "remove"], edit({ kind: "Drop" })],
+      ];
+      for (const [id, label, check, keywords, run] of edits) {
+        if (!check.ok) continue;
+        const { onto } = check;
+        commands.push({ id, label, keywords: [...keywords, "edit", "rebase", "commit"], run: () => run(onto) });
       }
     }
     if (state.headInfo.headId !== null) {

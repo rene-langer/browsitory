@@ -23,7 +23,8 @@ The palette has almost every action in Browsitory, grouped like this:
 - **Repositories:** switch to another tab, close the tab, open a terminal, reveal the
   repository in the file manager.
 - **General:** **Refresh**, undo and redo, search commits, file history of the current file,
-  the selected commit's actions (cherry-pick, revert, reset, check out), worktree and submodule
+  the selected commit's actions (cherry-pick, revert, reset, check out, reword, squash, fixup,
+  move, drop), worktree and submodule
   actions, **Preferences…**, **Show keyboard shortcuts**, **Third-party licences** and **Open
   user guide**.
 

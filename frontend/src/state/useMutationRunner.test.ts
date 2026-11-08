@@ -31,6 +31,8 @@ const BASE_STATE: AppState = {
   rebaseProgress: null,
   rebaseOnto: null,
   rebasePreset: null,
+  rewordDialog: null,
+  historyEditOutcome: null,
   pendingPull: null,
   pullOutcome: null,
   mergeDialog: null,

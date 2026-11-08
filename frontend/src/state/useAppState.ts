@@ -22,6 +22,7 @@ import type {
   StashOptions,
   PullRequestList,
   RebasePlanEntry,
+  RebaseStepResult,
   RemoteAuthMode,
   RemoteInfo,
   ReflogEntry,
@@ -53,6 +54,7 @@ import { useReflogActions } from "./useReflogActions";
 import { useRemoteTransferActions } from "./useRemoteTransferActions";
 import { useStagingActions } from "./useStagingActions";
 import type { PresetAction } from "../lib/rebaseSelection";
+import type { HistoryEditRequest } from "../lib/historyEdits";
 import { useStashActions } from "./useStashActions";
 import { useSubmoduleActions } from "./useSubmoduleActions";
 import { useWorktreeActions } from "./useWorktreeActions";
@@ -151,6 +153,10 @@ export interface AppState {
   // Per-commit actions to default to in the rebase planner, set only when it was opened via a
   // CommitGraph multi-select action (as opposed to "Rebase onto here").
   rebasePreset: ReadonlyMap<string, PresetAction> | null;
+  // Non-null while the Reword dialog of an older commit is open (#442); `onto` is its parent.
+  rewordDialog: { commitId: string; onto: string } | null;
+  // The last one-click history edit that finished, for its toast (#442).
+  historyEditOutcome: { message: string } | null;
   pendingPull: { upstreamRef: string } | null;
   pullOutcome: PullOutcome | null;
   // Non-null while the merge options dialog is open for that branch.
@@ -290,6 +296,10 @@ export interface UseAppStateResult {
   openRebaseSelection(onto: string, preset: ReadonlyMap<string, PresetAction>): void;
   closeRebasePlanner(): void;
   startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
+  /** See `MergeRebaseActions.editHistory`. */
+  editHistory(commitId: string, onto: string, request: HistoryEditRequest): Promise<RebaseStepResult | null>;
+  openRewordDialog(commitId: string, onto: string): void;
+  closeRewordDialog(): void;
   rebaseContinue(): Promise<void>;
   abortRebase(): Promise<RebaseAbort | null>;
   /** See `HistoryActions`: outcomes, or `null` on failure. */
@@ -386,6 +396,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     rebaseProgress: null,
     rebaseOnto: null,
     rebasePreset: null,
+    rewordDialog: null,
+    historyEditOutcome: null,
     pendingPull: null,
     pullOutcome: null,
     mergeDialog: null,
@@ -718,6 +730,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     openRebaseSelection,
     closeRebasePlanner,
     startRebase,
+    editHistory,
+    openRewordDialog,
+    closeRewordDialog,
     rebaseContinue,
     abortRebase,
   } = useMergeRebaseActions(client, repoPath, runMutation, setState);
@@ -863,6 +878,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     openRebaseSelection,
     closeRebasePlanner,
     startRebase,
+    editHistory,
+    openRewordDialog,
+    closeRewordDialog,
     rebaseContinue,
     abortRebase,
     cherryPick,
