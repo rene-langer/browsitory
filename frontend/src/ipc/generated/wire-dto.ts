@@ -37,7 +37,7 @@ export type DiffLineOrigin = "Add" | "Remove" | "Context";
 
 export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, };
 
-export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, };
+export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, wordWrap: WordWrap, };
 
 export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 
@@ -209,6 +209,8 @@ export type UpstreamInfo = { localBranch: string, remoteName: string, remoteBran
  * Where Push lands under `push.default`; null = ask with the Push to… dialog.
  */
 pushBranch: string | null, };
+
+export type WordWrap = "Auto" | "On" | "Off";
 
 export type Workspace = { id: string, name: string, rootPath: string, memberPaths: Array<string>, };
 
