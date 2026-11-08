@@ -2128,3 +2128,57 @@ fn a_failed_first_step_never_touches_an_edited_skip_worktree_file() {
         "precious\n"
     );
 }
+
+/// "Drop" on HEAD from the commit menu (#442): the plan is that one commit, dropped. Nothing
+/// lands, and the branch ends on the commit's parent.
+#[test]
+fn a_plan_that_only_drops_head_moves_the_branch_to_its_parent() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "add a");
+    let head = commit_id_at(&repo, 0);
+
+    let plan = vec![RebasePlanEntry {
+        commit_id: head,
+        action: RebaseAction::Drop,
+        combined_message: None,
+    }];
+    let (_state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    assert!(!repo.head_detached().unwrap());
+    assert_eq!(commit_id_at(&repo, 0), onto);
+    assert!(!dir.path().join("a.txt").exists());
+}
+
+/// "Move up"/"Move down" from the commit menu (#442): two neighbours swapped, the rest picked.
+#[test]
+fn swapping_two_neighbours_reorders_them_and_keeps_the_commits_after() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "base.txt", "v1\n");
+    commit_all(&repo, "base commit");
+    let onto = commit_id_at(&repo, 0);
+    for name in ["a", "b", "c"] {
+        write_file(dir.path(), &format!("{name}.txt"), &format!("{name}\n"));
+        commit_all(&repo, &format!("add {name}"));
+    }
+
+    let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
+    let plan = vec![
+        pick(&commits[1].id),
+        pick(&commits[0].id),
+        pick(&commits[2].id),
+    ];
+    let (_state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+
+    assert_eq!(result, RebaseStepResult::Done);
+    let summaries: Vec<String> = git_core::rebase::commits_since(&repo, &onto)
+        .unwrap()
+        .into_iter()
+        .map(|commit| commit.summary)
+        .collect();
+    assert_eq!(summaries, ["add b", "add a", "add c"]);
+}

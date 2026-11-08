@@ -1170,14 +1170,14 @@ describe("CommitGraph — history actions", () => {
     expect(onResetToCommit).toHaveBeenCalledWith("B", "mixed");
   });
 
-  it("disables cherry-pick on HEAD and offers Edit commit message there", () => {
+  it("disables cherry-pick on HEAD and rewords HEAD in the amend box", () => {
     const { openMenu, onEditHeadMessage } = setup();
     openMenu("C");
     expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit commit message…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reword…" }));
     expect(onEditHeadMessage).toHaveBeenCalled();
     openMenu("M");
-    expect(screen.queryByRole("menuitem", { name: "Edit commit message…" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Reword…" })).not.toBeInTheDocument();
   });
 
   it("asks for the parent of a merge commit and passes it as the mainline", () => {
@@ -1249,6 +1249,108 @@ describe("CommitGraph — history actions", () => {
     const { openMenu } = setup({ headInfo: { ...NO_HEAD, headId: "C", detachedAt: "C" }, currentBranch: null });
     openMenu("B");
     expect(screen.getByRole("menuitem", { name: "Reset HEAD to here…" })).toBeDisabled();
+  });
+});
+
+describe("CommitGraph — one-click history edits", () => {
+  // Newest first: E -> D -> C -> B -> A (root); X is on another branch, off C.
+  const line = (id: string, parentIds: string[]): GraphCommit => ({
+    ...commits[0],
+    id,
+    shortId: id,
+    summary: id,
+    parentIds,
+  });
+  const chain: GraphCommit[] = [line("E", ["D"]), line("X", ["C"]), line("D", ["C"]), line("C", ["B"]), line("B", ["A"]), line("A", [])];
+  const EDIT_ITEMS = ["Reword…", "Squash with parent", "Fixup into parent", "Move up", "Move down", "Drop"];
+
+  function setup(overrides: Partial<ComponentProps<typeof CommitGraph>> = {}) {
+    const handlers = {
+      onSelectRow: vi.fn(),
+      onBranchFromCommit: vi.fn(),
+      onRebaseFromCommit: vi.fn(),
+      onCherryPick: vi.fn(),
+      onRevert: vi.fn(),
+      onCheckoutCommit: vi.fn(),
+      onResetToCommit: vi.fn(),
+      onEditHeadMessage: vi.fn(),
+      onEditHistory: vi.fn(),
+      onRewordCommit: vi.fn(),
+    };
+    render(
+      <CommitGraph
+        status={[]}
+        commits={chain}
+        selectedRow="uncommitted"
+        pending={false}
+        headInfo={{ ...NO_HEAD, headId: "E" }}
+        currentBranch="main"
+        {...handlers}
+        {...overrides}
+      />,
+    );
+    const openMenu = (summary: string) => fireEvent.contextMenu(screen.getByText(`${summary} ${summary}`).closest("li")!);
+    return { ...handlers, openMenu };
+  }
+
+  it("runs each edit of an older commit from the right base", () => {
+    const { openMenu, onEditHistory, onRewordCommit } = setup();
+    const cases: [string, unknown, string][] = [
+      ["Squash with parent", { kind: "Squash" }, "A"],
+      ["Fixup into parent", { kind: "Fixup" }, "A"],
+      ["Move up", { kind: "MoveUp" }, "B"],
+      ["Move down", { kind: "MoveDown" }, "A"],
+      ["Drop", { kind: "Drop" }, "B"],
+    ];
+    for (const [name, request, onto] of cases) {
+      openMenu("C");
+      fireEvent.click(screen.getByRole("menuitem", { name }));
+      expect(onEditHistory).toHaveBeenLastCalledWith("C", onto, request);
+    }
+    openMenu("C");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reword…" }));
+    expect(onRewordCommit).toHaveBeenCalledWith("C", "B");
+  });
+
+  it("rewords HEAD in the amend box and can't move it up", () => {
+    const { openMenu, onEditHeadMessage, onRewordCommit } = setup();
+    openMenu("E");
+    expect(screen.getByRole("menuitem", { name: "Move up" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Move up" })).toHaveAttribute("title", "This is already the newest commit.");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reword…" }));
+    expect(onEditHeadMessage).toHaveBeenCalled();
+    expect(onRewordCommit).not.toHaveBeenCalled();
+  });
+
+  it("disables the edits with a reason off the current branch, on a dirty tree and while busy", () => {
+    const { openMenu } = setup();
+    openMenu("X");
+    for (const name of EDIT_ITEMS) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute("title", "Only commits of the current branch can be edited.");
+    }
+  });
+
+  it("needs a clean tracked tree", () => {
+    const { openMenu } = setup({ status });
+    openMenu("C");
+    for (const name of EDIT_ITEMS) {
+      expect(screen.getByRole("menuitem", { name })).toHaveAttribute("title", "Commit or stash your changes first.");
+    }
+  });
+
+  it("disables every edit while an operation is pending", () => {
+    const { openMenu } = setup({ pending: true });
+    openMenu("C");
+    for (const name of EDIT_ITEMS) expect(screen.getByRole("menuitem", { name })).toBeDisabled();
+  });
+
+  it("is reachable from the keyboard through the row's menu", () => {
+    const { onEditHistory } = setup({ selectedRow: { commitId: "D" } });
+    fireEvent.keyDown(screen.getByRole("listbox", { name: "Commit history" }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop" }));
+    expect(onEditHistory).toHaveBeenCalledWith("D", "C", { kind: "Drop" });
   });
 });
 
