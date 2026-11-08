@@ -15,11 +15,12 @@ import { Overlay } from "./components/primitives/Overlay";
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import type { AppCommands } from "./lib/commands";
-import { CommitMessageSection, ExternalToolsSection, PreferencesDialog } from "./components/PreferencesDialog";
+import { CommitMessageSection, ExternalToolsSection, FetchSection, PreferencesDialog } from "./components/PreferencesDialog";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
 import { repoNameOf } from "./lib/repoName";
 import { persistTheme } from "./lib/theme";
 import { CommitMessageSettingsProvider } from "./state/CommitMessageSettingsProvider";
+import { FetchSettingsProvider } from "./state/FetchSettingsProvider";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useOpenRepos } from "./state/useOpenRepos";
 import { useWorkspaces } from "./state/useWorkspaces";
@@ -42,7 +43,9 @@ export default function App(props: {
   return (
     <DiffSettingsProvider client={props.client}>
       <CommitMessageSettingsProvider client={props.client}>
-        <AppContent {...props} />
+        <FetchSettingsProvider client={props.client}>
+          <AppContent {...props} />
+        </FetchSettingsProvider>
       </CommitMessageSettingsProvider>
     </DiffSettingsProvider>
   );
@@ -247,6 +250,7 @@ function AppContent({
         <PreferencesDialog onClose={() => setPreferencesOpen(false)}>
           <ExternalToolsSection client={client} repoPath={openRepos.activePath} toolHost={toolHost} />
           <CommitMessageSection />
+          <FetchSection repoPath={openRepos.activePath} />
         </PreferencesDialog>
       )}
       {(transportError !== null || openError !== null) && (

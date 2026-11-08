@@ -276,10 +276,12 @@ fn fetch_all_remotes_reports_each_unreachable_remote_and_completes() {
         .filter_map(|event| match event {
             TransferEvent::RemoteFailed {
                 operation_id: id,
+                operation,
                 remote_name,
                 error,
             } => {
                 assert_eq!(id, &operation_id);
+                assert_eq!(*operation, TransferOperation::FetchAll);
                 Some((remote_name.clone(), *error))
             }
             _ => None,
@@ -694,4 +696,102 @@ fn force_push_streams_a_completed_force_push_event() {
             hook_output: None,
         }) if id == &operation_id
     ));
+}
+
+#[test]
+fn a_background_fetch_fetches_every_remote_quietly_and_records_no_undo_entry() {
+    let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let undo_before = handle.get_undo_state().expect("undo state");
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let operation_id = handle
+        .background_fetch(None, event_tx)
+        .expect("start background fetch")
+        .expect("an idle worker starts the background fetch");
+    let events: Vec<_> = event_rx.iter().collect();
+
+    assert!(operation_id.starts_with("background-fetch-"));
+    assert!(matches!(
+        events.first(),
+        Some(TransferEvent::Started {
+            operation: TransferOperation::BackgroundFetch,
+            ..
+        })
+    ));
+    assert_eq!(
+        completed(&events),
+        (TransferOperation::BackgroundFetch, None)
+    );
+    let local = Repository::open(local_dir.path()).expect("reopen local");
+    assert!(
+        local
+            .branches(Some(git2::BranchType::Remote))
+            .expect("branches")
+            .count()
+            > 0
+    );
+    assert_eq!(handle.get_undo_state().expect("undo state"), undo_before);
+    // Done: the registry forgets it, so the next background fetch may start.
+    assert_eq!(handle.cancelled.len(), 0);
+}
+
+#[test]
+fn a_background_fetch_reports_a_failing_remote_as_background_fetch() {
+    let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+    let missing = TempDir::new().expect("missing dir");
+    Repository::open(local_dir.path())
+        .expect("open local")
+        .remote(
+            "broken",
+            missing.path().join("nope").to_str().expect("path"),
+        )
+        .expect("add broken remote");
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let (event_tx, event_rx) = mpsc::channel();
+
+    worker
+        .handle()
+        .background_fetch(None, event_tx)
+        .expect("start background fetch")
+        .expect("started");
+    let events: Vec<_> = event_rx.iter().collect();
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        TransferEvent::RemoteFailed {
+            operation: TransferOperation::BackgroundFetch,
+            remote_name,
+            ..
+        } if remote_name == "broken"
+    )));
+    assert_eq!(
+        completed(&events),
+        (TransferOperation::BackgroundFetch, None)
+    );
+}
+
+#[test]
+fn a_background_fetch_is_skipped_while_another_operation_is_queued_or_running() {
+    let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    // A manual fetch (or a commit, a push, another background fetch…) holds an operation ID
+    // from the moment it is queued until it finished.
+    let manual = handle.cancelled.allocate("fetch");
+    let (event_tx, event_rx) = mpsc::channel();
+
+    assert_eq!(handle.background_fetch(None, event_tx.clone()), Ok(None));
+    drop(event_tx);
+    assert!(
+        event_rx.iter().next().is_none(),
+        "a skipped fetch sends no event"
+    );
+    drop(manual);
+    let (event_tx, _event_rx) = mpsc::channel();
+    assert!(handle
+        .background_fetch(None, event_tx)
+        .expect("start")
+        .is_some());
 }

@@ -1,4 +1,4 @@
-use repo_service::wire::{CommitMessageSettingsDto, DiffSettingsDto};
+use repo_service::wire::{CommitMessageSettingsDto, DiffSettingsDto, FetchSettingsDto};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -33,5 +33,20 @@ pub(super) fn set_commit_message_settings(
 ) -> Result<Value, String> {
     config::set_commit_message_settings(&params.settings.into())
         .map_err(|error| error.to_string())?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+pub(super) struct SetFetchSettingsParams {
+    settings: FetchSettingsDto,
+}
+
+pub(super) fn get_fetch_settings() -> Result<Value, String> {
+    let settings = config::get_fetch_settings().map_err(|error| error.to_string())?;
+    serde_json::to_value(FetchSettingsDto::from(settings)).map_err(|error| error.to_string())
+}
+
+pub(super) fn set_fetch_settings(params: SetFetchSettingsParams) -> Result<Value, String> {
+    config::set_fetch_settings(&params.settings.into()).map_err(|error| error.to_string())?;
     Ok(Value::Null)
 }

@@ -207,6 +207,24 @@ pub async fn fetch_all_remotes(
     Ok(operation_id)
 }
 
+/// The "Fetch automatically" tick: a quiet Fetch all (`TransferOperation::BackgroundFetch`).
+/// `None` when the repository's worker has another operation queued or running, so nothing was
+/// started (see `WorkerHandle::background_fetch`).
+#[tauri::command]
+pub async fn background_fetch(
+    repo_path: String,
+    prune: Option<bool>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = repo_worker(&state, &repo_path)?
+        .call(move |w| w.background_fetch(prune, event_tx))
+        .await?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn push_branch(

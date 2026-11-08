@@ -17,7 +17,7 @@ use super::*;
 use repo_service::wire::{
     transfer_progress_dto, BlameLineDto, BranchInfoDto, ChangedFileDto, CommitMessageSettingsDto,
     CommitOutcomeDto, CommitSignatureDto, CompareRangeDto, ConflictSegmentDto, DiffHunkDto,
-    DiffSettingsDto, ExternalToolSettingsDto, FileHistoryEntryDto, FileSidesDto,
+    DiffSettingsDto, ExternalToolSettingsDto, FetchSettingsDto, FileHistoryEntryDto, FileSidesDto,
     ForgeRepositoryDto, GitToolsDto, GraphCommitDto, HeadInfoDto, MarkResolvedOutcomeDto,
     MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto,
     PullRequestDto, PullRequestListDto, RebaseAbortDto, RebaseInfoDto, RebasePlanCommitDto,
@@ -102,6 +102,11 @@ fn snapshots() -> Vec<(String, String)> {
         "CommitMessageSettings",
         fixtures::commit_message_settings(),
         CommitMessageSettingsDto::from,
+    );
+    s.add(
+        "FetchSettings",
+        fixtures::fetch_settings(),
+        FetchSettingsDto::from,
     );
     s.add("GitTools", fixtures::git_tools(), GitToolsDto::from);
     s.add(
