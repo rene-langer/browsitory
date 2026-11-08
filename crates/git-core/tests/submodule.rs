@@ -117,7 +117,10 @@ fn reports_the_work_tree_of_a_checked_out_submodule_only() {
     assert_eq!(list_submodules(&parent).unwrap()[0].workdir, None);
 
     update_submodule(&parent, "deps/child", false).unwrap();
-    let workdir = list_submodules(&parent).unwrap()[0].workdir.clone().unwrap();
+    let workdir = list_submodules(&parent).unwrap()[0]
+        .workdir
+        .clone()
+        .unwrap();
     assert_eq!(Path::new(&workdir), expected);
     let opened = Repository::open(&workdir).unwrap();
     assert!(opened.find_reference("HEAD").is_ok());
@@ -136,7 +139,10 @@ fn reports_a_submodule_work_tree_inside_a_linked_worktree() {
     init_submodule(&linked, "deps/child").unwrap();
     update_submodule(&linked, "deps/child", false).unwrap();
 
-    let workdir = list_submodules(&linked).unwrap()[0].workdir.clone().unwrap();
+    let workdir = list_submodules(&linked).unwrap()[0]
+        .workdir
+        .clone()
+        .unwrap();
     assert_eq!(
         Path::new(&workdir).canonicalize().unwrap(),
         linked_path.join("deps/child").canonicalize().unwrap()

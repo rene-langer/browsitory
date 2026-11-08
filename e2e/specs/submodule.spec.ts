@@ -7,12 +7,12 @@ import { expandSidebarSection } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const E2E_SUBMODULE_PATH = "deps/e2e-child";
-const OPEN_IN_NEW_TAB = "//div[@role='menu']//button[@role='menuitem' and normalize-space(.)='Open in new tab']";
+const OPEN_IN_NEW_TAB = "//*[@role='menu']//button[@role='menuitem' and normalize-space(.)='Open in new tab']";
 
 // Opens the submodule row's menu from the keyboard: focus its "…" (shown only on hover or focus,
 // so focused by script rather than clicked) and press Shift+F10.
 async function openSubmoduleMenu(): Promise<void> {
-  const actions = await $(`button[aria-label='Actions for ${E2E_SUBMODULE_PATH}']`);
+  const actions = await $(`section[aria-label='Submodules'] button[aria-label='Actions for ${E2E_SUBMODULE_PATH}']`);
   await actions.waitForExist({ timeout: 10000 });
   await browser.execute((el) => (el as HTMLElement).focus(), actions);
   await browser.keys(["Shift", "F10"]);
@@ -37,7 +37,7 @@ describe("Browsitory submodules", () => {
     const openItem = await $(OPEN_IN_NEW_TAB);
     expect(await openItem.isEnabled()).toBe(false);
     expect(await openItem.getAttribute("title")).toContain("Not initialized");
-    await expect($("//div[@role='menu']//button[@role='menuitem' and normalize-space(.)='Initialize']")).toBeExisting();
+    await expect($("//*[@role='menu']//button[@role='menuitem' and normalize-space(.)='Initialize']")).toBeExisting();
     await closeMenu();
 
     await initializeButton.click();
@@ -108,7 +108,7 @@ describe("Browsitory submodules", () => {
       path.resolve(E2E_REPO_PATH, E2E_SUBMODULE_PATH),
     );
     // The tab shows the submodule's own history, not the superproject's.
-    await $("li*=e2e: advance child").waitForExist({ timeout: 10000 });
+    await $("li*=e2e: seed submodule").waitForExist({ timeout: 10000 });
 
     // Close it again (the close button sits right after the tab, see `multi-repo.spec.ts`).
     await browser.execute(
