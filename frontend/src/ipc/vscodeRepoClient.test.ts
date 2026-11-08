@@ -772,12 +772,12 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires listTags, createTag, and deleteTag", async () => {
-    const createPromise = vscodeRepoClient.createTag("/repo", "v1.0.0", "first release");
+    const createPromise = vscodeRepoClient.createTag("/repo", "v1.0.0", "first release", "abc123");
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "create_tag",
-      params: { repoPath: "/repo", name: "v1.0.0", message: "first release" },
+      params: { repoPath: "/repo", name: "v1.0.0", message: "first release", target: "abc123" },
     });
     respond(1, null);
     await expect(createPromise).resolves.toBeNull();
@@ -877,6 +877,16 @@ describe("vscodeRepoClient", () => {
     });
     respond(3, "delete-remote-3");
     await expect(del).resolves.toBe("delete-remote-3");
+
+    const delTag = vscodeRepoClient.deleteRemoteTag("/repo", "origin", "v1", true);
+    expect(postMessage).toHaveBeenLastCalledWith({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "delete_remote_tag",
+      params: { repoPath: "/repo", remoteName: "origin", tagName: "v1", noVerify: true },
+    });
+    respond(4, "delete-remote-4");
+    await expect(delTag).resolves.toBe("delete-remote-4");
   });
 
   it("wires cancelTransfer", async () => {

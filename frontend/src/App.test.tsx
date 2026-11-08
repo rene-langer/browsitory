@@ -116,6 +116,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     fetchAllRemotes: async () => unused(),
     pushBranch: async () => unused(),
     deleteRemoteBranch: async () => unused(),
+    deleteRemoteTag: async () => unused(),
     pullCurrentUpstream: async () => unused(),
     cancelTransfer: async () => unused(),
     subscribeTransferProgress: () => () => {},
@@ -1163,7 +1164,20 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => [
+        {
+          id: "c1",
+          shortId: "c1",
+          summary: "first commit",
+          authorName: "Test",
+          authorEmail: "test@example.com",
+          timestamp: 0,
+          parentIds: [],
+          branchRefs: ["main"],
+          remoteBranchRefs: [],
+          tags: ["v1"],
+        },
+      ],
       listBranches: async () => [{ name: "main", isCurrent: true }],
       listStashes: async () => [],
       listTags: async () => [
@@ -1171,11 +1185,15 @@ describe("App", () => {
       ],
       createTag,
     });
-    render(<App client={client} />);
+    const { container } = render(<App client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /^Tags/ }));
     await screen.findByLabelText("Select v1");
-    const form = screen.getByRole("form", { name: "Create tag" });
+    // Tags are created from a commit's menu in the graph (#438).
+    await waitFor(() => expect(container.querySelector('[data-commit-id="c1"]')).not.toBeNull());
+    fireEvent.contextMenu(container.querySelector('[data-commit-id="c1"]')!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create tag…" }));
+    const form = screen.getByRole("dialog", { name: "Create tag" });
     fireEvent.change(within(form).getByLabelText("Tag name"), { target: { value: "v1" } });
     fireEvent.click(within(form).getByRole("button", { name: "Create tag" }));
 

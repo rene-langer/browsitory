@@ -19,10 +19,17 @@ pub(super) struct CreateTagParams {
     repo_path: String,
     name: String,
     message: Option<String>,
+    // The commit to tag (a full id); missing or `null` tags HEAD's commit.
+    #[serde(default)]
+    target: Option<String>,
 }
 
 pub(super) fn create_tag(params: CreateTagParams, repos: &Repos) -> Result<Value, String> {
-    worker_handle(repos, &params.repo_path)?.create_tag(params.name, params.message)?;
+    worker_handle(repos, &params.repo_path)?.create_tag(
+        params.name,
+        params.message,
+        params.target,
+    )?;
     Ok(Value::Null)
 }
 

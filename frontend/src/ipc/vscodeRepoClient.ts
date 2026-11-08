@@ -359,8 +359,8 @@ export const vscodeRepoClient: RepoClient = {
     call<void>("set_current_upstream", { repoPath, remoteName, remoteBranch }),
   clearCurrentUpstream: (repoPath: string) => call<void>("clear_current_upstream", { repoPath }),
   listTags: (repoPath: string) => call<TagInfo[]>("list_tags", { repoPath }),
-  createTag: (repoPath: string, name: string, message: string | null) =>
-    call<void>("create_tag", { repoPath, name, message }),
+  createTag: (repoPath: string, name: string, message: string | null, target: string | null) =>
+    call<void>("create_tag", { repoPath, name, message, target }),
   deleteTag: (repoPath: string, name: string) => call<void>("delete_tag", { repoPath, name }),
   // Fetch and both pushes resolve with the operation id as soon as the sidecar has one — the
   // transfer itself is still running, and reports through `subscribeTransferProgress` below.
@@ -373,6 +373,8 @@ export const vscodeRepoClient: RepoClient = {
     call<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream, noVerify }),
   deleteRemoteBranch: (repoPath: string, remoteName: string, branchName: string, noVerify: boolean) =>
     call<string>("delete_remote_branch", { repoPath, remoteName, branchName, noVerify }),
+  deleteRemoteTag: (repoPath: string, remoteName: string, tagName: string, noVerify: boolean) =>
+    call<string>("delete_remote_tag", { repoPath, remoteName, tagName, noVerify }),
   pushCurrentBranch: (repoPath: string, remoteName: string, noVerify: boolean) =>
     call<string>("push_current_branch", { repoPath, remoteName, noVerify }),
   pushTags: (repoPath: string, remoteName: string, names: string[], noVerify: boolean) =>

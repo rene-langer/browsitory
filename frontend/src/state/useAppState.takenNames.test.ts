@@ -60,7 +60,7 @@ describe("taken names (#413)", () => {
     const result = await loaded({ listTags: async () => [tag("v1")], createTag });
 
     const outcome = await callAndSettle(
-      () => result.current.createTag("v1", null),
+      () => result.current.createTag("v1", null, null),
       () => expect(result.current.state.tags.map((t) => t.name)).toEqual(["v1"]),
     );
 
@@ -77,7 +77,7 @@ describe("taken names (#413)", () => {
 
     let outcome: string | null = null;
     await act(async () => {
-      outcome = await result.current.createTag("v1/rc", null);
+      outcome = await result.current.createTag("v1/rc", null, null);
     });
 
     expect(outcome).toBe('"v1/rc" can\'t be used while a tag named "v1" exists.');
@@ -93,7 +93,7 @@ describe("taken names (#413)", () => {
 
     let promise!: Promise<string | null>;
     act(() => {
-      promise = result.current.createTag("v2", null);
+      promise = result.current.createTag("v2", null, null);
     });
     expect(result.current.state.tags.map((t) => t.name)).toEqual(["v1", "v2"]);
 

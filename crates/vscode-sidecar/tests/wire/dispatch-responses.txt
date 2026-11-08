@@ -75,6 +75,9 @@ delete_branch/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"i
 delete_remote_branch/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct DeleteRemoteBranchParams"}}
 delete_remote_branch/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`"}}
 delete_remote_branch/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct DeleteRemoteBranchParams"}}
+delete_remote_tag/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct DeleteRemoteTagParams"}}
+delete_remote_tag/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`"}}
+delete_remote_tag/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct DeleteRemoteTagParams"}}
 delete_tag/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct DeleteTagParams"}}
 delete_tag/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`"}}
 delete_tag/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct DeleteTagParams"}}

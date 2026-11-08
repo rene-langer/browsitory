@@ -286,12 +286,12 @@ describe("useAppState", () => {
 
     let outcome: string | null = "not set";
     await act(async () => {
-      outcome = await result.current.createTag("good", null);
+      outcome = await result.current.createTag("good", null, null);
     });
     expect(outcome).toBeNull();
 
     await act(async () => {
-      outcome = await result.current.createTag("bad", null);
+      outcome = await result.current.createTag("bad", null, null);
     });
     expect(outcome).toBe("tag already exists");
     expect(result.current.state.error).toBe("tag already exists");
@@ -308,7 +308,7 @@ describe("useAppState", () => {
 
     let createPromise!: Promise<string | null>;
     act(() => {
-      createPromise = result.current.createTag("v1.0.0", null);
+      createPromise = result.current.createTag("v1.0.0", null, null);
     });
 
     expect(result.current.state.tags).toHaveLength(1);
@@ -349,7 +349,7 @@ describe("useAppState", () => {
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    await act(() => result.current.createTag("bad", null));
+    await act(() => result.current.createTag("bad", null, null));
     expect(result.current.state.error).toBe("tag already exists");
 
     act(() => result.current.dismissError());

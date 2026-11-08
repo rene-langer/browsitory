@@ -1,43 +1,62 @@
-import { useState } from "react";
-import { Tag } from "lucide-react";
+import { useState, type KeyboardEvent } from "react";
+import { MoreHorizontal, Tag } from "lucide-react";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
+import { isMenuKey, rectAnchor } from "../lib/menuKeys";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
-import { InlineError } from "./primitives/InlineError";
+import { ContextMenu } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
+import { tagMenuItems } from "./tagMenuItems";
 import styles from "./TagPanel.module.css";
 
+// `returnFocusTo`: the row's "…" for a pointer (WebKit focuses neither the row nor the button);
+// `undefined` for a key, so `ContextMenu` returns focus to what had it (as StashPanel).
+type TagMenu = { name: string; x: number; y: number; returnFocusTo?: HTMLElement };
+
+/**
+ * The list of every local tag: one line per tag (push-selection checkbox, name, kind), its
+ * actions in a menu (the "…" button, right-click, or the Menu key / Shift+F10 on the row's
+ * checkbox or "…"), the same items as the tag badge menu in the graph (`tagMenuItems`). Above
+ * the list a name filter, below it push selected / push all. Tags are created from the graph
+ * (a commit's "Create tag…") or the palette ("Create tag at HEAD…"), not here (#438).
+ * The tag name sits in its own element and the row has no click action yet (#441).
+ */
 export function TagPanel({
   tags,
   remotes,
-  onCreate,
   onDelete,
+  onDeleteFromRemote,
   onPush,
+  onPushTag,
+  onBranchFromCommit,
+  onCheckoutCommit,
   pushDisabled,
   operationDisabledReason,
 }: {
   tags: TagInfo[];
   remotes: RemoteInfo[];
-  // `null` = created; a string = the failure message to show inline next to the form. See
-  // `useAppState.ts`'s `createTag` (issue #30/UX-002).
-  onCreate: (name: string, message: string | null) => Promise<string | null>;
   onDelete: (name: string) => Promise<void>;
+  /** Opens the "Delete from remote" dialog for that tag. */
+  onDeleteFromRemote: (name: string) => void;
+  /** Push selected (`names`) or all (`[]`) tags. */
   onPush: (remoteName: string, names: string[]) => Promise<void>;
+  /** A row menu's "Push <tag> to <remote>". */
+  onPushTag: (remoteName: string, name: string) => void;
+  onBranchFromCommit: (commitId: string) => void;
+  onCheckoutCommit: (commitId: string) => void;
   pushDisabled: boolean;
   // Human-readable reason `pushDisabled` is true, shown as a `title` on the buttons it disables
   // (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
 }) {
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState<"lightweight" | "annotated">("lightweight");
-  const [message, setMessage] = useState("");
   const [remoteName, setRemoteName] = useState(remotes[0]?.name ?? "");
   const [selected, setSelected] = useState<string[]>([]);
+  const [filter, setFilter] = useState("");
   const [previousRemotes, setPreviousRemotes] = useState(remotes);
   const [previousTags, setPreviousTags] = useState(tags);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<TagMenu | null>(null);
 
   if (previousRemotes !== remotes) {
     setPreviousRemotes(remotes);
@@ -51,20 +70,9 @@ export function TagPanel({
     setSelected(selected.filter((name) => tags.some((tag) => tag.name === name)));
   }
 
-  const createTag = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const trimmedName = name.trim();
-    const trimmedMessage = message.trim();
-    if (trimmedName === "" || (kind === "annotated" && trimmedMessage === "")) return;
-    const failure = await onCreate(trimmedName, kind === "annotated" ? trimmedMessage : null);
-    if (failure !== null) {
-      setCreateError(failure);
-      return;
-    }
-    setCreateError(null);
-    setName("");
-    setMessage("");
-  };
+  // The menu acts on the tag it was opened for; a refresh that removed it closes the menu.
+  const menuTag = menu === null ? undefined : tags.find((tag) => tag.name === menu.name);
+  if (menu !== null && menuTag === undefined) setMenu(null);
 
   const toggleTag = (tagName: string) => {
     setSelected((current) => current.includes(tagName)
@@ -72,39 +80,94 @@ export function TagPanel({
       : [...current, tagName]);
   };
 
+  // The row is not a focus stop of its own (it has no click action yet), so the Menu key and
+  // Shift+F10 open its menu from its checkbox and its "…".
+  const openFromKey = (event: KeyboardEvent<HTMLElement>, name: string) => {
+    if (!isMenuKey(event)) return;
+    event.preventDefault();
+    const row = event.currentTarget.closest("li");
+    setMenu({ name, ...rectAnchor(row ?? event.currentTarget) });
+  };
+
+  const needle = filter.trim().toLowerCase();
+  const shown = needle === "" ? tags : tags.filter((tag) => tag.name.toLowerCase().includes(needle));
+  const disabledTitle = pushDisabled ? (operationDisabledReason ?? undefined) : undefined;
+
   return (
     <AccordionSection title="Tags" storageKey="sidebar-tags" icon={Tag} count={tags.length}>
-      <form className={styles.form} onSubmit={createTag} aria-label="Create tag">
-        <label className={styles.label}>Tag name<input value={name} onChange={(event) => { setName(event.target.value); setCreateError(null); }} /></label>
-        <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "lightweight"} onChange={() => setKind("lightweight")} />Lightweight tag</label>
-        <label className={styles.inlineLabel}><input type="radio" name="tag-kind" checked={kind === "annotated"} onChange={() => setKind("annotated")} />Annotated tag</label>
-        {kind === "annotated" && <label className={styles.label}>Tag message<textarea value={message} onChange={(event) => setMessage(event.target.value)} /></label>}
-        {createError !== null && (
-          <InlineError message={createError} onDismiss={() => setCreateError(null)} />
-        )}
-        <button type="submit" disabled={pushDisabled} title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}>Create tag</button>
-      </form>
-
-      {tags.length === 0 ? <p className={styles.empty}>No local tags. Create one above to mark a commit.</p> : (
-        <ul className={styles.list}>
-          {tags.map((tag) => (
-            <ListRow key={tag.name}>
-              <Tag size={14} aria-hidden="true" className={styles.rowIcon} />
-              <label className={styles.inlineLabel}><input type="checkbox" checked={selected.includes(tag.name)} onChange={() => toggleTag(tag.name)} aria-label={`Select ${tag.name}`} />{tag.name}</label>
-              <span>{tag.annotated ? "Annotated" : "Lightweight"}</span>
-              <Toolbar>
-                <button
-                  type="button"
-                  disabled={pushDisabled}
-                  title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
-                  onClick={() => setDeleteConfirmation(tag.name)}
+      {tags.length === 0 ? (
+        <p className={styles.empty}>
+          No local tags. To tag a commit, choose Create tag… in its menu in the graph, or Create tag at HEAD… in the
+          command palette.
+        </p>
+      ) : (
+        <>
+          <label className={styles.label}>
+            Filter tags
+            <input
+              type="search"
+              value={filter}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => setFilter(event.target.value)}
+            />
+          </label>
+          {shown.length === 0 ? (
+            <p className={styles.empty}>No tags match “{filter.trim()}”.</p>
+          ) : (
+            <ul className={styles.list} aria-label="Tags">
+              {shown.map((tag) => (
+                <ListRow
+                  key={tag.name}
+                  onOpenMenu={(anchor, trigger) =>
+                    setMenu({
+                      name: tag.name,
+                      ...anchor,
+                      returnFocusTo: trigger?.querySelector<HTMLElement>('button[aria-haspopup="menu"]') ?? undefined,
+                    })
+                  }
                 >
-                  Delete {tag.name}
-                </button>
-              </Toolbar>
-            </ListRow>
-          ))}
-        </ul>
+                  <input
+                    type="checkbox"
+                    className={styles.select}
+                    checked={selected.includes(tag.name)}
+                    onChange={() => toggleTag(tag.name)}
+                    onKeyDown={(event) => openFromKey(event, tag.name)}
+                    aria-label={`Select ${tag.name}`}
+                    aria-keyshortcuts="Shift+F10 ContextMenu"
+                  />
+                  <Tag size={14} aria-hidden="true" className={styles.rowIcon} />
+                  <span className={styles.tagName} title={tag.name}>
+                    {tag.name}
+                  </span>
+                  <span className={styles.kind}>{tag.annotated ? "Annotated" : "Lightweight"}</span>
+                  <button
+                    type="button"
+                    className={styles.iconButton}
+                    aria-label={`Actions for ${tag.name}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menu?.name === tag.name}
+                    aria-keyshortcuts="Shift+F10 ContextMenu"
+                    data-menu-key={tag.name}
+                    onKeyDown={(event) => openFromKey(event, tag.name)}
+                    onClick={(event) => {
+                      const trigger = event.currentTarget;
+                      if (menu?.name === tag.name) {
+                        // A second click closes it; focus stays on the button.
+                        trigger.focus({ preventScroll: true });
+                        setMenu(null);
+                      } else {
+                        setMenu({ name: tag.name, ...rectAnchor(trigger), returnFocusTo: trigger });
+                      }
+                    }}
+                  >
+                    <MoreHorizontal size={14} aria-hidden="true" />
+                  </button>
+                </ListRow>
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
       <section aria-labelledby="push-tags-heading">
@@ -115,7 +178,7 @@ export function TagPanel({
             value={remoteName}
             onChange={(event) => setRemoteName(event.target.value)}
             disabled={pushDisabled || remotes.length === 0}
-            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            title={disabledTitle}
           >
             {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
           </select>
@@ -124,7 +187,7 @@ export function TagPanel({
           <button
             type="button"
             disabled={pushDisabled || remoteName === "" || selected.length === 0}
-            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            title={disabledTitle}
             onClick={() => void onPush(remoteName, selected)}
           >
             Push selected tags
@@ -132,7 +195,7 @@ export function TagPanel({
           <button
             type="button"
             disabled={pushDisabled || remoteName === ""}
-            title={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+            title={disabledTitle}
             onClick={() => void onPush(remoteName, [])}
           >
             Push all tags
@@ -140,13 +203,36 @@ export function TagPanel({
         </Toolbar>
       </section>
 
+      {menu !== null && menuTag !== undefined && (
+        <ContextMenu
+          key={menuTag.name}
+          x={menu.x}
+          y={menu.y}
+          returnFocusTo={menu.returnFocusTo}
+          isTrigger={(button) => button.getAttribute("data-menu-key") === menuTag.name}
+          onClose={() => setMenu(null)}
+          items={tagMenuItems({
+            tag: menuTag.name,
+            commitId: menuTag.commitId,
+            remotes,
+            disabled: pushDisabled,
+            disabledReason: operationDisabledReason,
+            onPushTag,
+            onBranchFromCommit,
+            onCheckoutCommit,
+            onDeleteFromRemote,
+            onDelete: setDeleteConfirmation,
+          })}
+        />
+      )}
+
       {deleteConfirmation !== null && (
         <ConfirmDialog
           ariaLabel={`Delete local tag ${deleteConfirmation}`}
           message={`Delete local tag ${deleteConfirmation}?`}
           confirmLabel="Delete tag"
           confirmDisabled={pushDisabled}
-          confirmTitle={pushDisabled ? (operationDisabledReason ?? undefined) : undefined}
+          confirmTitle={disabledTitle}
           onConfirm={() => void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null))}
           onCancel={() => setDeleteConfirmation(null)}
         />

@@ -313,6 +313,7 @@ export type TransferOperation =
   | "PushTags"
   | "ForcePushBranch"
   | "DeleteRemoteBranch"
+  | "DeleteRemoteTag"
   | "Clone";
 /** Mirrors `git_core::remote::TransferErrorKind`; the wire value is its Rust variant name. */
 export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease" | "HookFailed";
@@ -759,7 +760,8 @@ export interface RepoClient {
   setCurrentUpstream(repoPath: string, remoteName: string, remoteBranch: string): Promise<void>;
   clearCurrentUpstream(repoPath: string): Promise<void>;
   listTags(repoPath: string): Promise<TagInfo[]>;
-  createTag(repoPath: string, name: string, message: string | null): Promise<void>;
+  /** Tags `target` (a full commit id), or HEAD's commit when `null`; `message` makes it annotated. */
+  createTag(repoPath: string, name: string, message: string | null, target: string | null): Promise<void>;
   deleteTag(repoPath: string, name: string): Promise<void>;
   /** `prune` `null` = git config decides (`remote.<name>.prune`, then `fetch.prune`). */
   fetchRemote(repoPath: string, remoteName: string, prune: boolean | null): Promise<string>;
@@ -778,6 +780,8 @@ export interface RepoClient {
   pushBranch(repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean): Promise<string>;
   /** Deletes the branch on the remote and its remote-tracking ref (runs `pre-push` unless `noVerify`). */
   deleteRemoteBranch(repoPath: string, remoteName: string, branchName: string, noVerify: boolean): Promise<string>;
+  /** Deletes the tag on the remote only; the local tag stays (runs `pre-push` unless `noVerify`). */
+  deleteRemoteTag(repoPath: string, remoteName: string, tagName: string, noVerify: boolean): Promise<string>;
   pullCurrentUpstream(repoPath: string): Promise<PullOutcome>;
   /**
    * Asks the backend to abort the in-flight transfer or hook run `operationId` (commit/amend/

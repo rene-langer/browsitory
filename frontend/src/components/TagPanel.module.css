@@ -6,45 +6,74 @@
   list-style: none;
 }
 
-.list li > span {
-  color: var(--color-text-muted);
-}
-
+/* One line per tag: checkbox, icon, name (takes the rest, truncated), kind, "…". */
 .list li {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1) var(--space-2);
+  gap: var(--space-1);
+  min-width: 0;
 }
 
-.form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: var(--space-2);
-  margin: var(--space-2) 0;
+.select {
+  flex: none;
+  margin: 0;
 }
 
 .label {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin: var(--space-2) 0;
   font-size: var(--text-sm);
 }
 
-.inlineLabel {
-  font-size: var(--text-sm);
+.tagName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.kind {
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+/* The row's "…" menu button, shown on hover, keyboard focus in the row or while its menu is
+   open, like the Stashes and Branches rows; `opacity` (not `display`) keeps it in the tab order. */
+.iconButton {
+  opacity: 0;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.iconButton:hover:not(:disabled),
+.iconButton[aria-expanded="true"] {
+  background: var(--color-control);
+  color: var(--color-text);
+}
+
+li:hover > .iconButton,
+li:focus-within > .iconButton,
+.iconButton[aria-expanded="true"] {
+  opacity: 1;
 }
 
 /* Sub-section heading in the panel body — replaces the retired global `.tag-panel h3` margin. */
 .sectionHeading {
-  margin: 0 0 var(--space-2) 0;
+  margin: var(--space-2) 0;
   font-size: var(--text-md);
 }
 
 .rowIcon {
-  vertical-align: text-bottom;
-  margin-right: var(--space-1);
+  flex: none;
   color: var(--color-text-muted);
 }
 

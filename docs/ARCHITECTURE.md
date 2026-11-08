@@ -1083,7 +1083,8 @@ certificate.
   (see "Cherry-pick sequences") and `push_refs`'s `push_negotiation` callback (`pre-push` with git's stdin,
   after the ref advertisement and the lease check, before any pack data). Every push
   (`push_branch` and its `push_current_branch` wrapper, force push, tags,
-  `delete_remote_branch`) funnels through `push_refs`, so all of them run `pre-push`.
+  `delete_remote_branch`, `delete_remote_tag`) funnels through `push_refs`, so all of them run
+  `pre-push`.
   `post-checkout`/`post-merge` run in the `repo-service` worker after successful commands only,
   so undo restores, rebase and other git-core internals never trigger hooks. Each runs on its
   command's own operation, before the cancel id is released and before the reply
