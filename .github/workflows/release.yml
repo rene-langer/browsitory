@@ -37,8 +37,8 @@ jobs:
   verify:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    # Observed up to 9 min (uncached cargo test). Its apt step has no limit of its own, and a slow
-    # mirror has taken up to 30 min (#353).
+    # Observed up to 9 min (uncached cargo test), plus up to 15 min for the apt step's retries
+    # past a slow mirror (#353, #459).
     timeout-minutes: 45
     env:
       # Same pin as ci.yml's `licenses` job; keep both in sync (Renovate updates both).
@@ -58,9 +58,12 @@ jobs:
         # into it before tagging (scripts/fold-changelog.py; see docs/RELEASING.md).
         run: python3 scripts/fold-changelog.py --check
       - name: Install Tauri system dependencies (Linux)
+        # Same script and packages as ci.yml's build-dist (#459): bounded download retries that
+        # skip a slow mirror (#353), at most about 11 min for the downloads plus the install
+        # from the cache; see the script's "Time budget".
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+          scripts/ci-apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
       - uses: dtolnay/rust-toolchain@stable
@@ -110,8 +113,8 @@ jobs:
           - os: windows-latest
             args: ""
     runs-on: ${{ matrix.os }}
-    # Observed up to 16 min (macOS universal build, no cache), plus up to 30 min for a slow apt
-    # mirror on Linux (#353).
+    # Observed up to 16 min (macOS universal build, no cache), plus up to 15 min for the apt
+    # step's retries past a slow mirror on Linux (#353, #459).
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -128,9 +131,12 @@ jobs:
           "
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-24.04'
+        # Same script and packages as ci.yml's build-dist (#459): bounded download retries that
+        # skip a slow mirror (#353), at most about 11 min for the downloads plus the install
+        # from the cache; see the script's "Time budget".
+        timeout-minutes: 15
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+          scripts/ci-apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev \
             libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
             libjavascriptcoregtk-4.1-dev libxdo-dev build-essential
       - uses: dtolnay/rust-toolchain@stable

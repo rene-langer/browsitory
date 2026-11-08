@@ -46,10 +46,16 @@ normally bundles with the tools main already used and downloads nothing.
 The script's tool list (URLs, file names, hashes) is copied from the bundler of the CLI version
 in its `TAURI_CLI_VERSION`. When the lockfile moves to another CLI version, the script only
 prints a warning in those jobs and the bundler downloads its own tools again, without retries
-(the cache still works). To restore the retries, compare
+(the cache still works). CI's `changelog` job runs `prefetch-bundler-tools.py --check-version`
+on every pull request, so a CLI bump (usually Renovate's Tauri group PR) gets a warning
+annotation and a line in the job summary; the check never fails (#458).
+
+After a CLI bump, in that PR or right after it: compare
 `crates/tauri-bundler/src/bundle/{windows/msi,windows/nsis,linux/appimage}` in the Tauri
-repository at the new `tauri-cli-v<version>` tag with the list, update it and bump
-`TAURI_CLI_VERSION`. If a release's `build-release` still fails on a download, re-run that job:
+repository at the new `tauri-cli-v<version>` tag with the list; update any changed URL, file
+name or required file and its hash (sha256 of the file at the URL where the bundler pins none);
+then set `TAURI_CLI_VERSION` to the new version. The warning goes away and the retries are
+back. If a release's `build-release` still fails on a download, re-run that job:
 the tag doesn't need to move.
 
 ### Preparing the changelog

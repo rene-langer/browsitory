@@ -5,11 +5,13 @@ import contextlib
 import hashlib
 import importlib.util
 import io
+import os
 import pathlib
 import shutil
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 
 MODULE_PATH = pathlib.Path(__file__).resolve().parent / "prefetch-bundler-tools.py"
@@ -70,6 +72,56 @@ class LockedVersionTests(unittest.TestCase):
 
     def test_reads_this_repositorys_lockfile(self):
         self.assertRegex(prefetch.locked_cli_version(LOCKFILE), r"^2\.\d+\.\d+$")
+
+
+class VersionCheckTests(unittest.TestCase):
+    """A Renovate CLI bump must be visible on its PR without failing it (#458)."""
+
+    def setUp(self):
+        self.dir = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(self.dir, ignore_errors=True))
+        self.summary = self.dir / "summary.md"
+
+    def check(self, locked, environ):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            warned = prefetch.warn_version_mismatch(locked, environ)
+        return warned, out.getvalue()
+
+    def test_the_matching_version_warns_nothing(self):
+        self.assertIsNone(prefetch.version_mismatch(prefetch.TAURI_CLI_VERSION))
+        warned, out = self.check(prefetch.TAURI_CLI_VERSION, {"GITHUB_STEP_SUMMARY": str(self.summary)})
+        self.assertFalse(warned)
+        self.assertNotIn("::warning", out)
+        self.assertFalse(self.summary.exists())
+
+    def test_another_version_is_an_annotation_and_a_summary_line(self):
+        warned, out = self.check("9.9.9", {"GITHUB_STEP_SUMMARY": str(self.summary)})
+        self.assertTrue(warned)
+        self.assertTrue(out.startswith("::warning "), out)
+        self.assertIn("@tauri-apps/cli 9.9.9", out)
+        self.assertIn(prefetch.TAURI_CLI_VERSION, out)
+        summary = self.summary.read_text(encoding="utf-8")
+        self.assertEqual(summary.count("\n"), 1)
+        self.assertIn("9.9.9", summary)
+        self.assertIn("TAURI_CLI_VERSION", summary)
+
+    def test_without_a_job_summary_it_only_prints(self):
+        warned, out = self.check("9.9.9", {})
+        self.assertTrue(warned)
+        self.assertIn("::warning", out)
+
+    def test_check_version_never_fails(self):
+        original = prefetch.TAURI_CLI_VERSION
+        self.addCleanup(setattr, prefetch, "TAURI_CLI_VERSION", original)
+        prefetch.TAURI_CLI_VERSION = "0.0.0"
+        out = io.StringIO()
+        # In CI, keep the real job summary free of this test's warning.
+        environ = {"GITHUB_STEP_SUMMARY": str(self.summary)}
+        with contextlib.redirect_stdout(out), unittest.mock.patch.dict(os.environ, environ):
+            self.assertEqual(prefetch.main(["--check-version"]), 0)
+        self.assertIn("::warning", out.getvalue())
+        self.assertIn("0.0.0", self.summary.read_text(encoding="utf-8"))
 
 
 class ToolsDirTests(unittest.TestCase):
