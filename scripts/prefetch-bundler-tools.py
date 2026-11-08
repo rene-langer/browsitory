@@ -20,16 +20,20 @@ The tool list below is copied from the tauri-bundler of TAURI_CLI_VERSION
 frontend/pnpm-lock.yaml locks another CLI version, the script prints a warning and downloads
 nothing, so the bundler fetches its own tools (without retries) until the list is updated:
 compare those files at the new `tauri-cli-v<version>` tag, then update the list, the hashes and
-TAURI_CLI_VERSION (docs/RELEASING.md, "Bundler tools").
+TAURI_CLI_VERSION (docs/RELEASING.md, "Bundler tools"). ci.yml's `changelog` job runs
+`--check-version` on every pull request, so a CLI bump (a Renovate Tauri group PR) shows that
+warning as an annotation and a job summary line, without failing (#458).
 
 Usage:
     prefetch-bundler-tools.py                                # download what is missing
     prefetch-bundler-tools.py --github-output --no-download  # only write cli-version= and
                                                              # tools-dir= to $GITHUB_OUTPUT,
                                                              # for the cache step
+    prefetch-bundler-tools.py --check-version                # only warn when the locked CLI
+                                                             # isn't TAURI_CLI_VERSION
 
 Exit status: 0 when every required tool is in place (or the CLI version doesn't match), 1 when a
-required download failed after all attempts.
+required download failed after all attempts. --check-version always exits 0.
 """
 
 from __future__ import annotations
@@ -168,6 +172,34 @@ def locked_cli_version(lockfile_text: str) -> str:
     return versions.pop()
 
 
+def version_mismatch(locked: str) -> str | None:
+    """The warning for a locked CLI version the tool list wasn't copied from, or None."""
+    if locked == TAURI_CLI_VERSION:
+        return None
+    return (
+        f"frontend/pnpm-lock.yaml locks @tauri-apps/cli {locked}, but "
+        f"scripts/prefetch-bundler-tools.py lists the tools of {TAURI_CLI_VERSION}: nothing is "
+        "prefetched and the bundler downloads its own tools without retries. Compare the tool "
+        "list with the new CLI's bundler, then update it, the hashes and TAURI_CLI_VERSION "
+        '(docs/RELEASING.md, "Bundler tools").'
+    )
+
+
+def warn_version_mismatch(locked: str, environ: dict[str, str]) -> bool:
+    """Prints a `::warning::` annotation and adds a line to the job summary
+    ($GITHUB_STEP_SUMMARY, when set) if the locked CLI version doesn't match. True if it did."""
+    message = version_mismatch(locked)
+    if message is None:
+        print(f"@tauri-apps/cli {locked} matches the tool list.")
+        return False
+    print(f"::warning title=Bundler tool list out of date::{message}", flush=True)
+    summary = environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as out:
+            out.write(f":warning: **Bundler tool list out of date.** {message}\n")
+    return True
+
+
 def tools_dir(platform: str, environ: dict[str, str], home: pathlib.Path) -> pathlib.Path | None:
     """The bundler's tools folder (`dirs::cache_dir()/tauri`), or None where it downloads nothing."""
     if platform == "win32":
@@ -304,9 +336,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="download nothing (with --github-output: only find the folder and the version)",
     )
+    parser.add_argument(
+        "--check-version",
+        action="store_true",
+        help="only warn (annotation and job summary) when the locked CLI isn't TAURI_CLI_VERSION",
+    )
     args = parser.parse_args(argv)
 
     version = locked_cli_version(LOCKFILE.read_text(encoding="utf-8"))
+    if args.check_version:
+        warn_version_mismatch(version, dict(os.environ))
+        return 0
     root = tools_dir(sys.platform, dict(os.environ), pathlib.Path.home())
     if args.github_output:
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
@@ -318,12 +358,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.no_download:
         print(f"@tauri-apps/cli {version}, tools folder {root}")
         return 0
-    if version != TAURI_CLI_VERSION:
-        print(
-            f"::warning::frontend/pnpm-lock.yaml locks @tauri-apps/cli {version}, but "
-            f"scripts/prefetch-bundler-tools.py lists the tools of {TAURI_CLI_VERSION}: nothing "
-            "prefetched, the bundler downloads its own (see docs/RELEASING.md, \"Bundler tools\")"
-        )
+    if warn_version_mismatch(version, dict(os.environ)):
         return 0
     return prefetch(root, tools_for(sys.platform))
 

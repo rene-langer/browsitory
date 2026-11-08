@@ -122,6 +122,12 @@ jobs:
       # Build tooling (build-dist and release.yml's build-release, #454); no network.
       - name: prefetch-bundler-tools.py unit tests
         run: python3 scripts/test_prefetch_bundler_tools.py
+      # Never fails (#458): when frontend/pnpm-lock.yaml (e.g. a Renovate Tauri group PR) locks
+      # another @tauri-apps/cli than the script's tool list was copied from, this adds a warning
+      # annotation and a job summary line, so the PR shows that the list needs updating. See
+      # docs/RELEASING.md, "Bundler tools".
+      - name: Bundler tool list matches the locked Tauri CLI
+        run: python3 scripts/prefetch-bundler-tools.py --check-version
       - name: Changelog entry (fragment in changelog.d/ or CHANGELOG.md)
         env:
           # A dispatched run has no pull request: the default branch is the base, and there are
