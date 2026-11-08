@@ -13,8 +13,14 @@ name since, it refuses ("Can't stash 'new' on its own: it was renamed from 'old'
 exists again. Stash 'old' too, or move it first."); **Stash file…** on the old name stashes
 both. On macOS, Windows or with `core.ignorecase`, **Stash file…** and **Stash all** refuse a
 staged rename that changes only the case of a name (`Old` to `old`: "Can't stash 'old': it
-differs from 'Old' only in case."); commit it or undo it first. One file at a
-time: the change lists have no multi-select. A file inside a symlinked folder can't be stashed on its own.
+differs from 'Old' only in case."); commit it or undo it first. On macOS this includes names
+the drive treats as the same (`Straße` and `Strasse`, `Café` and `CAFÉ`), on Windows `Café`
+and `CAFÉ`. If the repository holds two files whose names differ only in case (`A` and `a`,
+committed on a case-sensitive drive), **Stash all** refuses there too, and so does **Stash
+file…** on either of them ("Can't stash: 'a' and 'A' differ only in case, and stashing would
+remove one of them…");
+stashing other files on their own still works. One file at a time: the change lists have no
+multi-select. A file inside a symlinked folder can't be stashed on its own.
 If a tracked file was replaced by a symbolic link, stashing keeps the link in the stash and puts
 the file back; while a symbolic link replaces a tracked folder, **Stash all** refuses (move the
 link away first). So do switching branches, merging, cherry-picking, reverting, rebasing,
