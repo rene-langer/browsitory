@@ -873,9 +873,11 @@ function UncommittedDiffPane({
   onDiscardAllUnstaged: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
   // Resolves `true` once committed; CommitBox keeps the message otherwise.
-  /** The graph's commits, for HEAD's author in the amend Author field. */
+  /** The loaded history (may be a file history or search results); stands in for
+   * `branchCommits` when that is absent. */
   commits?: GraphCommit[];
-  /** The graph's commits (not a file history or search), for the branch's recent messages. */
+  /** The graph's commits (not a file history or search), for the branch's recent messages and
+   * HEAD's author in the amend Author field. */
   branchCommits?: GraphCommit[];
   onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
   onSaveStash: () => void;
@@ -917,7 +919,10 @@ function UncommittedDiffPane({
       ),
     [client, repoPath, branchCommits, commits, headInfo.headId],
   );
-  const headCommit = headInfo.headId === null ? undefined : commits?.find((c) => c.id === headInfo.headId);
+  // HEAD's author comes from the graph's commits: in file-history or search mode `commits` holds
+  // those results, which may not include HEAD (#464).
+  const headCommit =
+    headInfo.headId === null ? undefined : (branchCommits ?? commits)?.find((c) => c.id === headInfo.headId);
   const headAuthor = headCommit === undefined ? null : { name: headCommit.authorName, email: headCommit.authorEmail };
   const [headMessage, setHeadMessage] = useState<string | null>(null);
   useEffect(() => {

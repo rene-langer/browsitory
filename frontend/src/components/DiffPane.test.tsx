@@ -2413,6 +2413,20 @@ describe("DiffPane co-authors and amend author", () => {
     expect(onAmendCommit).toHaveBeenCalledWith("head message", { author: null, trailers: [] });
   });
 
+  it("prefills the amend Author from the graph while a file history is shown (#464)", async () => {
+    // In file-history mode `commits` holds the file's history, which doesn't include HEAD here;
+    // `branchCommits` is the graph's.
+    const older = { ...head, id: "f1", shortId: "f1", summary: "touches g.txt", authorName: "Other", authorEmail: "o@x.org" };
+    renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), [], {
+      amendMode: true,
+      headInfo,
+      commits: [older],
+      branchCommits: [head, older],
+      fileHistoryFocus: { path: "g.txt", oldPath: null },
+    });
+    expect(await screen.findByRole("textbox", { name: "Author" })).toHaveValue("Me <me@x.org>");
+  });
+
   it("leaves the Author empty when HEAD is not in the graph", async () => {
     renderUncommitted(fakeClient({ getCommitMessage: async () => "head message" }), [], {
       amendMode: true,
