@@ -59,6 +59,10 @@ pub struct SubmoduleInfo {
     pub gitlink_id: Option<String>,
     pub initialized: bool,
     pub head_id: Option<String>,
+    /// The submodule's own work tree, where a tab opens it (#445): the superproject's work tree
+    /// (a linked worktree's own folder, when listed from there) joined with `path`. `None`
+    /// until it is checked out: an empty or missing folder would open as the superproject.
+    pub workdir: Option<String>,
 }
 
 pub fn list_submodules(repo: &Repository) -> Result<Vec<SubmoduleInfo>, SubmoduleError> {
@@ -73,9 +77,19 @@ pub fn list_submodules(repo: &Repository) -> Result<Vec<SubmoduleInfo>, Submodul
                 gitlink_id: submodule.head_id().map(|id| id.to_string()),
                 initialized: config.get_string(&format!("submodule.{name}.url")).is_ok(),
                 head_id: submodule.workdir_id().map(|id| id.to_string()),
+                workdir: checked_out_workdir(repo, submodule.path()),
             })
         })
         .collect()
+}
+
+/// The submodule's folder when a repository opens there without searching upward, so the tab
+/// shows the submodule and never the superproject around it. libgit2's work tree ends in `/`
+/// (on Windows too), so joining the `/`-separated submodule path keeps one separator style.
+fn checked_out_workdir(repo: &Repository, path: &Path) -> Option<String> {
+    let folder = repo.workdir()?.join(path);
+    Repository::open(&folder).ok()?;
+    Some(folder.to_string_lossy().into_owned())
 }
 
 pub fn init_submodule(repo: &Repository, path: &str) -> Result<(), SubmoduleError> {

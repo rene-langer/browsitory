@@ -606,9 +606,9 @@ describe("vscodeRepoClient", () => {
 
   it("wires listSubmodules, initSubmodule, and updateSubmodule", async () => {
     const listPromise = vscodeRepoClient.listSubmodules("/repo");
-    respond(1, [{ path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null }]);
+    respond(1, [{ path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null, workdir: null }]);
     await expect(listPromise).resolves.toEqual([
-      { path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null },
+      { path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null, workdir: null },
     ]);
 
     const initPromise = vscodeRepoClient.initSubmodule("/repo", "deps/child");

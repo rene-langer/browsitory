@@ -102,6 +102,8 @@ export interface SubmoduleInfo {
   gitlinkId: string | null;
   initialized: boolean;
   headId: string | null;
+  /** The checked-out submodule's folder, which "Open in new tab" opens; `null` until it is checked out (#445). */
+  workdir: string | null;
 }
 
 export interface ReflogEntry {

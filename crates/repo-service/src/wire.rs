@@ -206,6 +206,9 @@ pub struct SubmoduleInfoDto {
     pub gitlink_id: Option<String>,
     pub initialized: bool,
     pub head_id: Option<String>,
+    /// Absolute path of the checked-out submodule, the folder its tab opens; `null` when it
+    /// isn't checked out (#445).
+    pub workdir: Option<String>,
 }
 
 impl From<git_core::submodule::SubmoduleInfo> for SubmoduleInfoDto {
@@ -216,6 +219,7 @@ impl From<git_core::submodule::SubmoduleInfo> for SubmoduleInfoDto {
             gitlink_id: submodule.gitlink_id,
             initialized: submodule.initialized,
             head_id: submodule.head_id,
+            workdir: submodule.workdir,
         }
     }
 }

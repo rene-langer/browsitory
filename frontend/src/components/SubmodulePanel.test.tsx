@@ -9,6 +9,7 @@ const uninitializedSubmodule: SubmoduleInfo = {
   gitlinkId: "0123456789abcdef",
   initialized: false,
   headId: null,
+  workdir: null,
 };
 
 const initializedSubmodule: SubmoduleInfo = {
@@ -16,6 +17,7 @@ const initializedSubmodule: SubmoduleInfo = {
   path: "deps/ready-child",
   initialized: true,
   headId: "fedcba9876543210",
+  workdir: "/repo/deps/ready-child",
 };
 
 function renderPanel(
@@ -27,7 +29,9 @@ function renderPanel(
       submodules={[uninitializedSubmodule, initializedSubmodule]}
       onInit={vi.fn().mockResolvedValue(undefined)}
       onUpdate={vi.fn().mockResolvedValue(undefined)}
+      onOpenInNewTab={vi.fn()}
       operationDisabled={false}
+      operationDisabledReason={null}
       {...overrides}
     />,
   );
@@ -86,5 +90,79 @@ describe("SubmodulePanel", () => {
     expect(screen.queryByRole("button", { name: /edit|delete|remove/i })).not.toBeInTheDocument();
 
     finishUpdate?.();
+  });
+
+  it("opens a checked-out submodule's folder in a new tab from its row menu", () => {
+    const onOpenInNewTab = vi.fn();
+    renderPanel({ onOpenInNewTab });
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for deps/ready-child" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Open in new tab",
+      "Update",
+    ]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in new tab" }));
+
+    expect(onOpenInNewTab).toHaveBeenCalledWith("/repo/deps/ready-child");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("disables Open in new tab with a reason for a submodule that isn't initialised, and offers Initialize", async () => {
+    const onInit = vi.fn().mockResolvedValue(undefined);
+    const onOpenInNewTab = vi.fn();
+    renderPanel({ onInit, onOpenInNewTab });
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for deps/child" }));
+    const open = screen.getByRole("menuitem", { name: "Open in new tab" });
+    expect(open).toBeDisabled();
+    expect(open).toHaveAttribute("title", "Not initialized: initialize and update it to check it out first.");
+    fireEvent.click(open);
+    expect(onOpenInNewTab).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Initialize" }));
+    await waitFor(() => expect(onInit).toHaveBeenCalledWith("deps/child"));
+  });
+
+  it("disables Open in new tab with a reason for an initialised submodule that isn't checked out", () => {
+    renderPanel({ submodules: [{ ...initializedSubmodule, headId: null, workdir: null }] });
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for deps/ready-child" }));
+    const open = screen.getByRole("menuitem", { name: "Open in new tab" });
+    expect(open).toBeDisabled();
+    expect(open).toHaveAttribute("title", "Not checked out: update it to check it out first.");
+    expect(screen.queryByRole("menuitem", { name: "Initialize" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Update" })).toBeEnabled();
+  });
+
+  it("disables the row menu's actions while an operation runs, with its reason", () => {
+    renderPanel({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for deps/ready-child" }));
+    for (const name of ["Open in new tab", "Update"]) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute("title", "A rebase is in progress.");
+    }
+  });
+
+  it("opens the row menu by right-click and from the keyboard (Shift+F10, Menu key)", () => {
+    renderPanel();
+
+    const row = screen.getByText("deps/ready-child").closest("li");
+    if (row === null) throw new Error("expected the submodule row");
+    fireEvent.contextMenu(row);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Open in new tab" }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    const actions = screen.getByRole("button", { name: "Actions for deps/ready-child" });
+    expect(actions).toHaveAttribute("aria-keyshortcuts", "Shift+F10 ContextMenu");
+    fireEvent.keyDown(actions, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menuitem", { name: "Open in new tab" })).toBeEnabled();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Open in new tab" }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Update deps/ready-child" }), { key: "ContextMenu" });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
   });
 });
