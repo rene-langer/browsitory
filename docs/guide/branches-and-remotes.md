@@ -54,6 +54,31 @@ remote. The toggle is remembered per repository; until you set it, your git conf
 all (unreachable, missing credentials), the others are still fetched and the error names the
 ones that failed.
 
+## Fetching automatically
+
+Ahead/behind counts and remote branches are only as fresh as the last fetch. To keep them
+current, open **Preferences → Fetch** and choose how often **Fetch automatically** fetches: off
+(the default), every 5, 10 or 30 minutes, or every hour. The setting applies to every
+repository; **In <repository>** below it overrides it for the open repository alone (for
+example, off for a slow server, or more often for a busy project). Choose **Use the app
+setting** to follow the app-wide choice again.
+
+A background fetch fetches all remotes, quietly: no progress panel, no "Fetch complete" toast,
+nothing to undo, and the window keeps its focus. It uses the repository's **Prune** choice like
+**Fetch all remotes**, and the history, branches and ahead/behind counts refresh when it is done.
+
+- It runs only for the open tab, and waits while the window is minimized (in VSCode: while the
+  Browsitory panel is behind another tab). Coming back after the interval passed fetches at once.
+- It never runs alongside something else: while another action runs (a commit, a push, a manual
+  fetch, …) it waits, and an action you start stops a background fetch that is still running.
+- It never asks for a password or a token. A remote that would need one (no saved HTTPS token,
+  a locked credential store, no key in the SSH agent) is skipped, and a short notice names it
+  once per session; **Credentials…** in the notice opens that remote's credentials. Other
+  failures, such as an unreachable server, stay quiet; the next fetch tries again.
+
+The sync bar shows when the repository was last fetched in this session, by you or in the
+background ("Fetched 3 minutes ago"); hover over it for the time and the interval.
+
 **Merge options.** **Merge into current branch…** opens a dialog naming both branches. Choose
 **Fast-forward if possible** (move the branch when nothing diverged, else create a merge
 commit), **Always create a merge commit** (even when a fast-forward was possible; the commit box

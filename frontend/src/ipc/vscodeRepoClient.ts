@@ -1,6 +1,7 @@
 import type {
   AmendOptions,
   CommitMessageSettings,
+  FetchSettings,
   FileSides,
   SignatureInput,
   Trailer,
@@ -63,6 +64,7 @@ import type {
   ResetMode,
 } from "./RepoClient";
 import { validateRemoteUrls } from "./validateRemoteUrls";
+import { __resetHostVisibilityForTests, publishHostVisibility } from "./hostVisibility";
 import {
   __resetTransportStatusForTests,
   publishTransportStatus,
@@ -167,6 +169,13 @@ function handleMessage(event: MessageEvent) {
     for (const listener of hookProgressListeners) listener(hookEvent);
     return;
   }
+  if (message.method === "panelVisibility") {
+    // The extension host's `onDidChangeViewState`: a panel behind another editor tab keeps its
+    // page "visible", so the page alone can't tell.
+    const params = message.params as { visible?: unknown } | null;
+    if (typeof params?.visible === "boolean") publishHostVisibility(params.visible);
+    return;
+  }
   if (message.method !== "transportStatus" || !isTransportStatus(message.params)) return;
   const status = message.params;
   const error = new Error(status.message);
@@ -214,6 +223,7 @@ export function __resetVscodeRepoClientForTests() {
   transferProgressListeners.clear();
   hookProgressListeners.clear();
   __resetTransportStatusForTests();
+  __resetHostVisibilityForTests();
 }
 
 export const vscodeRepoClient: RepoClient = {
@@ -369,6 +379,8 @@ export const vscodeRepoClient: RepoClient = {
     call<string>("fetch_remote", { repoPath, remoteName, prune }),
   fetchAllRemotes: (repoPath: string, prune: boolean | null) =>
     call<string>("fetch_all_remotes", { repoPath, prune }),
+  backgroundFetch: (repoPath: string, prune: boolean | null) =>
+    call<string | null>("background_fetch", { repoPath, prune }),
   pushBranch: (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean) =>
     call<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream, noVerify }),
   deleteRemoteBranch: (repoPath: string, remoteName: string, branchName: string, noVerify: boolean) =>
@@ -435,6 +447,8 @@ export const vscodeRepoClient: RepoClient = {
   getCommitMessageSettings: () => call<CommitMessageSettings>("get_commit_message_settings", {}),
   setCommitMessageSettings: (settings: CommitMessageSettings) =>
     call<void>("set_commit_message_settings", { settings }),
+  getFetchSettings: () => call<FetchSettings>("get_fetch_settings", {}),
+  setFetchSettings: (settings: FetchSettings) => call<void>("set_fetch_settings", { settings }),
   getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
   undo: (repoPath: string) => call<UndoOutcome>("undo_last", { repoPath }),
   redo: (repoPath: string) => call<UndoOutcome>("redo_last", { repoPath }),

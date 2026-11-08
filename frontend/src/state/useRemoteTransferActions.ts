@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { PullOutcome, RemoteAuthMode, RepoClient, TransferProgress } from "../ipc/RepoClient";
+import { recordFetch } from "../lib/autoFetch";
 import { writeFetchPrune } from "../lib/fetchPrune";
 import { upstreamPushBranch } from "../lib/pushTarget";
 import { credentialFailureMessage } from "./useMutationRunner";
@@ -183,6 +184,9 @@ export function useRemoteTransferActions(
 
   useEffect(() => {
     return client.subscribeTransferProgress((progress) => {
+      // "Fetch automatically" runs quietly (`useAutoFetch`): never shown as this tab's transfer,
+      // and never adopted by a transfer the user starts while its events are in flight.
+      if (progress.operation === "BackgroundFetch") return;
       if (progress.phase === "Starting") {
         if (!transferRequestPending.current || activeTransferId.current !== null) return;
         activeTransferId.current = progress.operationId;
@@ -205,6 +209,7 @@ export function useRemoteTransferActions(
 
       if (progress.phase === "Completed") {
         transferRequestPending.current = false;
+        if (progress.operation === "Fetch" || progress.operation === "FetchAll") recordFetch(repoPath);
         const failed = failedRemotes.current;
         failedRemotes.current = [];
         setState((prev) => ({ ...prev, forcePushOffer: null }));
@@ -569,6 +574,8 @@ export function useRemoteTransferActions(
         setState((prev) => ({ ...prev, pending: false, pendingPull: { upstreamRef: outcome.upstreamRef } }));
         return;
       }
+      // A pull fetches the upstream's remote first.
+      recordFetch(repoPath);
       await refresh();
       setState((prev) => ({ ...prev, pending: false, pullOutcome: outcome }));
     } catch (err) {

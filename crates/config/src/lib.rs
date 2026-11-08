@@ -180,6 +180,18 @@ pub struct ExternalToolSettings {
     pub terminal: Option<String>,
 }
 
+/// Fetch preferences, persisted as the `[fetch]` TOML table. `auto_fetch_minutes` is the
+/// app-wide "Fetch automatically" interval; 0 (the default) is off. A repository can override
+/// it in the UI (a per-repository preference the frontend keeps, like the Prune choice).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FetchSettings {
+    pub auto_fetch_minutes: u32,
+}
+
+/// The longest "Fetch automatically" interval `set_fetch_settings_at` keeps (a day).
+pub const MAX_AUTO_FETCH_MINUTES: u32 = 24 * 60;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ConfigFile {
     #[serde(default)]
@@ -200,6 +212,8 @@ struct ConfigFile {
     tools: ExternalToolSettings,
     #[serde(default)]
     commit_message: CommitMessageSettings,
+    #[serde(default)]
+    fetch: FetchSettings,
     #[serde(default, deserialize_with = "deserialize_open_repos")]
     open_repos: Vec<OpenRepoEntry>,
     #[serde(default)]
@@ -340,6 +354,30 @@ pub fn set_commit_message_settings_at(
         summary_limit: clamp(settings.summary_limit),
         body_ruler: clamp(settings.body_ruler),
         show_ruler: settings.show_ruler,
+    };
+    write_config(config_file, &config)
+}
+
+pub fn get_fetch_settings() -> Result<FetchSettings, ConfigError> {
+    get_fetch_settings_at(&config_file_path()?)
+}
+
+pub fn set_fetch_settings(settings: &FetchSettings) -> Result<(), ConfigError> {
+    set_fetch_settings_at(&config_file_path()?, settings)
+}
+
+pub fn get_fetch_settings_at(config_file: &Path) -> Result<FetchSettings, ConfigError> {
+    Ok(read_config(config_file)?.fetch)
+}
+
+/// Persists `settings`, clamping `auto_fetch_minutes` to `MAX_AUTO_FETCH_MINUTES` on write.
+pub fn set_fetch_settings_at(
+    config_file: &Path,
+    settings: &FetchSettings,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.fetch = FetchSettings {
+        auto_fetch_minutes: settings.auto_fetch_minutes.min(MAX_AUTO_FETCH_MINUTES),
     };
     write_config(config_file, &config)
 }

@@ -27,6 +27,8 @@ DiffSettings/plain {"ignoreWhitespace":true,"contextLines":5,"syntaxHighlight":f
 ExternalToolSettings/unset {"editor":null,"terminal":null}
 ExternalToolSettings/set {"editor":"code -w","terminal":"wt"}
 CommitMessageSettings/plain {"summaryLimit":50,"bodyRuler":72,"showRuler":true}
+FetchSettings/off {"autoFetchMinutes":0}
+FetchSettings/every-10 {"autoFetchMinutes":10}
 GitTools/diff-tool-System {"diffTool":{"name":"meld","command":"meld \"$LOCAL\" \"$REMOTE\"","source":"System","viaMergeTool":true,"problem":"not found on PATH"},"mergeTool":null}
 GitTools/diff-tool-Xdg {"diffTool":{"name":"meld","command":"meld \"$LOCAL\" \"$REMOTE\"","source":"Xdg","viaMergeTool":true,"problem":"not found on PATH"},"mergeTool":null}
 GitTools/diff-tool-Global {"diffTool":{"name":"meld","command":"meld \"$LOCAL\" \"$REMOTE\"","source":"Global","viaMergeTool":true,"problem":"not found on PATH"},"mergeTool":null}
@@ -76,6 +78,7 @@ TransferProgress/Started-ForcePushBranch {"operationId":"op-2","operation":"Forc
 TransferProgress/Started-PushTags {"operationId":"op-2","operation":"PushTags","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Started-DeleteRemoteBranch {"operationId":"op-2","operation":"DeleteRemoteBranch","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Started-Clone {"operationId":"op-2","operation":"Clone","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
+TransferProgress/Started-BackgroundFetch {"operationId":"op-2","operation":"BackgroundFetch","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Progress-Fetch-Receiving {"operationId":"op-2","operation":"Fetch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/Progress-Fetch-Updating {"operationId":"op-2","operation":"Fetch","phase":"Updating","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/Progress-Fetch-RunningHook {"operationId":"op-2","operation":"Fetch","phase":"RunningHook","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
@@ -86,6 +89,7 @@ TransferProgress/Progress-ForcePushBranch-Receiving {"operationId":"op-2","opera
 TransferProgress/Progress-PushTags-Receiving {"operationId":"op-2","operation":"PushTags","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/Progress-DeleteRemoteBranch-Receiving {"operationId":"op-2","operation":"DeleteRemoteBranch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/Progress-Clone-Receiving {"operationId":"op-2","operation":"Clone","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-BackgroundFetch-Receiving {"operationId":"op-2","operation":"BackgroundFetch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/RemoteFailed-NonFastForward {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"NonFastForward","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
 TransferProgress/RemoteFailed-RejectedRemoteRef {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"RejectedRemoteRef","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
 TransferProgress/RemoteFailed-StaleLease {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"StaleLease","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
@@ -113,6 +117,7 @@ TransferProgressEvent/Started-ForcePushBranch "transfer-progress"
 TransferProgressEvent/Started-PushTags "transfer-progress"
 TransferProgressEvent/Started-DeleteRemoteBranch "transfer-progress"
 TransferProgressEvent/Started-Clone "transfer-progress"
+TransferProgressEvent/Started-BackgroundFetch "transfer-progress"
 TransferProgressEvent/Progress-Fetch-Receiving "transfer-progress"
 TransferProgressEvent/Progress-Fetch-Updating "transfer-progress"
 TransferProgressEvent/Progress-Fetch-RunningHook "transfer-progress"
@@ -123,6 +128,7 @@ TransferProgressEvent/Progress-ForcePushBranch-Receiving "transfer-progress"
 TransferProgressEvent/Progress-PushTags-Receiving "transfer-progress"
 TransferProgressEvent/Progress-DeleteRemoteBranch-Receiving "transfer-progress"
 TransferProgressEvent/Progress-Clone-Receiving "transfer-progress"
+TransferProgressEvent/Progress-BackgroundFetch-Receiving "transfer-progress"
 TransferProgressEvent/RemoteFailed-NonFastForward "transfer-progress"
 TransferProgressEvent/RemoteFailed-RejectedRemoteRef "transfer-progress"
 TransferProgressEvent/RemoteFailed-StaleLease "transfer-progress"

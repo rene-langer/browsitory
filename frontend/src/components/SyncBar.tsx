@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { autoFetchLabel } from "../lib/autoFetch";
+import { formatRelativeDate } from "../lib/formatDate";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { upstreamPushBranch } from "../lib/pushTarget";
 import { SplitButton } from "./primitives/SplitButton";
@@ -27,6 +29,8 @@ export function SyncBar({
   onTogglePrune,
   onPublish,
   leading,
+  lastFetchedAt = null,
+  autoFetchMinutes = 0,
 }: {
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
@@ -43,6 +47,10 @@ export function SyncBar({
   /** Push on a branch without an upstream: open the Push dialog for the current branch. */
   onPublish: () => void;
   leading?: ReactNode;
+  /** When this repository was last fetched in this session (ms since the epoch), if at all. */
+  lastFetchedAt?: number | null;
+  /** The effective "Fetch automatically" interval, for the last-fetch tooltip; 0 is off. */
+  autoFetchMinutes?: number;
 }) {
   const fetchRemote = upstream?.remoteName ?? remotes[0]?.name ?? null;
   const busyTitle = operationDisabled ? (operationDisabledReason ?? undefined) : undefined;
@@ -114,6 +122,25 @@ export function SyncBar({
           <span title="Commits to pull">↓{upstream.behind}</span>
         </span>
       )}
+      {lastFetchedAt !== null && <LastFetch at={lastFetchedAt} autoFetchMinutes={autoFetchMinutes} />}
     </div>
+  );
+}
+
+/** "Fetched 5 minutes ago", refreshed every 30 seconds. */
+function LastFetch({ at, autoFetchMinutes }: { at: number; autoFetchMinutes: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  // A newer fetch than the last tick (`now - at` < 0) is "just now" too.
+  const label = now - at < 60_000 ? "just now" : formatRelativeDate(at / 1000, now, "en");
+  const when = `Last fetch: ${new Date(at).toLocaleString()}`;
+  const title = autoFetchMinutes > 0 ? `${when}. Fetches automatically ${autoFetchLabel(autoFetchMinutes).toLowerCase()}.` : when;
+  return (
+    <span className={styles.lastFetch} title={title}>
+      Fetched {label}
+    </span>
   );
 }

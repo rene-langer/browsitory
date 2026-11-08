@@ -2,9 +2,9 @@ mod common;
 
 use git_core::remote::{
     add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
-    delete_remote_branch, delete_tag, fetch_all, fetch_remote, force_push_current_branch,
-    list_remote_branches, list_remotes, list_tags, pull_after_fetch, push_branch,
-    push_current_branch, push_tags, push_target, remote_upstreams, remove_remote,
+    delete_remote_branch, delete_tag, fetch_all, fetch_all_as, fetch_remote,
+    force_push_current_branch, list_remote_branches, list_remotes, list_tags, pull_after_fetch,
+    push_branch, push_current_branch, push_tags, push_target, remote_upstreams, remove_remote,
     remove_remote_and_clear_upstreams, rename_remote, resolve_push_target, set_branch_upstream,
     set_current_upstream, set_remote_auth_profile, update_remote_urls, CredentialProvider,
     FetchAllOutcome, PullOutcome, PushTarget, RemoteAuthMode, RemoteError, TransferErrorKind,
@@ -1877,6 +1877,39 @@ fn fetch_all_records_an_unreachable_remote_and_fetches_the_rest() {
     assert!(reporter.events.iter().all(|event| {
         event.operation_id == "all-1" && event.operation == TransferOperation::FetchAll
     }));
+}
+
+#[test]
+fn a_background_fetch_all_reports_its_progress_as_background_fetch() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let mut reporter = VecReporter::default();
+
+    let outcome = fetch_all_as(
+        TransferOperation::BackgroundFetch,
+        &fixture.local,
+        None,
+        "background-fetch-1".into(),
+        &mut no_credentials_for,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(outcome.fetched, vec!["origin".to_string()]);
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        Some(fixture.remote_tip())
+    );
+    assert!(!reporter.events.is_empty());
+    assert!(reporter
+        .events
+        .iter()
+        .all(|event| event.operation == TransferOperation::BackgroundFetch));
 }
 
 #[test]

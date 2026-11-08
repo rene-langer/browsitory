@@ -31,6 +31,9 @@ pub enum TransferOperation {
     PushTags,
     DeleteRemoteBranch,
     Clone,
+    /// A Fetch all the app started on its own (the "Fetch automatically" setting), reported
+    /// apart from a Fetch all the user asked for so the UI can keep it quiet.
+    BackgroundFetch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -443,6 +446,28 @@ pub fn fetch_all<'c>(
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
 ) -> Result<FetchAllOutcome, RemoteError> {
+    fetch_all_as(
+        TransferOperation::FetchAll,
+        repo,
+        prune,
+        operation_id,
+        credentials_for,
+        reporter,
+        cancel,
+    )
+}
+
+/// `fetch_all`, reporting progress as `operation` (`FetchAll`, or `BackgroundFetch` for the
+/// fetch the app starts on its own).
+pub fn fetch_all_as<'c>(
+    operation: TransferOperation,
+    repo: &Repository,
+    prune: Option<bool>,
+    operation_id: String,
+    credentials_for: &mut dyn FnMut(&str) -> Result<BoxedCredentialProvider<'c>, RemoteError>,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+) -> Result<FetchAllOutcome, RemoteError> {
     let names: Vec<String> = repo
         .remotes()?
         .iter()
@@ -460,7 +485,7 @@ pub fn fetch_all<'c>(
                 repo,
                 &name,
                 prune,
-                TransferOperation::FetchAll,
+                operation,
                 &operation_id,
                 provider.as_mut(),
                 reporter,

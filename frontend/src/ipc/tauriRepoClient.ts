@@ -6,6 +6,7 @@ import { toCloneError } from "./RepoClient";
 import type {
   AmendOptions,
   CommitMessageSettings,
+  FetchSettings,
   FileSides,
   SignatureInput,
   Trailer,
@@ -253,6 +254,10 @@ export const tauriRepoClient: RepoClient = {
     await transferListenersReady;
     return loggedInvoke<string>("fetch_all_remotes", { repoPath, prune });
   },
+  backgroundFetch: async (repoPath: string, prune: boolean | null) => {
+    await transferListenersReady;
+    return loggedInvoke<string | null>("background_fetch", { repoPath, prune });
+  },
   pushBranch: async (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean) => {
     await transferListenersReady;
     return loggedInvoke<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream, noVerify });
@@ -354,6 +359,8 @@ export const tauriRepoClient: RepoClient = {
   getCommitMessageSettings: () => loggedInvoke<CommitMessageSettings>("get_commit_message_settings"),
   setCommitMessageSettings: (settings: CommitMessageSettings) =>
     loggedInvoke("set_commit_message_settings", { settings }),
+  getFetchSettings: () => loggedInvoke<FetchSettings>("get_fetch_settings"),
+  setFetchSettings: (settings: FetchSettings) => loggedInvoke("set_fetch_settings", { settings }),
   getUndoState: (repoPath: string) => loggedInvoke<UndoState>("get_undo_state", { repoPath }),
   undo: (repoPath: string) => loggedInvoke<UndoOutcome>("undo_last", { repoPath }),
   redo: (repoPath: string) => loggedInvoke<UndoOutcome>("redo_last", { repoPath }),

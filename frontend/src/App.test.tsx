@@ -114,6 +114,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     pushCurrentBranch: async () => unused(),
     pushTags: async () => unused(),
     fetchAllRemotes: async () => unused(),
+    backgroundFetch: async () => unused(),
     pushBranch: async () => unused(),
     deleteRemoteBranch: async () => unused(),
     pullCurrentUpstream: async () => unused(),
@@ -178,6 +179,8 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     listRecentAuthors: async () => [],
     getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
     setCommitMessageSettings: async () => {},
+    getFetchSettings: async () => ({ autoFetchMinutes: 0 }),
+    setFetchSettings: async () => {},
     logFrontendError: unused,
     ...overrides,
   };
