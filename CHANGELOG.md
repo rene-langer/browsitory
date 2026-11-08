@@ -6,6 +6,177 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-08
+
+Remote branches in the graph, a first-parent view for a single branch, a new identifier for the
+desktop app, and fixes for hard-linked and executable files, stashes, merges, checkouts that
+stop part-way and names that are already taken.
+
+### New app identifier
+
+The desktop app's identifier changes from `com.browsitory.app` to `com.browsitory.desktop`
+(an identifier ending in `.app` clashes with the extension of macOS app bundles). Updating
+needs nothing from you.
+
+- Changed: the first start after the update moves the app's folders to the new name, so the
+  theme, panel sizes and other choices you made in the app stay. The log folder is now
+  `~/.local/share/com.browsitory.desktop/logs` on Linux, `~/Library/Logs/com.browsitory.desktop`
+  on macOS and `%LOCALAPPDATA%\com.browsitory.desktop\logs` on Windows (#433).
+- Changed: macOS treats the app as a new app once, so it may ask again for access to folders
+  such as Documents or to your saved credentials in the keychain. Saved credentials, recent
+  repositories, workspaces and settings are not stored under the identifier and stay as they
+  were (#433).
+
+### Branches in the graph
+
+- Fixed: turning on a remote branch's dot in the Branches section (**Show ⟨remote⟩/⟨branch⟩ in
+  graph**) only toggled its badge; it now adds the branch's commits to the graph and to commit
+  search, also those no local branch has. Until you pick remote branches the graph is unchanged
+  (#385).
+- Added: **Isolate branch** on a remote branch. A single branch in the graph, local or remote,
+  shows its first-parent line (#385).
+- Changed: with a single branch in the graph (for example after **Isolate branch**), the graph
+  shows only that branch's own line: its merge commits and the commits made directly on it, not
+  every commit of the branches merged into it. A merge whose merged branch isn't shown gets a
+  short dashed stub instead of a line running to the bottom of the graph. Commit search without
+  `branch:` follows the same rule, so it finds what the graph shows (#380).
+- Fixed: **Show all branches** saved the names of today's local branches instead of going back to
+  the default graph. A branch created later stayed hidden until you clicked its dot, and in a
+  repository with a single local branch the graph then showed only that branch's first-parent
+  line. It now goes back to the default: every local branch, also new ones, no remote-only
+  commits, and every remote branch's badge. Turning the dots back on until every local branch
+  is shown, or deleting a branch so that every remaining one is shown, does the same for the
+  local branches (#402).
+
+### Hard-linked files
+
+- Fixed: a tracked file that is a hard link to a file elsewhere (another folder, or outside the
+  repository) changed under its other name too when Browsitory wrote it through libgit2:
+  Discard (file, hunk or lines), branch switches, resets, merges, cherry-picks, reverts, rebase
+  steps, Stash and stash apply or pop, aborts, Undo/Redo of a staged path and submodule
+  updates. As with git, the file is now replaced: the work-tree name gets the new content and
+  the other name keeps its old content, on Linux, macOS and Windows (#420).
+- Fixed: on Windows, Save resolution, Add to .gitignore and Undo/Redo failed with "a folder of
+  the working tree changed while it was being written" for a tracked file that is a hard link to
+  a file in another folder, and Mark resolved and the image preview couldn't read it. Windows may
+  report the file's other name, so it looked moved. Such a file is now written like any other:
+  it is replaced by a new file, as git's checkout does, and the other name keeps its old
+  content. A folder replaced by a junction or symbolic link while it is written is still refused
+  (#260).
+
+### Executable files and hunks
+
+- Fixed: staging, unstaging or discarding a hunk or selected lines of an executable file dropped
+  its executable bit, in the index (the next commit lost it) or in the work tree, on Linux and
+  macOS. As with `git add -p` and `git checkout -p`, the file now keeps its mode, and a pending
+  exec bit change is neither staged nor reverted by a hunk or line operation (#427).
+
+### Stashes and names that differ only in case
+
+- Fixed: on macOS, Windows or with `core.ignorecase`, **Stash all** with a staged rename that
+  changes only the case of a name (`Old` to `old`) wrote a stash that didn't undo the rename
+  (Linux), or refused with a misleading message about an ignored file (macOS, Windows). It now
+  refuses before writing anything, like **Stash file…**: "Can't stash 'old': it differs from
+  'Old' only in case. Commit the rename first, or undo it." (#370)
+- Fixed: with `core.ignorecase` on, **Stash all** in a repository holding two files whose names
+  differ only in case (`A` and `a`, committed on a case-sensitive drive) left one of them
+  staged as deleted, and sometimes deleted its file. It now refuses before writing anything;
+  **Stash file…** on other files still works (#392).
+- Fixed: **Stash file…** on one of such a pair was refused as a case-only rename, or, for the
+  pair's first name, stashed and broke the pair; it now gets the same clear refusal (#392).
+- Fixed: on macOS (`Straße` → `Strasse`, `Café` → `CAFÉ`, composed → decomposed accents) and
+  Windows (`Café` → `CAFÉ`), a rename the drive treats as the same name was refused with a
+  misleading "would overwrite the ignored file" message. It is now refused as a case-only
+  rename, like `README` → `readme`. **Stash file…** on one of two such names staged side by
+  side no longer deletes the file until Pop or writes a stash Pop refuses (#389).
+
+### File/folder conflicts libgit2 misses
+
+- Fixed: a merge, squash merge, pull with merge, cherry-pick, revert, rebase step or stash apply
+  where one side has a file and the other a folder of the same name, with another name sorting
+  between them (`c`, `c.txt`, `c/g`), no longer loses a file. libgit2 merged the two without a
+  conflict, so a cherry-pick, revert or rebase step committed without the file, and a merge or
+  stash apply stopped half-way with "directory exists". Browsitory now refuses such an operation
+  before changing anything and says to run it with git, which reports the conflict (#410).
+
+### Stopped checkouts
+
+- Fixed: a cherry-pick, revert, rebase, pull or stash apply whose checkout stopped while writing a
+  file (a full disk, an I/O error) left that file cut short, so trying again was refused; it is
+  now put back with the other files (#329).
+- Fixed: a rebase step after the first whose checkout stopped part-way (a file open in another
+  program, a read-only file) left the files it had written and showed git's raw error; the step
+  is now rolled back, a file open in another program is named, and Continue applies the step
+  again (#329).
+- Fixed: rolling back a stopped checkout no longer removes an empty folder you already had, and
+  removes the conflict files git had written under other names (`f.txt~HEAD`) and its leftover
+  `.lock` file (#329).
+
+### Names: renaming and taken names
+
+- Fixed: renaming a branch in the Branches tree kept spaces around the new name, so git refused it
+  with its own error; the name is now trimmed (#418).
+- Fixed: pressing Enter on an unchanged branch name renamed the branch onto itself; it now just
+  closes the field, like Save on an unchanged remote in Edit remote (#418).
+- Fixed: the branch rename field, Add remote and Edit remote now say why a name can't be used
+  (a space, `..`, `~` and so on) as you type, as New branch does, instead of git's error after
+  saving (#418).
+- Fixed: adding a remote under a name that already exists showed that remote twice in the
+  Branches tree until git refused it, then showed git's raw error; the Add remote form now says
+  `A remote named "origin" already exists.` and keeps what you typed (#408).
+- Fixed: creating a tag or a worktree under a name that already exists showed it twice until git
+  refused it; the form now says the name is taken and keeps what you typed (#413).
+- Fixed: creating or renaming a branch onto a taken name (or one that clashes as a folder, such as
+  `feature/x` next to `feature`) briefly replaced the existing branch in the Branches tree; it is
+  now refused at once with a clear message (#413).
+- Fixed: renaming a remote to another remote's name showed that name twice until git refused it;
+  it is now refused at once (#413).
+- Fixed: a worktree whose folder was deleted and made again listed both entries with the same
+  key, and a new worktree at a listed folder showed that folder twice while git checked it (#413).
+
+### Refresh
+
+- Fixed: a refresh that answered late could put older repository state back on screen, so after
+  a commit the toolbar could keep offering to undo the step before it instead of the commit,
+  until the next refresh. This happened when a read sent before the commit (another refresh, or
+  the undo check when the window regains focus) answered after the commit's own refresh. Results
+  from a read now only apply when no read sent after it has already landed (#342).
+
+### Release notes and licences dialogs
+
+- Fixed: the Release notes opened scrolled to the bottom in the desktop app; they now open at the
+  newest release (#378).
+- Changed: the Release notes' Close, User guide and Third-party licences buttons stay in view
+  while the notes scroll, so the dialog can be closed at any time. A click outside the dialog
+  closes it too, as Escape does (#379).
+- Changed: the Third-party licences dialog keeps its Close button in view as well (#379).
+- Fixed: on a short window the licence text scrolled inside a second scroll area around it, and
+  its end could be cut off. The text now fills the height the dialog has left and is the only
+  part that scrolls (#383).
+
+### Internal: end-to-end tests
+
+- Changed: the Tauri E2E suite runs on WebdriverIO 10 and expect-webdriverio 8 (#362). It first
+  kept WebdriverIO 9's first-match behaviour of `$`; the suite and the documentation screenshot
+  script now run with strict selectors, so every `$` selector matches exactly one element and a
+  test can't act on the wrong one by accident (#394).
+- Fixed: the desktop E2E test that opens Edit remote from the command palette could press Enter
+  before the app had listed the remote the test added, so nothing ran and the palette stayed
+  open. It now waits until the palette highlights that command (#434).
+
+### Internal: build and release
+
+- Changed: releases are built with `tauri-action` v1 (#363). The updater's `latest.json` now
+  links each bundle by its GitHub API asset URL instead of the browser download URL; see
+  `docs/RELEASING.md` for what that means for updating.
+- Changed: the release and CI's `build-dist` run the Tauri CLI locked in
+  `frontend/pnpm-lock.yaml` (#397, #430), and the release checks the draft's `latest.json`
+  (version, every platform, URLs and signatures) before anything is published (#398).
+- Changed: the shipped Linux builds are pinned to Ubuntu 24.04, so the Linux floor stays at
+  glibc 2.39 (#386).
+- Changed: all four pnpm projects and the workflows use pnpm 12 (#361); the user guide site is
+  built with Zensical instead of MkDocs Material (#340).
+
 ## [0.3.1] - 2026-11-06
 
 A patch release: stash fixes, a roomier Stashes sidebar, a clear stop for an invalid

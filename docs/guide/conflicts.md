@@ -27,6 +27,12 @@ the **Changes** group. The group shows a badge such as **1 conflict**, and each 
   work tree, or can't be found, or the repository uses a format Browsitory can't read (SHA-256,
   reftable). Stage such a folder with `git add <path>` in a terminal.
 
+When one side has a file and the other a folder of the same name, and another name sorts
+between them (`c`, `c.txt` and `c/g`), the Git library Browsitory uses misses the conflict. A
+merge, cherry-pick, revert, rebase step or stash apply then refuses before it changes anything
+("'c' is a file on one side and a folder on the other (with 'c/g')…"). Run it with git in a
+terminal, which reports the conflict so you can resolve it here.
+
 If the conflicted file is read-only, **Save resolution**, **Use ours (whole file)** and **Use
 theirs (whole file)** change nothing and say so: "'f.txt' is read-only. Make it writable, then
 try again." Clear the file's read-only flag (Windows) or give yourself write permission (macOS,

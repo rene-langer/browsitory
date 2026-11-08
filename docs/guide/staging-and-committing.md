@@ -42,8 +42,9 @@ discards the selection, or the whole hunk when nothing is selected.
 
 If the file changed since its diff was shown (for example you edited it in another editor),
 line actions don't run; the diff refreshes so you can select again. Discarding a whole hunk of
-an untracked file empties the file rather than deleting it. Staging a whole hunk doesn't stage a
-file's mode change (such as the executable bit); stage the whole file for that.
+an untracked file empties the file rather than deleting it. Staging, unstaging or discarding a
+hunk or lines keeps the file's mode (such as the executable bit), as `git add -p` does, and
+doesn't stage or undo a mode change; stage or discard the whole file for that.
 
 ## Discarding and ignoring files
 
