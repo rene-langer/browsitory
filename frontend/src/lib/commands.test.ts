@@ -2,6 +2,8 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   buildCommands,
   commandGroup,
+  commitPickerItems,
+  type GoToCommands,
   filterAndSortCommands,
   loadRecentCommandIds,
   recordCommandUsed,
@@ -201,6 +203,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     showAllGraphBranches: vi.fn(),
     isolateGraphBranch: vi.fn(),
     loadMoreHistory: vi.fn(),
+    loadHistoryThrough: vi.fn(),
     refresh: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -1430,5 +1433,122 @@ describe("remote and tag palette entries", () => {
     ];
     const ids = buildCommands(makeAppState({ tags })).map((c) => c.id);
     expect(ids).not.toContain("checkout-tag:tree");
+  });
+});
+
+describe("Go to pickers (#441)", () => {
+  const commit = (id: string, summary: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    shortId: id.slice(0, 7),
+    summary,
+    authorName: "a",
+    authorEmail: "a@b",
+    timestamp: 0,
+    parentIds: [],
+    branchRefs: [],
+    remoteBranchRefs: [],
+    ...extra,
+  });
+  const commits = [
+    commit("abc1234000000000000000000000000000000000", "Fix the parser", { remoteBranchRefs: ["origin/main"] }),
+    commit("def5678000000000000000000000000000000000", "Add a feature"),
+  ];
+  function goTo(): GoToCommands {
+    return {
+      onGoToCommit: vi.fn(),
+      onSearchHistory: vi.fn(),
+      onGoToBranch: vi.fn(),
+      onGoToTag: vi.fn(),
+      onGoToStash: vi.fn(),
+    };
+  }
+  function pickers(state: Parameters<typeof makeAppState>[0] = {}, handlers = goTo()) {
+    const commands = buildCommands(
+      makeAppState({ commits, ...state }),
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      handlers,
+    );
+    return { commands, handlers, picker: (id: string) => commands.find((c) => c.id === id) };
+  }
+
+  it("are offered under Go to, even while an operation runs, and only with something to go to", () => {
+    const { picker } = pickers({ pending: true });
+    for (const id of ["go-to-commit", "go-to-branch", "go-to-tag", "go-to-stash"]) {
+      expect(picker(id)?.picker).toBeDefined();
+      expect(commandGroup(id)).toBe("Go to");
+    }
+    expect(picker("go-to-commit")?.label).toBe("Go to commit…");
+
+    const empty = pickers({ tags: [], stashes: [] });
+    expect(empty.picker("go-to-tag")).toBeUndefined();
+    expect(empty.picker("go-to-stash")).toBeUndefined();
+    expect(buildCommands(makeAppState()).some((c) => c.id === "go-to-commit")).toBe(false);
+  });
+
+  it("lists local branches, then remote ones the graph knows, and goes to the chosen one", () => {
+    const { picker, handlers } = pickers({ graphRemoteBranchSelection: ["upstream/dev"] });
+    const items = picker("go-to-branch")!.picker!.items("");
+    expect(items.map((i) => i.label)).toEqual(["main (current)", "feature", "origin/main", "upstream/dev"]);
+
+    const filtered = picker("go-to-branch")!.picker!.items("dev");
+    expect(filtered.map((i) => i.label)).toEqual(["upstream/dev"]);
+    filtered[0].run();
+    items[1].run();
+    expect(handlers.onGoToBranch).toHaveBeenCalledWith("remote", "upstream/dev");
+    expect(handlers.onGoToBranch).toHaveBeenCalledWith("local", "feature");
+  });
+
+  it("goes to a tag's commit and to a stash", () => {
+    const { picker, handlers } = pickers();
+    picker("go-to-tag")!.picker!.items("v1")[0].run();
+    expect(handlers.onGoToTag).toHaveBeenCalledWith("v1.0", "aaa");
+    picker("go-to-stash")!.picker!.items("wip")[0].run();
+    expect(handlers.onGoToStash).toHaveBeenCalledWith("ccc");
+  });
+
+  it("ranks a fully typed label first, ahead of a longer one that starts with it", () => {
+    const { commands } = pickers();
+    const labels = (query: string) => filterAndSortCommands(commands, query).map((c) => c.label);
+    expect(labels("go to branch").slice(0, 2)).toEqual(["Go to branch…", "Go to Branches"]);
+    expect(labels("Go to branches")[0]).toBe("Go to Branches");
+    expect(labels("go to tag")[0]).toBe("Go to tag…");
+  });
+
+  describe("commitPickerItems", () => {
+    it("lists the loaded commits newest first for an empty query", () => {
+      const items = commitPickerItems(commits, "", goTo());
+      expect(items.map((i) => i.label)).toEqual(["abc1234 Fix the parser", "def5678 Add a feature"]);
+    });
+
+    it("matches a SHA prefix or message text, then offers the commit search", () => {
+      const handlers = goTo();
+      const bySha = commitPickerItems(commits, "DEF56", handlers);
+      expect(bySha.map((i) => i.label)).toEqual(["def5678 Add a feature", "Search all history for “DEF56”"]);
+      bySha[0].run();
+      expect(handlers.onGoToCommit).toHaveBeenCalledWith("def5678000000000000000000000000000000000");
+
+      const byText = commitPickerItems(commits, "parser", handlers);
+      expect(byText.map((i) => i.label)).toEqual([
+        "abc1234 Fix the parser",
+        "Look up “parser” in the whole repository",
+        "Search all history for “parser”",
+      ]);
+      byText[2].run();
+      expect(handlers.onSearchHistory).toHaveBeenCalledWith("parser");
+    });
+
+    it("offers a lookup first for a SHA or revision that isn't loaded, none for text with spaces", () => {
+      const handlers = goTo();
+      const items = commitPickerItems(commits, "v2.0~3", handlers);
+      expect(items.map((i) => i.label)).toEqual([
+        "Look up “v2.0~3” in the whole repository",
+        "Search all history for “v2.0~3”",
+      ]);
+      items[0].run();
+      expect(handlers.onGoToCommit).toHaveBeenCalledWith("v2.0~3");
+
+      expect(commitPickerItems(commits, "two words", handlers).map((i) => i.id)).toEqual(["search-history"]);
+    });
   });
 });

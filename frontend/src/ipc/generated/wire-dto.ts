@@ -13,6 +13,8 @@ export type BranchInfo = { name: string, isCurrent: boolean, upstream: string | 
 
 export type ChangedFile = { path: string, oldPath: string | null, };
 
+export type CommitLocation = { commitId: string, position: number | null, branches: Array<string>, remoteBranches: Array<string>, };
+
 export type CommitMessageSettings = { summaryLimit: number, bodyRuler: number, showRuler: boolean, };
 
 export type CommitOutcome = { "kind": "Committed", commitId: string, } | { "kind": "HookFailed", hook: string, output: string, };

@@ -113,6 +113,7 @@ export function BranchTree({
   onOpenPushDialog,
   onOpenDeleteRemoteBranch,
   onCompareBranch,
+  onGoToBranch,
   refreshGeneration,
   remoteDialog: remoteDialogProp,
   onRemoteDialogChange,
@@ -202,6 +203,11 @@ export function BranchTree({
    * `refName` is the full ref (`refs/heads/…`, `refs/remotes/…`), `label` its display name.
    */
   onCompareBranch?: (refName: string, label: string) => void;
+  /**
+   * A click on a branch row selects and scrolls to its tip in the graph (#441); a remote one as
+   * `<remote>/<branch>`. Double-click (or Enter) still switches / checks out.
+   */
+  onGoToBranch?: (kind: "local" | "remote", name: string) => void;
   /**
    * `AppState.refreshGeneration`. A change means remote branches may have changed (a fetch from
    * anywhere, a push that published one, a remote branch delete): open remote folders reload
@@ -306,7 +312,14 @@ export function BranchTree({
         <ListRow
           key={branch.name}
           className={selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
-          onClick={isRenaming ? undefined : () => setSelectedRow(rowKey)}
+          onClick={
+            isRenaming
+              ? undefined
+              : () => {
+                  setSelectedRow(rowKey);
+                  onGoToBranch?.("local", branch.name);
+                }
+          }
           onDoubleClick={
             isRenaming
               ? undefined
@@ -376,14 +389,16 @@ export function BranchTree({
                 aria-haspopup="menu"
                 data-menu-key={`local-branch:${branch.name}`}
                 aria-expanded={rowMenu?.kind === "local-branch" && rowMenu.name === branch.name}
-                onClick={(event) =>
+                onClick={(event) => {
+                  // Opening the menu doesn't also go to the branch (the row's click).
+                  event.stopPropagation();
                   toggleRowMenu({
                     kind: "local-branch",
                     name: branch.name,
                     ...rectAnchor(event.currentTarget),
                     returnFocusTo: event.currentTarget,
-                  })
-                }
+                  });
+                }}
               >
                 <MoreHorizontal size={12} aria-hidden="true" />
               </button>
@@ -430,7 +445,10 @@ export function BranchTree({
         <ListRow
           key={branchName}
           className={selectedRow === rowKey ? `${styles.treeRow} ${styles.selectedRow}` : styles.treeRow}
-          onClick={() => setSelectedRow(rowKey)}
+          onClick={() => {
+            setSelectedRow(rowKey);
+            onGoToBranch?.("remote", `${remoteName}/${branchName}`);
+          }}
           onDoubleClick={() => {
             if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
           }}
@@ -468,15 +486,16 @@ export function BranchTree({
               aria-expanded={
                 rowMenu?.kind === "remote-branch" && rowMenu.remoteName === remoteName && rowMenu.branchName === branchName
               }
-              onClick={(event) =>
+              onClick={(event) => {
+                event.stopPropagation();
                 toggleRowMenu({
                   kind: "remote-branch",
                   remoteName,
                   branchName,
                   ...rectAnchor(event.currentTarget),
                   returnFocusTo: event.currentTarget,
-                })
-              }
+                });
+              }}
             >
               <MoreHorizontal size={12} aria-hidden="true" />
             </button>

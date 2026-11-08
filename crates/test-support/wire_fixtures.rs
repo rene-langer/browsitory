@@ -338,6 +338,29 @@ pub fn compare_ranges() -> Cases<git_core::diff::CompareRange> {
     )]
 }
 
+pub fn commit_locations() -> Cases<git_core::locate::CommitLocation> {
+    vec![
+        case(
+            "in-graph",
+            git_core::locate::CommitLocation {
+                commit_id: "1111111111111111111111111111111111111111".to_string(),
+                position: Some(42),
+                branches: Vec::new(),
+                remote_branches: Vec::new(),
+            },
+        ),
+        case(
+            "hidden",
+            git_core::locate::CommitLocation {
+                commit_id: "2222222222222222222222222222222222222222".to_string(),
+                position: None,
+                branches: vec!["feature".to_string()],
+                remote_branches: vec!["origin/feature".to_string()],
+            },
+        ),
+    ]
+}
+
 pub fn open_repo_entries() -> Cases<config::OpenRepoEntry> {
     vec![
         case(

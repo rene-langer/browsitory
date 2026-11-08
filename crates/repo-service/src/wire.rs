@@ -559,6 +559,29 @@ impl From<git_core::diff::CompareRange> for CompareRangeDto {
     }
 }
 
+/// "Go to commit" (#441): see `git_core::locate::CommitLocation`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitLocation"))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitLocationDto {
+    pub commit_id: String,
+    pub position: Option<usize>,
+    pub branches: Vec<String>,
+    pub remote_branches: Vec<String>,
+}
+
+impl From<git_core::locate::CommitLocation> for CommitLocationDto {
+    fn from(l: git_core::locate::CommitLocation) -> Self {
+        CommitLocationDto {
+            commit_id: l.commit_id,
+            position: l.position,
+            branches: l.branches,
+            remote_branches: l.remote_branches,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "HeadInfo"))]
@@ -2059,6 +2082,7 @@ mod ts_bindings {
             SearchPageDto,
             ChangedFileDto,
             CompareRangeDto,
+            CommitLocationDto,
             HeadInfoDto,
             TerminalRebaseDto,
             ConfirmedAbortDto,

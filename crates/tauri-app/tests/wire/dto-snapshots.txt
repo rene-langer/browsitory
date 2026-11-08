@@ -19,6 +19,8 @@ SearchPage/exhausted {"commits":[],"nextCursor":null,"scanned":0}
 ChangedFile/plain {"path":"a.txt","oldPath":null}
 ChangedFile/renamed {"path":"b.txt","oldPath":"a.txt"}
 CompareRange/plain {"fromId":"1111111111111111111111111111111111111111","toId":"2222222222222222222222222222222222222222"}
+CommitLocation/in-graph {"commitId":"1111111111111111111111111111111111111111","position":42,"branches":[],"remoteBranches":[]}
+CommitLocation/hidden {"commitId":"2222222222222222222222222222222222222222","position":null,"branches":["feature"],"remoteBranches":["origin/feature"]}
 OpenRepoEntry/loose {"path":"/repos/app","workspaceId":null}
 OpenRepoEntry/in-workspace {"path":"/repos/lib","workspaceId":"ws-1"}
 Workspace/members {"id":"ws-1","name":"Work","rootPath":"/repos","memberPaths":["/repos/app","/repos/lib"]}

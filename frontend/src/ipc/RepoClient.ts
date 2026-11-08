@@ -462,6 +462,19 @@ export interface ChangedFile {
   oldPath: string | null;
 }
 
+/** Where a revision's commit sits in the graph ("Go to commit", #441). */
+export interface CommitLocation {
+  commitId: string;
+  /** Its row in the graph of the selection (0 = the first commit), or `null` when that graph
+   *  never reaches it however much history is loaded. */
+  position: number | null;
+  /** Only when `position` is `null`: local branches that contain the commit, sorted. A branch
+   *  already shown appears when the graph follows its first parents only. */
+  branches: string[];
+  /** Like `branches`, remote-tracking branches as `<remote>/<branch>`. */
+  remoteBranches: string[];
+}
+
 /** Resolved ends of a branch compare: the merge base with HEAD, and the branch tip. */
 export interface CompareRange {
   fromId: string;
@@ -696,6 +709,17 @@ export interface RepoClient {
     selectedBranches: string[] | null,
     remoteBranches: string[],
   ): Promise<GraphCommit[]>;
+  /**
+   * Resolves `revision` (SHA or prefix, branch, tag, any git revision) and finds its commit in
+   * the graph `getCommitGraph` returns for the same selection. `null` when it names no commit;
+   * rejects for an ambiguous SHA prefix.
+   */
+  locateCommit(
+    repoPath: string,
+    revision: string,
+    selectedBranches: string[] | null,
+    remoteBranches: string[],
+  ): Promise<CommitLocation | null>;
   getGraphBranchSelection(repoPath: string): Promise<string[] | null>;
   setGraphBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
   /** Forgets the saved selection: back to every local branch, also ones created later (#402). */

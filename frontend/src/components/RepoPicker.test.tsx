@@ -82,6 +82,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getWorkingTreeCompareFiles: async () => unimplemented(),
     getWorkingTreeCompareDiff: async () => unimplemented(),
     getBranchCompareRange: async () => unimplemented(),
+    locateCommit: async () => unimplemented(),
     getMergeOptions: async () => unimplemented(),
     setMergeOptions: async () => unimplemented(),
     dropStash: async () => unimplemented(),

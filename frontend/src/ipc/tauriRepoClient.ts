@@ -30,6 +30,7 @@ import type {
   FileConflictChoice,
   FileHistoryEntry,
   ChangedFile,
+  CommitLocation,
   CompareRange,
   SearchPage,
   ForgeProvider,
@@ -130,6 +131,8 @@ export const tauriRepoClient: RepoClient = {
   getStatus: (repoPath: string) => loggedInvoke<StatusEntry[]>("get_status", { repoPath }),
   getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null, remoteBranches: string[]) =>
     loggedInvoke<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches, remoteBranches }),
+  locateCommit: (repoPath: string, revision: string, selectedBranches: string[] | null, remoteBranches: string[]) =>
+    loggedInvoke<CommitLocation | null>("locate_commit", { repoPath, revision, selectedBranches, remoteBranches }),
   getGraphBranchSelection: (repoPath: string) =>
     loggedInvoke<string[] | null>("get_graph_branch_selection", { repoPath }),
   setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>

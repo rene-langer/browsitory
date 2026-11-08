@@ -12,22 +12,36 @@ import styles from "./CommandPalette.module.css";
 export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun: () => void }) {
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
+  // The picker command whose items are listed ("Go to branch…", #441), by id so it follows the
+  // rebuilt `commands`; `null` lists the commands themselves.
+  const [pickerId, setPickerId] = useState<string | null>(null);
   const listboxId = useId();
 
-  const grouped = query.trim() === "";
+  const pickerCommand = pickerId === null ? undefined : commands.find((command) => command.id === pickerId);
+  const picker = pickerCommand?.picker;
+
+  const grouped = picker === undefined && query.trim() === "";
   // Unfiltered: reorder into kind groups (stable within a group). Filtered: keep relevance order.
   // Keyboard order always equals displayed order, so the highlight index is over this list.
   const results = useMemo(() => {
+    const items = commands.find((command) => command.id === pickerId)?.picker?.items;
+    if (items !== undefined) return items(query);
     const ranked = filterAndSortCommands(commands, query);
     if (query.trim() !== "") return ranked;
     return COMMAND_GROUPS.flatMap((group) => ranked.filter((command) => commandGroup(command.id) === group));
-  }, [commands, query]);
+  }, [commands, query, pickerId]);
   const clampedIndex = results.length === 0 ? 0 : Math.min(highlightedIndex, results.length - 1);
   const activeDescendantId =
     results.length === 0 ? undefined : `${listboxId}-option-${clampedIndex}`;
 
   function runCommand(command: Command) {
-    recordCommandUsed(command.id);
+    if (picker === undefined) recordCommandUsed(command.id);
+    if (picker === undefined && command.picker !== undefined) {
+      setPickerId(command.id);
+      setQuery("");
+      setHighlightedIndex(0);
+      return;
+    }
     command.run();
     onRun();
   }
@@ -43,6 +57,11 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
       event.preventDefault();
       const command = results[clampedIndex];
       if (command !== undefined) runCommand(command);
+    } else if (event.key === "Backspace" && picker !== undefined && query === "") {
+      // Back from a picker to the command list.
+      event.preventDefault();
+      setPickerId(null);
+      setHighlightedIndex(0);
     }
   }
 
@@ -51,7 +70,7 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
       <input
         type="text"
         className={styles.input}
-        placeholder="Type a command…"
+        placeholder={picker?.placeholder ?? "Type a command…"}
         autoFocus
         value={query}
         onChange={(event) => {
@@ -59,13 +78,13 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
           setHighlightedIndex(0);
         }}
         onKeyDown={handleKeyDown}
-        aria-label="Command palette"
+        aria-label={pickerCommand !== undefined && picker !== undefined ? pickerCommand.label.replace(/…$/, "") : "Command palette"}
         role="combobox"
         aria-expanded={results.length > 0}
         aria-controls={listboxId}
         aria-activedescendant={activeDescendantId}
       />
-      <ul className={styles.list} id={listboxId} role="listbox" aria-label="Command results">
+      <ul className={styles.list} id={listboxId} role="listbox" aria-label={picker === undefined ? "Command results" : "Results"}>
         {results.map((command, index) => {
           const group = commandGroup(command.id);
           const startsGroup = grouped && (index === 0 || commandGroup(results[index - 1].id) !== group);
@@ -87,10 +106,14 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
             </Fragment>
           );
         })}
-        {results.length === 0 && <li className={styles.empty}>No matching commands</li>}
+        {results.length === 0 && (
+          <li className={styles.empty}>{picker?.emptyText ?? "No matching commands"}</li>
+        )}
       </ul>
       <div className={styles.footer} aria-hidden="true">
-        ↑↓ to move · Enter to run · Esc to close
+        {picker === undefined
+          ? "↑↓ to move · Enter to run · Esc to close"
+          : "↑↓ to move · Enter to go · Backspace to go back · Esc to close"}
       </div>
     </div>
   );

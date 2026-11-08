@@ -56,6 +56,34 @@ const historyProps = {
 };
 
 describe("CommitGraph", () => {
+  it("scrolls the selected row into view again when a Go to asks for it (#441)", () => {
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const props = {
+        ...historyProps,
+        status,
+        commits,
+        selectedRow: { commitId: "bbb222..." } as SelectedRow,
+        pending: false,
+        onSelectRow: vi.fn(),
+        onBranchFromCommit: vi.fn(),
+        onRebaseFromCommit: vi.fn(),
+      };
+      const { rerender } = render(<CommitGraph {...props} revealRequest={1} />);
+      const before = scrollIntoView.mock.calls.length;
+      rerender(<CommitGraph {...props} revealRequest={1} />);
+      expect(scrollIntoView.mock.calls.length).toBe(before);
+
+      rerender(<CommitGraph {...props} revealRequest={2} />);
+      expect(scrollIntoView.mock.calls.length).toBe(before + 1);
+      expect(scrollIntoView.mock.contexts.at(-1)).toHaveTextContent("first commit");
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it("exposes the row list as a labeled listbox, matching ListRow's option rows", () => {
     render(
       <CommitGraph

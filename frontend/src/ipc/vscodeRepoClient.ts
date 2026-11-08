@@ -23,6 +23,7 @@ import type {
   FileConflictChoice,
   FileHistoryEntry,
   ChangedFile,
+  CommitLocation,
   CompareRange,
   SearchPage,
   ForgeProvider,
@@ -232,6 +233,8 @@ export const vscodeRepoClient: RepoClient = {
   getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
   getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null, remoteBranches: string[]) =>
     call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches, remoteBranches }),
+  locateCommit: (repoPath: string, revision: string, selectedBranches: string[] | null, remoteBranches: string[]) =>
+    call<CommitLocation | null>("locate_commit", { repoPath, revision, selectedBranches, remoteBranches }),
   getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath: string | null = null) =>
     call<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts, oldPath }),
   getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>

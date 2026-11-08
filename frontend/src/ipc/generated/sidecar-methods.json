@@ -86,6 +86,7 @@
   "list_tags",
   "list_workspaces",
   "list_worktrees",
+  "locate_commit",
   "mark_resolved",
   "open_repo",
   "persist_open_repos",

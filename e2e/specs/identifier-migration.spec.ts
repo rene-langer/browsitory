@@ -26,6 +26,45 @@ function appIsRunning(): boolean {
   return false;
 }
 
+/**
+ * Processes other than this one that may still write under the data home: any process with a
+ * file open below it, and any WebKit helper (network or web process) started for this run (its
+ * environment has this `XDG_DATA_HOME`). A helper can outlive the app binary `appIsRunning`
+ * looks for and recreate the data folder after the spec moved it (#465). As "pid command".
+ */
+function dataHomeProcesses(): string[] {
+  const found: string[] = [];
+  for (const pid of fs.readdirSync("/proc")) {
+    if (!/^\d+$/.test(pid) || Number(pid) === process.pid) continue;
+    try {
+      const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" ").trim();
+      let holds = false;
+      try {
+        holds = fs
+          .readdirSync(`/proc/${pid}/fd`)
+          .some((fd) => {
+            try {
+              return fs.readlinkSync(`/proc/${pid}/fd/${fd}`).startsWith(E2E_DATA_HOME);
+            } catch {
+              return false;
+            }
+          });
+      } catch {
+        // Not ours to read, or gone.
+      }
+      // WebKitWebDriver (tauri-driver's native driver) serves every session and stays.
+      if (!holds && cmdline.includes("WebKit") && !cmdline.includes("WebKitWebDriver")) {
+        const environ = fs.readFileSync(`/proc/${pid}/environ`, "utf8").split("\0");
+        holds = environ.includes(`XDG_DATA_HOME=${E2E_DATA_HOME}`);
+      }
+      if (holds) found.push(`${pid} ${cmdline}`);
+    } catch {
+      // The process exited, or isn't ours to read.
+    }
+  }
+  return found;
+}
+
 /** Every file under `dir`, recursively (none when it doesn't exist). */
 function filesUnder(dir: string): string[] {
   let entries: fs.Dirent[];
@@ -86,9 +125,27 @@ describe("Browsitory identifier migration", () => {
       timeout: 20000,
       timeoutMsg: "the app did not exit after the session ended",
     });
+    // Its WebKit helpers too: one that is still running can recreate the folder (#465).
+    await browser.waitUntil(async () => dataHomeProcesses().length === 0, {
+      timeout: 20000,
+      interval: 200,
+      timeoutMsg: `processes still use ${E2E_DATA_HOME} after the app exited: ${dataHomeProcesses().join("; ")}`,
+    });
     expect(fs.existsSync(NEW_DIR)).toBe(true);
     fs.rmSync(OLD_DIR, { recursive: true, force: true });
     fs.renameSync(NEW_DIR, OLD_DIR);
+    // Nothing may bring the new folder back before the app starts again: the migration would
+    // then find both folders and keep the new one.
+    const settleUntil = Date.now() + 2000;
+    while (Date.now() < settleUntil) {
+      if (fs.existsSync(NEW_DIR)) {
+        throw new Error(
+          `${NEW_DIR} reappeared after it was moved, before the app restarted; files under it: ` +
+            `${listing(NEW_DIR)}; processes using the data home: [${dataHomeProcesses().join("; ")}]`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
     const probeFilesBefore = filesWithProbe(OLD_DIR);
     if (probeFilesBefore.length === 0) {
       throw new Error(`the localStorage probe is gone from disk after the app exited; files under ${OLD_DIR}: ${listing(OLD_DIR)}`);
@@ -113,7 +170,8 @@ describe("Browsitory identifier migration", () => {
             `The new session read ${JSON.stringify(seen)}; before the restart the probe was in ` +
             `${probeFilesBefore.join(", ")} under the old folder; the old folder is ` +
             `${fs.existsSync(OLD_DIR) ? "still there" : "gone"}; the probe is now in ` +
-            `[${filesWithProbe(NEW_DIR).join(", ")}]; files under ${NEW_DIR}: ${listing(NEW_DIR)}`,
+            `[${filesWithProbe(NEW_DIR).join(", ")}]; files under ${NEW_DIR}: ${listing(NEW_DIR)}; ` +
+            `the new folder did not reappear for 2 s after the move`,
         );
       });
     expect(fs.existsSync(OLD_DIR)).toBe(false);

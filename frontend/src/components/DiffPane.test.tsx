@@ -90,6 +90,7 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getWorkingTreeCompareFiles: unused,
     getWorkingTreeCompareDiff: unused,
     getBranchCompareRange: unused,
+    locateCommit: unused,
     getMergeOptions: unused,
     setMergeOptions: unused,
     dropStash: unused,

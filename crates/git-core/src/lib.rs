@@ -11,6 +11,7 @@ pub mod history;
 pub mod hooks;
 pub mod launch;
 mod line_patch;
+pub mod locate;
 pub mod merge;
 mod partial_checkout;
 pub mod pick;

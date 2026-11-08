@@ -63,7 +63,7 @@ pub use status::{
     discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame, get_commit_diff,
     get_commit_files, get_commit_graph, get_commit_message, get_commit_rename_diff,
     get_commit_signature, get_file_history, get_graph_branch_selection,
-    get_graph_remote_branch_selection, get_status, get_working_diff, ignore_path,
+    get_graph_remote_branch_selection, get_status, get_working_diff, ignore_path, locate_commit,
     set_graph_branch_selection, set_graph_remote_branch_selection, stage_file, stage_hunk,
     stage_lines, unstage_file, unstage_hunk, unstage_lines,
 };

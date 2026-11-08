@@ -18,7 +18,8 @@ The palette has almost every action in Browsitory, grouped like this:
   stash.
 - **Diff:** ignore whitespace, more or fewer context lines, syntax highlighting, discard the
   current file or all unstaged changes, open the current file in your editor or diff tool.
-- **Go to:** open a sidebar section and move to it, for example **Go to Tags**.
+- **Go to:** **Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** (see
+  below), and open a sidebar section and move to it, for example **Go to Tags**.
 - **Repositories:** switch to another tab, close the tab, open a terminal, reveal the
   repository in the file manager.
 - **General:** **Refresh**, undo and redo, search commits, file history of the current file,
@@ -29,6 +30,28 @@ The palette has almost every action in Browsitory, grouped like this:
 
 Commands that can't run right now are left out. For example, while a rebase is paused, the
 palette offers only the commands that are safe until it is finished.
+
+## Go to a commit, branch, tag or stash
+
+**Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** select something and
+scroll the graph to it without checking anything out: the working tree stays as it is. Choose
+one, then type to filter its list and press Enter (Backspace in the empty field goes back to the
+commands).
+
+- **Go to commit…** lists the loaded commits; type the start of a SHA or words from the commit
+  message. **Look up "…" in the whole repository** finds a SHA, branch, tag or any revision git
+  understands (for example `v1.0~2`) also outside the loaded history, and **Search all history
+  for "…"** opens the commit search with your text.
+- **Go to branch…** lists the local branches and the remote branches the graph knows. You can
+  also click a branch in the Branches section.
+- **Go to tag…** lists every local tag. You can also click a tag in the Tags section.
+- **Go to stash…** shows a stash, like clicking it in the Stashes section.
+
+When the commit is further down than the loaded history, the graph loads more until it gets
+there. When the graph doesn't show it at all, the commit is still selected (its changes show),
+and a note above the graph says why: it is only on a branch the graph hides (**Show ⟨branch⟩**
+adds that branch to the graph), it is on a side branch of the one branch the graph shows
+(**Show all branches**), or it is on no branch at all.
 
 ## Keyboard shortcuts
 

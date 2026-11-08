@@ -20,6 +20,18 @@ pub(super) fn get_commit_graph(
     );
 }
 
+pub(super) fn locate_commit(
+    repo: &git2::Repository,
+    revision: String,
+    selection: GraphSelection,
+    reply: Sender<Result<Option<git_core::locate::CommitLocation>, String>>,
+) {
+    let _ = reply.send(
+        git_core::locate::locate_commit(repo, &revision, &selection)
+            .map_err(|error| error.to_string()),
+    );
+}
+
 /// With `staged` and `old_path` (a staged rename), the HEAD → index diff of both paths with
 /// rename detection, so only the edits show (#137).
 pub(super) fn get_working_diff(
@@ -369,6 +381,24 @@ impl WorkerHandle {
         self.tx
             .send(Command::GetCommitGraph {
                 limit,
+                selection,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    /// Where `revision`'s commit sits in the graph of `selection` (#441).
+    pub fn locate_commit(
+        &self,
+        revision: String,
+        selection: GraphSelection,
+    ) -> Result<Option<git_core::locate::CommitLocation>, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::LocateCommit {
+                revision,
                 selection,
                 reply: tx,
             })

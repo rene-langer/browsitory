@@ -482,6 +482,18 @@ describe("vscodeRepoClient", () => {
     await expect(range).resolves.toEqual({ fromId: "base", toId: "tip" });
   });
 
+  it("wires locateCommit (#441)", async () => {
+    const promise = vscodeRepoClient.locateCommit("/repo", "v1.0", null, []);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "locate_commit",
+      params: { repoPath: "/repo", revision: "v1.0", selectedBranches: null, remoteBranches: [] },
+    });
+    respond(1, null);
+    await expect(promise).resolves.toBeNull();
+  });
+
   it("wires getCommitMessage", async () => {
     const promise = vscodeRepoClient.getCommitMessage("/repo", "abc123");
     expect(postMessage).toHaveBeenCalledWith({

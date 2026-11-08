@@ -11,17 +11,17 @@ use serde::Serialize;
 use super::clone::{CloneErrorDto, CloneOutcomeDto};
 use super::*;
 use repo_service::wire::{
-    hook_progress_dto, BlameLineDto, BranchInfoDto, ChangedFileDto, CommitMessageSettingsDto,
-    CommitOutcomeDto, CommitSignatureDto, CompareRangeDto, ConflictSegmentDto, DiffHunkDto,
-    DiffSettingsDto, ExternalToolSettingsDto, FetchSettingsDto, FileHistoryEntryDto, FileSidesDto,
-    ForgeRepositoryDto, GitToolsDto, GraphCommitDto, HeadInfoDto, MarkResolvedOutcomeDto,
-    MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto,
-    PullRequestDto, PullRequestListDto, RebaseAbortDto, RebaseInfoDto, RebasePlanCommitDto,
-    RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto, SearchPageDto, SequenceAbortDto,
-    SequenceOutcomeDto, SequenceProgressDto, SignatureInputDto, StashApplyOutcomeDto,
-    StashEntryDto, StashFilesDto, StatusEntryDto, SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto,
-    TerminalSequenceDto, UndoOutcomeDto, UndoStateDto, UpstreamInfoDto, WorkspaceDto,
-    WorktreeInfoDto,
+    hook_progress_dto, BlameLineDto, BranchInfoDto, ChangedFileDto, CommitLocationDto,
+    CommitMessageSettingsDto, CommitOutcomeDto, CommitSignatureDto, CompareRangeDto,
+    ConflictSegmentDto, DiffHunkDto, DiffSettingsDto, ExternalToolSettingsDto, FetchSettingsDto,
+    FileHistoryEntryDto, FileSidesDto, ForgeRepositoryDto, GitToolsDto, GraphCommitDto,
+    HeadInfoDto, MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto,
+    PickOutcomeDto, PullOutcomeDto, PullRequestDto, PullRequestListDto, RebaseAbortDto,
+    RebaseInfoDto, RebasePlanCommitDto, RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto,
+    SearchPageDto, SequenceAbortDto, SequenceOutcomeDto, SequenceProgressDto, SignatureInputDto,
+    StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StatusEntryDto, SubmoduleInfoDto,
+    TagInfoDto, TerminalRebaseDto, TerminalSequenceDto, UndoOutcomeDto, UndoStateDto,
+    UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
 };
 
 #[path = "../../../test-support/wire_fixtures.rs"]
@@ -82,6 +82,11 @@ fn snapshots() -> Vec<(String, String)> {
         "CompareRange",
         fixtures::compare_ranges(),
         CompareRangeDto::from,
+    );
+    s.add(
+        "CommitLocation",
+        fixtures::commit_locations(),
+        CommitLocationDto::from,
     );
     s.add(
         "OpenRepoEntry",

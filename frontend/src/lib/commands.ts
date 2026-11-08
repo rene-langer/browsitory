@@ -1,4 +1,4 @@
-import { MAX_CONTEXT_LINES, type DiffSettings } from "../ipc/RepoClient";
+import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit } from "../ipc/RepoClient";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
@@ -45,6 +45,31 @@ export interface Command {
   label: string;
   keywords: string[];
   run: () => void;
+  /** Set for a picker ("Go to commit…"): choosing the command lists these items instead of
+   *  running `run`. */
+  picker?: CommandPicker;
+}
+
+/** A second step of the palette: the items to choose from for the typed query (#441). */
+export interface CommandPicker {
+  placeholder: string;
+  /** Shown when `items` is empty. */
+  emptyText: string;
+  /** The items for `query`, already filtered and in display order. */
+  items(query: string): Command[];
+}
+
+/**
+ * "Go to commit / branch / tag / stash…" (#441): select and scroll to the target without
+ * touching the working tree. Read-only, so offered while an operation runs.
+ */
+export interface GoToCommands {
+  onGoToCommit(revision: string): void;
+  /** Opens the commit search with `query`, for message text beyond the loaded history. */
+  onSearchHistory(query: string): void;
+  onGoToBranch(kind: "local" | "remote", name: string): void;
+  onGoToTag(name: string, commitId: string | null): void;
+  onGoToStash(commitId: string): void;
 }
 
 const RECENT_KEY = "command-palette-recent";
@@ -198,6 +223,7 @@ export function buildCommands(
   undoCommands?: UndoCommands,
   searchCommands?: SearchCommands,
   toolCommands?: ToolCommands,
+  goToCommands?: GoToCommands,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
@@ -840,6 +866,8 @@ export function buildCommands(
     }
   }
 
+  if (goToCommands !== undefined) commands.push(...goToPickers(appState, goToCommands));
+
   for (const title of SIDEBAR_SECTIONS) {
     const panelId = sidebarSectionPanelId(title);
     if (panelId !== null && !panelVisibility[panelId]) continue;
@@ -872,6 +900,150 @@ export function buildCommands(
   }
 
   return commands;
+}
+
+const PICKER_KEYWORDS = ["go", "go to", "jump", "find", "show", "reveal", "select", "navigate"];
+
+function goToPickers(appState: UseAppStateResult, goTo: GoToCommands): Command[] {
+  const { state } = appState;
+  const pickers: Command[] = [];
+  const noop = () => {};
+
+  pickers.push({
+    id: "go-to-commit",
+    label: "Go to commit…",
+    keywords: [...PICKER_KEYWORDS, "commit", "sha", "hash", "message", "revision"],
+    run: noop,
+    picker: {
+      placeholder: "SHA, message text, or any revision…",
+      emptyText: "No loaded commit matches",
+      items: (query) => commitPickerItems(state.commits, query, goTo),
+    },
+  });
+
+  const remoteNames = new Set<string>();
+  for (const branch of state.branches) if (branch.upstream != null) remoteNames.add(branch.upstream);
+  for (const name of state.graphRemoteBranchSelection ?? []) remoteNames.add(name);
+  for (const commit of state.commits) for (const name of commit.remoteBranchRefs) remoteNames.add(name);
+  const branchItems: Command[] = [
+    ...state.branches.map((branch) => ({
+      id: `branch:${branch.name}`,
+      label: branch.isCurrent ? `${branch.name} (current)` : branch.name,
+      keywords: [branch.name],
+      run: () => goTo.onGoToBranch("local", branch.name),
+    })),
+    ...Array.from(remoteNames)
+      .sort()
+      .map((name) => ({
+        id: `remote-branch:${name}`,
+        label: name,
+        keywords: [name, "remote"],
+        run: () => goTo.onGoToBranch("remote", name),
+      })),
+  ];
+  if (branchItems.length > 0) {
+    pickers.push({
+      id: "go-to-branch",
+      label: "Go to branch…",
+      keywords: [...PICKER_KEYWORDS, "branch", "tip"],
+      run: noop,
+      picker: {
+        placeholder: "Branch name…",
+        emptyText: "No matching branches",
+        items: (query) => filterPickerItems(branchItems, query),
+      },
+    });
+  }
+
+  if (state.tags.length > 0) {
+    const tagItems = state.tags.map((tag) => ({
+      id: `tag:${tag.name}`,
+      label: tag.name,
+      keywords: [tag.name],
+      run: () => goTo.onGoToTag(tag.name, tag.commitId),
+    }));
+    pickers.push({
+      id: "go-to-tag",
+      label: "Go to tag…",
+      keywords: [...PICKER_KEYWORDS, "tag", "release", "version"],
+      run: noop,
+      picker: {
+        placeholder: "Tag name…",
+        emptyText: "No matching tags",
+        items: (query) => filterPickerItems(tagItems, query),
+      },
+    });
+  }
+
+  if (state.stashes.length > 0) {
+    const stashItems = state.stashes.map((stash) => ({
+      id: `stash:${stash.commitId}`,
+      label: stash.message,
+      keywords: [stash.message, `stash@{${stash.index}}`],
+      run: () => goTo.onGoToStash(stash.commitId),
+    }));
+    pickers.push({
+      id: "go-to-stash",
+      label: "Go to stash…",
+      keywords: [...PICKER_KEYWORDS, "stash"],
+      run: noop,
+      picker: {
+        placeholder: "Stash message…",
+        emptyText: "No matching stashes",
+        items: (query) => filterPickerItems(stashItems, query),
+      },
+    });
+  }
+  return pickers;
+}
+
+/**
+ * Loaded commits whose SHA starts with the query or whose summary contains it, newest first.
+ * A typed query also offers a lookup in the whole repository (a SHA or revision that isn't
+ * loaded, or is on a hidden branch) and the commit search (message text in older history).
+ */
+export function commitPickerItems(commits: GraphCommit[], query: string, goTo: GoToCommands): Command[] {
+  const q = query.trim();
+  const needle = q.toLowerCase();
+  const matches =
+    needle === ""
+      ? commits
+      : commits.filter((commit) => commit.id.startsWith(needle) || commit.summary.toLowerCase().includes(needle));
+  const items: Command[] = matches.slice(0, RESULT_LIMIT).map((commit) => ({
+    id: `commit:${commit.id}`,
+    label: `${commit.shortId} ${commit.summary}`,
+    keywords: [],
+    run: () => goTo.onGoToCommit(commit.id),
+  }));
+  if (q === "") return items;
+  // After the loaded matches (first when there are none). A revision has no spaces; one that a
+  // loaded SHA already starts with needs no lookup.
+  if (!/\s/.test(q) && !commits.some((commit) => commit.id.startsWith(needle))) {
+    items.push({
+      id: "lookup-revision",
+      label: `Look up “${q}” in the whole repository`,
+      keywords: [],
+      run: () => goTo.onGoToCommit(q),
+    });
+  }
+  items.push({
+    id: "search-history",
+    label: `Search all history for “${q}”`,
+    keywords: [],
+    run: () => goTo.onSearchHistory(q),
+  });
+  return items;
+}
+
+/** Picker items matching `query` (best match first, else in the given order). */
+export function filterPickerItems(items: Command[], query: string): Command[] {
+  const scored: { item: Command; score: number; index: number }[] = [];
+  items.forEach((item, index) => {
+    const score = scoreCommand(item, query);
+    if (score !== null) scored.push({ item, score, index });
+  });
+  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+  return scored.slice(0, RESULT_LIMIT).map((entry) => entry.item);
 }
 
 // Heading order used when the palette shows its unfiltered, grouped view.
@@ -920,7 +1092,7 @@ export function commandGroup(id: string): CommandGroup {
   ) {
     return "Diff";
   }
-  if (id.startsWith("go-to:")) return "Go to";
+  if (id.startsWith("go-to:") || id.startsWith("go-to-")) return "Go to";
   if (id.startsWith("switch-repo:") || id === "close-tab" || id === "open-terminal" || id === "reveal-repository") {
     return "Repositories";
   }
@@ -931,6 +1103,9 @@ function scoreCommand(command: Command, query: string): number | null {
   const q = query.trim().toLowerCase();
   if (q === "") return 0;
   const label = command.label.toLowerCase();
+  // The whole label typed ("go to branch" for "Go to branch…") beats a longer label that merely
+  // starts with it ("Go to Branches").
+  if (label === q || label.replace(/…$/, "") === q) return 4;
   if (label.startsWith(q)) return 3;
   if (command.keywords.some((keyword) => keyword.toLowerCase().startsWith(q))) return 2;
   if (label.includes(q) || command.keywords.some((keyword) => keyword.toLowerCase().includes(q))) return 1;

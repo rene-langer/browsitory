@@ -90,6 +90,7 @@
   "list_tags",
   "list_workspaces",
   "list_worktrees",
+  "locate_commit",
   "mark_resolved",
   "open_diff_tool",
   "open_external_url",
