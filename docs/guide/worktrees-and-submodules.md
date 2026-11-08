@@ -16,5 +16,13 @@ something else is in the new folder, Browsitory keeps the folder and names
 it; delete it by hand. A half-made worktree left by an older version of
 Browsitory can't be removed with Remove: delete its folder by hand, click
 **Prune worktrees**, then delete the branch if you don't need it.
+
 **Submodules** lists the repository's submodules. Initialize or update one from its row. Tick **Update
 recursively** to also update the submodules inside it.
+
+To work in a submodule, open it in its own tab: choose **Open in new tab** in its menu (the
+**…** button, right-click, or the Menu key or Shift+F10 on the row's buttons), or run **Open
+submodule ⟨path⟩ in new tab** from the command palette. This works once the submodule is
+checked out. Until then the menu item is disabled and says why: initialize the submodule, then
+update it, which checks it out. In a linked worktree, it opens that worktree's copy of the
+submodule.

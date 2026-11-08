@@ -133,6 +133,19 @@ pub struct DiffSettings {
     pub ignore_whitespace: bool,
     pub context_lines: u32,
     pub syntax_highlight: bool,
+    pub word_wrap: WordWrap,
+}
+
+/// Whether diff lines wrap at the pane's width (`On`) or scroll sideways (`Off`). `Auto` leaves
+/// it to the diff view: it wraps the split view, prose files and diffs with a very long line.
+/// Stored as `"auto"`, `"on"` or `"off"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WordWrap {
+    #[default]
+    Auto,
+    On,
+    Off,
 }
 
 impl Default for DiffSettings {
@@ -141,6 +154,7 @@ impl Default for DiffSettings {
             ignore_whitespace: false,
             context_lines: 3,
             syntax_highlight: true,
+            word_wrap: WordWrap::Auto,
         }
     }
 }

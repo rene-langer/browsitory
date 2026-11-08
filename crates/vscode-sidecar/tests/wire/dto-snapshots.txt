@@ -23,7 +23,9 @@ OpenRepoEntry/loose {"path":"/repos/app","workspaceId":null}
 OpenRepoEntry/in-workspace {"path":"/repos/lib","workspaceId":"ws-1"}
 Workspace/members {"id":"ws-1","memberPaths":["/repos/app","/repos/lib"],"name":"Work","rootPath":"/repos"}
 Workspace/empty {"id":"ws-2","memberPaths":[],"name":"Empty","rootPath":"/empty"}
-DiffSettings/plain {"contextLines":5,"ignoreWhitespace":true,"syntaxHighlight":false}
+DiffSettings/plain {"contextLines":5,"ignoreWhitespace":true,"syntaxHighlight":false,"wordWrap":"Auto"}
+DiffSettings/wrap-On {"contextLines":3,"ignoreWhitespace":false,"syntaxHighlight":true,"wordWrap":"On"}
+DiffSettings/wrap-Off {"contextLines":3,"ignoreWhitespace":false,"syntaxHighlight":true,"wordWrap":"Off"}
 ExternalToolSettings/unset {"editor":null,"terminal":null}
 ExternalToolSettings/set {"editor":"code -w","terminal":"wt"}
 CommitMessageSettings/plain {"bodyRuler":72,"showRuler":true,"summaryLimit":50}
@@ -58,8 +60,8 @@ BranchInfo/tracking {"ahead":2,"behind":0,"isCurrent":true,"name":"main","upstre
 BranchInfo/local-only {"ahead":null,"behind":null,"isCurrent":false,"name":"topic","upstream":null}
 WorktreeInfo/main {"head":"4444444444444444444444444444444444444444","isLocked":false,"isMain":true,"isPrunable":false,"name":"app","path":"/repos/app"}
 WorktreeInfo/unknown-head {"head":null,"isLocked":true,"isMain":false,"isPrunable":true,"name":"gone","path":"/repos/gone"}
-SubmoduleInfo/initialized {"gitlinkId":"5555555555555555555555555555555555555555","headId":"6666666666666666666666666666666666666666","initialized":true,"path":"vendor/lib","url":"https://example.com/lib.git"}
-SubmoduleInfo/unknown {"gitlinkId":null,"headId":null,"initialized":false,"path":"vendor/other","url":null}
+SubmoduleInfo/initialized {"gitlinkId":"5555555555555555555555555555555555555555","headId":"6666666666666666666666666666666666666666","initialized":true,"path":"vendor/lib","url":"https://example.com/lib.git","workdir":"/repos/app/vendor/lib"}
+SubmoduleInfo/unknown {"gitlinkId":null,"headId":null,"initialized":false,"path":"vendor/other","url":null,"workdir":null}
 ReflogEntry/with-summary {"committerEmail":"ada@example.com","committerName":"Ada Lovelace","message":"commit: Add","newId":"8888888888888888888888888888888888888888","oldId":"7777777777777777777777777777777777777777","reference":"HEAD","summary":"Add","timestamp":1700000100}
 ReflogEntry/no-summary {"committerEmail":"ada@example.com","committerName":"Ada Lovelace","message":"commit: Add","newId":"8888888888888888888888888888888888888888","oldId":"7777777777777777777777777777777777777777","reference":"HEAD","summary":null,"timestamp":1700000100}
 RemoteInfo/no-auth {"authMode":null,"authUsername":null,"fetchUrl":"https://example.com/app.git","name":"origin","prune":false,"pushUrl":null}

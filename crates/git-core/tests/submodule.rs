@@ -102,6 +102,55 @@ fn rejects_unknown_and_invalid_submodule_paths() {
     ));
 }
 
+/// The folder a submodule tab opens (#445): absent until the submodule is checked out, then
+/// the superproject's work tree joined with the submodule's (nested) path.
+#[test]
+fn reports_the_work_tree_of_a_checked_out_submodule_only() {
+    let (_dir, parent, _, _) = configured_submodule_checkout();
+    let expected = parent.workdir().unwrap().join("deps/child");
+
+    assert_eq!(list_submodules(&parent).unwrap()[0].workdir, None);
+
+    init_submodule(&parent, "deps/child").unwrap();
+    // Initialised but not checked out: the folder is empty (or missing), so there is nothing
+    // to open; opening it would find the superproject instead.
+    assert_eq!(list_submodules(&parent).unwrap()[0].workdir, None);
+
+    update_submodule(&parent, "deps/child", false).unwrap();
+    let workdir = list_submodules(&parent).unwrap()[0]
+        .workdir
+        .clone()
+        .unwrap();
+    assert_eq!(Path::new(&workdir), expected);
+    let opened = Repository::open(&workdir).unwrap();
+    assert!(opened.find_reference("HEAD").is_ok());
+    assert!(Path::new(&workdir).join("child.txt").is_file());
+}
+
+/// In a linked worktree the submodule lies under that worktree's folder, not the main one's.
+#[test]
+fn reports_a_submodule_work_tree_inside_a_linked_worktree() {
+    let (dir, parent, _, _) = configured_submodule_checkout();
+    let linked_path = dir.path().join("linked");
+    parent.worktree("linked", &linked_path, None).unwrap();
+    let linked = Repository::open(&linked_path).unwrap();
+
+    assert_eq!(list_submodules(&linked).unwrap()[0].workdir, None);
+    init_submodule(&linked, "deps/child").unwrap();
+    update_submodule(&linked, "deps/child", false).unwrap();
+
+    let workdir = list_submodules(&linked).unwrap()[0]
+        .workdir
+        .clone()
+        .unwrap();
+    assert_eq!(
+        Path::new(&workdir).canonicalize().unwrap(),
+        linked_path.join("deps/child").canonicalize().unwrap()
+    );
+    // The main worktree's copy is still not checked out.
+    assert_eq!(list_submodules(&parent).unwrap()[0].workdir, None);
+}
+
 #[test]
 fn initializes_an_already_initialized_submodule_without_overwriting_it() {
     let (_dir, parent, child_url, _) = configured_submodule_checkout();

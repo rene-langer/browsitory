@@ -6,6 +6,7 @@ import { Toolbar } from "./primitives/Toolbar";
 import { wordDiff, type Segment } from "../lib/wordDiff";
 import { useHunkTokens } from "../lib/highlight";
 import { languageForPath } from "../lib/languageForPath";
+import { wrapLines } from "../lib/wordWrap";
 import { logFailure } from "../lib/logger";
 import { DiffLineContent } from "./DiffLineContent";
 import styles from "./DiffView.module.css";
@@ -118,12 +119,29 @@ type LineCallback = (oldStart: number, newStart: number, lineIndices: number[], 
 const shownLines = (hunk: DiffHunk) => hunk.lines.map((l) => l.content);
 
 /**
+ * "Show whole file" (#444), for a parent that fetches the diff itself: `on` is the toggle,
+ * `tooLongLines` the line count of a whole-file diff that was too long to show (the parent then
+ * shows the normal context instead).
+ */
+export interface WholeFileToggle {
+  on: boolean;
+  onToggle: () => void;
+  tooLongLines: number | null;
+}
+
+const lineCount = new Intl.NumberFormat("en-US");
+
+/**
  * `hunks === null` means "not loaded yet" (renders a loading placeholder); `[]` is a real,
  * resolved empty diff (binary file, mode-only change, or no changes).
  *
  * Hunk actions are not tab stops: the diff container is one tab stop and handles `[`/`]`
  * (previous/next hunk), `s` (stage or unstage the active hunk) and `d` (discard; press twice).
  * The per-hunk buttons stay clickable but are removed from the tab order.
+ *
+ * Lines wrap as the `wordWrap` setting says (`lib/wordWrap.ts`) until the "Wrap lines" toggle
+ * overrides it for this diff. With `wholeFile`, a "Show whole file" toggle sits next to the
+ * context stepper.
  *
  * With line callbacks, Add/Remove lines are selectable (click, shift-click, ctrl/cmd-click, drag,
  * ArrowUp/ArrowDown with optional Shift) within one hunk; `s`/`d` and the hunk header buttons
@@ -139,6 +157,7 @@ export function DiffView({
   onDiscardLines,
   partialActionsDisabled = false,
   path,
+  wholeFile,
 }: {
   hunks: DiffHunk[] | null;
   onStageHunk?: (oldStart: number, newStart: number) => void;
@@ -149,17 +168,26 @@ export function DiffView({
   onDiscardLines?: LineCallback;
   partialActionsDisabled?: boolean;
   path?: string;
+  wholeFile?: WholeFileToggle;
 }) {
   const [previousHunks, setPreviousHunks] = useState(hunks);
   const [confirmingDiscardIndex, setConfirmingDiscardIndex] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [split, setSplit] = useState(false);
+  // This diff's own choice from the "Wrap lines" toggle; `null` follows the setting.
+  const [wrapOverride, setWrapOverride] = useState<boolean | null>(null);
   const [selection, setSelection] = useState<LineSelection>(EMPTY_SELECTION);
   const dragging = useRef<{ hunkIndex: number; line: number } | null>(null);
   const hunkRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const wordSegments = useMemo(() => computeWordSegments(hunks), [hunks]);
   const { settings, update } = useDiffSettingsContext();
   const tokens = useHunkTokens(hunks, path ? languageForPath(path) : null, settings.syntaxHighlight, logHighlightError);
+  const wrapBySetting = useMemo(
+    () => wrapLines(settings.wordWrap, { split, path, hunks }),
+    [settings.wordWrap, split, path, hunks],
+  );
+  const wrap = wrapOverride ?? wrapBySetting;
+  const wholeFileOn = wholeFile?.on === true;
 
   // A stale armed confirmation must never carry over to a different hunk list — `hunkIndex` is
   // only meaningful relative to the `hunks` array it was armed against. Reset-during-render (as
@@ -194,6 +222,9 @@ export function DiffView({
       <button type="button" onClick={() => setSplit((prev) => !prev)}>
         {split ? "Unified view" : "Split view"}
       </button>
+      <button type="button" aria-pressed={wrap} onClick={() => setWrapOverride(!wrap)}>
+        Wrap lines
+      </button>
       <button
         type="button"
         aria-pressed={settings.ignoreWhitespace}
@@ -205,7 +236,7 @@ export function DiffView({
         <button
           type="button"
           aria-label="Fewer context lines"
-          disabled={settings.contextLines <= 0}
+          disabled={wholeFileOn || settings.contextLines <= 0}
           onClick={() => update({ contextLines: settings.contextLines - 1 })}
         >
           −
@@ -214,12 +245,17 @@ export function DiffView({
         <button
           type="button"
           aria-label="More context lines"
-          disabled={settings.contextLines >= MAX_CONTEXT_LINES}
+          disabled={wholeFileOn || settings.contextLines >= MAX_CONTEXT_LINES}
           onClick={() => update({ contextLines: settings.contextLines + 1 })}
         >
           +
         </button>
       </span>
+      {wholeFile !== undefined && (
+        <button type="button" aria-pressed={wholeFile.on} onClick={wholeFile.onToggle}>
+          Show whole file
+        </button>
+      )}
       <button
         type="button"
         aria-pressed={settings.syntaxHighlight}
@@ -239,9 +275,17 @@ export function DiffView({
     );
   }
 
-  const hint = partialActionsDisabled ? (
-    <p className={styles.hint}>Turn off Ignore whitespace to stage partially.</p>
-  ) : null;
+  const hint = (
+    <>
+      {partialActionsDisabled && <p className={styles.hint}>Turn off Ignore whitespace to stage partially.</p>}
+      {wholeFileOn && wholeFile?.tooLongLines != null && (
+        <p className={styles.hint}>
+          This file is too long to show whole ({lineCount.format(wholeFile.tooLongLines)} lines); showing the
+          changes with context instead.
+        </p>
+      )}
+    </>
+  );
 
   // The toolbar stays even for an empty diff: ignoring whitespace can hide every hunk, and the
   // toggle must remain reachable to turn it back off.
@@ -371,7 +415,8 @@ export function DiffView({
       {toolbar}
       {hint}
       <div
-        className={styles.diff}
+        className={wrap ? styles.diff : `${styles.diff} ${styles.nowrap}`}
+        data-wrap={wrap}
         {...(hasActions
           ? {
               tabIndex: 0,
@@ -464,7 +509,7 @@ export function DiffView({
                 )}
               </div>
               {split ? (
-                <div className={styles.lines}>
+                <div className={`${styles.lines} ${styles.splitLines}`}>
                   {splitRows!.map((row, rowIndex) => {
                     if (row.kind === "context") {
                       const oldNo = oldLine++;
@@ -568,7 +613,7 @@ export function DiffView({
                   })}
                 </div>
               ) : (
-                <pre className={styles.lines}>
+                <pre className={`${styles.lines} ${styles.unifiedLines}`}>
                   {hunk.lines.map((line, lineIndex) => {
                     const oldNo = line.origin !== "Add" ? oldLine++ : null;
                     const newNo = line.origin !== "Remove" ? newLine++ : null;

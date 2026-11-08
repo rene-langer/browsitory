@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { DEFAULT_DIFF_SETTINGS, MAX_CONTEXT_LINES, type DiffSettings, type RepoClient } from "../ipc/RepoClient";
+import {
+  DEFAULT_DIFF_SETTINGS,
+  MAX_CONTEXT_LINES,
+  WORD_WRAP_VALUES,
+  type DiffSettings,
+  type RepoClient,
+} from "../ipc/RepoClient";
 
 export interface DiffSettingsApi {
   settings: DiffSettings;
@@ -10,7 +16,9 @@ export interface DiffSettingsApi {
 
 function clamp(settings: DiffSettings): DiffSettings {
   const contextLines = Math.min(Math.max(Math.round(settings.contextLines), 0), MAX_CONTEXT_LINES);
-  return { ...settings, contextLines };
+  // A missing or unknown value falls back to `Auto`.
+  const wordWrap = WORD_WRAP_VALUES.includes(settings.wordWrap) ? settings.wordWrap : DEFAULT_DIFF_SETTINGS.wordWrap;
+  return { ...settings, contextLines, wordWrap };
 }
 
 export function useDiffSettings(client: RepoClient): DiffSettingsApi {

@@ -582,7 +582,7 @@ describe("tauriRepoClient diff pane commands", () => {
     expect(invoke).toHaveBeenLastCalledWith("ignore_path", { repoPath: "/repo", pattern: "*.log" });
     await tauriRepoClient.getDiffSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_diff_settings", undefined);
-    const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true };
+    const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const };
     await tauriRepoClient.setDiffSettings(settings);
     expect(invoke).toHaveBeenLastCalledWith("set_diff_settings", { settings });
   });

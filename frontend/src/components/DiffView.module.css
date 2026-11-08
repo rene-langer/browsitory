@@ -113,6 +113,34 @@
   overflow-wrap: anywhere;
 }
 
+/* Unwrapped lines (#444): text keeps its length and each hunk scrolls sideways. Every row is as
+   wide as the hunk's longest line (or the pane, if wider), so backgrounds, the selection and the
+   cursor mark run the full width; one line per row keeps the gutters aligned. */
+.nowrap .content {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.nowrap .unifiedLines {
+  display: grid;
+  grid-template-columns: minmax(100%, max-content);
+}
+
+/* The split view becomes one grid so both columns keep a single width across rows: each side is
+   at least half the pane, wider when its longest line is. Context rows span both columns. */
+.nowrap .splitLines {
+  display: grid;
+  grid-template-columns: minmax(50%, max-content) minmax(50%, max-content);
+}
+
+.nowrap .splitLines > .splitRow {
+  display: contents;
+}
+
+.nowrap .splitLines > .line {
+  grid-column: 1 / -1;
+}
+
 .lineAdd {
   background: var(--color-diff-add-bg);
   color: var(--color-diff-add-text);

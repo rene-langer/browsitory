@@ -37,7 +37,7 @@ export type DiffLineOrigin = "Add" | "Remove" | "Context";
 
 export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, };
 
-export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, };
+export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, wordWrap: WordWrap, };
 
 export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 
@@ -173,7 +173,12 @@ oldPath: string | null, staged: boolean, kind: StatusKind, };
 
 export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 
-export type SubmoduleInfo = { path: string, url: string | null, gitlinkId: string | null, initialized: boolean, headId: string | null, };
+export type SubmoduleInfo = { path: string, url: string | null, gitlinkId: string | null, initialized: boolean, headId: string | null, 
+/**
+ * Absolute path of the checked-out submodule, the folder its tab opens; `null` when it
+ * isn't checked out (#445).
+ */
+workdir: string | null, };
 
 export type TagInfo = { name: string, targetId: string, commitId: string | null, annotated: boolean, message: string | null, taggerName: string | null, timestamp: number | null, };
 
@@ -211,6 +216,8 @@ export type UpstreamInfo = { localBranch: string, remoteName: string, remoteBran
  * Where Push lands under `push.default`; null = ask with the Push to… dialog.
  */
 pushBranch: string | null, };
+
+export type WordWrap = "Auto" | "On" | "Off";
 
 export type Workspace = { id: string, name: string, rootPath: string, memberPaths: Array<string>, };
 

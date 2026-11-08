@@ -164,12 +164,12 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.setCommitMessageSettings({ summaryLimit: 60, bodyRuler: 80, showRuler: false }), "set_commit_message_settings", { settings: { summaryLimit: 60, bodyRuler: 80, showRuler: false } }, null],
       [() => vscodeRepoClient.commit("/r", "m", false, [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]), "commit", { repoPath: "/r", message: "m", noVerify: false, trailers: [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }] }, { kind: "Committed", commitId: "c" }],
       [() => vscodeRepoClient.amendCommit("/r", "m", true, { author: { name: "Ada", email: "ada@x.org" }, trailers: [] }), "amend_commit", { repoPath: "/r", message: "m", noVerify: true, author: { name: "Ada", email: "ada@x.org" }, trailers: [] }, { kind: "Committed", commitId: "c" }],
-      [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }],
+      [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" }],
       [() => vscodeRepoClient.getFetchSettings(), "get_fetch_settings", {}, { autoFetchMinutes: 0 }],
       [() => vscodeRepoClient.setFetchSettings({ autoFetchMinutes: 10 }), "set_fetch_settings", { settings: { autoFetchMinutes: 10 } }, null],
       [() => vscodeRepoClient.backgroundFetch("/r", null), "background_fetch", { repoPath: "/r", prune: null }, "background-fetch-1"],
       [() => vscodeRepoClient.backgroundFetch("/r", true), "background_fetch", { repoPath: "/r", prune: true }, null],
-      [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true } }, null],
+      [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" } }, null],
     ] as const;
 
     for (const [index, [call, method, params, result]] of methods.entries()) {
@@ -628,9 +628,9 @@ describe("vscodeRepoClient", () => {
 
   it("wires listSubmodules, initSubmodule, and updateSubmodule", async () => {
     const listPromise = vscodeRepoClient.listSubmodules("/repo");
-    respond(1, [{ path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null }]);
+    respond(1, [{ path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null, workdir: null }]);
     await expect(listPromise).resolves.toEqual([
-      { path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null },
+      { path: "deps/child", url: null, gitlinkId: null, initialized: false, headId: null, workdir: null },
     ]);
 
     const initPromise = vscodeRepoClient.initSubmodule("/repo", "deps/child");

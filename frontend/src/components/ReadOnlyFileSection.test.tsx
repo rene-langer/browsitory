@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { DiffSource, RepoClient } from "../ipc/RepoClient";
+import { WHOLE_FILE_CONTEXT_LINES, type DiffSource, type RepoClient } from "../ipc/RepoClient";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 
@@ -27,6 +27,16 @@ describe("ReadOnlyFileSection", () => {
 
     rerender(<ReadOnlyFileSection {...props} diffKey="k2" />);
     await waitFor(() => expect(props.fetchDiff).toHaveBeenCalledTimes(2));
+  });
+
+  it("Show whole file refetches the commit or compare diff with whole-file context", async () => {
+    const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add" as const, content: "x\n" }] };
+    const { props } = renderSection({ fetchDiff: vi.fn(async () => [hunk]) });
+    fireEvent.click(await screen.findByRole("button", { name: "Show whole file" }));
+    await waitFor(() =>
+      expect(props.fetchDiff).toHaveBeenLastCalledWith({ ignoreWhitespace: false, contextLines: WHOLE_FILE_CONTEXT_LINES }),
+    );
+    expect(screen.getByRole("button", { name: "Show whole file" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("does not fetch while collapsed", () => {

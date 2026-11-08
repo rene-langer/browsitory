@@ -235,6 +235,78 @@ fn stage_lines_with_zero_context_matches_the_displayed_hunk() {
     assert_eq!(index_content(&repo, "f.txt").unwrap(), "a\nb\nc\nd\n");
 }
 
+/// base l1..l60 → workdir with lines 5 and 45 changed. With whole-file context the diff is one
+/// hunk: 4 context, -l5, +changed 5, 39 context, -l45, +changed 45, 15 context.
+fn setup_far_apart_changes() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", &sixty_lines_with(&[]));
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "f.txt", &sixty_lines_with(&[5, 45]));
+    (dir, repo)
+}
+
+fn sixty_lines_with(changed: &[u32]) -> String {
+    (1..=60)
+        .map(|n| {
+            if changed.contains(&n) {
+                format!("changed {n}\n")
+            } else {
+                format!("l{n}\n")
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn line_actions_with_whole_file_context_touch_only_the_selection() {
+    let (dir, repo) = setup_far_apart_changes();
+    let whole = git_core::diff::WHOLE_FILE_CONTEXT_LINES;
+    let opts = DiffOptions {
+        ignore_whitespace: false,
+        context_lines: whole,
+    };
+    let hunks = working_diff(&repo, "f.txt", false, &opts).unwrap();
+    assert_eq!(hunks.len(), 1);
+    let (o, n) = (hunks[0].old_start, hunks[0].new_start);
+    // Indices 45/46 are "-l45"/"+changed 45".
+    assert_eq!(hunks[0].lines[45].content, "l45\n");
+    stage_lines(&repo, "f.txt", o, n, whole, &[45, 46]).unwrap();
+    assert_eq!(
+        index_content(&repo, "f.txt").unwrap(),
+        sixty_lines_with(&[45])
+    );
+    assert_eq!(
+        workdir_content(dir.path(), "f.txt"),
+        sixty_lines_with(&[5, 45])
+    );
+
+    let staged = working_diff(&repo, "f.txt", true, &opts).unwrap();
+    assert_eq!(staged.len(), 1);
+    let (o, n) = (staged[0].old_start, staged[0].new_start);
+    unstage_lines(&repo, "f.txt", o, n, whole, &[44, 45]).unwrap();
+    assert_eq!(
+        index_content(&repo, "f.txt").unwrap(),
+        sixty_lines_with(&[])
+    );
+
+    discard_lines(&repo, "f.txt", o, n, whole, &[4, 5]).unwrap();
+    assert_eq!(
+        workdir_content(dir.path(), "f.txt"),
+        sixty_lines_with(&[45])
+    );
+}
+
+#[test]
+fn stage_hunk_with_whole_file_context_stages_every_change() {
+    let (dir, repo) = setup_far_apart_changes();
+    let whole = git_core::diff::WHOLE_FILE_CONTEXT_LINES;
+    git_core::stage::stage_hunk(&repo, "f.txt", 1, 1, whole).unwrap();
+    assert_eq!(
+        index_content(&repo, "f.txt").unwrap(),
+        workdir_content(dir.path(), "f.txt")
+    );
+}
+
 #[test]
 fn unstages_only_the_selected_line() {
     let (_dir, repo) = setup_abc();

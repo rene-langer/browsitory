@@ -112,6 +112,7 @@ export type DtoContract = [
   Expect<Equal<Hand.UndoOutcome, Wire.UndoOutcome>>,
   Expect<Equal<Hand.UndoState, Wire.UndoState>>,
   Expect<Equal<Hand.UpstreamInfo, Loosen<Wire.UpstreamInfo, "ahead" | "behind" | "pushBranch">>>,
+  Expect<Equal<Hand.WordWrap, Wire.WordWrap>>,
   Expect<Equal<Hand.Workspace, Wire.Workspace>>,
   Expect<Equal<Hand.WorktreeInfo, Wire.WorktreeInfo>>,
   // `persistOpenRepos` sends `OpenRepoEntry`s; the backends read them as `OpenRepoEntryInput`.

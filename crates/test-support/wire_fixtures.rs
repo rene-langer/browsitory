@@ -381,14 +381,30 @@ pub fn workspaces() -> Cases<config::Workspace> {
 }
 
 pub fn diff_settings() -> Cases<config::DiffSettings> {
-    vec![case(
+    let mut cases = vec![case(
         "plain",
         config::DiffSettings {
             ignore_whitespace: true,
             context_lines: 5,
             syntax_highlight: false,
+            word_wrap: config::WordWrap::Auto,
         },
-    )]
+    )];
+    use config::WordWrap;
+    // `plain` covers `Auto`.
+    for word_wrap in every!(WordWrap { Auto, On, Off }) {
+        if word_wrap == WordWrap::Auto {
+            continue;
+        }
+        cases.push(case(
+            format!("wrap-{word_wrap:?}"),
+            config::DiffSettings {
+                word_wrap,
+                ..config::DiffSettings::default()
+            },
+        ));
+    }
+    cases
 }
 
 pub fn external_tool_settings() -> Cases<config::ExternalToolSettings> {
@@ -660,6 +676,7 @@ pub fn submodules() -> Cases<git_core::submodule::SubmoduleInfo> {
                 gitlink_id: some("5555555555555555555555555555555555555555"),
                 initialized: true,
                 head_id: some("6666666666666666666666666666666666666666"),
+                workdir: some("/repos/app/vendor/lib"),
             },
         ),
         case(
@@ -670,6 +687,7 @@ pub fn submodules() -> Cases<git_core::submodule::SubmoduleInfo> {
                 gitlink_id: None,
                 initialized: false,
                 head_id: None,
+                workdir: None,
             },
         ),
     ]

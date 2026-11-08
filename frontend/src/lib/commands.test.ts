@@ -29,8 +29,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
         { name: "wt1", path: "/repo-wt1", head: "def", isMain: false, isLocked: false, isPrunable: false },
       ],
       submodules: [
-        { path: "libs/a", url: "https://example.com/a.git", gitlinkId: "aaa", initialized: false, headId: null },
-        { path: "libs/b", url: "https://example.com/b.git", gitlinkId: "bbb", initialized: true, headId: "bbb111" },
+        { path: "libs/a", url: "https://example.com/a.git", gitlinkId: "aaa", initialized: false, headId: null, workdir: null },
+        { path: "libs/b", url: "https://example.com/b.git", gitlinkId: "bbb", initialized: true, headId: "bbb111", workdir: "/repo/libs/b" },
       ],
       reflogRefs: [],
       selectedReflogReference: null,
@@ -647,6 +647,20 @@ describe("buildCommands", () => {
     expect(commands.some((c) => c.id === "update-submodule:libs/a")).toBe(false);
   });
 
+  it("opens a checked-out submodule's folder in a new tab, and offers nothing to open for one that isn't", () => {
+    const onOpenRepoTab = vi.fn();
+    const commands = buildCommands(makeAppState(), onOpenRepoTab, [], vi.fn());
+
+    const openCmd = commands.find((c) => c.id === "open-submodule:libs/b");
+    expect(openCmd?.label).toBe("Open submodule libs/b in new tab");
+    expect(openCmd?.keywords).toEqual(expect.arrayContaining(["submodule", "open", "tab", "libs/b"]));
+    openCmd?.run();
+    expect(onOpenRepoTab).toHaveBeenCalledWith("/repo/libs/b");
+
+    // Not checked out: the palette keeps offering "Initialize submodule libs/a" instead.
+    expect(commands.some((c) => c.id === "open-submodule:libs/a")).toBe(false);
+  });
+
   it("emits no per-entry restore-reflog commands, regardless of reflog size", () => {
     // state.reflog is an unbounded read of the whole reflog for the selected
     // reference — a per-entry command would grow without bound. Restoring is
@@ -813,6 +827,7 @@ describe("buildCommands", () => {
         expect(ids).not.toContain("prune-worktrees");
         expect(ids.some((id) => id.startsWith("init-submodule:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("update-submodule:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("open-submodule:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("apply-stash:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("drop-stash:"))).toBe(false);
 
@@ -918,6 +933,7 @@ describe("buildCommands", () => {
       const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, submodule: false });
       expect(commands.some((c) => c.id.startsWith("init-submodule:"))).toBe(false);
       expect(commands.some((c) => c.id.startsWith("update-submodule:"))).toBe(false);
+      expect(commands.some((c) => c.id.startsWith("open-submodule:"))).toBe(false);
     });
 
     it("defaults to every panel visible when no panelVisibility argument is passed", () => {
@@ -1094,7 +1110,7 @@ describe("history commands", () => {
 });
 
 describe("diff option and discard commands", () => {
-  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true };
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const };
   const build = (state: ReturnType<typeof makeAppState>, extra: Record<string, unknown> = {}) => {
     const diffCommands = {
       settings,
@@ -1212,7 +1228,7 @@ describe("preferences and external tool commands", () => {
     onOpenCurrentFileInDiffTool: vi.fn(),
   });
   const diffCommands = (currentFile: string | null) => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const },
     update: vi.fn(),
     currentFile,
     requestDiscardCurrentFile: vi.fn(),

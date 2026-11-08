@@ -45,9 +45,28 @@ pub struct DiffHunk {
 
 pub const MAX_CONTEXT_LINES: u32 = 20;
 
+/// `context_lines` value that shows the whole file: every line of a changed file, in one hunk
+/// ("Show whole file", #444). Any other value is clamped to `MAX_CONTEXT_LINES`.
+pub const WHOLE_FILE_CONTEXT_LINES: u32 = u32::MAX;
+
+/// What libgit2 gets for `WHOLE_FILE_CONTEXT_LINES`: more lines than any file it can diff, yet
+/// small enough that xdiff's `2 * context` in a C `long` can't overflow where `long` is 32 bits
+/// (Windows).
+const LIBGIT2_WHOLE_FILE_CONTEXT: u32 = (i32::MAX / 4) as u32;
+
+/// The context libgit2 is asked for: `MAX_CONTEXT_LINES` at most, or the whole file.
+fn effective_context_lines(context_lines: u32) -> u32 {
+    if context_lines == WHOLE_FILE_CONTEXT_LINES {
+        LIBGIT2_WHOLE_FILE_CONTEXT
+    } else {
+        context_lines.min(MAX_CONTEXT_LINES)
+    }
+}
+
 /// Display options shared by every diff the UI shows. Staging builds its diff through
 /// `working_diff_options` with the same `context_lines`, so the `(old_start, new_start)` hunk
-/// identity the UI captured always matches.
+/// identity the UI captured always matches. `context_lines` is clamped to `MAX_CONTEXT_LINES`
+/// unless it is `WHOLE_FILE_CONTEXT_LINES`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiffOptions {
     pub ignore_whitespace: bool,
@@ -81,7 +100,7 @@ pub struct CompareRange {
 fn apply_display_options(git_opts: &mut git2::DiffOptions, opts: &DiffOptions) {
     git_opts
         .ignore_whitespace(opts.ignore_whitespace)
-        .context_lines(opts.context_lines.min(MAX_CONTEXT_LINES));
+        .context_lines(effective_context_lines(opts.context_lines));
 }
 
 /// Literal pathspec for `path` (and `old_path`, for a rename) plus the display options.
