@@ -1838,8 +1838,13 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   any tab or spelling. The frontend waits while its own action runs or the host is hidden
   (`ipc/hostVisibility.ts`: the page's `visibilitychange`, plus the VSCode panel's
   `onDidChangeViewState`, posted by the extension host as a `panelVisibility` notification), and
-  cancels a running background fetch when the user starts an action. Fetches never prompt (the
-  credential provider only reads the keychain and the SSH agent); a remote failing with
+  cancels a running background fetch when the user starts an action. Fetches never prompt for
+  credentials (the provider only reads the OS store and the SSH agent), but reading the OS store
+  can make the OS prompt (a locked keyring; macOS for an unsigned build). So a background fetch
+  uses `RemoteCredentialProvider::without_prompt`: a token held in the process-wide
+  `CredentialSession` (from a read or save this session), else the store only once something the
+  user did read or wrote it successfully, else the remote fails as `MissingCredential` without
+  touching the store. A remote failing with
   `MissingCredential`, `CredentialStoreFailure` or `SshAgentFailure` is named once per session
   in a toast. Like every fetch it records no undo entry.
 - Push and force push of the current branch go where `git-core::remote::push_target` resolves

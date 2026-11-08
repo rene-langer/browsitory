@@ -523,17 +523,20 @@ pub(super) struct PushTarget {
     pub(super) no_verify: bool,
 }
 
-/// Builds the credential provider for one remote of a Fetch all from its auth profile.
+/// Builds the credential provider for one remote of a Fetch all from its auth profile; for a
+/// background fetch, one that never makes the OS credential store prompt.
 fn credential_provider<'a, S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &'a CredentialService<S>,
     remote_name: &str,
+    background: bool,
 ) -> Result<git_core::remote::BoxedCredentialProvider<'a>, git_core::remote::RemoteError> {
     let profile = git_core::remote::remote_auth_profile(repo, remote_name)?;
-    Ok(Box::new(crate::credentials::RemoteCredentialProvider::new(
-        credentials,
-        profile,
-    )))
+    Ok(Box::new(if background {
+        crate::credentials::RemoteCredentialProvider::without_prompt(credentials, profile)
+    } else {
+        crate::credentials::RemoteCredentialProvider::new(credentials, profile)
+    }))
 }
 
 pub(super) fn fetch_all<S: CredentialStore>(
@@ -560,7 +563,14 @@ pub(super) fn fetch_all<S: CredentialStore>(
         repo,
         prune,
         op.id.clone(),
-        &mut |remote_name| credential_provider(repo, credentials, remote_name),
+        &mut |remote_name| {
+            credential_provider(
+                repo,
+                credentials,
+                remote_name,
+                operation == TransferOperation::BackgroundFetch,
+            )
+        },
         &mut reporter,
         &cancel,
     );

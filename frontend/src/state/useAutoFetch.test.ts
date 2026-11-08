@@ -188,7 +188,7 @@ describe("useAutoFetch", () => {
 
     await advance(5 * MINUTE);
     expect(options.notify).toHaveBeenCalledExactlyOnceWith(
-      "Fetch automatically skipped origin: it needs a saved HTTPS token. Fetch it yourself or save a token.",
+      "Fetch automatically skipped origin: no HTTPS token is available without asking you. Fetch once yourself, or save a token.",
       expect.objectContaining({ label: "Credentials…" }),
     );
     vi.mocked(options.notify).mock.calls[0]![1]!.run();

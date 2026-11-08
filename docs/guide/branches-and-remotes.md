@@ -75,6 +75,11 @@ nothing to undo, and the window keeps its focus. It uses the repository's **Prun
   a locked credential store, no key in the SSH agent) is skipped, and a short notice names it
   once per session; **Credentials…** in the notice opens that remote's credentials. Other
   failures, such as an unreachable server, stay quiet; the next fetch tries again.
+- It never makes your system ask to unlock its credential store (keychain, keyring) either.
+  A saved HTTPS token is used in the background only after Browsitory has already read or
+  saved a token in this session: a fetch, pull or push you started, or saving a token in a
+  remote's **Credentials** dialog. Until then an HTTPS remote that uses a saved token is skipped
+  as above; fetch once yourself to let the background fetch use it.
 
 The sync bar shows when the repository was last fetched in this session, by you or in the
 background ("Fetched 3 minutes ago"); hover over it for the time and the interval.

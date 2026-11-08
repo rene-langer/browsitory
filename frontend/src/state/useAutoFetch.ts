@@ -42,7 +42,7 @@ const STARTING = "\u0000starting";
 
 function noticeText(remoteName: string, errorKind: TransferErrorKind | null): string | null {
   const skipped = `Fetch automatically skipped ${remoteName}`;
-  if (errorKind === "MissingCredential") return `${skipped}: it needs a saved HTTPS token. Fetch it yourself or save a token.`;
+  if (errorKind === "MissingCredential") return `${skipped}: no HTTPS token is available without asking you. Fetch once yourself, or save a token.`;
   if (errorKind === "CredentialStoreFailure") return `${skipped}: the operating-system credential store is locked or unavailable.`;
   if (errorKind === "SshAgentFailure") return `${skipped}: the SSH agent has no key for it.`;
   return null;
