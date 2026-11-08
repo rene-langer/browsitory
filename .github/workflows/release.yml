@@ -153,6 +153,25 @@ jobs:
       - name: Show the locked Tauri CLI version
         working-directory: crates/tauri-app
         run: node ../../frontend/node_modules/@tauri-apps/cli/tauri.js --version
+      # The bundler's tools (WiX and NSIS on Windows, the AppImage tools on Linux) come from the
+      # cache that ci.yml's build-dist fills on main, keyed on the locked CLI version; whatever
+      # is missing is downloaded with retries here, so a GitHub 504 doesn't fail the bundling
+      # (#454). Same three steps as build-dist; see docs/RELEASING.md, "Bundler tools".
+      - id: bundler-tools
+        name: Find the bundler's tools folder
+        if: runner.os != 'macOS'
+        shell: bash
+        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} scripts/prefetch-bundler-tools.py --github-output --no-download
+      - uses: actions/cache@v6
+        if: runner.os != 'macOS'
+        with:
+          path: ${{ steps.bundler-tools.outputs.tools-dir }}
+          key: tauri-bundler-tools-${{ runner.os }}-cli-${{ steps.bundler-tools.outputs.cli-version }}
+      - name: Download the bundler's tools (with retries)
+        if: runner.os != 'macOS'
+        timeout-minutes: 15
+        shell: bash
+        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} scripts/prefetch-bundler-tools.py
       # Creates the draft release (the first matrix job to finish creates it, the others find it)
       # and uploads the bundles and latest.json, the manifest every installed app's updater reads.
       # v1 (#363) differs from v0 in ways docs/RELEASING.md's "Updater manifest" describes:
