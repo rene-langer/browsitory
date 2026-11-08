@@ -37,6 +37,7 @@ export type DtoContract = [
   Expect<Equal<Hand.CloneOutcome, Tauri.CloneOutcome>>,
   Expect<Equal<Hand.CloneRequest, Tauri.CloneRequest>>,
   Expect<Equal<Hand.CommitMessageSettings, Wire.CommitMessageSettings>>,
+  Expect<Equal<Hand.FetchSettings, Wire.FetchSettings>>,
   Expect<Equal<Hand.CommitOutcome, Wire.CommitOutcome>>,
   Expect<Equal<Hand.CommitSignature, Wire.CommitSignature>>,
   Expect<Equal<Hand.CompareRange, Wire.CompareRange>>,

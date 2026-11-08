@@ -156,3 +156,20 @@
 .authorField {
   margin-bottom: var(--space-2);
 }
+
+/* The summary counter, then "Restore message" and "Recent messages" at the end of the row. */
+.messageTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+  margin: calc(-1 * var(--space-1)) 0 var(--space-1);
+}
+
+.messageTools > .counter {
+  margin: 0 auto 0 0;
+}
+
+.historyButton {
+  font-size: var(--text-xs);
+}

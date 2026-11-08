@@ -41,6 +41,25 @@ impl CancelRegistry {
         }
     }
 
+    /// `allocate`, but only while no other operation is known (queued or running); `None`
+    /// otherwise. Checked and inserted under one lock, so two callers can't both get an ID.
+    pub(super) fn allocate_if_idle(&self, prefix: &str) -> Option<OperationId> {
+        let mut operations = self.operations();
+        if !operations.is_empty() {
+            return None;
+        }
+        let id = format!(
+            "{prefix}-{}",
+            NEXT_OPERATION_ID.fetch_add(1, Ordering::Relaxed)
+        );
+        operations.insert(id.clone(), false);
+        drop(operations);
+        Some(OperationId {
+            id,
+            registry: self.clone(),
+        })
+    }
+
     /// Asks the operation `id` to stop; ignored when no such operation is pending or running.
     pub(super) fn cancel(&self, id: &str) {
         if let Some(cancelled) = self.operations().get_mut(id) {

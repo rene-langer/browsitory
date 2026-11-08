@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { SyncBar } from "./SyncBar";
@@ -147,6 +147,39 @@ describe("SyncBar", () => {
     expect(screen.getByText("HEAD detached at abc1234")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Push/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Pull/ })).toBeDisabled();
+  });
+});
+
+describe("SyncBar last fetch", () => {
+  it("shows nothing before the first fetch of the session", () => {
+    renderBar({ lastFetchedAt: null });
+
+    expect(screen.queryByText(/^Fetched/)).toBeNull();
+  });
+
+  it("shows when the last fetch ran and keeps the label current", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-11-08T12:00:00Z"));
+      renderBar({ lastFetchedAt: Date.now() - 10_000, autoFetchMinutes: 10 });
+
+      const label = screen.getByText("Fetched just now");
+      expect(label).toHaveAttribute("title", expect.stringContaining("Fetches automatically every 10 minutes"));
+
+      act(() => {
+        vi.advanceTimersByTime(3 * 60_000);
+      });
+      expect(screen.getByText("Fetched 3 minutes ago")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says automatic fetching is off in the tooltip when it is", () => {
+    renderBar({ lastFetchedAt: Date.now() - 2 * 3600_000, autoFetchMinutes: 0 });
+
+    const label = screen.getByText("Fetched 2 hours ago");
+    expect(label.getAttribute("title")).not.toContain("automatically");
   });
 });
 

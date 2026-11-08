@@ -114,6 +114,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     pushCurrentBranch: async () => unused(),
     pushTags: async () => unused(),
     fetchAllRemotes: async () => unused(),
+    backgroundFetch: async () => unused(),
     pushBranch: async () => unused(),
     deleteRemoteBranch: async () => unused(),
     deleteRemoteTag: async () => unused(),
@@ -179,6 +180,8 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
     listRecentAuthors: async () => [],
     getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
     setCommitMessageSettings: async () => {},
+    getFetchSettings: async () => ({ autoFetchMinutes: 0 }),
+    setFetchSettings: async () => {},
     logFrontendError: unused,
     ...overrides,
   };
@@ -779,6 +782,69 @@ describe("App", () => {
     await waitFor(() => expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: hooked", true, []));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "pre-commit hook failed" })).toBeNull());
     await waitFor(() => expect(box).toHaveValue(""));
+  });
+
+  it("offers committed messages and the branch's recent commits under Recent messages (#443)", async () => {
+    localStorage.clear();
+    const graphCommit = (id: string, summary: string, parentIds: string[]) => ({
+      id,
+      shortId: id.slice(0, 7),
+      summary,
+      authorName: "A",
+      authorEmail: "a@example.com",
+      timestamp: 0,
+      parentIds,
+      branchRefs: [],
+      remoteBranchRefs: [],
+    });
+    const getCommitMessage = vi.fn(async (_repo: string, id: string) => `${id} full message\n\nBody`);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
+      getCommitGraph: async () => [graphCommit("head111", "Tip of main", ["base222"]), graphCommit("base222", "Base", [])],
+      getHeadInfo: async () => ({
+        headId: "head111",
+        detachedAt: null,
+        headPushed: false,
+        operation: null,
+        operationLeftover: false,
+        squashMessage: null,
+        commitHooks: [],
+        sequence: null,
+        rebase: null,
+        bisect: null, terminalSequence: null, terminalRebase: null,
+      }),
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getCommitMessage,
+      commit: async () => ({ kind: "Committed", commitId: "c1" }),
+    });
+    try {
+      render(<App client={client} />);
+      const box = await screen.findByRole("textbox", { name: "Commit message" });
+      fireEvent.change(box, { target: { value: "feat: remembered\n\nwith a body" } });
+      const commitButton = screen.getByRole("button", { name: "Commit" });
+      await waitFor(() => expect(commitButton).toBeEnabled());
+      fireEvent.click(commitButton);
+      await waitFor(() => expect(box).toHaveValue(""));
+
+      fireEvent.click(screen.getByRole("button", { name: "Recent messages" }));
+      const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+      expect(items.map((item) => item.textContent)).toEqual(["feat: remembered", "Tip of main", "Base"]);
+      fireEvent.click(items[0]);
+      await waitFor(() => expect(box).toHaveValue("feat: remembered\n\nwith a body"));
+
+      fireEvent.click(screen.getByRole("button", { name: "Recent messages" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Tip of main" }));
+      await waitFor(() => expect(box).toHaveValue("head111 full message\n\nBody"));
+      expect(getCommitMessage).toHaveBeenCalledWith("/repos/a", "head111");
+      fireEvent.click(screen.getByRole("button", { name: "Restore message" }));
+      expect(box).toHaveValue("feat: remembered\n\nwith a body");
+    } finally {
+      localStorage.clear();
+    }
   });
 
   it("a failing hook on Continue opens the hook dialog and Continue without hooks finishes the sequence", async () => {

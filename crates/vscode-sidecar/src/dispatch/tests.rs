@@ -257,6 +257,7 @@ fn concurrent_relays_sharing_one_writer_never_interleave_a_line() {
 fn remote_failed_event_carries_the_remote_name_and_other_events_omit_it() {
     let failed = serde_json::to_value(transfer_progress_dto(TransferEvent::RemoteFailed {
         operation_id: "fetch-all-7".into(),
+        operation: TransferOperation::FetchAll,
         remote_name: "backup".into(),
         error: TransferErrorKind::TransferFailed,
     }))

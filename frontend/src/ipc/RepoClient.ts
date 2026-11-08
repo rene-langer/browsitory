@@ -39,6 +39,12 @@ export interface CommitMessageSettings {
 export const DEFAULT_COMMIT_MESSAGE_SETTINGS: CommitMessageSettings = { summaryLimit: 50, bodyRuler: 72, showRuler: true };
 export const COMMIT_MESSAGE_COLUMNS = { min: 10, max: 200 } as const;
 
+/** Fetch settings (`[fetch]`): the app-wide "Fetch automatically" interval, 0 for off. */
+export interface FetchSettings {
+  autoFetchMinutes: number;
+}
+export const DEFAULT_FETCH_SETTINGS: FetchSettings = { autoFetchMinutes: 0 };
+
 /** A `Key: value` line for a commit message's trailer block, e.g. `Co-authored-by`. */
 export interface Trailer {
   key: string;
@@ -316,7 +322,9 @@ export type TransferOperation =
   | "ForcePushBranch"
   | "DeleteRemoteBranch"
   | "DeleteRemoteTag"
-  | "Clone";
+  | "Clone"
+  /** The quiet Fetch all of the "Fetch automatically" setting (`backgroundFetch`). */
+  | "BackgroundFetch";
 /** Mirrors `git_core::remote::TransferErrorKind`; the wire value is its Rust variant name. */
 export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease" | "HookFailed";
 
@@ -776,6 +784,12 @@ export interface RepoClient {
    */
   fetchAllRemotes(repoPath: string, prune: boolean | null): Promise<string>;
   /**
+   * The "Fetch automatically" tick: a Fetch all reported as `BackgroundFetch` (with
+   * `RemoteFailed` events like `fetchAllRemotes`). Resolves `null`, starting nothing, while the
+   * repository has another operation queued or running (a fetch, pull, push, commit, …).
+   */
+  backgroundFetch(repoPath: string, prune: boolean | null): Promise<string | null>;
+  /**
    * Pushes `localBranch` to `remoteBranch` on `remoteName`, and when `setUpstream` is set and the
    * push lands, records it as the branch's upstream.
    */
@@ -828,6 +842,8 @@ export interface RepoClient {
   listRecentAuthors(repoPath: string): Promise<SignatureInput[]>;
   getCommitMessageSettings(): Promise<CommitMessageSettings>;
   setCommitMessageSettings(settings: CommitMessageSettings): Promise<void>;
+  getFetchSettings(): Promise<FetchSettings>;
+  setFetchSettings(settings: FetchSettings): Promise<void>;
   /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
   getUndoState(repoPath: string): Promise<UndoState>;
   /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `OperationInProgress`) resolve; only real failures reject. */

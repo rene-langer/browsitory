@@ -67,6 +67,8 @@ pub enum TransferEvent {
     /// One remote of a Fetch all failed; sent before the operation's `Completed`.
     RemoteFailed {
         operation_id: String,
+        /// `FetchAll`, or `BackgroundFetch` for the fetch the app starts on its own.
+        operation: TransferOperation,
         remote_name: String,
         error: TransferErrorKind,
     },
@@ -628,6 +630,8 @@ pub(crate) enum Command {
     },
     FetchAllRemotes {
         prune: Option<bool>,
+        /// `FetchAll`, or `BackgroundFetch` (see `WorkerHandle::background_fetch`).
+        operation: TransferOperation,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
@@ -1603,6 +1607,7 @@ impl Worker {
                     ),
                     Command::FetchAllRemotes {
                         prune,
+                        operation,
                         operation_id,
                         events,
                         reply,
@@ -1610,6 +1615,7 @@ impl Worker {
                         &repo,
                         &credential_service,
                         prune,
+                        operation,
                         remote::TransferOp::new(operation_id),
                         events,
                         reply,

@@ -1,7 +1,16 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { GitConfigSource, GitToolInfo, GitTools, RepoClient } from "../ipc/RepoClient";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useExternalToolSettings } from "../state/useExternalToolSettings";
+import { useFetchSettingsContext } from "../state/useFetchSettings";
+import {
+  AUTO_FETCH_CHOICES,
+  autoFetchLabel,
+  readAutoFetchOverride,
+  subscribeAutoFetchOverride,
+  writeAutoFetchOverride,
+} from "../lib/autoFetch";
+import { repoNameOf } from "../lib/repoName";
 import styles from "./PreferencesDialog.module.css";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
@@ -86,6 +95,76 @@ export function CommitMessageSection() {
         Show ruler
       </label>
       <p className={styles.hint}>The message field uses a monospace font while the ruler is shown.</p>
+      {error !== null && (
+        <p role="alert" className={styles.problem}>
+          {error}{" "}
+          <button type="button" onClick={dismissError}>
+            Dismiss
+          </button>
+        </p>
+      )}
+    </PreferencesSection>
+  );
+}
+
+/** Off, the offered intervals, and `current` when the config holds another one. */
+function intervalChoices(current: number): number[] {
+  const choices: number[] = [0, ...AUTO_FETCH_CHOICES];
+  if (current > 0 && !choices.includes(current)) choices.push(current);
+  return choices.sort((a, b) => a - b);
+}
+
+/**
+ * "Fetch": the app-wide "Fetch automatically" interval (`[fetch]` in config.toml), and the
+ * active repository's override of it (a per-repository preference, like Prune).
+ */
+export function FetchSection({ repoPath }: { repoPath: string | null }) {
+  const { settings, update, error, dismissError } = useFetchSettingsContext();
+  const override = useSyncExternalStore(subscribeAutoFetchOverride, () =>
+    repoPath === null ? null : readAutoFetchOverride(repoPath),
+  );
+  const appMinutes = settings.autoFetchMinutes;
+  return (
+    <PreferencesSection title="Fetch">
+      <Field label="Fetch automatically">
+        {(props) => (
+          <select
+            {...props}
+            value={String(appMinutes)}
+            onChange={(event) => update({ autoFetchMinutes: Number(event.target.value) })}
+          >
+            {intervalChoices(appMinutes).map((minutes) => (
+              <option key={minutes} value={String(minutes)}>
+                {autoFetchLabel(minutes)}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      {repoPath !== null && (
+        <Field label={`In ${repoNameOf(repoPath)}`}>
+          {(props) => (
+            <select
+              {...props}
+              value={override === null ? "app" : String(override)}
+              onChange={(event) =>
+                writeAutoFetchOverride(repoPath, event.target.value === "app" ? null : Number(event.target.value))
+              }
+            >
+              <option value="app">Use the app setting ({autoFetchLabel(appMinutes).toLowerCase()})</option>
+              {intervalChoices(override ?? 0).map((minutes) => (
+                <option key={minutes} value={String(minutes)}>
+                  {autoFetchLabel(minutes)}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      )}
+      <p className={styles.hint}>
+        Fetches all remotes in the background while Browsitory is visible and no other action runs, using
+        each repository's Prune choice. A remote that would need you to sign in is skipped and named once.
+      </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>
           {error}{" "}

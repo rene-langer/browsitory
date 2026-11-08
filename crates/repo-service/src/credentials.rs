@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use git_core::forge::ForgeProvider;
 use git_core::remote::{
@@ -183,13 +186,68 @@ impl CredentialStore for InMemoryCredentialStore {
     }
 }
 
+/// What this app process learned about the HTTPS credential store this session, so a
+/// background fetch ("Fetch automatically", #440) never makes the operating system ask the user
+/// anything. Reading the OS store can prompt (a locked keyring, or macOS asking an unsigned
+/// build on every access); a fetch the user started may prompt, a background one must not. So a
+/// background fetch reads the store only once something the user did in this process has read
+/// or written it successfully (`store_used`), and otherwise uses only the tokens held here from
+/// those reads (`tokens`). Process-wide (`CredentialSession::process`): every repository's
+/// worker shares it.
+#[derive(Clone, Default)]
+pub struct CredentialSession(Arc<SessionState>);
+
+#[derive(Default)]
+struct SessionState {
+    store_used: AtomicBool,
+    tokens: Mutex<HashMap<CredentialKey, String>>,
+}
+
+impl CredentialSession {
+    /// The session every `CredentialService::new` shares in this process.
+    pub fn process() -> Self {
+        static PROCESS: OnceLock<CredentialSession> = OnceLock::new();
+        PROCESS.get_or_init(CredentialSession::default).clone()
+    }
+
+    fn tokens(&self) -> std::sync::MutexGuard<'_, HashMap<CredentialKey, String>> {
+        self.0
+            .tokens
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn store_used(&self) -> bool {
+        self.0.store_used.load(Ordering::SeqCst)
+    }
+
+    /// The store answered a read or a write: it is unlocked and this app may use it.
+    fn record(&self, key: &CredentialKey, token: Option<&str>) {
+        self.0.store_used.store(true, Ordering::SeqCst);
+        match token {
+            Some(token) => {
+                self.tokens().insert(key.clone(), token.to_owned());
+            }
+            None => {
+                self.tokens().remove(key);
+            }
+        }
+    }
+}
+
 pub struct CredentialService<S: CredentialStore> {
     store: S,
+    session: CredentialSession,
 }
 
 impl<S: CredentialStore> CredentialService<S> {
     pub fn new(store: S) -> Self {
-        Self { store }
+        Self::with_session(store, CredentialSession::process())
+    }
+
+    /// `new` with its own session instead of the process's (tests).
+    pub fn with_session(store: S, session: CredentialSession) -> Self {
+        Self { store, session }
     }
 
     pub fn save_https(
@@ -199,7 +257,9 @@ impl<S: CredentialStore> CredentialService<S> {
         token: &str,
     ) -> Result<(), CredentialStoreError> {
         let key = CredentialKey::for_https(url, username)?;
-        self.store.set(&key, token)
+        self.store.set(&key, token)?;
+        self.session.record(&key, Some(token));
+        Ok(())
     }
 
     pub fn lookup_https(
@@ -211,7 +271,9 @@ impl<S: CredentialStore> CredentialService<S> {
             return Ok(None);
         };
         let key = CredentialKey::for_https(url, username)?;
-        let Some(token) = self.store.get(&key)? else {
+        let token = self.store.get(&key)?;
+        self.session.record(&key, token.as_deref());
+        let Some(token) = token else {
             return Ok(None);
         };
 
@@ -221,9 +283,36 @@ impl<S: CredentialStore> CredentialService<S> {
         }))
     }
 
+    /// `lookup_https` for a background fetch: never the first access to the OS store in this
+    /// process (see `CredentialSession`). Before anything the user did used the store, only a
+    /// token held from such a use is returned, else `None` (the remote is skipped as needing a
+    /// credential) without touching the store.
+    pub fn lookup_https_without_prompt(
+        &self,
+        url: &str,
+        username: Option<&str>,
+    ) -> Result<Option<HttpsCredential>, CredentialStoreError> {
+        let Some(username) = username else {
+            return Ok(None);
+        };
+        let key = CredentialKey::for_https(url, username)?;
+        if let Some(token) = self.session.tokens().get(&key).cloned() {
+            return Ok(Some(HttpsCredential {
+                username: username.to_owned(),
+                token,
+            }));
+        }
+        if !self.session.store_used() {
+            return Ok(None);
+        }
+        self.lookup_https(url, Some(username))
+    }
+
     pub fn forget_https(&self, url: &str, username: &str) -> Result<(), CredentialStoreError> {
         let key = CredentialKey::for_https(url, username)?;
-        self.store.delete(&key)
+        self.store.delete(&key)?;
+        self.session.record(&key, None);
+        Ok(())
     }
 
     /// Saves a forge (GitHub/Bitbucket) API token under its own keychain namespace, separate
@@ -280,6 +369,8 @@ pub(crate) struct RemoteCredentialProvider<'a, S: CredentialStore, A = Libgit2Ss
     service: &'a CredentialService<S>,
     profile: Option<RemoteAuthMode>,
     ssh_agent: A,
+    /// A background fetch: HTTPS tokens come from `lookup_https_without_prompt`.
+    without_prompt: bool,
 }
 
 impl<'a, S: CredentialStore> RemoteCredentialProvider<'a, S, Libgit2SshAgent> {
@@ -288,6 +379,19 @@ impl<'a, S: CredentialStore> RemoteCredentialProvider<'a, S, Libgit2SshAgent> {
             service,
             profile,
             ssh_agent: Libgit2SshAgent,
+            without_prompt: false,
+        }
+    }
+
+    /// The provider of a background fetch: it never makes the OS credential store prompt (see
+    /// `CredentialSession`). The SSH agent never prompts; it is used as for any fetch.
+    pub(crate) fn without_prompt(
+        service: &'a CredentialService<S>,
+        profile: Option<RemoteAuthMode>,
+    ) -> Self {
+        Self {
+            without_prompt: true,
+            ..Self::new(service, profile)
         }
     }
 }
@@ -303,6 +407,7 @@ impl<'a, S: CredentialStore, A: SshAgent> RemoteCredentialProvider<'a, S, A> {
             service,
             profile,
             ssh_agent,
+            without_prompt: false,
         }
     }
 }
@@ -316,7 +421,13 @@ impl<S: CredentialStore, A: SshAgent> CredentialProvider for RemoteCredentialPro
     ) -> Result<git2::Cred, git2::Error> {
         match &self.profile {
             Some(RemoteAuthMode::HttpsToken { username }) => {
-                let credential = match self.service.lookup_https(url, Some(username)) {
+                let lookup = if self.without_prompt {
+                    self.service
+                        .lookup_https_without_prompt(url, Some(username))
+                } else {
+                    self.service.lookup_https(url, Some(username))
+                };
+                let credential = match lookup {
                     Ok(Some(credential)) => credential,
                     Ok(None) => return Err(git2::Error::from_str(MISSING_CREDENTIAL_ERROR)),
                     Err(CredentialStoreError::Keychain(_)) => {
@@ -351,7 +462,7 @@ mod tests {
     use git_core::remote::{CredentialProvider, RemoteAuthMode};
 
     use super::{
-        CredentialKey, CredentialService, CredentialStore, CredentialStoreError,
+        CredentialKey, CredentialService, CredentialSession, CredentialStore, CredentialStoreError,
         RemoteCredentialProvider, CREDENTIAL_LOOKUP_FAILURE_ERROR, CREDENTIAL_STORE_FAILURE_ERROR,
         MISSING_CREDENTIAL_ERROR, SSH_AGENT_FAILURE_ERROR,
     };
@@ -604,6 +715,107 @@ mod tests {
             )
             .expect("stored token supplies a libgit2 credential");
         assert!(credential.has_username());
+    }
+
+    /// Counts store reads; `get` answers from `tokens`.
+    #[derive(Default)]
+    struct CountingStore {
+        inner: MemoryCredentialStore,
+        gets: std::cell::Cell<usize>,
+    }
+
+    impl CredentialStore for CountingStore {
+        fn get(&self, key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
+            self.gets.set(self.gets.get() + 1);
+            self.inner.get(key)
+        }
+
+        fn set(&self, key: &CredentialKey, token: &str) -> Result<(), CredentialStoreError> {
+            self.inner.set(key, token)
+        }
+
+        fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError> {
+            self.inner.delete(key)
+        }
+    }
+
+    const URL: &str = "https://git.example.test/owner/repo.git";
+
+    fn https_profile() -> Option<RemoteAuthMode> {
+        Some(RemoteAuthMode::HttpsToken {
+            username: "rene".to_string(),
+        })
+    }
+
+    #[test]
+    fn a_background_fetch_skips_an_https_remote_without_touching_a_store_not_used_this_session() {
+        // Any read would panic: the background provider must not be the first to ask the store.
+        let service =
+            CredentialService::with_session(PanicOnGetStore, CredentialSession::default());
+        let mut provider = RemoteCredentialProvider::without_prompt(&service, https_profile());
+
+        let error =
+            match provider.credential(URL, Some("rene"), git2::CredentialType::USER_PASS_PLAINTEXT)
+            {
+                Ok(_) => panic!("a background fetch must skip the remote"),
+                Err(error) => error,
+            };
+        assert_eq!(error.message(), MISSING_CREDENTIAL_ERROR);
+    }
+
+    #[test]
+    fn a_background_fetch_uses_the_store_once_the_user_used_it_this_session() {
+        let session = CredentialSession::default();
+        let store = CountingStore::default();
+        store
+            .inner
+            .set(&CredentialKey::for_https(URL, "rene").unwrap(), "token-123")
+            .unwrap();
+        let service = CredentialService::with_session(store, session.clone());
+
+        // A manual fetch reads the store (and may prompt): unchanged.
+        let mut manual = RemoteCredentialProvider::new(&service, https_profile());
+        manual
+            .credential(URL, Some("rene"), git2::CredentialType::USER_PASS_PLAINTEXT)
+            .expect("the manual fetch reads the saved token");
+        assert_eq!(service.store.gets.get(), 1);
+
+        // The background fetch now uses the token held from that read, without a store access.
+        let mut background = RemoteCredentialProvider::without_prompt(&service, https_profile());
+        let credential = background
+            .credential(URL, Some("rene"), git2::CredentialType::USER_PASS_PLAINTEXT)
+            .expect("the background fetch reuses the token");
+        assert!(credential.has_username());
+        assert_eq!(service.store.gets.get(), 1);
+
+        // Another remote's token isn't held, but the store is known to be unlocked: read it.
+        let other = "https://other.example.test/repo.git";
+        assert!(service
+            .lookup_https_without_prompt(other, Some("rene"))
+            .unwrap()
+            .is_none());
+        assert_eq!(service.store.gets.get(), 2);
+
+        // Forgetting the token drops it from the session too.
+        service.forget_https(URL, "rene").unwrap();
+        assert!(service
+            .lookup_https_without_prompt(URL, Some("rene"))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_token_saved_in_the_credentials_dialog_serves_a_background_fetch() {
+        let service =
+            CredentialService::with_session(CountingStore::default(), CredentialSession::default());
+        service.save_https(URL, "rene", "token-456").unwrap();
+
+        let found = service
+            .lookup_https_without_prompt(URL, Some("rene"))
+            .unwrap()
+            .expect("the saved token is held");
+        assert_eq!(found.token, "token-456");
+        assert_eq!(service.store.gets.get(), 0);
     }
 
     #[test]
