@@ -31,6 +31,7 @@ import type {
   StatusKind,
   Trailer,
 } from "../ipc/RepoClient";
+import { messageHistoryEntries, readCommitMessages, recentBranchCommits } from "../lib/commitMessageHistory";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import type { SelectedRow } from "../state/useAppState";
@@ -579,6 +580,7 @@ export function DiffPane({
   onSequenceAbort = noop,
   sequencePending = false,
   commits,
+  branchCommits,
   refreshGeneration = 0,
   initialCommitDraft,
   onCommitDraftChange,
@@ -626,6 +628,9 @@ export function DiffPane({
   onCommitDraftChange?: (draft: CommitDraft) => void;
   // Loaded history, used for the selected commit's header (author, date, parents).
   commits?: GraphCommit[];
+  // The graph's own commits (`commits` may be a file history or search results): the commit
+  // box's "Recent messages" offers the current branch's recent ones.
+  branchCommits?: GraphCommit[];
   status: StatusEntry[];
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
@@ -727,6 +732,7 @@ export function DiffPane({
         onMarkResolved={onMarkResolved}
         onResolveWholeFile={onResolveWholeFile}
         commits={commits}
+        branchCommits={branchCommits}
       />
     );
   }
@@ -783,6 +789,7 @@ function UncommittedDiffPane({
   repoPath,
   client,
   commits,
+  branchCommits,
   status,
   onStageFile,
   onUnstageFile,
@@ -864,6 +871,8 @@ function UncommittedDiffPane({
   // Resolves `true` once committed; CommitBox keeps the message otherwise.
   /** The graph's commits, for HEAD's author in the amend Author field. */
   commits?: GraphCommit[];
+  /** The graph's commits (not a file history or search), for the branch's recent messages. */
+  branchCommits?: GraphCommit[];
   onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
   onSaveStash: () => void;
   onOpenStashDialog: (paths: string[]) => void;
@@ -895,6 +904,15 @@ function UncommittedDiffPane({
 }) {
   const { settings: commitMessageSettings } = useCommitMessageSettingsContext();
   const loadRecentAuthors = useCallback(() => client.listRecentAuthors(repoPath), [client, repoPath]);
+  const loadMessageHistory = useCallback(
+    () =>
+      messageHistoryEntries(
+        readCommitMessages(repoPath),
+        recentBranchCommits(branchCommits ?? commits ?? [], headInfo.headId),
+        (commitId) => client.getCommitMessage(repoPath, commitId),
+      ),
+    [client, repoPath, branchCommits, commits, headInfo.headId],
+  );
   const headCommit = headInfo.headId === null ? undefined : commits?.find((c) => c.id === headInfo.headId);
   const headAuthor = headCommit === undefined ? null : { name: headCommit.authorName, email: headCommit.authorEmail };
   const [headMessage, setHeadMessage] = useState<string | null>(null);
@@ -1312,6 +1330,7 @@ function UncommittedDiffPane({
             onClearMessageHandled={onCommitMessageCleared}
             messageSettings={commitMessageSettings}
             loadRecentAuthors={loadRecentAuthors}
+            loadMessageHistory={loadMessageHistory}
             amend={{
               // A leftover merge/pick/revert doesn't block amend: the backend clears it first (#240).
               available:

@@ -31,6 +31,17 @@ trailer when you commit, after any trailers the message already ends with and ne
 The chips stay until the commit lands, so a failed hook keeps them, and **Commit without hooks**
 uses them too. They are hidden while a merge, cherry-pick or revert pre-fills the message.
 
+**Recent messages** (next to the counter) opens a menu of earlier messages: first the last 20
+you committed or amended in Browsitory in this repository (newest first; kept per repository on
+this computer, not in the repository), then the 10 newest commits on the current branch, each
+summary once. Use the arrow keys and Enter, or click, to put that full message in the box; it
+replaces what was there. **Ctrl+Z** (**Cmd+Z** on macOS) in the field, or **Restore message**,
+brings back the replaced text until you edit the field. A merge, cherry-pick, revert or squash
+message that git wrote and you committed unchanged is not kept.
+
+A commit that fails, for example because a hook rejected it, keeps its message in the box, so
+you can fix it and commit again without retyping it.
+
 ## Staging individual lines
 
 In a diff, select lines by clicking one, Shift+clicking to extend, Ctrl/Cmd+clicking to add

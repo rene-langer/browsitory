@@ -154,7 +154,7 @@ export function RepoWorkspace({
     () => historyEntries?.map((e) => e.commit) ?? searchCommits ?? appState.state.commits,
     [historyEntries, searchCommits, appState.state.commits],
   );
-  const { handleCommitDraftChange, commitAndClearDraft, retryWithCurrentMessage } = useCommitDraftActions(
+  const { handleCommitDraftChange, commitAndClearDraft, amendAndRecord, retryWithCurrentMessage } = useCommitDraftActions(
     repoPath,
     getCommitDraft,
     onCommitDraftChange,
@@ -867,6 +867,7 @@ export function RepoWorkspace({
                   client={client}
                   selectedRow={appState.state.selectedRow}
                   commits={diffPaneCommits}
+                  branchCommits={appState.state.commits}
                   fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
                   stashes={appState.state.stashes}
                   stashActions={{
@@ -918,7 +919,7 @@ export function RepoWorkspace({
                   headInfo={appState.state.headInfo}
                   onSetAmendMode={appState.setAmendMode}
                   onAmendCommit={(message, options) =>
-                    announce("Amended commit", appState.amendCommit)(message, appState.state.skipHooks, options)
+                    announce("Amended commit", amendAndRecord)(message, appState.state.skipHooks, options)
                   }
                   focusCommitMessage={focusCommitMessage}
                   onCommitMessageFocused={clearFocusCommitMessage}

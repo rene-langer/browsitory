@@ -6,8 +6,10 @@ import {
   type SignatureInput,
   type Trailer,
 } from "../ipc/RepoClient";
+import type { MessageHistoryEntry } from "../lib/commitMessageHistory";
 import { coAuthorTrailers, formatPerson, parsePerson, sameEmail } from "../lib/people";
 import { CoAuthorPicker } from "./CoAuthorPicker";
+import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { Field } from "./primitives/Field";
 import { Toolbar } from "./primitives/Toolbar";
 import { HookStatus } from "./HookStatus";
@@ -36,6 +38,13 @@ export interface CommitDraft {
 
 const NO_PEOPLE: SignatureInput[] = [];
 
+/** A history entry's menu label: its summary, cut so a long one doesn't widen the menu. */
+const HISTORY_LABEL_LENGTH = 72;
+function historyLabel(summary: string): string {
+  const chars = [...summary];
+  return chars.length > HISTORY_LABEL_LENGTH ? `${chars.slice(0, HISTORY_LABEL_LENGTH - 1).join("")}…` : summary;
+}
+
 export function CommitBox({
   onCommit,
   disabled,
@@ -54,6 +63,7 @@ export function CommitBox({
   onClearMessageHandled,
   messageSettings = DEFAULT_COMMIT_MESSAGE_SETTINGS,
   loadRecentAuthors,
+  loadMessageHistory,
 }: {
   /**
    * Resolves `true` once the commit landed. The message (and the co-author chips) are cleared
@@ -61,6 +71,12 @@ export function CommitBox({
    * hook — keeps them. `trailers` are the chips as `Co-authored-by` trailers.
    */
   onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
+  /**
+   * "Recent messages": earlier messages to fill the box with, read each time the menu opens;
+   * omit to hide the menu. Filling replaces the text, which Ctrl/Cmd+Z in the field or "Restore
+   * message" undoes until the field is edited.
+   */
+  loadMessageHistory?: () => MessageHistoryEntry[];
   /** Recent authors for "Add co-author"; omit to hide co-authors. */
   loadRecentAuthors?: () => Promise<SignatureInput[]>;
   disabled: boolean;
@@ -273,10 +289,72 @@ export function CommitBox({
     ? { "data-ruler": "true", style: { "--ruler-column": String(messageSettings.bodyRuler) } as CSSProperties }
     : {};
 
+  // The text a history pick replaced, offered back until the field changes again.
+  const [replaced, setReplaced] = useState<{ previous: string; inserted: string } | null>(null);
+  const canRestore = replaced !== null && message === replaced.inserted;
+  const fillFromHistory = (text: string) => {
+    const previous = latest.current.message;
+    textareaRef.current?.focus();
+    if (text === previous) return;
+    setReplaced({ previous, inserted: text });
+    setMessage(text);
+  };
+  const restoreReplaced = () => {
+    if (replaced === null || message !== replaced.inserted) return;
+    setMessage(replaced.previous);
+    setReplaced(null);
+    textareaRef.current?.focus();
+  };
+  const [historyMenu, setHistoryMenu] = useState<{
+    x: number;
+    y: number;
+    returnFocusTo: HTMLElement;
+    items: ContextMenuItem[];
+  } | null>(null);
+  const openHistoryMenu = (button: HTMLElement) => {
+    if (loadMessageHistory === undefined) return;
+    const labels = new Set<string>();
+    const items: ContextMenuItem[] = [];
+    for (const entry of loadMessageHistory()) {
+      const label = historyLabel(entry.summary);
+      if (labels.has(label)) continue;
+      labels.add(label);
+      items.push({
+        label,
+        title:
+          entry.source === "recorded"
+            ? "Committed here earlier"
+            : entry.shortId === undefined
+              ? "A recent commit on this branch"
+              : `Commit ${entry.shortId} on this branch`,
+        onSelect: () => {
+          void entry.load().then(fillFromHistory, () => fillFromHistory(entry.summary));
+        },
+      });
+    }
+    const rect = button.getBoundingClientRect();
+    setHistoryMenu({
+      x: rect.left,
+      y: rect.bottom,
+      returnFocusTo: button,
+      items: items.length > 0 ? items : [{ label: "No earlier messages", onSelect: () => {}, disabled: true }],
+    });
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
       commitIfReady();
+    } else if (
+      canRestore &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.shiftKey &&
+      !event.altKey &&
+      event.key.toLowerCase() === "z"
+    ) {
+      // The field's own undo can't see a replacement React made: undo it here.
+      event.preventDefault();
+      restoreReplaced();
     }
   };
 
@@ -286,20 +364,59 @@ export function CommitBox({
         ref={textareaRef}
         className={styles.textarea}
         value={message}
-        onChange={(event) => setMessage(event.target.value)}
+        onChange={(event) => {
+          setMessage(event.target.value);
+          setReplaced(null);
+        }}
         onKeyDown={handleKeyDown}
         placeholder="Commit message"
         aria-label="Commit message"
         {...ruler}
       />
-      <span
-        aria-label="Summary length"
-        className={styles.counter}
-        data-over={summaryOver ? "true" : undefined}
-        title={summaryOver ? `Many tools cut summaries longer than ${summaryLimit} characters.` : undefined}
-      >
-        Summary {summaryLength}/{summaryLimit}
-      </span>
+      <div className={styles.messageTools}>
+        <span
+          aria-label="Summary length"
+          className={styles.counter}
+          data-over={summaryOver ? "true" : undefined}
+          title={summaryOver ? `Many tools cut summaries longer than ${summaryLimit} characters.` : undefined}
+        >
+          Summary {summaryLength}/{summaryLimit}
+        </span>
+        {canRestore && (
+          <button type="button" className={styles.historyButton} onClick={restoreReplaced} title="Undo the pick (Ctrl/Cmd+Z)">
+            Restore message
+          </button>
+        )}
+        {loadMessageHistory !== undefined && (
+          <button
+            type="button"
+            className={styles.historyButton}
+            aria-haspopup="menu"
+            aria-expanded={historyMenu !== null}
+            title="Fill the box with an earlier commit message"
+            onClick={(event) => {
+              const button = event.currentTarget;
+              if (historyMenu !== null) {
+                button.focus({ preventScroll: true });
+                setHistoryMenu(null);
+                return;
+              }
+              openHistoryMenu(button);
+            }}
+          >
+            Recent messages
+          </button>
+        )}
+        {historyMenu !== null && (
+          <ContextMenu
+            x={historyMenu.x}
+            y={historyMenu.y}
+            returnFocusTo={historyMenu.returnFocusTo}
+            items={historyMenu.items}
+            onClose={() => setHistoryMenu(null)}
+          />
+        )}
+      </div>
       {showCoAuthors && (
         <div className={styles.coAuthors}>
           {coAuthors.length > 0 && (
