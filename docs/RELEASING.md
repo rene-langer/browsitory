@@ -182,6 +182,15 @@ same way (stable now); change it with the switch.
 reads `releases/latest/download/latest.json`, and GitHub's `latest` skips pre-releases. Check
 the [updater manifest](#updater-manifest-latestjson) before and after publishing.
 
+Publish **the draft** that `release.yml` created (Edit, then **Publish release**, or
+`gh release edit release/X.Y.Z --draft=false --latest`). Never create a new release for the
+tag on the releases page: the repository has **immutable releases** turned on, so the first
+release published for a tag locks that tag for good. An empty release published by mistake
+can be deleted, but the tag stays locked even with immutability turned off, and the draft with
+the bundles can then never be published. The only way out is the next patch version from the
+same commit (0.4.0 went out this way as 0.4.1). Keep immutability on: it stops published
+release files from being replaced.
+
 **Never re-tag a published version at a different commit.** Both registries refuse to replace a
 published version. `--skip-duplicate` only makes re-running the *same* commit's release safe; a
 moved tag would leave the registries on the old build. Bump the version instead.
