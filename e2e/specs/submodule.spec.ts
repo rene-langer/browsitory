@@ -104,7 +104,7 @@ describe("Browsitory submodules", () => {
     const submoduleTab = await $(`//button[@role="tab" and contains(@title, "e2e-child")]`);
     await submoduleTab.waitForExist({ timeout: 10000 });
     expect(await submoduleTab.getAttribute("aria-selected")).toBe("true");
-    expect(path.resolve(await submoduleTab.getAttribute("title"))).toBe(
+    expect(path.resolve((await submoduleTab.getAttribute("title")) ?? "")).toBe(
       path.resolve(E2E_REPO_PATH, E2E_SUBMODULE_PATH),
     );
     // The tab shows the submodule's own history, not the superproject's.
