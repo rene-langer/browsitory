@@ -50,6 +50,8 @@ const BASE_STATE: AppState = {
   fetchPrune: null,
   pushDialog: null,
   deleteRemoteBranchDialog: null,
+  createTagDialog: null,
+  deleteRemoteTagDialog: null,
   amendMode: false,
   skipHooks: false,
   hookRun: null,

@@ -359,6 +359,32 @@ pub(super) fn delete_remote_branch(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct DeleteRemoteTagParams {
+    repo_path: String,
+    remote_name: String,
+    tag_name: String,
+    #[serde(default)]
+    no_verify: bool,
+}
+
+pub(super) fn delete_remote_tag(
+    params: DeleteRemoteTagParams,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id = worker_handle(repos, &params.repo_path)?.delete_remote_tag(
+        params.remote_name,
+        params.tag_name,
+        params.no_verify,
+        event_tx,
+    )?;
+    Ok(Value::String(operation_id))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct CancelTransferParams {
     repo_path: String,
     operation_id: String,

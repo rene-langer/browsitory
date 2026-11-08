@@ -246,6 +246,7 @@ methods!(|params, repos, stdout| {
     "background_fetch" => background_fetch(FetchAllRemotesParams, repos, stdout),
     "push_branch" => push_branch(PushBranchParams, repos, stdout),
     "delete_remote_branch" => delete_remote_branch(DeleteRemoteBranchParams, repos, stdout),
+    "delete_remote_tag" => delete_remote_tag(DeleteRemoteTagParams, repos, stdout),
     "pull_current_upstream" => pull_current_upstream(RepoPathParams, repos, stdout),
     "list_stashes" => list_stashes(RepoPathParams, repos),
     "save_stash" => save_stash(SaveStashParams, repos),

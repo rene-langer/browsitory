@@ -48,6 +48,7 @@ export const remoteManagementClient = {
     backgroundFetch: async () => null,
     pushBranch: async () => "push-1",
     deleteRemoteBranch: async () => "delete-remote-1",
+    deleteRemoteTag: async () => "delete-remote-tag-1",
     subscribeTransferProgress: () => () => {},
     subscribeHookProgress: () => () => {},
   listWorktrees: async () => [],

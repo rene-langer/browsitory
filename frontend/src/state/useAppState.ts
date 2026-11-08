@@ -128,6 +128,10 @@ export interface AppState {
   pushDialog: { localBranch: string } | null;
   // Non-null while the delete-remote-branch dialog is open; both null = palette picker mode.
   deleteRemoteBranchDialog: { remoteName: string | null; branchName: string | null } | null;
+  // Non-null while the create-tag dialog is open; the tag goes on `commitId`.
+  createTagDialog: { commitId: string } | null;
+  // Non-null while the "Delete from remote" dialog is open for that tag.
+  deleteRemoteTagDialog: { tagName: string } | null;
   // CommitBox amend toggle.
   amendMode: boolean;
   // CommitBox "Skip hooks" (`--no-verify`) for the next commit/amend; reset after one lands.
@@ -235,7 +239,9 @@ export interface UseAppStateResult {
   listRemoteBranches(remoteName: string): Promise<string[]>;
   fetchRemote(remoteName: string): Promise<void>;
   // `Promise<string | null>` for the same reason as `createBranch`/`createWorktree` above.
-  createTag(name: string, message: string | null): Promise<string | null>;
+  createTag(name: string, message: string | null, target: string | null): Promise<string | null>;
+  openCreateTagDialog(commitId: string): void;
+  closeCreateTagDialog(): void;
   deleteTag(name: string): Promise<void>;
   pushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
   pushTags(remoteName: string, names: string[], noVerify?: boolean): Promise<void>;
@@ -256,6 +262,9 @@ export interface UseAppStateResult {
   deleteRemoteBranch(remoteName: string, branchName: string, noVerify?: boolean): Promise<void>;
   openDeleteRemoteBranchDialog(remoteName: string | null, branchName: string | null): void;
   closeDeleteRemoteBranchDialog(): void;
+  deleteRemoteTag(remoteName: string, tagName: string, deleteLocal: boolean, noVerify?: boolean): Promise<void>;
+  openDeleteRemoteTagDialog(tagName: string): void;
+  closeDeleteRemoteTagDialog(): void;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
   saveStash(options?: StashOptions): Promise<void>;
@@ -364,6 +373,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     fetchPrune: readFetchPrune(repoPath),
     pushDialog: null,
     deleteRemoteBranchDialog: null,
+    createTagDialog: null,
+    deleteRemoteTagDialog: null,
     amendMode: false,
     skipHooks: false,
     hookRun: null,
@@ -620,6 +631,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     listRemoteBranches,
     fetchRemote,
     createTag,
+    openCreateTagDialog,
+    closeCreateTagDialog,
     deleteTag,
     pushCurrentBranch,
     pushTags,
@@ -640,6 +653,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     deleteRemoteBranch,
     openDeleteRemoteBranchDialog,
     closeDeleteRemoteBranchDialog,
+    deleteRemoteTag,
+    openDeleteRemoteTagDialog,
+    closeDeleteRemoteTagDialog,
   } = useRemoteTransferActions(
     client,
     repoPath,
@@ -732,10 +748,12 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       else if (push.operation === "PushTags") await pushTags(push.remoteName, push.names, true);
       else if (push.operation === "PushBranchTo")
         await pushBranch(push.remoteName, push.localBranch, push.remoteBranch, push.setUpstream, true);
+      else if (push.operation === "DeleteRemoteTag")
+        await deleteRemoteTag(push.remoteName, push.tagName, push.deleteLocal, true);
       else await deleteRemoteBranch(push.remoteName, push.branchName, true);
       return true;
     },
-    [commit, amendCommit, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, setState],
+    [commit, amendCommit, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag, setState],
   );
 
   const { undo, redo } = useUndoActions(client, repoPath, runMutationWithOutcome, setState);
@@ -786,6 +804,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     fetchRemote,
     listRemoteBranches,
     createTag,
+    openCreateTagDialog,
+    closeCreateTagDialog,
     deleteTag,
     pushCurrentBranch,
     pushTags,
@@ -806,6 +826,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     deleteRemoteBranch,
     openDeleteRemoteBranchDialog,
     closeDeleteRemoteBranchDialog,
+    deleteRemoteTag,
+    openDeleteRemoteTagDialog,
+    closeDeleteRemoteTagDialog,
     openCreateBranchDraft,
     closeCreateBranchDraft,
     saveStash,

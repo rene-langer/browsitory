@@ -34,6 +34,8 @@ import { MergeDialog } from "./components/MergeDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { StashDialog } from "./components/StashDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
+import { CreateTagDialog } from "./components/CreateTagDialog";
+import { DeleteRemoteTagDialog } from "./components/DeleteRemoteTagDialog";
 import { RemoteDialogs } from "./components/RemoteDialogs";
 import type { RepoClient } from "./ipc/RepoClient";
 import { buildCommands, type AppCommands } from "./lib/commands";
@@ -295,6 +297,9 @@ export function RepoWorkspace({
     (appState.state.upstream?.remoteName === remoteName ? upstreamPushBranch(appState.state.upstream) : null) ??
     currentBranchName;
   const pushDialogBranch = appState.state.pushDialog?.localBranch ?? null;
+  const createTagDialog = appState.state.createTagDialog;
+  const createTagCommit =
+    createTagDialog === null ? undefined : appState.state.commits.find((commit) => commit.id === createTagDialog.commitId);
   const mergeDialogBranch = appState.state.mergeDialog?.branchName ?? null;
   useOutcomeToasts(appState.state, pushToast);
 
@@ -477,6 +482,43 @@ export function RepoWorkspace({
             void announce("Remote branch deleted", appState.deleteRemoteBranch)(remoteName, branchName)
           }
           onCancel={appState.closeDeleteRemoteBranchDialog}
+        />
+      )}
+      {active && createTagDialog !== null && (
+        <CreateTagDialog
+          key={createTagDialog.commitId}
+          shortId={createTagCommit?.shortId ?? createTagDialog.commitId.slice(0, 7)}
+          summary={createTagCommit?.summary ?? null}
+          existingTags={appState.state.tags.map((tag) => tag.name)}
+          remotes={appState.state.remotes}
+          disabled={repositoryOperationDisabled}
+          disabledReason={operationDisabledReason}
+          onCreate={async (name, message, pushTo) => {
+            // With a push to follow, only the push is announced: its toast reports both steps.
+            const create = pushTo === null ? announce("Tag created", appState.createTag) : appState.createTag;
+            const failure = await create(name, message, createTagDialog.commitId);
+            if (failure !== null) return failure;
+            appState.closeCreateTagDialog();
+            if (pushTo !== null) void announce("Push complete", appState.pushTags)(pushTo, [name]);
+            return null;
+          }}
+          onCancel={appState.closeCreateTagDialog}
+        />
+      )}
+      {active && appState.state.deleteRemoteTagDialog !== null && (
+        <DeleteRemoteTagDialog
+          tagName={appState.state.deleteRemoteTagDialog.tagName}
+          remotes={appState.state.remotes}
+          disabled={repositoryOperationDisabled}
+          disabledReason={operationDisabledReason}
+          onDelete={(remoteName, deleteLocal) =>
+            void announce("Remote tag deleted", appState.deleteRemoteTag)(
+              remoteName,
+              appState.state.deleteRemoteTagDialog?.tagName ?? "",
+              deleteLocal,
+            )
+          }
+          onCancel={appState.closeDeleteRemoteTagDialog}
         />
       )}
       {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`
@@ -682,9 +724,12 @@ export function RepoWorkspace({
               <TagPanel
                 tags={appState.state.tags}
                 remotes={appState.state.remotes}
-                onCreate={appState.createTag}
                 onDelete={appState.deleteTag}
+                onDeleteFromRemote={appState.openDeleteRemoteTagDialog}
                 onPush={appState.pushTags}
+                onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
+                onBranchFromCommit={appState.openCreateBranchDraft}
+                onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
                 pushDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
               />
@@ -825,6 +870,8 @@ export function RepoWorkspace({
                       remotes={appState.state.remotes}
                       onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
                       onDeleteTag={appState.deleteTag}
+                      onCreateTag={appState.openCreateTagDialog}
+                      onDeleteTagFromRemote={appState.openDeleteRemoteTagDialog}
                     />
                   )}
                 </>

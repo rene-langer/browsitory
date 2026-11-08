@@ -12,8 +12,8 @@ The palette has almost every action in Browsitory, grouped like this:
 
 - **Branches:** switch to a branch, merge a branch into the current one, check out a tag.
 - **Remotes:** fetch, push, **Push branch to…**, **Force push current branch…**, push all tags,
-  **Browse branches on ⟨remote⟩**, add, edit or remove a remote, manage its credentials, and
-  delete a remote branch.
+  **Browse branches on ⟨remote⟩**, add, edit or remove a remote, manage its credentials, delete
+  a remote branch, and delete a tag on a remote.
 - **Stash:** stash all, **Stash…**, stash the current file, and show, apply, pop or drop a
   stash.
 - **Diff:** ignore whitespace, more or fewer context lines, syntax highlighting, discard the

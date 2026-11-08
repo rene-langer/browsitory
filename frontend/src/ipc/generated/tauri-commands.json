@@ -26,6 +26,7 @@
   "create_worktree",
   "delete_branch",
   "delete_remote_branch",
+  "delete_remote_tag",
   "delete_tag",
   "delete_workspace",
   "detect_forge_repository",

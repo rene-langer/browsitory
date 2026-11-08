@@ -26,7 +26,7 @@ function transferFailureMessage(progress: TransferProgress, upstreamLabel: strin
   if (progress.errorKind === "Cancelled") {
     if (progress.operation === "Pull") return "Pull cancelled.";
     if (progress.operation === "Fetch" || progress.operation === "FetchAll") return "Fetch cancelled.";
-    if (progress.operation === "DeleteRemoteBranch") return "Delete cancelled.";
+    if (progress.operation === "DeleteRemoteBranch" || progress.operation === "DeleteRemoteTag") return "Delete cancelled.";
     return "Push cancelled.";
   }
   if (progress.errorKind === "HookFailed") return hookFailedMessage("pre-push");
@@ -40,6 +40,11 @@ function transferFailureMessage(progress: TransferProgress, upstreamLabel: strin
     return progress.errorKind === "RejectedRemoteRef"
       ? "The remote refused to delete the branch."
       : "Deleting the remote branch failed";
+  }
+  if (progress.operation === "DeleteRemoteTag") {
+    return progress.errorKind === "RejectedRemoteRef"
+      ? "The remote refused to delete the tag."
+      : "Deleting the remote tag failed";
   }
   const isPush =
     progress.operation === "PushBranch" || progress.operation === "PushTags" || progress.operation === "ForcePushBranch";
@@ -101,8 +106,12 @@ export interface RemoteTransferActions {
   clearCurrentUpstream(): Promise<void>;
   listRemoteBranches(remoteName: string): Promise<string[]>;
   fetchRemote(remoteName: string): Promise<void>;
-  // `Promise<string | null>` for the same reason as `addRemote` above.
-  createTag(name: string, message: string | null): Promise<string | null>;
+  // `Promise<string | null>` for the same reason as `addRemote` above. `target` is the commit to
+  // tag (a full id), `null` for HEAD's commit.
+  createTag(name: string, message: string | null, target: string | null): Promise<string | null>;
+  // Opens the create-tag dialog with its target fixed to `commitId`; no client call.
+  openCreateTagDialog(commitId: string): void;
+  closeCreateTagDialog(): void;
   deleteTag(name: string): Promise<void>;
   // `noVerify` skips the `pre-push` hook (the hook-failure dialog's retry); default `false`.
   pushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
@@ -127,6 +136,11 @@ export interface RemoteTransferActions {
   // Both null opens the palette's picker mode; both set is a plain confirmation.
   openDeleteRemoteBranchDialog(remoteName: string | null, branchName: string | null): void;
   closeDeleteRemoteBranchDialog(): void;
+  // Deletes `tagName` on `remoteName`. With `deleteLocal`, the local tag is deleted (an undoable
+  // step of its own) once the remote delete has landed; a failed remote delete keeps it.
+  deleteRemoteTag(remoteName: string, tagName: string, deleteLocal: boolean, noVerify?: boolean): Promise<void>;
+  openDeleteRemoteTagDialog(tagName: string): void;
+  closeDeleteRemoteTagDialog(): void;
 }
 
 // Owns everything transfer-progress-shaped (fetch/push/pull), plus the rest of remote/upstream/tag
@@ -181,6 +195,10 @@ export function useRemoteTransferActions(
   }, [tags]);
   // Remotes a Fetch all reported as failed (`RemoteFailed`), for the active operation only.
   const failedRemotes = useRef<FailedRemote[]>([]);
+  // The local tag a running "Delete from remote" also deletes once it lands ("also delete
+  // locally"), and the action that does it (`deleteTag`, defined below the subscription).
+  const localTagDeleteAfterRemote = useRef<string | null>(null);
+  const deleteTagRef = useRef<(name: string) => Promise<void>>(async () => {});
 
   useEffect(() => {
     return client.subscribeTransferProgress((progress) => {
@@ -226,6 +244,9 @@ export function useRemoteTransferActions(
             pending: false,
             error: failed.length > 0 ? fetchAllFailureMessage(failed, true) : prev.error,
           }));
+          const localTag = progress.operation === "DeleteRemoteTag" ? localTagDeleteAfterRemote.current : null;
+          localTagDeleteAfterRemote.current = null;
+          if (localTag !== null) void deleteTagRef.current(localTag);
         });
         return;
       }
@@ -233,6 +254,7 @@ export function useRemoteTransferActions(
       if (progress.phase === "Failed") {
         transferRequestPending.current = false;
         activeTransferId.current = null;
+        localTagDeleteAfterRemote.current = null;
         const current = upstreamRef.current;
         const target = progress.operation === "ForcePushBranch" ? forcePushTarget.current : null;
         const upstreamLabel =
@@ -437,7 +459,7 @@ export function useRemoteTransferActions(
   );
 
   const createTag = useCallback(
-    async (name: string, message: string | null) => {
+    async (name: string, message: string | null, target: string | null) => {
       // A taken tag name would show twice in `TagPanel` (keyed by name) until refused (#413).
       const refused = refuseTakenName("tag", tagsRef.current.map((tag) => tag.name), name, true);
       if (refused !== null) return refused;
@@ -452,7 +474,7 @@ export function useRemoteTransferActions(
                   { name, targetId: "", commitId: null, annotated: message !== null, message, taggerName: null, timestamp: null },
                 ],
               },
-        () => client.createTag(repoPath, name, message),
+        () => client.createTag(repoPath, name, message, target),
       );
     },
     [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],
@@ -465,6 +487,14 @@ export function useRemoteTransferActions(
       ),
     [client, runOptimisticMutation, repoPath],
   );
+  useEffect(() => {
+    deleteTagRef.current = deleteTag;
+  }, [deleteTag]);
+  const openCreateTagDialog = useCallback(
+    (commitId: string) => setState((prev) => ({ ...prev, createTagDialog: { commitId } })),
+    [setState],
+  );
+  const closeCreateTagDialog = useCallback(() => setState((prev) => ({ ...prev, createTagDialog: null })), [setState]);
   const pushCurrentBranch = useCallback(
     async (remoteName: string, noVerify = false) => {
       // push.default does not choose where the current branch goes on its upstream's remote
@@ -542,6 +572,23 @@ export function useRemoteTransferActions(
       );
     },
     [client, startTransfer, repoPath, setState],
+  );
+  const deleteRemoteTag = useCallback(
+    (remoteName: string, tagName: string, deleteLocal: boolean, noVerify = false) => {
+      setState((prev) => ({ ...prev, deleteRemoteTagDialog: null }));
+      lastPushRequest.current = { operation: "DeleteRemoteTag", remoteName, tagName, deleteLocal };
+      localTagDeleteAfterRemote.current = deleteLocal ? tagName : null;
+      return startTransfer("DeleteRemoteTag", () => client.deleteRemoteTag(repoPath, remoteName, tagName, noVerify));
+    },
+    [client, startTransfer, repoPath, setState],
+  );
+  const openDeleteRemoteTagDialog = useCallback(
+    (tagName: string) => setState((prev) => ({ ...prev, deleteRemoteTagDialog: { tagName } })),
+    [setState],
+  );
+  const closeDeleteRemoteTagDialog = useCallback(
+    () => setState((prev) => ({ ...prev, deleteRemoteTagDialog: null })),
+    [setState],
   );
   const openPushDialog = useCallback(
     (localBranch: string) => setState((prev) => ({ ...prev, pushDialog: { localBranch } })),
@@ -625,6 +672,8 @@ export function useRemoteTransferActions(
     listRemoteBranches,
     fetchRemote,
     createTag,
+    openCreateTagDialog,
+    closeCreateTagDialog,
     deleteTag,
     pushCurrentBranch,
     pushTags,
@@ -645,5 +694,8 @@ export function useRemoteTransferActions(
     deleteRemoteBranch,
     openDeleteRemoteBranchDialog,
     closeDeleteRemoteBranchDialog,
+    deleteRemoteTag,
+    openDeleteRemoteTagDialog,
+    closeDeleteRemoteTagDialog,
   };
 }

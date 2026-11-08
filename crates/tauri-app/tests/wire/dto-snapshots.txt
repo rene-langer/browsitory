@@ -77,6 +77,7 @@ TransferProgress/Started-PushBranch {"operationId":"op-2","operation":"PushBranc
 TransferProgress/Started-ForcePushBranch {"operationId":"op-2","operation":"ForcePushBranch","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Started-PushTags {"operationId":"op-2","operation":"PushTags","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Started-DeleteRemoteBranch {"operationId":"op-2","operation":"DeleteRemoteBranch","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
+TransferProgress/Started-DeleteRemoteTag {"operationId":"op-2","operation":"DeleteRemoteTag","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Started-Clone {"operationId":"op-2","operation":"Clone","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Started-BackgroundFetch {"operationId":"op-2","operation":"BackgroundFetch","phase":"Starting","errorKind":null,"current":0,"total":0,"receivedBytes":0,"message":null,"hookOutput":null}
 TransferProgress/Progress-Fetch-Receiving {"operationId":"op-2","operation":"Fetch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
@@ -88,6 +89,7 @@ TransferProgress/Progress-PushBranch-Receiving {"operationId":"op-2","operation"
 TransferProgress/Progress-ForcePushBranch-Receiving {"operationId":"op-2","operation":"ForcePushBranch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/Progress-PushTags-Receiving {"operationId":"op-2","operation":"PushTags","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/Progress-DeleteRemoteBranch-Receiving {"operationId":"op-2","operation":"DeleteRemoteBranch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
+TransferProgress/Progress-DeleteRemoteTag-Receiving {"operationId":"op-2","operation":"DeleteRemoteTag","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/Progress-Clone-Receiving {"operationId":"op-2","operation":"Clone","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/Progress-BackgroundFetch-Receiving {"operationId":"op-2","operation":"BackgroundFetch","phase":"Receiving","errorKind":null,"current":3,"total":10,"receivedBytes":4096,"message":null,"hookOutput":null}
 TransferProgress/RemoteFailed-NonFastForward {"operationId":"op-2","operation":"FetchAll","phase":"RemoteFailed","errorKind":"NonFastForward","current":0,"total":0,"receivedBytes":0,"message":null,"remoteName":"backup","hookOutput":null}
@@ -116,6 +118,7 @@ TransferProgressEvent/Started-PushBranch "transfer-progress"
 TransferProgressEvent/Started-ForcePushBranch "transfer-progress"
 TransferProgressEvent/Started-PushTags "transfer-progress"
 TransferProgressEvent/Started-DeleteRemoteBranch "transfer-progress"
+TransferProgressEvent/Started-DeleteRemoteTag "transfer-progress"
 TransferProgressEvent/Started-Clone "transfer-progress"
 TransferProgressEvent/Started-BackgroundFetch "transfer-progress"
 TransferProgressEvent/Progress-Fetch-Receiving "transfer-progress"
@@ -127,6 +130,7 @@ TransferProgressEvent/Progress-PushBranch-Receiving "transfer-progress"
 TransferProgressEvent/Progress-ForcePushBranch-Receiving "transfer-progress"
 TransferProgressEvent/Progress-PushTags-Receiving "transfer-progress"
 TransferProgressEvent/Progress-DeleteRemoteBranch-Receiving "transfer-progress"
+TransferProgressEvent/Progress-DeleteRemoteTag-Receiving "transfer-progress"
 TransferProgressEvent/Progress-Clone-Receiving "transfer-progress"
 TransferProgressEvent/Progress-BackgroundFetch-Receiving "transfer-progress"
 TransferProgressEvent/RemoteFailed-NonFastForward "transfer-progress"

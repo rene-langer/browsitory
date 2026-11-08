@@ -24,6 +24,7 @@ import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { RefBadges } from "./RefBadges";
+import { tagMenuItems } from "./tagMenuItems";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
@@ -55,6 +56,8 @@ export function CommitGraph({
   remotes = [],
   onPushTag,
   onDeleteTag,
+  onCreateTag,
+  onDeleteTagFromRemote,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -101,12 +104,17 @@ export function CommitGraph({
   /** Push targets offered by a tag badge's menu. */
   remotes?: RemoteInfo[];
   /**
-   * Tag badge menu actions (push, checkout, delete). Without `onPushTag`, tag badges have no menu
-   * and a right-click on them opens the commit menu. Badges stay non-focusable; `TagPanel` is
-   * the keyboard path for push and delete, and the commit menu has "Checkout (detached)".
+   * Tag badge menu actions (push, branch, checkout, delete locally or on a remote). Without
+   * `onPushTag`, tag badges have no menu and a right-click on them opens the commit menu. Badges
+   * stay non-focusable; `TagPanel` is the keyboard path for push and delete, and the commit menu
+   * has "Branch from here" and "Checkout (detached)".
    */
   onPushTag?: (remoteName: string, tag: string) => void;
   onDeleteTag?: (tag: string) => Promise<void>;
+  /** Opens the create-tag dialog for that commit (the single-commit menu's "Create tag…"). */
+  onCreateTag?: (commitId: string) => void;
+  /** Opens the "Delete from remote" dialog for that tag (the tag badge menu). */
+  onDeleteTagFromRemote?: (tag: string) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -170,6 +178,7 @@ export function CommitGraph({
     const isMerge = (commit?.parentIds.length ?? 0) > 1;
     const items: ContextMenuItem[] = [
       { label: "Branch from here", onSelect: () => onBranchFromCommit(commitId) },
+      ...(onCreateTag === undefined ? [] : [{ label: "Create tag…", onSelect: () => onCreateTag(commitId) }]),
       { label: "Rebase onto here", onSelect: () => onRebaseFromCommit(commitId), disabled: pending },
       // A merge commit needs a parent to apply against: the ellipsis opens the parent picker.
       isMerge && commit !== undefined
@@ -199,19 +208,17 @@ export function CommitGraph({
   }
 
   function tagItems(tag: string, commitId: string): ContextMenuItem[] {
-    const push: ContextMenuItem[] =
-      remotes.length === 0
-        ? [{ label: "Push tag", onSelect: () => {}, disabled: true, title: "No remote configured." }]
-        : remotes.map((remote) => ({
-            label: `Push ${tag} to ${remote.name}`,
-            onSelect: () => onPushTag?.(remote.name, tag),
-            disabled: pending,
-          }));
-    return [
-      ...push,
-      { label: "Checkout (detached)", onSelect: () => onCheckoutCommit(commitId), disabled: pending },
-      { label: "Delete tag…", destructive: true, onSelect: () => setTagToDelete(tag), disabled: pending },
-    ];
+    return tagMenuItems({
+      tag,
+      commitId,
+      remotes,
+      disabled: pending,
+      onPushTag,
+      onBranchFromCommit,
+      onCheckoutCommit,
+      onDeleteFromRemote: onDeleteTagFromRemote,
+      onDelete: setTagToDelete,
+    });
   }
 
   // Keep the keyboard-driven selection visible in a long history.

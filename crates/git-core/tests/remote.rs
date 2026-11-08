@@ -2,7 +2,7 @@ mod common;
 
 use git_core::remote::{
     add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
-    delete_remote_branch, delete_tag, fetch_all, fetch_all_as, fetch_remote,
+    delete_remote_branch, delete_remote_tag, delete_tag, fetch_all, fetch_all_as, fetch_remote,
     force_push_current_branch, list_remote_branches, list_remotes, list_tags, pull_after_fetch,
     push_branch, push_current_branch, push_tags, push_target, remote_upstreams, remove_remote,
     remove_remote_and_clear_upstreams, rename_remote, resolve_push_target, set_branch_upstream,
@@ -184,8 +184,8 @@ fn tag_crud_preserves_lightweight_and_annotated_tag_metadata() {
     common::commit_all(&repo, "initial commit");
     let target_id = repo.head().unwrap().target().unwrap().to_string();
 
-    create_tag(&repo, "v1.0.0", None).unwrap();
-    create_tag(&repo, "release-note", Some("ship it")).unwrap();
+    create_tag(&repo, "v1.0.0", None, None).unwrap();
+    create_tag(&repo, "release-note", Some("ship it"), None).unwrap();
 
     let tags = list_tags(&repo).unwrap();
     assert!(tags.iter().any(|tag| {
@@ -213,6 +213,63 @@ fn tag_crud_preserves_lightweight_and_annotated_tag_metadata() {
 }
 
 #[test]
+fn creates_lightweight_and_annotated_tags_at_a_given_commit() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "first\n");
+    common::commit_all(&repo, "first");
+    let first = repo.head().unwrap().target().unwrap().to_string();
+    common::write_file(dir.path(), "README.md", "second\n");
+    common::commit_all(&repo, "second");
+
+    create_tag(&repo, "old-light", None, Some(&first)).unwrap();
+    create_tag(
+        &repo,
+        "old-annotated",
+        Some("an older release"),
+        Some(&first),
+    )
+    .unwrap();
+
+    let tags = list_tags(&repo).unwrap();
+    let commit_of = |name: &str| {
+        tags.iter()
+            .find(|tag| tag.name == name)
+            .unwrap()
+            .commit_id
+            .clone()
+    };
+    assert_eq!(commit_of("old-light"), Some(first.clone()));
+    assert_eq!(commit_of("old-annotated"), Some(first));
+}
+
+#[test]
+fn creating_a_tag_at_an_unknown_or_malformed_commit_fails_without_a_tag() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "first\n");
+    common::commit_all(&repo, "first");
+    let tree = repo
+        .head()
+        .unwrap()
+        .peel_to_tree()
+        .unwrap()
+        .id()
+        .to_string();
+
+    for target in [
+        "0123456789abcdef0123456789abcdef01234567",
+        "HEAD~1",
+        "nope",
+        tree.as_str(),
+    ] {
+        assert!(
+            create_tag(&repo, "v1", None, Some(target)).is_err(),
+            "{target}"
+        );
+    }
+    assert!(list_tags(&repo).unwrap().is_empty());
+}
+
+#[test]
 fn lists_the_commit_each_tag_peels_to() {
     // A tag of a tag targets the inner tag object, not a commit; a tag of a tree has no commit.
     let (dir, repo) = common::init_repo();
@@ -222,8 +279,8 @@ fn lists_the_commit_each_tag_peels_to() {
     let commit_id = commit.id().to_string();
     let tagger = git2::Signature::now("Test User", "test@example.com").unwrap();
 
-    create_tag(&repo, "light", None).unwrap();
-    create_tag(&repo, "annotated", Some("ship it")).unwrap();
+    create_tag(&repo, "light", None, None).unwrap();
+    create_tag(&repo, "annotated", Some("ship it"), None).unwrap();
     let inner = repo.refname_to_id("refs/tags/annotated").unwrap();
     let inner_object = repo.find_object(inner, None).unwrap();
     repo.tag("outer", &inner_object, &tagger, "tag of a tag", false)
@@ -255,8 +312,8 @@ fn pushes_current_branch_and_only_selected_tag_to_bare_remote() {
     // Omitting either explicit refspec or pushing every local tag must fail this test.
     let fixture = local_and_bare_remote();
     fixture.local_commit("local change");
-    create_tag(&fixture.local, "v1.0.0", None).unwrap();
-    create_tag(&fixture.local, "not-selected", None).unwrap();
+    create_tag(&fixture.local, "v1.0.0", None, None).unwrap();
+    create_tag(&fixture.local, "not-selected", None, None).unwrap();
     let mut reporter = VecReporter::default();
 
     push_current_branch(
@@ -305,8 +362,8 @@ fn pushes_current_branch_and_only_selected_tag_to_bare_remote() {
 fn pushes_all_local_tags_without_using_the_configured_push_refspec() {
     // Passing no explicit refspecs lets libgit2 honor remote.origin.push instead of pushing tags.
     let fixture = local_and_bare_remote();
-    create_tag(&fixture.local, "v1.0.0", None).unwrap();
-    create_tag(&fixture.local, "v2.0.0", Some("second release")).unwrap();
+    create_tag(&fixture.local, "v1.0.0", None, None).unwrap();
+    create_tag(&fixture.local, "v2.0.0", Some("second release"), None).unwrap();
     fixture
         .local
         .config()
@@ -1676,6 +1733,100 @@ fn deleting_head_or_an_invalid_name_is_rejected_before_connecting() {
     }
     assert!(reporter.events.is_empty());
     assert!(fixture.bare_tip("main").is_some());
+}
+
+#[test]
+fn delete_remote_tag_removes_exactly_that_tag_on_the_remote_and_keeps_the_local_one() {
+    let fixture = local_and_bare_remote();
+    create_tag(&fixture.local, "v1", None, None).unwrap();
+    create_tag(&fixture.local, "v1.1", Some("annotated"), None).unwrap();
+    let (mut credentials, mut reporter) = quiet();
+    push_tags(
+        &fixture.local,
+        "origin",
+        &[],
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+    let bare = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+    assert!(bare.find_reference("refs/tags/v1").is_ok());
+    let main_before = fixture.bare_tip("main");
+    let mut events = VecReporter::default();
+
+    delete_remote_tag(
+        &fixture.local,
+        "origin",
+        "v1",
+        false,
+        &mut credentials,
+        &mut events,
+        &|| false,
+    )
+    .unwrap();
+
+    assert!(bare.find_reference("refs/tags/v1").is_err());
+    assert!(bare.find_reference("refs/tags/v1.1").is_ok());
+    assert_eq!(fixture.bare_tip("main"), main_before);
+    assert!(fixture.local.find_reference("refs/tags/v1").is_ok());
+    assert!(!events.events.is_empty());
+    assert!(events
+        .events
+        .iter()
+        .all(|event| event.operation == TransferOperation::DeleteRemoteTag));
+}
+
+#[test]
+fn a_remote_tag_delete_cancelled_at_negotiation_leaves_the_tag() {
+    let fixture = local_and_bare_remote();
+    create_tag(&fixture.local, "v1", None, None).unwrap();
+    let (mut credentials, mut reporter) = quiet();
+    push_tags(
+        &fixture.local,
+        "origin",
+        &[],
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| false,
+    )
+    .unwrap();
+
+    let result = delete_remote_tag(
+        &fixture.local,
+        "origin",
+        "v1",
+        false,
+        &mut credentials,
+        &mut reporter,
+        &|| true,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Cancelled)));
+    let bare = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
+    assert!(bare.find_reference("refs/tags/v1").is_ok());
+}
+
+#[test]
+fn deleting_an_invalid_remote_tag_name_is_rejected_before_connecting() {
+    let fixture = local_and_bare_remote();
+    let (mut credentials, mut reporter) = quiet();
+
+    for name in ["", "bad name", "-x", "v1:other", "+v1", "v1..2"] {
+        let result = delete_remote_tag(
+            &fixture.local,
+            "origin",
+            name,
+            false,
+            &mut credentials,
+            &mut reporter,
+            &|| false,
+        );
+        assert!(result.is_err(), "{name:?}");
+    }
+    assert!(reporter.events.is_empty());
 }
 
 fn no_credentials_for(_remote: &str) -> Result<Box<dyn CredentialProvider>, RemoteError> {

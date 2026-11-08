@@ -244,7 +244,8 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke("set_current_upstream", { repoPath, remoteName, remoteBranch }),
   clearCurrentUpstream: (repoPath: string) => loggedInvoke("clear_current_upstream", { repoPath }),
   listTags: (repoPath: string) => loggedInvoke<TagInfo[]>("list_tags", { repoPath }),
-  createTag: (repoPath: string, name: string, message: string | null) => loggedInvoke("create_tag", { repoPath, name, message }),
+  createTag: (repoPath: string, name: string, message: string | null, target: string | null) =>
+    loggedInvoke("create_tag", { repoPath, name, message, target }),
   deleteTag: (repoPath: string, name: string) => loggedInvoke("delete_tag", { repoPath, name }),
   fetchRemote: async (repoPath: string, remoteName: string, prune: boolean | null) => {
     await transferListenersReady;
@@ -265,6 +266,10 @@ export const tauriRepoClient: RepoClient = {
   deleteRemoteBranch: async (repoPath: string, remoteName: string, branchName: string, noVerify: boolean) => {
     await transferListenersReady;
     return loggedInvoke<string>("delete_remote_branch", { repoPath, remoteName, branchName, noVerify });
+  },
+  deleteRemoteTag: async (repoPath: string, remoteName: string, tagName: string, noVerify: boolean) => {
+    await transferListenersReady;
+    return loggedInvoke<string>("delete_remote_tag", { repoPath, remoteName, tagName, noVerify });
   },
   pushCurrentBranch: async (repoPath: string, remoteName: string, noVerify: boolean) => {
     await transferListenersReady;

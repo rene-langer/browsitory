@@ -30,6 +30,7 @@ pub enum TransferOperation {
     ForcePushBranch,
     PushTags,
     DeleteRemoteBranch,
+    DeleteRemoteTag,
     Clone,
     /// A Fetch all the app started on its own (the "Fetch automatically" setting), reported
     /// apart from a Fetch all the user asked for so the UI can keep it quiet.
@@ -625,9 +626,26 @@ pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>, RemoteError> {
     Ok(tags)
 }
 
-pub fn create_tag(repo: &Repository, name: &str, message: Option<&str>) -> Result<(), RemoteError> {
+/// Tags `target` (a full commit id), or HEAD's commit when `None`. A lightweight tag without
+/// `message`, an annotated one with it. An id that names no commit is an error, and never a
+/// revision expression: `HEAD~1` or a short id is refused like an unknown id.
+pub fn create_tag(
+    repo: &Repository,
+    name: &str,
+    message: Option<&str>,
+    target: Option<&str>,
+) -> Result<(), RemoteError> {
     validate_tag_name(name)?;
-    let target = repo.head()?.peel_to_commit()?.into_object();
+    let target = match target {
+        Some(id) => {
+            let oid = git2::Oid::from_str(id)?;
+            if id.len() != oid.to_string().len() {
+                return Err(git2::Error::from_str("tag target is not a full commit id").into());
+            }
+            repo.find_commit(oid)?.into_object()
+        }
+        None => repo.head()?.peel_to_commit()?.into_object(),
+    };
     match message {
         Some(message) => {
             let tagger = repo.signature()?;
@@ -848,6 +866,32 @@ pub fn delete_remote_branch(
         }
     }
     Ok(())
+}
+
+/// Deletes `refs/tags/<tag>` on `remote_name`, like `git push <remote> :refs/tags/<tag>`. The
+/// local tag stays. A refusal (protected tag, server hook) is `RejectedRemoteRef`; `cancel`
+/// behaves as for `push_current_branch`. Runs the `pre-push` hook unless `no_verify`.
+pub fn delete_remote_tag(
+    repo: &Repository,
+    remote_name: &str,
+    tag: &str,
+    no_verify: bool,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+) -> Result<(), RemoteError> {
+    validate_tag_name(tag)?;
+    push_refs(
+        repo,
+        remote_name,
+        &[format!(":refs/tags/{tag}")],
+        TransferOperation::DeleteRemoteTag,
+        credentials,
+        reporter,
+        cancel,
+        None,
+        no_verify,
+    )
 }
 
 /// The local ref `remote_name`'s fetch refspecs map `refs/heads/<branch>` to, if any.

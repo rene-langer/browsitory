@@ -674,6 +674,42 @@ pub(super) fn delete_remote_branch<S: CredentialStore>(
     });
     complete(&events, op, TransferOperation::DeleteRemoteBranch, result);
 }
+#[allow(clippy::too_many_arguments)]
+pub(super) fn delete_remote_tag<S: CredentialStore>(
+    repo: &git2::Repository,
+    credentials: &CredentialService<S>,
+    remote_name: String,
+    tag_name: String,
+    no_verify: bool,
+    op: TransferOp,
+    events: Sender<TransferEvent>,
+    reply: Sender<Result<String, String>>,
+) {
+    let _ = events.send(TransferEvent::Started {
+        operation_id: op.id.clone(),
+        operation: TransferOperation::DeleteRemoteTag,
+    });
+    let _ = reply.send(Ok(op.id.clone()));
+    let mut reporter = ChannelReporter {
+        events: events.clone(),
+        operation_id: op.id.clone(),
+    };
+    super::hooks::log_skipped_pre_push(repo, no_verify);
+    let cancel = op.cancel_check();
+    let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
+        let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
+        git_core::remote::delete_remote_tag(
+            repo,
+            &remote_name,
+            &tag_name,
+            no_verify,
+            &mut provider,
+            &mut reporter,
+            &cancel,
+        )
+    });
+    complete(&events, op, TransferOperation::DeleteRemoteTag, result);
+}
 
 impl WorkerHandle {
     pub fn fetch_remote(
@@ -782,6 +818,28 @@ impl WorkerHandle {
             .send(Command::DeleteRemoteBranch {
                 remote_name,
                 branch_name,
+                no_verify,
+                operation_id,
+                events,
+                reply,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+    pub fn delete_remote_tag(
+        &self,
+        remote_name: String,
+        tag_name: String,
+        no_verify: bool,
+        events: Sender<TransferEvent>,
+    ) -> Result<String, String> {
+        let (reply, rx) = std::sync::mpsc::channel();
+        let operation_id = self.cancelled.allocate("delete-remote");
+        self.tx
+            .send(Command::DeleteRemoteTag {
+                remote_name,
+                tag_name,
                 no_verify,
                 operation_id,
                 events,

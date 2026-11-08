@@ -272,6 +272,13 @@ describe("tauriRepoClient transfer progress subscription", () => {
       branchName: "topic",
       noVerify: true,
     });
+    await tauriRepoClient.deleteRemoteTag(TEST_REPO_PATH, "origin", "v1", false);
+    expect(invoke).toHaveBeenLastCalledWith("delete_remote_tag", {
+      repoPath: TEST_REPO_PATH,
+      remoteName: "origin",
+      tagName: "v1",
+      noVerify: false,
+    });
     await tauriRepoClient.pushTags(TEST_REPO_PATH, "origin", ["v1"], true);
     expect(invoke).toHaveBeenLastCalledWith("push_tags", {
       repoPath: TEST_REPO_PATH,

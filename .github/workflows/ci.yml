@@ -119,6 +119,9 @@ jobs:
       # Release tooling too (release.yml's publish-vsix-release, #398); files only, no network.
       - name: check-updater-manifest.py unit tests
         run: python3 scripts/test_check_updater_manifest.py
+      # Build tooling (build-dist and release.yml's build-release, #454); no network.
+      - name: prefetch-bundler-tools.py unit tests
+        run: python3 scripts/test_prefetch_bundler_tools.py
       - name: Changelog entry (fragment in changelog.d/ or CHANGELOG.md)
         env:
           # A dispatched run has no pull request: the default branch is the base, and there are
@@ -397,6 +400,27 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+      # The bundler downloads WiX and NSIS (Windows) and the AppImage tools (Linux) from GitHub
+      # release downloads, each tried once; a 504 there failed this job (#454). So the tools
+      # folder is cached, keyed on the locked CLI version, and whatever the cache didn't restore
+      # is downloaded with retries before the build, the way the bundler would. Same three steps
+      # as release.yml's build-release. macOS downloads nothing. See docs/RELEASING.md,
+      # "Bundler tools".
+      - id: bundler-tools
+        name: Find the bundler's tools folder
+        if: runner.os != 'macOS'
+        shell: bash
+        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} scripts/prefetch-bundler-tools.py --github-output --no-download
+      - uses: actions/cache@v6
+        if: runner.os != 'macOS'
+        with:
+          path: ${{ steps.bundler-tools.outputs.tools-dir }}
+          key: tauri-bundler-tools-${{ runner.os }}-cli-${{ steps.bundler-tools.outputs.cli-version }}
+      - name: Download the bundler's tools (with retries)
+        if: runner.os != 'macOS'
+        timeout-minutes: 15
+        shell: bash
+        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} scripts/prefetch-bundler-tools.py
       # The build-dist scripts run the @tauri-apps/cli that frontend/pnpm-lock.yaml locks, as
       # release.yml's build-release does, so this job bundles with the release's CLI (#430).
       - name: Build distributable (Linux/macOS)

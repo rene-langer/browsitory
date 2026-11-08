@@ -31,6 +31,27 @@ ships. The other Linux jobs stay on `ubuntu-latest`; CI ran them on `ubuntu-26.0
 switch (#386). To raise the floor, move all four pins together and update
 `docs/guide/install.md`; do it before GitHub retires the `ubuntu-24.04` image.
 
+### Bundler tools
+
+While bundling, the Tauri CLI downloads tools from GitHub release downloads, each tried once:
+WiX 3.14 and NSIS 3.13 on Windows (into `%LOCALAPPDATA%\tauri`), AppRun, linuxdeploy and its
+AppImage plugin on Linux (into `~/.cache/tauri`); macOS downloads nothing. A GitHub 504 there
+failed CI's `build-dist` on both platforms (#454). So `build-release` and `build-dist` cache that
+folder with `actions/cache`, keyed on the OS and the `@tauri-apps/cli` version
+`frontend/pnpm-lock.yaml` locks, and run `scripts/prefetch-bundler-tools.py` before bundling: it
+downloads whatever is missing with retries and checks each file's hash, so the bundler finds
+every tool in place. A tag's run can restore the caches main's `build-dist` saved, so a release
+normally bundles with the tools main already used and downloads nothing.
+
+The script's tool list (URLs, file names, hashes) is copied from the bundler of the CLI version
+in its `TAURI_CLI_VERSION`. When the lockfile moves to another CLI version, the script only
+prints a warning in those jobs and the bundler downloads its own tools again, without retries
+(the cache still works). To restore the retries, compare
+`crates/tauri-bundler/src/bundle/{windows/msi,windows/nsis,linux/appimage}` in the Tauri
+repository at the new `tauri-cli-v<version>` tag with the list, update it and bump
+`TAURI_CLI_VERSION`. If a release's `build-release` still fails on a download, re-run that job:
+the tag doesn't need to move.
+
 ### Preparing the changelog
 
 Pull requests don't edit `CHANGELOG.md`. Each adds a fragment, `changelog.d/<issue>-<slug>.md`
@@ -181,6 +202,15 @@ same way (stable now); change it with the switch.
 **GitHub release:** publish the draft as a normal release, not a pre-release. The app's updater
 reads `releases/latest/download/latest.json`, and GitHub's `latest` skips pre-releases. Check
 the [updater manifest](#updater-manifest-latestjson) before and after publishing.
+
+Publish **the draft** that `release.yml` created (Edit, then **Publish release**, or
+`gh release edit release/X.Y.Z --draft=false --latest`). Never create a new release for the
+tag on the releases page: the repository has **immutable releases** turned on, so the first
+release published for a tag locks that tag for good. An empty release published by mistake
+can be deleted, but the tag stays locked even with immutability turned off, and the draft with
+the bundles can then never be published. The only way out is the next patch version from the
+same commit (0.4.0 went out this way as 0.4.1). Keep immutability on: it stops published
+release files from being replaced.
 
 **Never re-tag a published version at a different commit.** Both registries refuse to replace a
 published version. `--skip-duplicate` only makes re-running the *same* commit's release safe; a

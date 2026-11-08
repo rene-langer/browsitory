@@ -21,10 +21,11 @@ pub async fn create_tag(
     repo_path: String,
     name: String,
     message: Option<String>,
+    target: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.create_tag(name, message))
+        .call(move |w| w.create_tag(name, message, target))
         .await
 }
 

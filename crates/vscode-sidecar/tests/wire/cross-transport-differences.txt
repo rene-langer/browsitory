@@ -115,6 +115,7 @@ TransferProgress/Completed-ok key-order
 TransferProgress/Progress-BackgroundFetch-Receiving key-order
 TransferProgress/Progress-Clone-Receiving key-order
 TransferProgress/Progress-DeleteRemoteBranch-Receiving key-order
+TransferProgress/Progress-DeleteRemoteTag-Receiving key-order
 TransferProgress/Progress-Fetch-Receiving key-order
 TransferProgress/Progress-Fetch-RunningHook key-order
 TransferProgress/Progress-Fetch-Updating key-order
@@ -135,6 +136,7 @@ TransferProgress/RemoteFailed-TransferFailed key-order
 TransferProgress/Started-BackgroundFetch key-order
 TransferProgress/Started-Clone key-order
 TransferProgress/Started-DeleteRemoteBranch key-order
+TransferProgress/Started-DeleteRemoteTag key-order
 TransferProgress/Started-Fetch key-order
 TransferProgress/Started-FetchAll key-order
 TransferProgress/Started-ForcePushBranch key-order

@@ -76,6 +76,7 @@ TransferProgress/Started-PushBranch {"current":0,"errorKind":null,"hookOutput":n
 TransferProgress/Started-ForcePushBranch {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"ForcePushBranch","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
 TransferProgress/Started-PushTags {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"PushTags","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
 TransferProgress/Started-DeleteRemoteBranch {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteBranch","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Started-DeleteRemoteTag {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteTag","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
 TransferProgress/Started-Clone {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"Clone","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
 TransferProgress/Started-BackgroundFetch {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"BackgroundFetch","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
 TransferProgress/Progress-Fetch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Fetch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
@@ -87,6 +88,7 @@ TransferProgress/Progress-PushBranch-Receiving {"current":3,"errorKind":null,"ho
 TransferProgress/Progress-ForcePushBranch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"ForcePushBranch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
 TransferProgress/Progress-PushTags-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"PushTags","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
 TransferProgress/Progress-DeleteRemoteBranch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteBranch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/Progress-DeleteRemoteTag-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteTag","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
 TransferProgress/Progress-Clone-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Clone","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
 TransferProgress/Progress-BackgroundFetch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"BackgroundFetch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
 TransferProgress/RemoteFailed-NonFastForward {"current":0,"errorKind":"NonFastForward","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}

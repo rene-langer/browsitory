@@ -16,11 +16,56 @@ function commitFile(fileName: string, content: string, message: string) {
   git("commit", "-m", message);
 }
 
-/** The status strip's text, read via execute (WebKitGTK's getText() can come back empty). */
+/**
+ * The status strip's text ("" without a strip), read in one in-page step: WebKitGTK's getText()
+ * can come back empty, and an element reference can go stale when the strip unmounts (#182).
+ */
 async function stripText(): Promise<string> {
-  const strip = await $("[role='status'][aria-label='Operation status']");
-  if (!(await strip.isExisting())) return "";
-  return browser.execute((el) => (el as HTMLElement).textContent ?? "", strip);
+  return browser.execute(
+    () => document.querySelector("[role='status'][aria-label='Operation status']")?.textContent ?? "",
+  );
+}
+
+/** The text of every alert in the page (an action that failed shows its error in one). */
+async function alertTexts(): Promise<string> {
+  return browser.execute(() =>
+    Array.from(document.querySelectorAll("[role='alert']"))
+      .map((el) => (el.textContent ?? "").replace(/\s+/g, " ").trim())
+      .filter((text) => text !== "")
+      .join(" | "),
+  );
+}
+
+/**
+ * Clicks **Continue rebase** once the restarted app has settled: the same button element has been
+ * in the page, enabled and rendered, for a full second. The strip shows the paused rebase as soon
+ * as the restarted app's first refresh lands, but the workspace can still re-render or remount
+ * right after (startup tab reconciliation, the next refresh), and a click on a button that is
+ * replaced or moves at that moment can get lost (#453, like the palette race in #434). Each poll
+ * marks the button it sees, so a remounted button has no mark and starts the second over. The
+ * click happens in the same in-page step that sees the settled button, so nothing can replace it
+ * in between.
+ */
+async function clickContinueRebaseWhenSettled(): Promise<void> {
+  await browser.waitUntil(
+    () =>
+      browser.execute(() => {
+        const button = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+          (el) => (el.textContent ?? "").trim() === "Continue rebase",
+        );
+        if (button === undefined || button.disabled || button.getClientRects().length === 0) return false;
+        const now = Date.now();
+        const seenAt = Number(button.dataset.e2eSeenAt ?? "0");
+        if (seenAt === 0) {
+          button.dataset.e2eSeenAt = String(now);
+          return false;
+        }
+        if (now - seenAt < 1000) return false;
+        button.click();
+        return true;
+      }),
+    { timeout: 20000, interval: 200, timeoutMsg: "Continue rebase never stayed clickable in the restarted app" },
+  );
 }
 
 // #108: a paused rebase is stored on disk, so it survives an app restart. The restart is
@@ -38,7 +83,10 @@ describe("Browsitory restart resilience", () => {
     commitFile("restart-b.txt", "b\n", "e2e: restart commit b");
   });
 
-  it("keeps a paused rebase across an app restart and finishes it as one undo step", async () => {
+  it("keeps a paused rebase across an app restart and finishes it as one undo step", async function () {
+    // The restart, the settle wait and the finish wait take up to 20 s each: past mocha's 60 s
+    // default, a slow run would end in mocha's timeout instead of the waits' own messages.
+    this.timeout(120000);
     await browser.refresh();
     const onto = await $("li*=e2e: restart onto-point commit");
     await onto.waitForExist({ timeout: 10000 });
@@ -67,14 +115,26 @@ describe("Browsitory restart resilience", () => {
       timeout: 20000,
       timeoutMsg: "the restarted app did not show the paused rebase",
     });
-    const continueButton = await $("button=Continue rebase");
-    await continueButton.waitForClickable({ timeout: 10000 });
-    await continueButton.click();
+    await clickContinueRebaseWhenSettled();
 
-    await browser.waitUntil(async () => (await stripText()) === "", {
-      timeout: 10000,
-      timeoutMsg: "the rebase did not finish",
-    });
+    // 20 s like the restart wait: the first Continue in a fresh app process can be slow on a busy
+    // runner. The strip's last text and any alert go into the failure message, so a Continue that
+    // failed (an error instead of an empty strip) can be told apart from a slow one (#453).
+    let lastStrip = "";
+    try {
+      await browser.waitUntil(
+        async () => {
+          lastStrip = await stripText();
+          return lastStrip === "";
+        },
+        { timeout: 20000 },
+      );
+    } catch (err) {
+      const alerts = await alertTexts().catch(() => "(could not read the alerts)");
+      throw new Error(
+        `the rebase did not finish within 20 s: the status strip still shows "${lastStrip}", alerts: "${alerts}" (${String(err)})`,
+      );
+    }
     expect(git("log", "-2", "--format=%s").split("\n")).toEqual(["e2e: restart commit b", "e2e: restart commit a"]);
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git/browsitory/rebase.json"))).toBe(false);
     expect(git("symbolic-ref", "-q", "HEAD")).toMatch(/^refs\/heads\//);
