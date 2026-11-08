@@ -123,8 +123,20 @@ export function activate(context: vscode.ExtensionContext): void {
     currentMessageSubscription = messageSubscription;
     context.subscriptions.push(messageSubscription);
 
+    // A panel behind another editor tab keeps its page "visible"; tell the webview, which
+    // pauses background work (Fetch automatically) while hidden.
+    const viewStateSubscription = panel.onDidChangeViewState((event) => {
+      void panel.webview.postMessage({
+        jsonrpc: "2.0",
+        method: "panelVisibility",
+        params: { visible: event.webviewPanel.visible },
+      });
+    });
+    context.subscriptions.push(viewStateSubscription);
+
     const panelSubscription = panel.onDidDispose(() => {
       messageSubscription.dispose();
+      viewStateSubscription.dispose();
       void bridge.dispose();
       if (currentMessageSubscription === messageSubscription) {
         currentMessageSubscription = undefined;

@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BranchInfo, TransferProgress } from "../ipc/RepoClient";
+import { lastFetchAt } from "../lib/autoFetch";
 import { useAppState } from "./useAppState";
 import { unimplemented, TEST_REPO_PATH, upstream, transferClient } from "./useAppStateTestClient";
 
@@ -333,6 +334,38 @@ describe("useAppState", () => {
     expect(statusCalls).toBe(2);
     expect(result.current.state.transfer).toBeNull();
     expect(result.current.state.pending).toBe(false);
+  });
+
+  it("never adopts a background fetch's events as the transfer the user started (#440)", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const event = (operationId: string, operation: "FetchAll" | "BackgroundFetch", phase: "Starting" | "Completed") => ({
+      operationId, operation, phase, errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null,
+    });
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      fetchAllRemotes: async () => {
+        // A background fetch queued just before still reports while the user's request is pending.
+        listener?.(event("background-fetch-1", "BackgroundFetch", "Starting"));
+        listener?.(event("fetch-all-2", "FetchAll", "Starting"));
+        return "fetch-all-2";
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.fetchAllRemotes());
+    expect(result.current.state.transfer).toMatchObject({ operationId: "fetch-all-2", operation: "FetchAll" });
+
+    await act(async () => listener?.(event("background-fetch-1", "BackgroundFetch", "Completed")));
+    expect(result.current.state.transfer).toMatchObject({ operationId: "fetch-all-2" });
+    expect(result.current.state.pending).toBe(true);
+
+    await act(async () => listener?.(event("fetch-all-2", "FetchAll", "Completed")));
+    expect(result.current.state.transfer).toBeNull();
+    expect(lastFetchAt(TEST_REPO_PATH)).not.toBeNull();
   });
 
   it("clears a failed transfer so retry can start while retaining safe error feedback", async () => {

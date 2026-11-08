@@ -287,6 +287,20 @@ pub(super) fn fetch_all_remotes(
     Ok(Value::String(operation_id))
 }
 
+/// The "Fetch automatically" tick; `null` when the worker had another operation queued or
+/// running and nothing was started (see `WorkerHandle::background_fetch`).
+pub(super) fn background_fetch(
+    params: FetchAllRemotesParams,
+    repos: &Repos,
+    stdout: &Arc<Mutex<std::io::Stdout>>,
+) -> Result<Value, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    spawn_progress_relay(event_rx, Arc::clone(stdout));
+    let operation_id =
+        worker_handle(repos, &params.repo_path)?.background_fetch(params.prune, event_tx)?;
+    Ok(operation_id.map_or(Value::Null, Value::String))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct PushBranchParams {

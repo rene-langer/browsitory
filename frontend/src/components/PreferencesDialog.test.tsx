@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { CommitMessageSettingsProvider } from "../state/CommitMessageSettingsProvider";
-import { CommitMessageSection, DiffSection, ExternalToolsSection, PreferencesDialog } from "./PreferencesDialog";
+import { __resetAutoFetchForTests, readAutoFetchOverride } from "../lib/autoFetch";
+import { FetchSettingsProvider } from "../state/FetchSettingsProvider";
+import { CommitMessageSection, DiffSection, ExternalToolsSection, FetchSection, PreferencesDialog } from "./PreferencesDialog";
 import { DiffSettingsProvider } from "../state/DiffSettingsProvider";
 import { within } from "@testing-library/react";
 
@@ -222,5 +224,87 @@ describe("DiffSection", () => {
         wordWrap: "Auto",
       }),
     );
+  });
+});
+
+describe("Fetch preferences", () => {
+  afterEach(() => {
+    localStorage.clear();
+    __resetAutoFetchForTests();
+  });
+
+  function renderFetch(client: Partial<RepoClient>, repoPath: string | null = "/work/app") {
+    render(
+      <FetchSettingsProvider client={client as RepoClient}>
+        <PreferencesDialog onClose={() => {}}>
+          <FetchSection repoPath={repoPath} />
+        </PreferencesDialog>
+      </FetchSettingsProvider>,
+    );
+  }
+
+  it("is off by default and saves the app-wide interval", async () => {
+    const setFetchSettings = vi.fn(async () => {});
+    renderFetch({ getFetchSettings: async () => ({ autoFetchMinutes: 0 }), setFetchSettings });
+    const group = await screen.findByRole("group", { name: "Fetch" });
+    const app = within(group).getByRole("combobox", { name: "Fetch automatically" });
+    expect(app).toHaveValue("0");
+    expect(within(app).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Off",
+      "Every 5 minutes",
+      "Every 10 minutes",
+      "Every 30 minutes",
+      "Every hour",
+    ]);
+
+    fireEvent.change(app, { target: { value: "10" } });
+
+    await waitFor(() => expect(setFetchSettings).toHaveBeenLastCalledWith({ autoFetchMinutes: 10 }));
+    expect(within(group).getByRole("combobox", { name: "In app" })).toHaveDisplayValue(
+      "Use the app setting (every 10 minutes)",
+    );
+  });
+
+  it("keeps an interval set in config.toml that the list doesn't offer", async () => {
+    renderFetch({ getFetchSettings: async () => ({ autoFetchMinutes: 15 }), setFetchSettings: async () => {} });
+    const app = await screen.findByRole("combobox", { name: "Fetch automatically" });
+    await waitFor(() => expect(app).toHaveDisplayValue("Every 15 minutes"));
+  });
+
+  it("overrides the interval for the active repository only", async () => {
+    const setFetchSettings = vi.fn(async () => {});
+    renderFetch({ getFetchSettings: async () => ({ autoFetchMinutes: 10 }), setFetchSettings });
+    const repo = await screen.findByRole("combobox", { name: "In app" });
+    expect(repo).toHaveValue("app");
+
+    fireEvent.change(repo, { target: { value: "0" } });
+    expect(repo).toHaveValue("0");
+    expect(readAutoFetchOverride("/work/app")).toBe(0);
+    expect(readAutoFetchOverride("/work/other")).toBeNull();
+
+    fireEvent.change(repo, { target: { value: "60" } });
+    expect(readAutoFetchOverride("/work/app")).toBe(60);
+    fireEvent.change(repo, { target: { value: "app" } });
+    expect(readAutoFetchOverride("/work/app")).toBeNull();
+    expect(setFetchSettings).not.toHaveBeenCalled();
+  });
+
+  it("offers no repository override without an open repository", async () => {
+    renderFetch({ getFetchSettings: async () => ({ autoFetchMinutes: 0 }), setFetchSettings: async () => {} }, null);
+    await screen.findByRole("combobox", { name: "Fetch automatically" });
+    expect(screen.getAllByRole("combobox")).toHaveLength(1);
+  });
+
+  it("shows a failed save and goes back to the saved interval", async () => {
+    renderFetch({
+      getFetchSettings: async () => ({ autoFetchMinutes: 0 }),
+      setFetchSettings: async () => {
+        throw new Error("read-only config");
+      },
+    });
+    const app = await screen.findByRole("combobox", { name: "Fetch automatically" });
+    fireEvent.change(app, { target: { value: "5" } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("read-only config");
+    expect(app).toHaveValue("0");
   });
 });

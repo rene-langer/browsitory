@@ -254,6 +254,8 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("fetch_remote", { repoPath: TEST_REPO_PATH, remoteName: "origin", prune: false });
     await tauriRepoClient.fetchAllRemotes(TEST_REPO_PATH, true);
     expect(invoke).toHaveBeenLastCalledWith("fetch_all_remotes", { repoPath: TEST_REPO_PATH, prune: true });
+    await tauriRepoClient.backgroundFetch(TEST_REPO_PATH, null);
+    expect(invoke).toHaveBeenLastCalledWith("background_fetch", { repoPath: TEST_REPO_PATH, prune: null });
     await tauriRepoClient.pushBranch(TEST_REPO_PATH, "origin", "topic", "published", true, false);
     expect(invoke).toHaveBeenLastCalledWith("push_branch", {
       repoPath: TEST_REPO_PATH,
@@ -326,6 +328,10 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("list_recent_authors", { repoPath: "/r" });
     await tauriRepoClient.getCommitMessageSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_commit_message_settings", undefined);
+    await tauriRepoClient.getFetchSettings();
+    expect(invoke).toHaveBeenLastCalledWith("get_fetch_settings", undefined);
+    await tauriRepoClient.setFetchSettings({ autoFetchMinutes: 30 });
+    expect(invoke).toHaveBeenLastCalledWith("set_fetch_settings", { settings: { autoFetchMinutes: 30 } });
     await tauriRepoClient.setCommitMessageSettings({ summaryLimit: 60, bodyRuler: 80, showRuler: false });
     expect(invoke).toHaveBeenLastCalledWith("set_commit_message_settings", {
       settings: { summaryLimit: 60, bodyRuler: 80, showRuler: false },

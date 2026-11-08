@@ -27,6 +27,7 @@ function createHarness() {
   const appendLine = vi.fn();
   const messageListeners = new Set<(message: unknown) => void>();
   const panelDisposeListeners = new Set<() => void>();
+  const viewStateListeners = new Set<(event: { webviewPanel: { visible: boolean } }) => void>();
   let openCommand: (() => void) | undefined;
   let contentProvider:
     | { provideTextDocumentContent: (uri: { path: string; query: string }) => Promise<string> }
@@ -46,9 +47,14 @@ function createHarness() {
     webview,
     viewColumn: 1,
     reveal: vi.fn(),
+    visible: true,
     onDidDispose(listener: () => void) {
       panelDisposeListeners.add(listener);
       return { dispose: () => panelDisposeListeners.delete(listener) };
+    },
+    onDidChangeViewState(listener: (event: { webviewPanel: { visible: boolean } }) => void) {
+      viewStateListeners.add(listener);
+      return { dispose: () => viewStateListeners.delete(listener) };
     },
   };
   const vscode = {
@@ -94,7 +100,12 @@ function createHarness() {
     appendLine,
     messageListeners,
     panelDisposeListeners,
+    viewStateListeners,
     vscode,
+    setPanelVisible: (visible: boolean) => {
+      panel.visible = visible;
+      for (const listener of [...viewStateListeners]) listener({ webviewPanel: panel });
+    },
     context,
     provideContent: (uri: { path: string; query: string }) => {
       if (!contentProvider) throw new Error("content provider was not registered");
@@ -204,6 +215,22 @@ describe("extension lifecycle", () => {
         retainContextWhenHidden: true,
       }),
     );
+  });
+
+  it("tells the webview when its panel is hidden or shown, and stops when the panel closes", async () => {
+    activate(harness.context);
+    harness.openPanel();
+    harness.postMessage.mockClear();
+
+    harness.setPanelVisible(false);
+    harness.setPanelVisible(true);
+
+    expect(harness.postMessage.mock.calls.map(([message]) => message)).toEqual([
+      { jsonrpc: "2.0", method: "panelVisibility", params: { visible: false } },
+      { jsonrpc: "2.0", method: "panelVisibility", params: { visible: true } },
+    ]);
+    await harness.disposePanel();
+    expect(harness.viewStateListeners.size).toBe(0);
   });
 
   it("delivers delayed sidecar replies through Webview.postMessage", async () => {

@@ -1827,6 +1827,27 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
 - `prune: Option<bool>`: `None` is `FetchPrune::Unspecified`, so libgit2 applies
   `remote.<name>.prune` then `fetch.prune` itself. The UI's Prune toggle is a per-repo
   `localStorage` preference; unset, every fetch sends `null`.
+- **Fetch automatically (#440).** The app-wide interval is `[fetch] auto_fetch_minutes` in
+  `config.toml` (0 = off, the default; `get_fetch_settings`/`set_fetch_settings`); a
+  repository's override is a `localStorage` preference like Prune (`lib/autoFetch.ts`). The
+  frontend schedules it (`state/useAutoFetch.ts`, active tab only) and calls
+  `backgroundFetch`, which is `fetch_all` reported as `TransferOperation::BackgroundFetch`
+  (`RemoteFailed` carries the operation too), so `useRemoteTransferActions` never shows or
+  adopts it. `WorkerHandle::background_fetch` starts nothing and answers `null` while the
+  worker's `CancelRegistry` knows any operation (`allocate_if_idle`: a fetch, pull, push,
+  commit, merge, … queued or running), so it never overlaps another fetch or a mutation from
+  any tab or spelling. The frontend waits while its own action runs or the host is hidden
+  (`ipc/hostVisibility.ts`: the page's `visibilitychange`, plus the VSCode panel's
+  `onDidChangeViewState`, posted by the extension host as a `panelVisibility` notification), and
+  cancels a running background fetch when the user starts an action. Fetches never prompt for
+  credentials (the provider only reads the OS store and the SSH agent), but reading the OS store
+  can make the OS prompt (a locked keyring; macOS for an unsigned build). So a background fetch
+  uses `RemoteCredentialProvider::without_prompt`: a token held in the process-wide
+  `CredentialSession` (from a read or save this session), else the store only once something the
+  user did read or wrote it successfully, else the remote fails as `MissingCredential` without
+  touching the store. A remote failing with
+  `MissingCredential`, `CredentialStoreFailure` or `SshAgentFailure` is named once per session
+  in a toast. Like every fetch it records no undo entry.
 - Push and force push of the current branch go where `git-core::remote::push_target` resolves
   from `push.default` (unset = `simple`): `upstream`/`tracking` push to the upstream's branch,
   `current` to the local name, `simple`/`matching` only when the names match, `nothing` never.

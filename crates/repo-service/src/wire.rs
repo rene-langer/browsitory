@@ -1920,6 +1920,32 @@ impl From<CommitMessageSettingsDto> for config::CommitMessageSettings {
     }
 }
 
+/// The `[fetch]` preferences: `autoFetchMinutes` is the app-wide "Fetch automatically"
+/// interval, 0 for off.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "FetchSettings"))]
+#[serde(rename_all = "camelCase")]
+pub struct FetchSettingsDto {
+    pub auto_fetch_minutes: u32,
+}
+
+impl From<config::FetchSettings> for FetchSettingsDto {
+    fn from(s: config::FetchSettings) -> Self {
+        Self {
+            auto_fetch_minutes: s.auto_fetch_minutes,
+        }
+    }
+}
+
+impl From<FetchSettingsDto> for config::FetchSettings {
+    fn from(d: FetchSettingsDto) -> Self {
+        Self {
+            auto_fetch_minutes: d.auto_fetch_minutes,
+        }
+    }
+}
+
 /// The payload of a transfer event: the desktop app's `transfer-progress`/`transfer-complete`
 /// events and the sidecar's `transferProgress` notification. `phase` adds `Starting`,
 /// `RemoteFailed`, `Completed` and `Failed` to the `TransferPhase` names.
@@ -1943,12 +1969,12 @@ pub fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
         TransferEvent::Progress(progress) => TransferProgressDto::from(progress),
         TransferEvent::RemoteFailed {
             operation_id,
+            operation,
             remote_name,
             error,
         } => TransferProgressDto {
             operation_id,
-            // Only Fetch all reports per-remote failures.
-            operation: TransferOperation::FetchAll,
+            operation,
             phase: TransferProgressPhaseDto::RemoteFailed,
             error_kind: Some(error),
             current: 0,
@@ -2084,6 +2110,7 @@ mod ts_bindings {
             DiffSettingsDto,
             WordWrapDto,
             CommitMessageSettingsDto,
+            FetchSettingsDto,
         );
         test_support::assert_generated_file(
             &test_support::repo_root().join("frontend/src/ipc/generated/wire-dto.ts"),

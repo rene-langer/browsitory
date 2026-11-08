@@ -100,7 +100,8 @@ pub fn transfer_operations() -> Vec<TransferOperation> {
         PushTags,
         DeleteRemoteBranch,
         DeleteRemoteTag,
-        Clone
+        Clone,
+        BackgroundFetch
     })
 }
 
@@ -428,6 +429,23 @@ pub fn commit_message_settings() -> Cases<config::CommitMessageSettings> {
             show_ruler: true,
         },
     )]
+}
+
+pub fn fetch_settings() -> Cases<config::FetchSettings> {
+    vec![
+        case(
+            "off",
+            config::FetchSettings {
+                auto_fetch_minutes: 0,
+            },
+        ),
+        case(
+            "every-10",
+            config::FetchSettings {
+                auto_fetch_minutes: 10,
+            },
+        ),
+    ]
 }
 
 fn git_tool(source: ConfigSource) -> git_core::tools::GitToolInfo {
@@ -828,6 +846,7 @@ pub fn transfer_events() -> Cases<TransferEvent> {
             format!("RemoteFailed-{error:?}"),
             TransferEvent::RemoteFailed {
                 operation_id: "op-2".to_string(),
+                operation: TransferOperation::FetchAll,
                 remote_name: "backup".to_string(),
                 error,
             },

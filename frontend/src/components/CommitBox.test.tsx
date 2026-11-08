@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { within } from "@testing-library/react";
 import type { SignatureInput } from "../ipc/RepoClient";
+import type { MessageHistoryEntry } from "../lib/commitMessageHistory";
 import { CommitBox, type CommitDraft } from "./CommitBox";
 
 describe("CommitBox", () => {
@@ -887,6 +888,125 @@ describe("CommitBox showAbort", () => {
       expect(screen.getByText("Ada <ada@x.org>")).toBeInTheDocument();
       expect(screen.queryByText("Bob <bob@x.org>")).toBeNull();
       expect(screen.queryByRole("textbox", { name: "Author" })).toBeNull();
+    });
+  });
+
+  describe("recent messages (#443)", () => {
+    const entries = (): MessageHistoryEntry[] => [
+      { summary: "Fix the parser", source: "recorded", load: () => Promise.resolve("Fix the parser\n\nBody text") },
+      {
+        summary: "Add tests",
+        source: "branch",
+        shortId: "abc1234",
+        load: () => Promise.resolve("Add tests\n\nFull body"),
+      },
+    ];
+
+    it("is hidden without a history source", () => {
+      render(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} />);
+      expect(screen.queryByRole("button", { name: "Recent messages" })).toBeNull();
+    });
+
+    it("lists the entries as a menu and fills the box with the picked full message", async () => {
+      const load = vi.fn(entries);
+      render(
+        <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} loadMessageHistory={load} />,
+      );
+      const button = screen.getByRole("button", { name: "Recent messages" });
+      expect(button).toHaveAttribute("aria-haspopup", "menu");
+      expect(button).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(button);
+      expect(button).toHaveAttribute("aria-expanded", "true");
+      expect(load).toHaveBeenCalledTimes(1);
+      const menu = screen.getByRole("menu");
+      const items = within(menu).getAllByRole("menuitem");
+      expect(items.map((item) => item.textContent)).toEqual(["Fix the parser", "Add tests"]);
+      expect(items[0]).toHaveFocus();
+      expect(items[1]).toHaveAttribute("title", "Commit abc1234 on this branch");
+
+      // Keyboard: ArrowDown then Enter picks the branch commit's full message.
+      fireEvent.keyDown(menu, { key: "ArrowDown" });
+      expect(items[1]).toHaveFocus();
+      fireEvent.keyDown(menu, { key: "Enter" });
+      expect(screen.queryByRole("menu")).toBeNull();
+      const box = screen.getByLabelText("Commit message");
+      await waitFor(() => expect(box).toHaveValue("Add tests\n\nFull body"));
+      expect(box).toHaveFocus();
+    });
+
+    it("says when there is nothing to recall", () => {
+      render(
+        <CommitBox
+          onCommit={vi.fn(async () => true)}
+          disabled={false}
+          onAbortMerge={() => {}}
+          loadMessageHistory={() => []}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Recent messages" }));
+      expect(screen.getByRole("menuitem", { name: "No earlier messages" })).toBeDisabled();
+    });
+
+    it("undoes the replacement with Ctrl/Cmd+Z or Restore message, until the field is edited", async () => {
+      render(
+        <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} loadMessageHistory={entries} />,
+      );
+      const box = screen.getByLabelText("Commit message");
+      fireEvent.change(box, { target: { value: "half-typed" } });
+      expect(screen.queryByRole("button", { name: "Restore message" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Recent messages" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Fix the parser" }));
+      await waitFor(() => expect(box).toHaveValue("Fix the parser\n\nBody text"));
+      fireEvent.keyDown(box, { key: "z", ctrlKey: true });
+      expect(box).toHaveValue("half-typed");
+      expect(screen.queryByRole("button", { name: "Restore message" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Recent messages" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Fix the parser" }));
+      await waitFor(() => expect(box).toHaveValue("Fix the parser\n\nBody text"));
+      fireEvent.click(screen.getByRole("button", { name: "Restore message" }));
+      expect(box).toHaveValue("half-typed");
+      expect(box).toHaveFocus();
+
+      // An edit after a pick ends the undo offer; Ctrl+Z is then the field's own again.
+      fireEvent.click(screen.getByRole("button", { name: "Recent messages" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Fix the parser" }));
+      await waitFor(() => expect(box).toHaveValue("Fix the parser\n\nBody text"));
+      fireEvent.change(box, { target: { value: "Fix the parser\n\nBody text!" } });
+      expect(screen.queryByRole("button", { name: "Restore message" })).toBeNull();
+      const event = new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true });
+      box.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(box).toHaveValue("Fix the parser\n\nBody text!");
+    });
+
+    it("falls back to the summary when a branch commit's message can't be loaded", async () => {
+      render(
+        <CommitBox
+          onCommit={vi.fn(async () => true)}
+          disabled={false}
+          onAbortMerge={() => {}}
+          loadMessageHistory={() => [
+            { summary: "Gone", source: "branch", shortId: "deadbee", load: () => Promise.reject(new Error("x")) },
+          ]}
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Recent messages" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Gone" }));
+      await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveValue("Gone"));
+    });
+
+    it("Escape closes the menu and returns focus to its button", () => {
+      render(
+        <CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} loadMessageHistory={entries} />,
+      );
+      const button = screen.getByRole("button", { name: "Recent messages" });
+      button.focus();
+      fireEvent.click(button);
+      fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(button).toHaveFocus();
     });
   });
 });

@@ -29,6 +29,8 @@ DiffSettings/wrap-Off {"contextLines":3,"ignoreWhitespace":false,"syntaxHighligh
 ExternalToolSettings/unset {"editor":null,"terminal":null}
 ExternalToolSettings/set {"editor":"code -w","terminal":"wt"}
 CommitMessageSettings/plain {"bodyRuler":72,"showRuler":true,"summaryLimit":50}
+FetchSettings/off {"autoFetchMinutes":0}
+FetchSettings/every-10 {"autoFetchMinutes":10}
 GitTools/diff-tool-System {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"System","viaMergeTool":true},"mergeTool":null}
 GitTools/diff-tool-Xdg {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"Xdg","viaMergeTool":true},"mergeTool":null}
 GitTools/diff-tool-Global {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"Global","viaMergeTool":true},"mergeTool":null}
@@ -78,6 +80,7 @@ TransferProgress/Started-PushTags {"current":0,"errorKind":null,"hookOutput":nul
 TransferProgress/Started-DeleteRemoteBranch {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteBranch","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
 TransferProgress/Started-DeleteRemoteTag {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteTag","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
 TransferProgress/Started-Clone {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"Clone","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
+TransferProgress/Started-BackgroundFetch {"current":0,"errorKind":null,"hookOutput":null,"message":null,"operation":"BackgroundFetch","operationId":"op-2","phase":"Starting","receivedBytes":0,"total":0}
 TransferProgress/Progress-Fetch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Fetch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
 TransferProgress/Progress-Fetch-Updating {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Fetch","operationId":"op-2","phase":"Updating","receivedBytes":4096,"total":10}
 TransferProgress/Progress-Fetch-RunningHook {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Fetch","operationId":"op-2","phase":"RunningHook","receivedBytes":4096,"total":10}
@@ -89,6 +92,7 @@ TransferProgress/Progress-PushTags-Receiving {"current":3,"errorKind":null,"hook
 TransferProgress/Progress-DeleteRemoteBranch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteBranch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
 TransferProgress/Progress-DeleteRemoteTag-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"DeleteRemoteTag","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
 TransferProgress/Progress-Clone-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"Clone","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
+TransferProgress/Progress-BackgroundFetch-Receiving {"current":3,"errorKind":null,"hookOutput":null,"message":null,"operation":"BackgroundFetch","operationId":"op-2","phase":"Receiving","receivedBytes":4096,"total":10}
 TransferProgress/RemoteFailed-NonFastForward {"current":0,"errorKind":"NonFastForward","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
 TransferProgress/RemoteFailed-RejectedRemoteRef {"current":0,"errorKind":"RejectedRemoteRef","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}
 TransferProgress/RemoteFailed-StaleLease {"current":0,"errorKind":"StaleLease","hookOutput":null,"message":null,"operation":"FetchAll","operationId":"op-2","phase":"RemoteFailed","receivedBytes":0,"remoteName":"backup","total":0}

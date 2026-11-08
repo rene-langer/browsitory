@@ -18,6 +18,9 @@ amend_commit/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"in
 apply_stash/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct StashApplyParams"}}
 apply_stash/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`"}}
 apply_stash/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct StashApplyParams"}}
+background_fetch/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct FetchAllRemotesParams"}}
+background_fetch/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`"}}
+background_fetch/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct FetchAllRemotesParams"}}
 cancel_search/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams"}}
 cancel_search/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`"}}
 cancel_search/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams"}}
@@ -156,6 +159,9 @@ get_diff_settings/string {"jsonrpc":"2.0","id":7,"result":{"contextLines":3,"ign
 get_external_tool_settings/absent {"jsonrpc":"2.0","id":7,"result":{"editor":null,"terminal":null}}
 get_external_tool_settings/empty {"jsonrpc":"2.0","id":7,"result":{"editor":null,"terminal":null}}
 get_external_tool_settings/string {"jsonrpc":"2.0","id":7,"result":{"editor":null,"terminal":null}}
+get_fetch_settings/absent {"jsonrpc":"2.0","id":7,"result":{"autoFetchMinutes":0}}
+get_fetch_settings/empty {"jsonrpc":"2.0","id":7,"result":{"autoFetchMinutes":0}}
+get_fetch_settings/string {"jsonrpc":"2.0","id":7,"result":{"autoFetchMinutes":0}}
 get_file_history/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct GetFileHistoryParams"}}
 get_file_history/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`"}}
 get_file_history/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct GetFileHistoryParams"}}
@@ -357,6 +363,9 @@ set_diff_settings/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message
 set_external_tool_settings/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetExternalToolSettingsParams"}}
 set_external_tool_settings/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `settings`"}}
 set_external_tool_settings/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetExternalToolSettingsParams"}}
+set_fetch_settings/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetFetchSettingsParams"}}
+set_fetch_settings/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `settings`"}}
+set_fetch_settings/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetFetchSettingsParams"}}
 set_graph_branch_selection/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetGraphBranchSelectionParams"}}
 set_graph_branch_selection/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`"}}
 set_graph_branch_selection/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetGraphBranchSelectionParams"}}

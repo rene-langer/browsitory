@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BranchTree } from "./components/BranchTree";
 import { CommandPalette } from "./components/CommandPalette";
 import type { CommitDraft } from "./components/CommitBox";
@@ -41,6 +41,15 @@ import type { RepoClient } from "./ipc/RepoClient";
 import { buildCommands, type AppCommands } from "./lib/commands";
 import { useExternalTools } from "./state/useExternalTools";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
+import {
+  effectiveAutoFetchMinutes,
+  lastFetchAt,
+  readAutoFetchOverride,
+  subscribeAutoFetchOverride,
+  subscribeLastFetch,
+} from "./lib/autoFetch";
+import { useAutoFetch } from "./state/useAutoFetch";
+import { useFetchSettingsContext } from "./state/useFetchSettings";
 import { upstreamPushBranch } from "./lib/pushTarget";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
@@ -154,7 +163,7 @@ export function RepoWorkspace({
     () => historyEntries?.map((e) => e.commit) ?? searchCommits ?? appState.state.commits,
     [historyEntries, searchCommits, appState.state.commits],
   );
-  const { handleCommitDraftChange, commitAndClearDraft, retryWithCurrentMessage } = useCommitDraftActions(
+  const { handleCommitDraftChange, commitAndClearDraft, amendAndRecord, retryWithCurrentMessage } = useCommitDraftActions(
     repoPath,
     getCommitDraft,
     onCommitDraftChange,
@@ -245,6 +254,27 @@ export function RepoWorkspace({
 
   const { dismissError } = appState;
   const announce = useAnnounce(appState, pushToast);
+
+  // "Fetch automatically" (#440): the repository's override, else the app setting.
+  const fetchSettings = useFetchSettingsContext();
+  const autoFetchOverride = useSyncExternalStore(subscribeAutoFetchOverride, () => readAutoFetchOverride(repoPath));
+  const autoFetchMinutes = effectiveAutoFetchMinutes(autoFetchOverride, fetchSettings.settings.autoFetchMinutes);
+  const lastFetchedAt = useSyncExternalStore(subscribeLastFetch, () => lastFetchAt(repoPath));
+  const openRemoteDialog = appState.openRemoteDialog;
+  const openCredentials = useCallback(
+    (remoteName: string) => openRemoteDialog("credentials", remoteName),
+    [openRemoteDialog],
+  );
+  useAutoFetch({
+    client,
+    repoPath,
+    minutes: autoFetchMinutes,
+    prune: appState.state.fetchPrune,
+    busy: pending || transfer !== null,
+    refresh: appState.refresh,
+    notify: pushToast,
+    openCredentials,
+  });
   const {
     terminalAbortRequest,
     setTerminalAbortRequest,
@@ -741,6 +771,8 @@ export function RepoWorkspace({
                 prune={effectiveFetchPrune(appState.state.fetchPrune, appState.state.remotes, appState.state.upstream)}
                 onFetchAll={announce("Fetch complete", appState.fetchAllRemotes)}
                 onTogglePrune={appState.setFetchPrune}
+                lastFetchedAt={lastFetchedAt}
+                autoFetchMinutes={autoFetchMinutes}
                 onPublish={() => {
                   const current = appState.state.branches.find((branch) => branch.isCurrent);
                   if (current !== undefined) appState.openPushDialog(current.name);
@@ -867,6 +899,7 @@ export function RepoWorkspace({
                   client={client}
                   selectedRow={appState.state.selectedRow}
                   commits={diffPaneCommits}
+                  branchCommits={appState.state.commits}
                   fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
                   stashes={appState.state.stashes}
                   stashActions={{
@@ -918,7 +951,7 @@ export function RepoWorkspace({
                   headInfo={appState.state.headInfo}
                   onSetAmendMode={appState.setAmendMode}
                   onAmendCommit={(message, options) =>
-                    announce("Amended commit", appState.amendCommit)(message, appState.state.skipHooks, options)
+                    announce("Amended commit", amendAndRecord)(message, appState.state.skipHooks, options)
                   }
                   focusCommitMessage={focusCommitMessage}
                   onCommitMessageFocused={clearFocusCommitMessage}

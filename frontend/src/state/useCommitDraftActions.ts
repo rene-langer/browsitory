@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import type { CommitDraft } from "../components/CommitBox";
-import type { Trailer } from "../ipc/RepoClient";
+import type { AmendOptions, Trailer } from "../ipc/RepoClient";
+import { recordCommitMessage } from "../lib/commitMessageHistory";
 import type { HookRetry } from "../lib/hookFailure";
 import { coAuthorTrailers, parsePerson } from "../lib/people";
 import type { UseAppStateResult } from "./useAppState";
@@ -33,14 +34,35 @@ export function useCommitDraftActions(
     },
     [getCommitDraft, onCommitDraftChange, repoPath],
   );
-  const { commit: commitStaged, retryWithoutHooks } = appState;
+  // A landed message goes into the box's "Recent messages" (#443), unless it is git's own merge,
+  // pick, revert or squash message, taken unedited.
+  const seededMessage = appState.state.headInfo.operationLeftover ? null : appState.state.mergeMessage;
+  const squashMessage = appState.state.headInfo.squashMessage;
+  const recordLanded = useCallback(
+    (message: string) => {
+      if (message !== seededMessage && message !== squashMessage) recordCommitMessage(repoPath, message);
+    },
+    [repoPath, seededMessage, squashMessage],
+  );
+  const { commit: commitStaged, amendCommit, retryWithoutHooks } = appState;
   const commitAndClearDraft = useCallback(
     async (message: string, noVerify: boolean, trailers: Trailer[]) => {
       const ok = await commitStaged(message, noVerify, trailers);
-      if (ok) clearCommittedDraft(message);
+      if (ok) {
+        clearCommittedDraft(message);
+        recordLanded(message);
+      }
       return ok;
     },
-    [commitStaged, clearCommittedDraft],
+    [commitStaged, clearCommittedDraft, recordLanded],
+  );
+  const amendAndRecord = useCallback(
+    async (message: string, noVerify: boolean, options: AmendOptions) => {
+      const ok = await amendCommit(message, noVerify, options);
+      if (ok) recordLanded(message);
+      return ok;
+    },
+    [amendCommit, recordLanded],
   );
   // "… without hooks" commits what the box holds now: the user may have fixed the message after
   // closing the dialog. Falls back to the failed message when the box is empty.
@@ -73,18 +95,24 @@ export function useCommitDraftActions(
           : authorText === ""
             ? null
             : (parsePerson(authorText) ?? retry.options.author);
-        return retryWithoutHooks({ ...retry, message, options: { author, trailers } });
+        const amended = await retryWithoutHooks({ ...retry, message, options: { author, trailers } });
+        if (amended) recordLanded(message);
+        return amended;
       }
       // The co-author chips the box holds now, too (the stashed ones while amending).
       const chips = draft === undefined ? undefined : amending ? draft.stashedCoAuthors : draft.coAuthors;
       const trailers = seeded || !fromBox || chips == null ? retry.trailers : coAuthorTrailers(chips);
       const ok = await retryWithoutHooks({ ...retry, message, trailers });
-      if (ok && retry.kind === "commit") clearCommittedDraft(message);
+      if (ok && retry.kind === "commit") {
+        clearCommittedDraft(message);
+        recordLanded(message);
+      }
       return ok;
     },
     [
       retryWithoutHooks,
       clearCommittedDraft,
+      recordLanded,
       getCommitDraft,
       repoPath,
       appState.state.mergeMessage,
@@ -92,5 +120,5 @@ export function useCommitDraftActions(
       appState.state.headInfo.squashMessage,
     ],
   );
-  return { handleCommitDraftChange, commitAndClearDraft, retryWithCurrentMessage };
+  return { handleCommitDraftChange, commitAndClearDraft, amendAndRecord, retryWithCurrentMessage };
 }

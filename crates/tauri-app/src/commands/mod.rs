@@ -9,7 +9,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use repo_service::wire::{
     hook_progress_dto, transfer_progress_dto, CommitMessageSettingsDto, DiffSettingsDto,
-    OpenRepoEntryDto, OpenRepoEntryInput, TransferProgressDto, WorkspaceDto,
+    FetchSettingsDto, OpenRepoEntryDto, OpenRepoEntryInput, TransferProgressDto, WorkspaceDto,
 };
 use repo_service::worker::{HookEvent, TransferEvent, WorkerHandle, WorkerRegistry};
 
@@ -328,6 +328,18 @@ pub fn get_commit_message_settings() -> Result<CommitMessageSettingsDto, String>
 #[tauri::command]
 pub fn set_commit_message_settings(settings: CommitMessageSettingsDto) -> Result<(), String> {
     config::set_commit_message_settings(&settings.into()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_fetch_settings() -> Result<FetchSettingsDto, String> {
+    config::get_fetch_settings()
+        .map(FetchSettingsDto::from)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_fetch_settings(settings: FetchSettingsDto) -> Result<(), String> {
+    config::set_fetch_settings(&settings.into()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

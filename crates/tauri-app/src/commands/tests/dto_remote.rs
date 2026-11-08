@@ -4,6 +4,7 @@ use super::*;
 fn remote_failed_event_carries_the_remote_name_and_other_events_omit_it() {
     let (event, failed) = transfer_event_payload(TransferEvent::RemoteFailed {
         operation_id: "fetch-all-7".into(),
+        operation: TransferOperation::FetchAll,
         remote_name: "backup".into(),
         error: TransferErrorKind::MissingCredential,
     });
