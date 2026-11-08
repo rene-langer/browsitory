@@ -1840,6 +1840,36 @@ pub struct DiffSettingsDto {
     pub ignore_whitespace: bool,
     pub context_lines: u32,
     pub syntax_highlight: bool,
+    pub word_wrap: WordWrapDto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "WordWrap"))]
+pub enum WordWrapDto {
+    Auto,
+    On,
+    Off,
+}
+
+impl From<config::WordWrap> for WordWrapDto {
+    fn from(w: config::WordWrap) -> Self {
+        match w {
+            config::WordWrap::Auto => WordWrapDto::Auto,
+            config::WordWrap::On => WordWrapDto::On,
+            config::WordWrap::Off => WordWrapDto::Off,
+        }
+    }
+}
+
+impl From<WordWrapDto> for config::WordWrap {
+    fn from(w: WordWrapDto) -> Self {
+        match w {
+            WordWrapDto::Auto => config::WordWrap::Auto,
+            WordWrapDto::On => config::WordWrap::On,
+            WordWrapDto::Off => config::WordWrap::Off,
+        }
+    }
 }
 
 impl From<config::DiffSettings> for DiffSettingsDto {
@@ -1848,6 +1878,7 @@ impl From<config::DiffSettings> for DiffSettingsDto {
             ignore_whitespace: s.ignore_whitespace,
             context_lines: s.context_lines,
             syntax_highlight: s.syntax_highlight,
+            word_wrap: s.word_wrap.into(),
         }
     }
 }
@@ -1858,6 +1889,7 @@ impl From<DiffSettingsDto> for config::DiffSettings {
             ignore_whitespace: d.ignore_whitespace,
             context_lines: d.context_lines,
             syntax_highlight: d.syntax_highlight,
+            word_wrap: d.word_wrap.into(),
         }
     }
 }
@@ -2080,6 +2112,7 @@ mod ts_bindings {
             CreatePullRequestDto,
             DiffOptionsDto,
             DiffSettingsDto,
+            WordWrapDto,
             CommitMessageSettingsDto,
             FetchSettingsDto,
         );

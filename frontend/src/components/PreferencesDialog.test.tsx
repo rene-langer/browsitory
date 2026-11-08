@@ -4,7 +4,8 @@ import type { RepoClient } from "../ipc/RepoClient";
 import { CommitMessageSettingsProvider } from "../state/CommitMessageSettingsProvider";
 import { __resetAutoFetchForTests, readAutoFetchOverride } from "../lib/autoFetch";
 import { FetchSettingsProvider } from "../state/FetchSettingsProvider";
-import { CommitMessageSection, ExternalToolsSection, FetchSection, PreferencesDialog } from "./PreferencesDialog";
+import { CommitMessageSection, DiffSection, ExternalToolsSection, FetchSection, PreferencesDialog } from "./PreferencesDialog";
+import { DiffSettingsProvider } from "../state/DiffSettingsProvider";
 import { within } from "@testing-library/react";
 
 function renderTools(client: Partial<RepoClient>, toolHost: "desktop" | "vscode" = "desktop", repoPath: string | null = "/r") {
@@ -193,6 +194,36 @@ describe("Commit message preferences", () => {
     });
     fireEvent.click(await screen.findByRole("checkbox", { name: "Show ruler" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("read-only config");
+  });
+});
+
+describe("DiffSection", () => {
+  it("loads and saves the word wrap setting with the other diff settings", async () => {
+    const setDiffSettings = vi.fn(async () => {});
+    const client = {
+      getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const }),
+      setDiffSettings,
+    } as Partial<RepoClient> as RepoClient;
+    render(
+      <DiffSettingsProvider client={client}>
+        <PreferencesDialog onClose={vi.fn()}>
+          <DiffSection />
+        </PreferencesDialog>
+      </DiffSettingsProvider>,
+    );
+    const group = screen.getByRole("group", { name: "Diff" });
+    const wrap = within(group).getByRole("combobox", { name: "Word wrap" });
+    await waitFor(() => expect(wrap).toHaveValue("Off"));
+    expect(within(wrap).getAllByRole("option").map((o) => o.textContent)).toEqual(["Auto", "On", "Off"]);
+    fireEvent.change(wrap, { target: { value: "Auto" } });
+    await waitFor(() =>
+      expect(setDiffSettings).toHaveBeenCalledWith({
+        ignoreWhitespace: true,
+        contextLines: 5,
+        syntaxHighlight: true,
+        wordWrap: "Auto",
+      }),
+    );
   });
 });
 

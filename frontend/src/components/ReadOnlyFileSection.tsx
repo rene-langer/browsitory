@@ -5,6 +5,7 @@ import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
+import { useWholeFile } from "../state/useWholeFile";
 import { BlameView } from "./BlameView";
 import { CollapseToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
@@ -18,7 +19,8 @@ import { InlineError } from "./primitives/InlineError";
 
 /**
  * One file's diff in a read-only view (a commit or a compare), with Blame and History.
- * `fetchDiff` runs again whenever `diffKey`, the path or the diff settings change. With
+ * `fetchDiff` runs again whenever `diffKey`, the path, the diff settings or "Show whole file"
+ * change. With
  * `externalTools` and `toolSource`, a "…" button and right-click menu open the file in the
  * user's editor, file manager or diff tool. With `previewSource`, an image file (by extension)
  * shows a before/after preview instead of hunks; an SVG can switch to its text diff.
@@ -76,13 +78,15 @@ export function ReadOnlyFileSection({
   const [error, setError] = useState<DescribedError | null>(null);
 
   const { settings } = useDiffSettingsContext();
-  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: settings.contextLines };
+  const wholeFile = useWholeFile(settings.contextLines);
+  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: wholeFile.contextLines };
   const loadDiff = () => {
     let ignore = false;
-    const request = fetchDiff(diffOptions);
+    const requested = diffOptions;
+    const request = fetchDiff(requested);
     request
       .then((next) => {
-        if (!ignore) {
+        if (!ignore && wholeFile.accept(next, requested.contextLines)) {
           setHunks(next);
           setError(null);
         }
@@ -101,7 +105,7 @@ export function ReadOnlyFileSection({
     if (mode !== "diff" || collapsed || showImage) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diffKey, path, oldPath, mode, collapsed, showImage, settings.ignoreWhitespace, settings.contextLines]);
+  }, [diffKey, path, oldPath, mode, collapsed, showImage, settings.ignoreWhitespace, wholeFile.contextLines]);
 
   const loadBlame = () => {
     let ignore = false;
@@ -224,7 +228,7 @@ export function ReadOnlyFileSection({
           ) : (
             <>
               {isImage && <ImageTextToggle asText onToggle={() => setImageAsText(false)} />}
-              <DiffView hunks={hunks} path={path} />
+              <DiffView hunks={hunks} path={path} wholeFile={wholeFile} />
             </>
           )}
         </div>

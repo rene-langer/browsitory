@@ -1110,7 +1110,7 @@ describe("history commands", () => {
 });
 
 describe("diff option and discard commands", () => {
-  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true };
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const };
   const build = (state: ReturnType<typeof makeAppState>, extra: Record<string, unknown> = {}) => {
     const diffCommands = {
       settings,
@@ -1228,7 +1228,7 @@ describe("preferences and external tool commands", () => {
     onOpenCurrentFileInDiffTool: vi.fn(),
   });
   const diffCommands = (currentFile: string | null) => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const },
     update: vi.fn(),
     currentFile,
     requestDiscardCurrentFile: vi.fn(),

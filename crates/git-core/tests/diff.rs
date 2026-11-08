@@ -242,6 +242,65 @@ fn context_lines_option_is_clamped_to_twenty() {
     assert_eq!(hunk.old_lines, 41);
 }
 
+fn sixty_lines_with(changed: &[u32]) -> String {
+    (1..=60)
+        .map(|n| {
+            if changed.contains(&n) {
+                format!("changed {n}\n")
+            } else {
+                format!("l{n}\n")
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn whole_file_context_shows_every_line_in_one_hunk() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", &sixty_lines_with(&[]));
+    common::commit_all(&repo, "base");
+    // Two changes 40 lines apart: twenty lines of context would still split them.
+    common::write_file(dir.path(), "f.txt", &sixty_lines_with(&[5, 45]));
+
+    let whole = DiffOptions {
+        ignore_whitespace: false,
+        context_lines: git_core::diff::WHOLE_FILE_CONTEXT_LINES,
+    };
+    let hunks = git_core::diff::working_diff(&repo, "f.txt", false, &whole).unwrap();
+    assert_eq!(hunks.len(), 1);
+    let hunk = &hunks[0];
+    assert_eq!((hunk.old_start, hunk.old_lines), (1, 60));
+    assert_eq!((hunk.new_start, hunk.new_lines), (1, 60));
+    assert_eq!(hunk.lines.len(), 62);
+    assert_eq!(hunk.lines[0].content, "l1\n");
+    assert_eq!(hunk.lines.last().unwrap().content, "l60\n");
+}
+
+#[test]
+fn whole_file_context_applies_to_commit_diffs() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "f.txt", &sixty_lines_with(&[]));
+    common::commit_all(&repo, "base");
+    common::write_file(dir.path(), "f.txt", &sixty_lines_with(&[30]));
+    common::commit_all(&repo, "change");
+    let head = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
+
+    let whole = DiffOptions {
+        ignore_whitespace: false,
+        context_lines: git_core::diff::WHOLE_FILE_CONTEXT_LINES,
+    };
+    let hunks = git_core::diff::commit_diff(&repo, &head, "f.txt", &whole).unwrap();
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(hunks[0].old_lines, 60);
+    assert_eq!(hunks[0].lines.len(), 61);
+}
+
 #[test]
 fn ignore_whitespace_hides_whitespace_only_changes() {
     let (dir, repo) = common::init_repo();

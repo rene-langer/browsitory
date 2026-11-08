@@ -422,7 +422,7 @@ describe("App", () => {
         getCommitGraph: async () => [],
         listBranches: async () => [],
         listStashes: async () => [],
-        getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }),
+        getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" }),
         discardFile: vi.fn().mockResolvedValue(undefined),
         discardAllUnstaged: vi.fn().mockResolvedValue(undefined),
         ...overrides,

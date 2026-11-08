@@ -546,7 +546,7 @@ describe("DiffView options toolbar", () => {
   it("toggles ignore whitespace and steps context lines through the settings context", () => {
     const update = vi.fn();
     render(
-      <TestDiffSettings value={{ settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true }, update }}>
+      <TestDiffSettings value={{ settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" }, update }}>
         <DiffView hunks={[lineHunk]} />
       </TestDiffSettings>,
     );
@@ -564,4 +564,78 @@ describe("DiffView syntax highlighting", () => {
     );
     await waitFor(() => expect(container.querySelector('[style*="--shiki-token"]')).not.toBeNull(), { timeout: 15000 });
   }, 20000);
+});
+
+describe("DiffView word wrap", () => {
+  const settingsWith = (wordWrap: "Auto" | "On" | "Off") => ({
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap },
+    update: vi.fn(),
+  });
+  const wrapButton = () => screen.getByRole("button", { name: "Wrap lines" });
+  const lines = (container: HTMLElement) => container.querySelector<HTMLElement>("[data-wrap]")!;
+
+  it("follows the setting: Auto leaves code unwrapped in the unified view and wraps the split view", () => {
+    const { container } = render(
+      <TestDiffSettings value={settingsWith("Auto")}>
+        <DiffView hunks={[lineHunk]} path="src/main.rs" />
+      </TestDiffSettings>,
+    );
+    expect(lines(container)).toHaveAttribute("data-wrap", "false");
+    expect(wrapButton()).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Split view" }));
+    expect(lines(container)).toHaveAttribute("data-wrap", "true");
+    expect(wrapButton()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("the per-diff toggle overrides the setting without changing it", () => {
+    const value = settingsWith("On");
+    const { container } = render(
+      <TestDiffSettings value={value}>
+        <DiffView hunks={[lineHunk]} path="src/main.rs" />
+      </TestDiffSettings>,
+    );
+    expect(lines(container)).toHaveAttribute("data-wrap", "true");
+    fireEvent.click(wrapButton());
+    expect(lines(container)).toHaveAttribute("data-wrap", "false");
+    expect(wrapButton()).toHaveAttribute("aria-pressed", "false");
+    // Still off in the split view: the override is this diff's, not the view's.
+    fireEvent.click(screen.getByRole("button", { name: "Split view" }));
+    expect(lines(container)).toHaveAttribute("data-wrap", "false");
+    expect(value.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps line numbers and line selection when unwrapped", () => {
+    const onStageLines = vi.fn();
+    const { container } = render(
+      <TestDiffSettings value={settingsWith("Off")}>
+        <DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={onStageLines} />
+      </TestDiffSettings>,
+    );
+    expect(lines(container)).toHaveAttribute("data-wrap", "false");
+    fireEvent.click(row(container, 4));
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    expect(onStageLines).toHaveBeenCalledWith(1, 1, [4], shown);
+    expect(row(container, 4).querySelectorAll('[aria-hidden="true"]')[1]).toHaveTextContent("4");
+  });
+});
+
+describe("DiffView whole file", () => {
+  it("offers Show whole file only when the parent can fetch it, and disables the context stepper while on", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(<DiffView hunks={[lineHunk]} />);
+    expect(screen.queryByRole("button", { name: "Show whole file" })).toBeNull();
+    rerender(<DiffView hunks={[lineHunk]} wholeFile={{ on: false, onToggle, tooLongLines: null }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    expect(onToggle).toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "More context lines" })).toBeEnabled();
+    rerender(<DiffView hunks={[lineHunk]} wholeFile={{ on: true, onToggle, tooLongLines: null }} />);
+    expect(screen.getByRole("button", { name: "Show whole file" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "More context lines" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Fewer context lines" })).toBeDisabled();
+  });
+
+  it("says when the file is too long to show whole", () => {
+    render(<DiffView hunks={[lineHunk]} wholeFile={{ on: true, onToggle: vi.fn(), tooLongLines: 12345 }} />);
+    expect(screen.getByText(/too long to show whole \(12,345 lines\)/)).toBeInTheDocument();
+  });
 });

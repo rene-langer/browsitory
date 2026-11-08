@@ -23,7 +23,9 @@ OpenRepoEntry/loose {"path":"/repos/app","workspaceId":null}
 OpenRepoEntry/in-workspace {"path":"/repos/lib","workspaceId":"ws-1"}
 Workspace/members {"id":"ws-1","name":"Work","rootPath":"/repos","memberPaths":["/repos/app","/repos/lib"]}
 Workspace/empty {"id":"ws-2","name":"Empty","rootPath":"/empty","memberPaths":[]}
-DiffSettings/plain {"ignoreWhitespace":true,"contextLines":5,"syntaxHighlight":false}
+DiffSettings/plain {"ignoreWhitespace":true,"contextLines":5,"syntaxHighlight":false,"wordWrap":"Auto"}
+DiffSettings/wrap-On {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"On"}
+DiffSettings/wrap-Off {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Off"}
 ExternalToolSettings/unset {"editor":null,"terminal":null}
 ExternalToolSettings/set {"editor":"code -w","terminal":"wt"}
 CommitMessageSettings/plain {"summaryLimit":50,"bodyRuler":72,"showRuler":true}

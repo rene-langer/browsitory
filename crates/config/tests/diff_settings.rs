@@ -1,4 +1,6 @@
-use config::{get_diff_settings_at, set_diff_settings_at, set_last_seen_version_at, DiffSettings};
+use config::{
+    get_diff_settings_at, set_diff_settings_at, set_last_seen_version_at, DiffSettings, WordWrap,
+};
 
 #[test]
 fn defaults_when_never_set() {
@@ -9,7 +11,8 @@ fn defaults_when_never_set() {
         DiffSettings {
             ignore_whitespace: false,
             context_lines: 3,
-            syntax_highlight: true
+            syntax_highlight: true,
+            word_wrap: WordWrap::Auto,
         }
     );
 }
@@ -23,6 +26,7 @@ fn round_trips_and_coexists_with_other_keys() {
         ignore_whitespace: true,
         context_lines: 7,
         syntax_highlight: false,
+        word_wrap: WordWrap::Off,
     };
     set_diff_settings_at(&file, &wanted).unwrap();
     assert_eq!(get_diff_settings_at(&file).unwrap(), wanted);
@@ -42,6 +46,7 @@ fn clamps_context_lines_on_write() {
             ignore_whitespace: false,
             context_lines: 99,
             syntax_highlight: true,
+            word_wrap: WordWrap::On,
         },
     )
     .unwrap();
@@ -57,4 +62,23 @@ fn a_partial_diff_table_fills_missing_fields_with_defaults() {
     assert!(s.ignore_whitespace);
     assert_eq!(s.context_lines, 3);
     assert!(s.syntax_highlight);
+    assert_eq!(s.word_wrap, WordWrap::Auto);
+}
+
+#[test]
+fn word_wrap_is_stored_as_a_lowercase_word() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("config.toml");
+    set_diff_settings_at(
+        &file,
+        &DiffSettings {
+            word_wrap: WordWrap::Off,
+            ..DiffSettings::default()
+        },
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("word_wrap = \"off\""), "{text}");
+    std::fs::write(&file, "[diff]\nword_wrap = \"on\"\n").unwrap();
+    assert_eq!(get_diff_settings_at(&file).unwrap().word_wrap, WordWrap::On);
 }
