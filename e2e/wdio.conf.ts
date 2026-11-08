@@ -35,7 +35,7 @@ const E2E_WORKSPACE_REPO_C = path.join(E2E_WORKSPACE_ROOT, "repo-c");
 const E2E_CONFIG_DIR = path.join(os.tmpdir(), "browsitory-e2e-config");
 // Webview data root for the app under test (issue #99). Tauri on Linux keeps the webview's
 // localStorage under `$XDG_DATA_HOME/<identifier>/` — by default the *real* app's
-// `~/.local/share/com.browsitory.app/`, shared with any installed build and persisted across
+// `~/.local/share/com.browsitory.desktop/`, shared with any installed build and persisted across
 // runs, so accordion open/closed state and palette history leaked into (and out of) the suite.
 // Pointing XDG_DATA_HOME at a throwaway dir that `beforeSession` wipes gives every spec file a
 // fresh, empty storage.
