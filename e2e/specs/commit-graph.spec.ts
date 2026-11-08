@@ -9,6 +9,7 @@ const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 // specs sharing a throwaway `prime.txt` is only safe as long as each spec file gets its own
 // freshly re-cloned fixture repo.
 const PRIME_FILE = "graph-prime.txt";
+const DETACHED_FILE = "graph-detached.txt";
 
 describe("Browsitory commit graph", () => {
   before(() => {
@@ -70,5 +71,41 @@ describe("Browsitory commit graph", () => {
     // elsewhere in the app (e.g. BranchTree's Local folder rows).
     const featureCommitEntryText = await featureCommitEntry.getText();
     expect(featureCommitEntryText).toContain("e2e-graph-feature");
+  });
+
+  // #467: a commit on a detached HEAD that no branch contains used to be missing from the graph.
+  it("shows a commit made on a detached HEAD, marked HEAD", async () => {
+    execFileSync("git", ["checkout", "--detach"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    fs.writeFileSync(path.join(E2E_REPO_PATH, DETACHED_FILE), "detached\n");
+
+    const stageButton = await $(`button[aria-label="Stage ${DETACHED_FILE}"]`);
+    await stageButton.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
+    await browser.execute((el) => (el as HTMLElement).click(), stageButton);
+    const commitMessageInput = await $("textarea[placeholder='Commit message']");
+    await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: commit on a detached HEAD"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
+    const commitButton = await $("button=Commit");
+    await browser.execute((el) => (el as HTMLElement).click(), commitButton);
+
+    await browser.waitUntil(
+      () =>
+        execFileSync("git", ["log", "-1", "--format=%s"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim() ===
+        "e2e: commit on a detached HEAD",
+      { timeout: 10000, timeoutMsg: "the commit on the detached HEAD did not land" },
+    );
+    // No branch contains it: only HEAD reaches it.
+    expect(
+      execFileSync("git", ["for-each-ref", "--contains", "HEAD", "refs/heads"], {
+        cwd: E2E_REPO_PATH,
+        encoding: "utf8",
+      }).trim(),
+    ).toBe("");
+
+    const detachedRow = await $("li.commit-row*=e2e: commit on a detached HEAD");
+    await detachedRow.waitForExist({ timeout: 10000 });
+    await detachedRow.$("span=HEAD").waitForExist({
+      timeout: 10000,
+      timeoutMsg: "the detached HEAD's row has no HEAD badge",
+    });
   });
 });

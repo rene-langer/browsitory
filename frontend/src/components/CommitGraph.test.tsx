@@ -302,6 +302,47 @@ describe("CommitGraph", () => {
     expect(screen.getByText("main")).toBeInTheDocument();
   });
 
+  it("marks the commit of a detached HEAD with a HEAD badge (#467)", () => {
+    render(
+      <CommitGraph
+        {...historyProps}
+        headInfo={{ ...NO_HEAD, headId: commits[0].id, detachedAt: commits[0].shortId }}
+        currentBranch={null}
+        status={status}
+        commits={commits}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+      />,
+    );
+
+    const rows = document.querySelectorAll("li.commit-row");
+    const badge = within(rows[0] as HTMLElement).getByText("HEAD");
+    expect(badge).toHaveClass(styles.headBadge);
+    expect(badge).toHaveAttribute("title", "Detached HEAD");
+    expect(within(rows[1] as HTMLElement).queryByText("HEAD")).not.toBeInTheDocument();
+  });
+
+  it("shows no HEAD badge while HEAD is on a branch (the branch badge marks it)", () => {
+    render(
+      <CommitGraph
+        {...historyProps}
+        headInfo={{ ...NO_HEAD, headId: commits[0].id }}
+        status={status}
+        commits={commits}
+        selectedRow="uncommitted"
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("HEAD")).not.toBeInTheDocument();
+  });
+
   it("renders a remote branch badge for a commit that is a remote-tracking tip", () => {
     const commitsWithRemoteBranch: GraphCommit[] = [
       { ...commits[0], remoteBranchRefs: ["origin/main"] },

@@ -39,6 +39,11 @@ the graph it has a short dashed stub ("Merged from a branch not shown in this vi
 the merged branch. With two or more branches, or all of them, the graph shows every commit they
 reach, merged branches included.
 
+When HEAD is detached (you checked out a commit or a tag), the graph also shows the commit you are
+on and the commits before it, whichever branches you picked, and marks that commit with a **HEAD**
+badge. Commits you make there are on no branch until you create one (**Branch from here**), but
+they stay in the graph and in commit search while HEAD is on them.
+
 ## Image previews
 
 A changed PNG, JPEG, GIF, WebP or SVG file shows the old and new image side by side (**Before**

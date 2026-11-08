@@ -475,6 +475,7 @@ export function CommitGraph({
           </div>
           <RefBadges
             commit={commit}
+            detachedHead={headInfo.detachedAt !== null && headInfo.headId === commit.id}
             shownRemoteBranches={shownRemoteBranches}
             onTagContextMenu={
               onPushTag === undefined
