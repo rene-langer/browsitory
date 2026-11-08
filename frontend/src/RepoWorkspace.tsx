@@ -8,6 +8,7 @@ import { CompareDiffPane } from "./components/CompareDiffPane";
 import { FileHistoryList } from "./components/FileHistoryList";
 import { CommitSearchBar } from "./components/CommitSearchBar";
 import { CommitSearchResults } from "./components/CommitSearchResults";
+import { GoToNotice } from "./components/GoToNotice";
 import { SyncBar } from "./components/SyncBar";
 import { UndoRedoButtons } from "./components/UndoRedoButtons";
 import { DiffPane } from "./components/DiffPane";
@@ -56,6 +57,7 @@ import { useFileHistory } from "./state/useFileHistory";
 import { leftoverReason, pickToast, sequenceToast, terminalAbortConfirm, terminalRebaseReason } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
+import { useGoTo } from "./state/useGoTo";
 import type { SelectedRow } from "./state/useAppState";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiscardRequest } from "./components/DiffPane";
@@ -152,6 +154,28 @@ export function RepoWorkspace({
     if (fileHistoryOpen) closeFileHistory();
     setSearchFocusRequested(true);
   }, [fileHistoryOpen, closeFileHistory]);
+  // "Go to" (#441): show the graph (closing search, file history and compare), select the row
+  // and scroll to it, even when it was already selected.
+  const [revealRequest, setRevealRequest] = useState(0);
+  const closeSearch = commitSearch.close;
+  const reveal = useCallback(
+    (row: SelectedRow) => {
+      closeSearch();
+      if (fileHistoryOpen) closeFileHistory();
+      selectRowClosingCompare(row);
+      setRevealRequest((n) => n + 1);
+    },
+    [closeSearch, fileHistoryOpen, closeFileHistory, selectRowClosingCompare],
+  );
+  const goTo = useGoTo(client, repoPath, appState, reveal);
+  const setSearchQuery = commitSearch.setQuery;
+  const searchHistory = useCallback(
+    (query: string) => {
+      setSearchQuery(query);
+      requestSearchFocus();
+    },
+    [setSearchQuery, requestSearchFocus],
+  );
   const selectedRow = appState.state.selectedRow;
   const historyEntry =
     fileHistory.history !== null && typeof selectedRow === "object"
@@ -586,6 +610,13 @@ export function RepoWorkspace({
                   if (currentFile !== null) externalTools.openDiffTool(currentFile, { kind: "Unstaged" });
                 },
               },
+              {
+                onGoToCommit: (revision) => void goTo.goToRevision(revision),
+                onSearchHistory: searchHistory,
+                onGoToBranch: (kind, name) => void goTo.goToBranch(kind, name),
+                onGoToTag: (name, commitId) => void goTo.goToTag(name, commitId),
+                onGoToStash: (commitId) => reveal({ commitId }),
+              },
             )}
             onRun={() => setPaletteOpen(false)}
           />
@@ -670,6 +701,7 @@ export function RepoWorkspace({
               onOpenPushDialog={appState.openPushDialog}
               onOpenDeleteRemoteBranch={appState.openDeleteRemoteBranchDialog}
               onCompareBranch={compare.compareBranch}
+              onGoToBranch={(kind, name) => void goTo.goToBranch(kind, name)}
               refreshGeneration={appState.state.refreshGeneration}
               remoteDialog={appState.state.remoteDialog}
               onRemoteDialogChange={(dialog) =>
@@ -732,6 +764,7 @@ export function RepoWorkspace({
                 onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
                 onBranchFromCommit={appState.openCreateBranchDraft}
                 onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
+                onGoToTag={(tag) => void goTo.goToTag(tag.name, tag.commitId)}
                 pushDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
               />
@@ -790,6 +823,7 @@ export function RepoWorkspace({
                   />
                 }
               />
+              {goTo.notice !== null && <GoToNotice notice={goTo.notice} onDismiss={goTo.dismissNotice} />}
               {fileHistory.history !== null ? (
                 <FileHistoryList
                   history={fileHistory.history}
@@ -874,6 +908,7 @@ export function RepoWorkspace({
                       onDeleteTag={appState.deleteTag}
                       onCreateTag={appState.openCreateTagDialog}
                       onDeleteTagFromRemote={appState.openDeleteRemoteTagDialog}
+                      revealRequest={revealRequest}
                     />
                   )}
                 </>

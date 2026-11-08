@@ -133,6 +133,7 @@ methods!(|params, repos, stdout| {
     "close_repo" => close_repo(RepoPathParams, repos),
     "get_status" => get_status(RepoPathParams, repos),
     "get_commit_graph" => get_commit_graph(GetCommitGraphParams, repos),
+    "locate_commit" => locate_commit(LocateCommitParams, repos),
     "get_working_diff" => get_working_diff(GetWorkingDiffParams, repos),
     "get_commit_diff" => get_commit_diff(GetCommitDiffParams, repos),
     "get_file_history" => get_file_history(GetFileHistoryParams, repos),

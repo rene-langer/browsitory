@@ -1,8 +1,8 @@
 use super::{emit_hook_events, repo_worker, AppState};
 use git_core::graph::GraphSelection;
 use repo_service::wire::{
-    to_trailers, BlameLineDto, CommitOutcomeDto, CommitSignatureDto, DiffHunkDto, DiffOptionsDto,
-    FileHistoryEntryDto, GraphCommitDto, StatusEntryDto, TrailerDto,
+    to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, StatusEntryDto, TrailerDto,
 };
 use std::path::Path;
 use tauri::{AppHandle, State};
@@ -38,6 +38,25 @@ pub async fn get_commit_graph(
         .into_iter()
         .map(GraphCommitDto::from)
         .collect())
+}
+
+/// Where `revision`'s commit sits in the graph of the given selection (#441).
+#[tauri::command]
+pub async fn locate_commit(
+    repo_path: String,
+    revision: String,
+    selected_branches: Option<Vec<String>>,
+    remote_branches: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Option<CommitLocationDto>, String> {
+    let selection = GraphSelection {
+        local: selected_branches,
+        remote: remote_branches,
+    };
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.locate_commit(revision, selection))
+        .await?
+        .map(CommitLocationDto::from))
 }
 
 #[tauri::command]

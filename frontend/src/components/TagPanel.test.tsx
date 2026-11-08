@@ -41,6 +41,7 @@ function props(overrides: Partial<Props> = {}): Props {
     onPushTag: vi.fn(),
     onBranchFromCommit: vi.fn(),
     onCheckoutCommit: vi.fn(),
+    onGoToTag: vi.fn(),
     pushDisabled: false,
     operationDisabledReason: null,
     ...overrides,
@@ -54,6 +55,10 @@ function renderPanel(overrides: Partial<Props> = {}) {
   fireEvent.click(screen.getByRole("button", { name: "Tags" }));
   return { ...result, props: all };
 }
+
+/** The row of tag `name` (a `role="button"` `<li>`, see `ListRow`). */
+const tagRow = (name: string) =>
+  screen.getByRole("button", { name: `Actions for ${name}` }).closest("li") as HTMLElement;
 
 const openMenu = (name: string) => fireEvent.click(screen.getByRole("button", { name: `Actions for ${name}` }));
 
@@ -70,8 +75,10 @@ describe("TagPanel", () => {
   it("shows one compact row per tag: checkbox, name in its own element, kind and an actions button", () => {
     renderPanel({ tags: [tag, { ...tag, name: "v2", annotated: true }] });
 
-    const rows = within(screen.getByRole("list", { name: "Tags" })).getAllByRole("listitem");
+    const rows = Array.from(screen.getByRole("list", { name: "Tags" }).children) as HTMLElement[];
     expect(rows).toHaveLength(2);
+    // A focusable row: a click or Enter goes to the tag's commit (#441).
+    expect(rows[0]).toHaveAttribute("role", "button");
     expect(within(rows[0]).getByText("v1.0.0").tagName).toBe("SPAN");
     expect(within(rows[0]).getByText("Lightweight")).toBeInTheDocument();
     expect(within(rows[1]).getByText("Annotated")).toBeInTheDocument();
@@ -129,9 +136,38 @@ describe("TagPanel", () => {
     expect(screen.queryByRole("menuitem", { name: "Checkout (detached)" })).toBeNull();
   });
 
+  it("selects the tag's commit when its row is clicked or activated by key (#441)", () => {
+    const { props: given } = renderPanel();
+    const row = tagRow("v1.0.0");
+
+    expect(row).toHaveAttribute("tabindex", "0");
+    fireEvent.click(row);
+    fireEvent.keyDown(row, { key: "Enter" });
+    fireEvent.keyDown(row, { key: " " });
+    expect(given.onGoToTag).toHaveBeenCalledTimes(3);
+    expect(given.onGoToTag).toHaveBeenCalledWith(tag);
+
+    // The checkbox and the "…" keep their own meaning.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
+    openMenu("v1.0.0");
+    expect(given.onGoToTag).toHaveBeenCalledTimes(3);
+  });
+
+  it("opens the row menu from the focused row with Shift+F10 or the Menu key", () => {
+    renderPanel();
+    const row = tagRow("v1.0.0");
+
+    expect(row).toHaveAttribute("aria-keyshortcuts", "Shift+F10 ContextMenu");
+    fireEvent.keyDown(row, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.keyDown(row, { key: "ContextMenu" });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
+
   it("opens the row menu by right-click and from the keyboard (Shift+F10, Menu key)", () => {
     renderPanel();
-    const row = within(screen.getByRole("list", { name: "Tags" })).getByRole("listitem");
+    const row = screen.getByRole("list", { name: "Tags" }).querySelector("li")!;
 
     fireEvent.contextMenu(row);
     expect(screen.getByRole("menu")).toBeInTheDocument();

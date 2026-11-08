@@ -171,6 +171,7 @@ fn busy_refusal(command: &Command) -> Option<BusyRefusal<'_>> {
         Command::Ping { .. }
         | Command::GetStatus { .. }
         | Command::GetCommitGraph { .. }
+        | Command::LocateCommit { .. }
         | Command::GetWorkingDiff { .. }
         | Command::GetCommitDiff { .. }
         | Command::GetCommitFiles { .. }

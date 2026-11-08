@@ -6,7 +6,10 @@ and the author and date (they hide when the pane is narrow). Selecting a commit 
 message, author, date, full SHA (**Copy** copies it) and parents above the file list; click a
 parent to jump to it. The graph loads the latest 300 commits; choose **Load more** at the bottom
 (or keep pressing ↓ past the last row) to load the next page. Use ↑/↓ or j/k to move through the
-commits, and PageUp/PageDown to move a page at a time.
+commits, and PageUp/PageDown to move a page at a time. To jump to a commit, branch, tag or stash,
+use **Go to commit…** and the other Go to commands in the [command
+palette](command-palette.md#go-to-a-commit-branch-tag-or-stash), or click a branch or tag in the
+sidebar.
 
 The bar above the graph has **Fetch**, **Pull** and **Push** buttons for the
 current branch's upstream, with ahead/behind counts (for example `↑2 ↓1`)

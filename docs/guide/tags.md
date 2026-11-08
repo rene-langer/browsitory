@@ -15,10 +15,13 @@ a tag you just created.
 
 Open **Tags** in the sidebar for the list of every local tag, including tags on commits the graph
 doesn't show, one line per tag with its kind (annotated or lightweight). Type in **Filter tags**
-to find a tag by name. To share tags, pick the remote under **Push tags**, tick the tags you want
-and choose **Push selected tags**, or choose **Push all tags**. A tag's other actions are in its
-menu: the **…** button (it appears when you point at or tab into the row), a right-click, or the
-Menu key or Shift+F10 on the row's checkbox or **…**. The menu has the same items as the tag's
+to find a tag by name. Click a tag, or press Enter or Space on it, to select its commit and
+scroll the graph there, without checking anything out (**Go to tag…** in the command palette does
+the same; see [Command palette](command-palette.md#go-to-a-commit-branch-tag-or-stash) for what
+happens when the graph doesn't show the commit). To share tags, pick the remote under **Push
+tags**, tick the tags you want and choose **Push selected tags**, or choose **Push all tags**. A
+tag's other actions are in its menu: the **…** button (it appears when you point at or tab into
+the row), a right-click, or the Menu key or Shift+F10 on the row, its checkbox or its **…**. The menu has the same items as the tag's
 badge in the graph: push to a remote, **Branch from tag**, **Checkout (detached)**, **Delete
 from remote…** and **Delete tag…** (the local tag, after a confirmation).
 

@@ -58,6 +58,7 @@ export function CommitGraph({
   onDeleteTag,
   onCreateTag,
   onDeleteTagFromRemote,
+  revealRequest = 0,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -115,6 +116,9 @@ export function CommitGraph({
   onCreateTag?: (commitId: string) => void;
   /** Opens the "Delete from remote" dialog for that tag (the tag badge menu). */
   onDeleteTagFromRemote?: (tag: string) => void;
+  /** Bumped by "Go to" (#441): scrolls the selected row into view even when it was already
+   *  selected. */
+  revealRequest?: number;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -221,11 +225,11 @@ export function CommitGraph({
     });
   }
 
-  // Keep the keyboard-driven selection visible in a long history.
+  // Keep the keyboard-driven selection visible in a long history, and a "Go to" target too.
   useEffect(() => {
     const selected = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
     if (typeof selected?.scrollIntoView === "function") selected.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex]);
+  }, [selectedIndex, revealRequest]);
 
   const moveSelection = (nextIndex: number, extendRange: boolean) => {
     // Arrowing/paging past the last loaded row pulls in the next page instead of dead-ending.

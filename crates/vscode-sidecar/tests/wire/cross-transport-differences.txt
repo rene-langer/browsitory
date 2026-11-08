@@ -7,6 +7,8 @@ BranchInfo/local-only key-order
 BranchInfo/tracking key-order
 ChangedFile/plain key-order
 ChangedFile/renamed key-order
+CommitLocation/hidden key-order
+CommitLocation/in-graph key-order
 CommitMessageSettings/plain key-order
 CommitOutcome/Committed key-order
 CommitOutcome/HookFailed key-order

@@ -90,10 +90,17 @@ describe("BranchTree — local branches", () => {
     expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/foo");
   });
 
-  it("single-clicking a branch selects it without switching", () => {
-    const { props } = renderTree();
+  it("single-clicking a branch selects it and its tip in the graph without switching (#441)", () => {
+    const onGoToBranch = vi.fn();
+    const { props } = renderTree({ onGoToBranch });
     fireEvent.click(screen.getByRole("button", { name: "foo" }));
     expect(props.onSwitchBranch).not.toHaveBeenCalled();
+    expect(onGoToBranch).toHaveBeenCalledWith("local", "feat/foo");
+
+    // The swatch and the "…" keep their own meaning.
+    fireEvent.click(screen.getByRole("button", { name: "Show feat/foo in graph" }));
+    fireEvent.click(screen.getByRole("button", { name: "Actions for feat/foo" }));
+    expect(onGoToBranch).toHaveBeenCalledOnce();
   });
 
   it("branches whose name contains a / are nested under a folder split on each segment", () => {
@@ -572,6 +579,14 @@ describe("BranchTree — remotes", () => {
   // selection, every branch's graph swatch is pressed (shown) by default" above). So toggling off
   // origin/main here removes it from that set rather than adding it; origin/develop stays, which
   // also proves the qualified `${remoteName}/${branchName}` naming is computed correctly.
+  it("single-clicking a remote branch selects its tip in the graph (#441)", async () => {
+    const onGoToBranch = vi.fn();
+    renderTree({ remotes: oneRemote, onGoToBranch, onListRemoteBranches: vi.fn().mockResolvedValue(["develop"]) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    fireEvent.click(await screen.findByText("develop"));
+    expect(onGoToBranch).toHaveBeenCalledWith("remote", "origin/develop");
+  });
+
   it("toggles a remote branch's graph visibility via its swatch button", async () => {
     const onSetGraphRemoteBranchSelection = vi.fn();
     renderTree({

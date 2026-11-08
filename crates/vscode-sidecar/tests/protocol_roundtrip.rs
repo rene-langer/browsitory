@@ -225,6 +225,34 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
 }
 
 #[test]
+fn locate_commit_finds_a_commit_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    let head = repo.head().unwrap().target().unwrap().to_string();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let found = sidecar.call(
+        2,
+        "locate_commit",
+        serde_json::json!({"repoPath": repo_path, "revision": &head[..7], "selectedBranches": null, "remoteBranches": []}),
+    );
+    let missing = sidecar.call(
+        3,
+        "locate_commit",
+        serde_json::json!({"repoPath": repo_path, "revision": "no-such-branch", "selectedBranches": null, "remoteBranches": []}),
+    );
+
+    assert_eq!(found["result"]["commitId"], head.as_str());
+    assert_eq!(found["result"]["position"], 0);
+    assert_eq!(found["result"]["remoteBranches"], serde_json::json!([]));
+    assert!(missing["result"].is_null(), "{missing}");
+}
+
+#[test]
 fn commit_graph_and_search_walk_the_selected_remote_branches_through_the_sidecar() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, repo) = init_repo();

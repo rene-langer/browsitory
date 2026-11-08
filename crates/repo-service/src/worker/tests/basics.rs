@@ -38,6 +38,34 @@ fn get_commit_graph_reflects_a_commit() {
 }
 
 #[test]
+fn locate_commit_finds_a_commit_through_the_worker() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    let id = repo.head().unwrap().target().unwrap().to_string();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let found = handle
+        .locate_commit(
+            id[..7].to_string(),
+            git_core::graph::GraphSelection::default(),
+        )
+        .unwrap()
+        .unwrap();
+    let missing = handle
+        .locate_commit(
+            "no-such-branch".into(),
+            git_core::graph::GraphSelection::default(),
+        )
+        .unwrap();
+
+    assert_eq!(found.commit_id, id);
+    assert_eq!(found.position, Some(0));
+    assert_eq!(missing, None);
+}
+
+#[test]
 fn stage_then_commit_round_trips_through_the_worker() {
     let (dir, _repo) = init_repo();
     write_file(dir.path(), "new.txt", "hello");

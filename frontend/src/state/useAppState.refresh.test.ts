@@ -171,6 +171,25 @@ describe("useAppState", () => {
     expect(result.current.state.graphLimit).toBe(600);
   });
 
+  it("loadHistoryThrough grows the limit in whole pages to reach a graph row (#441)", async () => {
+    const limits: number[] = [];
+    const client = transferClient({
+      getCommitGraph: async (_repoPath, limit) => {
+        limits.push(limit);
+        return [];
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(() => result.current.refresh());
+    await act(() => result.current.loadHistoryThrough(700));
+    // Already loaded far enough: reloads (the graph may be stale) without shrinking the limit.
+    await act(() => result.current.loadHistoryThrough(5));
+
+    expect(limits).toEqual([300, 900, 900]);
+    expect(result.current.state.graphLimit).toBe(900);
+  });
+
   it("reports more history only when the graph filled its limit", async () => {
     const commitFor = (n: number) => ({
       id: `id${n}`,
@@ -434,6 +453,7 @@ describe("useAppState", () => {
       getWorkingTreeCompareFiles: async () => unimplemented(),
       getWorkingTreeCompareDiff: async () => unimplemented(),
       getBranchCompareRange: async () => unimplemented(),
+      locateCommit: async () => unimplemented(),
       getMergeOptions: async () => unimplemented(),
       setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
@@ -526,6 +546,7 @@ describe("useAppState", () => {
       getWorkingTreeCompareFiles: async () => unimplemented(),
       getWorkingTreeCompareDiff: async () => unimplemented(),
       getBranchCompareRange: async () => unimplemented(),
+      locateCommit: async () => unimplemented(),
       getMergeOptions: async () => unimplemented(),
       setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),
@@ -613,6 +634,7 @@ describe("useAppState", () => {
       getWorkingTreeCompareFiles: async () => unimplemented(),
       getWorkingTreeCompareDiff: async () => unimplemented(),
       getBranchCompareRange: async () => unimplemented(),
+      locateCommit: async () => unimplemented(),
       getMergeOptions: async () => unimplemented(),
       setMergeOptions: async () => unimplemented(),
       dropStash: async () => unimplemented(),

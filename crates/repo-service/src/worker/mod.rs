@@ -103,6 +103,11 @@ pub(crate) enum Command {
         selection: GraphSelection,
         reply: Sender<Result<Vec<GraphCommit>, String>>,
     },
+    LocateCommit {
+        revision: String,
+        selection: GraphSelection,
+        reply: Sender<Result<Option<git_core::locate::CommitLocation>, String>>,
+    },
     GetWorkingDiff {
         path: String,
         staged: bool,
@@ -943,6 +948,11 @@ impl Worker {
                         selection,
                         reply,
                     } => status::get_commit_graph(&repo, limit, selection, reply),
+                    Command::LocateCommit {
+                        revision,
+                        selection,
+                        reply,
+                    } => status::locate_commit(&repo, revision, selection, reply),
                     Command::GetWorkingDiff {
                         path,
                         staged,

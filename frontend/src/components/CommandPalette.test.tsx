@@ -135,4 +135,73 @@ describe("CommandPalette", () => {
       expect(screen.getByText(/Esc to close/)).toBeInTheDocument();
     });
   });
+  describe("pickers (#441)", () => {
+    function pickerCommands() {
+      const goMain = vi.fn();
+      const goFeature = vi.fn();
+      const items = [
+        { id: "branch:main", label: "main", keywords: ["main"], run: goMain },
+        { id: "branch:feature", label: "feature", keywords: ["feature"], run: goFeature },
+      ];
+      const pickerRun = vi.fn();
+      const commands: Command[] = [
+        {
+          id: "go-to-branch",
+          label: "Go to branch…",
+          keywords: [],
+          run: pickerRun,
+          picker: {
+            placeholder: "Branch name…",
+            emptyText: "No matching branches",
+            items: (query) => items.filter((item) => item.label.includes(query)),
+          },
+        },
+        { id: "fetch-origin", label: "Fetch origin", keywords: [], run: vi.fn() },
+      ];
+      return { commands, goMain, goFeature, pickerRun };
+    }
+
+    it("opens a picker's items instead of running it, then runs the chosen item", () => {
+      const { commands, goFeature, pickerRun } = pickerCommands();
+      const onRun = vi.fn();
+      render(<CommandPalette commands={commands} onRun={onRun} />);
+      const input = screen.getByRole("combobox");
+      fireEvent.change(input, { target: { value: "go to br" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(pickerRun).not.toHaveBeenCalled();
+      expect(onRun).not.toHaveBeenCalled();
+      expect(input).toHaveValue("");
+      expect(input).toHaveAttribute("placeholder", "Branch name…");
+      expect(input).toHaveAccessibleName("Go to branch");
+      expect(screen.getByText("main")).toBeInTheDocument();
+      expect(screen.queryByText("Fetch origin")).not.toBeInTheDocument();
+
+      fireEvent.change(input, { target: { value: "feat" } });
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(goFeature).toHaveBeenCalledOnce();
+      expect(onRun).toHaveBeenCalledOnce();
+    });
+
+    it("shows the picker's empty text and goes back with Backspace on an empty query", () => {
+      const { commands } = pickerCommands();
+      render(<CommandPalette commands={commands} onRun={vi.fn()} />);
+      fireEvent.click(screen.getByText("Go to branch…"));
+      const input = screen.getByRole("combobox");
+      fireEvent.change(input, { target: { value: "zzz" } });
+      expect(screen.getByText("No matching branches")).toBeInTheDocument();
+
+      fireEvent.change(input, { target: { value: "" } });
+      fireEvent.keyDown(input, { key: "Backspace" });
+      expect(screen.getByText("Fetch origin")).toBeInTheDocument();
+      expect(input).toHaveAttribute("placeholder", "Type a command…");
+    });
+
+    it("lists a picker in the recent commands once opened", () => {
+      const { commands } = pickerCommands();
+      render(<CommandPalette commands={commands} onRun={vi.fn()} />);
+      fireEvent.click(screen.getByText("Go to branch…"));
+      expect(JSON.parse(localStorage.getItem("command-palette-recent") ?? "[]")).toEqual(["go-to-branch"]);
+    });
+  });
 });

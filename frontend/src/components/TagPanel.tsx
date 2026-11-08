@@ -20,7 +20,8 @@ type TagMenu = { name: string; x: number; y: number; returnFocusTo?: HTMLElement
  * checkbox or "…"), the same items as the tag badge menu in the graph (`tagMenuItems`). Above
  * the list a name filter, below it push selected / push all. Tags are created from the graph
  * (a commit's "Create tag…") or the palette ("Create tag at HEAD…"), not here (#438).
- * The tag name sits in its own element and the row has no click action yet (#441).
+ * Clicking a row (or Enter / Space on it) selects the tag's commit in the graph, like the
+ * palette's "Go to tag…" (#441).
  */
 export function TagPanel({
   tags,
@@ -31,6 +32,7 @@ export function TagPanel({
   onPushTag,
   onBranchFromCommit,
   onCheckoutCommit,
+  onGoToTag,
   pushDisabled,
   operationDisabledReason,
 }: {
@@ -45,6 +47,8 @@ export function TagPanel({
   onPushTag: (remoteName: string, name: string) => void;
   onBranchFromCommit: (commitId: string) => void;
   onCheckoutCommit: (commitId: string) => void;
+  /** Selects and scrolls to the tag's commit in the graph (#441). */
+  onGoToTag: (tag: TagInfo) => void;
   pushDisabled: boolean;
   // Human-readable reason `pushDisabled` is true, shown as a `title` on the buttons it disables
   // (issue #31/UX-003). `null` when nothing is blocking.
@@ -80,8 +84,8 @@ export function TagPanel({
       : [...current, tagName]);
   };
 
-  // The row is not a focus stop of its own (it has no click action yet), so the Menu key and
-  // Shift+F10 open its menu from its checkbox and its "…".
+  // The row (a focus stop) and its "…" get the Menu key and Shift+F10 from `ListRow`, which
+  // leaves them to a text field or checkbox: the checkbox opens the menu itself.
   const openFromKey = (event: KeyboardEvent<HTMLElement>, name: string) => {
     if (!isMenuKey(event)) return;
     event.preventDefault();
@@ -119,6 +123,7 @@ export function TagPanel({
               {shown.map((tag) => (
                 <ListRow
                   key={tag.name}
+                  onClick={() => onGoToTag(tag)}
                   onOpenMenu={(anchor, trigger) =>
                     setMenu({
                       name: tag.name,
@@ -132,6 +137,8 @@ export function TagPanel({
                     className={styles.select}
                     checked={selected.includes(tag.name)}
                     onChange={() => toggleTag(tag.name)}
+                    // Ticking the box selects the tag for pushing, not its commit.
+                    onClick={(event) => event.stopPropagation()}
                     onKeyDown={(event) => openFromKey(event, tag.name)}
                     aria-label={`Select ${tag.name}`}
                     aria-keyshortcuts="Shift+F10 ContextMenu"
@@ -147,10 +154,9 @@ export function TagPanel({
                     aria-label={`Actions for ${tag.name}`}
                     aria-haspopup="menu"
                     aria-expanded={menu?.name === tag.name}
-                    aria-keyshortcuts="Shift+F10 ContextMenu"
                     data-menu-key={tag.name}
-                    onKeyDown={(event) => openFromKey(event, tag.name)}
                     onClick={(event) => {
+                      event.stopPropagation();
                       const trigger = event.currentTarget;
                       if (menu?.name === tag.name) {
                         // A second click closes it; focus stays on the button.

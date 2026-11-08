@@ -2,7 +2,9 @@
 
 **Branches** is a single tree: a **Local** folder holding your local
 branches, and one folder per remote holding that remote's branches (fetched
-lazily the first time you expand it). Double-click a local branch, or choose
+lazily the first time you expand it). Click a branch, local or remote, to select its latest
+commit and scroll the graph there without checking anything out (as **Go to branch…** in the
+command palette does). Double-click a local branch, or choose
 **Checkout** from its context menu, to switch to it;
 right-click a branch, a remote folder, or a remote branch to bring up its actions:
 

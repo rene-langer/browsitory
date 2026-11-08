@@ -1,7 +1,7 @@
 use git_core::graph::GraphSelection;
 use repo_service::wire::{
-    to_trailers, BlameLineDto, CommitOutcomeDto, CommitSignatureDto, DiffHunkDto, DiffOptionsDto,
-    FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
+    to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -49,6 +49,30 @@ pub(super) fn get_commit_graph(
         .map(GraphCommitDto::from)
         .collect();
     serde_json::to_value(commits).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct LocateCommitParams {
+    repo_path: String,
+    revision: String,
+    selected_branches: Option<Vec<String>>,
+    /// Required, like `GetCommitGraphParams::remote_branches`.
+    remote_branches: Vec<String>,
+}
+
+/// Where `revision`'s commit sits in the graph of the given selection (#441).
+pub(super) fn locate_commit(params: LocateCommitParams, repos: &Repos) -> Result<Value, String> {
+    let location = worker_handle(repos, &params.repo_path)?
+        .locate_commit(
+            params.revision,
+            GraphSelection {
+                local: params.selected_branches,
+                remote: params.remote_branches,
+            },
+        )?
+        .map(CommitLocationDto::from);
+    serde_json::to_value(location).map_err(|error| error.to_string())
 }
 
 #[derive(Deserialize)]

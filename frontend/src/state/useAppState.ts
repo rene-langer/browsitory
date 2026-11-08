@@ -331,6 +331,9 @@ export interface UseAppStateResult {
   isolateGraphBranch(kind: "local" | "remote", name: string): Promise<void>;
   // Fetches the next page of history (grows the graph limit by one page and reloads).
   loadMoreHistory(): Promise<void>;
+  // Reloads the graph with at least `count` commits (whole pages), so a "Go to" target's row
+  // (`CommitLocation.position + 1`) is loaded (#441).
+  loadHistoryThrough(count: number): Promise<void>;
   refresh(): Promise<void>;
   undo(): Promise<UndoOutcome | null>;
   redo(): Promise<UndoOutcome | null>;
@@ -542,6 +545,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     graphLimit.current += GRAPH_PAGE_SIZE;
     await refresh();
   }, [refresh]);
+
+  const loadHistoryThrough = useCallback(
+    async (count: number) => {
+      graphLimit.current = Math.max(graphLimit.current, Math.ceil(count / GRAPH_PAGE_SIZE) * GRAPH_PAGE_SIZE);
+      await refresh();
+    },
+    [refresh],
+  );
 
   const {
     runMutation,
@@ -875,6 +886,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     showAllGraphBranches,
     isolateGraphBranch,
     loadMoreHistory,
+    loadHistoryThrough,
     refresh,
     undo,
     redo,
