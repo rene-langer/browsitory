@@ -7,7 +7,7 @@ Browsitory runs your repository's client-side git hooks the way git does:
 | `pre-commit`, `prepare-commit-msg`, `commit-msg`, `post-commit` | commit or amend, or **Continue** a paused multi-commit cherry-pick or revert |
 | `pre-merge-commit`, `prepare-commit-msg`, `commit-msg` | commit a merge that had no conflicts (instead of `pre-commit`; no `post-commit`; the message hooks get `.git/MERGE_MSG`, as with `git merge`) |
 | `prepare-commit-msg`, `post-commit` | cherry-pick or revert: for each commit Browsitory creates from a step that applied without conflicts |
-| `pre-push` | push a branch, force push, push tags, **Push to…**, or delete a remote branch |
+| `pre-push` | push a branch, force push, push tags, **Push to…**, delete a remote branch or a tag on a remote |
 | `post-checkout` | switch branches or check out a commit |
 | `post-merge` | after a merge commit, a fast-forward or a squash, or a pull with a fast-forward |
 

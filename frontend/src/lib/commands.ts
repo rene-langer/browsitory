@@ -454,6 +454,13 @@ export function buildCommands(
         keywords: ["checkout", "detach", "commit"],
         run: () => void appState.checkoutCommit(selectedCommit.id),
       });
+      // The keyboard path for the commit menu's "Create tag…" (#438).
+      commands.push({
+        id: "create-tag-selected",
+        label: `Create tag at ${selectedCommit.shortId}…`,
+        keywords: ["tag", "create", "new", "release", "commit"],
+        run: () => appState.openCreateTagDialog(selectedCommit.id),
+      });
       // Same condition as CommitGraph's context-menu Reset item (disabled without a current
       // branch), so the palette never opens a menu whose Reset entry is greyed out.
       if (state.branches.some((branch) => branch.isCurrent)) {
@@ -462,6 +469,26 @@ export function buildCommands(
           label: `Reset to ${selectedCommit.shortId}…`,
           keywords: ["reset", "soft", "mixed", "hard"],
           run: () => goToCommitMenu(selectedCommit.id),
+        });
+      }
+    }
+    if (state.headInfo.headId !== null) {
+      const headId = state.headInfo.headId;
+      commands.push({
+        id: "create-tag-head",
+        label: "Create tag at HEAD…",
+        keywords: ["tag", "create", "new", "release", "head"],
+        run: () => appState.openCreateTagDialog(headId),
+      });
+    }
+    // The keyboard path for a tag badge's "Delete from remote…" (#439); the dialog confirms.
+    if (state.remotes.length > 0) {
+      for (const tag of state.tags) {
+        commands.push({
+          id: `delete-remote-tag:${tag.name}`,
+          label: `Delete tag ${tag.name} from remote…`,
+          keywords: ["tag", "delete", "remove", "remote", tag.name],
+          run: () => appState.openDeleteRemoteTagDialog(tag.name),
         });
       }
     }
@@ -824,6 +851,7 @@ export function commandGroup(id: string): CommandGroup {
     id.startsWith("edit-remote:") ||
     id.startsWith("manage-credentials:") ||
     id.startsWith("remove-remote:") ||
+    id.startsWith("delete-remote-tag:") ||
     id === "add-remote" ||
     id === "force-push"
   ) {

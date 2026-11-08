@@ -185,7 +185,7 @@ export type Trailer = { key: string, value: string, };
 
 export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "StaleLease" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "HookFailed";
 
-export type TransferOperation = "Fetch" | "FetchAll" | "Pull" | "PushBranch" | "ForcePushBranch" | "PushTags" | "DeleteRemoteBranch" | "Clone";
+export type TransferOperation = "Fetch" | "FetchAll" | "Pull" | "PushBranch" | "ForcePushBranch" | "PushTags" | "DeleteRemoteBranch" | "DeleteRemoteTag" | "Clone";
 
 export type TransferProgress = { operationId: string, operation: TransferOperation, phase: TransferProgressPhase, errorKind: TransferErrorKind | null, current: number, total: number, receivedBytes: number, message: string | null, 
 /**

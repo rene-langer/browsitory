@@ -1,6 +1,6 @@
-import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import type { BranchInfo } from "../ipc/RepoClient";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import type { BranchInfo, TransferProgress } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 import { unimplemented, TEST_REPO_PATH, upstream, transferClient } from "./useAppStateTestClient";
 
@@ -512,5 +512,105 @@ describe("useAppState", () => {
       "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.",
     );
     expect(result.current.state.error).not.toBe("Fetch failed");
+  });
+
+  it("passes the dialog's target commit to createTag", async () => {
+    const createTag = vi.fn(async () => {});
+    const { result } = renderHook(() => useAppState(transferClient({ createTag }), TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    act(() => result.current.openCreateTagDialog("abc123"));
+    expect(result.current.state.createTagDialog).toEqual({ commitId: "abc123" });
+    await act(() => result.current.createTag("v1", "notes", "abc123"));
+
+    expect(createTag).toHaveBeenCalledWith(TEST_REPO_PATH, "v1", "notes", "abc123");
+    act(() => result.current.closeCreateTagDialog());
+    expect(result.current.state.createTagDialog).toBeNull();
+  });
+
+  const progress = (phase: "Starting" | "Completed" | "Failed", errorKind: TransferProgress["errorKind"] = null): TransferProgress => ({
+    operationId: "delete-remote-7",
+    operation: "DeleteRemoteTag",
+    phase,
+    errorKind,
+    current: 0,
+    total: 0,
+    receivedBytes: 0,
+    message: null,
+    hookOutput: null,
+  });
+
+  it.each([true, false])("deletes the local tag after a remote tag delete lands only when asked (%s)", async (deleteLocal) => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const deleteRemoteTag = vi.fn(async () => "delete-remote-7");
+    const deleteTag = vi.fn(async () => {});
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      deleteRemoteTag,
+      deleteTag,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    act(() => result.current.openDeleteRemoteTagDialog("v1"));
+    expect(result.current.state.deleteRemoteTagDialog).toEqual({ tagName: "v1" });
+
+    await act(() => result.current.deleteRemoteTag("origin", "v1", deleteLocal));
+    expect(deleteRemoteTag).toHaveBeenCalledWith(TEST_REPO_PATH, "origin", "v1", false);
+    expect(result.current.state.deleteRemoteTagDialog).toBeNull();
+    expect(deleteTag).not.toHaveBeenCalled();
+
+    await act(async () => listener?.(progress("Completed")));
+
+    await waitFor(() => expect(result.current.state.pending).toBe(false));
+    if (deleteLocal) await waitFor(() => expect(deleteTag).toHaveBeenCalledWith(TEST_REPO_PATH, "v1"));
+    else expect(deleteTag).not.toHaveBeenCalled();
+  });
+
+  it("keeps the local tag when the remote tag delete fails, and reports the refusal", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const deleteTag = vi.fn(async () => {});
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      deleteRemoteTag: async () => "delete-remote-7",
+      deleteTag,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.deleteRemoteTag("origin", "v1", true));
+    await act(async () => listener?.(progress("Failed", "RejectedRemoteRef")));
+
+    expect(result.current.state.error).toBe("The remote refused to delete the tag.");
+    expect(deleteTag).not.toHaveBeenCalled();
+  });
+
+  it("retries a remote tag delete without hooks, keeping the also-delete-locally choice", async () => {
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    const deleteRemoteTag = vi.fn(async () => "delete-remote-7");
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      deleteRemoteTag,
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    await act(() => result.current.deleteRemoteTag("origin", "v1", true));
+    await act(async () => listener?.({ ...progress("Failed", "HookFailed"), hookOutput: "no" }));
+    expect(result.current.state.hookFailure?.retry).toEqual({
+      kind: "push",
+      push: { operation: "DeleteRemoteTag", remoteName: "origin", tagName: "v1", deleteLocal: true },
+    });
+
+    await act(() => result.current.retryWithoutHooks(result.current.state.hookFailure!.retry));
+    expect(deleteRemoteTag).toHaveBeenLastCalledWith(TEST_REPO_PATH, "origin", "v1", true);
   });
 });

@@ -60,6 +60,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       fetchPrune: null,
       pushDialog: null,
       deleteRemoteBranchDialog: null,
+      createTagDialog: null,
+      deleteRemoteTagDialog: null,
       headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
       amendMode: false,
       skipHooks: false,
@@ -123,6 +125,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     listRemoteBranches: vi.fn(),
     fetchRemote: vi.fn(),
     createTag: vi.fn(),
+    openCreateTagDialog: vi.fn(),
+    closeCreateTagDialog: vi.fn(),
     deleteTag: vi.fn(),
     pushCurrentBranch: vi.fn(),
     pushTags: vi.fn(),
@@ -155,6 +159,9 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     deleteRemoteBranch: vi.fn(),
     openDeleteRemoteBranchDialog: vi.fn(),
     closeDeleteRemoteBranchDialog: vi.fn(),
+    deleteRemoteTag: vi.fn(),
+    openDeleteRemoteTagDialog: vi.fn(),
+    closeDeleteRemoteTagDialog: vi.fn(),
     saveStash: vi.fn(),
     openStashDialog: vi.fn(),
     closeStashDialog: vi.fn(),
@@ -798,6 +805,8 @@ describe("buildCommands", () => {
         expect(ids.some((id) => id.startsWith("push-tags:"))).toBe(false);
         expect(ids).not.toContain("pull");
         expect(ids.some((id) => id.startsWith("delete-tag:"))).toBe(false);
+        expect(ids.some((id) => id.startsWith("delete-remote-tag:"))).toBe(false);
+        expect(ids).not.toContain("create-tag-head");
         expect(ids.some((id) => /^(edit-remote|manage-credentials|remove-remote|checkout-tag):/.test(id))).toBe(false);
         expect(ids.some((id) => id.startsWith("open-worktree:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("remove-worktree:"))).toBe(false);
@@ -989,6 +998,8 @@ describe("history commands", () => {
     "cherry-pick-selected",
     "revert-selected",
     "checkout-selected",
+    "create-tag-selected",
+    "create-tag-head",
     "reset-selected",
     "amend-last-commit",
     "force-push",
@@ -1041,6 +1052,28 @@ describe("history commands", () => {
     commands.find((command) => command.id === "force-push")!.run();
     expect(cherryPick).toHaveBeenCalledWith("c2");
     expect(requestForcePush).toHaveBeenCalledWith("origin");
+  });
+
+  it("opens the create-tag dialog at the selected commit or at HEAD", () => {
+    const appState = makeAppState(historyState);
+    const commands = buildCommands(appState);
+    const selected = commands.find((command) => command.id === "create-tag-selected")!;
+    expect(selected.label).toBe("Create tag at c2…");
+    selected.run();
+    expect(appState.openCreateTagDialog).toHaveBeenLastCalledWith("c2");
+    const head = commands.find((command) => command.id === "create-tag-head")!;
+    expect(head.label).toBe("Create tag at HEAD…");
+    head.run();
+    expect(appState.openCreateTagDialog).toHaveBeenLastCalledWith("c1");
+  });
+
+  it("offers Create tag at HEAD… only once HEAD has a commit", () => {
+    const ids = buildCommands(
+      makeAppState({
+        headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
+      }),
+    ).map((c) => c.id);
+    expect(ids).not.toContain("create-tag-head");
   });
 
   it("omits reset when there is no current branch (detached HEAD)", () => {
@@ -1306,6 +1339,22 @@ describe("remote and tag palette entries", () => {
     command?.run();
     expect(appState.checkoutCommit).toHaveBeenCalledWith("c1");
     expect(commandGroup("checkout-tag:v1")).toBe("Branches");
+  });
+
+  it("opens Delete from remote… for each tag while a remote exists", () => {
+    const tags = [
+      { name: "v1", targetId: "c1", commitId: "c1", annotated: false, message: null, taggerName: null, timestamp: null },
+    ];
+    const appState = makeAppState({ tags });
+    const command = buildCommands(appState).find((c) => c.id === "delete-remote-tag:v1");
+    expect(command?.label).toBe("Delete tag v1 from remote…");
+    command?.run();
+    expect(appState.openDeleteRemoteTagDialog).toHaveBeenCalledWith("v1");
+
+    const ids = buildCommands(makeAppState({ tags, remotes: [] })).map((c) => c.id);
+    expect(ids).not.toContain("delete-remote-tag:v1");
+    const busy = buildCommands(makeAppState({ tags, pending: true })).map((c) => c.id);
+    expect(busy).not.toContain("delete-remote-tag:v1");
   });
 
   it("offers no checkout for a tag that doesn't peel to a commit", () => {

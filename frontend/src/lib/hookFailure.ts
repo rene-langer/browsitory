@@ -8,7 +8,8 @@ export type PushRequest =
   | { operation: "ForcePushBranch"; remoteName: string }
   | { operation: "PushTags"; remoteName: string; names: string[] }
   | { operation: "PushBranchTo"; remoteName: string; localBranch: string; remoteBranch: string; setUpstream: boolean }
-  | { operation: "DeleteRemoteBranch"; remoteName: string; branchName: string };
+  | { operation: "DeleteRemoteBranch"; remoteName: string; branchName: string }
+  | { operation: "DeleteRemoteTag"; remoteName: string; tagName: string; deleteLocal: boolean };
 
 import type { AmendOptions, Trailer } from "../ipc/RepoClient";
 
@@ -64,5 +65,6 @@ export function retrySuccessLabel(retry: Exclude<HookRetry, { kind: "continueSeq
   if (retry.kind === "amend") return "Amended commit";
   if (retry.push.operation === "ForcePushBranch") return "Force pushed";
   if (retry.push.operation === "DeleteRemoteBranch") return "Remote branch deleted";
+  if (retry.push.operation === "DeleteRemoteTag") return "Remote tag deleted";
   return "Push complete";
 }

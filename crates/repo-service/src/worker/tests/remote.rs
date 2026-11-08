@@ -407,6 +407,64 @@ fn push_branch_publishes_with_upstream_and_delete_remote_branch_removes_it() {
 }
 
 #[test]
+fn create_tag_at_a_commit_and_delete_remote_tag_round_trip_through_the_worker() {
+    let (_source_dir, remote_dir, local_dir) = local_and_bare_remote();
+    let local = Repository::open(local_dir.path()).expect("open local");
+    write_file(local_dir.path(), "older.txt", "older\n");
+    commit_all(&local, "older");
+    let older = local.head().expect("head").target().expect("target");
+    write_file(local_dir.path(), "local.txt", "local\n");
+    commit_all(&local, "newer");
+    drop(local);
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+
+    handle
+        .create_tag("v0".into(), None, Some(older.to_string()))
+        .expect("create tag at an older commit");
+    let tags = handle.list_tags().expect("list tags");
+    assert_eq!(
+        tags[0].commit_id.as_deref(),
+        Some(older.to_string().as_str())
+    );
+    assert_eq!(
+        handle.get_undo_state().expect("undo state").undo.as_deref(),
+        Some("Create tag v0")
+    );
+
+    let (event_tx, event_rx) = mpsc::channel();
+    handle
+        .push_tags("origin".into(), vec!["v0".into()], false, event_tx)
+        .expect("start tag push");
+    let _: Vec<_> = event_rx.iter().collect();
+    let bare_has_tag = || {
+        Repository::open_bare(remote_dir.path())
+            .expect("open bare")
+            .find_reference("refs/tags/v0")
+            .is_ok()
+    };
+    assert!(bare_has_tag());
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let delete_id = handle
+        .delete_remote_tag("origin".into(), "v0".into(), false, event_tx)
+        .expect("start delete");
+    let events: Vec<_> = event_rx.iter().collect();
+    assert!(delete_id.starts_with("delete-remote-"));
+    assert_eq!(
+        completed(&events),
+        (TransferOperation::DeleteRemoteTag, None)
+    );
+    assert!(!bare_has_tag());
+    // The local tag stays, and the remote delete records no undo step.
+    assert_eq!(handle.list_tags().expect("list tags").len(), 1);
+    assert_eq!(
+        handle.get_undo_state().expect("undo state").undo.as_deref(),
+        Some("Create tag v0")
+    );
+}
+
+#[test]
 fn push_and_force_push_refuse_up_front_when_push_default_needs_a_choice() {
     let (_source_dir, remote_dir, local_dir) = local_and_bare_remote();
     let local = Repository::open(local_dir.path()).expect("open local");
@@ -478,7 +536,7 @@ fn tags_and_branch_push_round_trip_through_the_worker() {
     let handle = worker.handle();
 
     handle
-        .create_tag("v1.0.0".into(), Some("first release".into()))
+        .create_tag("v1.0.0".into(), Some("first release".into()), None)
         .expect("create tag");
     let tags = handle.list_tags().expect("list tags");
     assert_eq!(tags.len(), 1);

@@ -253,6 +253,23 @@ pub async fn delete_remote_branch(
     Ok(operation_id)
 }
 
+#[tauri::command]
+pub async fn delete_remote_tag(
+    repo_path: String,
+    remote_name: String,
+    tag_name: String,
+    no_verify: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let (event_tx, event_rx) = mpsc::channel();
+    let operation_id = repo_worker(&state, &repo_path)?
+        .call(move |w| w.delete_remote_tag(remote_name, tag_name, no_verify, event_tx))
+        .await?;
+    emit_transfer_events(app, event_rx);
+    Ok(operation_id)
+}
+
 /// Asks the worker to abort the in-flight transfer `operation_id`.
 ///
 /// Deliberately does no channel round trip: `WorkerHandle::cancel_transfer` writes into the

@@ -130,7 +130,7 @@ describe("useAppState", () => {
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
-    await act(() => result.current.createTag("v1.0.0", "first release"));
+    await act(() => result.current.createTag("v1.0.0", "first release", null));
     expect(result.current.state.tags).toEqual([release]);
 
     await act(() => result.current.deleteTag("v1.0.0"));

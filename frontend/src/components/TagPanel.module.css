@@ -17,19 +17,16 @@
   gap: var(--space-1) var(--space-2);
 }
 
-.form {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: var(--space-2);
-  margin: var(--space-2) 0;
-}
-
 .label {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin: var(--space-2) 0;
   font-size: var(--text-sm);
+}
+
+.tagName {
+  overflow-wrap: anywhere;
 }
 
 .inlineLabel {

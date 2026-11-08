@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { TagPanel } from "./TagPanel";
@@ -35,8 +35,8 @@ function renderPanel(overrides: Partial<Parameters<typeof TagPanel>[0]> = {}) {
     <TagPanel
       tags={[tag]}
       remotes={[origin]}
-      onCreate={vi.fn()}
       onDelete={vi.fn().mockResolvedValue(undefined)}
+      onDeleteFromRemote={vi.fn()}
       onPush={vi.fn()}
       pushDisabled={false}
       operationDisabledReason={null}
@@ -56,52 +56,44 @@ describe("TagPanel", () => {
     expect(screen.getByRole("dialog", { name: "Delete local tag v1.0.0" })).toBeInTheDocument();
   });
 
-  it("requires a message before creating an annotated tag", () => {
-    const onCreate = vi.fn();
-    renderPanel({ onCreate });
+  // #438: tags are created from the graph and the palette; the panel is the tag list.
+  it("has no create form and points to where tags are created when there are none", () => {
+    renderPanel({ tags: [] });
 
-    fireEvent.click(screen.getByRole("radio", { name: "Annotated tag" }));
-    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "v2.0.0" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
-
-    expect(onCreate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("form", { name: "Create tag" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create tag" })).toBeNull();
+    expect(screen.getByText(/choose Create tag… in its menu in the graph/)).toBeInTheDocument();
   });
 
-  it("clears the form after a successful create", async () => {
-    const onCreate = vi.fn().mockResolvedValue(null);
-    renderPanel({ onCreate });
+  it("filters the list by name, case-insensitively", () => {
+    renderPanel({ tags: [tag, { ...tag, name: "release-2" }, { ...tag, name: "V1.1" }] });
 
-    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "v2.0.0" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
+    fireEvent.change(screen.getByLabelText("Filter tags"), { target: { value: "v1" } });
 
-    expect(onCreate).toHaveBeenCalledWith("v2.0.0", null);
-    await waitFor(() => expect(screen.getByLabelText("Tag name")).toHaveValue(""));
+    const list = screen.getByRole("list", { name: "Tags" });
+    expect(within(list).getByText("v1.0.0")).toBeInTheDocument();
+    expect(within(list).getByText("V1.1")).toBeInTheDocument();
+    expect(within(list).queryByText("release-2")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Filter tags"), { target: { value: "nothing" } });
+    expect(screen.getByText("No tags match “nothing”.")).toBeInTheDocument();
   });
 
-  // `useAppState`'s `createTag` never rejects — it reports failure by resolving to the message,
-  // the same contract `RemotePanel`'s `addRemote` established. See issue #30/UX-002.
-  it("shows a failed create-tag's message inline and keeps the entered name", async () => {
-    const onCreate = vi.fn().mockResolvedValue("tag already exists");
-    renderPanel({ onCreate });
+  it("opens Delete from remote… for a tag", () => {
+    const onDeleteFromRemote = vi.fn();
+    renderPanel({ onDeleteFromRemote });
 
-    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "v1.0.0" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete v1.0.0 from remote…" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("tag already exists");
-    expect(screen.getByLabelText("Tag name")).toHaveValue("v1.0.0");
+    expect(onDeleteFromRemote).toHaveBeenCalledWith("v1.0.0");
   });
 
-  it("clears the create-tag failure message once the name is edited again", async () => {
-    const onCreate = vi.fn().mockResolvedValue("tag already exists");
-    renderPanel({ onCreate });
+  it("disables Delete from remote… without a remote, and explains why", () => {
+    renderPanel({ remotes: [] });
 
-    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "v1.0.0" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create tag" }));
-    await screen.findByRole("alert");
-
-    fireEvent.change(screen.getByLabelText("Tag name"), { target: { value: "v1.0.1" } });
-
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Delete v1.0.0 from remote…" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "No remote configured.");
   });
 
   it("pushes only selected tags to the selected remote", () => {
@@ -132,8 +124,8 @@ describe("TagPanel", () => {
       <TagPanel
         tags={[tag]}
         remotes={[origin, backup]}
-        onCreate={vi.fn()}
         onDelete={vi.fn()}
+        onDeleteFromRemote={vi.fn()}
         onPush={onPush}
         pushDisabled={false}
         operationDisabledReason={null}
@@ -153,8 +145,8 @@ describe("TagPanel", () => {
       <TagPanel
         tags={[]}
         remotes={[origin]}
-        onCreate={vi.fn()}
         onDelete={vi.fn()}
+        onDeleteFromRemote={vi.fn()}
         onPush={onPush}
         pushDisabled={false}
         operationDisabledReason={null}
@@ -169,24 +161,16 @@ describe("TagPanel", () => {
 
     expect(screen.getByRole("button", { name: "Push selected tags" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Push all tags" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete v1.0.0 from remote…" })).toBeDisabled();
   });
 
   // Disabled buttons went inert with no explanation — issue #31/UX-003.
   it("explains why the push controls are disabled via their title", () => {
     renderPanel({ pushDisabled: true, operationDisabledReason: "A transfer is in progress." });
 
-    expect(screen.getByRole("button", { name: "Create tag" })).toHaveAttribute(
-      "title",
-      "A transfer is in progress.",
-    );
-    expect(screen.getByRole("button", { name: "Push selected tags" })).toHaveAttribute(
-      "title",
-      "A transfer is in progress.",
-    );
-    expect(screen.getByRole("button", { name: "Push all tags" })).toHaveAttribute(
-      "title",
-      "A transfer is in progress.",
-    );
+    for (const name of ["Push selected tags", "Push all tags", "Delete v1.0.0 from remote…", "Delete v1.0.0"]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute("title", "A transfer is in progress.");
+    }
   });
 
   it("deletes only after the local-delete confirmation", async () => {

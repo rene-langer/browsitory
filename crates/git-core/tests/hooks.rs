@@ -563,8 +563,8 @@ fn committing_a_merge_during_a_bisect_keeps_the_bisect() {
 // ---- pre-push ------------------------------------------------------------------------------
 
 use git_core::remote::{
-    delete_remote_branch, push_branch, push_current_branch, push_tags, CredentialProvider,
-    RemoteError, TransferPhase, TransferProgress, TransferReporter,
+    delete_remote_branch, delete_remote_tag, push_branch, push_current_branch, push_tags,
+    CredentialProvider, RemoteError, TransferPhase, TransferProgress, TransferReporter,
 };
 
 #[derive(Default)]
@@ -758,7 +758,7 @@ fn cancel_during_pre_push_is_a_cancellation() {
 #[test]
 fn pushing_tags_runs_pre_push() {
     let fixture = pushable();
-    git_core::remote::create_tag(&fixture.local, "v1", None).unwrap();
+    git_core::remote::create_tag(&fixture.local, "v1", None, None).unwrap();
     common::install_hook(&hooks_dir(&fixture.local).unwrap(), "pre-push", "exit 1");
 
     let error = push_tags(
@@ -850,6 +850,63 @@ fn a_failing_pre_push_blocks_a_remote_branch_delete() {
 
     assert!(matches!(error, RemoteError::HookFailed { .. }));
     assert!(remote_ref(&fixture.remote_path, "refs/heads/topic").is_some());
+}
+
+#[test]
+fn delete_remote_tag_runs_pre_push_and_a_failing_hook_blocks_it() {
+    let fixture = pushable();
+    git_core::remote::create_tag(&fixture.local, "v1", None, None).unwrap();
+    push_tags(
+        &fixture.local,
+        "origin",
+        &["v1".to_string()],
+        false,
+        &mut NoCredentials,
+        &mut Phases::default(),
+        &|| false,
+    )
+    .unwrap();
+    let tagged = remote_ref(&fixture.remote_path, "refs/tags/v1").unwrap();
+    common::install_hook(&hooks_dir(&fixture.local).unwrap(), "pre-push", "exit 1");
+
+    let error = delete_remote_tag(
+        &fixture.local,
+        "origin",
+        "v1",
+        false,
+        &mut NoCredentials,
+        &mut Phases::default(),
+        &|| false,
+    )
+    .unwrap_err();
+    assert!(matches!(error, RemoteError::HookFailed { .. }));
+    assert_eq!(
+        remote_ref(&fixture.remote_path, "refs/tags/v1"),
+        Some(tagged)
+    );
+
+    let record = fixture.local_dir.path().join("pre-push.txt");
+    common::install_hook(
+        &hooks_dir(&fixture.local).unwrap(),
+        "pre-push",
+        &format!("cat >> '{}'", record.display()),
+    );
+    delete_remote_tag(
+        &fixture.local,
+        "origin",
+        "v1",
+        false,
+        &mut NoCredentials,
+        &mut Phases::default(),
+        &|| false,
+    )
+    .unwrap();
+    let zero = git2::Oid::ZERO_SHA1;
+    assert_eq!(
+        std::fs::read_to_string(&record).unwrap(),
+        format!("(delete) {zero} refs/tags/v1 {tagged}\n")
+    );
+    assert_eq!(remote_ref(&fixture.remote_path, "refs/tags/v1"), None);
 }
 
 fn install_raw_hook(repo: &git2::Repository, name: &str, contents: &str) {

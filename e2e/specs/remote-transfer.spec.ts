@@ -4,6 +4,7 @@ import { createServer } from "node:https";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { clickInPage } from "../support/dom";
 import { ADD_REMOTE_NAME_INPUT, expandSidebarSection, sidebarRemoteFolder } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -229,9 +230,9 @@ describe("Browsitory remote transfer", () => {
     );
   });
 
-  it("pushes the current branch and a local tag", async () => {
-    // "Branches" holds the remote-folder's push action; "Tags" holds the tag-creation form and
-    // the push-tags controls used later in this test. Both default closed.
+  it("pushes the current branch and a tag created at an older commit", async () => {
+    // "Branches" holds the remote-folder's push action; "Tags" holds the push-tags controls used
+    // later in this test. Both default closed.
     await expandSidebarSection("Branches");
     await expandSidebarSection("Tags");
 
@@ -298,24 +299,35 @@ describe("Browsitory remote transfer", () => {
     // The differently named upstream branch is never the silent target.
     if (needsChoice) expect(bareTip(upstreamBranch)).toBe(upstreamBeforePush);
 
-    const createTagButton = await $("button=Create tag");
-    await createTagButton.waitForEnabled({ timeout: 10000 });
-    await (await $("//form[@aria-label='Create tag']//label[contains(., 'Tag name')]//input")).setValue("e2e-transfer-tag");
-    await createTagButton.click();
+    // #438: tag the commit before HEAD from its row in the graph, without checking it out.
+    const parent = execFileSync("git", ["rev-parse", "HEAD~1"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+    const parentRow = await $(`li.commit-row[data-commit-id="${parent}"]`);
+    await parentRow.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => {
+      el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
+    }, parentRow);
+    await clickInPage("[role='menu'] button", "Create tag…");
+    const tagDialog = await $("dialog[aria-label='Create tag']");
+    await tagDialog.waitForExist({ timeout: 10000 });
+    await expect(tagDialog).toHaveText(expect.stringContaining(parent.slice(0, 7)));
+    await (await tagDialog.$("//label[contains(., 'Tag name')]/following-sibling::input")).setValue("e2e-transfer-tag");
+    await clickInPage("dialog[aria-label='Create tag'] button[type='submit']", "Create tag");
     await browser.waitUntil(
       () => {
         try {
-          execFileSync("git", ["show-ref", "--verify", "refs/tags/e2e-transfer-tag"], {
-            cwd: E2E_REPO_PATH,
-            stdio: "ignore",
-          });
-          return true;
+          return (
+            execFileSync("git", ["rev-parse", "refs/tags/e2e-transfer-tag^{commit}"], {
+              cwd: E2E_REPO_PATH,
+              encoding: "utf8",
+            }).trim() === parent
+          );
         } catch {
           return false;
         }
       },
-      { timeout: 10000, timeoutMsg: "expected local tag creation to complete" },
+      { timeout: 10000, timeoutMsg: "expected the tag to be created at the older commit" },
     );
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim()).toBe(localHead);
     const pushTags = await $("button=Push all tags");
     await pushTags.waitForEnabled({ timeout: 10000 });
     await $("section[aria-labelledby='push-tags-heading'] select").selectByAttribute("value", "transfer-origin");
@@ -332,6 +344,39 @@ describe("Browsitory remote transfer", () => {
       },
       { timeout: 10000, timeoutMsg: "expected tag push to complete" },
     );
+  });
+
+  it("deletes a tag on the remote and, when asked, locally too", async () => {
+    // #439. Follows the push above, which left `e2e-transfer-tag` on `transfer-origin`.
+    await expandSidebarSection("Tags");
+    const hasTag = (cwd: string) => {
+      try {
+        execFileSync("git", ["show-ref", "--verify", "refs/tags/e2e-transfer-tag"], { cwd, stdio: "ignore" });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    expect(hasTag(BARE_REMOTE_PATH)).toBe(true);
+
+    await clickInPage("button", "Delete e2e-transfer-tag from remote…");
+    const dialog = await $("dialog[aria-label='Delete tag e2e-transfer-tag from remote']");
+    await dialog.waitForExist({ timeout: 10000 });
+    // A picker only appears with several remotes; aim at this spec's own remote either way.
+    const picker = await dialog.$("select");
+    if (await picker.isExisting()) await picker.selectByAttribute("value", "transfer-origin");
+    await expect(dialog).toHaveText(expect.stringContaining("Delete tag e2e-transfer-tag on transfer-origin? This can't be undone."));
+    await (await dialog.$("//label[contains(., 'Also delete the local tag')]/input")).click();
+    await (await dialog.$("button=Delete from remote")).click();
+
+    await browser.waitUntil(() => !hasTag(BARE_REMOTE_PATH), {
+      timeout: 10000,
+      timeoutMsg: "expected the tag to be deleted on the remote",
+    });
+    await browser.waitUntil(() => !hasTag(E2E_REPO_PATH), {
+      timeout: 10000,
+      timeoutMsg: "expected the local tag to be deleted after the remote delete",
+    });
   });
 
   it("selects SSH-agent authentication without rendering an HTTPS token field", async () => {

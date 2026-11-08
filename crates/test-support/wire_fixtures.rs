@@ -99,6 +99,7 @@ pub fn transfer_operations() -> Vec<TransferOperation> {
         ForcePushBranch,
         PushTags,
         DeleteRemoteBranch,
+        DeleteRemoteTag,
         Clone
     })
 }

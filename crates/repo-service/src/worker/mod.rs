@@ -394,6 +394,7 @@ pub(crate) enum Command {
     CreateTag {
         name: String,
         message: Option<String>,
+        target: Option<String>,
         reply: Sender<Result<(), String>>,
     },
     DeleteTag {
@@ -644,6 +645,14 @@ pub(crate) enum Command {
     DeleteRemoteBranch {
         remote_name: String,
         branch_name: String,
+        no_verify: bool,
+        operation_id: cancel::OperationId,
+        events: Sender<TransferEvent>,
+        reply: Sender<Result<String, String>>,
+    },
+    DeleteRemoteTag {
+        remote_name: String,
+        tag_name: String,
         no_verify: bool,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
@@ -1274,8 +1283,9 @@ impl Worker {
                     Command::CreateTag {
                         name,
                         message,
+                        target,
                         reply,
-                    } => tag::create(&repo, name, message, reply),
+                    } => tag::create(&repo, name, message, target, reply),
                     Command::DeleteTag { name, reply } => tag::delete(&repo, name, reply),
                     Command::ListStashes { reply } => stash::list(&mut repo, reply),
                     Command::SaveStash { options, reply } => stash::save(&mut repo, options, reply),
@@ -1639,6 +1649,23 @@ impl Worker {
                         &credential_service,
                         remote_name,
                         branch_name,
+                        no_verify,
+                        remote::TransferOp::new(operation_id),
+                        events,
+                        reply,
+                    ),
+                    Command::DeleteRemoteTag {
+                        remote_name,
+                        tag_name,
+                        no_verify,
+                        operation_id,
+                        events,
+                        reply,
+                    } => remote::delete_remote_tag(
+                        &repo,
+                        &credential_service,
+                        remote_name,
+                        tag_name,
                         no_verify,
                         remote::TransferOp::new(operation_id),
                         events,

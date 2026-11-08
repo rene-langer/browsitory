@@ -13,9 +13,10 @@ pub(super) fn create(
     repo: &git2::Repository,
     name: String,
     message: Option<String>,
+    target: Option<String>,
     reply: Sender<Result<(), String>>,
 ) {
-    let result = git_core::remote::create_tag(repo, &name, message.as_deref())
+    let result = git_core::remote::create_tag(repo, &name, message.as_deref(), target.as_deref())
         .map_err(|error| error.to_string());
     let _ = reply.send(result);
 }
@@ -36,12 +37,19 @@ impl WorkerHandle {
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
 
-    pub fn create_tag(&self, name: String, message: Option<String>) -> Result<(), String> {
+    /// Tags `target` (a full commit id), or HEAD's commit when `None`.
+    pub fn create_tag(
+        &self,
+        name: String,
+        message: Option<String>,
+        target: Option<String>,
+    ) -> Result<(), String> {
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::CreateTag {
                 name,
                 message,
+                target,
                 reply: reply_tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;

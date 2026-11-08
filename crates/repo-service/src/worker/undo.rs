@@ -268,6 +268,7 @@ fn busy_refusal(command: &Command) -> Option<BusyRefusal<'_>> {
         | Command::FetchAllRemotes { .. }
         | Command::PushBranch { .. }
         | Command::DeleteRemoteBranch { .. }
+        | Command::DeleteRemoteTag { .. }
         | Command::DetectForgeRepository { .. }
         | Command::SaveForgeToken { .. }
         | Command::ForgetForgeToken { .. }
@@ -1424,7 +1425,8 @@ mod tests {
         });
         assert_held!(CreateTag {
             name: s(),
-            message: None
+            message: None,
+            target: None
         });
         assert_held!(DeleteTag { name: s() });
         assert_held!(DiscardHunk {

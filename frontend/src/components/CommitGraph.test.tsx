@@ -1322,4 +1322,70 @@ describe("CommitGraph — tag badges", () => {
     fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
     expect(screen.getByRole("menuitem", { name: "Cherry-pick" })).toBeInTheDocument();
   });
+
+  it("offers Branch from tag and Delete from remote… on a tag badge", () => {
+    const onDeleteTagFromRemote = vi.fn();
+    const { onBranchFromCommit } = renderGraph({
+      remotes,
+      onPushTag: vi.fn(),
+      onDeleteTag: vi.fn(async () => {}),
+      onDeleteTagFromRemote,
+    });
+
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Branch from tag" }));
+    expect(onBranchFromCommit).toHaveBeenCalledWith(tagged[0].id);
+
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete from remote…" }));
+    expect(onDeleteTagFromRemote).toHaveBeenCalledWith("v2.0");
+  });
+
+  it("disables Delete from remote… without remotes", () => {
+    renderGraph({ remotes: [], onPushTag: vi.fn(), onDeleteTag: vi.fn(async () => {}), onDeleteTagFromRemote: vi.fn() });
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    const item = screen.getByRole("menuitem", { name: "Delete from remote…" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "No remote configured.");
+  });
+});
+
+describe("CommitGraph — Create tag…", () => {
+  function renderGraph(overrides: Partial<ComponentProps<typeof CommitGraph>> = {}) {
+    render(
+      <CommitGraph
+        status={[]}
+        commits={commits}
+        selectedRow={{ commitId: commits[1].id }}
+        pending={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        onCherryPick={vi.fn()}
+        onRevert={vi.fn()}
+        onCheckoutCommit={vi.fn()}
+        onResetToCommit={vi.fn()}
+        onEditHeadMessage={vi.fn()}
+        headInfo={{ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }}
+        currentBranch="main"
+        {...overrides}
+      />,
+    );
+  }
+
+  it("is in the commit menu and opens with the keyboard for the selected commit", () => {
+    const onCreateTag = vi.fn();
+    renderGraph({ onCreateTag });
+
+    fireEvent.keyDown(screen.getByRole("listbox", { name: "Commit history" }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create tag…" }));
+
+    expect(onCreateTag).toHaveBeenCalledWith(commits[1].id);
+  });
+
+  it("is absent when no handler is wired", () => {
+    renderGraph();
+    fireEvent.keyDown(screen.getByRole("listbox", { name: "Commit history" }), { key: "Enter" });
+    expect(screen.queryByRole("menuitem", { name: "Create tag…" })).toBeNull();
+  });
 });
