@@ -9,6 +9,7 @@ import { expandSidebarSection, sidebarRemoteFolder, sidebarSectionToggle } from 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-keyboard-remote.git");
 const REMOTE_NAME = "kbd-origin";
+const TAG_NAME = "e2e-kbd-tag";
 
 // Same retrying open as `command-palette.spec.ts`'s `openPalette` (Ctrl+K can arrive before the
 // workspace's key handler is attached right after `beforeTest`'s reload). `label` is the full
@@ -47,15 +48,17 @@ async function runPaletteCommand(label: string): Promise<void> {
 }
 
 describe("Browsitory keyboard context menus", () => {
-  // Non-destructive: one remote added here and removed in `after`; the tests only open and
-  // close menus and dialogs.
+  // Non-destructive: one remote and one tag added here and removed in `after`; the tests only
+  // open and close menus and dialogs.
   before(() => {
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
     execFileSync("git", ["init", "--bare", BARE_REMOTE_PATH], { stdio: "inherit" });
     execFileSync("git", ["remote", "add", REMOTE_NAME, BARE_REMOTE_PATH], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    execFileSync("git", ["tag", "-f", TAG_NAME], { cwd: E2E_REPO_PATH, stdio: "inherit" });
   });
 
   after(() => {
+    execFileSync("git", ["tag", "-d", TAG_NAME], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     execFileSync("git", ["remote", "remove", REMOTE_NAME], { cwd: E2E_REPO_PATH, stdio: "inherit" });
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
   });
@@ -101,6 +104,28 @@ describe("Browsitory keyboard context menus", () => {
     await browser.keys(["Escape"]);
     await waitUntilGoneInPage("[role='menu']");
     expect(await browser.execute((el) => document.activeElement === (el as Element), header)).toBe(true);
+  });
+
+  it("opens a tag row's menu from the keyboard and returns focus on Escape", async () => {
+    await expandSidebarSection("Tags");
+    const actions = await $(`button[aria-label="Actions for ${TAG_NAME}"]`);
+    await actions.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => (el as HTMLElement).focus(), actions);
+
+    await browser.keys(["Shift", "F10"]);
+    const menu = await $("[role='menu']");
+    await menu.waitForExist({ timeout: 10000 });
+    await browser.pause(300);
+    expect(await $$("[role='menu']")).toHaveLength(1);
+    expect(await browser.execute(() => document.activeElement?.getAttribute("role"))).toBe("menuitem");
+    const labels = await browser.execute(() =>
+      Array.from(document.querySelectorAll("[role='menu'] [role='menuitem']")).map((item) => item.textContent),
+    );
+    expect(labels).toEqual(expect.arrayContaining(["Branch from tag", "Delete from remote…", "Delete tag…"]));
+
+    await browser.keys(["Escape"]);
+    await waitUntilGoneInPage("[role='menu']");
+    expect(await browser.execute((el) => document.activeElement === (el as Element), actions)).toBe(true);
   });
 
   it("opens Edit remote from the palette", async () => {

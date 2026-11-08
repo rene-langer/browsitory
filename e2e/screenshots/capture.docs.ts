@@ -126,7 +126,7 @@ describe("Documentation screenshots", () => {
   it("tags", async () => {
     await collapseSidebarSection("Stashes");
     await expandSidebarSection("Tags");
-    await $("label*=v0.2.0").waitForExist({ timeout: 10000 });
+    await $('button[aria-label="Actions for v0.2.0"]').waitForExist({ timeout: 10000 });
     await shoot("tags");
     await collapseSidebarSection("Tags");
     await expandSidebarSection("Branches");

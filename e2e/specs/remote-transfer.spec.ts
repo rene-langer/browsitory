@@ -359,7 +359,11 @@ describe("Browsitory remote transfer", () => {
     };
     expect(hasTag(BARE_REMOTE_PATH)).toBe(true);
 
-    await clickInPage("button", "Delete e2e-transfer-tag from remote…");
+    // The Tags panel row's "…" menu (shown on hover/focus, clickable in the page either way).
+    const actions = await $('button[aria-label="Actions for e2e-transfer-tag"]');
+    await actions.waitForExist({ timeout: 10000 });
+    await browser.execute((el) => (el as HTMLElement).click(), actions);
+    await clickInPage("[role='menu'] button", "Delete from remote…");
     const dialog = await $("dialog[aria-label='Delete tag e2e-transfer-tag from remote']");
     await dialog.waitForExist({ timeout: 10000 });
     // A picker only appears with several remotes; aim at this spec's own remote either way.

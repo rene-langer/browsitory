@@ -459,6 +459,7 @@ export function RepoWorkspace({
           key={createTagDialog.commitId}
           shortId={createTagCommit?.shortId ?? createTagDialog.commitId.slice(0, 7)}
           summary={createTagCommit?.summary ?? null}
+          existingTags={appState.state.tags.map((tag) => tag.name)}
           remotes={appState.state.remotes}
           disabled={repositoryOperationDisabled}
           disabledReason={operationDisabledReason}
@@ -696,6 +697,9 @@ export function RepoWorkspace({
                 onDelete={appState.deleteTag}
                 onDeleteFromRemote={appState.openDeleteRemoteTagDialog}
                 onPush={appState.pushTags}
+                onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
+                onBranchFromCommit={appState.openCreateBranchDraft}
+                onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
                 pushDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
               />

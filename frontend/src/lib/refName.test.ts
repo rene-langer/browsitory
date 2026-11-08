@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { branchNameProblem, remoteNameProblem } from "./refName";
+import { branchNameProblem, remoteNameProblem, tagNameProblem } from "./refName";
 
 describe("branchNameProblem", () => {
   it.each(["feat/new", "fix-123", "release/1.2.3", ""])("accepts %s", (name) => {
@@ -18,6 +18,18 @@ describe("remoteNameProblem", () => {
     "rejects %s",
     (name) => {
       expect(remoteNameProblem(name)).not.toBeNull();
+    },
+  );
+});
+
+describe("tagNameProblem", () => {
+  it.each(["v1.0.0", "release/2026-11", "v1_rc@2", ""])("accepts %s", (name) => {
+    expect(tagNameProblem(name)).toBeNull();
+  });
+  it.each(["v 1", "v1~1", "a:b", "v1..2", "x@{1}", "-x", "+x", "/v1", "v1/", "a//b", "v1.", ".v1", "a/.b", "v1.lock", "a.lock/b", "@"])(
+    "rejects %s",
+    (name) => {
+      expect(tagNameProblem(name)).not.toBeNull();
     },
   );
 });

@@ -24,6 +24,7 @@ import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { RefBadges } from "./RefBadges";
+import { tagMenuItems } from "./tagMenuItems";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
@@ -207,33 +208,17 @@ export function CommitGraph({
   }
 
   function tagItems(tag: string, commitId: string): ContextMenuItem[] {
-    const push: ContextMenuItem[] =
-      remotes.length === 0
-        ? [{ label: "Push tag", onSelect: () => {}, disabled: true, title: "No remote configured." }]
-        : remotes.map((remote) => ({
-            label: `Push ${tag} to ${remote.name}`,
-            onSelect: () => onPushTag?.(remote.name, tag),
-            disabled: pending,
-          }));
-    const deleteFromRemote: ContextMenuItem[] =
-      onDeleteTagFromRemote === undefined
-        ? []
-        : [
-            {
-              label: "Delete from remote…",
-              destructive: true,
-              onSelect: () => onDeleteTagFromRemote(tag),
-              disabled: pending || remotes.length === 0,
-              title: remotes.length === 0 ? "No remote configured." : undefined,
-            },
-          ];
-    return [
-      ...push,
-      { label: "Branch from tag", onSelect: () => onBranchFromCommit(commitId) },
-      { label: "Checkout (detached)", onSelect: () => onCheckoutCommit(commitId), disabled: pending },
-      ...deleteFromRemote,
-      { label: "Delete tag…", destructive: true, onSelect: () => setTagToDelete(tag), disabled: pending },
-    ];
+    return tagMenuItems({
+      tag,
+      commitId,
+      remotes,
+      disabled: pending,
+      onPushTag,
+      onBranchFromCommit,
+      onCheckoutCommit,
+      onDeleteFromRemote: onDeleteTagFromRemote,
+      onDelete: setTagToDelete,
+    });
   }
 
   // Keep the keyboard-driven selection visible in a long history.

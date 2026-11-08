@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
+import { tagNameProblem } from "../lib/refName";
+import { refNameClash, takenNameMessage } from "../lib/takenNames";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
 import { InlineError } from "./primitives/InlineError";
@@ -19,6 +21,7 @@ function defaultRemote(remotes: RemoteInfo[]): string {
 export function CreateTagDialog({
   shortId,
   summary,
+  existingTags,
   remotes,
   disabled,
   disabledReason,
@@ -28,6 +31,8 @@ export function CreateTagDialog({
   /** The target commit, as shown to the user. */
   shortId: string;
   summary: string | null;
+  /** Local tag names: a name that clashes with one is refused next to the field (#418). */
+  existingTags: readonly string[];
   remotes: RemoteInfo[];
   /** A repository operation is running: creating is blocked until it ends. */
   disabled: boolean;
@@ -49,9 +54,18 @@ export function CreateTagDialog({
 
   const trimmedName = name.trim();
   const trimmedMessage = message.trim();
+  // Checked as you type, like the New branch and Add remote forms (#418): invalid ref names and
+  // names already taken (also as a folder of another tag) never reach the backend.
+  const clash = trimmedName === "" ? null : refNameClash(existingTags, trimmedName);
+  const nameProblem =
+    tagNameProblem(trimmedName) ?? (clash === null ? null : takenNameMessage("tag", trimmedName, clash));
   const pushTo = push && remoteName !== "" ? remoteName : null;
   const blocked =
-    disabled || submitting || trimmedName === "" || (kind === "annotated" && trimmedMessage === "");
+    disabled ||
+    submitting ||
+    trimmedName === "" ||
+    nameProblem !== null ||
+    (kind === "annotated" && trimmedMessage === "");
 
   return (
     <FormDialog ariaLabel="Create tag" onCancel={onCancel}>
@@ -71,7 +85,7 @@ export function CreateTagDialog({
           Tag commit <code>{shortId}</code>
           {summary !== null && summary !== "" && <> {summary}</>}
         </p>
-        <Field label="Tag name">
+        <Field label="Tag name" error={nameProblem}>
           {(props) => (
             <input
               {...props}
