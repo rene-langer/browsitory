@@ -172,7 +172,11 @@ fn a_commit_only_on_a_remote_branch_names_that_remote_branch() {
     assert_eq!(hidden.position, None);
     assert!(hidden.branches.is_empty());
     assert_eq!(hidden.remote_branches, vec!["origin/trunk".to_string()]);
-    assert_eq!(walked.position, Some(0));
+    // Its row in that graph (commits made in the same second may come in either order).
+    let graph = graph_log(&repo, 50, &shown).unwrap();
+    let row = graph.iter().position(|c| c.id == remote_only.to_string());
+    assert!(row.is_some());
+    assert_eq!(walked.position, row);
 }
 
 #[test]
