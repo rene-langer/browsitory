@@ -1,7 +1,7 @@
 {
   "name": "browsitory-vscode-e2e",
   "private": true,
-  "packageManager": "pnpm@9.15.9",
+  "packageManager": "pnpm@12.18.0",
   "scripts": {
     "test": "tsc -p tsconfig.json && node out/runTests.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -1,0 +1,8 @@
+# pnpm settings for e2e/ (pnpm 11+ reads them only from here). Dependency build scripts are
+# blocked unless listed: esbuild (via tsx, which loads wdio.conf.ts) checks its platform
+# binary; edgedriver/geckodriver only download a driver when *_AUTO_INSTALL is set, and
+# the Tauri suite drives tauri-driver, not Edge or Firefox.
+allowBuilds:
+  esbuild: true
+  edgedriver: false
+  geckodriver: false

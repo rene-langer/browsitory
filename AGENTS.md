@@ -120,7 +120,12 @@ with hashes in `docs/requirements.txt` by Renovate's `pip-compile` manager). Min
 are grouped per ecosystem (Rust, JS, Python docs tools, GitHub Actions); Tauri crates and `@tauri-apps/*` packages share one group. Majors and
 `git2`/`libgit2-sys` wait for approval on the Dependency Dashboard issue (libgit2 bumps change
 behaviour the tests and `docs/ARCHITECTURE.md` characterize). Security fixes skip the
-schedule; lockfiles get a monthly maintenance PR.
+schedule; lockfiles get a monthly maintenance PR. npm versions wait a day before Renovate proposes
+them: pnpm 12 (pinned in all four `packageManager` fields) refuses to install, even with
+`--frozen-lockfile`, anything published less than a day ago (`minimumReleaseAge`). It also
+runs no dependency build script that the project's `pnpm-workspace.yaml` `allowBuilds` doesn't
+list, and an unlisted one fails the install: a new dependency with a postinstall needs an
+entry (`true`, or `false` when the script isn't needed; see `docs/ARCHITECTURE.md`).
 
 The license policy and the CI `audit` and `licenses` jobs still apply to these PRs. The
 `licenses` job checks every licence in the full Rust and npm trees, transitive and dev
