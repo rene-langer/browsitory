@@ -474,3 +474,61 @@ fn a_selected_remote_branch_that_no_longer_exists_is_skipped() {
             .is_empty()
     );
 }
+
+/// `base` on `main`, then HEAD detached at `base` and two commits on it that no branch
+/// contains (#467).
+fn detached_ahead_of_every_branch() -> (tempfile::TempDir, git2::Repository) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().target().unwrap();
+    repo.reference("refs/heads/main", base, true, "test")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.set_head_detached(base).unwrap();
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "detached 1");
+    write_file(dir.path(), "file.txt", "v3");
+    commit_all(&repo, "detached 2");
+    (dir, repo)
+}
+
+#[test]
+fn the_default_graph_includes_a_detached_head_that_no_branch_contains() {
+    let (_dir, repo) = detached_ahead_of_every_branch();
+
+    let commits = git_core::graph::graph_log(&repo, 50, &GraphSelection::default()).unwrap();
+
+    assert_eq!(summaries(&commits), ["detached 2", "detached 1", "base"]);
+    assert!(commits[0].branch_refs.is_empty());
+}
+
+#[test]
+fn a_branch_selection_still_includes_the_detached_head() {
+    let (_dir, repo) = detached_ahead_of_every_branch();
+
+    for selection in [local(&["main"]), local(&[]), local(&["gone"])] {
+        let commits = git_core::graph::graph_log(&repo, 50, &selection).unwrap();
+
+        assert_eq!(
+            summaries(&commits),
+            ["detached 2", "detached 1", "base"],
+            "{selection:?}"
+        );
+    }
+}
+
+#[test]
+fn a_detached_head_at_a_branch_tip_adds_no_duplicate_row() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "tip");
+    let tip = repo.head().unwrap().target().unwrap();
+    repo.set_head_detached(tip).unwrap();
+
+    let commits = git_core::graph::graph_log(&repo, 50, &GraphSelection::default()).unwrap();
+
+    assert_eq!(summaries(&commits), ["tip", "base"]);
+}

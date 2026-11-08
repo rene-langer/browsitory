@@ -672,7 +672,13 @@ certificate.
   saved, is every local branch; `Some([])` none) plus the selected remote branches (`remote`,
   `<remote>/<branch>` names pushed as `refs/remotes/…`; empty, also for a never-saved remote
   selection, walks none, so the default graph has no remote-only commits, #385). Missing names
-  are skipped (#97). Both selections are required parameters of `get_commit_graph` and
+  are skipped (#97). A detached HEAD is always a start point too, whatever the selection (#467):
+  its commits may be on no branch (a commit after checking out a commit or tag, a submodule's
+  checkout, a terminal rebase), and it is what the user is on. An attached HEAD adds nothing (its
+  branch is walked when selected). The search cursor's fingerprint covers it, as it covers every
+  start oid. The frontend marks the row with a HEAD badge from `HeadInfo` (`headId` +
+  `detachedAt`); `GraphCommit` carries no HEAD flag. File history already walks from HEAD.
+  Both selections are required parameters of `get_commit_graph` and
   `search_commits` on both transports (`remoteBranches` has no default), so a caller can't drop
   the remote one by leaving it out.
 - Exactly one branch in the graph selection, local and remote together (what "Isolate branch"

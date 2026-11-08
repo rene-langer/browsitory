@@ -14,7 +14,8 @@ Right-click a commit in the graph:
   **Abort revert**). On a merge commit, **Revert…** asks for the parent to keep (parent 1 undoes
   what the merge brought in), and the message names it like `git revert -m` does.
 - **Checkout (detached)** checks the commit out without a branch. The sync bar shows
-  **HEAD detached at …** and push and pull are disabled until you check out a branch.
+  **HEAD detached at …** and push and pull are disabled until you check out a branch. The
+  commit's row in the graph has a **HEAD** badge.
 - **Reset ⟨branch⟩ to here…** moves your branch to that commit. **Soft** keeps your changes
   staged, **Mixed** (the default) keeps them unstaged, **Hard** discards changes to tracked files;
   untracked files are kept. Hard asks for a second confirmation (**Reset hard**). Not available
