@@ -511,6 +511,21 @@ fn an_unborn_repository_returns_an_empty_final_page() {
     assert_eq!(page.scanned, 0);
 }
 
+#[test]
+fn search_finds_commits_on_a_detached_head_that_no_branch_contains() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().target().unwrap();
+    repo.set_head_detached(base).unwrap();
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "detached needle");
+
+    assert_eq!(summaries(&repo, "needle"), ["detached needle"]);
+    let page = search_with(&repo, "needle", Some(&[])).unwrap();
+    assert_eq!(page.commits.len(), 1);
+}
+
 fn linear_history(dir: &Path, repo: &Repository, messages: &[&str]) {
     for (i, message) in messages.iter().enumerate() {
         write_file(dir, &format!("f{i}.txt"), message);

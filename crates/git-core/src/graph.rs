@@ -131,7 +131,8 @@ impl GraphSelection {
         matches!(&self.local, Some(local) if local.len() + self.remote.len() == 1)
     }
 
-    /// The commits the walk starts from, sorted and deduplicated. A persisted selection can
+    /// The commits the walk starts from, sorted and deduplicated: the selected branches plus a
+    /// detached HEAD (#467). A persisted selection can
     /// outlive its branches (deleted or renamed, possibly outside the app, or a remote branch
     /// pruned by a fetch): missing names are skipped instead of failing the walk (#97).
     pub(crate) fn start_oids(&self, repo: &Repository) -> Result<Vec<Oid>, git2::Error> {
@@ -169,6 +170,15 @@ impl GraphSelection {
         }
         for name in &self.remote {
             oids.extend(named(&format!("refs/remotes/{name}"))?);
+        }
+        // A detached HEAD is what the user is on, whatever the selection: its commits may be on
+        // no branch at all (a commit made after checking out a tag or a commit, a submodule's
+        // checkout, a rebase in progress), and would otherwise be missing (#467). An attached
+        // HEAD is a branch, walked when that branch is selected.
+        if repo.head_detached().unwrap_or(false) {
+            if let Ok(commit) = repo.head().and_then(|head| head.peel_to_commit()) {
+                oids.push(commit.id());
+            }
         }
         oids.sort();
         oids.dedup();

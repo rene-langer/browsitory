@@ -26,6 +26,46 @@ function appIsRunning(): boolean {
   return false;
 }
 
+/** Every file under `dir`, recursively (none when it doesn't exist). */
+function filesUnder(dir: string): string[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return []; // Missing, or removed while we looked.
+  }
+  return entries.flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return filesUnder(full);
+    return entry.isFile() ? [full] : [];
+  });
+}
+
+/**
+ * The files under `dir` that hold `PROBE_KEY`, relative to `dir`. WebKitGTK keeps localStorage in
+ * SQLite databases (and their `-wal` journals) below the data folder; the key may be stored as
+ * UTF-8 or UTF-16, so both are searched.
+ */
+function filesWithProbe(dir: string): string[] {
+  const needles = [Buffer.from(PROBE_KEY, "utf8"), Buffer.from(PROBE_KEY, "utf16le")];
+  return filesUnder(dir)
+    .filter((file) => {
+      try {
+        const contents = fs.readFileSync(file);
+        return needles.some((needle) => contents.includes(needle));
+      } catch {
+        return false; // Removed or replaced while we looked.
+      }
+    })
+    .map((file) => path.relative(dir, file));
+}
+
+/** For failure messages: the files under `dir`, relative to it. */
+function listing(dir: string): string {
+  const files = filesUnder(dir).map((file) => path.relative(dir, file));
+  return files.length === 0 ? "(no files)" : files.join(", ");
+}
+
 // #433: the bundle identifier changed from com.browsitory.app to com.browsitory.desktop. The first
 // start of the new version renames the old folder, so the webview's localStorage (theme, panel
 // sizes, ...) and the logs carry over. The test turns this run's folder into a 0.3.x one while
@@ -33,6 +73,13 @@ function appIsRunning(): boolean {
 describe("Browsitory identifier migration", () => {
   it("moves the 0.3.x data folder to the new identifier and keeps localStorage", async () => {
     await browser.execute((key) => window.localStorage.setItem(key, "kept"), PROBE_KEY);
+    // WebKitGTK writes localStorage to disk asynchronously, and ending the session stops the
+    // app: without this wait the write can be lost before the folder is moved (#465).
+    await browser.waitUntil(async () => filesWithProbe(NEW_DIR).length > 0, {
+      timeout: 20000,
+      interval: 200,
+      timeoutMsg: `the localStorage probe never reached the disk; files under ${NEW_DIR}: ${listing(NEW_DIR)}`,
+    });
 
     await browser.deleteSession();
     await browser.waitUntil(async () => !appIsRunning(), {
@@ -42,15 +89,33 @@ describe("Browsitory identifier migration", () => {
     expect(fs.existsSync(NEW_DIR)).toBe(true);
     fs.rmSync(OLD_DIR, { recursive: true, force: true });
     fs.renameSync(NEW_DIR, OLD_DIR);
+    const probeFilesBefore = filesWithProbe(OLD_DIR);
+    if (probeFilesBefore.length === 0) {
+      throw new Error(`the localStorage probe is gone from disk after the app exited; files under ${OLD_DIR}: ${listing(OLD_DIR)}`);
+    }
 
     // reloadSession's own deleteSession fails on the ended session (WebdriverIO only logs it) and
     // then starts a fresh app process.
     await browser.reloadSession();
 
-    await browser.waitUntil(
-      async () => (await browser.execute((key) => window.localStorage.getItem(key), PROBE_KEY)) === "kept",
-      { timeout: 20000, timeoutMsg: "localStorage did not carry over to the new identifier" },
-    );
+    let seen: unknown = null;
+    await browser
+      .waitUntil(
+        async () => {
+          seen = await browser.execute((key) => window.localStorage.getItem(key), PROBE_KEY);
+          return seen === "kept";
+        },
+        { timeout: 20000 },
+      )
+      .catch(() => {
+        throw new Error(
+          "localStorage did not carry over to the new identifier. " +
+            `The new session read ${JSON.stringify(seen)}; before the restart the probe was in ` +
+            `${probeFilesBefore.join(", ")} under the old folder; the old folder is ` +
+            `${fs.existsSync(OLD_DIR) ? "still there" : "gone"}; the probe is now in ` +
+            `[${filesWithProbe(NEW_DIR).join(", ")}]; files under ${NEW_DIR}: ${listing(NEW_DIR)}`,
+        );
+      });
     expect(fs.existsSync(OLD_DIR)).toBe(false);
     expect(fs.existsSync(path.join(NEW_DIR, "logs", "browsitory.log"))).toBe(true);
     const log = fs.readFileSync(path.join(NEW_DIR, "logs", "browsitory.log"), "utf8");
