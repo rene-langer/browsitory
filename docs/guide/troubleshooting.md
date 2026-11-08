@@ -9,10 +9,14 @@ renamed with the date and time (`browsitory_2026-11-06_14-30-00.log`) and a new 
 5 most recent old files are kept. Attach `browsitory.log` (and the newest old file, if the
 problem was earlier) to a bug report:
 
-- **Linux:** `~/.local/share/com.browsitory.app/logs` (or `$XDG_DATA_HOME/com.browsitory.app/logs`
-  if you set `XDG_DATA_HOME`)
-- **macOS:** `~/Library/Logs/com.browsitory.app`
-- **Windows:** `%LOCALAPPDATA%\com.browsitory.app\logs`
+- **Linux:** `~/.local/share/com.browsitory.desktop/logs` (or
+  `$XDG_DATA_HOME/com.browsitory.desktop/logs` if you set `XDG_DATA_HOME`)
+- **macOS:** `~/Library/Logs/com.browsitory.desktop`
+- **Windows:** `%LOCALAPPDATA%\com.browsitory.desktop\logs`
+
+Up to version 0.3.x these folders were named `com.browsitory.app`. The first start of 0.4.0 or
+later renames them, and the log file then names each folder it moved. If a folder could not be
+moved, the log says why and the old folder is left as it was.
 
 Report problems on [GitHub](https://github.com/rene-langer/browsitory/issues).
 

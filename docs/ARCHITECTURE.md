@@ -1834,6 +1834,30 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   same target's tracking ref, and the UI only offers "Force push (with lease)" after a rejected
   push whose target equals that resolution.
 
+## Desktop app folders and the bundle identifier
+
+The bundle identifier in `crates/tauri-app/tauri.conf.json` is `com.browsitory.desktop` (up to
+0.3.x it was `com.browsitory.app`, #433). It names the per-user folders Tauri and the webviews
+use: the log folder (`<local data>/<id>/logs`, `~/Library/Logs/<id>` on macOS) and the webview's
+storage, which holds the frontend's `localStorage` (`<local data>/<id>` on Linux and Windows,
+`~/Library/WebKit/<id>` on macOS). On macOS it is also the bundle ID, the app's identity for
+Gatekeeper, TCC folder permissions and the keychain. It does not name the `config` crate's
+`config.toml` (recent repositories, workspaces, settings; `directories::ProjectDirs`
+`("com", "browsitory", "Browsitory")`) or the keychain service names in
+`repo-service/src/credentials.rs` (`com.browsitory.git`, `com.browsitory.forge`, shared with the
+VSCode extension). The Windows installers don't derive their upgrade identity from it either: the
+MSI `UpgradeCode` comes from the product name, and the NSIS registry keys from the product name
+and the manufacturer (the identifier's second segment, `browsitory`, for both identifiers).
+
+`crates/tauri-app/src/identifier_migration.rs` moves the old folders on the first start after the
+change. It is the first plugin registered, because plugins are set up in registration order and
+the log plugin opens its file in its setup; the webview is created later. In each folder Tauri
+resolves identifier folders under (data, local data, config, cache, and on macOS
+`~/Library/{Logs,WebKit,HTTPStorages}`) it renames `com.browsitory.app` to the new identifier,
+only when the new folder doesn't exist yet. A rename is atomic and deletes nothing; a failure is
+logged once the log plugin is up, and the app starts with fresh folders. Don't change the
+identifier again without extending this migration.
+
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,

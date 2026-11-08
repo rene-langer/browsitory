@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod identifier_migration;
 
 use commands::{
     abort_merge, abort_rebase, abort_sequence, add_remote, amend_commit, apply_stash, cancel_clone,
@@ -206,6 +207,9 @@ fn main() {
     }));
 
     tauri::Builder::default()
+        // First: moves the 0.3.x folders to the new identifier's names before the log plugin
+        // opens its file and before the webview opens its storage (#433).
+        .plugin(identifier_migration::plugin())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .targets([
@@ -224,6 +228,10 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .manage(AppState::default())
         .manage(CloneState::default())
+        .setup(|app| {
+            identifier_migration::log_report(app.handle());
+            Ok(())
+        })
         .invoke_handler(invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
