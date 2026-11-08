@@ -66,7 +66,7 @@ describe("Browsitory diff word wrap and whole file", () => {
     expect(wrapped.height).toBeGreaterThan(unwrapped.height);
   });
 
-  it("shows the whole file and stages one selected line of it", async () => {
+  it("shows the whole file and stages one selected change of it", async () => {
     await clickInPage("button", "Show whole file");
     // l20 is 15 lines from either change: only the whole file shows it.
     await waitUntilInPage(".diff-line-context", " l20", { contains: true });
@@ -75,16 +75,18 @@ describe("Browsitory diff word wrap and whole file", () => {
     );
     expect(hunkHeaders).toBe(1);
 
+    // Select line 45's removal and its replacement.
     await browser.execute(() => {
-      const added = [...document.querySelectorAll<HTMLElement>(".diff-line-add")].find((el) =>
-        el.textContent!.includes("changed 45"),
-      )!;
-      added.click();
+      const content = (el: HTMLElement) => (el.lastElementChild as HTMLElement).textContent!.trim();
+      const removed = [...document.querySelectorAll<HTMLElement>(".diff-line-remove")].find((el) => content(el) === "l45")!;
+      const added = [...document.querySelectorAll<HTMLElement>(".diff-line-add")].find((el) => content(el) === "changed 45")!;
+      removed.click();
+      added.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true }));
     });
-    await clickInPage("button", "Stage lines (1)");
-    await browser.waitUntil(() => git("show", `:${FILE}`) === lines({ 45: "changed 45" }), {
-      timeout: 10000,
-      timeoutMsg: "expected only line 45's change in the index",
-    });
+    await clickInPage("button", "Stage lines (2)");
+    await browser
+      .waitUntil(() => git("show", `:${FILE}`) === lines({ 45: "changed 45" }), { timeout: 10000 })
+      .catch(() => {});
+    expect(git("show", `:${FILE}`)).toBe(lines({ 45: "changed 45" }));
   });
 });
