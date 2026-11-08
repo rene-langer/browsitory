@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { GitConfigSource, GitToolInfo, GitTools, RepoClient } from "../ipc/RepoClient";
+import { WORD_WRAP_VALUES, type GitConfigSource, type GitToolInfo, type GitTools, type RepoClient, type WordWrap } from "../ipc/RepoClient";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
+import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useExternalToolSettings } from "../state/useExternalToolSettings";
 import styles from "./PreferencesDialog.module.css";
 import { Field } from "./primitives/Field";
@@ -86,6 +87,44 @@ export function CommitMessageSection() {
         Show ruler
       </label>
       <p className={styles.hint}>The message field uses a monospace font while the ruler is shown.</p>
+      {error !== null && (
+        <p role="alert" className={styles.problem}>
+          {error}{" "}
+          <button type="button" onClick={dismissError}>
+            Dismiss
+          </button>
+        </p>
+      )}
+    </PreferencesSection>
+  );
+}
+
+const WORD_WRAP_LABEL: Record<WordWrap, string> = { Auto: "Auto", On: "On", Off: "Off" };
+
+/** "Diff": the default for wrapping long lines (#444); each diff's "Wrap lines" overrides it. */
+export function DiffSection() {
+  const { settings, update, error, dismissError } = useDiffSettingsContext();
+  return (
+    <PreferencesSection title="Diff">
+      <Field label="Word wrap">
+        {(props) => (
+          <select
+            {...props}
+            value={settings.wordWrap}
+            onChange={(event) => update({ wordWrap: event.target.value as WordWrap })}
+          >
+            {WORD_WRAP_VALUES.map((value) => (
+              <option key={value} value={value}>
+                {WORD_WRAP_LABEL[value]}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      <p className={styles.hint}>
+        Auto wraps the split view, prose files and diffs with very long lines. The Wrap lines button
+        above a diff changes it for that diff only.
+      </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>
           {error}{" "}

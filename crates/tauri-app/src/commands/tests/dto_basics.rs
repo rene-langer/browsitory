@@ -252,14 +252,17 @@ fn diff_settings_dto_round_trips_camel_case() {
         ignore_whitespace: false,
         context_lines: 3,
         syntax_highlight: true,
+        word_wrap: config::WordWrap::Off,
     });
     let json = serde_json::to_value(&dto).unwrap();
     assert_eq!(
         json,
-        serde_json::json!({"ignoreWhitespace": false, "contextLines": 3, "syntaxHighlight": true})
+        serde_json::json!({"ignoreWhitespace": false, "contextLines": 3, "syntaxHighlight": true, "wordWrap": "Off"})
     );
     let back: DiffSettingsDto = serde_json::from_value(json).unwrap();
-    assert_eq!(config::DiffSettings::from(back).context_lines, 3);
+    let back = config::DiffSettings::from(back);
+    assert_eq!(back.context_lines, 3);
+    assert_eq!(back.word_wrap, config::WordWrap::Off);
 }
 
 #[test]

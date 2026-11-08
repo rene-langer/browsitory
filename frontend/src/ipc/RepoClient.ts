@@ -22,13 +22,31 @@ export interface DiffOptions {
   contextLines: number;
 }
 
+/** Diff line wrapping: always, never, or `Auto` (see `lib/wordWrap.ts`). */
+export type WordWrap = "Auto" | "On" | "Off";
+export const WORD_WRAP_VALUES: readonly WordWrap[] = ["Auto", "On", "Off"];
+
 export interface DiffSettings extends DiffOptions {
   syntaxHighlight: boolean;
+  wordWrap: WordWrap;
 }
 
-export const DEFAULT_DIFF_SETTINGS: DiffSettings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true };
+export const DEFAULT_DIFF_SETTINGS: DiffSettings = {
+  ignoreWhitespace: false,
+  contextLines: 3,
+  syntaxHighlight: true,
+  wordWrap: "Auto",
+};
 export const DEFAULT_DIFF_OPTIONS: DiffOptions = { ignoreWhitespace: false, contextLines: 3 };
 export const MAX_CONTEXT_LINES = 20;
+/**
+ * `DiffOptions.contextLines` for "Show whole file" (#444): the backend then returns every line of
+ * the file in one hunk. Any other value above `MAX_CONTEXT_LINES` is clamped to it. Hunk and line
+ * actions on such a diff pass the same value, as they do for any other context.
+ */
+export const WHOLE_FILE_CONTEXT_LINES = 4294967295;
+/** A whole-file diff longer than this many lines falls back to the normal context. */
+export const WHOLE_FILE_LINE_LIMIT = 10000;
 
 /** Commit message editor settings (`[commit_message]`); columns are clamped to 10–200. */
 export interface CommitMessageSettings {

@@ -15,7 +15,7 @@ import { Overlay } from "./components/primitives/Overlay";
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import type { AppCommands } from "./lib/commands";
-import { CommitMessageSection, ExternalToolsSection, PreferencesDialog } from "./components/PreferencesDialog";
+import { CommitMessageSection, DiffSection, ExternalToolsSection, PreferencesDialog } from "./components/PreferencesDialog";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
 import { repoNameOf } from "./lib/repoName";
 import { persistTheme } from "./lib/theme";
@@ -247,6 +247,7 @@ function AppContent({
         <PreferencesDialog onClose={() => setPreferencesOpen(false)}>
           <ExternalToolsSection client={client} repoPath={openRepos.activePath} toolHost={toolHost} />
           <CommitMessageSection />
+          <DiffSection />
         </PreferencesDialog>
       )}
       {(transportError !== null || openError !== null) && (

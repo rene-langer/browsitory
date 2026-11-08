@@ -50,11 +50,26 @@ image**). A conflicted image opens the conflict pane, like any conflict.
 
 ## Diff options
 
-The diff toolbar has four controls. **Split view** shows the old and new version side by side;
-**Unified view** goes back to one column. The other three are remembered across sessions:
-**Ignore whitespace**, **Context lines** (− and +, 0 to 20) and **Syntax highlighting**. While whitespace is ignored, partial
-staging (lines and hunks) is unavailable in the working tree and a hint says so; staging and
-unstaging whole files still works. Right after you change an option, hunk and line actions
-return once the diff has reloaded with it. Highlighting covers common languages and is skipped
-when a file's diff has more than 2,000 lines in total across its hunks. The command palette has
-an entry for each option.
+The diff toolbar above each file has these controls. **Split view** shows the old and new
+version side by side; **Unified view** goes back to one column. **Ignore whitespace**, **Context
+lines** (− and +, 0 to 20) and **Syntax highlighting** are remembered across sessions and apply
+to every diff. While whitespace is ignored, partial staging (lines and hunks) is unavailable in
+the working tree and a hint says so; staging and unstaging whole files still works. Right after
+you change an option, hunk and line actions return once the diff has reloaded with it.
+Highlighting covers common languages and is skipped when a file's diff has more than 2,000 lines
+in total across its hunks. The command palette has an entry for each of these three.
+
+**Wrap lines** wraps long lines at the pane's width, or turns wrapping off so each line stays on
+one row and the diff scrolls sideways. Line numbers stay next to their line either way, and
+selecting and staging lines works the same. The button changes only that diff, until you leave
+it. The default comes from **Preferences → Diff → Word wrap**: **On**, **Off** or **Auto**
+(the default). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
+AsciiDoc and the like) and any diff with a line longer than 300 characters, such as minified or
+generated files; code in the unified view scrolls sideways so its indentation stays readable.
+
+**Show whole file** shows every line of that file, with the changes highlighted where they are,
+in the unified and the split view; press it again for the changes with context. It works in the
+working tree, commits, stashes and compares. In the working tree the whole file is one hunk:
+**Stage hunk** then stages every change in the file, and selected lines stage just those lines.
+A file longer than 10,000 lines is too long to show whole: a note says so and the diff keeps the
+normal context.

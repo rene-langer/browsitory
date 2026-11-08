@@ -33,6 +33,7 @@ import type {
 } from "../ipc/RepoClient";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
+import { useWholeFile } from "../state/useWholeFile";
 import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { BlameView } from "./BlameView";
@@ -218,7 +219,9 @@ function UncommittedFileSection({
   // `loadDiff` is pulled out of the effect (returning its own cleanup) so the failure banner's
   // Retry button can re-run the exact same fetch on demand, not just on a dependency change.
   const { settings } = useDiffSettingsContext();
-  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: settings.contextLines };
+  // "Show whole file" fetches with whole-file context; hunk and line actions then pass it too.
+  const wholeFile = useWholeFile(settings.contextLines);
+  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: wholeFile.contextLines };
   const loadDiff = () => {
     let ignore = false;
     const requested = diffOptions;
@@ -227,7 +230,7 @@ function UncommittedFileSection({
       : client.getWorkingDiff(repoPath, entry.path, entry.staged, requested, renamedFrom)
     )
       .then((next) => {
-        if (!ignore) {
+        if (!ignore && wholeFile.accept(next, requested.contextLines)) {
           setHunks(next);
           setFetchedOptions(requested);
           setError(null);
@@ -250,7 +253,7 @@ function UncommittedFileSection({
     if (mode !== "diff" || isConflicted || showImage || collapsed || !nearViewport) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, renamedFrom, isConflicted, showImage, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, settings.contextLines]);
+  }, [repoPath, client, entry.path, entry.staged, renamedFrom, isConflicted, showImage, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, wholeFile.contextLines]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -287,8 +290,8 @@ function UncommittedFileSection({
   const optionsCurrent =
     fetchedOptions !== null &&
     fetchedOptions.ignoreWhitespace === settings.ignoreWhitespace &&
-    fetchedOptions.contextLines === settings.contextLines;
-  const fetchedContext = fetchedOptions?.contextLines ?? settings.contextLines;
+    fetchedOptions.contextLines === wholeFile.contextLines;
+  const fetchedContext = fetchedOptions?.contextLines ?? wholeFile.contextLines;
   const unstagedActions = optionsCurrent && !entry.staged;
   const stagedActions = optionsCurrent && entry.staged;
 
@@ -492,6 +495,7 @@ function UncommittedFileSection({
               onUnstageLines={stagedActions ? (o, n, idx, shown) => onUnstageLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
               onDiscardLines={unstagedActions ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
               partialActionsDisabled={fetchedOptions?.ignoreWhitespace ?? settings.ignoreWhitespace}
+              wholeFile={wholeFile}
             />
             </>
           )}

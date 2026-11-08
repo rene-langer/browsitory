@@ -23,8 +23,9 @@ the right:
 - The moon or sun button switches between the light and dark theme (**Switch to dark theme** /
   **Switch to light theme**). Browsitory remembers your choice. Until you pick one, it follows
   your system's setting.
-- The gear button opens **Preferences**: the commit message settings, and your editor, terminal
-  and diff tools (see [External tools](external-tools.md)).
+- The gear button opens **Preferences**: the commit message settings, diff word wrap (see
+  [Diff options](history.md#diff-options)), and your editor, terminal and diff tools (see
+  [External tools](external-tools.md)).
 - The sparkle button (**What's new**) opens the **Release notes**: what changed in each version. They also open
   by themselves the first time you start a new version. The buttons at the bottom stay in view
   while you scroll: **Close** (or Escape, or a click outside the dialog) closes them, and

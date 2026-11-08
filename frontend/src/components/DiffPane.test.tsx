@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_DIFF_OPTIONS } from "../ipc/RepoClient";
-import type { BlameLine, ConflictSegment, DiffHunk, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import { DEFAULT_DIFF_OPTIONS, WHOLE_FILE_CONTEXT_LINES, WHOLE_FILE_LINE_LIMIT } from "../ipc/RepoClient";
+import type { BlameLine, ConflictSegment, DiffHunk, DiffOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { CommitMessageSettingsContext } from "../state/useCommitMessageSettings";
@@ -1547,7 +1547,7 @@ describe("DiffPane line staging", () => {
   const TestDiffSettings = ({ ignoreWhitespace, children }: { ignoreWhitespace: boolean; children: ReactNode }) => (
     <DiffSettingsContext.Provider
       value={{
-        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true },
+        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" },
         update: () => {},
         error: null,
         dismissError: () => {},
@@ -1655,7 +1655,7 @@ describe("DiffPane diff options contract", () => {
   ) {
     return (
       <DiffSettingsContext.Provider
-        value={{ settings: { ...settings, syntaxHighlight: false }, update: () => {}, error: null, dismissError: () => {} }}
+        value={{ settings: { ...settings, syntaxHighlight: false, wordWrap: "Auto" }, update: () => {}, error: null, dismissError: () => {} }}
       >
         <DiffPane
           repoPath={TEST_REPO_PATH}
@@ -1693,6 +1693,55 @@ describe("DiffPane diff options contract", () => {
     fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
     fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
     await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 7, [2], shown));
+  });
+
+  it("Show whole file refetches with whole-file context and forwards it to hunk and line actions", async () => {
+    const getWorkingDiff = vi.fn(async () => [lineHunk]);
+    const onStageHunk = vi.fn();
+    const onStageLines = vi.fn();
+    const { container } = render(
+      pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 3 }, { onStageHunk, onStageLines }),
+    );
+    await screen.findByRole("button", { name: "Stage hunk" });
+    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    await waitFor(() =>
+      expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, {
+        ignoreWhitespace: false,
+        contextLines: WHOLE_FILE_CONTEXT_LINES,
+      }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
+    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, WHOLE_FILE_CONTEXT_LINES));
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, WHOLE_FILE_CONTEXT_LINES, [2], shown));
+
+    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    await waitFor(() =>
+      expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3 }),
+    );
+  });
+
+  it("falls back to the normal context when the whole file is too long to show", async () => {
+    const huge: DiffHunk = {
+      oldStart: 1,
+      oldLines: WHOLE_FILE_LINE_LIMIT + 1,
+      newStart: 1,
+      newLines: WHOLE_FILE_LINE_LIMIT + 1,
+      lines: Array.from({ length: WHOLE_FILE_LINE_LIMIT + 1 }, (_, i) => ({ origin: "Context" as const, content: `l${i}\n` })),
+    };
+    const getWorkingDiff = vi.fn(async (_repo: string, _path: string, _staged: boolean, opts: DiffOptions) =>
+      opts.contextLines === WHOLE_FILE_CONTEXT_LINES ? [huge] : [lineHunk],
+    );
+    render(pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 3 }, {}));
+    await screen.findByRole("button", { name: "Stage hunk" });
+    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
+    expect(await screen.findByText(/too long to show whole \(10,001 lines\)/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3 }),
+    );
+    expect(screen.queryByText("l5000")).toBeNull();
+    expect(screen.getByRole("button", { name: "Stage hunk" })).toBeInTheDocument();
   });
 
   it("offers no hunk or line action while a context-lines change is refetching, then uses the new value", async () => {
