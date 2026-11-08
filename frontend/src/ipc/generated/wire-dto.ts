@@ -171,7 +171,12 @@ oldPath: string | null, staged: boolean, kind: StatusKind, };
 
 export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 
-export type SubmoduleInfo = { path: string, url: string | null, gitlinkId: string | null, initialized: boolean, headId: string | null, };
+export type SubmoduleInfo = { path: string, url: string | null, gitlinkId: string | null, initialized: boolean, headId: string | null, 
+/**
+ * Absolute path of the checked-out submodule, the folder its tab opens; `null` when it
+ * isn't checked out (#445).
+ */
+workdir: string | null, };
 
 export type TagInfo = { name: string, targetId: string, commitId: string | null, annotated: boolean, message: string | null, taggerName: string | null, timestamp: number | null, };
 
