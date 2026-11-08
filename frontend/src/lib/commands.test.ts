@@ -1456,6 +1456,14 @@ describe("Go to pickers (#441)", () => {
     expect(handlers.onGoToStash).toHaveBeenCalledWith("ccc");
   });
 
+  it("ranks a fully typed label first, ahead of a longer one that starts with it", () => {
+    const { commands } = pickers();
+    const labels = (query: string) => filterAndSortCommands(commands, query).map((c) => c.label);
+    expect(labels("go to branch").slice(0, 2)).toEqual(["Go to branch…", "Go to Branches"]);
+    expect(labels("Go to branches")[0]).toBe("Go to Branches");
+    expect(labels("go to tag")[0]).toBe("Go to tag…");
+  });
+
   describe("commitPickerItems", () => {
     it("lists the loaded commits newest first for an empty query", () => {
       const items = commitPickerItems(commits, "", goTo());

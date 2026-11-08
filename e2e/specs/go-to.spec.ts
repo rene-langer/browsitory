@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { waitUntilGoneInPage } from "../support/dom";
+import { clickInPage, waitUntilGoneInPage } from "../support/dom";
 import { expandSidebarSection, sidebarSectionToggle } from "../support/sidebar";
 
 // "Go to commit / branch / tag" (#441): selects and scrolls to a target without checking it out.
@@ -58,19 +58,27 @@ async function openPalette() {
   return input;
 }
 
-/** Waits until the option Enter would run starts with `text`, then presses Enter. */
-async function chooseHighlighted(input: WebdriverIO.Element, text: string): Promise<void> {
-  // `textContent` via `browser.execute`: `getText()` returns "" inside the palette's native
-  // <dialog> (see `command-palette.spec.ts`).
+/** The text of the palette option Enter would run. Read in the page: `getText()` returns ""
+ *  inside the palette's native <dialog> (see `command-palette.spec.ts`). */
+function highlighted(input: WebdriverIO.Element): Promise<string> {
+  return browser.execute((el) => {
+    const id = (el as HTMLElement).getAttribute("aria-activedescendant");
+    return id === null ? "" : (document.getElementById(id)?.textContent ?? "");
+  }, input);
+}
+
+/**
+ * Waits until the option Enter would run is `text` (or, with `prefix`, starts with it), then
+ * presses Enter. Exact for commands: "Go to branch…" and "Go to Branches" share a prefix.
+ */
+async function chooseHighlighted(input: WebdriverIO.Element, text: string, prefix = false): Promise<void> {
+  let seen = "";
   await browser.waitUntil(
-    async () =>
-      (
-        await browser.execute((el) => {
-          const id = (el as HTMLElement).getAttribute("aria-activedescendant");
-          return id === null ? "" : (document.getElementById(id)?.textContent ?? "");
-        }, input)
-      ).startsWith(text),
-    { timeout: 10000, timeoutMsg: `expected the command palette to highlight "${text}"` },
+    async () => {
+      seen = (await highlighted(input)).trim();
+      return prefix ? seen.startsWith(text) : seen === text;
+    },
+    { timeout: 10000, timeoutMsg: `expected the command palette to highlight "${text}", not "${seen}"` },
   );
   await browser.keys(["Enter"]);
 }
@@ -86,7 +94,7 @@ async function goToWithPicker(command: string, query: string, firstMatch: string
     timeoutMsg: `expected the ${command} picker to open`,
   });
   await input.setValue(query);
-  await chooseHighlighted(input, firstMatch);
+  await chooseHighlighted(input, firstMatch, true);
   await waitUntilGoneInPage("dialog input[role='combobox']");
 }
 
@@ -109,7 +117,27 @@ describe("Browsitory go to commit, branch or tag", () => {
     headBefore = git(["rev-parse", "HEAD"]);
   });
 
-  after(() => {
+  // The graph's branch selection is saved in the suite's config folder, which outlives this
+  // spec: a branch left hidden (or a list of branches that omits the ones later specs create)
+  // would hide their commits. "Show all branches" forgets it, even after a failed test.
+  after(async () => {
+    await browser.keys(["Escape"]);
+    await browser.refresh();
+    await expandSidebarSection("Branches");
+    await clickInPage("section[aria-label='Branches'] button[aria-label='Add']");
+    await $("[role='menu']").waitForExist({ timeout: 10000 });
+    const restore = await browser.execute(() => {
+      const item = Array.from(document.querySelectorAll("[role='menu'] [role='menuitem']")).find(
+        (element) => element.textContent?.trim() === "Show all branches",
+      ) as HTMLButtonElement | undefined;
+      if (item === undefined) return "missing";
+      if (item.disabled || item.getAttribute("aria-disabled") === "true") return "already all";
+      item.click();
+      return "restored";
+    });
+    if (restore === "already all") await browser.keys(["Escape"]);
+    if (restore === "missing") throw new Error('the Branches "+" menu has no "Show all branches"');
+    await waitUntilGoneInPage("[role='menu']");
     git(["tag", "-d", TAG]);
     git(["branch", "-D", HIDDEN]);
   });

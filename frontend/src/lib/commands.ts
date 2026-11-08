@@ -1074,6 +1074,9 @@ function scoreCommand(command: Command, query: string): number | null {
   const q = query.trim().toLowerCase();
   if (q === "") return 0;
   const label = command.label.toLowerCase();
+  // The whole label typed ("go to branch" for "Go to branch…") beats a longer label that merely
+  // starts with it ("Go to Branches").
+  if (label === q || label.replace(/…$/, "") === q) return 4;
   if (label.startsWith(q)) return 3;
   if (command.keywords.some((keyword) => keyword.toLowerCase().startsWith(q))) return 2;
   if (label.includes(q) || command.keywords.some((keyword) => keyword.toLowerCase().includes(q))) return 1;
