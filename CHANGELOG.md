@@ -90,7 +90,7 @@ needs nothing from you.
   rename, like `README` → `readme`. **Stash file…** on one of two such names staged side by
   side no longer deletes the file until Pop or writes a stash Pop refuses (#389).
 
-### File/folder conflicts libgit2 misses
+### Conflicts between a file and a folder of the same name
 
 - Fixed: a merge, squash merge, pull with merge, cherry-pick, revert, rebase step or stash apply
   where one side has a file and the other a folder of the same name, with another name sorting
