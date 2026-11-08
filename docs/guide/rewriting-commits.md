@@ -20,8 +20,38 @@ Right-click a commit in the graph:
   staged, **Mixed** (the default) keeps them unstaged, **Hard** discards changes to tracked files;
   untracked files are kept. Hard asks for a second confirmation (**Reset hard**). Not available
   on a detached HEAD.
-- **Edit commit message…** appears on the latest commit only. It opens the amend box with that
-  commit's message filled in and the cursor in the message field.
+- **Reword…** on the latest commit opens the amend box with that commit's message filled in
+  and the cursor in the message field. On an older commit it opens a dialog with the full
+  message (see "Editing older commits" below).
+
+**Editing older commits.** The commit menu has six one-click edits for commits of the current
+branch:
+
+- **Reword…** changes the commit's message.
+- **Squash with parent** combines the commit with the one below it. The result keeps the
+  parent's author and has both messages, the parent's first.
+- **Fixup into parent** combines them too, but keeps only the parent's message.
+- **Move up** and **Move down** swap the commit with the newer or the older neighbour.
+- **Drop** removes the commit and its changes from the branch.
+
+Each one is a small interactive rebase (see [Rebase](rebase.md)): the commits after the edited
+one are rewritten, so they get new ids. A conflict pauses it like any rebase: the progress panel
+shows **Continue rebase** and **Abort rebase**, the paused rebase survives a restart, and Abort
+puts the branch back as it was. A finished edit is one **Undo** step ("Rebase onto …").
+
+An edit is disabled, with the reason as its tooltip, when:
+
+- the commit isn't on the current branch (or HEAD is detached);
+- it is a merge commit, or a merge commit comes after it (use **Rebase onto here…** instead);
+- it is the first commit of the history; Squash, Fixup and Move down also need a parent that
+  isn't the first commit or a merge commit;
+- Move up is on the latest commit;
+- you have staged changes or changes to tracked files (untracked files are fine), as for any
+  rebase: commit or stash them first;
+- a merge, cherry-pick, revert or rebase is in progress, here or in a terminal.
+
+The edits only change messages and the order of commits. To change the files of an older
+commit, use **Rebase onto here…** with an **Edit** step.
 
 **Amend last commit.** Tick **Amend last commit** under the commit message. The message fills
 with the last commit's, and the **Commit** button becomes **Amend**: anything staged is folded
@@ -135,5 +165,6 @@ A commit made while HEAD is detached by the bisect is not on any branch: `git bi
 leaves it behind (it is still in the reflog).
 
 The palette also has commands to cherry-pick, revert, check out and reset to the selected commit,
-and to amend the last commit (where the commit menu offers them), plus **Continue cherry-pick** /
+to reword, squash, fixup, move or drop it (**Reword 1a2b3c4…**, **Drop 1a2b3c4** and so on), and
+to amend the last commit (where the commit menu offers them), plus **Continue cherry-pick** /
 **Abort cherry-pick** (or revert) while a sequence is paused.

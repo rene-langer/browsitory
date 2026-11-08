@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { clickInPage, waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const git = (...args: string[]) =>
@@ -87,5 +88,80 @@ describe("Browsitory history rewrite", () => {
     await clickButton("Reset");
     await clickButton("Reset hard");
     await browser.waitUntil(() => git("rev-parse", "HEAD") === startTip, { timeout: 10000 });
+  });
+});
+
+// One-click history edits from the commit menu (#442): each runs as a one-step rebase.
+describe("Browsitory one-click history edits", () => {
+  const commitFile = (file: string, content: string, message: string) => {
+    fs.writeFileSync(path.join(E2E_REPO_PATH, file), content);
+    git("add", file);
+    git("commit", "-m", message);
+  };
+  // The newest commit with exactly this subject (ids change with every edit).
+  const idOf = (subject: string) =>
+    git("log", "--format=%H%x09%s", "-50")
+      .split("\n")
+      .map((line) => line.split("\t"))
+      .find(([, s]) => s === subject)![0];
+  const subjects = (count: number) => git("log", "--format=%s", `-${count}`).split("\n");
+  const waitForSubjects = (expected: string[]) =>
+    browser.waitUntil(() => JSON.stringify(subjects(expected.length)) === JSON.stringify(expected), {
+      timeout: 15000,
+      timeoutMsg: `history never became ${JSON.stringify(expected)}; it is ${JSON.stringify(subjects(expected.length))}`,
+    });
+
+  before(() => {
+    commitFile("edit-1.txt", "1\n", "e2e: edit one");
+    commitFile("edit-2.txt", "2\n", "e2e: edit two");
+    commitFile("edit-3.txt", "3\n", "e2e: edit three");
+    commitFile("edit-4.txt", "4\n", "e2e: edit four");
+  });
+
+  it("rewords an older commit, squashes one into its parent, moves one up and drops one", async () => {
+    await browser.refresh();
+
+    await chooseFromCommitMenu(idOf("e2e: edit two"), "Reword…");
+    const field = await $("dialog[aria-label^='Reword commit'] textarea");
+    await field.waitForExist({ timeout: 10000 });
+    await browser.waitUntil(async () => (await field.getValue()).startsWith("e2e: edit two"), { timeout: 10000 });
+    await field.setValue("e2e: edit two reworded");
+    await clickInPage("dialog[aria-label^='Reword commit'] button", "Reword");
+    await waitForSubjects(["e2e: edit four", "e2e: edit three", "e2e: edit two reworded", "e2e: edit one"]);
+
+    await chooseFromCommitMenu(idOf("e2e: edit three"), "Squash with parent");
+    await waitForSubjects(["e2e: edit four", "e2e: edit two reworded", "e2e: edit one"]);
+    expect(git("log", "-1", "--format=%B", idOf("e2e: edit two reworded"))).toBe(
+      "e2e: edit two reworded\n\ne2e: edit three",
+    );
+    expect(fs.existsSync(path.join(E2E_REPO_PATH, "edit-3.txt"))).toBe(true);
+
+    await chooseFromCommitMenu(idOf("e2e: edit two reworded"), "Move up");
+    await waitForSubjects(["e2e: edit two reworded", "e2e: edit four", "e2e: edit one"]);
+
+    await chooseFromCommitMenu(idOf("e2e: edit four"), "Drop");
+    await waitForSubjects(["e2e: edit two reworded", "e2e: edit one"]);
+    expect(fs.existsSync(path.join(E2E_REPO_PATH, "edit-4.txt"))).toBe(false);
+    expect(git("status", "--porcelain", "--untracked-files=no")).toBe("");
+  });
+
+  it("pauses a move that conflicts, and Abort puts the branch back", async () => {
+    commitFile("edit-move.txt", "one\n", "e2e: move base");
+    commitFile("edit-move.txt", "two\n", "e2e: move first");
+    commitFile("edit-move.txt", "three\n", "e2e: move second");
+    const tipBefore = git("rev-parse", "HEAD");
+    await browser.refresh();
+
+    // "second" changes the line "first" wrote: replayed before it, it conflicts.
+    await chooseFromCommitMenu(idOf("e2e: move second"), "Move down");
+    const panel = await $("section[aria-label='Rebase in progress']");
+    await panel.waitForExist({ timeout: 15000 });
+    await waitUntilInPage("span", "edit-move.txt (Conflicted)", { contains: true });
+
+    await clickInPage("section[aria-label='Rebase in progress'] button", "Abort rebase");
+    await waitUntilGoneInPage("section[aria-label='Rebase in progress']");
+    await browser.waitUntil(() => git("rev-parse", "HEAD") === tipBefore, { timeout: 10000 });
+    expect(git("rev-parse", "--abbrev-ref", "HEAD")).not.toBe("HEAD");
+    expect(fs.readFileSync(path.join(E2E_REPO_PATH, "edit-move.txt"), "utf8")).toBe("three\n");
   });
 });

@@ -71,6 +71,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       rebaseProgress: null,
       rebaseOnto: null,
       rebasePreset: null,
+      rewordDialog: null,
+      historyEditOutcome: null,
       pendingPull: null,
       pullOutcome: null,
       mergeDialog: null,
@@ -183,6 +185,9 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     openRebaseSelection: vi.fn(),
     closeRebasePlanner: vi.fn(),
     startRebase: vi.fn(),
+    editHistory: vi.fn(),
+    openRewordDialog: vi.fn(),
+    closeRewordDialog: vi.fn(),
     rebaseContinue: vi.fn(),
     abortRebase: vi.fn(),
     listPullRequests: vi.fn(),
@@ -1106,6 +1111,52 @@ describe("history commands", () => {
 
   it("groups force push under Remotes", () => {
     expect(commandGroup("force-push")).toBe("Remotes");
+  });
+
+  describe("one-click history edits (#442)", () => {
+    // c1 (HEAD) -> c2 -> c3 -> c4 (root)
+    const editState: Partial<AppState> = {
+      ...historyState,
+      selectedRow: { commitId: "c2" },
+      commits: [graphCommit("c1", ["c2"]), graphCommit("c2", ["c3"]), graphCommit("c3", ["c4"]), graphCommit("c4", [])],
+    };
+    const EDIT_IDS = ["reword-selected", "squash-selected", "fixup-selected", "move-up-selected", "move-down-selected", "drop-selected"];
+
+    it("offers every edit the commit menu enables, and runs it from the same base", () => {
+      const appState = makeAppState(editState);
+      const commands = buildCommands(appState);
+      const byId = (id: string) => commands.find((command) => command.id === id)!;
+      expect(EDIT_IDS.map((id) => byId(id).label)).toEqual([
+        "Reword c2…",
+        "Squash c2 with parent",
+        "Fixup c2 into parent",
+        "Move c2 up",
+        "Move c2 down",
+        "Drop c2",
+      ]);
+      byId("squash-selected").run();
+      expect(appState.editHistory).toHaveBeenLastCalledWith("c2", "c4", { kind: "Squash" });
+      byId("move-up-selected").run();
+      expect(appState.editHistory).toHaveBeenLastCalledWith("c2", "c3", { kind: "MoveUp" });
+      byId("drop-selected").run();
+      expect(appState.editHistory).toHaveBeenLastCalledWith("c2", "c3", { kind: "Drop" });
+      byId("reword-selected").run();
+      expect(appState.openRewordDialog).toHaveBeenCalledWith("c2", "c3");
+    });
+
+    it("leaves out edits the menu disables", () => {
+      const head = buildCommands(makeAppState({ ...editState, selectedRow: { commitId: "c1" } })).map((c) => c.id);
+      // HEAD: no Move up; its Reword… is Amend last commit.
+      expect(head).not.toContain("move-up-selected");
+      expect(head).not.toContain("reword-selected");
+      expect(head).toContain("drop-selected");
+      const dirty = buildCommands(
+        makeAppState({ ...editState, status: [{ path: "a", oldPath: null, staged: false, kind: "Modified" }] }),
+      ).map((c) => c.id);
+      for (const id of EDIT_IDS) expect(dirty).not.toContain(id);
+      const busy = buildCommands(makeAppState({ ...editState, pending: true })).map((c) => c.id);
+      for (const id of EDIT_IDS) expect(busy).not.toContain(id);
+    });
   });
 });
 

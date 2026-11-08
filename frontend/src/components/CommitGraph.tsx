@@ -14,6 +14,7 @@ import {
   presetPickAll,
   type PresetAction,
 } from "../lib/rebaseSelection";
+import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "../lib/historyEdits";
 import { rowsEqual, type SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
@@ -47,6 +48,8 @@ export function CommitGraph({
   onCheckoutCommit,
   onResetToCommit,
   onEditHeadMessage,
+  onEditHistory,
+  onRewordCommit,
   hasMore = false,
   onLoadMore,
   graphRemoteBranchSelection = null,
@@ -85,7 +88,16 @@ export function CommitGraph({
   onRevertMany?: (commitIdsOldestFirst: string[]) => void;
   onCheckoutCommit: (commitId: string) => void;
   onResetToCommit: (commitId: string, mode: ResetMode) => void;
+  /** HEAD's Reword…: opens the amend box with its message. */
   onEditHeadMessage: () => void;
+  /**
+   * The one-click edits of a commit of the current branch (#442): Squash with parent, Fixup
+   * into parent, Move up/down, Drop, each a one-step rebase from `onto`. Without it, the
+   * menu offers only HEAD's Reword….
+   */
+  onEditHistory?: (commitId: string, onto: string, request: HistoryEditRequest) => void;
+  /** Reword… of a commit below HEAD: opens the Reword dialog (a one-step rebase from `onto`). */
+  onRewordCommit?: (commitId: string, onto: string) => void;
   // True when the loaded history filled its limit, so older commits probably exist.
   hasMore?: boolean;
   onLoadMore?: () => void;
@@ -198,13 +210,36 @@ export function CommitGraph({
         disabled: pending || currentBranch === null,
       },
     ];
-    if (isHead) {
-      items.push({ label: "Edit commit message…", onSelect: onEditHeadMessage, disabled: pending });
-    }
+    items.push(...editItems(commitId, isHead));
     if (onCompareWithWorkingTree !== undefined) {
       items.push({ label: "Diff against working tree", onSelect: () => onCompareWithWorkingTree(commitId) });
     }
     return items;
+  }
+
+  // One-click history edits (#442). HEAD's Reword… amends, so it needs neither a clean tree nor
+  // a parent, as "Edit commit message…" before it.
+  function editItems(commitId: string, isHead: boolean): ContextMenuItem[] {
+    const headReword: ContextMenuItem = { label: "Reword…", onSelect: onEditHeadMessage, disabled: pending };
+    if (onEditHistory === undefined) return isHead ? [headReword] : [];
+    const checks = historyEditChecks({ commits, headInfo, currentBranch, status }, commitId);
+    const item = (label: string, check: HistoryEditCheck, run: (onto: string) => void): ContextMenuItem => ({
+      label,
+      onSelect: () => {
+        if (check.ok) run(check.onto);
+      },
+      disabled: pending || !check.ok,
+      title: check.ok ? undefined : check.reason,
+    });
+    const edit = (request: HistoryEditRequest) => (onto: string) => onEditHistory(commitId, onto, request);
+    return [
+      isHead ? headReword : item("Reword…", checks.Reword, (onto) => onRewordCommit?.(commitId, onto)),
+      item("Squash with parent", checks.Squash, edit({ kind: "Squash" })),
+      item("Fixup into parent", checks.Fixup, edit({ kind: "Fixup" })),
+      item("Move up", checks.MoveUp, edit({ kind: "MoveUp" })),
+      item("Move down", checks.MoveDown, edit({ kind: "MoveDown" })),
+      { ...item("Drop", checks.Drop, edit({ kind: "Drop" })), destructive: true },
+    ];
   }
 
   function tagItems(tag: string, commitId: string): ContextMenuItem[] {
