@@ -57,8 +57,8 @@ BranchInfo/tracking {"name":"main","isCurrent":true,"upstream":"origin/main","ah
 BranchInfo/local-only {"name":"topic","isCurrent":false,"upstream":null,"ahead":null,"behind":null}
 WorktreeInfo/main {"name":"app","path":"/repos/app","head":"4444444444444444444444444444444444444444","isMain":true,"isLocked":false,"isPrunable":false}
 WorktreeInfo/unknown-head {"name":"gone","path":"/repos/gone","head":null,"isMain":false,"isLocked":true,"isPrunable":true}
-SubmoduleInfo/initialized {"path":"vendor/lib","url":"https://example.com/lib.git","gitlinkId":"5555555555555555555555555555555555555555","initialized":true,"headId":"6666666666666666666666666666666666666666"}
-SubmoduleInfo/unknown {"path":"vendor/other","url":null,"gitlinkId":null,"initialized":false,"headId":null}
+SubmoduleInfo/initialized {"path":"vendor/lib","url":"https://example.com/lib.git","gitlinkId":"5555555555555555555555555555555555555555","initialized":true,"headId":"6666666666666666666666666666666666666666","workdir":"/repos/app/vendor/lib"}
+SubmoduleInfo/unknown {"path":"vendor/other","url":null,"gitlinkId":null,"initialized":false,"headId":null,"workdir":null}
 ReflogEntry/with-summary {"reference":"HEAD","oldId":"7777777777777777777777777777777777777777","newId":"8888888888888888888888888888888888888888","committerName":"Ada Lovelace","committerEmail":"ada@example.com","timestamp":1700000100,"message":"commit: Add","summary":"Add"}
 ReflogEntry/no-summary {"reference":"HEAD","oldId":"7777777777777777777777777777777777777777","newId":"8888888888888888888888888888888888888888","committerName":"Ada Lovelace","committerEmail":"ada@example.com","timestamp":1700000100,"message":"commit: Add","summary":null}
 RemoteInfo/no-auth {"name":"origin","fetchUrl":"https://example.com/app.git","pushUrl":null,"authMode":null,"authUsername":null,"prune":false}
