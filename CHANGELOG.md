@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-08
+
+The desktop app 0.4.0 was built but could not be published, so 0.4.1 ships the same changes. If
+you use 0.3.x, the update brings everything listed under 0.4.0 below.
+
+### Re-release of 0.4.0
+
+- Changed: the same code as 0.4.0, released again so the desktop app can update. The VSCode
+  extension 0.4.1 is the same as 0.4.0.
+
 ## [0.4.0] - 2026-11-08
 
 Remote branches in the graph, a first-parent view for a single branch, a new identifier for the
