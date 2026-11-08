@@ -109,6 +109,11 @@ describe("Browsitory submodules", () => {
     );
     // The tab shows the submodule's own history, not the superproject's.
     await $("li*=e2e: seed submodule").waitForExist({ timeout: 10000 });
+    // The submodule is checked out detached, and the commit the test above made on it is on no
+    // branch: it shows anyway, marked HEAD (#467).
+    const advancedRow = await $("li.commit-row*=e2e: advance child");
+    await advancedRow.waitForExist({ timeout: 10000, timeoutMsg: "expected the detached HEAD's commit in the submodule's graph" });
+    await advancedRow.$("span=HEAD").waitForExist({ timeout: 10000, timeoutMsg: "expected a HEAD badge on the detached HEAD's commit" });
 
     // Close it again (the close button sits right after the tab, see `multi-repo.spec.ts`).
     await browser.execute(
