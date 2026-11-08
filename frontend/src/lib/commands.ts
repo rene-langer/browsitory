@@ -733,6 +733,17 @@ export function buildCommands(
             run: () => void appState.initSubmodule(submodule.path),
           });
         }
+        // Like "Open worktree": a tab of its own (#445). Only a checked-out submodule has a
+        // folder to open; for the others the commands above offer Initialize / Update.
+        const workdir = submodule.workdir;
+        if (workdir !== null) {
+          commands.push({
+            id: `open-submodule:${submodule.path}`,
+            label: `Open submodule ${submodule.path} in new tab`,
+            keywords: ["submodule", "open", "tab", submodule.path],
+            run: () => onOpenRepoTab(workdir),
+          });
+        }
       }
     }
 

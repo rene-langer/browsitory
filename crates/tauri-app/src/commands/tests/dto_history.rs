@@ -185,6 +185,7 @@ fn submodule_info_dto_serializes_camel_case_fields() {
         gitlink_id: Some("0123456789abcdef".into()),
         initialized: true,
         head_id: Some("fedcba9876543210".into()),
+        workdir: Some("/repos/app/deps/child".into()),
     });
 
     assert_eq!(
@@ -195,6 +196,7 @@ fn submodule_info_dto_serializes_camel_case_fields() {
             "gitlinkId": "0123456789abcdef",
             "initialized": true,
             "headId": "fedcba9876543210",
+            "workdir": "/repos/app/deps/child",
         })
     );
 }

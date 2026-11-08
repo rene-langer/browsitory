@@ -660,6 +660,7 @@ pub fn submodules() -> Cases<git_core::submodule::SubmoduleInfo> {
                 gitlink_id: some("5555555555555555555555555555555555555555"),
                 initialized: true,
                 head_id: some("6666666666666666666666666666666666666666"),
+                workdir: some("/repos/app/vendor/lib"),
             },
         ),
         case(
@@ -670,6 +671,7 @@ pub fn submodules() -> Cases<git_core::submodule::SubmoduleInfo> {
                 gitlink_id: None,
                 initialized: false,
                 head_id: None,
+                workdir: None,
             },
         ),
     ]

@@ -707,7 +707,9 @@ export function RepoWorkspace({
                 submodules={appState.state.submodules}
                 onInit={appState.initSubmodule}
                 onUpdate={appState.updateSubmodule}
+                onOpenInNewTab={(workdir) => void onOpenRepoTab(workdir)}
                 operationDisabled={repositoryOperationDisabled}
+                operationDisabledReason={operationDisabledReason}
               />
             )}
             {panelVisibility.visibility.reflog && (

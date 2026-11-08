@@ -66,6 +66,7 @@ describe("useAppState", () => {
         gitlinkId: "0123456789abcdef",
         initialized: true,
         headId: "fedcba9876543210",
+        workdir: "/repo/deps/child",
       };
       const client = transferClient({
         getStatus: async () => {
