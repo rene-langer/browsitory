@@ -25,6 +25,8 @@ ConflictSegment/Clean key-order
 DiffHunk/empty key-order
 DiffHunk/every-origin key-order
 DiffSettings/plain key-order
+DiffSettings/wrap-Off key-order
+DiffSettings/wrap-On key-order
 FileHistoryEntry/no-old-path key-order
 FileHistoryEntry/renamed key-order
 FileSides/new-Loaded-not-an-image key-order

@@ -284,7 +284,10 @@ fn line_actions_with_whole_file_context_touch_only_the_selection() {
     assert_eq!(staged.len(), 1);
     let (o, n) = (staged[0].old_start, staged[0].new_start);
     unstage_lines(&repo, "f.txt", o, n, whole, &[44, 45]).unwrap();
-    assert_eq!(index_content(&repo, "f.txt").unwrap(), sixty_lines_with(&[]));
+    assert_eq!(
+        index_content(&repo, "f.txt").unwrap(),
+        sixty_lines_with(&[])
+    );
 
     discard_lines(&repo, "f.txt", o, n, whole, &[4, 5]).unwrap();
     assert_eq!(

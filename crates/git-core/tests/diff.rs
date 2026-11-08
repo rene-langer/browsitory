@@ -283,7 +283,13 @@ fn whole_file_context_applies_to_commit_diffs() {
     common::commit_all(&repo, "base");
     common::write_file(dir.path(), "f.txt", &sixty_lines_with(&[30]));
     common::commit_all(&repo, "change");
-    let head = repo.head().unwrap().peel_to_commit().unwrap().id().to_string();
+    let head = repo
+        .head()
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id()
+        .to_string();
 
     let whole = DiffOptions {
         ignore_whitespace: false,

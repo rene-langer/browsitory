@@ -1094,7 +1094,7 @@ describe("history commands", () => {
 });
 
 describe("diff option and discard commands", () => {
-  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" };
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const };
   const build = (state: ReturnType<typeof makeAppState>, extra: Record<string, unknown> = {}) => {
     const diffCommands = {
       settings,
@@ -1143,7 +1143,7 @@ describe("diff option and discard commands", () => {
     commands.find((c) => c.id === "decrease-context-lines")!.run();
     expect(diffCommands.update).toHaveBeenCalledWith({ contextLines: 2 });
     commands.find((c) => c.id === "toggle-syntax-highlighting")!.run();
-    expect(diffCommands.update).toHaveBeenCalledWith({ syntaxHighlight: false, wordWrap: "Auto" });
+    expect(diffCommands.update).toHaveBeenCalledWith({ syntaxHighlight: false });
     expect(commands.some((c) => c.id === "discard-current-file")).toBe(false);
     expect(commands.some((c) => c.id === "discard-all-unstaged")).toBe(false);
   });
@@ -1212,7 +1212,7 @@ describe("preferences and external tool commands", () => {
     onOpenCurrentFileInDiffTool: vi.fn(),
   });
   const diffCommands = (currentFile: string | null) => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const },
     update: vi.fn(),
     currentFile,
     requestDiscardCurrentFile: vi.fn(),

@@ -2254,14 +2254,14 @@ fn diff_settings_round_trip_through_the_sidecar() {
         1,
         "set_diff_settings",
         serde_json::json!({
-            "settings": {"ignoreWhitespace": true, "contextLines": 6, "syntaxHighlight": false}
+            "settings": {"ignoreWhitespace": true, "contextLines": 6, "syntaxHighlight": false, "wordWrap": "Off"}
         }),
     );
     assert_eq!(set["result"], serde_json::Value::Null, "{set}");
     let got = sidecar.call(2, "get_diff_settings", serde_json::json!({}));
     assert_eq!(
         got["result"],
-        serde_json::json!({"ignoreWhitespace": true, "contextLines": 6, "syntaxHighlight": false})
+        serde_json::json!({"ignoreWhitespace": true, "contextLines": 6, "syntaxHighlight": false, "wordWrap": "Off"})
     );
 }
 
