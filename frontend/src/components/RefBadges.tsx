@@ -7,9 +7,12 @@ import graphStyles from "./CommitGraph.module.css";
 export function RefBadges({
   commit,
   shownRemoteBranches = null,
+  detachedHead = false,
   onTagContextMenu,
 }: {
   commit: GraphCommit;
+  /** This commit is the detached HEAD: a HEAD badge goes first (#467). */
+  detachedHead?: boolean;
   /** `null`/omitted shows every remote badge; otherwise only the listed `<remote>/<branch>`es. */
   shownRemoteBranches?: ReadonlySet<string> | null;
   /** When set, right-clicking a tag opens its menu instead of the row's. */
@@ -21,6 +24,11 @@ export function RefBadges({
       : commit.remoteBranchRefs.filter((ref) => shownRemoteBranches.has(ref));
   return (
     <>
+      {detachedHead && (
+        <span className={graphStyles.headBadge} title="Detached HEAD">
+          HEAD
+        </span>
+      )}
       {commit.branchRefs.map((ref) => (
         <span key={`branch:${ref}`} className={graphStyles.branchBadge}>
           {ref}
