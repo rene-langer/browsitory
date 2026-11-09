@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
 import { useWorkspaces } from "./useWorkspaces";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const workspace: Workspace = {
   id: "ws-1",
@@ -11,13 +12,13 @@ const workspace: Workspace = {
 };
 
 function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
-  return {
+  return fakeRepoClient({
     listWorkspaces: vi.fn().mockResolvedValue([]),
     saveWorkspace: vi.fn().mockResolvedValue("ws-new"),
     updateWorkspace: vi.fn().mockResolvedValue(undefined),
     deleteWorkspace: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as RepoClient;
+  });
 }
 
 describe("useWorkspaces", () => {

@@ -2,13 +2,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { useDiffSettings, useDiffSettingsContext } from "./useDiffSettings";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function clientWith(overrides: Partial<RepoClient>): RepoClient {
-  return {
+  return fakeRepoClient({
     getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const })),
     setDiffSettings: vi.fn(async () => {}),
     ...overrides,
-  } as unknown as RepoClient; // only the two settings methods are used by this hook
+  });
 }
 
 describe("useDiffSettings", () => {

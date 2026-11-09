@@ -1,8 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { DiffHunk, RepoClient } from "../ipc/RepoClient";
+import type { DiffHunk } from "../ipc/RepoClient";
 import { installGlobalErrorLogging } from "../lib/logger";
 import { DiffView } from "./DiffView";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 // Make the highlighter itself fail, so the real useHunkTokens -> highlightLines path rejects.
 vi.mock("shiki/core", async (importOriginal) => {
@@ -21,7 +22,7 @@ describe("DiffView highlight failure", () => {
 
   it("renders plain text and logs when highlighting fails", async () => {
     const logFrontendError = vi.fn().mockResolvedValue(undefined);
-    uninstall = installGlobalErrorLogging({ logFrontendError } as unknown as RepoClient);
+    uninstall = installGlobalErrorLogging(fakeRepoClient({ logFrontendError }));
 
     const { container } = render(<DiffView hunks={[hunk]} path="f.ts" />);
 

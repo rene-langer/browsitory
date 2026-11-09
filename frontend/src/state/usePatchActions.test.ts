@@ -1,8 +1,9 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CommitChangeRequest, RepoClient } from "../ipc/RepoClient";
+import type { CommitChangeRequest } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import { commitChangeMessage, commitsPatchName, patchFileName, usePatchActions } from "./usePatchActions";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const CONTENT = { base64: "aGk=" };
 
@@ -25,7 +26,7 @@ function setup(overrides: Partial<Record<string, unknown>> = {}, ok = true) {
     return true;
   });
   const { result } = renderHook(() =>
-    usePatchActions(client as unknown as RepoClient, "/repo", runMutationWithOutcome as never, setState),
+    usePatchActions(fakeRepoClient(client), "/repo", runMutationWithOutcome as never, setState),
   );
   return { client, actions: result.current, state: () => state, runMutationWithOutcome };
 }

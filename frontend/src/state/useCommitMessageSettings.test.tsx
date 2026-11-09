@@ -2,13 +2,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { useCommitMessageSettings, useCommitMessageSettingsContext } from "./useCommitMessageSettings";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function clientWith(overrides: Partial<RepoClient>): RepoClient {
-  return {
+  return fakeRepoClient({
     getCommitMessageSettings: vi.fn(async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true })),
     setCommitMessageSettings: vi.fn(async () => {}),
     ...overrides,
-  } as unknown as RepoClient; // only the two settings methods are used by this hook
+  });
 }
 
 describe("useCommitMessageSettings", () => {

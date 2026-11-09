@@ -2,13 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
 import { WorkspaceEditor } from "./WorkspaceEditor";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
-  return {
+  return fakeRepoClient({
     pickRepoFolder: vi.fn().mockResolvedValue(null),
     scanReposInRoot: vi.fn().mockResolvedValue([]),
     ...overrides,
-  } as unknown as RepoClient;
+  });
 }
 
 describe("WorkspaceEditor", () => {

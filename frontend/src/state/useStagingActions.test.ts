@@ -1,7 +1,7 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { RepoClient } from "../ipc/RepoClient";
 import { useStagingActions } from "./useStagingActions";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function setup() {
   const client = {
@@ -18,7 +18,7 @@ function setup() {
     await fn();
   }) as never;
   const { result } = renderHook(() =>
-    useStagingActions(client as unknown as RepoClient, "/repo", runMutation, vi.fn() as never, vi.fn() as never, vi.fn()),
+    useStagingActions(fakeRepoClient(client), "/repo", runMutation, vi.fn() as never, vi.fn() as never, vi.fn()),
   );
   return { client, actions: result.current };
 }

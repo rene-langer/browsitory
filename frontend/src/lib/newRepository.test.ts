@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { CloneError, type RepoClient } from "../ipc/RepoClient";
+import { CloneError } from "../ipc/RepoClient";
 import { cloneToastMessage, createNewRepository } from "./newRepository";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function client(picked: string | null, init: () => Promise<void>) {
-  return { pickRepoFolder: vi.fn(async () => picked), initRepo: vi.fn(init) } as unknown as RepoClient;
+  return fakeRepoClient({ pickRepoFolder: vi.fn(async () => picked), initRepo: vi.fn(init) });
 }
 
 describe("createNewRepository", () => {
