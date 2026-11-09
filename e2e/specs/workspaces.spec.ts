@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { expect } from "@wdio/globals";
 import { waitUntilGoneInPage } from "../support/dom";
+import { reloadSessionWithRetry } from "../support/session";
 import { sidebarSectionToggle } from "../support/sidebar";
 
 const E2E_WORKSPACE_ROOT = path.join(os.tmpdir(), "browsitory-e2e-workspace-root");
@@ -35,7 +36,9 @@ describe("Browsitory multi-repo workspaces", function () {
   this.retries(1);
   this.timeout(90000);
 
-  it("restores an open workspace group after restart, then closes the whole group at once", async () => {
+  it("restores an open workspace group after restart, then closes the whole group at once", async function () {
+    // The restart may take two bounded session attempts (#457).
+    this.timeout(150000);
     await openPickerOverlay();
 
     const openAllButton = await $('button=Open all');
@@ -67,7 +70,7 @@ describe("Browsitory multi-repo workspaces", function () {
     );
 
     await browser.execute((key) => window.localStorage.setItem(key, "true"), E2E_RESTORE_OPEN_REPOS_ONCE);
-    await browser.reloadSession();
+    await reloadSessionWithRetry();
     await waitForAppReady();
 
     await $('span*=E2E Workspace').waitForExist({ timeout: 10000 });

@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import "webdriverio";
 import "@wdio/types";
 import { closeSharedForgeFixtureServer, startSharedForgeFixtureServer } from "./support/forgeFixtureServer";
+import { registerDriverRestart } from "./support/session";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -130,6 +131,8 @@ function setupCredentialCertificate() {
 // an aborted run left behind, and nothing else.
 let tauriDriver: ChildProcess | undefined;
 let exiting = false;
+// The environment `beforeSession` starts tauri-driver with, kept for `restartTauriDriver`.
+let driverEnv: NodeJS.ProcessEnv | undefined;
 // When `beforeSession` handed over to WebdriverIO's session request; `before` logs the
 // difference, so a slow or hanging session start shows up in the CI log (#182).
 let sessionRequestedAt = 0;
@@ -332,6 +335,65 @@ function waitForPort(port: number, host: string, timeoutMs: number): Promise<voi
   });
 }
 
+// Reaps leftovers, starts tauri-driver in its own process group and waits until it and the
+// WebKitWebDriver it starts accept connections. Logs each step's pid and port, so a session
+// start that hangs shows how far it got (#457).
+async function startTauriDriver(): Promise<void> {
+  // TAURI_DRIVER_PATH: set by wdio.screenshots.conf.ts, which points HOME at a temp dir
+  // before this runs (so `os.homedir()` no longer finds ~/.cargo/bin).
+  const driverPath = process.env.TAURI_DRIVER_PATH ?? path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
+  reapLeftovers();
+  await assertPortFree(DRIVER_PORT);
+  await assertPortFree(NATIVE_DRIVER_PORT);
+  exiting = false;
+  const startedAt = Date.now();
+  const driver = spawn(driverPath, [], {
+    stdio: [null, process.stdout, process.stderr],
+    env: driverEnv,
+    // Its own process group, see `closeTauriDriver`.
+    detached: true,
+  });
+  tauriDriver = driver;
+  if (driver.pid) fs.writeFileSync(DRIVER_GROUP_FILE, `${driver.pid}\n`);
+  console.log(`[e2e] tauri-driver spawned: pid ${driver.pid}`);
+  driver.on("error", (error) => {
+    console.error("tauri-driver error:", error);
+    process.exit(1);
+  });
+  driver.on("exit", (code) => {
+    // A driver replaced by `restartTauriDriver` may exit late; only the current one counts.
+    if (!exiting && tauriDriver === driver) {
+      console.error("tauri-driver exited with code:", code);
+      process.exit(1);
+    }
+  });
+  // tauri-driver listens on 4444 and starts WebKitWebDriver on 4445; a session request sent
+  // before the native driver accepts can stall (#182).
+  await waitForPort(DRIVER_PORT, "127.0.0.1", 10_000);
+  console.log(`[e2e] tauri-driver listening on ${DRIVER_PORT} after ${Date.now() - startedAt} ms`);
+  await waitForPort(NATIVE_DRIVER_PORT, "127.0.0.1", 10_000);
+  console.log(`[e2e] WebKitWebDriver listening on ${NATIVE_DRIVER_PORT} after ${Date.now() - startedAt} ms`);
+}
+
+// Kills tauri-driver's whole process group (WebKitWebDriver and any app it started too) and
+// starts a fresh one with the same environment, keeping the app's data and the fixture repo.
+// For `reloadSessionWithRetry` (support/session.ts), when a new session hangs (#457).
+async function restartTauriDriver(): Promise<void> {
+  console.warn("[e2e] restarting tauri-driver");
+  await closeTauriDriver();
+  await startTauriDriver();
+}
+registerDriverRestart(restartTauriDriver);
+
+// The app processes in the current tauri-driver's process group, for the session logs.
+function appPids(): string {
+  const group = tauriDriver?.pid;
+  const pids = (listOwnProcesses() ?? [])
+    .filter((info) => info.argv[0] === tauriAppBinary && info.pgrp === group)
+    .map((info) => info.pid);
+  return pids.length > 0 ? pids.join(", ") : "none found";
+}
+
 function onShutdown(fn: () => void) {
   const cleanup = () => {
     try {
@@ -441,9 +503,6 @@ export const config: WebdriverIO.Config = {
   // Ensure `tauri-driver` is running before the session starts so we can proxy the WebDriver
   // requests to it (127.0.0.1:4444, matching `hostname`/`port` above).
   beforeSession: async () => {
-    // TAURI_DRIVER_PATH: set by wdio.screenshots.conf.ts, which points HOME at a temp dir
-    // before this runs (so `os.homedir()` no longer finds ~/.cargo/bin).
-    const driverPath = process.env.TAURI_DRIVER_PATH ?? path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver");
     // Fresh webview storage per spec file (see E2E_DATA_HOME), wiped before the app launches.
     fs.rmSync(E2E_DATA_HOME, { recursive: true, force: true });
     fs.mkdirSync(E2E_DATA_HOME, { recursive: true });
@@ -453,39 +512,19 @@ export const config: WebdriverIO.Config = {
     // the compositor sent it no frame callbacks: zero requestAnimationFrame ticks, no
     // IntersectionObserver deliveries (so DiffPane never loaded a diff), CSS animations frozen on
     // frame 0. Under Xvfb the same build renders normally. Harmless on CI (no Wayland session).
-    const driverEnv: NodeJS.ProcessEnv = { ...process.env, XDG_DATA_HOME: E2E_DATA_HOME, GDK_BACKEND: "x11" };
+    driverEnv = { ...process.env, XDG_DATA_HOME: E2E_DATA_HOME, GDK_BACKEND: "x11" };
     delete driverEnv.WAYLAND_DISPLAY;
-    reapLeftovers();
-    await assertPortFree(DRIVER_PORT);
-    await assertPortFree(NATIVE_DRIVER_PORT);
-    exiting = false;
-    tauriDriver = spawn(driverPath, [], {
-      stdio: [null, process.stdout, process.stderr],
-      env: driverEnv,
-      // Its own process group, see `closeTauriDriver`.
-      detached: true,
-    });
-    if (tauriDriver.pid) fs.writeFileSync(DRIVER_GROUP_FILE, `${tauriDriver.pid}\n`);
     resetFixtureRepo();
-    tauriDriver.on("error", (error) => {
-      console.error("tauri-driver error:", error);
-      process.exit(1);
-    });
-    tauriDriver.on("exit", (code) => {
-      if (!exiting) {
-        console.error("tauri-driver exited with code:", code);
-        process.exit(1);
-      }
-    });
-    // tauri-driver listens on 4444 and starts WebKitWebDriver on 4445; a session request sent
-    // before the native driver accepts can stall (#182).
-    await waitForPort(DRIVER_PORT, "127.0.0.1", 10_000);
-    await waitForPort(NATIVE_DRIVER_PORT, "127.0.0.1", 10_000);
+    await startTauriDriver();
     sessionRequestedAt = Date.now();
   },
 
   before: () => {
-    console.log(`[e2e] session start: ${Date.now() - sessionRequestedAt} ms`);
+    console.log(`[e2e] session start: ${Date.now() - sessionRequestedAt} ms; app pid ${appPids()}`);
+  },
+
+  onReload: (oldSessionId: string, newSessionId: string) => {
+    console.log(`[e2e] session reloaded: ${oldSessionId} -> ${newSessionId}; app pid ${appPids()}`);
   },
 
   // Each spec prepares its fixture with direct git CLI calls in a Mocha `before` hook, but
