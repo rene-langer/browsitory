@@ -54,6 +54,10 @@ cd frontend && pnpm test -- --run && pnpm lint
 - New dependencies must use a licence from the policy in [AGENTS.md](AGENTS.md#license-policy)
   and get a row in [docs/LICENSE_COMPLIANCE.md](docs/LICENSE_COMPLIANCE.md).
 - User-facing text follows [docs/CONTENT_GUIDELINES.md](docs/CONTENT_GUIDELINES.md).
+- Pull requests are squash-merged (the only merge method allowed), and GitHub deletes the
+  branch on merge. Because the branch's own commits never reach `main`, `git branch --merged`
+  and `git fetch --prune` don't clean up your local copies;
+  `scripts/prune-merged-branches.sh` lists them, and `--delete` removes them.
 
 ## Documentation
 
