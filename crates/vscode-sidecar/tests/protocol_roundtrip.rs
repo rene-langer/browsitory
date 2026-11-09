@@ -348,7 +348,8 @@ fn search_commits_and_cancel_search_round_trip_through_the_sidecar() {
     assert!(invalid["error"]["message"]
         .as_str()
         .unwrap()
-        .starts_with("Unknown search key"));
+        .starts_with("Invalid search: Unknown search key"));
+    assert_eq!(invalid["error"]["data"]["kind"], "InvalidSearchQuery");
 
     let cancelled = sidecar.call(
         4,

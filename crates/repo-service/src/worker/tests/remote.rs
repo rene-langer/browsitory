@@ -715,7 +715,7 @@ fn a_background_fetch_fetches_every_remote_quietly_and_records_no_undo_entry() {
     let (event_tx, event_rx) = mpsc::channel();
 
     let operation_id = handle
-        .background_fetch(None, event_tx)
+        .background_fetch(None, 5, event_tx)
         .expect("start background fetch")
         .expect("an idle worker starts the background fetch");
     let events: Vec<_> = event_rx.iter().collect();
@@ -761,7 +761,7 @@ fn a_background_fetch_reports_a_failing_remote_as_background_fetch() {
 
     worker
         .handle()
-        .background_fetch(None, event_tx)
+        .background_fetch(None, 5, event_tx)
         .expect("start background fetch")
         .expect("started");
     let events: Vec<_> = event_rx.iter().collect();
@@ -790,7 +790,7 @@ fn a_background_fetch_is_skipped_while_another_operation_is_queued_or_running() 
     let manual = handle.cancelled.allocate("fetch");
     let (event_tx, event_rx) = mpsc::channel();
 
-    assert_eq!(handle.background_fetch(None, event_tx.clone()), Ok(None));
+    assert_eq!(handle.background_fetch(None, 5, event_tx.clone()), Ok(None));
     drop(event_tx);
     assert!(
         event_rx.iter().next().is_none(),
@@ -799,7 +799,193 @@ fn a_background_fetch_is_skipped_while_another_operation_is_queued_or_running() 
     drop(manual);
     let (event_tx, _event_rx) = mpsc::channel();
     assert!(handle
-        .background_fetch(None, event_tx)
+        .background_fetch(None, 5, event_tx)
         .expect("start")
         .is_some());
+}
+
+/// A server that accepts connections and never answers: a host a fetch can't get anything from,
+/// without the network (#462). Dropping it closes what it accepted, so a fetch still waiting on
+/// it ends.
+struct SilentServer {
+    url: String,
+    accepted: mpsc::Receiver<()>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl SilentServer {
+    fn start() -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let url = format!(
+            "http://127.0.0.1:{}/repo.git",
+            listener.local_addr().expect("address").port()
+        );
+        let (accepted_tx, accepted) = mpsc::channel();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = Arc::clone(&stop);
+        let thread = thread::spawn(move || {
+            let mut held = Vec::new();
+            while !stopped.load(std::sync::atomic::Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        held.push(stream);
+                        let _ = accepted_tx.send(());
+                    }
+                    Err(_) => thread::sleep(Duration::from_millis(5)),
+                }
+            }
+        });
+        Self {
+            url,
+            accepted,
+            stop,
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for SilentServer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn background_options(
+    connect_limit: Duration,
+) -> super::super::background_fetch::BackgroundFetchOptions {
+    super::super::background_fetch::BackgroundFetchOptions {
+        prune: None,
+        interval: Duration::from_secs(5 * 60),
+        connect_limit,
+    }
+}
+
+fn remote_failures(events: &[TransferEvent]) -> Vec<(String, TransferErrorKind)> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            TransferEvent::RemoteFailed {
+                remote_name, error, ..
+            } => Some((remote_name.clone(), *error)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_cancel_stops_waiting_for_a_background_fetch_that_is_still_connecting() {
+    let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+    let server = SilentServer::start();
+    Repository::open(local_dir.path())
+        .expect("open local")
+        .remote("silent", &server.url)
+        .expect("add silent remote");
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let operation_id = handle
+        .background_fetch_with(background_options(Duration::from_secs(600)), event_tx)
+        .expect("start background fetch")
+        .expect("an idle worker starts the background fetch");
+    server
+        .accepted
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the background fetch connects to the silent server");
+    // Well within the connect limit, the worker keeps waiting for it.
+    thread::sleep(Duration::from_millis(300));
+    let early: Vec<_> = event_rx.try_iter().collect();
+    assert!(
+        !early
+            .iter()
+            .any(|event| matches!(event, TransferEvent::Completed { .. })),
+        "{early:?}"
+    );
+    assert!(
+        early.iter().any(|event| matches!(
+            event,
+            TransferEvent::Progress(progress) if progress.operation_id == operation_id
+        )),
+        "the other remote's progress is passed on: {early:?}"
+    );
+    // The user starts an action: the app cancels the background fetch, then sends the action.
+    let started = std::time::Instant::now();
+    handle.cancel_transfer(&operation_id);
+    handle.get_status().expect("status");
+
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the action waited {:?} for a fetch that was still connecting",
+        started.elapsed()
+    );
+    let events: Vec<_> = event_rx.iter().collect();
+    assert_eq!(
+        completed(&events),
+        (
+            TransferOperation::BackgroundFetch,
+            Some(TransferErrorKind::Cancelled)
+        )
+    );
+    assert_eq!(handle.cancelled.len(), 0);
+    let local = Repository::open(local_dir.path()).expect("reopen local");
+    assert!(local
+        .references_glob("refs/remotes/silent/*")
+        .expect("references")
+        .next()
+        .is_none());
+}
+
+#[test]
+fn a_remote_that_never_answers_is_given_up_after_the_connect_limit_and_skipped_next_time() {
+    let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+    let server = SilentServer::start();
+    Repository::open(local_dir.path())
+        .expect("open local")
+        .remote("silent", &server.url)
+        .expect("add silent remote");
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let options = background_options(Duration::from_millis(300));
+
+    let (event_tx, event_rx) = mpsc::channel();
+    handle
+        .background_fetch_with(options, event_tx)
+        .expect("start")
+        .expect("started");
+    let events: Vec<_> = event_rx.iter().collect();
+
+    // The other remote is fetched; the silent one fails quietly, and the tick counts as a fetch.
+    assert_eq!(
+        remote_failures(&events),
+        [("silent".to_string(), TransferErrorKind::TransferFailed)]
+    );
+    assert_eq!(
+        completed(&events),
+        (TransferOperation::BackgroundFetch, None)
+    );
+    server
+        .accepted
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the first tick tried the silent remote");
+
+    // The next tick skips it (backing off, and its first connect is still waiting) instead of
+    // waiting for it again.
+    let (event_tx, event_rx) = mpsc::channel();
+    let started = std::time::Instant::now();
+    handle
+        .background_fetch_with(options, event_tx)
+        .expect("start")
+        .expect("started");
+    let events: Vec<_> = event_rx.iter().collect();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(
+        remote_failures(&events),
+        [("silent".to_string(), TransferErrorKind::TransferFailed)]
+    );
+    assert!(server.accepted.try_recv().is_err(), "no second connect");
 }

@@ -59,7 +59,9 @@ export function useHostVisible(): boolean {
  * the app is hidden, and stops a running background fetch when `busy` turns on, so a user's
  * action never queues behind it. The backend skips the tick (`null`) while any other operation of
  * the repository is queued or running. A remote that needs a credential it can't get is reported
- * once per session as a notice; other failures stay quiet and the next tick tries again.
+ * once per session as a notice; other failures stay quiet and the next tick tries again. The
+ * backend gives up on a remote that doesn't answer and skips it for a while (#462), so a cancel
+ * reaches even a fetch that is still connecting.
  */
 export function useAutoFetch({
   client,
@@ -76,9 +78,9 @@ export function useAutoFetch({
   const [schedule, setSchedule] = useState(0);
   const inFlight = useRef<string | null>(null);
   const collected = useRef(new Map<string, Collected>());
-  const latest = useRef({ prune, busy, refresh, notify, openCredentials });
+  const latest = useRef({ prune, minutes, busy, refresh, notify, openCredentials });
   useEffect(() => {
-    latest.current = { prune, busy, refresh, notify, openCredentials };
+    latest.current = { prune, minutes, busy, refresh, notify, openCredentials };
   });
 
   const finish = useCallback(
@@ -131,7 +133,7 @@ export function useAutoFetch({
     inFlight.current = STARTING;
     let operationId: string | null = null;
     try {
-      operationId = await client.backgroundFetch(repoPath, latest.current.prune);
+      operationId = await client.backgroundFetch(repoPath, latest.current.prune, Math.max(1, Math.round(latest.current.minutes)));
     } catch {
       // The repository went away or the backend refused: quiet; the next tick tries again.
     }

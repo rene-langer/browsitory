@@ -1,7 +1,8 @@
-//! Commit search: a small query language parsed once (`parse_query`) and a paged, cancellable
-//! revwalk over it (`search_commits`).
+//! Commit search: a small query language parsed once (`parse_query`) into a boolean expression
+//! over per-commit terms, and a paged, cancellable revwalk over it (`search_commits`).
 
 use git2::{DiffLineType, DiffOptions, ErrorCode, ObjectType, Oid, Repository, Sort};
+use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
@@ -31,18 +32,55 @@ pub enum SearchTerm {
     After(i64),
     /// Days since 1970-01-01, inclusive.
     Before(i64),
+    /// Where the walk starts, not a test of each commit; only ever a top-level AND term.
     Branch(String),
     /// The commit changed these lines of the file, followed back through earlier changes like
     /// line history (#447). The lines are the file's at the `branch:` term's tip, else HEAD.
-    Lines {
-        path: String,
-        lines: LineRange,
-    },
+    Lines { path: String, lines: LineRange },
+    /// `merges:only` / `merges:none` (#450): the commit has more than one parent, or not.
+    Merges(MergeFilter),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeFilter {
+    /// `merges:only`: commits with two or more parents.
+    OnlyMerges,
+    /// `merges:none`: commits with at most one parent.
+    NoMerges,
+}
+
+/// A parsed query (#450): terms joined by AND (adjacent terms, or `and`), OR and NOT.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchExpr {
+    Term(SearchTerm),
+    Not(Box<SearchExpr>),
+    /// Every part matches. At least two parts, none of them an `And` itself.
+    And(Vec<SearchExpr>),
+    /// Any part matches. At least two parts, none of them an `Or` itself.
+    Or(Vec<SearchExpr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchQuery {
-    pub terms: Vec<SearchTerm>,
+    pub expr: SearchExpr,
+}
+
+impl SearchQuery {
+    /// The parts every match must satisfy: the top-level `And`'s parts, or the whole query.
+    pub fn top_level(&self) -> &[SearchExpr] {
+        match &self.expr {
+            SearchExpr::And(parts) => parts,
+            expr => std::slice::from_ref(expr),
+        }
+    }
+
+    /// The `branch:` term's name, if any. `parse_query` only accepts one at the top level.
+    pub fn branch(&self) -> Option<&str> {
+        self.top_level().iter().find_map(|part| match part {
+            SearchExpr::Term(SearchTerm::Branch(name)) => Some(name.as_str()),
+            _ => None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +113,10 @@ pub struct SearchPage {
 
 #[derive(Debug, Error)]
 pub enum SearchError {
-    #[error("{message}")]
+    /// The query doesn't parse, or names something that isn't there. Its text starts with
+    /// `Invalid search: ` so the transports can tell it apart (`ErrorKind::InvalidSearchQuery`)
+    /// and the search field can show it (#450).
+    #[error("Invalid search: {message}")]
     InvalidQuery { message: String },
     #[error("The history changed since this search started. Search again.")]
     StaleCursor,
@@ -91,7 +132,7 @@ fn invalid(message: impl Into<String>) -> SearchError {
     }
 }
 
-const KEYS: [&str; 10] = [
+const KEYS: [&str; 11] = [
     "author",
     "committer",
     "message",
@@ -102,26 +143,139 @@ const KEYS: [&str; 10] = [
     "before",
     "branch",
     "line",
+    "merges",
 ];
 
-/// Parses a search query. Grammar: whitespace-separated terms, each either `key:value` (key is
-/// `[A-Za-z]+`, case-insensitive) or a bare value; a value is either `"quoted"` (with `\"` and
-/// `\\` escapes) or runs to the next whitespace. All terms are ANDed.
+const OR_NEEDS_TERMS: &str = "\"or\" needs a term on both sides.";
+const AND_NEEDS_TERMS: &str = "\"and\" needs a term on both sides.";
+const NOT_NEEDS_TERM: &str = "\"not\" or \"-\" needs a term right after it, like -wip.";
+const MISSING_CLOSE: &str = "Missing closing parenthesis.";
+const UNMATCHED_CLOSE: &str = "Unmatched \")\". Put it in quotes to search for it literally.";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Token {
+    Open,
+    Close,
+    And,
+    Or,
+    Not,
+    Term(SearchTerm),
+}
+
+/// Parses a search query (#450).
+///
+/// Tokens are separated by whitespace. `(` and `)` group; a bare `and`, `or` or `not` (any case)
+/// is an operator; a `-` at the start of a token negates what follows it. Every other token is
+/// a term: `key:value` (key is `[A-Za-z]+`, case-insensitive) or a bare value; a value is either
+/// `"quoted"` (with `\"` and `\\` escapes) or runs to the next whitespace or to a `)` that
+/// closes a group (a `(` inside a value keeps its `)`, so `fix(ui)` stays one word).
+///
+/// Precedence, loosest first: `or`, then AND (adjacent terms or `and`), then `not`/`-`.
+/// `branch:` sets where the walk starts, so it may only appear once, ANDed at the top level.
 pub fn parse_query(input: &str) -> Result<SearchQuery, SearchError> {
+    let tokens = tokenize(input)?;
+    let mut parser = Parser {
+        tokens: &tokens,
+        pos: 0,
+    };
+    let expr = parser.or()?;
+    if parser.pos < tokens.len() {
+        // `or()` only stops early at a `)` without its `(`.
+        return Err(invalid(UNMATCHED_CLOSE));
+    }
+    let query = SearchQuery { expr };
+
+    let branches = count_branch_terms(&query.expr);
+    if branches > 1 {
+        return Err(invalid("Use at most one branch: term."));
+    }
+    if branches == 1 && query.branch().is_none() {
+        return Err(invalid(
+            "branch: picks where the search starts, so it can't be negated or used with or.",
+        ));
+    }
+    Ok(query)
+}
+
+fn count_branch_terms(expr: &SearchExpr) -> usize {
+    match expr {
+        SearchExpr::Term(SearchTerm::Branch(_)) => 1,
+        SearchExpr::Term(_) => 0,
+        SearchExpr::Not(inner) => count_branch_terms(inner),
+        SearchExpr::And(parts) | SearchExpr::Or(parts) => {
+            parts.iter().map(count_branch_terms).sum()
+        }
+    }
+}
+
+/// `and`/`or`/`not` (any case) at `i`, when it is a whole token: followed by the end,
+/// whitespace or a parenthesis.
+fn operator_at(chars: &[char], i: usize) -> Option<(Token, usize)> {
+    for (word, token) in [("and", Token::And), ("or", Token::Or), ("not", Token::Not)] {
+        let len = word.len();
+        if i + len > chars.len() {
+            continue;
+        }
+        let candidate: String = chars[i..i + len].iter().collect();
+        let ends = chars
+            .get(i + len)
+            .is_none_or(|c| c.is_whitespace() || matches!(c, '(' | ')'));
+        if ends && candidate.eq_ignore_ascii_case(word) {
+            return Some((token, len));
+        }
+    }
+    None
+}
+
+fn tokenize(input: &str) -> Result<Vec<Token>, SearchError> {
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
-    let mut terms = Vec::new();
-    while i < chars.len() {
-        if chars[i].is_whitespace() {
-            i += 1;
+    let mut tokens = Vec::new();
+    // Every pass takes at least one char, so the input's length bounds the passes: an index
+    // that stopped advancing (a bug) ends the loop rather than hanging or filling memory.
+    for _ in 0..chars.len() {
+        if i >= chars.len() {
+            break;
+        }
+        match chars[i] {
+            c if c.is_whitespace() => {
+                i += 1;
+                continue;
+            }
+            '(' => {
+                tokens.push(Token::Open);
+                i += 1;
+                continue;
+            }
+            ')' => {
+                tokens.push(Token::Close);
+                i += 1;
+                continue;
+            }
+            '-' => {
+                if chars
+                    .get(i + 1)
+                    .is_none_or(|c| c.is_whitespace() || *c == ')')
+                {
+                    return Err(invalid(NOT_NEEDS_TERM));
+                }
+                tokens.push(Token::Not);
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if let Some((token, len)) = operator_at(&chars, i) {
+            tokens.push(token);
+            i += len;
             continue;
         }
 
         // A key is a run of ASCII letters immediately followed by `:`.
-        let mut end = i;
-        while end < chars.len() && chars[end].is_ascii_alphabetic() {
-            end += 1;
-        }
+        let end = i + chars[i..]
+            .iter()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .count();
         let key = if end > i && end < chars.len() && chars[end] == ':' {
             let key: String = chars[i..end].iter().collect::<String>().to_lowercase();
             if !KEYS.contains(&key.as_str()) {
@@ -131,8 +285,13 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, SearchError> {
                 )));
             }
             i = end + 1;
-            if i >= chars.len() || chars[i].is_whitespace() {
+            if i >= chars.len() || chars[i].is_whitespace() || chars[i] == ')' {
                 return Err(invalid(format!("{key}: needs a value.")));
+            }
+            if chars[i] == '(' {
+                return Err(invalid(format!(
+                    "{key}: takes one value. For several, repeat it: ({key}:a or {key}:b)."
+                )));
             }
             Some(key)
         } else {
@@ -140,26 +299,24 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, SearchError> {
         };
 
         let value = if chars[i] == '"' {
-            i += 1;
+            // An iterator, not index arithmetic: it always advances, so the loop that grows
+            // `value` always ends.
+            let mut rest = chars[i + 1..].iter();
             let mut value = String::new();
             let mut closed = false;
-            while i < chars.len() {
-                match chars[i] {
+            while let Some(&c) = rest.next() {
+                match c {
                     '"' => {
                         closed = true;
-                        i += 1;
                         break;
                     }
-                    '\\' if i + 1 < chars.len() && matches!(chars[i + 1], '"' | '\\') => {
-                        value.push(chars[i + 1]);
-                        i += 2;
+                    '\\' if matches!(rest.as_slice().first(), Some('"' | '\\')) => {
+                        value.extend(rest.next());
                     }
-                    c => {
-                        value.push(c);
-                        i += 1;
-                    }
+                    c => value.push(c),
                 }
             }
+            i = chars.len() - rest.as_slice().len();
             if !closed {
                 return Err(invalid("Missing closing quote."));
             }
@@ -169,54 +326,176 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, SearchError> {
             value
         } else {
             let start = i;
-            while i < chars.len() && !chars[i].is_whitespace() {
-                i += 1;
-            }
+            // Parentheses opened inside the value; a `)` beyond them closes a group instead.
+            let mut depth = 0usize;
+            let len = chars[start..]
+                .iter()
+                .take_while(|&&c| match c {
+                    c if c.is_whitespace() => false,
+                    '(' => {
+                        depth += 1;
+                        true
+                    }
+                    ')' if depth == 0 => false,
+                    ')' => {
+                        depth -= 1;
+                        true
+                    }
+                    _ => true,
+                })
+                .count();
+            i = start + len;
             chars[start..i].iter().collect()
         };
 
-        terms.push(match key.as_deref() {
-            None => SearchTerm::Text(value),
-            Some("author") => SearchTerm::Author(value),
-            Some("committer") => SearchTerm::Committer(value),
-            Some("message") => SearchTerm::Message(value),
-            Some("commit") => {
-                if value.is_empty()
-                    || value.len() > 40
-                    || !value.chars().all(|c| c.is_ascii_hexdigit())
-                {
-                    return Err(invalid("commit: expects a hexadecimal SHA prefix."));
-                }
-                SearchTerm::Commit(value.to_lowercase())
+        tokens.push(Token::Term(term(key.as_deref(), value)?));
+    }
+    Ok(tokens)
+}
+
+fn term(key: Option<&str>, value: String) -> Result<SearchTerm, SearchError> {
+    Ok(match key {
+        None => SearchTerm::Text(value),
+        Some("author") => SearchTerm::Author(value),
+        Some("committer") => SearchTerm::Committer(value),
+        Some("message") => SearchTerm::Message(value),
+        Some("commit") => {
+            if value.is_empty() || value.len() > 40 || !value.chars().all(|c| c.is_ascii_hexdigit())
+            {
+                return Err(invalid("commit: expects a hexadecimal SHA prefix."));
             }
-            Some("path") => SearchTerm::Path(value),
-            Some("contents") => SearchTerm::Contents(value),
-            Some("after") => SearchTerm::After(
-                parse_day(&value)
-                    .ok_or_else(|| invalid("after: expects a date like 2026-01-31."))?,
-            ),
-            Some("before") => SearchTerm::Before(
-                parse_day(&value)
-                    .ok_or_else(|| invalid("before: expects a date like 2026-01-31."))?,
-            ),
-            Some("branch") => SearchTerm::Branch(value),
-            Some("line") => parse_line_term(&value)?,
-            Some(other) => unreachable!("unhandled search key {other}"),
-        });
+            SearchTerm::Commit(value.to_lowercase())
+        }
+        Some("path") => SearchTerm::Path(value),
+        Some("contents") => SearchTerm::Contents(value),
+        Some("after") => SearchTerm::After(
+            parse_day(&value).ok_or_else(|| invalid("after: expects a date like 2026-01-31."))?,
+        ),
+        Some("before") => SearchTerm::Before(
+            parse_day(&value).ok_or_else(|| invalid("before: expects a date like 2026-01-31."))?,
+        ),
+        Some("branch") => SearchTerm::Branch(value),
+        Some("line") => parse_line_term(&value)?,
+        Some("merges") => SearchTerm::Merges(match value.to_lowercase().as_str() {
+            "only" => MergeFilter::OnlyMerges,
+            "none" => MergeFilter::NoMerges,
+            _ => return Err(invalid("merges: expects only or none.")),
+        }),
+        Some(other) => unreachable!("unhandled search key {other}"),
+    })
+}
+
+/// Recursive descent over the tokens: `or := and ("or" and)*`,
+/// `and := unary (["and"] unary)*`, `unary := ("not" | "-") unary | "(" or ")" | term`.
+struct Parser<'t> {
+    tokens: &'t [Token],
+    pos: usize,
+}
+
+impl Parser<'_> {
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
     }
 
-    if terms.is_empty() {
-        return Err(invalid("Type something to search for."));
+    fn previous(&self) -> Option<&Token> {
+        self.pos.checked_sub(1).and_then(|p| self.tokens.get(p))
     }
-    if terms
-        .iter()
-        .filter(|t| matches!(t, SearchTerm::Branch(_)))
-        .count()
-        > 1
-    {
-        return Err(invalid("Use at most one branch: term."));
+
+    fn or(&mut self) -> Result<SearchExpr, SearchError> {
+        let mut parts = vec![self.and()?];
+        // Every pass takes at least one token; see `tokenize` for why the passes are bounded.
+        for _ in 0..self.tokens.len() {
+            if self.peek() != Some(&Token::Or) {
+                break;
+            }
+            self.pos += 1;
+            parts.push(self.and()?);
+        }
+        Ok(join(parts, false))
     }
-    Ok(SearchQuery { terms })
+
+    fn and(&mut self) -> Result<SearchExpr, SearchError> {
+        let mut parts = Vec::new();
+        // Every pass but the last takes at least one token; see `tokenize` for why the passes
+        // are bounded.
+        for _ in 0..=self.tokens.len() {
+            match self.peek() {
+                None | Some(Token::Close) | Some(Token::Or) => break,
+                Some(Token::And) => {
+                    self.pos += 1;
+                    if parts.is_empty()
+                        || matches!(
+                            self.peek(),
+                            None | Some(Token::Close | Token::Or | Token::And)
+                        )
+                    {
+                        return Err(invalid(AND_NEEDS_TERMS));
+                    }
+                }
+                Some(_) => parts.push(self.unary()?),
+            }
+        }
+        if parts.is_empty() {
+            return Err(invalid(match (self.previous(), self.peek()) {
+                (_, Some(Token::Or)) | (Some(Token::Or), _) => OR_NEEDS_TERMS,
+                (None, None) => "Type something to search for.",
+                (Some(Token::Open), Some(Token::Close)) => {
+                    "Empty parentheses don't match anything."
+                }
+                (Some(Token::Open), None) => MISSING_CLOSE,
+                _ => UNMATCHED_CLOSE,
+            }));
+        }
+        Ok(join(parts, true))
+    }
+
+    fn unary(&mut self) -> Result<SearchExpr, SearchError> {
+        let token = self.peek().cloned();
+        self.pos += 1;
+        match token {
+            Some(Token::Not) => {
+                if matches!(
+                    self.peek(),
+                    None | Some(Token::Close | Token::Or | Token::And)
+                ) {
+                    return Err(invalid(NOT_NEEDS_TERM));
+                }
+                Ok(SearchExpr::Not(Box::new(self.unary()?)))
+            }
+            Some(Token::Open) => {
+                let inner = self.or()?;
+                if self.peek() != Some(&Token::Close) {
+                    return Err(invalid(MISSING_CLOSE));
+                }
+                self.pos += 1;
+                Ok(inner)
+            }
+            Some(Token::Term(term)) => Ok(SearchExpr::Term(term)),
+            // `and()` only calls this on a token that starts a term.
+            other => unreachable!("unary() at {other:?}"),
+        }
+    }
+}
+
+/// One part as itself; several as an `And` (`all`) or `Or`, flattening nested ones of the same
+/// kind so `a (b c)` is `And[a, b, c]`.
+fn join(parts: Vec<SearchExpr>, all: bool) -> SearchExpr {
+    if parts.len() == 1 {
+        return parts.into_iter().next().expect("one part");
+    }
+    let mut flat = Vec::with_capacity(parts.len());
+    for part in parts {
+        match part {
+            SearchExpr::And(inner) if all => flat.extend(inner),
+            SearchExpr::Or(inner) if !all => flat.extend(inner),
+            other => flat.push(other),
+        }
+    }
+    if all {
+        SearchExpr::And(flat)
+    } else {
+        SearchExpr::Or(flat)
+    }
 }
 
 /// `<path>:<from>-<to>` or `<path>:<line>` → a `Lines` term. The path is everything before the
@@ -317,7 +596,7 @@ pub fn search_commits(
     cancel: &dyn Fn() -> bool,
 ) -> Result<SearchPage, SearchError> {
     let starts = start_points(repo, query, selection)?;
-    let first_parent = !has_branch_term(query) && selection.walks_first_parent();
+    let first_parent = query.branch().is_none() && selection.walks_first_parent();
     let fingerprint = fingerprint(&starts, first_parent)?;
     let started = Instant::now();
     let offset = match cursor {
@@ -343,11 +622,13 @@ pub fn search_commits(
         });
     }
 
-    let terms = prepare(repo, &query.terms, &starts, cancel)?;
-    let paths: Vec<&str> = terms
+    let node = prepare(repo, query, &starts, cancel)?;
+    // `contents:` looks only at the files of the `path:` terms ANDed at the top level.
+    let paths: Vec<&str> = query
+        .top_level()
         .iter()
-        .filter_map(|t| match t {
-            Prepared::Path(p) => Some(p.as_str()),
+        .filter_map(|part| match part {
+            SearchExpr::Term(SearchTerm::Path(p)) => Some(p.as_str()),
             _ => None,
         })
         .collect();
@@ -387,7 +668,7 @@ pub fn search_commits(
         let commit = repo.find_commit(oid?)?;
         position += 1;
         scanned_here += 1;
-        if matches(repo, &commit, &terms, &paths)? {
+        if Subject::new(repo, &commit, &paths).eval(&node)? {
             commits.push(decorations.graph_commit(&commit));
         }
     }
@@ -403,23 +684,12 @@ pub fn search_commits(
     })
 }
 
-fn has_branch_term(query: &SearchQuery) -> bool {
-    query
-        .terms
-        .iter()
-        .any(|t| matches!(t, SearchTerm::Branch(_)))
-}
-
 fn start_points(
     repo: &Repository,
     query: &SearchQuery,
     selection: &GraphSelection,
 ) -> Result<Vec<Oid>, SearchError> {
-    let branch = query.terms.iter().find_map(|t| match t {
-        SearchTerm::Branch(name) => Some(name),
-        _ => None,
-    });
-    let Some(name) = branch else {
+    let Some(name) = query.branch() else {
         // The same start points as the graph for this selection.
         return Ok(selection.start_oids(repo)?);
     };
@@ -451,11 +721,12 @@ fn fingerprint(starts: &[Oid], first_parent: bool) -> Result<String, git2::Error
     Ok(hash.to_string()[..16].to_string())
 }
 
-/// A search term ready for matching: lowercased once, ordered by cost.
+/// A search term ready for matching: lowercased once.
 enum Prepared {
     /// The commits a `line:` term's line history lists, computed once per page.
     Lines(HashSet<Oid>),
     Commit(String),
+    Merges(MergeFilter),
     After(i64),
     Before(i64),
     Author(String),
@@ -472,7 +743,7 @@ enum Prepared {
 impl Prepared {
     fn cost(&self) -> u8 {
         match self {
-            Prepared::Lines(_) | Prepared::Commit(_) => 0,
+            Prepared::Lines(_) | Prepared::Commit(_) | Prepared::Merges(_) => 0,
             Prepared::After(_) | Prepared::Before(_) => 1,
             Prepared::Author(_) | Prepared::Committer(_) => 2,
             Prepared::Text { .. } | Prepared::Message(_) => 3,
@@ -482,58 +753,117 @@ impl Prepared {
     }
 }
 
+/// A query ready for matching: the parts of every `And`/`Or` ordered cheapest first, so the
+/// expensive diff-based terms run only when the cheap ones haven't decided already.
+enum Node {
+    Term(Prepared),
+    Not(Box<Node>),
+    /// Every part matches; empty matches every commit (a query of only `branch:`).
+    And(Vec<Node>),
+    Or(Vec<Node>),
+}
+
+impl Node {
+    /// The most expensive term inside.
+    fn cost(&self) -> u8 {
+        match self {
+            Node::Term(term) => term.cost(),
+            Node::Not(inner) => inner.cost(),
+            Node::And(parts) | Node::Or(parts) => parts.iter().map(Node::cost).max().unwrap_or(0),
+        }
+    }
+}
+
 /// `starts` are the walk's start points: with a `branch:` term, the one that names the commit
 /// `line:` terms read their lines from (HEAD otherwise).
 fn prepare(
     repo: &Repository,
-    terms: &[SearchTerm],
+    query: &SearchQuery,
     starts: &[Oid],
     cancel: &dyn Fn() -> bool,
-) -> Result<Vec<Prepared>, SearchError> {
-    let mut lines = Vec::new();
-    for term in terms {
-        if let SearchTerm::Lines { path, lines: range } = term {
-            lines.push(Prepared::Lines(line_term_commits(
-                repo, terms, starts, path, *range, cancel,
-            )?));
-        }
+) -> Result<Node, SearchError> {
+    let ctx = PrepareContext {
+        repo,
+        starts,
+        has_branch: query.branch().is_some(),
+        cancel,
+    };
+    Ok(ctx.node(&query.expr)?.unwrap_or(Node::And(Vec::new())))
+}
+
+struct PrepareContext<'a> {
+    repo: &'a Repository,
+    starts: &'a [Oid],
+    has_branch: bool,
+    cancel: &'a dyn Fn() -> bool,
+}
+
+impl PrepareContext<'_> {
+    /// `None` for a `branch:` term, which tests nothing (`parse_query` keeps it at the top
+    /// level, so it is only ever dropped from the top-level `And`).
+    fn node(&self, expr: &SearchExpr) -> Result<Option<Node>, SearchError> {
+        let sorted = |parts: &[SearchExpr]| -> Result<Vec<Node>, SearchError> {
+            let mut nodes = Vec::with_capacity(parts.len());
+            for part in parts {
+                nodes.extend(self.node(part)?);
+            }
+            nodes.sort_by_key(Node::cost);
+            Ok(nodes)
+        };
+        Ok(Some(match expr {
+            SearchExpr::Term(term) => match self.term(term)? {
+                Some(prepared) => Node::Term(prepared),
+                None => return Ok(None),
+            },
+            SearchExpr::Not(inner) => {
+                Node::Not(Box::new(self.node(inner)?.unwrap_or(Node::And(Vec::new()))))
+            }
+            SearchExpr::And(parts) => Node::And(sorted(parts)?),
+            SearchExpr::Or(parts) => Node::Or(sorted(parts)?),
+        }))
     }
-    let mut prepared: Vec<Prepared> = terms
-        .iter()
-        .filter_map(|term| {
-            Some(match term {
-                SearchTerm::Text(t) => Prepared::Text {
-                    needle: t.to_lowercase(),
-                    sha: (4..=40).contains(&t.len()) && t.chars().all(|c| c.is_ascii_hexdigit()),
-                },
-                SearchTerm::Author(t) => Prepared::Author(t.to_lowercase()),
-                SearchTerm::Committer(t) => Prepared::Committer(t.to_lowercase()),
-                SearchTerm::Message(t) => Prepared::Message(t.to_lowercase()),
-                SearchTerm::Commit(t) => Prepared::Commit(t.to_lowercase()),
-                SearchTerm::Path(t) => Prepared::Path(t.clone()),
-                SearchTerm::Contents(t) => Prepared::Contents(t.to_lowercase()),
-                SearchTerm::After(d) => Prepared::After(*d),
-                SearchTerm::Before(d) => Prepared::Before(*d),
-                SearchTerm::Branch(_) | SearchTerm::Lines { .. } => return None,
-            })
-        })
-        .collect();
-    prepared.extend(lines);
-    prepared.sort_by_key(Prepared::cost);
-    Ok(prepared)
+
+    fn term(&self, term: &SearchTerm) -> Result<Option<Prepared>, SearchError> {
+        Ok(Some(match term {
+            SearchTerm::Text(t) => Prepared::Text {
+                needle: t.to_lowercase(),
+                sha: (4..=40).contains(&t.len()) && t.chars().all(|c| c.is_ascii_hexdigit()),
+            },
+            SearchTerm::Author(t) => Prepared::Author(t.to_lowercase()),
+            SearchTerm::Committer(t) => Prepared::Committer(t.to_lowercase()),
+            SearchTerm::Message(t) => Prepared::Message(t.to_lowercase()),
+            SearchTerm::Commit(t) => Prepared::Commit(t.to_lowercase()),
+            SearchTerm::Path(t) => Prepared::Path(t.clone()),
+            SearchTerm::Contents(t) => Prepared::Contents(t.to_lowercase()),
+            SearchTerm::After(d) => Prepared::After(*d),
+            SearchTerm::Before(d) => Prepared::Before(*d),
+            SearchTerm::Merges(filter) => Prepared::Merges(*filter),
+            SearchTerm::Lines { path, lines } => Prepared::Lines(line_term_commits(
+                self.repo,
+                self.has_branch,
+                self.starts,
+                path,
+                *lines,
+                self.cancel,
+            )?),
+            SearchTerm::Branch(_) => return Ok(None),
+        }))
+    }
 }
 
 /// The commits a `line:` term matches: line history of `path`'s `range` as it is at the
-/// `branch:` term's tip (`starts` holds exactly that commit then), or else at HEAD.
+/// `branch:` term's tip (`starts` holds exactly that commit then), or else at HEAD. As a set
+/// computed up front it is a plain per-commit test, so `not` and `or` apply to it like to any
+/// other term.
 fn line_term_commits(
     repo: &Repository,
-    terms: &[SearchTerm],
+    has_branch: bool,
     starts: &[Oid],
     path: &str,
     range: LineRange,
     cancel: &dyn Fn() -> bool,
 ) -> Result<HashSet<Oid>, SearchError> {
-    let start = if terms.iter().any(|t| matches!(t, SearchTerm::Branch(_))) {
+    let start = if has_branch {
         starts.first().copied()
     } else {
         match repo.head() {
@@ -587,59 +917,97 @@ fn first_parent_diff<'r>(
     repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))
 }
 
-fn matches(
-    repo: &Repository,
-    commit: &git2::Commit,
-    terms: &[Prepared],
-    paths: &[&str],
-) -> Result<bool, git2::Error> {
-    let id = commit.id().to_string();
-    let lowered = std::cell::OnceCell::new();
-    let message =
-        || lowered.get_or_init(|| String::from_utf8_lossy(commit.message_bytes()).to_lowercase());
-    let when = commit.time();
-    let day = (when.seconds() + i64::from(when.offset_minutes()) * 60).div_euclid(86_400);
-    // Diff against the first parent limited to every `path:` term; built at most once.
-    let mut combined: Option<git2::Diff> = None;
+/// One commit being matched, with what several terms share computed at most once.
+struct Subject<'a, 'r> {
+    repo: &'r Repository,
+    commit: &'a git2::Commit<'r>,
+    id: String,
+    message: OnceCell<String>,
+    day: i64,
+    /// The top-level `path:` patterns; `contents:` looks only at their files.
+    paths: &'a [&'a str],
+    /// Diff against the first parent limited to `paths`; built at most once.
+    scoped: Option<git2::Diff<'r>>,
+}
 
-    for term in terms {
-        let ok = match term {
+impl<'a, 'r> Subject<'a, 'r> {
+    fn new(repo: &'r Repository, commit: &'a git2::Commit<'r>, paths: &'a [&'a str]) -> Self {
+        let when = commit.time();
+        Self {
+            repo,
+            commit,
+            id: commit.id().to_string(),
+            message: OnceCell::new(),
+            day: (when.seconds() + i64::from(when.offset_minutes()) * 60).div_euclid(86_400),
+            paths,
+            scoped: None,
+        }
+    }
+
+    fn message(&self) -> &str {
+        self.message
+            .get_or_init(|| String::from_utf8_lossy(self.commit.message_bytes()).to_lowercase())
+    }
+
+    fn scoped_diff(&mut self) -> Result<&git2::Diff<'r>, git2::Error> {
+        if self.scoped.is_none() {
+            self.scoped = Some(first_parent_diff(self.repo, self.commit, self.paths)?);
+        }
+        Ok(self.scoped.as_ref().expect("diff just built"))
+    }
+
+    fn eval(&mut self, node: &Node) -> Result<bool, git2::Error> {
+        Ok(match node {
+            Node::Term(term) => self.term(term)?,
+            Node::Not(inner) => !self.eval(inner)?,
+            Node::And(parts) => {
+                for part in parts {
+                    if !self.eval(part)? {
+                        return Ok(false);
+                    }
+                }
+                true
+            }
+            Node::Or(parts) => {
+                for part in parts {
+                    if self.eval(part)? {
+                        return Ok(true);
+                    }
+                }
+                false
+            }
+        })
+    }
+
+    fn term(&mut self, term: &Prepared) -> Result<bool, git2::Error> {
+        let commit = self.commit;
+        Ok(match term {
             Prepared::Lines(ids) => ids.contains(&commit.id()),
-            Prepared::Commit(prefix) => id.starts_with(prefix.as_str()),
-            Prepared::After(d) => day >= *d,
-            Prepared::Before(d) => day <= *d,
+            Prepared::Commit(prefix) => self.id.starts_with(prefix.as_str()),
+            Prepared::Merges(MergeFilter::OnlyMerges) => commit.parent_count() > 1,
+            Prepared::Merges(MergeFilter::NoMerges) => commit.parent_count() <= 1,
+            Prepared::After(d) => self.day >= *d,
+            Prepared::Before(d) => self.day <= *d,
             Prepared::Author(n) => signature_contains(&commit.author(), n),
             Prepared::Committer(n) => signature_contains(&commit.committer(), n),
             Prepared::Text { needle, sha } => {
-                (*sha && id.starts_with(needle.as_str())) || message().contains(needle.as_str())
+                (*sha && self.id.starts_with(needle.as_str()))
+                    || self.message().contains(needle.as_str())
             }
-            Prepared::Message(t) => message().contains(t.as_str()),
+            Prepared::Message(t) => self.message().contains(t.as_str()),
             Prepared::Path(pattern) => {
-                if paths.len() == 1 {
-                    if combined.is_none() {
-                        combined = Some(first_parent_diff(repo, commit, paths)?);
-                    }
-                    combined.as_ref().is_some_and(|d| d.deltas().len() > 0)
+                if self.paths == [pattern.as_str()] {
+                    self.scoped_diff()?.deltas().len() > 0
                 } else {
-                    first_parent_diff(repo, commit, &[pattern.as_str()])?
+                    first_parent_diff(self.repo, commit, &[pattern.as_str()])?
                         .deltas()
                         .len()
                         > 0
                 }
             }
-            Prepared::Contents(needle) => {
-                if combined.is_none() {
-                    combined = Some(first_parent_diff(repo, commit, paths)?);
-                }
-                let diff = combined.as_ref().expect("diff just built");
-                diff_lines_contain(diff, needle)?
-            }
-        };
-        if !ok {
-            return Ok(false);
-        }
+            Prepared::Contents(needle) => diff_lines_contain(self.scoped_diff()?, needle)?,
+        })
     }
-    Ok(true)
 }
 
 /// True when an added or removed line of `diff` contains `needle` (already lowercased).
@@ -677,8 +1045,29 @@ mod tests {
     use super::*;
     use SearchTerm::*;
 
+    /// The query's terms when it is a plain AND of terms.
     fn terms(input: &str) -> Vec<SearchTerm> {
-        parse_query(input).unwrap().terms
+        parse_query(input)
+            .unwrap()
+            .top_level()
+            .iter()
+            .map(|part| match part {
+                SearchExpr::Term(term) => term.clone(),
+                other => panic!("expected only terms in {input:?}, got {other:?}"),
+            })
+            .collect()
+    }
+
+    fn expr(input: &str) -> SearchExpr {
+        parse_query(input).unwrap().expr
+    }
+
+    fn text(value: &str) -> SearchExpr {
+        SearchExpr::Term(Text(value.into()))
+    }
+
+    fn not(inner: SearchExpr) -> SearchExpr {
+        SearchExpr::Not(Box::new(inner))
     }
 
     fn error(input: &str) -> String {
@@ -702,6 +1091,11 @@ mod tests {
             terms(r#""fix login" "say \"hi\" \\o/""#),
             vec![Text("fix login".into()), Text(r#"say "hi" \o/"#.into()),]
         );
+    }
+
+    #[test]
+    fn a_backslash_before_any_other_char_stays_in_quotes() {
+        assert_eq!(terms(r#""C:\dir\x""#), vec![Text(r"C:\dir\x".into())]);
     }
 
     #[test]
@@ -807,6 +1201,156 @@ mod tests {
                     lines: LineRange { start: 1, end: 2 }
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn adjacent_terms_and_explicit_and_both_mean_and() {
+        assert_eq!(expr("a b"), expr("a AND b"));
+        assert_eq!(expr("a and b"), SearchExpr::And(vec![text("a"), text("b")]));
+    }
+
+    #[test]
+    fn or_binds_looser_than_and_and_not_binds_tightest() {
+        assert_eq!(
+            expr("a b or not c d"),
+            SearchExpr::Or(vec![
+                SearchExpr::And(vec![text("a"), text("b")]),
+                SearchExpr::And(vec![not(text("c")), text("d")]),
+            ])
+        );
+    }
+
+    #[test]
+    fn parentheses_group_and_nested_groups_flatten() {
+        assert_eq!(
+            expr("(a OR b) c"),
+            SearchExpr::And(vec![SearchExpr::Or(vec![text("a"), text("b")]), text("c"),])
+        );
+        assert_eq!(
+            expr("a (b (c d))"),
+            SearchExpr::And(vec![text("a"), text("b"), text("c"), text("d")])
+        );
+        assert_eq!(
+            expr("a or (b or c)"),
+            SearchExpr::Or(vec![text("a"), text("b"), text("c")])
+        );
+        assert_eq!(expr("((a))"), text("a"));
+    }
+
+    #[test]
+    fn a_leading_dash_negates_and_works_on_keys_and_groups() {
+        assert_eq!(
+            expr("-wip -author:bot -(a b)"),
+            SearchExpr::And(vec![
+                not(text("wip")),
+                not(SearchExpr::Term(Author("bot".into()))),
+                not(SearchExpr::And(vec![text("a"), text("b")])),
+            ])
+        );
+        assert_eq!(expr("not not a"), not(not(text("a"))));
+        assert_eq!(expr("NOT(a)"), not(text("a")));
+    }
+
+    #[test]
+    fn operators_are_whole_words_and_quotes_make_them_text() {
+        assert_eq!(
+            terms(r#"order nothing "or" "not" a-b fix(ui) fix(ui):"#),
+            vec![
+                Text("order".into()),
+                Text("nothing".into()),
+                Text("or".into()),
+                Text("not".into()),
+                Text("a-b".into()),
+                Text("fix(ui)".into()),
+                Text("fix(ui):".into()),
+            ]
+        );
+        assert_eq!(
+            terms(r#""-wip" "(x)""#),
+            vec![Text("-wip".into()), Text("(x)".into())]
+        );
+    }
+
+    #[test]
+    fn a_closing_parenthesis_ends_a_value() {
+        assert_eq!(
+            expr("(author:ada or path:src/a(b).rs)"),
+            SearchExpr::Or(vec![
+                SearchExpr::Term(Author("ada".into())),
+                SearchExpr::Term(Path("src/a(b).rs".into())),
+            ])
+        );
+    }
+
+    #[test]
+    fn merges_takes_only_or_none() {
+        assert_eq!(
+            terms("merges:only MERGES:None"),
+            vec![
+                Merges(MergeFilter::OnlyMerges),
+                Merges(MergeFilter::NoMerges)
+            ]
+        );
+        assert_eq!(error("merges:yes"), "merges: expects only or none.");
+    }
+
+    #[test]
+    fn malformed_boolean_queries_have_specific_messages() {
+        let or = "\"or\" needs a term on both sides.";
+        let and = "\"and\" needs a term on both sides.";
+        let not = "\"not\" or \"-\" needs a term right after it, like -wip.";
+        let unmatched = "Unmatched \")\". Put it in quotes to search for it literally.";
+        assert_eq!(error("or a"), or);
+        assert_eq!(error("a or"), or);
+        assert_eq!(error("a or or b"), or);
+        assert_eq!(error("(or a)"), or);
+        assert_eq!(error("(a or)"), or);
+        assert_eq!(error("and a"), and);
+        assert_eq!(error("a and"), and);
+        assert_eq!(error("a and or b"), and);
+        assert_eq!(error("not"), not);
+        assert_eq!(error("a -"), not);
+        assert_eq!(error("- a"), not);
+        assert_eq!(error("(a -)"), not);
+        assert_eq!(error("not or a"), not);
+        assert_eq!(error("()"), "Empty parentheses don't match anything.");
+        assert_eq!(error("(a"), "Missing closing parenthesis.");
+        assert_eq!(error("(a (b)"), "Missing closing parenthesis.");
+        assert_eq!(error("("), "Missing closing parenthesis.");
+        assert_eq!(error("a)"), unmatched);
+        assert_eq!(error(")"), unmatched);
+        assert_eq!(error("(a))"), unmatched);
+        assert_eq!(error("author:)"), "author: needs a value.");
+        assert_eq!(
+            error("author:(a or b)"),
+            "author: takes one value. For several, repeat it: (author:a or author:b)."
+        );
+    }
+
+    #[test]
+    fn branch_must_be_a_single_top_level_and_term() {
+        assert_eq!(
+            parse_query("(a b) branch:main").unwrap().branch(),
+            Some("main")
+        );
+        assert_eq!(parse_query("branch:main").unwrap().branch(), Some("main"));
+        let message =
+            "branch: picks where the search starts, so it can't be negated or used with or.";
+        assert_eq!(error("-branch:main"), message);
+        assert_eq!(error("a or branch:main"), message);
+        assert_eq!(error("(a or b branch:main)"), message);
+        assert_eq!(
+            error("branch:a (branch:b)"),
+            "Use at most one branch: term."
+        );
+    }
+
+    #[test]
+    fn invalid_query_text_names_the_search() {
+        assert_eq!(
+            parse_query("(").unwrap_err().to_string(),
+            "Invalid search: Missing closing parenthesis."
         );
     }
 }
