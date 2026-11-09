@@ -12,6 +12,7 @@ export function CommitSearchBar({
   onFocusResults,
   focusRequested,
   onFocusHandled,
+  error = null,
 }: {
   query: string;
   onQueryChange: (text: string) => void;
@@ -20,10 +21,13 @@ export function CommitSearchBar({
   /** Set by Ctrl/Cmd+F or the palette; the bar focuses its field and acknowledges. */
   focusRequested: boolean;
   onFocusHandled: () => void;
+  /** Why the query is invalid (#450), shown under the field; `null` when it parses. */
+  error?: string | null;
 }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const helpId = useId();
+  const errorId = useId();
 
   useEffect(() => {
     if (!focusRequested) return;
@@ -55,6 +59,8 @@ export function CommitSearchBar({
         value={query}
         spellCheck={false}
         autoComplete="off"
+        aria-invalid={error !== null}
+        aria-describedby={error !== null ? errorId : undefined}
         onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={handleKeyDown}
       />
@@ -73,6 +79,11 @@ export function CommitSearchBar({
       >
         <CircleHelp size={14} aria-hidden="true" />
       </button>
+      {error !== null && (
+        <p id={errorId} className={styles.error} role="alert">
+          {error}
+        </p>
+      )}
       {helpOpen && (
         <div id={helpId} className={styles.help} role="region" aria-label="Search syntax">
           <dl className={styles.syntax}>

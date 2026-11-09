@@ -50,7 +50,7 @@ fn an_invalid_search_query_replies_its_message() {
             .handle()
             .search_commits("author:".into(), GraphSelection::default(), None)
             .unwrap_err(),
-        "author: needs a value."
+        "Invalid search: author: needs a value."
     );
 }
 

@@ -981,6 +981,7 @@ export function RepoWorkspace({
                     onFocusResults={() => searchResultsRef.current?.focus()}
                     focusRequested={searchFocusRequested}
                     onFocusHandled={clearSearchFocusRequest}
+                    error={commitSearch.results?.queryError ?? null}
                   />
                   {commitSearch.results !== null ? (
                     <CommitSearchResults

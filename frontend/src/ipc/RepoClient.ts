@@ -400,7 +400,8 @@ export type ErrorKind =
   | "DirtyWorktree"
   | "PullFailed"
   | "Cancelled"
-  | "AddDeleteConflict";
+  | "AddDeleteConflict"
+  | "InvalidSearchQuery";
 
 /** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
 export interface RepoErrorPayload {
@@ -443,6 +444,7 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
   "PullFailed",
   "Cancelled",
   "AddDeleteConflict",
+  "InvalidSearchQuery",
 ]);
 
 /**
