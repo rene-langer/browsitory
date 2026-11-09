@@ -44,8 +44,11 @@ describe("Browsitory partial revert", () => {
     await browser.execute((el) => (el as HTMLElement).click(), entry);
 
     // The commit's two hunks each have a header button; the first is line 2's.
-    const revertHunk = await $("button=Revert hunk");
-    await revertHunk.waitForExist({ timeout: UI_TIMEOUT });
+    await browser.waitUntil(async () => (await (await $$("button=Revert hunk")).length) === 2, {
+      timeout: UI_TIMEOUT,
+      timeoutMsg: "expected the commit's two hunks with Revert hunk",
+    });
+    const [revertHunk] = await $$("button=Revert hunk");
     await browser.execute((el) => (el as HTMLElement).click(), revertHunk);
 
     await browser.waitUntil(() => fileContents() === lines({ 17: "LINE SEVENTEEN" }), {
