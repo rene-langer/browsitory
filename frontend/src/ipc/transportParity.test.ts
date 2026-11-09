@@ -16,7 +16,9 @@
 //   and refuses to forward for the webview (`HOST_SIDECAR_METHODS`, same test).
 //
 // The client side is not parsed from source either: this test calls every method of each client
-// with a mocked transport and records the backend name it sends.
+// with a mocked transport and records the backend name and the params it sends. Most methods come
+// from the shared `createRepoClient` (#504), so they can't differ; the params check guards the
+// methods a transport implements itself.
 import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "./RepoClient";
@@ -30,6 +32,18 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) })
 vi.mock("@tauri-apps/plugin-log", () => ({ error: vi.fn(async () => {}) }));
 
 type Method = keyof RepoClient;
+
+/** One backend call as a transport sent it. */
+interface Sent {
+  name: string;
+  params: unknown;
+}
+
+/**
+ * The arguments every method is called with: a distinct object per position, so the recorded
+ * params show which argument went where (a spread argument such as `HunkOptions` adds its key).
+ */
+const ARGS = Array.from({ length: 8 }, (_, index) => ({ [`arg${index}`]: index }));
 
 /** Methods that only register an event listener; they call no backend method on either side. */
 const SUBSCRIPTIONS = [
@@ -63,15 +77,11 @@ function methodsOf(client: RepoClient): Method[] {
   return (Object.keys(client) as Method[]).filter((name) => typeof client[name] === "function");
 }
 
-/** Calls `method` with no arguments and returns the backend names it sent through `sent`. */
-async function backendNamesFor(
-  client: RepoClient,
-  method: Method,
-  sent: () => string[],
-): Promise<string[]> {
+/** Calls `method` with `ARGS` and returns the backend calls it sent through `sent`. */
+async function backendCallsFor(client: RepoClient, method: Method, sent: () => Sent[]): Promise<Sent[]> {
   const before = sent().length;
   try {
-    const result: unknown = (client[method] as (...args: unknown[]) => unknown)();
+    const result: unknown = (client[method] as (...args: unknown[]) => unknown)(...ARGS);
     // A vscode call stays pending until a reply arrives; the message is already posted by then.
     if (result instanceof Promise) {
       await Promise.race([result.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 0))]);
@@ -82,18 +92,18 @@ async function backendNamesFor(
   return sent().slice(before);
 }
 
-async function backendNames(client: RepoClient, sent: () => string[]): Promise<Map<Method, string[]>> {
-  const names = new Map<Method, string[]>();
+async function backendCalls(client: RepoClient, sent: () => Sent[]): Promise<Map<Method, Sent[]>> {
+  const calls = new Map<Method, Sent[]>();
   for (const method of methodsOf(client)) {
-    names.set(method, await backendNamesFor(client, method, sent));
+    calls.set(method, await backendCallsFor(client, method, sent));
   }
-  return names;
+  return calls;
 }
 
-/** Each method sends exactly one backend name, except the listed methods, which send none. */
-function singleNames(names: Map<Method, string[]>, sendNothing: readonly Method[]): Map<Method, string> {
-  const single = new Map<Method, string>();
-  for (const [method, sent] of names) {
+/** Each method sends exactly one backend call, except the listed methods, which send none. */
+function singleCalls(calls: Map<Method, Sent[]>, sendNothing: readonly Method[]): Map<Method, Sent> {
+  const single = new Map<Method, Sent>();
+  for (const [method, sent] of calls) {
     if (sendNothing.includes(method)) {
       expect(sent, `${method} should call no backend method`).toEqual([]);
     } else {
@@ -104,34 +114,42 @@ function singleNames(names: Map<Method, string[]>, sendNothing: readonly Method[
   return single;
 }
 
+const namesOf = (calls: Map<Method, Sent>) => new Map([...calls].map(([method, { name }]) => [method, name]));
+
 describe("transport parity", () => {
+  let tauriCalls: Map<Method, Sent>;
+  let vscodeCalls: Map<Method, Sent>;
   let tauriNames: Map<Method, string>;
   let vscodeNames: Map<Method, string>;
   let resetVscode: (() => void) | undefined;
 
   beforeEach(async () => {
     vi.resetModules();
-    const invoked: string[] = [];
-    vi.mocked(invoke).mockImplementation(async (command: string) => {
-      invoked.push(command);
+    const invoked: Sent[] = [];
+    vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+      // A command without arguments is invoked with none; the VSCode client sends `{}` for it.
+      invoked.push({ name: command, params: args ?? {} });
       return [];
     });
     const { tauriRepoClient } = await import("./tauriRepoClient");
-    tauriNames = singleNames(
-      await backendNames(tauriRepoClient, () => invoked),
+    tauriCalls = singleCalls(
+      await backendCalls(tauriRepoClient, () => invoked),
       [...SUBSCRIPTIONS, ...TAURI_NO_COMMAND],
     );
+    tauriNames = namesOf(tauriCalls);
 
-    const posted: string[] = [];
+    const posted: Sent[] = [];
     (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
-      postMessage: (message: { method: string }) => posted.push(message.method),
+      postMessage: (message: { method: string; params: unknown }) =>
+        posted.push({ name: message.method, params: message.params }),
     });
     const vscodeModule = await import("./vscodeRepoClient");
     resetVscode = vscodeModule.__resetVscodeRepoClientForTests;
-    vscodeNames = singleNames(
-      await backendNames(vscodeModule.vscodeRepoClient, () => posted),
+    vscodeCalls = singleCalls(
+      await backendCalls(vscodeModule.vscodeRepoClient, () => posted),
       [...SUBSCRIPTIONS, ...VSCODE_UNSUPPORTED],
     );
+    vscodeNames = namesOf(vscodeCalls);
   });
 
   afterEach(() => {
@@ -170,6 +188,25 @@ describe("transport parity", () => {
       .filter(([method, name]) => vscodeNames.has(method) && vscodeNames.get(method) !== name)
       .map(([method]) => method);
     expect(differing).toEqual([]);
+  });
+
+  it("both clients send the same params for each method they share", () => {
+    const shared = [...tauriCalls.keys()].filter((method) => vscodeCalls.has(method));
+    const paramsOf = (calls: Map<Method, Sent>) =>
+      Object.fromEntries(shared.map((method) => [method, calls.get(method)!.params]));
+    expect(paramsOf(vscodeCalls)).toStrictEqual(paramsOf(tauriCalls));
+  });
+
+  it("records the arguments each method sends, not just their count", () => {
+    // Guards the check above: with arguments that all looked alike it would pass vacuously.
+    expect(tauriCalls.get("getStatus")?.params).toEqual({ repoPath: ARGS[0] });
+    expect(vscodeCalls.get("stageHunk")?.params).toEqual({
+      repoPath: ARGS[0],
+      path: ARGS[1],
+      oldStart: ARGS[2],
+      newStart: ARGS[3],
+      ...ARGS[4],
+    });
   });
 
   it("the transports differ only in the allow-listed methods", () => {
