@@ -7,7 +7,6 @@ import { UI_TIMEOUT } from "../support/timeouts";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "tree-e2e/nested.txt";
-const MOD = process.platform === "darwin" ? "Meta" : "Control";
 
 function fileContents(): string | null {
   try {
@@ -55,8 +54,9 @@ describe("Browsitory files at a commit", () => {
     });
 
     const label = `Restore ${FILE} from ${first.slice(0, 7)}`;
-    await $(`button[aria-label="Undo ${label}"]`).waitForExist({ timeout: UI_TIMEOUT });
-    await browser.keys([MOD, "z"]);
+    // The toolbar's Undo button, not Mod+Z: focus may still be in the filter box, whose own
+    // undo would take the key.
+    await clickInPage(`button[aria-label="Undo ${label}"]`);
     await browser.waitUntil(() => fileContents() === "version two\n", {
       timeout: UI_TIMEOUT,
       timeoutMsg: "undo did not bring the file back",
