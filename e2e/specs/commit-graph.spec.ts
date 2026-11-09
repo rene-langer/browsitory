@@ -64,6 +64,11 @@ describe("Browsitory commit graph", () => {
   it("shows a commit made on a detached HEAD, marked HEAD", async () => {
     git(E2E_REPO_PATH, "checkout", "--detach");
     fs.writeFileSync(path.join(E2E_REPO_PATH, DETACHED_FILE), "detached\n");
+    // The app doesn't watch the working tree: it reads status when the page loads and after its
+    // own actions. `beforeTest`'s reload ran before the two lines above, so its first status
+    // read could land before the file existed, and the Stage button never appeared (#556).
+    // Reload now, after the change on disk, so that read sees the detached HEAD and the file.
+    await browser.refresh();
 
     const stageButton = await $(`button[aria-label="Stage ${DETACHED_FILE}"]`);
     await stageButton.waitForExist();
