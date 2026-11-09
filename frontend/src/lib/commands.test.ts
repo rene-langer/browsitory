@@ -107,6 +107,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     unstageLines: vi.fn(),
     discardLines: vi.fn(),
     discardFile: vi.fn(),
+    restoreFileVersion: vi.fn(),
     discardAllUnstaged: vi.fn(),
     ignorePath: vi.fn(),
     ignorePaths: vi.fn(),

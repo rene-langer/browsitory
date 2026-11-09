@@ -92,6 +92,30 @@ export interface FileSides {
   new: FileSide;
 }
 
+/** What a commit's tree entry is (#446). `Executable`: a file with the executable bit. */
+export type TreeEntryKind = "Folder" | "File" | "Executable" | "Symlink" | "Submodule";
+/** One entry of a commit's tree; `path` is repository-relative, `size` `null` for folders and submodules. */
+export interface TreeEntry {
+  path: string;
+  name: string;
+  kind: TreeEntryKind;
+  size: number | null;
+}
+/** One folder of a commit's tree, or a filter's matches (`truncated`: there were more). */
+export interface TreeListing {
+  entries: TreeEntry[];
+  truncated: boolean;
+}
+/**
+ * A file's content at a commit for the read-only viewer (#446). Files over 2 MB are `TooLarge`;
+ * a binary file's bytes come only when they are a previewable image (`Image`).
+ */
+export type FileContent =
+  | { kind: "Text"; size: number; text: string }
+  | { kind: "Image"; size: number; base64: string; mime: string }
+  | { kind: "Binary"; size: number }
+  | { kind: "TooLarge"; size: number };
+
 export interface DiffHunk {
   oldStart: number;
   oldLines: number;
@@ -951,6 +975,20 @@ export interface RepoClient {
   amendCommit(repoPath: string, message: string, noVerify: boolean, options?: AmendOptions): Promise<CommitOutcome>;
   /** Both sides of `path` in `source`, for the image preview (each capped at 20 MB). */
   getFileSides(repoPath: string, path: string, source: DiffSource): Promise<FileSides>;
+  /**
+   * One folder (`dir`, `""` for the root) of `commitId`'s tree, folders first. With a non-blank
+   * `filter`, every file whose path contains it instead (case-insensitive, at most 500) (#446).
+   */
+  getCommitTree(repoPath: string, commitId: string, dir: string, filter: string | null): Promise<TreeListing>;
+  /** `path` as it is in `commitId`, for the read-only viewer. */
+  getFileAtCommit(repoPath: string, commitId: string, path: string): Promise<FileContent>;
+  /**
+   * Asks where to save `path` as it is in `commitId`, then writes it there byte for byte.
+   * Resolves the path written, or `null` when the user cancelled.
+   */
+  saveFileVersion(repoPath: string, commitId: string, path: string): Promise<string | null>;
+  /** Writes `path` as it is in `commitId` to the work tree (not the index); one undo step. */
+  restoreFileVersion(repoPath: string, commitId: string, path: string): Promise<void>;
   /** Up to 20 recent authors (other than the current user), newest first. */
   listRecentAuthors(repoPath: string): Promise<SignatureInput[]>;
   getCommitMessageSettings(): Promise<CommitMessageSettings>;

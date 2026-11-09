@@ -50,6 +50,7 @@ mod status;
 mod submodule;
 mod tag;
 mod tools;
+mod tree;
 mod undo;
 mod undo_store;
 mod worktree;
@@ -512,6 +513,29 @@ pub(crate) enum Command {
         path: String,
         version: git_core::tools::FileVersion,
         reply: Sender<Result<Option<Vec<u8>>, String>>,
+    },
+    /// One folder of a commit's tree, or a filter's matches (#446).
+    GetCommitTree {
+        commit_id: String,
+        dir: String,
+        filter: Option<String>,
+        reply: Sender<Result<git_core::tree::TreeListing, String>>,
+    },
+    GetFileAtCommit {
+        commit_id: String,
+        path: String,
+        reply: Sender<Result<git_core::tree::FileContent, String>>,
+    },
+    SaveFileVersion {
+        commit_id: String,
+        path: String,
+        destination: std::path::PathBuf,
+        reply: Sender<Result<(), String>>,
+    },
+    RestoreFileVersion {
+        commit_id: String,
+        path: String,
+        reply: Sender<Result<(), String>>,
     },
     #[allow(dead_code)]
     CommitsSince {
@@ -1542,6 +1566,28 @@ impl Worker {
                         version,
                         reply,
                     } => tools::read_file_version(&repo, path, version, reply),
+                    Command::GetCommitTree {
+                        commit_id,
+                        dir,
+                        filter,
+                        reply,
+                    } => tree::get_commit_tree(&repo, commit_id, dir, filter, reply),
+                    Command::GetFileAtCommit {
+                        commit_id,
+                        path,
+                        reply,
+                    } => tree::get_file_at_commit(&repo, commit_id, path, reply),
+                    Command::SaveFileVersion {
+                        commit_id,
+                        path,
+                        destination,
+                        reply,
+                    } => tree::save_file_version(&repo, commit_id, path, destination, reply),
+                    Command::RestoreFileVersion {
+                        commit_id,
+                        path,
+                        reply,
+                    } => tree::restore_file_version(&repo, commit_id, path, reply),
                     Command::CommitsSince { onto, reply } => {
                         rebase::commits_since(&repo, onto, reply)
                     }

@@ -71,6 +71,7 @@ describe("SidecarBridge with the real vscode-sidecar", () => {
         messages.push(message);
       },
       showOpenDialog: async () => undefined,
+    showSaveDialog: async () => undefined,
       openExternal: async () => true,
       appendLine: (message) => diagnostics.push(message),
       openFile: async () => undefined,

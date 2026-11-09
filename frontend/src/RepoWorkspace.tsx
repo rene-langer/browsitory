@@ -1058,6 +1058,10 @@ export function RepoWorkspace({
                   }}
                   onOpenFileHistory={fileHistory.open}
                   externalTools={externalTools}
+                  onRestoreFileVersion={(commitId, path) =>
+                    announce(`Restored ${path} from ${commitId.slice(0, 7)}`, appState.restoreFileVersion)(commitId, path)
+                  }
+                  restoreBlockedReason={operationDisabledReason}
                   onMarkResolved={appState.markResolved}
                   onResolveWholeFile={(path, side) => void appState.resolveWholeFile(path, side)}
                   status={appState.state.status}

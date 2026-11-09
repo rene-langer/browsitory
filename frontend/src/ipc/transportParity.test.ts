@@ -52,10 +52,10 @@ const TAURI_NO_COMMAND = ["logFrontendError"] as const satisfies readonly Method
 
 /**
  * Sidecar methods the webview never calls. The extension host itself calls them, to read file
- * versions for VSCode's diff and merge editors and to check a merge target before it opens the
- * merge editor.
+ * versions for VSCode's diff and merge editors, to check a merge target before it opens the
+ * merge editor, and to write a file version to the path picked in its save dialog.
  */
-const SIDECAR_HOST_ONLY = ["check_merge_target", "read_file_version", "repo_workdir"];
+const SIDECAR_HOST_ONLY = ["check_merge_target", "read_file_version", "repo_workdir", "write_file_version"];
 
 const sorted = (names: Iterable<string>) => [...names].sort();
 

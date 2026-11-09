@@ -10,6 +10,7 @@ function setup() {
     unstageLines: vi.fn(async () => {}),
     discardLines: vi.fn(async () => {}),
     discardFile: vi.fn(async () => {}),
+    restoreFileVersion: vi.fn(async () => {}),
     discardAllUnstaged: vi.fn(async () => {}),
     ignorePath: vi.fn(async () => {}),
   };
@@ -39,11 +40,13 @@ describe("useStagingActions", () => {
     expect(client.discardLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
   });
 
-  it("file, discard-all and ignore actions call through", async () => {
+  it("file, discard-all, ignore and restore actions call through", async () => {
     const { client, actions } = setup();
     await actions.discardFile("f.txt");
     await actions.discardAllUnstaged(["a.txt", "u.txt"]);
     await actions.ignorePath("*.log");
+    await actions.restoreFileVersion("abc", "src/old.txt");
+    expect(client.restoreFileVersion).toHaveBeenCalledWith("/repo", "abc", "src/old.txt");
     expect(client.discardFile).toHaveBeenCalledWith("/repo", "f.txt");
     expect(client.discardAllUnstaged).toHaveBeenCalledWith("/repo", ["a.txt", "u.txt"]);
     expect(client.ignorePath).toHaveBeenCalledWith("/repo", "*.log");

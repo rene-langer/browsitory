@@ -4,7 +4,8 @@
 **Ctrl/Cmd+Shift+Z** (or Ctrl+Y) redoes it. The undo/redo buttons next to Fetch/Pull/Push, the
 command palette, and the toast's Undo/Redo button do the same; each names the operation it
 will act on. Undo covers staging, commits, amend, reset, branch and tag changes, checkout,
-cherry-pick, revert, merge, rebase, pull and every discard, so discarded changes are
+cherry-pick, revert, merge, rebase, pull, every discard and restoring a file from a commit
+(see [Files at a commit](files-at-a-commit.md)), so discarded or replaced changes are
 recoverable. Up to 50 steps are kept, across restarts. An operation that stopped on a conflict
 or an edit step (merge, cherry-pick, revert, a multi-commit sequence, rebase) becomes one undo
 step when it finishes, even if you restarted the app in between; one aborted, or replaced by
@@ -31,7 +32,7 @@ Redo then say "'f.txt' is open in another program. Close it, then try again."
 
 With the desktop app and the VSCode extension open on the same repository, they share one undo
 history. If the other window keeps it busy for more than about 10 seconds (a pull, a commit
-hook, a signing prompt), Undo, Redo, discards and **Reset hard** say "Another Browsitory window
+hook, a signing prompt), Undo, Redo, discards, restoring a file and **Reset hard** say "Another Browsitory window
 is changing this repository's undo history. Try again in a moment…" and change nothing; other
 operations still run, but can't be undone. After that, while the other window stays busy, each
 action waits about a second for it instead of 10; a quick run of actions waits only once.

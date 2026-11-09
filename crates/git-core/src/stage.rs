@@ -74,6 +74,18 @@ pub enum StageError {
     /// written (#239).
     #[error("'{0}' is open in another program. Close it, then try again.")]
     FileInUse(String),
+    /// `restore_file_version`: the path is not a file or symlink in that commit.
+    #[error("'{0}' is not a file in that commit.")]
+    NotAFileInCommit(String),
+    /// `restore_file_version`: a folder on the way to `path` is now the file `parent`.
+    #[error(
+        "Couldn't restore '{path}': '{parent}' is now a file, not a folder. Move '{parent}' first."
+    )]
+    RestoreBlockedByFile { path: String, parent: String },
+    /// `restore_file_version`: `path` is now a folder holding `inner`, which Undo can't bring
+    /// back.
+    #[error("Couldn't restore '{path}': it is now a folder holding '{inner}', which Undo can't bring back. Move it first.")]
+    RestoreBlockedByFolder { path: String, inner: String },
 }
 
 impl From<LinePatchError> for StageError {
@@ -255,6 +267,66 @@ pub fn discard_file(repo: &git2::Repository, path: &str) -> Result<(), StageErro
             return Err(StageError::IsFolder(path.to_string()));
         }
     }
+    Ok(())
+}
+
+/// Writes `path` as it is in `commit_id` to the work tree (#446), like `git restore
+/// --source=<commit> -- <path>`: the index is left as it is, so the restored content shows as an
+/// unstaged change. Line-ending and other checkout filters apply, and a symlink is restored as a
+/// link. The same guards as `discard_file` apply: nothing is written through a symlinked folder
+/// or a symlink that replaced the file, and a folder in the way that holds what Undo can't bring
+/// back is refused.
+pub fn restore_file_version(
+    repo: &git2::Repository,
+    commit_id: &str,
+    path: &str,
+) -> Result<(), StageError> {
+    const GITLINK: i32 = 0o160000;
+    let rel = checked_relative(path)?;
+    let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    let tree = repo.find_commit(git2::Oid::from_str(commit_id)?)?.tree()?;
+    match tree.get_path(rel) {
+        Ok(entry)
+            if entry.kind() == Some(git2::ObjectType::Blob) && entry.filemode() != GITLINK => {}
+        Ok(_) => return Err(StageError::NotAFileInCommit(path.to_string())),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => {
+            return Err(StageError::NotAFileInCommit(path.to_string()))
+        }
+        Err(e) => return Err(e.into()),
+    }
+    refuse_beyond_symlink(workdir, path)?;
+    ensure_no_symlinked_parent(workdir, rel)?;
+    if let Some(parent) = crate::worktree_guard::file_in_place_of_folder(workdir, path)? {
+        return Err(StageError::RestoreBlockedByFile {
+            path: path.to_string(),
+            parent,
+        });
+    }
+    if let Some(inner) = unrestorable_inside(repo, workdir, path)? {
+        return Err(StageError::RestoreBlockedByFolder {
+            path: path.to_string(),
+            inner,
+        });
+    }
+    crate::worktree_guard::prepare_forced_checkout::<StageError, _>(
+        repo,
+        Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
+        Some(&[path.to_string()]),
+    )?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout
+        .force()
+        .path(rel)
+        .disable_pathspec_match(true)
+        .update_index(false);
+    crate::hardlink::on_checkout(repo, &mut checkout);
+    repo.checkout_tree(tree.as_object(), Some(&mut checkout))
+        .map_err(|error| {
+            match crate::worktree_guard::held_open_after_checkout(workdir, &error, [path]) {
+                Some(path) => StageError::FileInUse(path.to_string()),
+                None => error.into(),
+            }
+        })?;
     Ok(())
 }
 

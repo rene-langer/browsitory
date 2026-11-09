@@ -18,14 +18,14 @@ use repo_service::wire::{
     transfer_progress_dto, BlameLineDto, BranchInfoDto, ChangedFileDto, CommitLocationDto,
     CommitMessageSettingsDto, CommitOutcomeDto, CommitSignatureDto, CompareRangeDto,
     ConflictSegmentDto, DiffHunkDto, DiffSettingsDto, ExternalToolSettingsDto, FetchSettingsDto,
-    FileHistoryEntryDto, FileSidesDto, ForgeRepositoryDto, GitToolsDto, GraphCommitDto,
-    HeadInfoDto, MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto,
-    PickOutcomeDto, PullOutcomeDto, PullRequestDto, PullRequestListDto, RebaseAbortDto,
-    RebaseInfoDto, RebasePlanCommitDto, RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto,
-    SearchPageDto, SequenceAbortDto, SequenceOutcomeDto, SequenceProgressDto, StashApplyOutcomeDto,
-    StashEntryDto, StashFilesDto, StatusEntryDto, SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto,
-    TerminalSequenceDto, UndoOutcomeDto, UndoStateDto, UpstreamInfoDto, WorkspaceDto,
-    WorktreeInfoDto,
+    FileContentDto, FileHistoryEntryDto, FileSidesDto, ForgeRepositoryDto, GitToolsDto,
+    GraphCommitDto, HeadInfoDto, MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto,
+    OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto, PullRequestDto, PullRequestListDto,
+    RebaseAbortDto, RebaseInfoDto, RebasePlanCommitDto, RebaseStepResultDto, ReflogEntryDto,
+    RemoteInfoDto, SearchPageDto, SequenceAbortDto, SequenceOutcomeDto, SequenceProgressDto,
+    StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StatusEntryDto, SubmoduleInfoDto,
+    TagInfoDto, TerminalRebaseDto, TerminalSequenceDto, TreeListingDto, UndoOutcomeDto,
+    UndoStateDto, UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
 };
 
 #[path = "../../../test-support/wire_fixtures.rs"]
@@ -121,6 +121,16 @@ fn snapshots() -> Vec<(String, String)> {
         MarkResolvedOutcomeDto::from,
     );
     s.add("FileSides", fixtures::file_sides(), FileSidesDto::from);
+    s.add(
+        "TreeListing",
+        fixtures::tree_listings(),
+        TreeListingDto::from,
+    );
+    s.add(
+        "FileContent",
+        fixtures::file_contents(),
+        FileContentDto::from,
+    );
     s.add(
         "CommitOutcome",
         fixtures::commit_outcomes(),

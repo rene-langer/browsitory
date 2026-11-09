@@ -86,6 +86,7 @@ nav:
       - conflicts.md
       - history.md
       - file-history.md
+      - files-at-a-commit.md
       - search.md
       - compare.md
       - undo-redo.md

@@ -48,11 +48,13 @@
   "get_commit_message_settings",
   "get_commit_rename_diff",
   "get_commit_signature",
+  "get_commit_tree",
   "get_conflict_hunks",
   "get_current_upstream",
   "get_diff_settings",
   "get_external_tool_settings",
   "get_fetch_settings",
+  "get_file_at_commit",
   "get_file_history",
   "get_file_sides",
   "get_git_tools",
@@ -108,6 +110,7 @@
   "resolve_add_delete_conflict",
   "resolve_conflict",
   "resolve_whole_file",
+  "restore_file_version",
   "restore_reflog_entry",
   "revert_commit",
   "revert_many",
@@ -138,5 +141,6 @@
   "unstage_lines",
   "update_remote_urls",
   "update_submodule",
-  "update_workspace"
+  "update_workspace",
+  "write_file_version"
 ]

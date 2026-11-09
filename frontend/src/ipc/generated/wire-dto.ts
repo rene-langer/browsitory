@@ -53,6 +53,8 @@ export type FetchSettings = { autoFetchMinutes: number, };
 
 export type FileConflictChoice = "Ours" | "Theirs" | "Delete";
 
+export type FileContent = { "kind": "Text", size: number, text: string, } | { "kind": "Image", size: number, base64: string, mime: string, } | { "kind": "Binary", size: number, } | { "kind": "TooLarge", size: number, };
+
 export type FileHistoryEntry = { commit: GraphCommit, path: string, oldPath: string | null, };
 
 export type FileSide = { "kind": "Missing" } | { "kind": "TooLarge", size: number, } | { "kind": "Loaded", size: number, base64: string, mime: string | null, };
@@ -212,6 +214,12 @@ remoteName?: string,
 hookOutput: string | null, };
 
 export type TransferProgressPhase = "Starting" | "Receiving" | "Updating" | "RunningHook" | "RemoteFailed" | "Completed" | "Failed";
+
+export type TreeEntry = { path: string, name: string, kind: TreeEntryKind, size: number | null, };
+
+export type TreeEntryKind = "Folder" | "File" | "Executable" | "Symlink" | "Submodule";
+
+export type TreeListing = { entries: Array<TreeEntry>, truncated: boolean, };
 
 export type UndoOutcome = { "kind": "Done", label: string, } | { "kind": "Nothing" } | { "kind": "RepositoryChanged", label: string, } | { "kind": "BranchHeld", label: string, message: string, } | { "kind": "OperationInProgress" };
 

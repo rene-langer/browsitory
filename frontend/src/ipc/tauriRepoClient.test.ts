@@ -349,6 +349,14 @@ describe("tauriRepoClient transfer progress subscription", () => {
     vi.mocked(invoke).mockResolvedValue(null);
     await tauriRepoClient.getFileSides("/r", "a.png", { kind: "Unstaged" });
     expect(invoke).toHaveBeenLastCalledWith("get_file_sides", { repoPath: "/r", path: "a.png", source: { kind: "Unstaged" } });
+    await tauriRepoClient.getCommitTree("/r", "c", "", "main");
+    expect(invoke).toHaveBeenLastCalledWith("get_commit_tree", { repoPath: "/r", commitId: "c", dir: "", filter: "main" });
+    await tauriRepoClient.getFileAtCommit("/r", "c", "a.txt");
+    expect(invoke).toHaveBeenLastCalledWith("get_file_at_commit", { repoPath: "/r", commitId: "c", path: "a.txt" });
+    await tauriRepoClient.saveFileVersion("/r", "c", "a.txt");
+    expect(invoke).toHaveBeenLastCalledWith("save_file_version", { repoPath: "/r", commitId: "c", path: "a.txt" });
+    await tauriRepoClient.restoreFileVersion("/r", "c", "a.txt");
+    expect(invoke).toHaveBeenLastCalledWith("restore_file_version", { repoPath: "/r", commitId: "c", path: "a.txt" });
     await tauriRepoClient.listRecentAuthors("/r");
     expect(invoke).toHaveBeenLastCalledWith("list_recent_authors", { repoPath: "/r" });
     await tauriRepoClient.getCommitMessageSettings();

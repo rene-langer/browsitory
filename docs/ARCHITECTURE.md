@@ -1765,6 +1765,17 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
 - Side files and `read_file_version` return raw blob bytes: git2 0.21 exposes neither
   `git_blob_filter` nor libgit2's filter lists, so CRLF/`ident`/filter-driver conversion is not
   applied (documented for users in USER_GUIDE).
+- A commit's file tree (#446, `git-core::tree`): `get_commit_tree` lists one folder per call
+  (the frontend loads folders as they open) or, with a filter, walks the whole tree for matching
+  paths (at most `MAX_TREE_MATCHES`). `get_file_at_commit` sends text, or a sniffed image's
+  bytes, up to `MAX_VIEW_BYTES` (judged from the object header), otherwise only the size.
+  "Save as…" writes the raw blob (like `git show`) to a path the host's own save dialog picked:
+  the Tauri command shows the dialog and then calls the worker; in VSCode the native
+  `save_file_version` shows VSCode's dialog and calls the host-only sidecar method
+  `write_file_version`, so the webview never names a destination. `restore_file_version` is a
+  forced checkout of one path from the commit's tree with the index left alone, behind the same
+  symlink and folder guards as a discard, and records a `Full` undo entry refused while the
+  state lock stays busy (a discard).
 - Runnable-file refusal checks one extension list on every OS (Wine runs Windows installers and
   shortcuts from `xdg-open`/`open`) plus content sniffing (`#!`, ELF, PE, Mach-O, OLE except
   old Office documents, and freedesktop launchers: shared-mime-info's x-desktop magics,

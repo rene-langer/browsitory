@@ -73,6 +73,8 @@ import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
+import { CommitTreeBrowser } from "./CommitTreeBrowser";
+import treeStyles from "./CommitTreeBrowser.module.css";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
 
 const STATUS_ICONS: Record<StatusKind, LucideIcon> = {
@@ -646,7 +648,13 @@ export function DiffPane({
   onIgnorePaths,
   onSelectionChange,
   selectionBusyReason = null,
+  onRestoreFileVersion,
+  restoreBlockedReason = null,
 }: {
+  // "All files" view of a commit (#446): Restore… writes a file's version to the work tree.
+  onRestoreFileVersion?: (commitId: string, path: string) => void | Promise<void>;
+  // Why Restore… can't run now (`operationBlockers`), else `null`.
+  restoreBlockedReason?: string | null;
   // A multi-file selection's discard (#449): exactly the confirmed paths, one undo step.
   // Defaults to `onDiscardAllUnstaged`.
   onDiscardFiles?: (paths: string[]) => void;
@@ -741,6 +749,8 @@ export function DiffPane({
   // An action is running: the sequence's Continue/Abort are disabled (no double submit).
   sequencePending?: boolean;
 }) {
+  // A commit's Changes / All files view (#446), kept while moving between commits.
+  const [commitView, setCommitView] = useState<CommitView>("changes");
   if (selectedRow === "uncommitted") {
     return (
       <UncommittedDiffPane
@@ -826,9 +836,16 @@ export function DiffPane({
       onOpenFileHistory={onOpenFileHistory}
       focus={fileHistoryFocus ?? null}
       externalTools={externalTools}
+      view={commitView}
+      onViewChange={setCommitView}
+      onRestoreFileVersion={onRestoreFileVersion}
+      restoreBlockedReason={restoreBlockedReason}
     />
   );
 }
+
+/** What a commit's view lists: the files it changed, or its whole tree (#446). */
+export type CommitView = "changes" | "tree";
 
 /** The stash view's actions; Apply/Pop use `restoreIndex`. */
 export interface StashActions {
@@ -1677,6 +1694,10 @@ function CommitDiffPane({
   focus,
   onOpenFileHistory,
   externalTools,
+  view,
+  onViewChange,
+  onRestoreFileVersion,
+  restoreBlockedReason,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -1686,6 +1707,10 @@ function CommitDiffPane({
   focus: FileHistoryFocus | null;
   onOpenFileHistory?: (path: string) => void;
   externalTools?: ExternalToolsApi;
+  view: CommitView;
+  onViewChange: (view: CommitView) => void;
+  onRestoreFileVersion?: (commitId: string, path: string) => void | Promise<void>;
+  restoreBlockedReason: string | null;
 }) {
   const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
   const fetchCommitDiff = (path: string, oldPath: string | null) => (opts: DiffOptions) =>
@@ -1765,7 +1790,26 @@ function CommitDiffPane({
         knownCommitIds={knownCommitIds}
         onSelectRow={onSelectRow}
       />
-      {focused ? (
+      <div className={treeStyles.viewToggle} role="group" aria-label="Commit files">
+        <button type="button" aria-pressed={view === "changes"} onClick={() => onViewChange("changes")}>
+          Changes
+        </button>
+        <button type="button" aria-pressed={view === "tree"} onClick={() => onViewChange("tree")}>
+          All files
+        </button>
+      </div>
+      {view === "tree" ? (
+        <CommitTreeBrowser
+          repoPath={repoPath}
+          client={client}
+          commitId={commitId}
+          onSelectRow={onSelectRow}
+          onOpenFileHistory={onOpenFileHistory}
+          externalTools={externalTools}
+          onRestoreFileVersion={onRestoreFileVersion}
+          restoreBlockedReason={restoreBlockedReason}
+        />
+      ) : focused ? (
         <>
           <ul className={styles.fileList}>
             <ReadOnlyFileSection

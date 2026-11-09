@@ -147,6 +147,9 @@ get_commit_rename_diff/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"me
 get_commit_signature/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct GetCommitFilesParams","data":{"kind":"Other","message":"invalid type: null, expected struct GetCommitFilesParams"}}}
 get_commit_signature/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 get_commit_signature/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct GetCommitFilesParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct GetCommitFilesParams"}}}
+get_commit_tree/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct GetCommitTreeParams","data":{"kind":"Other","message":"invalid type: null, expected struct GetCommitTreeParams"}}}
+get_commit_tree/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
+get_commit_tree/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct GetCommitTreeParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct GetCommitTreeParams"}}}
 get_conflict_hunks/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoFilePathParams"}}}
 get_conflict_hunks/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 get_conflict_hunks/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoFilePathParams"}}}
@@ -162,6 +165,9 @@ get_external_tool_settings/string {"jsonrpc":"2.0","id":7,"result":{"editor":nul
 get_fetch_settings/absent {"jsonrpc":"2.0","id":7,"result":{"autoFetchMinutes":0}}
 get_fetch_settings/empty {"jsonrpc":"2.0","id":7,"result":{"autoFetchMinutes":0}}
 get_fetch_settings/string {"jsonrpc":"2.0","id":7,"result":{"autoFetchMinutes":0}}
+get_file_at_commit/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct CommitFileParams","data":{"kind":"Other","message":"invalid type: null, expected struct CommitFileParams"}}}
+get_file_at_commit/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
+get_file_at_commit/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct CommitFileParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct CommitFileParams"}}}
 get_file_history/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct GetFileHistoryParams","data":{"kind":"Other","message":"invalid type: null, expected struct GetFileHistoryParams"}}}
 get_file_history/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 get_file_history/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct GetFileHistoryParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct GetFileHistoryParams"}}}
@@ -327,6 +333,9 @@ resolve_conflict/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message"
 resolve_whole_file/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct ResolveWholeFileParams","data":{"kind":"Other","message":"invalid type: null, expected struct ResolveWholeFileParams"}}}
 resolve_whole_file/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 resolve_whole_file/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct ResolveWholeFileParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct ResolveWholeFileParams"}}}
+restore_file_version/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct CommitFileParams","data":{"kind":"Other","message":"invalid type: null, expected struct CommitFileParams"}}}
+restore_file_version/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
+restore_file_version/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct CommitFileParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct CommitFileParams"}}}
 restore_reflog_entry/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RestoreReflogEntryParams","data":{"kind":"Other","message":"invalid type: null, expected struct RestoreReflogEntryParams"}}}
 restore_reflog_entry/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 restore_reflog_entry/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RestoreReflogEntryParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RestoreReflogEntryParams"}}}
@@ -420,3 +429,6 @@ update_submodule/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message"
 update_workspace/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct UpdateWorkspaceParams","data":{"kind":"Other","message":"invalid type: null, expected struct UpdateWorkspaceParams"}}}
 update_workspace/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `id`","data":{"kind":"Other","message":"missing field `id`"}}}
 update_workspace/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct UpdateWorkspaceParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct UpdateWorkspaceParams"}}}
+write_file_version/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct WriteFileVersionParams","data":{"kind":"Other","message":"invalid type: null, expected struct WriteFileVersionParams"}}}
+write_file_version/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
+write_file_version/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct WriteFileVersionParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct WriteFileVersionParams"}}}
