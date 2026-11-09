@@ -44,6 +44,10 @@ pub enum SubmoduleError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// The target commit holds a case pair the submodule's HEAD doesn't, while the submodule's
+    /// `core.ignorecase` is on (#534): its index would keep only one of the two names.
+    #[error(transparent)]
+    CasePairBroughtIn(#[from] crate::CasePairBroughtIn),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
@@ -182,8 +186,15 @@ fn guarded_update(
         }
         let commit = sub.find_commit(target)?;
         let tree = commit.tree()?;
-        check_submodule_tree(&sub, &tree, policy)?;
-        if workdir_is_empty(&sub) {
+        // An empty work tree (a clone whose checkout was refused) has nothing checked out, even
+        // though its HEAD may already be the target.
+        let empty = workdir_is_empty(&sub);
+        let head = match empty {
+            true => None,
+            false => sub.head().and_then(|head| head.peel_to_tree()).ok(),
+        };
+        check_submodule_tree(&sub, &tree, head.as_ref(), policy)?;
+        if empty {
             // A clone whose checkout was refused (or never ran): its index already lists every
             // file, so libgit2's safe checkout would take the missing files for deletions.
             let mut checkout = git2::build::CheckoutBuilder::new();
@@ -212,7 +223,8 @@ fn guarded_update(
     submodule.update(false, Some(&mut options))?;
     let sub = submodule.open()?;
     let tree = sub.head()?.peel_to_tree()?;
-    check_submodule_tree(&sub, &tree, policy)?;
+    // A fresh clone has no tree of its own yet: HEAD already is the target.
+    check_submodule_tree(&sub, &tree, None, policy)?;
     // The no-checkout pass already wrote HEAD's entries into the index, so the missing files
     // must be recreated explicitly.
     let mut checkout = git2::build::CheckoutBuilder::new();
@@ -229,11 +241,21 @@ fn workdir_is_empty(sub: &Repository) -> bool {
         .is_some_and(|entries| entries.flatten().all(|entry| entry.file_name() == ".git"))
 }
 
+/// Refuses `tree`, the commit the submodule `sub` is about to check out, when it holds a case
+/// collision (#156), a case pair `head` (the submodule's checked-out tree, `None` for a fresh
+/// clone) doesn't while the submodule's `core.ignorecase` is on (#534), or a folder where `sub`
+/// has a link (#114).
 fn check_submodule_tree(
     sub: &Repository,
     tree: &Tree<'_>,
+    head: Option<&Tree<'_>>,
     policy: CasePolicy,
 ) -> Result<(), SubmoduleError> {
+    crate::worktree_guard::refuse_case_pair_brought_in::<SubmoduleError>(
+        sub,
+        &GuardSource::Tree(tree),
+        head,
+    )?;
     if policy.applies(sub)? {
         const ALL: Option<&[&str]> = None;
         if let Some(collision) =
