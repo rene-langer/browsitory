@@ -8,6 +8,15 @@ name: Docs
 # an absolute link or a missing image. Publishing needs Pages enabled with "GitHub Actions" as
 # the source (Settings → Pages); until then the deploy job fails and the build job still checks
 # the site.
+#
+# The site also carries the updater manifest of the latest published release,
+# https://rene-langer.github.io/browsitory/latest.json: the desktop app's second update endpoint
+# (crates/tauri-app/tauri.conf.json), read when the release download URL fails (#477). The build
+# copies it from the release that GitHub's `releases/latest` names (published, not a draft or
+# pre-release) after scripts/check-updater-manifest.py has checked it, so the copy is never ahead
+# of the published release. If that fails, the site is published without it (a warning, not a
+# failed build). Publishing a release starts this workflow on main again (`redeploy-on-release`),
+# so the copy follows each release. docs/RELEASING.md, "Updater manifest".
 
 on:
   push:
@@ -18,6 +27,7 @@ on:
       - ".github/workflows/docs.yml"
       - "scripts/check-docs-nav.py"
       - "scripts/test_check_docs_nav.py"
+      - "scripts/check-updater-manifest.py"
   pull_request:
     paths:
       - "docs/**"
@@ -25,6 +35,10 @@ on:
       - ".github/workflows/docs.yml"
       - "scripts/check-docs-nav.py"
       - "scripts/test_check_docs_nav.py"
+      - "scripts/check-updater-manifest.py"
+  # A published release changes the latest.json the site carries; see redeploy-on-release.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -36,7 +50,25 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # A release event runs on the release's tag, which may not deploy to Pages (the github-pages
+  # environment allows main) and whose docs may be older than main's. So it only starts this
+  # workflow on main, which rebuilds the site with the new release's latest.json. A run started
+  # with GITHUB_TOKEN through workflow_dispatch does start (other events it causes don't).
+  redeploy-on-release:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Rebuild and publish the site from main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run docs.yml --ref main
+
   build:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     # Usually under a minute (#353).
     timeout-minutes: 10
@@ -58,6 +90,36 @@ jobs:
         run: python scripts/check-docs-nav.py
       - name: Build the site
         run: .venv/bin/zensical build --strict
+      # Also on pull requests, which check the step but publish nothing. Never fails the build:
+      # without a checked manifest the site goes out without latest.json, and the app's first
+      # endpoint (the release download URL) still works as before.
+      - name: Add the latest published release's updater manifest (latest.json)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          add_manifest() {
+            # `releases/latest` is the newest published release that is not a pre-release; the
+            # app's first endpoint (releases/latest/download/latest.json) resolves the same way.
+            tag="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)" || return 1
+            case "$tag" in
+              release/*) ;;
+              *) echo "latest release tag '$tag' is not release/X.Y.Z"; return 1 ;;
+            esac
+            dir="$RUNNER_TEMP/updater-manifest"
+            rm -rf "$dir" && mkdir -p "$dir" || return 1
+            gh release download "$tag" -D "$dir" -p latest.json -p '*.sig' || return 1
+            gh release view "$tag" --json assets > "$dir/assets.json" || return 1
+            python3 -I scripts/check-updater-manifest.py --version "${tag#release/}" \
+              --assets "$dir/assets.json" "$dir" || return 1
+            cp "$dir/latest.json" site/latest.json || return 1
+            echo "Site carries latest.json of $tag." >> "$GITHUB_STEP_SUMMARY"
+          }
+          if ! add_manifest; then
+            rm -f site/latest.json
+            echo "::warning title=Updater manifest::No checked latest.json of the latest release; the site goes out without it (see the log above). Re-run this workflow on main once that is fixed."
+            echo "Site goes out WITHOUT latest.json (see the warning)." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload the site for Pages
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v5

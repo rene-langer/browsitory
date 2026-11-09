@@ -1,35 +1,63 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { checkForUpdate, type UpdateInfo } from "../ipc/updater";
 import styles from "./UpdateBanner.module.css";
 
+/** Time between checks while they succeed (no update found yet). */
 const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/** First retry after a failed check or download (#477). */
+const FIRST_RETRY_DELAY_MS = 10 * 60 * 1000;
+/** Longest retry delay; stays below RECHECK_INTERVAL_MS. */
+const MAX_RETRY_DELAY_MS = 3 * 60 * 60 * 1000;
+
+/** Delay before the next try after `failures` failed tries in a row (1 or more). */
+function retryDelayMs(failures: number): number {
+  return Math.min(FIRST_RETRY_DELAY_MS * 2 ** (failures - 1), MAX_RETRY_DELAY_MS);
+}
 
 export function UpdateBanner() {
   const [readyUpdate, setReadyUpdate] = useState<UpdateInfo | null>(null);
-  const checking = useRef(false);
-  const hasReadyUpdate = useRef(false);
 
   useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    // Failed tries in a row; a successful check resets it.
+    let failures = 0;
+
+    // Checks, downloads a found update, and schedules the next check: RECHECK_INTERVAL_MS after
+    // a successful check, sooner with backoff after a failed check or download (the update
+    // host can be down for a while, #477). Stops once an update is ready to install.
     async function runCheck() {
-      if (hasReadyUpdate.current) return;
-      if (checking.current) return;
-      checking.current = true;
+      const outcome = await checkAndDownload();
+      if (cancelled || outcome === "ready") return;
+      failures = outcome === "failed" ? failures + 1 : 0;
+      const delay = failures === 0 ? RECHECK_INTERVAL_MS : retryDelayMs(failures);
+      timer = window.setTimeout(() => void runCheck(), delay);
+    }
+
+    async function checkAndDownload(): Promise<"ready" | "none" | "failed"> {
+      let update: UpdateInfo | null;
       try {
-        const update = await checkForUpdate();
-        if (update === null) return;
+        update = await checkForUpdate();
+      } catch (error) {
+        console.error("Update check failed", error);
+        return "failed";
+      }
+      if (update === null) return "none";
+      try {
         await update.download();
-        hasReadyUpdate.current = true;
-        setReadyUpdate(update);
       } catch (error) {
         console.error("Update download failed", error);
-      } finally {
-        checking.current = false;
+        return "failed";
       }
+      if (!cancelled) setReadyUpdate(update);
+      return "ready";
     }
 
     void runCheck();
-    const timer = window.setInterval(() => void runCheck(), RECHECK_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, []);
 
   if (readyUpdate === null) return null;

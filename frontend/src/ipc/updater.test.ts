@@ -60,12 +60,10 @@ describe("checkForUpdate", () => {
     expect(relaunch).toHaveBeenCalledTimes(1);
   });
 
-  it("returns null when the check rejects", async () => {
+  it("rejects when the check rejects, so a failed check is not taken for no update", async () => {
     vi.mocked(check).mockRejectedValue(new Error("network error"));
 
-    const result = await checkForUpdate();
-
-    expect(result).toBeNull();
+    await expect(checkForUpdate()).rejects.toThrow("network error");
   });
 });
 
