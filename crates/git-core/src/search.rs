@@ -2,11 +2,14 @@
 //! revwalk over it (`search_commits`).
 
 use git2::{DiffLineType, DiffOptions, ErrorCode, ObjectType, Oid, Repository, Sort};
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
 
 use crate::graph::{GraphCommit, GraphSelection, RefDecorations};
+use crate::history::HistoryError;
+use crate::line_history::{line_history_ids, LineRange};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchTerm {
@@ -29,6 +32,12 @@ pub enum SearchTerm {
     /// Days since 1970-01-01, inclusive.
     Before(i64),
     Branch(String),
+    /// The commit changed these lines of the file, followed back through earlier changes like
+    /// line history (#447). The lines are the file's at the `branch:` term's tip, else HEAD.
+    Lines {
+        path: String,
+        lines: LineRange,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,7 +91,7 @@ fn invalid(message: impl Into<String>) -> SearchError {
     }
 }
 
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 10] = [
     "author",
     "committer",
     "message",
@@ -92,6 +101,7 @@ const KEYS: [&str; 9] = [
     "after",
     "before",
     "branch",
+    "line",
 ];
 
 /// Parses a search query. Grammar: whitespace-separated terms, each either `key:value` (key is
@@ -190,6 +200,7 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, SearchError> {
                     .ok_or_else(|| invalid("before: expects a date like 2026-01-31."))?,
             ),
             Some("branch") => SearchTerm::Branch(value),
+            Some("line") => parse_line_term(&value)?,
             Some(other) => unreachable!("unhandled search key {other}"),
         });
     }
@@ -206,6 +217,38 @@ pub fn parse_query(input: &str) -> Result<SearchQuery, SearchError> {
         return Err(invalid("Use at most one branch: term."));
     }
     Ok(SearchQuery { terms })
+}
+
+/// `<path>:<from>-<to>` or `<path>:<line>` → a `Lines` term. The path is everything before the
+/// last `:`, so it may hold colons itself.
+fn parse_line_term(value: &str) -> Result<SearchTerm, SearchError> {
+    const EXPECTS: &str = "line: expects a file and lines, like line:src/main.rs:10-20.";
+    let (path, range) = value.rsplit_once(':').ok_or_else(|| invalid(EXPECTS))?;
+    let number = |text: &str| -> Result<usize, SearchError> {
+        if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(invalid(EXPECTS));
+        }
+        text.parse().map_err(|_| invalid(EXPECTS))
+    };
+    let (start, end) = match range.split_once('-') {
+        Some((start, end)) => (number(start)?, number(end)?),
+        None => {
+            let line = number(range)?;
+            (line, line)
+        }
+    };
+    if path.is_empty() {
+        return Err(invalid(EXPECTS));
+    }
+    if start == 0 || end < start {
+        return Err(invalid(
+            "line: needs lines counted from 1, the first no higher than the last.",
+        ));
+    }
+    Ok(SearchTerm::Lines {
+        path: path.to_string(),
+        lines: LineRange { start, end },
+    })
 }
 
 /// `YYYY-MM-DD` → days since 1970-01-01, or `None` when malformed or not a real calendar day.
@@ -300,7 +343,7 @@ pub fn search_commits(
         });
     }
 
-    let terms = prepare(&query.terms);
+    let terms = prepare(repo, &query.terms, &starts, cancel)?;
     let paths: Vec<&str> = terms
         .iter()
         .filter_map(|t| match t {
@@ -410,12 +453,17 @@ fn fingerprint(starts: &[Oid], first_parent: bool) -> Result<String, git2::Error
 
 /// A search term ready for matching: lowercased once, ordered by cost.
 enum Prepared {
+    /// The commits a `line:` term's line history lists, computed once per page.
+    Lines(HashSet<Oid>),
     Commit(String),
     After(i64),
     Before(i64),
     Author(String),
     Committer(String),
-    Text { needle: String, sha: bool },
+    Text {
+        needle: String,
+        sha: bool,
+    },
     Message(String),
     Path(String),
     Contents(String),
@@ -424,7 +472,7 @@ enum Prepared {
 impl Prepared {
     fn cost(&self) -> u8 {
         match self {
-            Prepared::Commit(_) => 0,
+            Prepared::Lines(_) | Prepared::Commit(_) => 0,
             Prepared::After(_) | Prepared::Before(_) => 1,
             Prepared::Author(_) | Prepared::Committer(_) => 2,
             Prepared::Text { .. } | Prepared::Message(_) => 3,
@@ -434,7 +482,22 @@ impl Prepared {
     }
 }
 
-fn prepare(terms: &[SearchTerm]) -> Vec<Prepared> {
+/// `starts` are the walk's start points: with a `branch:` term, the one that names the commit
+/// `line:` terms read their lines from (HEAD otherwise).
+fn prepare(
+    repo: &Repository,
+    terms: &[SearchTerm],
+    starts: &[Oid],
+    cancel: &dyn Fn() -> bool,
+) -> Result<Vec<Prepared>, SearchError> {
+    let mut lines = Vec::new();
+    for term in terms {
+        if let SearchTerm::Lines { path, lines: range } = term {
+            lines.push(Prepared::Lines(line_term_commits(
+                repo, terms, starts, path, *range, cancel,
+            )?));
+        }
+    }
     let mut prepared: Vec<Prepared> = terms
         .iter()
         .filter_map(|term| {
@@ -451,12 +514,43 @@ fn prepare(terms: &[SearchTerm]) -> Vec<Prepared> {
                 SearchTerm::Contents(t) => Prepared::Contents(t.to_lowercase()),
                 SearchTerm::After(d) => Prepared::After(*d),
                 SearchTerm::Before(d) => Prepared::Before(*d),
-                SearchTerm::Branch(_) => return None,
+                SearchTerm::Branch(_) | SearchTerm::Lines { .. } => return None,
             })
         })
         .collect();
+    prepared.extend(lines);
     prepared.sort_by_key(Prepared::cost);
-    prepared
+    Ok(prepared)
+}
+
+/// The commits a `line:` term matches: line history of `path`'s `range` as it is at the
+/// `branch:` term's tip (`starts` holds exactly that commit then), or else at HEAD.
+fn line_term_commits(
+    repo: &Repository,
+    terms: &[SearchTerm],
+    starts: &[Oid],
+    path: &str,
+    range: LineRange,
+    cancel: &dyn Fn() -> bool,
+) -> Result<HashSet<Oid>, SearchError> {
+    let start = if terms.iter().any(|t| matches!(t, SearchTerm::Branch(_))) {
+        starts.first().copied()
+    } else {
+        match repo.head() {
+            Ok(head) => Some(head.peel_to_commit()?.id()),
+            Err(e) if matches!(e.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => None,
+            Err(e) => return Err(e.into()),
+        }
+    };
+    let Some(start) = start else {
+        return Ok(HashSet::new());
+    };
+    match line_history_ids(repo, start, path, range, cancel) {
+        Ok(Some(ids)) => Ok(ids),
+        Ok(None) => Err(SearchError::Cancelled),
+        Err(HistoryError::Git(e)) => Err(e.into()),
+        Err(e) => Err(invalid(format!("line: {e}"))),
+    }
 }
 
 fn signature_contains(signature: &git2::Signature, needle: &str) -> bool {
@@ -510,6 +604,7 @@ fn matches(
 
     for term in terms {
         let ok = match term {
+            Prepared::Lines(ids) => ids.contains(&commit.id()),
             Prepared::Commit(prefix) => id.starts_with(prefix.as_str()),
             Prepared::After(d) => day >= *d,
             Prepared::Before(d) => day <= *d,
@@ -677,5 +772,41 @@ mod tests {
             "commit: expects a hexadecimal SHA prefix."
         );
         assert_eq!(error("branch:a branch:b"), "Use at most one branch: term.");
+        let expects = "line: expects a file and lines, like line:src/main.rs:10-20.";
+        assert_eq!(error("line:src/main.rs"), expects);
+        assert_eq!(error("line:src/main.rs:"), expects);
+        assert_eq!(error("line::3-4"), expects);
+        assert_eq!(error("line:a.rs:x-4"), expects);
+        assert_eq!(error("line:a.rs:3-"), expects);
+        assert_eq!(error("line:a.rs:-3"), expects);
+        assert_eq!(
+            error("line:a.rs:5-3"),
+            "line: needs lines counted from 1, the first no higher than the last."
+        );
+        assert_eq!(
+            error("line:a.rs:0-3"),
+            "line: needs lines counted from 1, the first no higher than the last."
+        );
+    }
+
+    #[test]
+    fn line_terms_take_a_range_or_one_line_and_the_last_colon() {
+        assert_eq!(
+            terms(r#"line:src/a.rs:10-20 LINE:b.rs:7 line:"dir with space/c:d.rs:1-2""#),
+            vec![
+                Lines {
+                    path: "src/a.rs".into(),
+                    lines: LineRange { start: 10, end: 20 }
+                },
+                Lines {
+                    path: "b.rs".into(),
+                    lines: LineRange { start: 7, end: 7 }
+                },
+                Lines {
+                    path: "dir with space/c:d.rs".into(),
+                    lines: LineRange { start: 1, end: 2 }
+                },
+            ]
+        );
     }
 }

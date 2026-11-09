@@ -132,4 +132,75 @@ describe("useFileHistory", () => {
     await waitFor(() => expect(result.current.history?.error).toBeNull());
     expect(getFileHistory).toHaveBeenLastCalledWith("/repo", "../x", FILE_HISTORY_PAGE_SIZE);
   });
+
+  describe("line history (#447)", () => {
+    function setupLines(getLineHistory: RepoClient["getLineHistory"], getFileHistory: RepoClient["getFileHistory"] = vi.fn()) {
+      const client = { getFileHistory, getLineHistory } as unknown as RepoClient;
+      const selectRow = vi.fn();
+      const hook = renderHook(
+        ({ generation }: { generation: number }) => useFileHistory(client, "/repo", generation, "uncommitted", selectRow),
+        { initialProps: { generation: 0 } },
+      );
+      return { ...hook, selectRow };
+    }
+
+    it("loads the lines' history at the revision and selects the newest entry", async () => {
+      const getLineHistory = vi.fn(async () => ({
+        entries: [{ ...entry("c2"), startLine: 3, endLine: 4 }],
+        truncated: false,
+      }));
+      const { result, selectRow } = setupLines(getLineHistory);
+
+      act(() => result.current.openLines("f.txt", "abc", 3, 4));
+
+      await waitFor(() => expect(result.current.history?.loading).toBe(false));
+      expect(getLineHistory).toHaveBeenCalledWith("/repo", "abc", "f.txt", 3, 4, FILE_HISTORY_PAGE_SIZE);
+      expect(result.current.history?.target).toEqual({ kind: "lines", path: "f.txt", revision: "abc", startLine: 3, endLine: 4 });
+      expect(result.current.history?.entries.map((e) => e.commit.id)).toEqual(["c2"]);
+      expect(selectRow).toHaveBeenCalledWith({ commitId: "c2" });
+    });
+
+    it("offers no more pages once the backend stopped at its cap", async () => {
+      const full = Array.from({ length: FILE_HISTORY_PAGE_SIZE }, (_, i) => ({ ...entry(`c${i}`), startLine: 1, endLine: 1 }));
+      const { result } = setupLines(vi.fn(async () => ({ entries: full, truncated: true })));
+
+      act(() => result.current.openLines("f.txt", "HEAD", 1, 1));
+
+      await waitFor(() => expect(result.current.history?.loading).toBe(false));
+      expect(result.current.history?.truncated).toBe(true);
+      expect(result.current.history?.hasMore).toBe(false);
+    });
+
+    it("loads more and reloads on refresh with the same lines", async () => {
+      const full = Array.from({ length: FILE_HISTORY_PAGE_SIZE }, (_, i) => ({ ...entry(`c${i}`), startLine: 1, endLine: 1 }));
+      const getLineHistory = vi.fn(async () => ({ entries: full, truncated: false }));
+      const { result, rerender } = setupLines(getLineHistory);
+
+      act(() => result.current.openLines("f.txt", "HEAD", 1, 2));
+      await waitFor(() => expect(result.current.history?.hasMore).toBe(true));
+      act(() => result.current.loadMore());
+      await waitFor(() =>
+        expect(getLineHistory).toHaveBeenLastCalledWith("/repo", "HEAD", "f.txt", 1, 2, FILE_HISTORY_PAGE_SIZE * 2),
+      );
+      rerender({ generation: 1 });
+      await waitFor(() => expect(getLineHistory).toHaveBeenCalledTimes(3));
+      expect(getLineHistory).toHaveBeenLastCalledWith("/repo", "HEAD", "f.txt", 1, 2, FILE_HISTORY_PAGE_SIZE * 2);
+    });
+
+    it("switching from a file's history to its lines drops the file's entries", async () => {
+      const lines = deferred<{ entries: never[]; truncated: boolean }>();
+      const getFileHistory = vi.fn(async () => [entry("c1")]);
+      const { result } = setupLines(
+        vi.fn(() => lines.promise),
+        getFileHistory,
+      );
+
+      act(() => result.current.open("f.txt"));
+      await waitFor(() => expect(result.current.history?.entries).toHaveLength(1));
+      act(() => result.current.openLines("f.txt", "HEAD", 1, 1));
+
+      expect(result.current.history?.entries).toEqual([]);
+      expect(result.current.history?.loading).toBe(true);
+    });
+  });
 });

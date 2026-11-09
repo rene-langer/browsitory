@@ -21,7 +21,7 @@ type Loosen<T, K extends keyof T> = Flat<Omit<T, K> & Partial<Pick<T, K>>>;
 // Deliberate differences, each written out below:
 // - `BranchInfo`, `GraphCommit`, `RemoteInfo`, `UpstreamInfo`: both backends always send these
 //   fields; `RepoClient.ts` keeps them optional so older test fixtures stay valid (`Loosen`).
-//   `FileHistoryEntry` and `SearchPage` hold a `GraphCommit`, so they are compared with the
+//   `FileHistoryEntry`, `LineHistoryEntry` and `SearchPage` hold a `GraphCommit`, so they are compared with the
 //   hand-written one in its place (`GraphCommit` itself is compared on its own line).
 // - `MergeToolOutcome` (desktop only): `"HandedOff"` comes from the VSCode extension host, never
 //   from Tauri.
@@ -92,6 +92,8 @@ export type DtoContract = [
   Expect<Equal<Hand.RebasePlanCommit, Wire.RebasePlanCommit>>,
   Expect<Equal<Hand.RebasePlanEntry, Wire.RebasePlanEntry>>,
   Expect<Equal<Hand.RebaseStepResult, Wire.RebaseStepResult>>,
+  Expect<Equal<Hand.LineHistoryEntry, Flat<Omit<Wire.LineHistoryEntry, "commit"> & { commit: Hand.GraphCommit }>>>,
+  Expect<Equal<Hand.LineHistory, Flat<Omit<Wire.LineHistory, "entries"> & { entries: Hand.LineHistoryEntry[] }>>>,
   Expect<Equal<Hand.ReflogEntry, Wire.ReflogEntry>>,
   Expect<Equal<Hand.RepoErrorPayload, Wire.RepoErrorPayload>>,
   Expect<Equal<Hand.RemoteAuthMode, Wire.RemoteAuthMode>>,

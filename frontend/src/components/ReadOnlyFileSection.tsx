@@ -6,6 +6,8 @@ import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWholeFile } from "../state/useWholeFile";
+import { FolderHistoryButton } from "./FolderHistoryButton";
+import { LineHistoryButton } from "./LineHistoryButton";
 import { BlameView } from "./BlameView";
 import { CollapseToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
@@ -37,6 +39,8 @@ export function ReadOnlyFileSection({
   onToggleCollapse,
   onSelectRow,
   onOpenFileHistory,
+  onOpenLineHistory,
+  onOpenFolderHistory,
   externalTools,
   toolSource,
   previewSource,
@@ -54,6 +58,12 @@ export function ReadOnlyFileSection({
   onToggleCollapse: () => void;
   onSelectRow: (row: SelectedRow) => void;
   onOpenFileHistory?: (path: string) => void;
+  /** "History of lines" (#447) for the lines selected in the diff or blame view: their numbers
+   *  are the new side's, which is `blameAt`'s version of the file. Leave it out when the new side
+   *  is not a commit. */
+  onOpenLineHistory?: (path: string, revision: string, startLine: number, endLine: number) => void;
+  /** "Folder history" (#447) of the file's folder. */
+  onOpenFolderHistory?: (folder: string) => void;
   externalTools?: ExternalToolsApi;
   /** The two versions "Open in diff tool" compares. */
   toolSource?: DiffSource;
@@ -73,6 +83,7 @@ export function ReadOnlyFileSection({
     else if (action.kind === "reveal") tools.externalTools.reveal(path);
     else if (action.kind === "diffTool") tools.externalTools.openDiffTool(path, tools.toolSource);
   };
+  const bodyRef = useRef<HTMLDivElement>(null);
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
@@ -170,6 +181,16 @@ export function ReadOnlyFileSection({
               History
             </button>
           )}
+          {onOpenLineHistory !== undefined && (
+            <LineHistoryButton
+              container={bodyRef}
+              enabled={!collapsed}
+              path={path}
+              revision={blameAt}
+              onOpen={onOpenLineHistory}
+            />
+          )}
+          {onOpenFolderHistory !== undefined && <FolderHistoryButton path={path} onOpen={onOpenFolderHistory} />}
           {tools !== null && (
             <button
               type="button"
@@ -198,7 +219,7 @@ export function ReadOnlyFileSection({
         </div>
       </div>
       {!collapsed && (
-        <div className={styles.fileSectionBody}>
+        <div className={styles.fileSectionBody} ref={bodyRef}>
           {mode === "blame" ? (
             <>
               {error !== null ? (

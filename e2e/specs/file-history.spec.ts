@@ -54,4 +54,35 @@ describe("Browsitory file history", () => {
     await clickViaScript(`button[aria-label="Close file history"]`);
     await (await $(`ul[aria-label="Commit history"]`)).waitForExist();
   });
+
+  it("opens the history of lines selected in a commit's diff (#447)", async () => {
+    await clickViaScript(`button[aria-label="History of ${NEW_NAME}"]`);
+    const renameRow = await $("li*=e2e: history rename");
+    await renameRow.waitForExist();
+    await browser.execute((el) => (el as HTMLElement).click(), renameRow);
+    await (await $(".diff-line-add*=CHANGED")).waitForExist();
+
+    // Select the changed line (line 5 of the commit's version) as a mouse selection would.
+    await browser.execute(() => {
+      const line = document.querySelector('[data-line-number="5"]')!;
+      const range = document.createRange();
+      range.selectNodeContents(line);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    await clickViaScript(`button[aria-label="History of line 5 of ${NEW_NAME}"]`);
+
+    const banner = await $(`[role="toolbar"][aria-label="Line history"]`);
+    await banner.waitForExist();
+    await expect(banner).toHaveText(expect.stringContaining(`History of line 5 of ${NEW_NAME}`));
+    // The rename changed line 5; the add created it, under the old name.
+    await (await $("li*=e2e: history rename")).waitForExist();
+    await (await $("li*=e2e: history add")).waitForExist();
+
+    // The line history took the file history's place; closing it goes back to the graph.
+    await clickViaScript(`button[aria-label="Close line history"]`);
+    await (await $(`ul[aria-label="Commit history"]`)).waitForExist();
+  });
 });

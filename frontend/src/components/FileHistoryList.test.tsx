@@ -23,7 +23,17 @@ function entry(id: string, path = "f.txt", oldPath: string | null = null): FileH
 }
 
 function state(overrides: Partial<FileHistoryState> = {}): FileHistoryState {
-  return { path: "f.txt", entries: [], limit: 300, hasMore: false, loading: false, error: null, ...overrides };
+  return {
+    target: { kind: "file", path: "f.txt" },
+    path: "f.txt",
+    entries: [],
+    limit: 300,
+    hasMore: false,
+    truncated: false,
+    loading: false,
+    error: null,
+    ...overrides,
+  };
 }
 
 function baseProps(history: FileHistoryState, overrides: Partial<React.ComponentProps<typeof FileHistoryList>> = {}) {
@@ -147,5 +157,40 @@ describe("FileHistoryList", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("boom");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(props.onRetry).toHaveBeenCalled();
+  });
+
+  describe("a line history (#447)", () => {
+    const lines = { kind: "lines" as const, path: "f.txt", revision: "abcdef1234567890", startLine: 10, endLine: 12 };
+
+    it("names the lines and the commit they were read at, and each row's lines", () => {
+      renderList(
+        state({
+          target: lines,
+          entries: [
+            { ...entry("c2"), startLine: 10, endLine: 12 },
+            { ...entry("c1"), startLine: 7, endLine: 7 },
+          ],
+        }),
+      );
+
+      const banner = screen.getByRole("toolbar", { name: "Line history" });
+      expect(banner).toHaveTextContent("History of lines 10–12 of f.txt at abcdef1");
+      expect(screen.getByText("lines 10–12")).toBeInTheDocument();
+      expect(screen.getByText("line 7")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close line history" })).toBeInTheDocument();
+    });
+
+    it("says when the backend stopped early", () => {
+      renderList(state({ target: { ...lines, revision: "HEAD" }, truncated: true }));
+
+      expect(screen.getByRole("toolbar", { name: "Line history" })).not.toHaveTextContent(" at ");
+      expect(screen.getByText(/older changes to these lines may be missing/)).toBeInTheDocument();
+    });
+
+    it("names the lines when none changed", () => {
+      renderList(state({ target: lines }));
+
+      expect(screen.getByText(/No committed history for lines 10–12 of/)).toBeInTheDocument();
+    });
   });
 });

@@ -502,6 +502,51 @@ impl From<git_core::history::FileHistoryEntry> for FileHistoryEntryDto {
 
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "LineHistoryEntry"))]
+#[serde(rename_all = "camelCase")]
+pub struct LineHistoryEntryDto {
+    pub commit: GraphCommitDto,
+    pub path: String,
+    // Serialized as `null` (not omitted) — the TS type is `string | null`.
+    pub old_path: Option<String>,
+    /// The tracked lines in this commit's version of the file, 1-based and inclusive.
+    pub start_line: usize,
+    pub end_line: usize,
+}
+
+impl From<git_core::line_history::LineHistoryEntry> for LineHistoryEntryDto {
+    fn from(e: git_core::line_history::LineHistoryEntry) -> Self {
+        LineHistoryEntryDto {
+            commit: GraphCommitDto::from(e.commit),
+            path: e.path,
+            old_path: e.old_path,
+            start_line: e.lines.start,
+            end_line: e.lines.end,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "LineHistory"))]
+#[serde(rename_all = "camelCase")]
+pub struct LineHistoryDto {
+    pub entries: Vec<LineHistoryEntryDto>,
+    /// The walk stopped at its commit cap, so older changes may be missing.
+    pub truncated: bool,
+}
+
+impl From<git_core::line_history::LineHistory> for LineHistoryDto {
+    fn from(h: git_core::line_history::LineHistory) -> Self {
+        LineHistoryDto {
+            entries: h.entries.into_iter().map(Into::into).collect(),
+            truncated: h.truncated,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "SearchPage"))]
 #[serde(rename_all = "camelCase")]
 pub struct SearchPageDto {
@@ -2319,6 +2364,8 @@ mod ts_bindings {
             BlameLineDto,
             GraphCommitDto,
             FileHistoryEntryDto,
+            LineHistoryEntryDto,
+            LineHistoryDto,
             SearchPageDto,
             ChangedFileDto,
             CompareRangeDto,

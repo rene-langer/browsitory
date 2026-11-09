@@ -146,6 +146,16 @@ pub(crate) enum Command {
         limit: usize,
         reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, String>>,
     },
+    /// The commits that changed lines `start_line..=end_line` of `path` as it is in `revision`
+    /// (a commit id or "HEAD"), at most `limit` (#447).
+    GetLineHistory {
+        revision: String,
+        path: String,
+        start_line: usize,
+        end_line: usize,
+        limit: usize,
+        reply: Sender<Result<git_core::line_history::LineHistory, String>>,
+    },
     /// One page of a commit search. `generation` is the `SearchGeneration` value claimed when
     /// the command was queued; once a newer search or `cancel_search` bumps the counter, this
     /// one stops and replies `Search cancelled.`.
@@ -1007,6 +1017,16 @@ impl Worker {
                     Command::GetFileHistory { path, limit, reply } => {
                         status::get_file_history(&repo, path, limit, reply)
                     }
+                    Command::GetLineHistory {
+                        revision,
+                        path,
+                        start_line,
+                        end_line,
+                        limit,
+                        reply,
+                    } => status::get_line_history(
+                        &repo, revision, path, start_line, end_line, limit, reply,
+                    ),
                     Command::SearchCommits {
                         query,
                         selection,

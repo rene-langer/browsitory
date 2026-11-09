@@ -75,6 +75,7 @@ import { ListRow } from "./primitives/ListRow";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 import { CommitTreeBrowser } from "./CommitTreeBrowser";
 import treeStyles from "./CommitTreeBrowser.module.css";
+import { FolderHistoryButton } from "./FolderHistoryButton";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
 
 const STATUS_ICONS: Record<StatusKind, LucideIcon> = {
@@ -117,6 +118,7 @@ function UncommittedFileSection({
   onStashFile,
   stashDisabledReason,
   onOpenFileHistory,
+  onOpenFolderHistory,
   externalTools,
   onMarkResolved,
   onResolveWholeFile,
@@ -161,6 +163,7 @@ function UncommittedFileSection({
   /** `stashBlockReason`: disables "Stash file…" like the Stash button. */
   stashDisabledReason: string | null;
   onOpenFileHistory?: (path: string) => void;
+  onOpenFolderHistory?: (folder: string) => void;
   externalTools?: ExternalToolsApi;
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
   // The conflict pane's "Use ours/theirs (whole file)".
@@ -390,6 +393,9 @@ function UncommittedFileSection({
             >
               History
             </button>
+          )}
+          {onOpenFolderHistory !== undefined && (
+            <FolderHistoryButton path={entry.path} onOpen={onOpenFolderHistory} stopPropagation />
           )}
           {hasFileActions && (
             <button
@@ -639,6 +645,8 @@ export function DiffPane({
   onCurrentFileChange,
   fileHistoryFocus,
   onOpenFileHistory,
+  onOpenLineHistory,
+  onOpenFolderHistory,
   stashes = [],
   stashActions,
   externalTools,
@@ -679,6 +687,8 @@ export function DiffPane({
   // Set while the graph shows a file's history: the commit view shows only that file.
   fileHistoryFocus?: FileHistoryFocus | null;
   onOpenFileHistory?: (path: string) => void;
+  onOpenLineHistory?: (path: string, revision: string, startLine: number, endLine: number) => void;
+  onOpenFolderHistory?: (folder: string) => void;
   repoPath: string;
   client: RepoClient;
   selectedRow: SelectedRow;
@@ -800,6 +810,7 @@ export function DiffPane({
         onDiscardRequestChange={onDiscardRequestChange}
         onCurrentFileChange={onCurrentFileChange}
         onOpenFileHistory={onOpenFileHistory}
+        onOpenFolderHistory={onOpenFolderHistory}
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
         onResolveWholeFile={onResolveWholeFile}
@@ -834,6 +845,8 @@ export function DiffPane({
       commits={commits}
       onSelectRow={onSelectRow}
       onOpenFileHistory={onOpenFileHistory}
+      onOpenLineHistory={onOpenLineHistory}
+      onOpenFolderHistory={onOpenFolderHistory}
       focus={fileHistoryFocus ?? null}
       externalTools={externalTools}
       view={commitView}
@@ -930,6 +943,7 @@ function UncommittedDiffPane({
   initialCommitDraft,
   onCommitDraftChange,
   onOpenFileHistory,
+  onOpenFolderHistory,
   externalTools,
   onMarkResolved,
   onResolveWholeFile,
@@ -943,6 +957,7 @@ function UncommittedDiffPane({
   onSelectionChange?: (selection: ReportedFileSelection | null) => void;
   selectionBusyReason: string | null;
   onOpenFileHistory?: (path: string) => void;
+  onOpenFolderHistory?: (folder: string) => void;
   externalTools?: ExternalToolsApi;
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
   // The conflict pane's "Use ours/theirs (whole file)".
@@ -1464,6 +1479,7 @@ function UncommittedDiffPane({
         onStashFile={(path) => onOpenStashDialog([path])}
         stashDisabledReason={stashReason}
         onOpenFileHistory={onOpenFileHistory}
+        onOpenFolderHistory={onOpenFolderHistory}
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
         onResolveWholeFile={onResolveWholeFile}
@@ -1693,6 +1709,8 @@ function CommitDiffPane({
   onSelectRow,
   focus,
   onOpenFileHistory,
+  onOpenLineHistory,
+  onOpenFolderHistory,
   externalTools,
   view,
   onViewChange,
@@ -1706,6 +1724,8 @@ function CommitDiffPane({
   onSelectRow: (row: SelectedRow) => void;
   focus: FileHistoryFocus | null;
   onOpenFileHistory?: (path: string) => void;
+  onOpenLineHistory?: (path: string, revision: string, startLine: number, endLine: number) => void;
+  onOpenFolderHistory?: (folder: string) => void;
   externalTools?: ExternalToolsApi;
   view: CommitView;
   onViewChange: (view: CommitView) => void;
@@ -1805,6 +1825,8 @@ function CommitDiffPane({
           commitId={commitId}
           onSelectRow={onSelectRow}
           onOpenFileHistory={onOpenFileHistory}
+          onOpenLineHistory={onOpenLineHistory}
+          onOpenFolderHistory={onOpenFolderHistory}
           externalTools={externalTools}
           onRestoreFileVersion={onRestoreFileVersion}
           restoreBlockedReason={restoreBlockedReason}
@@ -1824,6 +1846,8 @@ function CommitDiffPane({
               collapsed={focusCollapsed}
               onToggleCollapse={() => setFocusCollapsed((c) => !c)}
               onSelectRow={onSelectRow}
+              onOpenLineHistory={onOpenLineHistory}
+              onOpenFolderHistory={onOpenFolderHistory}
               externalTools={externalTools}
               toolSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
               previewSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
@@ -1856,6 +1880,8 @@ function CommitDiffPane({
                 onToggleCollapse={() => toggleCollapse(path)}
                 onSelectRow={onSelectRow}
                 onOpenFileHistory={onOpenFileHistory}
+                onOpenLineHistory={onOpenLineHistory}
+                onOpenFolderHistory={onOpenFolderHistory}
                 externalTools={externalTools}
                 toolSource={{ kind: "Commit", commitId, oldPath: null }}
                 previewSource={{ kind: "Commit", commitId, oldPath: null }}

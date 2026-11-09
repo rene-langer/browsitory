@@ -24,6 +24,7 @@ import type {
   DiffSettings,
   FileConflictChoice,
   FileHistoryEntry,
+  LineHistory,
   ChangedFile,
   CommitLocation,
   CompareRange,
@@ -256,6 +257,8 @@ export const vscodeRepoClient: RepoClient = {
     call<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
   getFileHistory: (repoPath: string, path: string, limit: number) =>
     call<FileHistoryEntry[]>("get_file_history", { repoPath, path, limit }),
+  getLineHistory: (repoPath: string, revision: string, path: string, startLine: number, endLine: number, limit: number) =>
+    call<LineHistory>("get_line_history", { repoPath, revision, path, startLine, endLine, limit }),
   searchCommits: (repoPath: string, query: string, refs: string[] | null, remoteBranches: string[], cursor: string | null) =>
     call<SearchPage>("search_commits", { repoPath, query, refs, remoteBranches, cursor }),
   cancelSearch: (repoPath: string) => call<void>("cancel_search", { repoPath }),

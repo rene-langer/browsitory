@@ -15,6 +15,7 @@ Press ↓ in the field to move into the results.
 | `commit:SHA` | SHA starts with it |
 | `path:PATTERN` | Changes a matching path (`src/`, `*.md`) |
 | `contents:TEXT` | An added or removed line contains it |
+| `line:PATH:FROM-TO` | Changed those lines of the file at HEAD, followed back |
 | `after:YYYY-MM-DD` | Committed on or after that day |
 | `before:YYYY-MM-DD` | Committed on or before that day |
 | `branch:NAME` | Only commits reachable from NAME |
@@ -30,6 +31,11 @@ Press ↓ in the field to move into the results.
   you added to the graph included; with a single branch in the graph, only that branch's own
   line, as in the graph. `branch:NAME` always
   searches every commit reachable from NAME, merged branches included.
+- `line:src/main.rs:10-20` (or `line:src/main.rs:12` for one line) lists the commits that
+  changed those lines, following them back through earlier edits, the same as
+  [line history](file-history.md#history-of-lines) does. The line numbers are the file's at HEAD,
+  or at the tip of the `branch:` term's branch. Put a path with spaces in quotes
+  (`line:"my file.txt:3-4"`). Lines outside the file are an error.
 - Results load 100 at a time, and "Scanned N commits…" shows progress on large histories.
 - Selecting a result shows its diff as usual.
 - Esc or × goes back to the graph and the previous selection.

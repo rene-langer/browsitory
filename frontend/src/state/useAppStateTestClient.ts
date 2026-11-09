@@ -114,6 +114,7 @@ export function transferClient(overrides: Partial<RepoClient>): RepoClient {
     getWorkingDiff: async () => unimplemented(),
     getCommitDiff: async () => unimplemented(),
     getFileHistory: async () => unimplemented(),
+    getLineHistory: async () => unimplemented(),
     searchCommits: async () => ({ commits: [], nextCursor: null, scanned: 0 }),
     cancelSearch: async () => {},
     getCommitRenameDiff: async () => unimplemented(),

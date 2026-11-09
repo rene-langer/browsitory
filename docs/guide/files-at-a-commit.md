@@ -11,6 +11,9 @@ Folders come first, then files, each with its size. Type in **Filter files** to 
 path in the commit (case doesn't matter): the tree is replaced by the matching files with their
 full paths. At most 500 matches are listed; type more to narrow them down.
 
+The clock button at the end of a folder's row opens its
+[folder history](file-history.md#folder-history).
+
 ## Viewing a file
 
 Click a file to see its content at that commit, read-only, with line numbers and the same syntax
@@ -21,6 +24,10 @@ submodules are not shown; a notice says so. A symbolic link shows its target.
 The file's header has these actions:
 
 - **History** opens the [file history](file-history.md) of that path.
+- **History of lines N–M** (or **Line history** while no lines are selected): select lines of a
+  text file with the mouse, then click it for the commits that changed those lines (see
+  [History of lines](file-history.md#history-of-lines)).
+- **Folder history** lists the commits that changed anything in the file's folder.
 - **Compare with working tree** shows the diff between this version and the file in your working
   tree, as **Diff against working tree** does for a whole commit (see
   [Comparing commits and branches](compare.md)). Click it again for the content.

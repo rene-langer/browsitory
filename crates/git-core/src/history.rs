@@ -19,6 +19,16 @@ pub struct FileHistoryEntry {
 pub enum HistoryError {
     #[error("Path must be relative to the repository root.")]
     InvalidPath,
+    #[error("{path} isn't a file in this commit.")]
+    NotAFile { path: String },
+    #[error("{path} is a binary file, so it has no lines to follow.")]
+    NotText { path: String },
+    #[error("Lines {start}-{end} aren't in the file, which has {count} lines.")]
+    InvalidRange {
+        start: usize,
+        end: usize,
+        count: usize,
+    },
     #[error(transparent)]
     Git(#[from] git2::Error),
 }
@@ -102,7 +112,7 @@ pub fn file_history(
     Ok(entries)
 }
 
-fn validate_path(path: &str) -> Result<(), HistoryError> {
+pub(crate) fn validate_path(path: &str) -> Result<(), HistoryError> {
     let relative = Path::new(path);
     if path.is_empty()
         || !relative
@@ -115,13 +125,13 @@ fn validate_path(path: &str) -> Result<(), HistoryError> {
 }
 
 /// Blob id and file mode at `path`, or `None` when absent or not a file (e.g. a directory).
-fn blob_at(tree: &Tree, path: &str) -> Option<(Oid, i32)> {
+pub(crate) fn blob_at(tree: &Tree, path: &str) -> Option<(Oid, i32)> {
     let entry = tree.get_path(Path::new(path)).ok()?;
     (entry.kind() == Some(git2::ObjectType::Blob)).then(|| (entry.id(), entry.filemode()))
 }
 
 /// The path `new_path` was renamed from between `old` and `new`, if libgit2 sees a rename.
-fn rename_source(
+pub(crate) fn rename_source(
     repo: &Repository,
     old: &Tree,
     new: &Tree,

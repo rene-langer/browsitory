@@ -113,6 +113,16 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "-",
         ),
         (
+            cmd!(GetLineHistory {
+                revision: s("HEAD"),
+                path: s("a.txt"),
+                start_line: 1,
+                end_line: 1,
+                limit: 1
+            }),
+            "-",
+        ),
+        (
             cmd!(SearchCommits {
                 query: s("fix"),
                 selection: graph(),

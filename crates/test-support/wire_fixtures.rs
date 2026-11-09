@@ -329,6 +329,38 @@ pub fn file_history_entries() -> Cases<git_core::history::FileHistoryEntry> {
     ]
 }
 
+pub fn line_histories() -> Cases<git_core::line_history::LineHistory> {
+    vec![
+        case(
+            "complete",
+            git_core::line_history::LineHistory {
+                entries: vec![
+                    git_core::line_history::LineHistoryEntry {
+                        commit: graph_commit("Edit"),
+                        path: "b.txt".to_string(),
+                        old_path: None,
+                        lines: git_core::line_history::LineRange { start: 10, end: 12 },
+                    },
+                    git_core::line_history::LineHistoryEntry {
+                        commit: graph_commit("Rename"),
+                        path: "b.txt".to_string(),
+                        old_path: some("a.txt"),
+                        lines: git_core::line_history::LineRange { start: 7, end: 9 },
+                    },
+                ],
+                truncated: false,
+            },
+        ),
+        case(
+            "truncated",
+            git_core::line_history::LineHistory {
+                entries: Vec::new(),
+                truncated: true,
+            },
+        ),
+    ]
+}
+
 pub fn search_pages() -> Cases<git_core::search::SearchPage> {
     vec![
         case(

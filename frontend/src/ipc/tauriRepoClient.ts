@@ -31,6 +31,7 @@ import type {
   DiffSettings,
   FileConflictChoice,
   FileHistoryEntry,
+  LineHistory,
   ChangedFile,
   CommitLocation,
   CompareRange,
@@ -163,6 +164,8 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<DiffHunk[]>("get_commit_diff", { repoPath, commitId, path, opts }),
   getFileHistory: (repoPath: string, path: string, limit: number) =>
     loggedInvoke<FileHistoryEntry[]>("get_file_history", { repoPath, path, limit }),
+  getLineHistory: (repoPath: string, revision: string, path: string, startLine: number, endLine: number, limit: number) =>
+    loggedInvoke<LineHistory>("get_line_history", { repoPath, revision, path, startLine, endLine, limit }),
   // Plain `invoke` on purpose: query errors and cancellations are expected while typing and are
   // shown in the UI, not logged.
   searchCommits: (repoPath: string, query: string, refs: string[] | null, remoteBranches: string[], cursor: string | null) =>
