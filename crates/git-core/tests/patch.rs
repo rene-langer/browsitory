@@ -649,3 +649,77 @@ fn a_new_file_meeting_an_untracked_one_where_case_folds_does_not_apply() {
     assert_eq!(read(dir.path(), "A.txt"), "mine\n");
     assert!(!dir.path().join("a.txt").exists());
 }
+
+/// A two-mail series over the files `base` writes: the first mail makes `first`'s change, the
+/// second adds `g.txt`. The repository is reset to the base, with an untracked `g.txt` there, so the second
+/// mail doesn't apply.
+fn failing_series(
+    base: impl Fn(&std::path::Path),
+    first: impl Fn(&std::path::Path),
+) -> (tempfile::TempDir, Repository, Vec<u8>) {
+    let (dir, repo) = init_repo();
+    base(dir.path());
+    commit_all(&repo, "base");
+    let base_id = head_id(&repo);
+    first(dir.path());
+    // Deletions too.
+    let mut index = repo.index().unwrap();
+    index.update_all(["*"].iter(), None).unwrap();
+    index.write().unwrap();
+    commit_all(&repo, "first");
+    let first_id = head_id(&repo);
+    write_file(dir.path(), "g.txt", "g\n");
+    commit_all(&repo, "add g");
+    let second_id = head_id(&repo);
+    let series = commits_patch(&repo, &[first_id, second_id]).unwrap();
+    {
+        let base_commit = repo
+            .find_commit(git2::Oid::from_str(&base_id).unwrap())
+            .unwrap();
+        repo.reset(base_commit.as_object(), git2::ResetType::Hard, None)
+            .unwrap();
+    }
+    write_file(dir.path(), "g.txt", "mine\n");
+    (dir, repo, series)
+}
+
+/// [`failing_series`] whose first mail adds `new/dir/a.txt` (no `new/` in the base).
+fn series_adding_a_folder_then_failing() -> (tempfile::TempDir, Repository, Vec<u8>) {
+    failing_series(
+        |dir| write_file(dir, "f.txt", "one\n"),
+        |dir| write_file(dir, "new/dir/a.txt", "a\n"),
+    )
+}
+
+#[test]
+fn a_failed_series_removes_the_folders_an_earlier_mail_created() {
+    let (dir, repo, series) = series_adding_a_folder_then_failing();
+    let err = apply_patch(&repo, &series).unwrap_err();
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert!(!dir.path().join("new").exists());
+    assert_eq!(read(dir.path(), "g.txt"), "mine\n");
+}
+
+#[test]
+fn a_failed_series_keeps_a_folder_that_was_there_before() {
+    let (dir, repo, series) = series_adding_a_folder_then_failing();
+    std::fs::create_dir(dir.path().join("new")).unwrap();
+    let err = apply_patch(&repo, &series).unwrap_err();
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert!(dir.path().join("new").is_dir());
+    assert!(!dir.path().join("new/dir").exists());
+}
+
+#[test]
+fn a_failed_series_puts_back_a_folder_an_earlier_mail_replaced_with_a_file() {
+    let (dir, repo, series) = failing_series(
+        |dir| write_file(dir, "foo/bar.txt", "bar\n"),
+        |dir| {
+            std::fs::remove_dir_all(dir.join("foo")).unwrap();
+            write_file(dir, "foo", "file\n");
+        },
+    );
+    let err = apply_patch(&repo, &series).unwrap_err();
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert_eq!(read(dir.path(), "foo/bar.txt"), "bar\n");
+}
