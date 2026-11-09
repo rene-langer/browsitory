@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import * as os from "node:os";
 import * as vscode from "vscode";
 import {
   resolveDevelopmentSidecarPath,
@@ -71,6 +72,14 @@ export function activate(context: vscode.ExtensionContext): void {
       context,
       postToWebview: (message) => panel.webview.postMessage(message),
       showOpenDialog: (options) => vscode.window.showOpenDialog(options),
+      showSaveDialog: async (fileName) => {
+        const folder = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(os.homedir());
+        const picked = await vscode.window.showSaveDialog({
+          defaultUri: vscode.Uri.joinPath(folder, fileName),
+          saveLabel: "Save",
+        });
+        return picked?.fsPath;
+      },
       openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url, true)),
       appendLine: (message) => output.appendLine(message),
       openFile: (file, line) =>

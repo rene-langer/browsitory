@@ -196,6 +196,10 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::ListRecentAuthors { .. }
         | Command::CheckMergeTarget { .. }
         | Command::ReadFileVersion { .. }
+        | Command::GetCommitTree { .. }
+        | Command::GetFileAtCommit { .. }
+        // Writes only outside the repository, to a path the user picked.
+        | Command::SaveFileVersion { .. }
         | Command::CommitsSince { .. }
         | Command::GetHeadInfo { .. }
         | Command::DetectForgeRepository { .. }
@@ -268,6 +272,14 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         Command::DiscardAllUnstaged { .. } => {
             P::recorded("Discard all unstaged changes".to_string(), Full).refused_when_busy(Discard)
         }
+        // Overwrites the work tree file, so it is a discard too (#446).
+        Command::RestoreFileVersion {
+            commit_id, path, ..
+        } => P::recorded(
+            with_path("Restore ", path, &format!(" from {}", short(commit_id))),
+            Full,
+        )
+        .refused_when_busy(Discard),
 
         // Commits end a merge or pick, so they can't run under a stored rebase or sequence.
         Command::Commit { message, .. } => {
@@ -478,6 +490,10 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         ListRecentAuthors,
         CheckMergeTarget,
         ReadFileVersion,
+        GetCommitTree,
+        GetFileAtCommit,
+        SaveFileVersion,
+        RestoreFileVersion,
         CommitsSince,
         StartRebase,
         RebaseContinue,

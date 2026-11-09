@@ -137,6 +137,10 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     setExternalToolSettings: async () => {},
     getGitTools: async () => ({ diffTool: null, mergeTool: null }),
     getFileSides: async () => ({ old: { kind: "Missing" as const }, new: { kind: "Missing" as const } }),
+    getCommitTree: async () => ({ entries: [], truncated: false }),
+    getFileAtCommit: async () => ({ kind: "Binary" as const, size: 0 }),
+    saveFileVersion: async () => null,
+    restoreFileVersion: async () => {},
     listRecentAuthors: async () => [],
     getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
     setCommitMessageSettings: async () => {},
@@ -1416,6 +1420,39 @@ describe("DiffPane", () => {
       expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
       expect(await screen.findByText(/fn main/)).toBeInTheDocument();
       expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs", DEFAULT_DIFF_OPTIONS);
+    });
+
+    it("switches to All files, which lists the commit's tree and stays on for the next commit (#446)", async () => {
+      const getCommitTree = vi.fn(async () => ({
+        entries: [{ path: "README.md", name: "README.md", kind: "File" as const, size: 3 }],
+        truncated: false,
+      }));
+      const client = fakeClient({ getCommitFiles, getCommitDiff, getCommitTree });
+      const { rerender } = renderCommit(client, "abc123");
+      expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Changes" })).toHaveAttribute("aria-pressed", "true");
+
+      fireEvent.click(screen.getByRole("button", { name: "All files" }));
+      expect(await screen.findByRole("button", { name: /README\.md/ })).toBeInTheDocument();
+      expect(getCommitTree).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "", null);
+      expect(screen.queryByText(/fn main/)).toBeNull();
+
+      rerender(
+        <DiffPane
+          repoPath={TEST_REPO_PATH}
+          client={client}
+          selectedRow={{ commitId: "def456" }}
+          status={[]}
+          mergeMessage={null}
+          rebaseProgress={null}
+          {...noopHandlers}
+        />,
+      );
+      await waitFor(() => expect(getCommitTree).toHaveBeenCalledWith(TEST_REPO_PATH, "def456", "", null));
+      expect(screen.getByRole("button", { name: "All files" })).toHaveAttribute("aria-pressed", "true");
+
+      fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+      expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
     });
 
     it("no CommitBox or stage/unstage buttons render", async () => {

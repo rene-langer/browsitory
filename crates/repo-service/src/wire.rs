@@ -1163,6 +1163,92 @@ impl From<git_core::diff::FileSides> for FileSidesDto {
     }
 }
 
+/// One entry of a commit's tree (#446).
+#[derive(Debug, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "TreeEntry"))]
+#[serde(rename_all = "camelCase")]
+pub struct TreeEntryDto {
+    pub path: String,
+    pub name: String,
+    pub kind: git_core::tree::TreeEntryKind,
+    pub size: Option<u64>,
+}
+
+impl From<git_core::tree::TreeEntry> for TreeEntryDto {
+    fn from(entry: git_core::tree::TreeEntry) -> Self {
+        Self {
+            path: entry.path,
+            name: entry.name,
+            kind: entry.kind,
+            size: entry.size,
+        }
+    }
+}
+
+/// One folder of a commit's tree, or a filter's matches (`truncated`: there were more).
+#[derive(Debug, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "TreeListing"))]
+pub struct TreeListingDto {
+    pub entries: Vec<TreeEntryDto>,
+    pub truncated: bool,
+}
+
+impl From<git_core::tree::TreeListing> for TreeListingDto {
+    fn from(listing: git_core::tree::TreeListing) -> Self {
+        Self {
+            entries: listing.entries.into_iter().map(Into::into).collect(),
+            truncated: listing.truncated,
+        }
+    }
+}
+
+/// A file's content at a commit for the read-only viewer (#446). A binary file's bytes are sent
+/// only when they are a previewable image (`Image`, the type sniffed from the bytes).
+#[derive(Debug, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "FileContent"))]
+#[serde(tag = "kind")]
+pub enum FileContentDto {
+    Text {
+        size: u64,
+        text: String,
+    },
+    Image {
+        size: u64,
+        base64: String,
+        mime: &'static str,
+    },
+    Binary {
+        size: u64,
+    },
+    TooLarge {
+        size: u64,
+    },
+}
+
+impl From<git_core::tree::FileContent> for FileContentDto {
+    fn from(content: git_core::tree::FileContent) -> Self {
+        use git_core::tree::FileContent;
+        match content {
+            FileContent::Text { text, size } => Self::Text { size, text },
+            FileContent::TooLarge { size } => Self::TooLarge { size },
+            FileContent::Binary { bytes } => {
+                let size = bytes.len() as u64;
+                match git_core::diff::sniff_image_mime(&bytes) {
+                    Some(mime) => Self::Image {
+                        size,
+                        base64: crate::base64::encode(&bytes),
+                        mime,
+                    },
+                    None => Self::Binary { size },
+                }
+            }
+        }
+    }
+}
+
 /// A `Key: value` trailer for a commit/amend message (`RepoClient`'s `Trailer`).
 #[derive(Debug, Deserialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
@@ -2210,6 +2296,7 @@ mod ts_bindings {
             git_core::repo::OperationKind,
             git_core::repo::TerminalRebaseKind,
             git_core::status::StatusKind,
+            git_core::tree::TreeEntryKind,
             ErrorKind,
             ErrorDto,
             crate::worker::HookSource,
@@ -2260,6 +2347,9 @@ mod ts_bindings {
             ResetModeDto,
             FileSideDto,
             FileSidesDto,
+            TreeEntryDto,
+            TreeListingDto,
+            FileContentDto,
             TrailerDto,
             SignatureInputDto,
             DiffSourceDto,

@@ -619,6 +619,82 @@ pub fn file_sides() -> Cases<git_core::diff::FileSides> {
         .collect()
 }
 
+pub fn tree_listings() -> Cases<git_core::tree::TreeListing> {
+    use git_core::tree::{TreeEntry, TreeEntryKind};
+    let kinds = every!(TreeEntryKind {
+        Folder,
+        File,
+        Executable,
+        Symlink,
+        Submodule
+    });
+    let entries = kinds
+        .into_iter()
+        .map(|kind| {
+            let name = format!("{kind:?}").to_lowercase();
+            let size = match kind {
+                TreeEntryKind::Folder | TreeEntryKind::Submodule => None,
+                _ => Some(42),
+            };
+            TreeEntry {
+                path: format!("src/{name}"),
+                name,
+                kind,
+                size,
+            }
+        })
+        .collect();
+    vec![
+        case(
+            "folder",
+            git_core::tree::TreeListing {
+                entries,
+                truncated: false,
+            },
+        ),
+        case(
+            "truncated-empty",
+            git_core::tree::TreeListing {
+                entries: vec![],
+                truncated: true,
+            },
+        ),
+    ]
+}
+
+pub fn file_contents() -> Cases<git_core::tree::FileContent> {
+    use git_core::tree::FileContent;
+    let cases = vec![
+        case(
+            "Text",
+            FileContent::Text {
+                text: "fn main() {}\n".to_string(),
+                size: 13,
+            },
+        ),
+        case(
+            "Binary-png",
+            FileContent::Binary {
+                bytes: b"\x89PNG\r\n\x1a\n\0\0".to_vec(),
+            },
+        ),
+        case(
+            "Binary-not-an-image",
+            FileContent::Binary {
+                bytes: b"\0\x01\x02".to_vec(),
+            },
+        ),
+        case("TooLarge", FileContent::TooLarge { size: 99_000_000 }),
+    ];
+    assert_every_variant!(
+        cases.iter().map(|(_, content)| content),
+        FileContent::Text { .. },
+        FileContent::Binary { .. },
+        FileContent::TooLarge { .. },
+    );
+    cases
+}
+
 pub fn commit_outcomes() -> Cases<git_core::commit::CommitOutcome> {
     use git_core::commit::CommitOutcome;
     let cases = vec![

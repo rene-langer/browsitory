@@ -39,6 +39,7 @@ function bridgeWithoutSidecar() {
     } as unknown as ExtensionContext,
     postToWebview,
     showOpenDialog: async () => undefined,
+    showSaveDialog: async () => undefined,
     openExternal: async () => true,
     appendLine: () => {},
     openFile: async () => undefined,

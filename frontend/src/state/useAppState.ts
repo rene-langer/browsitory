@@ -204,6 +204,8 @@ export interface UseAppStateResult {
   unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(path: string): Promise<void>;
+  /** Writes `path` as it is in `commitId` to the work tree, not the index (#446); one undo step. */
+  restoreFileVersion(commitId: string, path: string): Promise<void>;
   discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
   ignorePaths(patterns: string[]): Promise<void>;
@@ -589,6 +591,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     unstageLines,
     discardLines,
     discardFile,
+    restoreFileVersion,
     discardAllUnstaged,
     ignorePath,
     ignorePaths,
@@ -795,6 +798,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   return {
     state,
     selectRow,
+    restoreFileVersion,
     stageFile,
     unstageFile,
     stageAllFiles,

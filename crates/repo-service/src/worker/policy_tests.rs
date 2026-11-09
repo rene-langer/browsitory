@@ -511,6 +511,36 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "-",
         ),
+        (
+            cmd!(GetCommitTree {
+                commit_id: s(ONTO),
+                dir: s(""),
+                filter: None
+            }),
+            "-",
+        ),
+        (
+            cmd!(GetFileAtCommit {
+                commit_id: s(ONTO),
+                path: s("a.txt")
+            }),
+            "-",
+        ),
+        (
+            cmd!(SaveFileVersion {
+                commit_id: s(ONTO),
+                path: s("a.txt"),
+                destination: std::path::PathBuf::from("/elsewhere/a.txt")
+            }),
+            "-",
+        ),
+        (
+            cmd!(RestoreFileVersion {
+                commit_id: s(ONTO),
+                path: s("a.txt")
+            }),
+            "undo(Full, Restore a.txt from 707e824) lock busy=Discard hold",
+        ),
         (cmd!(CommitsSince { onto: s(ONTO) }), "-"),
         (
             cmd!(StartRebase {

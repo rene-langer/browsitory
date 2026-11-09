@@ -28,6 +28,7 @@ mod status;
 mod submodule;
 mod tag;
 mod tools;
+mod tree;
 mod undo;
 #[cfg(test)]
 mod wire_snapshots;
@@ -73,6 +74,7 @@ pub use tools::{
     get_external_tool_settings, get_file_sides, get_git_tools, open_diff_tool, open_in_editor,
     open_merge_tool, open_terminal, reveal_in_file_manager, set_external_tool_settings,
 };
+pub use tree::{get_commit_tree, get_file_at_commit, restore_file_version, save_file_version};
 pub use undo::{get_undo_state, redo_last, undo_last};
 pub use worktree::{create_worktree, list_worktrees, prune_worktrees, remove_worktree};
 

@@ -47,6 +47,7 @@ function createBridge(overrides: {
   externalResult?: boolean;
   spawnResults?: Array<FakeSidecar | Error>;
   mergeEditorOpened?: boolean;
+  savePath?: string | undefined;
 } = {}) {
   const child = new FakeSidecar();
   const spawnResults = overrides.spawnResults ?? [child];
@@ -58,6 +59,7 @@ function createBridge(overrides: {
   });
   const postToWebview = vi.fn();
   const showOpenDialog = vi.fn(async () => overrides.folder);
+  const showSaveDialog = vi.fn(async (_fileName: string) => overrides.savePath);
   const openExternal = vi.fn(async () => overrides.externalResult ?? true);
   const appendLine = vi.fn();
   const openFile = vi.fn(async (_path: string, _line: number | null) => undefined);
@@ -75,6 +77,7 @@ function createBridge(overrides: {
     context: state.context,
     postToWebview,
     showOpenDialog,
+    showSaveDialog,
     openExternal,
     appendLine,
     openFile,
@@ -89,6 +92,7 @@ function createBridge(overrides: {
     spawn,
     postToWebview,
     showOpenDialog,
+    showSaveDialog,
     openExternal,
     appendLine,
     openFile,
@@ -433,6 +437,60 @@ describe("SidecarBridge", () => {
       // The merge editor fell back to a plain open: still handed off to VSCode.
       { jsonrpc: "2.0", id: 5, result: "HandedOff" },
     ]);
+  });
+
+  it("saves a file version to the path picked in the save dialog (#446)", async () => {
+    const { bridge, child, postToWebview, showSaveDialog } = createBridge({ savePath: "/home/me/main.rs" });
+    const save = bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "save_file_version",
+      params: { repoPath: "/repos/a", commitId: "abc", path: "src/main.rs" },
+    });
+    await vi.waitFor(() => expect(child.stdin.write).toHaveBeenCalledTimes(1));
+    expect(showSaveDialog).toHaveBeenCalledWith("main.rs");
+    const write = writtenRequest(child, 0);
+    expect(write).toMatchObject({
+      method: "write_file_version",
+      params: { repoPath: "/repos/a", commitId: "abc", path: "src/main.rs", destination: "/home/me/main.rs" },
+    });
+    child.stdout.push(`${JSON.stringify({ jsonrpc: "2.0", id: write.id, result: null })}\n`);
+    await save;
+    expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, result: "/home/me/main.rs" });
+  });
+
+  it("writes nothing when the save dialog is cancelled, and refuses an unsafe path", async () => {
+    const { bridge, spawn, postToWebview, showSaveDialog } = createBridge({ savePath: undefined });
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "save_file_version",
+      params: { repoPath: "/repos/a", commitId: "abc", path: "a.txt" },
+    });
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "save_file_version",
+      params: { repoPath: "/repos/a", commitId: "abc", path: "../a.txt" },
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(showSaveDialog).toHaveBeenCalledTimes(1);
+    expect(postToWebview.mock.calls.map(([message]) => message)).toEqual([
+      { jsonrpc: "2.0", id: 1, result: null },
+      { jsonrpc: "2.0", id: 2, error: { code: -32602, message: "Invalid path." } },
+    ]);
+  });
+
+  it("never forwards the webview's write_file_version to the sidecar", async () => {
+    const { bridge, spawn, postToWebview } = createBridge();
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "write_file_version",
+      params: { repoPath: "/repos/a", commitId: "abc", path: "a.txt", destination: "/etc/passwd" },
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(postToWebview).toHaveBeenCalledWith(expect.objectContaining({ id: 1, error: expect.anything() }));
   });
 
   it("does not open the merge editor when the sidecar refuses the merge target", async () => {

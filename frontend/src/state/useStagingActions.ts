@@ -23,6 +23,8 @@ export interface StagingActions {
   unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(path: string): Promise<void>;
+  // Writes `path` as it is in `commitId` to the work tree (#446); one undo step.
+  restoreFileVersion(commitId: string, path: string): Promise<void>;
   discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
   // A multi-file selection's "Ignore" (#449): one pattern after another in a single
@@ -150,6 +152,10 @@ export function useStagingActions(
     (path: string) => runMutation(() => client.discardFile(repoPath, path)),
     [client, runMutation, repoPath],
   );
+  const restoreFileVersion = useCallback(
+    (commitId: string, path: string) => runMutation(() => client.restoreFileVersion(repoPath, commitId, path)),
+    [client, runMutation, repoPath],
+  );
   const discardAllUnstaged = useCallback(
     (paths: string[]) => runMutation(() => client.discardAllUnstaged(repoPath, paths)),
     [client, runMutation, repoPath],
@@ -204,6 +210,7 @@ export function useStagingActions(
     unstageLines,
     discardLines,
     discardFile,
+    restoreFileVersion,
     discardAllUnstaged,
     ignorePath,
     ignorePaths,

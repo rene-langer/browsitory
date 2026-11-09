@@ -3,6 +3,8 @@ import type {
   CommitMessageSettings,
   FetchSettings,
   FileSides,
+  FileContent,
+  TreeListing,
   SignatureInput,
   Trailer,
   DiffSource,
@@ -461,6 +463,15 @@ export const vscodeRepoClient: RepoClient = {
     }),
   getFileSides: (repoPath: string, path: string, source: DiffSource) =>
     call<FileSides>("get_file_sides", { repoPath, path, source }),
+  getCommitTree: (repoPath: string, commitId: string, dir: string, filter: string | null) =>
+    call<TreeListing>("get_commit_tree", { repoPath, commitId, dir, filter }),
+  getFileAtCommit: (repoPath: string, commitId: string, path: string) =>
+    call<FileContent>("get_file_at_commit", { repoPath, commitId, path }),
+  // A native method: the extension host shows VSCode's save dialog, then has the sidecar write.
+  saveFileVersion: (repoPath: string, commitId: string, path: string) =>
+    call<string | null>("save_file_version", { repoPath, commitId, path }),
+  restoreFileVersion: (repoPath: string, commitId: string, path: string) =>
+    call<void>("restore_file_version", { repoPath, commitId, path }),
   listRecentAuthors: (repoPath: string) => call<SignatureInput[]>("list_recent_authors", { repoPath }),
   getCommitMessageSettings: () => call<CommitMessageSettings>("get_commit_message_settings", {}),
   setCommitMessageSettings: (settings: CommitMessageSettings) =>

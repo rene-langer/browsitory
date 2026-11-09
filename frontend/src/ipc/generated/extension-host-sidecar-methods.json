@@ -1,5 +1,6 @@
 [
   "check_merge_target",
   "read_file_version",
-  "repo_workdir"
+  "repo_workdir",
+  "write_file_version"
 ]

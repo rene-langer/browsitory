@@ -51,6 +51,12 @@ FileSides/new-Missing {"new":{"kind":"Missing"},"old":{"kind":"Missing"}}
 FileSides/new-TooLarge {"new":{"kind":"TooLarge","size":99000000},"old":{"kind":"Missing"}}
 FileSides/new-Loaded-png {"new":{"base64":"iVBORw0KGgoAAA==","kind":"Loaded","mime":"image/png","size":10},"old":{"kind":"Missing"}}
 FileSides/new-Loaded-not-an-image {"new":{"base64":"aGVsbG8=","kind":"Loaded","mime":null,"size":5},"old":{"kind":"Missing"}}
+TreeListing/folder {"entries":[{"kind":"Folder","name":"folder","path":"src/folder","size":null},{"kind":"File","name":"file","path":"src/file","size":42},{"kind":"Executable","name":"executable","path":"src/executable","size":42},{"kind":"Symlink","name":"symlink","path":"src/symlink","size":42},{"kind":"Submodule","name":"submodule","path":"src/submodule","size":null}],"truncated":false}
+TreeListing/truncated-empty {"entries":[],"truncated":true}
+FileContent/Text {"kind":"Text","size":13,"text":"fn main() {}\n"}
+FileContent/Binary-png {"base64":"iVBORw0KGgoAAA==","kind":"Image","mime":"image/png","size":10}
+FileContent/Binary-not-an-image {"kind":"Binary","size":3}
+FileContent/TooLarge {"kind":"TooLarge","size":99000000}
 CommitOutcome/Committed {"commitId":"3333333333333333333333333333333333333333","kind":"Committed"}
 CommitOutcome/HookFailed {"hook":"pre-commit","kind":"HookFailed","output":"lint failed\n"}
 HookProgress/Started-Commit {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Commit"}

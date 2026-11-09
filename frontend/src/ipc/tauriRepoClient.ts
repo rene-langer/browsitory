@@ -8,6 +8,8 @@ import type {
   CommitMessageSettings,
   FetchSettings,
   FileSides,
+  FileContent,
+  TreeListing,
   SignatureInput,
   Trailer,
   DiffSource,
@@ -376,6 +378,14 @@ export const tauriRepoClient: RepoClient = {
   },
   getFileSides: (repoPath: string, path: string, source: DiffSource) =>
     loggedInvoke<FileSides>("get_file_sides", { repoPath, path, source }),
+  getCommitTree: (repoPath: string, commitId: string, dir: string, filter: string | null) =>
+    loggedInvoke<TreeListing>("get_commit_tree", { repoPath, commitId, dir, filter }),
+  getFileAtCommit: (repoPath: string, commitId: string, path: string) =>
+    loggedInvoke<FileContent>("get_file_at_commit", { repoPath, commitId, path }),
+  saveFileVersion: (repoPath: string, commitId: string, path: string) =>
+    loggedInvoke<string | null>("save_file_version", { repoPath, commitId, path }),
+  restoreFileVersion: (repoPath: string, commitId: string, path: string) =>
+    loggedInvoke<void>("restore_file_version", { repoPath, commitId, path }),
   listRecentAuthors: (repoPath: string) => loggedInvoke<SignatureInput[]>("list_recent_authors", { repoPath }),
   getCommitMessageSettings: () => loggedInvoke<CommitMessageSettings>("get_commit_message_settings"),
   setCommitMessageSettings: (settings: CommitMessageSettings) =>

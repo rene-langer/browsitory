@@ -26,6 +26,7 @@ mod status;
 mod submodule;
 mod tag;
 mod tools;
+mod tree;
 mod undo;
 mod worktree;
 
@@ -45,6 +46,7 @@ use status::*;
 use submodule::*;
 use tag::*;
 use tools::*;
+use tree::*;
 use undo::*;
 use worktree::*;
 
@@ -164,6 +166,10 @@ methods!(|params, repos, stdout| {
     "set_external_tool_settings" => set_external_tool_settings(SetExternalToolSettingsParams),
     "get_git_tools" => get_git_tools(RepoPathParams, repos),
     "get_file_sides" => get_file_sides(FileSidesParams, repos),
+    "get_commit_tree" => get_commit_tree(GetCommitTreeParams, repos),
+    "get_file_at_commit" => get_file_at_commit(CommitFileParams, repos),
+    "restore_file_version" => restore_file_version(CommitFileParams, repos),
+    "write_file_version" => write_file_version(WriteFileVersionParams, repos),
     "list_recent_authors" => list_recent_authors(RepoPathParams, repos),
     "get_commit_message_settings" => get_commit_message_settings(),
     "set_commit_message_settings" => set_commit_message_settings(SetCommitMessageSettingsParams),

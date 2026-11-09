@@ -26,6 +26,8 @@ export const NATIVE_METHODS: ReadonlySet<string> = new Set([
   "open_terminal",
   "open_diff_tool",
   "open_merge_tool",
+  // "Save as…" of a file at a commit (#446): VSCode's save dialog, then `write_file_version`.
+  "save_file_version",
 ]);
 
 // Sidecar methods only the extension host calls (#306). The webview may not call them: a
@@ -36,6 +38,7 @@ export const HOST_SIDECAR_METHODS = {
   readFileVersion: "read_file_version",
   repoWorkdir: "repo_workdir",
   checkMergeTarget: "check_merge_target",
+  writeFileVersion: "write_file_version",
 } as const;
 const HOST_SIDECAR_METHOD_NAMES: ReadonlySet<string> = new Set(Object.values(HOST_SIDECAR_METHODS));
 
@@ -92,6 +95,11 @@ export interface SidecarBridgeDependencies {
   readonly showOpenDialog: (
     options: OpenDialogOptions,
   ) => PromiseLike<readonly Uri[] | undefined>;
+  /**
+   * VSCode's save dialog, suggesting `fileName`; resolves the picked file's path, or `undefined`
+   * when the user cancelled.
+   */
+  readonly showSaveDialog: (fileName: string) => PromiseLike<string | undefined>;
   readonly openExternal: (url: string) => PromiseLike<boolean>;
   readonly appendLine: (message: string) => void;
   /** Opens a work tree file in a VSCode editor, at the 1-based `line` when given. */
@@ -607,6 +615,23 @@ export class SidecarBridge {
           await this.dependencies.openMergeEditor(mergeSides(repoPath, workdir, rel));
           // VSCode owns the merge from here; Browsitory can't see when it's done.
           result = "HandedOff";
+          break;
+        }
+        case "save_file_version": {
+          const params = requireParams(request, { repoPath: "string", commitId: "string", path: "string" });
+          const rel = requireRepoPath(params["path"]);
+          const destination = await this.dependencies.showSaveDialog(path.posix.basename(rel));
+          if (destination === undefined) {
+            result = null;
+            break;
+          }
+          await this.callRunningSidecar(HOST_SIDECAR_METHODS.writeFileVersion, {
+            repoPath: params["repoPath"],
+            commitId: params["commitId"],
+            path: rel,
+            destination,
+          });
+          result = destination;
           break;
         }
         default:

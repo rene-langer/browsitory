@@ -30,6 +30,7 @@ pub mod stash;
 pub mod status;
 pub mod submodule;
 pub mod tools;
+pub mod tree;
 pub mod undo;
 pub mod worktree;
 pub(crate) mod worktree_guard;

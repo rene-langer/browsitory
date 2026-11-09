@@ -33,6 +33,7 @@ mod search;
 mod sequence;
 mod staging;
 mod stash;
+mod tree;
 mod undo;
 
 /// A hook event sender for commands whose hook progress a test doesn't look at.

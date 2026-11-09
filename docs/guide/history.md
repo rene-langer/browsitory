@@ -1,7 +1,8 @@
 # History and diffs
 
 Click a commit in the graph to see the files it changed and their diffs. **Blame** on a file
-shows who last changed each line. Each row shows the branches and tags that point at the commit,
+shows who last changed each line. **All files** above the list browses every file of the commit
+instead (see [Files at a commit](files-at-a-commit.md)). Each row shows the branches and tags that point at the commit,
 and the author and date (they hide when the pane is narrow). Selecting a commit shows its full
 message, author, date, full SHA (**Copy** copies it) and parents above the file list; click a
 parent to jump to it. The graph loads the latest 300 commits; choose **Load more** at the bottom

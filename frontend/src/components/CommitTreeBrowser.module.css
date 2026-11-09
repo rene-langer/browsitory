@@ -1,0 +1,154 @@
+/* A commit's file tree and the selected file's content (#446). */
+.browser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.filter {
+  width: 100%;
+  font-size: var(--text-sm);
+}
+
+.tree {
+  max-height: 40vh;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) 0;
+}
+
+.tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  padding-block: 1px;
+  padding-inline-end: var(--space-2);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  text-align: start;
+  justify-content: flex-start;
+}
+
+.row:hover {
+  background: var(--color-bg-subtle);
+}
+
+.row[aria-current="true"] {
+  background: var(--color-selected-bg);
+}
+
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.size {
+  margin-inline-start: auto;
+  padding-inline-start: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.note {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.viewer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.viewerHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.viewerPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.viewerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-inline-start: auto;
+}
+
+.viewerActions button {
+  padding: 1px var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.code {
+  overflow: auto;
+  max-height: 70vh;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.line {
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: var(--leading-normal);
+}
+
+.lineNumber {
+  flex: 0 0 auto;
+  min-width: 5ch;
+  padding: 0 var(--space-2) 0 var(--space-1);
+  text-align: right;
+  color: var(--color-text-muted);
+  user-select: none;
+  opacity: 0.6;
+}
+
+.lineText {
+  white-space: pre;
+  font-family: inherit;
+  background: none;
+  padding: 0;
+}
+
+.image img {
+  max-width: 100%;
+  max-height: 60vh;
+  background: repeating-conic-gradient(var(--color-bg-subtle) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+}
+
+.viewToggle {
+  display: flex;
+  gap: 2px;
+  padding: var(--space-1) var(--space-3);
+}
+
+.viewToggle button {
+  padding: 1px var(--space-2);
+  font-size: var(--text-xs);
+}
