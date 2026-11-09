@@ -252,10 +252,22 @@ export function operationBlockers(state: OperationState): OperationBlockers {
   return { blocked: reason !== null, reason };
 }
 
-function operationBlockReason(state: OperationState): string | null {
-  const { headInfo } = state;
+/**
+ * Why an action that is allowed during a paused merge, rebase or cherry-pick/revert step is
+ * blocked, or `null` when it is allowed: only an action in flight or a transfer blocks it.
+ * Narrower than `operationBlockers`, for discarding changes and dropping a stash, which users do
+ * while resolving a step (#521). The reasons are `operationBlockers`' own.
+ */
+export function busyReason(state: Pick<OperationState, "pending" | "transfer">): string | null {
   if (state.pending) return "Another action is in progress.";
   if (state.transfer !== null) return "A transfer is in progress.";
+  return null;
+}
+
+function operationBlockReason(state: OperationState): string | null {
+  const { headInfo } = state;
+  const busy = busyReason(state);
+  if (busy !== null) return busy;
   if (headInfo.sequence !== null) return `A ${sequenceNoun(headInfo.sequence.kind)} is in progress.`;
   if (headInfo.terminalRebase !== null) return terminalRebaseReason(headInfo.terminalRebase);
   if (state.mergeMessage !== null) {

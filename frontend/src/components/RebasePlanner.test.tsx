@@ -39,12 +39,15 @@ describe("RebasePlanner", () => {
         onto="base"
         onStartRebase={vi.fn()}
         onCancel={vi.fn()}
-        operationDisabled={true}
+        blockedReason="A merge is in progress."
       />,
     );
     await screen.findByText(/add a/);
 
     expect(screen.getByText("Start rebase")).toBeDisabled();
+    // #521: the reason shows, as a title and as text.
+    expect(screen.getByText("Start rebase")).toHaveAttribute("title", "A merge is in progress.");
+    expect(screen.getByText("A merge is in progress.")).toBeInTheDocument();
   });
 
   it("lists commits oldest-first with a default Pick action each", async () => {

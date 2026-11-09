@@ -1,7 +1,7 @@
 import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit } from "../ipc/RepoClient";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
 import { commitActions } from "./actions/commitActions";
-import { operationBlockers, stashBlockReason } from "./operationStatus";
+import { busyReason, operationBlockers, stashBlockReason } from "./operationStatus";
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
@@ -934,7 +934,9 @@ export function buildCommands(
       );
     }
     // Both only open the confirm dialogs; staged and conflicted entries have no discard action.
-    if (!repositoryOperationDisabled) {
+    // Like the diff pane's discard, allowed while resolving a merge or a paused step: only an
+    // action in flight or a transfer blocks it (`busyReason`, #521).
+    if (busyReason(state) === null) {
       if (selection !== null && !selection.staged && diffCommands.requestDiscardSelection !== undefined) {
         commands.push({
           id: "discard-selected-files",

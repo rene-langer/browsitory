@@ -1453,7 +1453,7 @@ describe("CommitGraph — tag badges", () => {
       onRequestReset: vi.fn(),
       onEditHeadMessage: vi.fn(),
     };
-    render(
+    const graph = (more: Partial<ComponentProps<typeof CommitGraph>>) => (
       <CommitGraph
         status={[]}
         commits={tagged}
@@ -1463,10 +1463,28 @@ describe("CommitGraph — tag badges", () => {
         currentBranch="main"
         {...handlers}
         {...overrides}
-      />,
+        {...more}
+      />
     );
-    return handlers;
+    const { rerender } = render(graph({}));
+    return { ...handlers, rerenderWith: (more: Partial<ComponentProps<typeof CommitGraph>>) => rerender(graph(more)) };
   }
+
+  it("blocks an open tag delete confirmation, saying why, once the repository is busy (#521)", () => {
+    const onDeleteTag = vi.fn(async () => {});
+    const { rerenderWith } = renderGraph({ remotes, onPushTag: vi.fn(), onDeleteTag });
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete tag…" }));
+
+    rerenderWith({ pending: true, pendingReason: "A transfer is in progress." });
+    const dialog = screen.getByRole("dialog", { name: "Delete local tag v2.0" });
+    expect(dialog).toHaveTextContent("A transfer is in progress.");
+    const confirm = within(dialog).getByRole("button", { name: "Delete tag" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("title", "A transfer is in progress.");
+    fireEvent.click(confirm);
+    expect(onDeleteTag).not.toHaveBeenCalled();
+  });
 
   it("opens a tag menu with push per remote, checkout, and a confirmed delete", async () => {
     const onPushTag = vi.fn();

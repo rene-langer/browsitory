@@ -4,6 +4,7 @@ import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { isMenuKey, rectAnchor } from "../lib/menuKeys";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
@@ -235,11 +236,20 @@ export function TagPanel({
       {deleteConfirmation !== null && (
         <ConfirmDialog
           ariaLabel={`Delete local tag ${deleteConfirmation}`}
-          message={`Delete local tag ${deleteConfirmation}?`}
+          message={
+            <>
+              <p>Delete local tag {deleteConfirmation}?</p>
+              {/* #521: the repository can become busy while the confirmation is open. */}
+              {disabledTitle !== undefined && <p className={formStyles.blocked}>{disabledTitle}</p>}
+            </>
+          }
           confirmLabel="Delete tag"
           confirmDisabled={pushDisabled}
           confirmTitle={disabledTitle}
-          onConfirm={() => void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null))}
+          onConfirm={() => {
+            if (pushDisabled) return;
+            void onDelete(deleteConfirmation).then(() => setDeleteConfirmation(null));
+          }}
           onCancel={() => setDeleteConfirmation(null)}
         />
       )}

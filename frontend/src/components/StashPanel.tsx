@@ -5,6 +5,7 @@ import type { StashEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import styles from "./StashPanel.module.css";
@@ -30,6 +31,7 @@ export function StashPanel({
   applyDisabledReason,
   operationDisabled,
   operationDisabledReason,
+  dropDisabledReason,
 }: {
   stashes: StashEntry[];
   onSelectRow: (row: SelectedRow) => void;
@@ -41,13 +43,17 @@ export function StashPanel({
   restoreIndex: boolean;
   onSetRestoreIndex: (on: boolean) => void;
   // Why Apply/Pop can't run right now (staged changes, conflicts, a running operation); `null`
-  // when they can. Drop only follows `operationDisabled`.
+  // when they can.
   applyDisabledReason: string | null;
   operationDisabled: boolean;
   // Human-readable reason `operationDisabled` is true, shown as a `title` on the buttons it
   // disables so they don't just go inert with no explanation (issue #31/UX-003). `null` when
-  // nothing is blocking.
+  // nothing is blocking. Apply and Pop only.
   operationDisabledReason: string | null;
+  // Why Drop can't run now (`busyReason`: an action in flight or a transfer), else `null`.
+  // Narrower than `operationDisabled`: dropping a stash while resolving a paused merge, rebase or
+  // sequence step is fine, like in the stash view (#521).
+  dropDisabledReason: string | null;
 }) {
   const [pendingDrop, setPendingDrop] = useState<StashEntry | null>(null);
   const [menu, setMenu] = useState<StashMenu | null>(null);
@@ -90,7 +96,8 @@ export function StashPanel({
   }, [refocus]);
   const applyDisabled = operationDisabled || applyDisabledReason !== null;
   const applyTitle = applyDisabledReason ?? (operationDisabled ? (operationDisabledReason ?? undefined) : undefined);
-  const dropTitle = operationDisabled ? (operationDisabledReason ?? undefined) : undefined;
+  const dropDisabled = dropDisabledReason !== null;
+  const dropTitle = dropDisabledReason ?? undefined;
 
   // A new menu or Drop dialog ends watching an earlier drop (its stash may never go).
   const openMenu = (next: StashMenu) => {
@@ -103,7 +110,7 @@ export function StashPanel({
     { label: "Pop", disabled: applyDisabled, title: applyTitle, onSelect: () => onPopStash(stash.index) },
     {
       label: "Drop…",
-      disabled: operationDisabled,
+      disabled: dropDisabled,
       title: dropTitle,
       destructive: true,
       onSelect: () => {
@@ -192,11 +199,18 @@ export function StashPanel({
       {dropStash !== undefined && (
         <ConfirmDialog
           ariaLabel={`Drop stash ${dropStash.message}`}
-          message={<p>Drop "{dropStash.message}"? This cannot be undone.</p>}
+          message={
+            <>
+              <p>Drop "{dropStash.message}"? This cannot be undone.</p>
+              {/* #521: the repository can become busy while the confirmation is open. */}
+              {dropDisabledReason !== null && <p className={formStyles.blocked}>{dropDisabledReason}</p>}
+            </>
+          }
           confirmLabel="Drop stash"
-          confirmDisabled={operationDisabled}
+          confirmDisabled={dropDisabled}
           confirmTitle={dropTitle}
           onConfirm={() => {
+            if (dropDisabled) return;
             const { commitId } = dropStash;
             setDroppedCommitId(commitId);
             setPendingDrop(null);

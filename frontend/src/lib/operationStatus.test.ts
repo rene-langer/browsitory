@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RebaseInfo, TerminalRebase, TerminalSequence } from "../ipc/RepoClient";
 import {
   abortToast,
+  busyReason,
   conflictReason,
   leftoverReason,
   operationBlockers,
@@ -225,6 +226,14 @@ describe("operationBlockers (#495)", () => {
     expect(operationBlockers({ ...idle, mergeMessage: "m", headInfo: { ...headInfo, terminalRebase } }).reason).toBe(
       terminalRebaseReason(terminalRebase),
     );
+  });
+});
+
+describe("busyReason (#521)", () => {
+  it("blocks only while an action is pending or a transfer runs", () => {
+    expect(busyReason({ pending: false, transfer: null })).toBeNull();
+    expect(busyReason({ pending: true, transfer: null })).toBe("Another action is in progress.");
+    expect(busyReason({ pending: false, transfer: {} })).toBe("A transfer is in progress.");
   });
 });
 

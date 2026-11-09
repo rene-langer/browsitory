@@ -315,6 +315,20 @@ describe("App", () => {
       await waitFor(() => expect(client.discardAllUnstaged).toHaveBeenCalledTimes(1));
       expect(client.discardAllUnstaged).toHaveBeenCalledWith("/repos/a", ["a.txt"]);
     });
+
+    // #521: discarding while resolving a merge or a paused step is allowed; only an action in
+    // flight or a transfer blocks it (`busyReason`), not `operationBlockers`.
+    it("discards during a merge, which blocks other repository operations (#521)", async () => {
+      const client = discardClient({ getMergeMessage: async () => "Merge branch 'x'" });
+      render(<App client={client} />);
+      await screen.findByText("a.txt (Modified)");
+
+      await runPaletteCommand("Discard all unstaged changes");
+      const confirm = await screen.findByRole("button", { name: "Discard all" });
+      expect(confirm).toBeEnabled();
+      fireEvent.click(confirm);
+      await waitFor(() => expect(client.discardAllUnstaged).toHaveBeenCalledWith("/repos/a", ["a.txt"]));
+    });
   });
 
   it("closes a focused, inactive tab on Delete without switching away from the active one", async () => {

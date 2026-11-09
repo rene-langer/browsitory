@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { CommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
-import { DiffPane, type DiscardRequest } from "./DiffPane";
+import { DiffPane, type DiscardRequest, type StashActions } from "./DiffPane";
 import styles from "./DiffPane.module.css";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 
@@ -474,6 +474,33 @@ describe("DiffPane", () => {
         expect(onDiscardAllUnstaged).toHaveBeenCalledTimes(1);
         // Exactly what the dialog counted: the unstaged, non-conflicted entries.
         expect(onDiscardAllUnstaged).toHaveBeenCalledWith(["src/a.ts", "logs/run.log"]);
+      });
+
+      it("blocks the discard confirmations, saying why, while an action is in progress (#521)", () => {
+        const onDiscardFile = vi.fn();
+        const onDiscardAllUnstaged = vi.fn();
+        const reason = "Another action is in progress.";
+        render({ onDiscardFile, onDiscardAllUnstaged, discardBlockedReason: reason });
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+        let dialog = screen.getByRole("dialog", { name: "Discard changes", hidden: true });
+        expect(dialog).toHaveTextContent(reason);
+        let confirm = within(dialog).getByRole("button", { name: "Discard changes", hidden: true });
+        expect(confirm).toBeDisabled();
+        expect(confirm).toHaveAttribute("title", reason);
+        fireEvent.click(confirm);
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+
+        fireEvent.click(screen.getByRole("button", { name: "Discard all…" }));
+        dialog = screen.getByRole("dialog", { name: "Discard all changes", hidden: true });
+        expect(dialog).toHaveTextContent(reason);
+        confirm = within(dialog).getByRole("button", { name: "Discard all", hidden: true });
+        expect(confirm).toBeDisabled();
+        fireEvent.click(confirm);
+
+        expect(onDiscardFile).not.toHaveBeenCalled();
+        expect(onDiscardAllUnstaged).not.toHaveBeenCalled();
       });
 
       it("opens the file confirm from a lifted request and reports the current file", () => {
@@ -1928,6 +1955,7 @@ describe("DiffPane stash view", () => {
     restoreIndex: true,
     onSetRestoreIndex: vi.fn(),
     disabledReason: null,
+    dropDisabledReason: null,
     ...overrides,
   });
 
@@ -2013,6 +2041,41 @@ describe("DiffPane stash view", () => {
       expect(within(section).getByRole("button", { name })).toHaveAttribute("title", "Unstage or commit staged changes first.");
     }
     expect(within(section).getByRole("button", { name: "Drop…" })).toBeEnabled();
+  });
+
+  it("disables Drop… and its open confirmation, saying why, while an action is in progress (#521)", async () => {
+    const reason = "Another action is in progress.";
+    const client = fakeClient({
+      getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null })),
+      getCommitDiff: vi.fn(async () => []),
+      getBlame: async () => [],
+    });
+    const actions = stashActions();
+    const props = (current: StashActions) => ({
+      repoPath: TEST_REPO_PATH,
+      client,
+      selectedRow: { commitId: "s0" },
+      status: [],
+      mergeMessage: null,
+      rebaseProgress: null,
+      ...noopHandlers,
+      stashes: [stash],
+      stashActions: current,
+    });
+    const { rerender } = render(<DiffPane {...props(actions)} />);
+    const section = await screen.findByRole("region", { name: "Stash details" });
+    fireEvent.click(within(section).getByRole("button", { name: "Drop…" }));
+
+    rerender(<DiffPane {...props({ ...actions, dropDisabledReason: reason })} />);
+    const drop = within(section).getByRole("button", { name: "Drop…" });
+    expect(drop).toBeDisabled();
+    expect(drop).toHaveAttribute("title", reason);
+    const dialog = screen.getByRole("dialog", { name: "Drop stash On main: wip", hidden: true });
+    expect(dialog).toHaveTextContent(reason);
+    const confirm = within(dialog).getByRole("button", { name: "Drop stash", hidden: true });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(actions.onDrop).not.toHaveBeenCalled();
   });
 
   it("shows a load failure with Retry", async () => {
@@ -2335,6 +2398,7 @@ describe("DiffPane image preview", () => {
           restoreIndex: true,
           onSetRestoreIndex: vi.fn(),
           disabledReason: null,
+          dropDisabledReason: null,
         },
       },
     );
