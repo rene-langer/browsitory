@@ -128,8 +128,8 @@ function sidebarSectionPanelId(title: (typeof SIDEBAR_SECTIONS)[number]): Sideba
 // Remote-tracking branches (Checkout / Set as upstream, from BranchTree's `remoteBranchItems`)
 // have no keyboard path at all: their rows only render once a remote's folder is expanded, and
 // the folder is never expanded until then, so there's nothing in the DOM yet for a command to act
-// on directly (see AUD-2026-09-05-FE-001). Mirroring the destructive-command pattern below —
-// navigate to where the real UI lives rather than reimplementing it — this expands the named
+// on directly (see AUD-2026-09-05-FE-001). Navigating to where the real UI lives rather than
+// reimplementing it, this expands the named
 // remote's folder inside the Branches section so its branch rows (now real keyboard-focusable
 // buttons, each with a "…" affordance) become reachable by Tab immediately after running the
 // command.
@@ -154,20 +154,6 @@ function expandRemoteBranches(remoteName: string): void {
     remoteToggle.click();
   }
   remoteToggle.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
-}
-
-// "Reset to …" needs the mode dialog that lives in the commit row's context menu, so open that
-// menu rather than reimplementing it (same navigate-to-the-real-UI pattern as above).
-function goToCommitMenu(commitId: string): void {
-  const row = document.querySelector<HTMLElement>(
-    `[data-active-repo="true"] [data-commit-id="${CSS.escape(commitId)}"]`,
-  );
-  if (row === null) return;
-  row.scrollIntoView({ behavior: scrollBehavior(), block: "nearest" });
-  const rect = row.getBoundingClientRect();
-  row.dispatchEvent(
-    new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.top }),
-  );
 }
 
 function goToSidebarSection(title: string): void {
@@ -209,6 +195,21 @@ export interface DiffCommands {
   openCurrentFileHistory(): void;
 }
 
+/**
+ * The commit menu's Cherry-pick, Revert and Reset for the selected commit (#507): the same action
+ * functions as the menu (toasts, outcome and sequence handling), and the parent picker and reset
+ * dialog opened directly, so they work while the graph row isn't rendered (search results, file
+ * history). Without these, the palette leaves the three out.
+ */
+export interface CommitCommands {
+  onCherryPick(commitId: string): void;
+  onRevert(commitId: string): void;
+  /** A merge commit's pick or revert: opens the parent picker. */
+  onChooseParent(action: "Cherry-pick" | "Revert", commitId: string): void;
+  /** Opens the reset mode dialog. */
+  onReset(commitId: string): void;
+}
+
 export function buildCommands(
   appState: UseAppStateResult,
   onOpenRepoTab: (path: string) => void = () => {},
@@ -226,6 +227,7 @@ export function buildCommands(
   searchCommands?: SearchCommands,
   toolCommands?: ToolCommands,
   goToCommands?: GoToCommands,
+  commitCommands?: CommitCommands,
 ): Command[] {
   const { state } = appState;
   const commands: Command[] = [];
@@ -470,14 +472,17 @@ export function buildCommands(
     ) => {
       if (action.enabled) commands.push({ id, label: action.paletteLabel, keywords, run });
     };
-    // A merge commit's pick and revert need the parent picker, which lives behind the commit
-    // menu (navigate to the real UI, as Reset does).
-    offer("cherry-pick-selected", actions.cherryPick, ["cherry", "pick", "apply", "commit"], () =>
-      actions.cherryPick.needsParent ? goToCommitMenu(commitId) : void appState.cherryPick(commitId),
-    );
-    offer("revert-selected", actions.revert, ["revert", "undo", "commit"], () =>
-      actions.revert.needsParent ? goToCommitMenu(commitId) : void appState.revertCommit(commitId),
-    );
+    // The menu's own actions (#507); a merge commit's pick and revert ask for the parent first.
+    if (commitCommands !== undefined) {
+      offer("cherry-pick-selected", actions.cherryPick, ["cherry", "pick", "apply", "commit"], () =>
+        actions.cherryPick.needsParent
+          ? commitCommands.onChooseParent("Cherry-pick", commitId)
+          : commitCommands.onCherryPick(commitId),
+      );
+      offer("revert-selected", actions.revert, ["revert", "undo", "commit"], () =>
+        actions.revert.needsParent ? commitCommands.onChooseParent("Revert", commitId) : commitCommands.onRevert(commitId),
+      );
+    }
     offer("checkout-selected", actions.checkout, ["checkout", "detach", "commit"], () =>
       void appState.checkoutCommit(commitId),
     );
@@ -486,8 +491,10 @@ export function buildCommands(
     offer("create-tag-selected", actions.createTag, ["tag", "create", "new", "release", "commit"], () =>
       appState.openCreateTagDialog(commitId),
     );
-    // Reset needs the mode dialog behind the commit menu.
-    offer("reset-selected", actions.reset, ["reset", "soft", "mixed", "hard"], () => goToCommitMenu(commitId));
+    // Reset asks for the mode in its dialog.
+    if (commitCommands !== undefined) {
+      offer("reset-selected", actions.reset, ["reset", "soft", "mixed", "hard"], () => commitCommands.onReset(commitId));
+    }
   }
   if (state.headInfo.headId !== null) {
     const headId = state.headInfo.headId;

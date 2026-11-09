@@ -14,13 +14,15 @@ function ConfirmHost() {
   );
 }
 
-function FormHost() {
+function FormHost({ returnToOther = false }: { returnToOther?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [other, setOther] = useState<HTMLButtonElement | null>(null);
   return (
     <>
       <button onClick={() => setOpen(true)}>Trigger</button>
+      <button ref={setOther}>Other</button>
       {open && (
-        <FormDialog ariaLabel="Form" onCancel={() => setOpen(false)}>
+        <FormDialog ariaLabel="Form" onCancel={() => setOpen(false)} returnFocusTo={returnToOther ? other : undefined}>
           <input aria-label="field" />
           <button onClick={() => setOpen(false)}>Done</button>
         </FormDialog>
@@ -46,5 +48,14 @@ describe("dialog focus restoration", () => {
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("button", { name: "Done", hidden: true }));
     expect(trigger).toHaveFocus();
+  });
+
+  it("FormDialog returns focus to returnFocusTo instead when given", () => {
+    render(<FormHost returnToOther />);
+    const trigger = screen.getByRole("button", { name: "Trigger" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Done", hidden: true }));
+    expect(screen.getByRole("button", { name: "Other" })).toHaveFocus();
   });
 });

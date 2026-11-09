@@ -1445,8 +1445,25 @@ describe("App", () => {
       });
     }
 
-    // #146: the menu the palette opens must hand focus to the commit list, so the dialog it opens
-    // returns there on Cancel (not to whatever was focused before the palette).
+    async function runPaletteCommand(query: string, option: string) {
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: query } });
+      fireEvent.click(await screen.findByRole("option", { name: option }));
+    }
+
+    // Ctrl+F on the graph, then a query whose results replace the graph (#507's "row not rendered").
+    async function showSearchResults() {
+      const graphList = await screen.findByRole("listbox", { name: "Commit history" });
+      graphList.focus();
+      fireEvent.keyDown(graphList, { key: "f", ctrlKey: true });
+      fireEvent.change(screen.getByRole("searchbox", { name: "Search commits" }), { target: { value: "one" } });
+      const results = await screen.findByRole("listbox", { name: "Search results" }, { timeout: 2000 });
+      expect(screen.queryByRole("listbox", { name: "Commit history" })).toBeNull();
+      return results;
+    }
+
+    // #146: the dialog the palette opens returns focus to the commit list on Cancel (not to
+    // whatever was focused before the palette). Since #507 the palette opens it directly.
     it("the palette's Reset to… returns focus to the commit list after the dialog closes", async () => {
       const original = Element.prototype.scrollIntoView;
       Element.prototype.scrollIntoView = () => {};
@@ -1455,18 +1472,111 @@ describe("App", () => {
         fireEvent.click((await screen.findByText(/c1 one/)).closest("li")!);
         screen.getByRole("tab", { name: "a" }).focus();
 
-        fireEvent.keyDown(window, { key: "k", ctrlKey: true });
-        fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
-          target: { value: "Reset to c1" },
-        });
-        fireEvent.click(await screen.findByRole("option", { name: "Reset to c1…" }));
-        fireEvent.click(await screen.findByRole("menuitem", { name: "Reset main to here…" }));
+        await runPaletteCommand("Reset to c1", "Reset to c1…");
         const dialog = await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
         fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
         await waitFor(() => expect(screen.getByRole("listbox", { name: "Commit history" })).toHaveFocus());
       } finally {
         Element.prototype.scrollIntoView = original;
       }
+    });
+
+    // #507: the palette runs the menu's own action, toast included.
+    it("the palette's Cherry-pick and Revert show the same toasts as the menu (#507)", async () => {
+      const cherryPick = vi.fn<RepoClient["cherryPick"]>().mockResolvedValue({ kind: "Committed", commitId: "c3" });
+      const revertCommit = vi.fn<RepoClient["revertCommit"]>().mockResolvedValue({ kind: "Committed", commitId: "c4" });
+      render(<App client={pickClient({ cherryPick, revertCommit })} />);
+      fireEvent.click((await screen.findByText(/c1 one/)).closest("li")!);
+
+      await runPaletteCommand("Cherry-pick c1", "Cherry-pick c1");
+      await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "c1", null));
+      expect(await screen.findByText("Cherry-picked")).toBeInTheDocument();
+
+      await runPaletteCommand("Revert c1", "Revert c1");
+      await waitFor(() => expect(revertCommit).toHaveBeenCalledWith("/repos/a", "c1", null));
+      expect(await screen.findByText("Reverted")).toBeInTheDocument();
+    });
+
+    // #507: the graph row isn't rendered while search results are shown; the palette must not
+    // depend on it.
+    it("the palette's Reset to… works while search results replace the graph (#507)", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        const resetToCommit = vi.fn<RepoClient["resetToCommit"]>().mockResolvedValue(undefined);
+        const searchCommits = vi.fn(async () => ({ commits: [graph[1]], nextCursor: null, scanned: 2 }));
+        render(<App client={pickClient({ resetToCommit, searchCommits, cancelSearch: async () => {} })} />);
+        const results = await showSearchResults();
+        expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("one");
+
+        await runPaletteCommand("Reset to c1", "Reset to c1…");
+        const dialog = await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Reset", hidden: true }));
+        await waitFor(() => expect(resetToCommit).toHaveBeenCalledWith("/repos/a", "c1", "mixed"));
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: "Reset branch", hidden: true })).toBeNull());
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    it("the palette's Cherry-pick of a merge commit asks for the parent while search results are shown (#507)", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        const merge = { ...graph[1], id: "m3", shortId: "m3", summary: "merge one", timestamp: 3, parentIds: ["c2", "c1"], branchRefs: [] };
+        const cherryPick = vi.fn<RepoClient["cherryPick"]>().mockResolvedValue({ kind: "Committed", commitId: "c5" });
+        const searchCommits = vi.fn(async () => ({ commits: [merge], nextCursor: null, scanned: 3 }));
+        render(
+          <App
+            client={pickClient({
+              getCommitGraph: async () => [merge, ...graph],
+              cherryPick,
+              searchCommits,
+              cancelSearch: async () => {},
+            })}
+          />,
+        );
+        const results = await showSearchResults();
+        expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("merge one");
+
+        await runPaletteCommand("Cherry-pick m3", "Cherry-pick m3…");
+        const dialog = await screen.findByRole("dialog", { name: "Choose parent", hidden: true });
+        fireEvent.click(within(dialog).getByRole("radio", { name: /Parent 2/, hidden: true }));
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cherry-pick", hidden: true }));
+        await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "m3", 2));
+        expect(await screen.findByText("Cherry-picked")).toBeInTheDocument();
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    // #508: a dialog opened before a sequence starts (e.g. in a terminal, picked up by a refresh)
+    // must not stash the paused step's working tree away.
+    it("disables the stash dialog's Stash once a cherry-pick sequence starts (#508)", async () => {
+      let sequence: { kind: "CherryPick"; currentStep: number; totalSteps: number; currentCommit: string } | null = null;
+      const saveStash = vi.fn(async () => {});
+      render(
+        <App
+          client={pickClient({
+            getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
+            saveStash,
+          })}
+        />,
+      );
+      await screen.findByText(/c1 one/);
+      await runPaletteCommand("Stash…", "Stash…");
+      const dialog = await screen.findByRole("dialog", { name: "Stash changes", hidden: true });
+      expect(within(dialog).getByRole("button", { name: "Stash", hidden: true })).toBeEnabled();
+
+      sequence = { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c1" };
+      await runPaletteCommand("Refresh", "Refresh");
+      const stash = within(dialog).getByRole("button", { name: "Stash", hidden: true });
+      await waitFor(() => expect(stash).toBeDisabled());
+      expect(stash).toHaveAttribute("title", "A cherry-pick is in progress.");
+      fireEvent.submit(stash.closest("form")!);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(saveStash).not.toHaveBeenCalled();
     });
 
     it("says Cherry-picked only when the pick committed (#107)", async () => {

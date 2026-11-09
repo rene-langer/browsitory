@@ -14,14 +14,17 @@ import styles from "./FormDialog.module.css";
 export function FormDialog({
   ariaLabel,
   onCancel,
+  returnFocusTo,
   children,
 }: {
   ariaLabel: string;
   onCancel: () => void;
+  /** Focused on close instead of the element focused when the dialog opened. */
+  returnFocusTo?: HTMLElement | null;
   children: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  useRestoreFocus();
+  useRestoreFocus(returnFocusTo);
 
   useEffect(() => {
     const dialog = dialogRef.current;

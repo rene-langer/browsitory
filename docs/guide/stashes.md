@@ -5,6 +5,9 @@
 **Stash** in the commit dock sets every change aside, untracked files included. Its chevron
 opens **Stash all** and **Stash…**, a dialog with an optional message, **Keep staged changes**
 (stash them but also leave them staged) and **Include untracked files** (on by default).
+While a rebase or a cherry-pick or revert is paused, stashing waits: the Stash button, the
+dialog's **Stash** and **Stash file…** are disabled with the reason, because continuing after
+stashing the paused step's changes away would commit the wrong result.
 **Stash file…** in a changed file's menu (staged or not) opens the same dialog for just that
 file; every other change stays where it is, and "Restore staged changes" later restages only
 that file. For an untracked file, untracked files are always included. For a staged rename it

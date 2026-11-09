@@ -34,13 +34,15 @@ import { WorktreePanel } from "./components/WorktreePanel";
 import { MergeDialog } from "./components/MergeDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { StashDialog } from "./components/StashDialog";
+import { ParentPickerDialog } from "./components/ParentPickerDialog";
+import { ResetDialog } from "./components/ResetDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
 import { CreateTagDialog } from "./components/CreateTagDialog";
 import { RewordDialog } from "./components/RewordDialog";
 import { DeleteRemoteTagDialog } from "./components/DeleteRemoteTagDialog";
 import { RemoteDialogs } from "./components/RemoteDialogs";
-import type { RepoClient } from "./ipc/RepoClient";
-import { buildCommands, type AppCommands } from "./lib/commands";
+import type { GraphCommit, RepoClient } from "./ipc/RepoClient";
+import { buildCommands, type AppCommands, type CommitCommands } from "./lib/commands";
 import { useExternalTools } from "./state/useExternalTools";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
 import {
@@ -55,7 +57,13 @@ import { useFetchSettingsContext } from "./state/useFetchSettings";
 import { upstreamPushBranch } from "./lib/pushTarget";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
-import { operationBlockers, pickToast, sequenceToast, terminalAbortConfirm } from "./lib/operationStatus";
+import {
+  operationBlockers,
+  pickToast,
+  sequenceToast,
+  stashBlockReason,
+  terminalAbortConfirm,
+} from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import { useGoTo } from "./state/useGoTo";
@@ -199,6 +207,15 @@ export function RepoWorkspace({
   const clearFocusCommitMessage = useCallback(() => setFocusCommitMessage(false), []);
   // Discard confirmations live here (not in DiffPane) so the palette can open the same dialogs.
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null);
+  // The palette's parent picker and reset dialog (#507). The commit menu opens its own; these
+  // live here so the palette needs no rendered graph row (search results, file history).
+  const [commitDialog, setCommitDialog] = useState<{
+    kind: "Cherry-pick" | "Revert" | "Reset";
+    commit: GraphCommit;
+    returnFocusTo: HTMLElement | null;
+  } | null>(null);
+  // State, not a ref: the palette's commands are built during render (`react-hooks/refs`).
+  const [workspaceElement, setWorkspaceElement] = useState<HTMLDivElement | null>(null);
   const [currentFile, setCurrentFile] = useState<string | null>(null);
   const diffSettings = useDiffSettingsContext();
   const narrow = useNarrowLayout();
@@ -286,6 +303,42 @@ export function RepoWorkspace({
     paletteAbortMerge,
   } = useSequenceActions(appState, pushToast, mounted, announce);
   const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
+  // Cherry-pick, revert and reset of one commit, shared by the commit menu and the palette
+  // (#507): the toast comes from the outcome (#107).
+  const cherryPickCommit = (commitId: string, mainline: number | null) =>
+    void runPickAction(
+      () => appState.cherryPick(commitId, mainline),
+      (outcome) => pickToast("CherryPick", outcome),
+    );
+  const revertCommit = (commitId: string, mainline: number | null) =>
+    void runPickAction(
+      () => appState.revertCommit(commitId, mainline),
+      (outcome) => pickToast("Revert", outcome),
+    );
+  const resetToCommit = announce("Reset branch", appState.resetToCommit);
+  // The palette's dialogs return focus to the list showing the selection (#146), not to the
+  // palette, which is gone by then.
+  const openCommitDialog = (kind: "Cherry-pick" | "Revert" | "Reset", commitId: string) => {
+    const commit = appState.state.commits.find((candidate) => candidate.id === commitId);
+    if (commit === undefined) return;
+    setCommitDialog({
+      kind,
+      commit,
+      returnFocusTo:
+        workspaceElement?.querySelector<HTMLElement>(
+          '[role="listbox"][aria-label="Commit history"], [role="listbox"][aria-label="Search results"], [role="listbox"][aria-label="File history commits"]',
+        ) ?? null,
+    });
+  };
+  const commitCommands: CommitCommands = {
+    onCherryPick: (commitId) => cherryPickCommit(commitId, null),
+    onRevert: (commitId) => revertCommit(commitId, null),
+    onChooseParent: openCommitDialog,
+    onReset: (commitId) => openCommitDialog("Reset", commitId),
+  };
+  const currentLocalBranch = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null;
+  // #508: the stash dialog re-checks this while open; a rebase or sequence can start meanwhile.
+  const stashBlocked = stashBlockReason(appState.state);
   // The branch `force_push_current_branch` overwrites on `remoteName`: what push.default resolves
   // for the upstream's remote, else the current branch's own name.
   const forcePushTargetBranch = (remoteName: string) =>
@@ -325,6 +378,7 @@ export function RepoWorkspace({
     // component's own internal gates (`active &&` below) still need a real boolean rather than an
     // assumption that they're always mounted-implies-active.
     <div
+      ref={setWorkspaceElement}
       style={{ display: active ? "contents" : "none" }}
       data-active-repo={active ? "true" : "false"}
       role="tabpanel"
@@ -441,8 +495,38 @@ export function RepoWorkspace({
               appState.state.status.some((entry) => entry.path === path && !entry.staged && entry.kind === "New"),
             )
           }
-          onStash={(options) => void announce("Changes stashed", appState.saveStash)(options)}
+          blockedReason={stashBlocked}
+          onStash={(options) => {
+            if (stashBlocked !== null) return;
+            void announce("Changes stashed", appState.saveStash)(options);
+          }}
           onCancel={appState.closeStashDialog}
+        />
+      )}
+      {active && commitDialog !== null && commitDialog.kind !== "Reset" && (
+        <ParentPickerDialog
+          action={commitDialog.kind}
+          commit={commitDialog.commit}
+          commits={appState.state.commits}
+          returnFocusTo={commitDialog.returnFocusTo}
+          onConfirm={(mainline) => {
+            setCommitDialog(null);
+            if (commitDialog.kind === "Cherry-pick") cherryPickCommit(commitDialog.commit.id, mainline);
+            else revertCommit(commitDialog.commit.id, mainline);
+          }}
+          onCancel={() => setCommitDialog(null)}
+        />
+      )}
+      {active && commitDialog !== null && commitDialog.kind === "Reset" && currentLocalBranch !== null && (
+        <ResetDialog
+          branch={currentLocalBranch}
+          shortId={commitDialog.commit.shortId}
+          returnFocusTo={commitDialog.returnFocusTo}
+          onReset={(mode) => {
+            setCommitDialog(null);
+            void resetToCommit(commitDialog.commit.id, mode);
+          }}
+          onCancel={() => setCommitDialog(null)}
         />
       )}
       {active && pushDialogBranch !== null && (
@@ -612,6 +696,7 @@ export function RepoWorkspace({
                 onGoToTag: (name, commitId) => void goTo.goToTag(name, commitId),
                 onGoToStash: (commitId) => reveal({ commitId }),
               },
+              commitCommands,
             )}
             onRun={() => setPaletteOpen(false)}
           />
@@ -867,18 +952,8 @@ export function RepoWorkspace({
                       onRebaseSelection={appState.openRebaseSelection}
                       headInfo={appState.state.headInfo}
                       currentBranch={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
-                      onCherryPick={(commitId, mainline) =>
-                        void runPickAction(
-                          () => appState.cherryPick(commitId, mainline),
-                          (outcome) => pickToast("CherryPick", outcome),
-                        )
-                      }
-                      onRevert={(commitId, mainline) =>
-                        void runPickAction(
-                          () => appState.revertCommit(commitId, mainline),
-                          (outcome) => pickToast("Revert", outcome),
-                        )
-                      }
+                      onCherryPick={cherryPickCommit}
+                      onRevert={revertCommit}
                       onCherryPickMany={(ids) =>
                         void runPickAction(
                           () => appState.cherryPickMany(ids),
@@ -892,7 +967,7 @@ export function RepoWorkspace({
                         )
                       }
                       onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
-                      onResetToCommit={announce("Reset branch", appState.resetToCommit)}
+                      onResetToCommit={resetToCommit}
                       onEditHeadMessage={() => {
                         appState.selectRow("uncommitted");
                         appState.setAmendMode(true);
