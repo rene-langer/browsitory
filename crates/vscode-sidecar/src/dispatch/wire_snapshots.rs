@@ -93,6 +93,9 @@ fn snapshots() -> Vec<(String, String)> {
         fixtures::commit_locations(),
         CommitLocationDto::from,
     );
+    s.add("PatchContent", fixtures::patch_contents(), |bytes| {
+        repo_service::wire::PatchContentDto::from_bytes(&bytes)
+    });
     s.add(
         "OpenRepoEntry",
         fixtures::open_repo_entries(),

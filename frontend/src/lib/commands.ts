@@ -369,6 +369,24 @@ export function buildCommands(
       run: () => void appState.pullCurrentUpstream(),
     });
   }
+  // #448: a patch file applied to the working tree (recorded, so behind the repository guard);
+  // saving the staged changes only reads.
+  if (!repositoryOperationDisabled) {
+    commands.push({
+      id: "apply-patch",
+      label: "Apply patch…",
+      keywords: ["apply", "patch", "diff", "mbox", "file", "import"],
+      run: () => void appState.applyPatchFile(),
+    });
+  }
+  if (state.status.some((entry) => entry.staged)) {
+    commands.push({
+      id: "save-staged-patch",
+      label: "Save staged changes as patch…",
+      keywords: ["save", "patch", "staged", "diff", "export"],
+      run: () => void appState.savePatch({ kind: "Staged" }, "staged.patch"),
+    });
+  }
   // Stashing has its own, narrower rule (`stashBlockReason`): the same one DiffPane's Stash
   // button and the file menu's "Stash file…" follow. It allows stashing during a merge, so these
   // commands are not behind the full repository guard.

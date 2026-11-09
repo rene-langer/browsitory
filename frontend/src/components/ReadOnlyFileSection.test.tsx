@@ -39,6 +39,45 @@ describe("ReadOnlyFileSection", () => {
     expect(screen.getByRole("button", { name: "Show whole file" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("a commit's hunk header reverts or applies that hunk with the context it was shown with (#448)", async () => {
+    const hunk = { oldStart: 4, oldLines: 1, newStart: 5, newLines: 1, lines: [{ origin: "Add" as const, content: "x\n" }] };
+    const patch = {
+      blockedReason: null,
+      onRevertFile: vi.fn(),
+      onApplyFile: vi.fn(),
+      onSavePatch: vi.fn(),
+      onRevertHunk: vi.fn(),
+      onApplyHunk: vi.fn(),
+    };
+    renderSection({ fetchDiff: vi.fn(async () => [hunk]), patch });
+    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
+    expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3 });
+    fireEvent.click(screen.getByRole("button", { name: "Apply hunk" }));
+    expect(patch.onApplyHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3 });
+
+    // The file menu opens without external tools, and holds the file's actions.
+    fireEvent.click(screen.getByRole("button", { name: "Actions for a.txt" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Revert this file" }));
+    expect(patch.onRevertFile).toHaveBeenCalled();
+    expect(screen.queryByRole("menuitem", { name: "Open in editor" })).toBeNull();
+  });
+
+  it("disables a commit's hunk actions with the reason while repository actions are blocked", async () => {
+    const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add" as const, content: "x\n" }] };
+    const patch = {
+      blockedReason: "A rebase is in progress.",
+      onRevertFile: vi.fn(),
+      onApplyFile: vi.fn(),
+      onSavePatch: vi.fn(),
+      onRevertHunk: vi.fn(),
+      onApplyHunk: vi.fn(),
+    };
+    renderSection({ fetchDiff: vi.fn(async () => [hunk]), patch });
+    const revert = await screen.findByRole("button", { name: "Revert hunk" });
+    expect(revert).toBeDisabled();
+    expect(revert).toHaveAttribute("title", "A rebase is in progress.");
+  });
+
   it("does not fetch while collapsed", () => {
     const { props } = renderSection({ collapsed: true });
     expect(props.fetchDiff).not.toHaveBeenCalled();

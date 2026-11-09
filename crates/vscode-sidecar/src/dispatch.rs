@@ -15,6 +15,7 @@ mod compare;
 mod forge;
 mod history;
 mod merge;
+mod patch;
 mod rebase;
 mod reflog;
 mod remote;
@@ -35,6 +36,7 @@ use compare::*;
 use forge::*;
 use history::*;
 use merge::*;
+use patch::*;
 use rebase::*;
 use reflog::*;
 use remote::*;
@@ -199,6 +201,9 @@ methods!(|params, repos, stdout| {
     "discard_lines" => discard_lines(LinesParams, repos),
     "discard_file" => discard_file(RepoFilePathParams, repos),
     "discard_all_unstaged" => discard_all_unstaged(DiscardAllParams, repos),
+    "apply_commit_change" => apply_commit_change(ApplyCommitChangeParams, repos),
+    "get_patch" => get_patch(GetPatchParams, repos),
+    "apply_patch" => apply_patch(ApplyPatchParams, repos),
     "ignore_path" => ignore_path(IgnorePathParams, repos),
     "commit" => commit(CommitMessageParams, repos, stdout),
     "list_branches" => list_branches(RepoPathParams, repos),

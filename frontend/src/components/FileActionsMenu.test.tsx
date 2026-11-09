@@ -110,6 +110,25 @@ describe("FileActionsMenu", () => {
       ]);
     });
 
+    it("puts a commit file's revert, apply and save first, disabling only the repository actions when blocked (#448)", () => {
+      const onPick = vi.fn();
+      const items = commitFileMenuItems(onPick, { tools: false, patch: { blockedReason: "A merge is in progress." } });
+      expect(items.map((i) => i.label)).toEqual([
+        "Revert this file",
+        "Apply this file to the working tree",
+        "Save file as patch…",
+      ]);
+      expect(items.map((i) => i.disabled ?? false)).toEqual([true, true, false]);
+      expect(items[0].title).toBe("A merge is in progress.");
+      for (const item of items) item.onSelect();
+      expect(onPick.mock.calls.map(([action]) => action)).toEqual([
+        { kind: "revertCommitFile" },
+        { kind: "applyCommitFile" },
+        { kind: "saveFilePatch" },
+      ]);
+      expect(commitFileMenuItems(onPick, { patch: { blockedReason: null } })).toHaveLength(6);
+    });
+
     it("builds the commit file menu and reports picks", () => {
       const onPick = vi.fn();
       const items = commitFileMenuItems(onPick);

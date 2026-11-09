@@ -162,6 +162,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetWorkingDiff { .. }
         | Command::GetCommitDiff { .. }
         | Command::GetCommitFiles { .. }
+        | Command::GetPatch { .. }
         | Command::GetCommitMessage { .. }
         | Command::GetCommitSignature { .. }
         | Command::GetBlame { .. }
@@ -282,6 +283,15 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         )
         .refused_when_busy(Discard),
 
+        // A commit's file or hunk, or a patch file, applied to the working tree (#448): recorded,
+        // and like a discard refused rather than run unrecorded (it may merge into local edits).
+        Command::ApplyCommitChange { change, .. } => {
+            P::recorded(commit_change_label(change), Full).refused_when_busy(Discard)
+        }
+        Command::ApplyPatch { .. } => {
+            P::recorded("Apply patch".to_string(), Full).refused_when_busy(Discard)
+        }
+
         // Commits end a merge or pick, so they can't run under a stored rebase or sequence.
         Command::Commit { message, .. } => {
             P::recorded(quoted("Commit ", message), RefsAndIndex).gated(Refused)
@@ -377,6 +387,21 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
     }
 }
 
+/// "Revert hunk in a.txt from 1234567", "Apply a.txt from 1234567".
+fn commit_change_label(change: &super::CommitChange) -> String {
+    let verb = if change.reverse { "Revert" } else { "Apply" };
+    let prefix = if change.hunk.is_some() {
+        format!("{verb} hunk in ")
+    } else {
+        format!("{verb} ")
+    };
+    with_path(
+        &prefix,
+        &change.path,
+        &format!(" from {}", short(&change.commit_id)),
+    )
+}
+
 /// A command's reply channel, whatever its value type, for the policy's generic actions.
 pub(super) trait Reply {
     /// Swaps the reply for a proxy and keeps the original in `held` (see [`HeldReplies`]).
@@ -436,6 +461,9 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         DiscardLines,
         DiscardFile,
         DiscardAllUnstaged,
+        ApplyCommitChange,
+        GetPatch,
+        ApplyPatch,
         IgnorePath,
         Commit,
         ListBranches,

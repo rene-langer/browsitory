@@ -12,7 +12,8 @@ import { CommitSearchResults } from "./components/CommitSearchResults";
 import { GoToNotice } from "./components/GoToNotice";
 import { SyncBar } from "./components/SyncBar";
 import { UndoRedoButtons } from "./components/UndoRedoButtons";
-import { DiffPane } from "./components/DiffPane";
+import { DiffPane, type DiffPanePatchActions } from "./components/DiffPane";
+import { commitsPatchName } from "./state/usePatchActions";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { repoPanelId, repoTabId } from "./components/repoTabIds";
@@ -247,6 +248,14 @@ export function RepoWorkspace({
   const { blocked: repositoryOperationDisabled, reason: operationDisabledReason } = operationBlockers(appState.state);
 
   const { pending, transfer } = appState.state;
+  // #448: "Save as patch…" for commits (oldest first), and the commit view's revert/apply/save.
+  const savePatchOfCommits = (commitIds: string[]) =>
+    void appState.savePatch({ kind: "Commits", commitIds }, commitsPatchName(commitIds, appState.state.commits));
+  const diffPanePatchActions: DiffPanePatchActions = {
+    blockedReason: operationDisabledReason,
+    onApplyCommitChange: (change) => void appState.applyCommitChange(change),
+    onSavePatch: (source, suggestedName) => void appState.savePatch(source, suggestedName),
+  };
   const { mounted, handleUndo, handleRedo } = useUndoRedoActions(appState, active, pushToast);
 
   const { paletteOpen, setPaletteOpen, shortcutsOpen, setShortcutsOpen } = useWorkspaceShortcuts({
@@ -977,6 +986,7 @@ export function RepoWorkspace({
                       onRequestSearch={requestSearchFocus}
                       onCompareCommits={compare.compareCommits}
                       onCompareWithWorkingTree={compare.compareWorkingTree}
+                      onSavePatch={savePatchOfCommits}
                       hasMore={appState.state.hasMoreHistory}
                       onLoadMore={() => void appState.loadMoreHistory()}
                       status={appState.state.status}
@@ -1069,6 +1079,7 @@ export function RepoWorkspace({
                     announce(`Restored ${path} from ${commitId.slice(0, 7)}`, appState.restoreFileVersion)(commitId, path)
                   }
                   restoreBlockedReason={operationDisabledReason}
+                  patchActions={diffPanePatchActions}
                   onMarkResolved={appState.markResolved}
                   onResolveWholeFile={(path, side) => void appState.resolveWholeFile(path, side)}
                   status={appState.state.status}

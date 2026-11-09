@@ -16,6 +16,9 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Keyboard
 import type {
   AmendOptions,
   BlameLine,
+  CommitChangeRequest,
+  CommitHunk,
+  PatchSource,
   DiffHunk,
   DiffSource,
   DiffOptions,
@@ -72,7 +75,7 @@ import { ContextMenu } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
-import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
+import { ReadOnlyFileSection, type CommitFilePatchActions } from "./ReadOnlyFileSection";
 import { CommitTreeBrowser } from "./CommitTreeBrowser";
 import treeStyles from "./CommitTreeBrowser.module.css";
 import { FolderHistoryButton } from "./FolderHistoryButton";
@@ -658,11 +661,14 @@ export function DiffPane({
   selectionBusyReason = null,
   onRestoreFileVersion,
   restoreBlockedReason = null,
+  patchActions,
 }: {
   // "All files" view of a commit (#446): Restore… writes a file's version to the work tree.
   onRestoreFileVersion?: (commitId: string, path: string) => void | Promise<void>;
   // Why Restore… can't run now (`operationBlockers`), else `null`.
   restoreBlockedReason?: string | null;
+  // Revert / apply a commit's file or hunk, "Save as patch…" (#448); omitted, none of them show.
+  patchActions?: DiffPanePatchActions;
   // A multi-file selection's discard (#449): exactly the confirmed paths, one undo step.
   // Defaults to `onDiscardAllUnstaged`.
   onDiscardFiles?: (paths: string[]) => void;
@@ -820,6 +826,7 @@ export function DiffPane({
         selectionBusyReason={selectionBusyReason}
         commits={commits}
         branchCommits={branchCommits}
+        patchActions={patchActions}
       />
     );
   }
@@ -853,12 +860,42 @@ export function DiffPane({
       onViewChange={setCommitView}
       onRestoreFileVersion={onRestoreFileVersion}
       restoreBlockedReason={restoreBlockedReason}
+      patchActions={patchActions}
     />
   );
 }
 
 /** What a commit's view lists: the files it changed, or its whole tree (#446). */
 export type CommitView = "changes" | "tree";
+/** What `DiffPane` needs for #448's revert/apply and "Save as patch…". */
+export interface DiffPanePatchActions {
+  /** Why reverting or applying can't run now (`operationBlockers`), else `null`. */
+  blockedReason: string | null;
+  onApplyCommitChange: (change: CommitChangeRequest) => void;
+  onSavePatch: (source: PatchSource, suggestedName: string) => void;
+}
+
+/** A commit's file's `CommitFilePatchActions`, from `DiffPane`'s. */
+function commitFilePatch(
+  actions: DiffPanePatchActions,
+  commitId: string,
+  path: string,
+  oldPath: string | null,
+): CommitFilePatchActions {
+  const change = (reverse: boolean, hunk: CommitHunk | null) =>
+    actions.onApplyCommitChange({ commitId, path, oldPath, hunk, reverse, stage: false });
+  const name = path.split("/").pop() ?? path;
+  return {
+    blockedReason: actions.blockedReason,
+    onRevertFile: () => change(true, null),
+    onApplyFile: () => change(false, null),
+    onSavePatch: () =>
+      actions.onSavePatch({ kind: "CommitFile", commitId, path, oldPath }, `${commitId.slice(0, 7)}-${name}.patch`),
+    onRevertHunk: (hunk) => change(true, hunk),
+    onApplyHunk: (hunk) => change(false, hunk),
+  };
+}
+
 
 /** The stash view's actions; Apply/Pop use `restoreIndex`. */
 export interface StashActions {
@@ -951,7 +988,9 @@ function UncommittedDiffPane({
   onIgnorePaths,
   onSelectionChange,
   selectionBusyReason,
+  patchActions,
 }: {
+  patchActions?: DiffPanePatchActions;
   onDiscardFiles: (paths: string[]) => void;
   onIgnorePaths: (patterns: string[]) => void;
   onSelectionChange?: (selection: ReportedFileSelection | null) => void;
@@ -1543,6 +1582,11 @@ function UncommittedDiffPane({
             <button type="button" onClick={handleUnstageAll}>
               Unstage all
             </button>
+            {patchActions !== undefined && (
+              <button type="button" onClick={() => patchActions.onSavePatch({ kind: "Staged" }, "staged.patch")}>
+                Save as patch…
+              </button>
+            )}
           </div>
           {stagedSummary !== null && renderSelectionBar(stagedSummary)}
           <ul
@@ -1716,7 +1760,9 @@ function CommitDiffPane({
   onViewChange,
   onRestoreFileVersion,
   restoreBlockedReason,
+  patchActions,
 }: {
+  patchActions?: DiffPanePatchActions;
   repoPath: string;
   client: RepoClient;
   commitId: string;
@@ -1851,6 +1897,7 @@ function CommitDiffPane({
               externalTools={externalTools}
               toolSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
               previewSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
+              patch={patchActions && commitFilePatch(patchActions, commitId, focus.path, focus.oldPath)}
             />
           </ul>
           {files.length > 1 && (
@@ -1885,6 +1932,7 @@ function CommitDiffPane({
                 externalTools={externalTools}
                 toolSource={{ kind: "Commit", commitId, oldPath: null }}
                 previewSource={{ kind: "Commit", commitId, oldPath: null }}
+                patch={patchActions && commitFilePatch(patchActions, commitId, path, null)}
               />
             ))}
           </ul>

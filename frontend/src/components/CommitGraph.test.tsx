@@ -736,6 +736,21 @@ describe("CommitGraph", () => {
     expect(screen.getByRole("button", { name: "Compare these commits" })).toBeEnabled();
   });
 
+  it("saves one commit, or the selected ones oldest first, as a patch even while busy (#448)", () => {
+    const onSavePatch = vi.fn();
+    renderChain({ pending: true, onSavePatch });
+    fireEvent.contextMenu(row("C"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save as patch…" }));
+    expect(onSavePatch).toHaveBeenLastCalledWith(["C"]);
+
+    fireEvent.click(row("B"));
+    fireEvent.click(row("D"), { ctrlKey: true });
+    const save = screen.getByRole("button", { name: "Save 2 commits as patch…" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    expect(onSavePatch).toHaveBeenLastCalledWith(["B", "D"]);
+  });
+
   it("offers Diff against working tree on a single commit", () => {
     const onCompareWithWorkingTree = vi.fn();
     renderChain({ pending: true, onCompareWithWorkingTree });

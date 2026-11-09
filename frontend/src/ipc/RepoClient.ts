@@ -664,6 +664,34 @@ export type DiffSource =
   | { kind: "Staged"; oldPath: string | null }
   | { kind: "Commit"; commitId: string; oldPath: string | null }
   | { kind: "Range"; fromId: string; toId: string | null; oldPath: string | null };
+/** A hunk of a commit's diff as the commit view showed it (#448), whitespace significant. */
+export interface CommitHunk {
+  oldStart: number;
+  newStart: number;
+  contextLines: number;
+}
+/** A commit's file, or one hunk of it, to revert or apply in the working tree (#448). */
+export interface CommitChangeRequest {
+  commitId: string;
+  path: string;
+  /** The rename's old path, when the commit view paired one. */
+  oldPath: string | null;
+  /** `null`: the whole file. */
+  hunk: CommitHunk | null;
+  /** Revert the change rather than apply it. */
+  reverse: boolean;
+  /** Also stage the result (the touched files must have no unstaged changes). */
+  stage: boolean;
+}
+/** What "Save as patch…" writes (#448). `commitIds` oldest first. */
+export type PatchSource =
+  | { kind: "Commits"; commitIds: string[] }
+  | { kind: "CommitFile"; commitId: string; path: string; oldPath: string | null }
+  | { kind: "Staged" };
+/** A patch's bytes, base64 (a patch may hold file content in any encoding). */
+export interface PatchContent {
+  base64: string;
+}
 /** `HandedOff`: VSCode's merge editor took over, and Browsitory can't see when it's done. */
 export type MergeToolOutcome = "Resolved" | "Unresolved" | "HandedOff";
 export type MarkResolvedOutcome = "Resolved" | "MarkersRemain";
@@ -911,6 +939,22 @@ export interface RepoClient {
   discardFile(repoPath: string, path: string): Promise<void>;
   // Discards exactly `paths` (the list the user confirmed); folders are skipped and reported.
   discardAllUnstaged(repoPath: string, paths: string[]): Promise<void>;
+  /**
+   * Reverts (`reverse`) or applies a commit's file or hunk in the working tree (#448); never
+   * commits. Rejects, changing nothing, when it doesn't apply. Recorded for Undo.
+   */
+  applyCommitChange(repoPath: string, change: CommitChangeRequest): Promise<void>;
+  /** The patch text of `source` (#448). */
+  getPatch(repoPath: string, source: PatchSource): Promise<PatchContent>;
+  /**
+   * Applies a patch file's content (a diff, or `git format-patch` mails in order) to the working
+   * tree, all or nothing (#448). Recorded for Undo.
+   */
+  applyPatch(repoPath: string, content: PatchContent): Promise<void>;
+  /** Asks the user where to save `content` and writes it: the path, or `null` when cancelled. */
+  savePatchFile(suggestedName: string, content: PatchContent): Promise<string | null>;
+  /** Asks the user for a patch file: its content, or `null` when cancelled. */
+  openPatchFile(): Promise<PatchContent | null>;
   ignorePath(repoPath: string, pattern: string): Promise<void>;
   getDiffSettings(): Promise<DiffSettings>;
   setDiffSettings(settings: DiffSettings): Promise<void>;

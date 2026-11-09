@@ -29,6 +29,7 @@ it. Open several repositories as tabs, and save groups of them as workspaces.
 - [File history](file-history.md)
 - [Searching commits](search.md)
 - [Comparing commits and branches](compare.md)
+- [Patches and partial reverts](patches.md)
 - [Undo and redo](undo-redo.md)
 
 **Branches and sharing**

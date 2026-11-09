@@ -57,6 +57,7 @@ export function CommitGraph({
   onRequestSearch,
   onCompareCommits,
   onCompareWithWorkingTree,
+  onSavePatch,
   remotes = [],
   onPushTag,
   onDeleteTag,
@@ -123,6 +124,8 @@ export function CommitGraph({
   onCompareCommits?: (fromId: string, toId: string) => void;
   /** Single-commit menu: compare that commit with the working tree. */
   onCompareWithWorkingTree?: (commitId: string) => void;
+  /** "Save as patch…" for the commit, or the selected commits (#448); ids oldest-first. Read-only. */
+  onSavePatch?: (commitIdsOldestFirst: string[]) => void;
   /** Push targets offered by a tag badge's menu. */
   remotes?: RemoteInfo[];
   /**
@@ -232,6 +235,9 @@ export function CommitGraph({
     items.push(...editItems(commitId, isHead));
     if (onCompareWithWorkingTree !== undefined) {
       items.push({ label: "Diff against working tree", onSelect: () => onCompareWithWorkingTree(commitId) });
+    }
+    if (onSavePatch !== undefined) {
+      items.push({ label: "Save as patch…", onSelect: () => onSavePatch([commitId]) });
     }
     return items;
   }
@@ -467,10 +473,25 @@ export function CommitGraph({
     }
     return items;
   })();
+  // Read-only too: a mailbox of the selected commits, oldest first.
+  const savePatchItem: ContextMenuItem | null =
+    onSavePatch === undefined || !multiSelected
+      ? null
+      : {
+          label: `Save ${effectiveSelection.ids.size} commits as patch…`,
+          onSelect: () =>
+            onSavePatch(
+              commits
+                .filter((commit) => effectiveSelection.ids.has(commit.id))
+                .reverse()
+                .map((commit) => commit.id),
+            ),
+        };
   const multiSelectItems: ContextMenuItem[] = [
     ...rebaseItems,
     ...(compareItem === null ? [] : [compareItem]),
     ...pickItems,
+    ...(savePatchItem === null ? [] : [savePatchItem]),
   ];
 
   const commitLayouts = useMemo(() => assignLanes(commits), [commits]);

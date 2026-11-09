@@ -5,6 +5,9 @@ import { validateRemoteUrls } from "./validateRemoteUrls";
 import { toCloneError, toRepoError } from "./RepoClient";
 import type {
   AmendOptions,
+  CommitChangeRequest,
+  PatchContent,
+  PatchSource,
   CommitMessageSettings,
   FetchSettings,
   FileSides,
@@ -207,6 +210,13 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
   discardFile: (repoPath: string, path: string) => loggedInvoke("discard_file", { repoPath, path }),
   discardAllUnstaged: (repoPath: string, paths: string[]) => loggedInvoke("discard_all_unstaged", { repoPath, paths }),
+  applyCommitChange: (repoPath: string, change: CommitChangeRequest) =>
+    loggedInvoke("apply_commit_change", { repoPath, change }),
+  getPatch: (repoPath: string, source: PatchSource) => loggedInvoke<PatchContent>("get_patch", { repoPath, source }),
+  applyPatch: (repoPath: string, content: PatchContent) => loggedInvoke("apply_patch", { repoPath, content }),
+  savePatchFile: (suggestedName: string, content: PatchContent) =>
+    loggedInvoke<string | null>("save_patch_file", { suggestedName, content }),
+  openPatchFile: () => loggedInvoke<PatchContent | null>("open_patch_file"),
   ignorePath: (repoPath: string, pattern: string) => loggedInvoke("ignore_path", { repoPath, pattern }),
   getDiffSettings: () => loggedInvoke<DiffSettings>("get_diff_settings"),
   setDiffSettings: (settings: DiffSettings) => loggedInvoke("set_diff_settings", { settings }),

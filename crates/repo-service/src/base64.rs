@@ -1,6 +1,5 @@
 //! Standard base64 (RFC 4648 §4, with `=` padding), for sending file bytes as JSON text (the
-//! image preview's `data:` URLs). Hand-rolled to avoid a direct dependency: only encoding is
-//! needed, and the frontend uses the text as is.
+//! image preview's `data:` URLs, patch files: #448). Hand-rolled to avoid a direct dependency.
 
 const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -26,9 +25,46 @@ pub fn encode(bytes: &[u8]) -> String {
     out
 }
 
+/// The bytes of standard, padded base64 `text`; `None` for anything else. ASCII whitespace
+/// (a wrapped encoding) is skipped.
+pub fn decode(text: &str) -> Option<Vec<u8>> {
+    let value = |c: u8| TABLE.iter().position(|&t| t == c).map(|v| v as u32);
+    let symbols: Vec<u8> = text.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if !symbols.len().is_multiple_of(4) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(symbols.len() / 4 * 3);
+    let quads = symbols.len() / 4;
+    for (index, quad) in symbols.chunks(4).enumerate() {
+        let pad = quad.iter().rev().take_while(|&&c| c == b'=').count();
+        if pad > 2 || (pad > 0 && index + 1 != quads) {
+            return None;
+        }
+        let mut n = 0u32;
+        for (i, &c) in quad[..4 - pad].iter().enumerate() {
+            n |= value(c)? << (18 - 6 * i);
+        }
+        out.extend_from_slice(&[(n >> 16) as u8, (n >> 8) as u8, n as u8][..3 - pad]);
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::encode;
+
+    #[test]
+    fn decode_round_trips_and_refuses_garbage() {
+        for len in 0..40u8 {
+            let bytes: Vec<u8> = (0..len).map(|i| i.wrapping_mul(37)).collect();
+            assert_eq!(super::decode(&encode(&bytes)), Some(bytes));
+        }
+        assert_eq!(super::decode("Zm9v\nYmFy"), Some(b"foobar".to_vec()));
+        assert_eq!(super::decode("Zm9"), None);
+        assert_eq!(super::decode("Zm=v"), None);
+        assert_eq!(super::decode("Zg==Zm9v"), None);
+        assert_eq!(super::decode("Z!=="), None);
+    }
 
     /// A straightforward decoder, only to check round trips.
     fn decode(text: &str) -> Vec<u8> {

@@ -14,7 +14,11 @@ export type FileAction =
   | { kind: "unstageSelection" }
   | { kind: "discardSelection" }
   | { kind: "ignoreSelection" }
-  | { kind: "stashSelection" };
+  | { kind: "stashSelection" }
+  // A commit's file (#448): revert or apply its change in the working tree, save it as a patch.
+  | { kind: "revertCommitFile" }
+  | { kind: "applyCommitFile" }
+  | { kind: "saveFilePatch" };
 
 export const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
 
@@ -157,13 +161,33 @@ export function selectionMenuItems(
   return items;
 }
 
-/** The menu of a read-only file section (a commit's or a compare's file). */
-export function commitFileMenuItems(onPick: (action: FileAction) => void): ContextMenuItem[] {
-  return [
-    { label: "Open in editor", onSelect: () => onPick({ kind: "openInEditor" }) },
-    { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }) },
-    { label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }) },
-  ];
+/**
+ * The menu of a read-only file section (a commit's or a compare's file). With `patch` (a commit's
+ * file, #448), it starts with Revert / Apply in the working tree (disabled with `blockedReason`
+ * while repository actions can't run) and "Save file as patch…"; with `tools`, the external
+ * tools follow.
+ */
+export function commitFileMenuItems(
+  onPick: (action: FileAction) => void,
+  { tools = true, patch = null }: { tools?: boolean; patch?: { blockedReason: string | null } | null } = {},
+): ContextMenuItem[] {
+  const items: ContextMenuItem[] = [];
+  if (patch !== null) {
+    const blocked = { disabled: patch.blockedReason !== null, title: patch.blockedReason ?? undefined };
+    items.push(
+      { label: "Revert this file", ...blocked, onSelect: () => onPick({ kind: "revertCommitFile" }) },
+      { label: "Apply this file to the working tree", ...blocked, onSelect: () => onPick({ kind: "applyCommitFile" }) },
+      { label: "Save file as patch…", onSelect: () => onPick({ kind: "saveFilePatch" }) },
+    );
+  }
+  if (tools) {
+    items.push(
+      { label: "Open in editor", onSelect: () => onPick({ kind: "openInEditor" }) },
+      { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }) },
+      { label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }) },
+    );
+  }
+  return items;
 }
 
 export function discardConfirmMessage(entry: StatusEntry): string {

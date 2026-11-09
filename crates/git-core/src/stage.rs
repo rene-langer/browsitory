@@ -679,18 +679,18 @@ pub fn unstage_hunk(
     )
 }
 
-struct FoundHunk {
-    old_absent: bool,
-    new_absent: bool,
-    old_mode: u32,
-    new_mode: u32,
-    lines: Vec<PatchLine>,
+pub(crate) struct FoundHunk {
+    pub(crate) old_absent: bool,
+    pub(crate) new_absent: bool,
+    pub(crate) old_mode: u32,
+    pub(crate) new_mode: u32,
+    pub(crate) lines: Vec<PatchLine>,
 }
 
 /// Re-walks `diff` the same way `diff::hunks_from_diff` does and returns the lines of the hunk
 /// at `(old_start, new_start)` with their raw libgit2 origins, so indices line up with the UI.
 /// Only `path`'s own delta counts: a literal pathspec `d` also matches `d/…` (#116).
-fn find_hunk(
+pub(crate) fn find_hunk(
     diff: &git2::Diff,
     path: &str,
     old_start: u32,

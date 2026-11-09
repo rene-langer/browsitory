@@ -36,6 +36,7 @@ mod gate;
 mod history;
 mod hooks;
 mod merge;
+mod patch;
 mod policy;
 mod rebase;
 mod rebase_store;
@@ -56,6 +57,7 @@ mod undo_store;
 mod worktree;
 
 pub use hooks::{HookEvent, HookSource};
+pub use patch::{CommitChange, PatchSource};
 pub use rebase::{HistoryEdit, HistoryEditKind};
 pub use registry::{repo_key, WorkerRegistry};
 pub use undo::{UndoOutcome, UndoState};
@@ -263,6 +265,19 @@ pub(crate) enum Command {
     },
     DiscardAllUnstaged {
         paths: Vec<String>,
+        reply: Sender<Result<(), String>>,
+    },
+    /// #448: a commit's file or hunk reverted or applied in the working tree.
+    ApplyCommitChange {
+        change: CommitChange,
+        reply: Sender<Result<(), String>>,
+    },
+    GetPatch {
+        source: PatchSource,
+        reply: Sender<Result<Vec<u8>, String>>,
+    },
+    ApplyPatch {
+        content: Vec<u8>,
         reply: Sender<Result<(), String>>,
     },
     IgnorePath {
@@ -1181,6 +1196,13 @@ impl Worker {
                     }
                     Command::DiscardAllUnstaged { paths, reply } => {
                         status::discard_all_unstaged(&repo, paths, reply)
+                    }
+                    Command::ApplyCommitChange { change, reply } => {
+                        patch::apply_commit_change(&repo, change, reply)
+                    }
+                    Command::GetPatch { source, reply } => patch::get_patch(&repo, source, reply),
+                    Command::ApplyPatch { content, reply } => {
+                        patch::apply_patch(&repo, content, reply)
                     }
                     Command::IgnorePath { pattern, reply } => {
                         status::ignore_path(&repo, pattern, reply)

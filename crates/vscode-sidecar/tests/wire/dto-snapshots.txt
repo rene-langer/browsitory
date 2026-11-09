@@ -23,6 +23,8 @@ ChangedFile/renamed {"oldPath":"a.txt","path":"b.txt"}
 CompareRange/plain {"fromId":"1111111111111111111111111111111111111111","toId":"2222222222222222222222222222222222222222"}
 CommitLocation/in-graph {"branches":[],"commitId":"1111111111111111111111111111111111111111","position":42,"remoteBranches":[]}
 CommitLocation/hidden {"branches":["feature"],"commitId":"2222222222222222222222222222222222222222","position":null,"remoteBranches":["origin/feature"]}
+PatchContent/text {"base64":"ZGlmZiAtLWdpdCBhL2YgYi9mCg=="}
+PatchContent/latin-1 {"base64":"K+kK"}
 OpenRepoEntry/loose {"path":"/repos/app","workspaceId":null}
 OpenRepoEntry/in-workspace {"path":"/repos/lib","workspaceId":"ws-1"}
 Workspace/members {"id":"ws-1","memberPaths":["/repos/app","/repos/lib"],"name":"Work","rootPath":"/repos"}

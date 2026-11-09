@@ -104,7 +104,7 @@ fn apply_display_options(git_opts: &mut git2::DiffOptions, opts: &DiffOptions) {
 }
 
 /// Literal pathspec for `path` (and `old_path`, for a rename) plus the display options.
-fn literal_path_options(
+pub(crate) fn literal_path_options(
     path: &str,
     old_path: Option<&str>,
     opts: &DiffOptions,
@@ -120,7 +120,7 @@ fn literal_path_options(
 }
 
 /// Pairs deletes and adds into renames (git's default 50% similarity, no copies).
-fn detect_renames(diff: &mut git2::Diff) -> Result<(), DiffError> {
+pub(crate) fn detect_renames(diff: &mut git2::Diff) -> Result<(), DiffError> {
     let mut find = git2::DiffFindOptions::new();
     find.renames(true);
     diff.find_similar(Some(&mut find))?;
@@ -397,7 +397,7 @@ pub fn branch_compare_range(repo: &Repository, ref_name: &str) -> Result<Compare
     })
 }
 
-fn commit_and_parent_trees<'repo>(
+pub(crate) fn commit_and_parent_trees<'repo>(
     repo: &'repo Repository,
     commit_id: &str,
 ) -> Result<(Option<git2::Tree<'repo>>, git2::Tree<'repo>), DiffError> {

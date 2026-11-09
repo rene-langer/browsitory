@@ -79,6 +79,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       rebasePreset: null,
       rewordDialog: null,
       historyEditOutcome: null,
+      patchOutcome: null,
       pendingPull: null,
       pullOutcome: null,
       mergeDialog: null,
@@ -203,6 +204,9 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     forgetForgeToken: vi.fn(),
     createPullRequest: vi.fn(),
     openExternalUrl: vi.fn(),
+    applyCommitChange: vi.fn(),
+    savePatch: vi.fn(),
+    applyPatchFile: vi.fn(),
     setGraphBranchSelection: vi.fn(),
     setGraphRemoteBranchSelection: vi.fn(),
     clearGraphBranchSelection: vi.fn(),
@@ -282,6 +286,19 @@ describe("buildCommands", () => {
     expect(labels).not.toContain("Fetch all remotes");
     expect(labels).not.toContain("Push branch to…");
     expect(labels).not.toContain("Delete remote branch…");
+  });
+
+  it("offers Apply patch… unless an operation runs, and Save staged changes as patch… with staged files (#448)", () => {
+    const appState = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }] });
+    const commands = buildCommands(appState);
+    commands.find((command) => command.id === "apply-patch")!.run();
+    expect(appState.applyPatchFile).toHaveBeenCalled();
+    commands.find((command) => command.id === "save-staged-patch")!.run();
+    expect(appState.savePatch).toHaveBeenCalledWith({ kind: "Staged" }, "staged.patch");
+
+    const ids = (overrides: Parameters<typeof makeAppState>[0]) => buildCommands(makeAppState(overrides)).map((c) => c.id);
+    expect(ids({ pending: true })).not.toContain("apply-patch");
+    expect(ids({ status: [] })).not.toContain("save-staged-patch");
   });
 
   it("includes a shortcuts command only when a handler is supplied", () => {
