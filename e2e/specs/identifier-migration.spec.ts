@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
+import { reloadSessionWithRetry } from "../support/session";
 
 // The app's webview storage and logs live in `$XDG_DATA_HOME/<identifier>` (wdio.conf.ts points
 // XDG_DATA_HOME at this throwaway dir).
@@ -110,7 +111,9 @@ function listing(dir: string): string {
 // sizes, ...) and the logs carry over. The test turns this run's folder into a 0.3.x one while
 // the app is closed and restarts the app on it.
 describe("Browsitory identifier migration", () => {
-  it("moves the 0.3.x data folder to the new identifier and keeps localStorage", async () => {
+  it("moves the 0.3.x data folder to the new identifier and keeps localStorage", async function () {
+    // The restart may take two bounded session attempts (#457), on top of the 20 s waits.
+    this.timeout(120000);
     await browser.execute((key) => window.localStorage.setItem(key, "kept"), PROBE_KEY);
     // WebKitGTK writes localStorage to disk asynchronously, and ending the session stops the
     // app: without this wait the write can be lost before the folder is moved (#465).
@@ -153,7 +156,7 @@ describe("Browsitory identifier migration", () => {
 
     // reloadSession's own deleteSession fails on the ended session (WebdriverIO only logs it) and
     // then starts a fresh app process.
-    await browser.reloadSession();
+    await reloadSessionWithRetry();
 
     let seen: unknown = null;
     await browser

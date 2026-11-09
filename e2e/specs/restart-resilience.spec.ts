@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { reloadSessionWithRetry } from "../support/session";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
@@ -69,7 +70,7 @@ async function clickContinueRebaseWhenSettled(): Promise<void> {
 }
 
 // #108: a paused rebase is stored on disk, so it survives an app restart. The restart is
-// `browser.reloadSession()`: tauri-driver ends the session (closing the app) and launches a fresh
+// `reloadSessionWithRetry()` (`browser.reloadSession()`, bounded, #457): tauri-driver ends the session (closing the app) and launches a fresh
 // app process against the same XDG_DATA_HOME and fixture repo.
 describe("Browsitory restart resilience", () => {
   before(() => {
@@ -109,7 +110,7 @@ describe("Browsitory restart resilience", () => {
     });
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git/browsitory/rebase.json"))).toBe(true);
 
-    await browser.reloadSession();
+    await reloadSessionWithRetry();
 
     await browser.waitUntil(async () => (await stripText()).includes("Rebasing, step 1 of 2"), {
       timeout: 20000,
