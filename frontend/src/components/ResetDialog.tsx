@@ -16,11 +16,14 @@ export function ResetDialog({
   shortId,
   onReset,
   onCancel,
+  returnFocusTo,
 }: {
   branch: string;
   shortId: string;
   onReset: (mode: ResetMode) => void;
   onCancel: () => void;
+  /** `FormDialog`'s: where focus goes on close. */
+  returnFocusTo?: HTMLElement | null;
 }) {
   const [mode, setMode] = useState<ResetMode>("mixed");
   const [confirmingHard, setConfirmingHard] = useState(false);
@@ -38,7 +41,7 @@ export function ResetDialog({
   }
 
   return (
-    <FormDialog ariaLabel="Reset branch" onCancel={onCancel}>
+    <FormDialog ariaLabel="Reset branch" onCancel={onCancel} returnFocusTo={returnFocusTo}>
       <form
         onSubmit={(event) => {
           event.preventDefault();

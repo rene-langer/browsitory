@@ -15,6 +15,7 @@ export function ParentPickerDialog({
   commits,
   onConfirm,
   onCancel,
+  returnFocusTo,
 }: {
   action: "Cherry-pick" | "Revert";
   commit: GraphCommit;
@@ -23,10 +24,12 @@ export function ParentPickerDialog({
   /** The chosen 1-based parent number. */
   onConfirm: (mainline: number) => void;
   onCancel: () => void;
+  /** `FormDialog`'s: where focus goes on close. */
+  returnFocusTo?: HTMLElement | null;
 }) {
   const [mainline, setMainline] = useState(1);
   return (
-    <FormDialog ariaLabel="Choose parent" onCancel={onCancel}>
+    <FormDialog ariaLabel="Choose parent" onCancel={onCancel} returnFocusTo={returnFocusTo}>
       <form
         onSubmit={(event) => {
           event.preventDefault();

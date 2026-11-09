@@ -1078,28 +1078,81 @@ describe("history commands", () => {
     commits: [graphCommit("c1", ["c2"]), graphCommit("c2", [])],
     headInfo: { headId: "c1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
   };
+  // RepoWorkspace's commit actions: the menu's own (#507).
+  const makeCommitCommands = () => ({ onCherryPick: vi.fn(), onRevert: vi.fn(), onChooseParent: vi.fn(), onReset: vi.fn() });
+  const buildWithCommitCommands = (
+    appState: UseAppStateResult,
+    commitCommands: ReturnType<typeof makeCommitCommands> = makeCommitCommands(),
+    onCloseActiveRepoTab?: () => void,
+  ) =>
+    buildCommands(
+      appState,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      onCloseActiveRepoTab,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      commitCommands,
+    );
 
   it("offers the history commands when a commit is selected and nothing is running", () => {
-    const ids = buildCommands(makeAppState(historyState)).map((command) => command.id);
+    const ids = buildWithCommitCommands(makeAppState(historyState)).map((command) => command.id);
     expect(ids).toEqual(expect.arrayContaining(HISTORY_IDS));
   });
 
   it("omits them while a merge is in progress, except Create tag, whose dialog says why it waits", () => {
-    const ids = buildCommands(makeAppState({ ...historyState, mergeMessage: "Merge x" })).map((c) => c.id);
+    const ids = buildWithCommitCommands(makeAppState({ ...historyState, mergeMessage: "Merge x" })).map((c) => c.id);
     for (const id of HISTORY_IDS) {
       if (id.startsWith("create-tag-")) expect(ids).toContain(id);
       else expect(ids).not.toContain(id);
     }
   });
 
-  it("offers cherry-pick and revert of a merge commit through the commit menu's parent picker (#495)", () => {
+  it("offers cherry-pick and revert of a merge commit through the parent picker (#495, #507)", () => {
     const merge = { ...graphCommit("m1", ["c1", "c2"]), shortId: "m1" };
     const appState = makeAppState({ ...historyState, selectedRow: { commitId: "m1" }, commits: [merge, ...historyState.commits!] });
-    const commands = buildCommands(appState);
+    const commitCommands = makeCommitCommands();
+    const commands = buildWithCommitCommands(appState, commitCommands);
     expect(commands.find((c) => c.id === "cherry-pick-selected")?.label).toBe("Cherry-pick m1…");
     expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m1…");
     commands.find((c) => c.id === "cherry-pick-selected")!.run();
+    expect(commitCommands.onChooseParent).toHaveBeenLastCalledWith("Cherry-pick", "m1");
+    commands.find((c) => c.id === "revert-selected")!.run();
+    expect(commitCommands.onChooseParent).toHaveBeenLastCalledWith("Revert", "m1");
+    expect(commitCommands.onCherryPick).not.toHaveBeenCalled();
+    expect(commitCommands.onRevert).not.toHaveBeenCalled();
     expect(appState.cherryPick).not.toHaveBeenCalled();
+    expect(appState.revertCommit).not.toHaveBeenCalled();
+  });
+
+  // #507: the palette runs the commit menu's own actions (toast, outcome handling) and opens the
+  // reset dialog itself, so it works without the graph row (search results, file history).
+  it("runs cherry-pick, revert and reset through the commit menu's actions (#507)", () => {
+    const appState = makeAppState(historyState);
+    const commitCommands = makeCommitCommands();
+    const commands = buildWithCommitCommands(appState, commitCommands);
+    commands.find((c) => c.id === "cherry-pick-selected")!.run();
+    commands.find((c) => c.id === "revert-selected")!.run();
+    commands.find((c) => c.id === "reset-selected")!.run();
+    expect(commitCommands.onCherryPick).toHaveBeenCalledWith("c2");
+    expect(commitCommands.onRevert).toHaveBeenCalledWith("c2");
+    expect(commitCommands.onReset).toHaveBeenCalledWith("c2");
+    expect(appState.cherryPick).not.toHaveBeenCalled();
+    expect(appState.revertCommit).not.toHaveBeenCalled();
+    expect(appState.resetToCommit).not.toHaveBeenCalled();
+  });
+
+  it("leaves out cherry-pick, revert and reset without the commit actions to run them", () => {
+    const ids = buildCommands(makeAppState(historyState)).map((c) => c.id);
+    for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected"]) expect(ids).not.toContain(id);
+    expect(ids).toContain("checkout-selected");
   });
 
   // #503: paused between steps, a terminal rebase writes no MERGE_MSG, so only
@@ -1108,13 +1161,9 @@ describe("history commands", () => {
     ["rebase", { kind: "Rebase" as const, branch: "topic", onto: "c2", currentStep: 1, totalSteps: 2 }],
     ["git am", { kind: "Am" as const, branch: "", onto: "", currentStep: 1, totalSteps: 2 }],
   ])("omits cherry-pick, revert, checkout and other mutations during a %s started in a terminal (#503)", (_label, terminalRebase) => {
-    const ids = buildCommands(
+    const ids = buildWithCommitCommands(
       makeAppState({ ...historyState, headInfo: { ...historyState.headInfo!, terminalRebase } }),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+      makeCommitCommands(),
       () => {},
     ).map((c) => c.id);
     for (const id of ["cherry-pick-selected", "revert-selected", "checkout-selected", "reset-selected", "pull", "close-tab"]) {
@@ -1173,7 +1222,7 @@ describe("history commands", () => {
       try {
         const row = screen.getAllByRole("option").find((option) => option.textContent?.includes(`commit ${selectedId}`));
         fireEvent.contextMenu(row!);
-        const ids = buildCommands(appState).map((command) => command.id);
+        const ids = buildWithCommitCommands(appState).map((command) => command.id);
         const resetItem = screen.getByRole("menuitem", { name: /^Reset .* to here…$/ });
         for (const [label, id] of [...pairs, [resetItem.textContent!, "reset-selected"] as [string, string]]) {
           const item = screen.getByRole("menuitem", { name: label });
@@ -1187,7 +1236,7 @@ describe("history commands", () => {
   });
 
   it("omits cherry-pick for HEAD and force push on a detached HEAD", () => {
-    const ids = buildCommands(
+    const ids = buildWithCommitCommands(
       makeAppState({
         ...historyState,
         selectedRow: { commitId: "c1" },
@@ -1199,13 +1248,13 @@ describe("history commands", () => {
   });
 
   it("runs cherry-pick on the selected commit and force push through the confirm", () => {
-    const cherryPick = vi.fn();
     const requestForcePush = vi.fn();
-    const appState = { ...makeAppState(historyState), cherryPick, requestForcePush };
-    const commands = buildCommands(appState);
+    const appState = { ...makeAppState(historyState), requestForcePush };
+    const commitCommands = makeCommitCommands();
+    const commands = buildWithCommitCommands(appState, commitCommands);
     commands.find((command) => command.id === "cherry-pick-selected")!.run();
     commands.find((command) => command.id === "force-push")!.run();
-    expect(cherryPick).toHaveBeenCalledWith("c2");
+    expect(commitCommands.onCherryPick).toHaveBeenCalledWith("c2");
     expect(requestForcePush).toHaveBeenCalledWith("origin");
   });
 
@@ -1232,7 +1281,7 @@ describe("history commands", () => {
   });
 
   it("omits reset when there is no current branch (detached HEAD)", () => {
-    const ids = buildCommands(
+    const ids = buildWithCommitCommands(
       makeAppState({
         ...historyState,
         branches: [{ name: "main", isCurrent: false }],
