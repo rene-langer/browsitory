@@ -67,6 +67,7 @@ import {
   stashBlockReason,
   terminalAbortConfirm,
 } from "./lib/operationStatus";
+import { stashBlockers } from "./lib/actions/stashActions";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import { CurrentDiffContext, useCurrentDiffRegistry } from "./state/useCurrentDiff";
@@ -280,15 +281,9 @@ export function RepoWorkspace({
     transfer,
   });
 
-  // Stash Apply/Pop: libgit2 refuses while the index differs from HEAD or has conflicts, so say
-  // what to do instead of letting the backend error.
-  const stashApplyDisabledReason: string | null = appState.state.status.some((entry) => entry.kind === "Conflicted")
-    ? "Resolve conflicts first."
-    : appState.state.status.some((entry) => entry.staged)
-      ? "Unstage or commit staged changes first."
-      : repositoryOperationDisabled
-        ? operationDisabledReason
-        : null;
+  // A stored stash's Apply/Pop and Drop rules, shared by the stash list, the stash view and the
+  // palette (#509).
+  const storedStashBlockers = stashBlockers(appState.state);
 
   const { dismissError } = appState;
   const announce = useAnnounce(appState, pushToast);
@@ -803,7 +798,6 @@ export function RepoWorkspace({
               onOpenCreateBranchDraft={appState.openCreateBranchDraft}
               onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
               onMergeBranch={appState.openMergeDialog}
-              isMerging={appState.state.mergeMessage !== null}
               isRebasing={appState.state.rebaseProgress !== null}
               operationDisabled={repositoryOperationDisabled}
               operationDisabledReason={operationDisabledReason}
@@ -864,10 +858,7 @@ export function RepoWorkspace({
                 onDropStash={dropStash}
                 restoreIndex={appState.state.stashRestoreIndex}
                 onSetRestoreIndex={appState.setStashRestoreIndex}
-                applyDisabledReason={stashApplyDisabledReason}
-                operationDisabled={repositoryOperationDisabled}
-                operationDisabledReason={operationDisabledReason}
-                dropDisabledReason={discardDropBlockedReason}
+                blockers={storedStashBlockers}
               />
             )}
             {panelVisibility.visibility.worktree && (
@@ -1014,8 +1005,8 @@ export function RepoWorkspace({
                       status={appState.state.status}
                       commits={appState.state.commits}
                       selectedRow={appState.state.selectedRow}
-                      pending={repositoryOperationDisabled}
-                      pendingReason={operationDisabledReason}
+                      operationsBlocked={repositoryOperationDisabled}
+                      operationsBlockedReason={operationDisabledReason}
                       onSelectRow={selectRowClosingCompare}
                       onBranchFromCommit={appState.openCreateBranchDraft}
                       onRebaseFromCommit={appState.openRebasePlanner}
@@ -1091,8 +1082,7 @@ export function RepoWorkspace({
                     onDrop: (index) => void dropStash(index),
                     restoreIndex: appState.state.stashRestoreIndex,
                     onSetRestoreIndex: appState.setStashRestoreIndex,
-                    disabledReason: stashApplyDisabledReason,
-                    dropDisabledReason: discardDropBlockedReason,
+                    blockers: storedStashBlockers,
                   }}
                   onOpenFileHistory={fileHistory.open}
                   onOpenLineHistory={fileHistory.openLines}

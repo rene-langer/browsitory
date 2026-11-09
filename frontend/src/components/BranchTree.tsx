@@ -22,6 +22,10 @@ import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import type { RemoteDialog } from "../state/useAppState";
+import { menuItem } from "../lib/actions/action";
+import { branchActions, remoteBranchActions } from "../lib/actions/branchActions";
+import { addRemoteAction, remoteActions } from "../lib/actions/remoteActions";
+import type { OperationBlockers } from "../lib/operationStatus";
 import { RemoteDialogs } from "./RemoteDialogs";
 import styles from "./BranchTree.module.css";
 
@@ -75,7 +79,6 @@ export function BranchTree({
   onOpenCreateBranchDraft,
   onCloseCreateBranchDraft,
   onMergeBranch,
-  isMerging,
   isRebasing,
   operationDisabled,
   operationDisabledReason,
@@ -130,13 +133,12 @@ export function BranchTree({
   onOpenCreateBranchDraft: (startPoint: string) => void;
   onCloseCreateBranchDraft: () => void;
   onMergeBranch: (name: string) => void;
-  isMerging: boolean;
-  // Every ref-mutating action here is disabled while a rebase is paused mid-flight: the rebase
-  // runs on a detached HEAD and `git-core::rebase`'s `finish` moves the *original* branch ref at
-  // the end, so switching/renaming/deleting branches underneath it silently retargets an
-  // unrelated branch. `git-core::rebase::rebase_continue` also refuses outright once HEAD has
-  // drifted — this just stops the user from getting there.
+  // The New branch form's Create is disabled while a rebase is paused mid-flight: the rebase runs
+  // on a detached HEAD and `git-core::rebase`'s `finish` moves the *original* branch ref at the
+  // end. The branch and remote menus follow `operationDisabled` (`branchActions`,
+  // `remoteActions`, #509), which covers a rebase too.
   isRebasing: boolean;
+  // `operationBlockers` (#495): every branch and remote action follows it.
   operationDisabled: boolean;
   // Human-readable reason `operationDisabled` is true (e.g. "A rebase is in progress."), shown
   // as a `title` on the buttons it disables so they don't just go inert with no explanation
@@ -260,6 +262,9 @@ export function BranchTree({
   const [addError, setAddError] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [remoteBranchesError, setRemoteBranchesError] = useState<string | null>(null);
+  // The menus' availability and labels come from the shared action rules (#509), like the palette's.
+  const blockers: OperationBlockers = { blocked: operationDisabled, reason: operationDisabledReason };
+  const branchContext = { blockers, remoteCount: remotes.length, upstream };
 
   function remoteFolderKey(remoteName: string): string {
     return `branchtree.remote.${remoteName}`;
@@ -325,7 +330,7 @@ export function BranchTree({
             isRenaming
               ? undefined
               : () => {
-                  if (!isRebasing) onSwitchBranch(branch.name);
+                  if (branchActions(branchContext, branch).checkout.enabled) onSwitchBranch(branch.name);
                 }
           }
           onOpenMenu={
@@ -451,7 +456,9 @@ export function BranchTree({
             onGoToBranch?.("remote", `${remoteName}/${branchName}`);
           }}
           onDoubleClick={() => {
-            if (!operationDisabled) void checkoutRemoteBranch(remoteName, branchName);
+            if (remoteBranchActions(blockers, remoteName, branchName).checkout.enabled) {
+              void checkoutRemoteBranch(remoteName, branchName);
+            }
           }}
           onOpenMenu={(anchor, trigger) =>
             openRowMenu({ kind: "remote-branch", remoteName, branchName, ...anchor, returnFocusTo: trigger })
@@ -587,60 +594,35 @@ export function BranchTree({
   };
 
   function remoteFolderItems(remote: RemoteInfo): ContextMenuItem[] {
+    const actions = remoteActions(blockers, remote.name);
     return [
+      // The `refreshGeneration` reload above already refreshes the cached branch list after any
+      // fetch; this explicit drop-and-reload just makes the update immediate here.
+      menuItem(actions.fetch, () =>
+        void onFetchRemote(remote.name).then(() => {
+          setRemoteBranches((prev) => {
+            const next = { ...prev };
+            delete next[remote.name];
+            return next;
+          });
+          if (isRemoteOpen(remote.name)) fetchRemoteBranchList(remote.name);
+        }),
+      ),
+      menuItem(actions.pushCurrentBranch, () => void onPushCurrentBranch(remote.name)),
+      menuItem(actions.edit, () => setRemoteDialog({ kind: "edit", remoteName: remote.name })),
+      menuItem(actions.credentials, () => setRemoteDialog({ kind: "credentials", remoteName: remote.name })),
       {
-        label: "Fetch",
-        disabled: operationDisabled,
-        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-        // The `refreshGeneration` reload above already refreshes the cached branch list after
-        // any fetch; this explicit drop-and-reload just makes the update immediate here.
-        onSelect: () =>
-          void onFetchRemote(remote.name).then(() => {
-            setRemoteBranches((prev) => {
-              const next = { ...prev };
-              delete next[remote.name];
-              return next;
-            });
-            if (isRemoteOpen(remote.name)) fetchRemoteBranchList(remote.name);
-          }),
-      },
-      {
-        label: "Push current branch here",
-        disabled: operationDisabled,
-        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-        onSelect: () => void onPushCurrentBranch(remote.name),
-      },
-      {
-        label: "Edit remote",
-        onSelect: () => setRemoteDialog({ kind: "edit", remoteName: remote.name }),
-      },
-      {
-        label: "Manage credentials",
-        onSelect: () => setRemoteDialog({ kind: "credentials", remoteName: remote.name }),
-      },
-      {
-        label: "Remove remote",
+        ...menuItem(actions.remove, () => setRemoteDialog({ kind: "remove", remoteName: remote.name })),
         destructive: true,
-        disabled: operationDisabled,
-        onSelect: () => setRemoteDialog({ kind: "remove", remoteName: remote.name }),
       },
     ];
   }
 
   function remoteBranchItems(remoteName: string, branchName: string): ContextMenuItem[] {
+    const actions = remoteBranchActions(blockers, remoteName, branchName);
     return [
-      {
-        label: "Checkout",
-        disabled: operationDisabled,
-        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-        onSelect: () => void checkoutRemoteBranch(remoteName, branchName),
-      },
-      {
-        label: "Set as upstream for current branch",
-        disabled: operationDisabled,
-        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-        onSelect: () => void onSetUpstream(remoteName, branchName),
-      },
+      menuItem(actions.checkout, () => void checkoutRemoteBranch(remoteName, branchName)),
+      menuItem(actions.setAsUpstream, () => void onSetUpstream(remoteName, branchName)),
       ...(onCompareBranch !== undefined
         ? [
             {
@@ -654,13 +636,7 @@ export function BranchTree({
         title: "Show only this branch in the commit graph",
         onSelect: () => onIsolateGraphBranch("remote", `${remoteName}/${branchName}`),
       },
-      {
-        label: `Delete ${remoteName}/${branchName}…`,
-        destructive: true,
-        disabled: operationDisabled,
-        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-        onSelect: () => onOpenDeleteRemoteBranch(remoteName, branchName),
-      },
+      { ...menuItem(actions.delete, () => onOpenDeleteRemoteBranch(remoteName, branchName)), destructive: true },
     ];
   }
 
@@ -748,77 +724,44 @@ export function BranchTree({
   const busyReason = operationDisabled ? operationDisabledReason : null;
 
   function branchContextItems(branch: BranchInfo): ContextMenuItem[] {
+    const actions = branchActions(branchContext, branch);
     const items: ContextMenuItem[] = [
       {
-        label: "Checkout",
-        title: branch.isCurrent ? "Already the current branch." : "Same as double-clicking the branch.",
-        disabled: isRebasing || branch.isCurrent,
-        onSelect: () => onSwitchBranch(branch.name),
+        ...menuItem(actions.checkout, () => onSwitchBranch(branch.name)),
+        title: actions.checkout.reason ?? "Same as double-clicking the branch.",
       },
-      {
-        label: "Rename",
-        disabled: isRebasing,
-        onSelect: () => {
-          setRenaming(branch.name);
-          setRenameValue(branch.name);
-        },
-      },
+      menuItem(actions.rename, () => {
+        setRenaming(branch.name);
+        setRenameValue(branch.name);
+      }),
     ];
     if (!branch.isCurrent) {
-      items.push({
-        label: "Merge into current branch…",
-        disabled: isMerging || isRebasing || operationDisabled,
-        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-        onSelect: () => onMergeBranch(branch.name),
-      });
+      items.push(menuItem(actions.merge, () => onMergeBranch(branch.name)));
       if (onCompareBranch !== undefined) {
         items.push({ label: compareLabel, onSelect: () => onCompareBranch(`refs/heads/${branch.name}`, branch.name) });
       }
     }
-    if (branch.isCurrent) {
-      if (upstream !== null) {
-        items.push({
-          label: `Push to ${upstream.remoteName}`,
-          disabled: operationDisabled,
-          title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-          onSelect: () => void onPushCurrentBranch(upstream.remoteName),
-        });
-      }
-      items.push({
-        label: "Set upstream…",
-        // Like "Set as upstream for current branch" in a remote branch's menu (#521).
-        disabled: operationDisabled,
-        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-        onSelect: () => {
+    if (actions.pushToUpstream !== null && upstream !== null) {
+      const remoteName = upstream.remoteName;
+      items.push(menuItem(actions.pushToUpstream, () => void onPushCurrentBranch(remoteName)));
+    }
+    if (actions.setUpstream !== null) {
+      items.push(
+        menuItem(actions.setUpstream, () => {
           setUpstreamRemoteField("");
           setUpstreamBranchField("");
           setUpstreamDialogOpen(true);
-        },
-      });
+        }),
+      );
     }
-    items.push({
-      label: "Push to…",
-      disabled: operationDisabled || remotes.length === 0,
-      title: operationDisabled
-        ? (operationDisabledReason ?? undefined)
-        : remotes.length === 0
-          ? "No remote configured."
-          : undefined,
-      onSelect: () => onOpenPushDialog(branch.name),
-    });
+    items.push(menuItem(actions.pushTo, () => onOpenPushDialog(branch.name)));
     items.push({
       label: "Isolate branch",
       title: "Show only this branch in the commit graph",
       onSelect: () => onIsolateGraphBranch("local", branch.name),
     });
-    items.push({
-      label: "Delete",
-      // The one busy rule (#521): a soft delete that fails asks to force delete.
-      disabled: operationDisabled,
-      title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
-      destructive: true,
-      onSelect: () => void handleDeleteClick(branch.name),
-    });
+    // A soft delete that fails asks to force delete.
+    items.push({ ...menuItem(actions.delete, () => void handleDeleteClick(branch.name)), destructive: true });
     return items;
   }
 
@@ -1150,7 +1093,7 @@ export function BranchTree({
             onClose={() => setRowMenu(null)}
             items={[
               { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD") },
-              { label: "Add remote…", onSelect: onOpenAddRemoteDraft },
+              menuItem(addRemoteAction(), onOpenAddRemoteDraft),
               {
                 label: "Show all branches",
                 disabled: graphBranchSelection === null && graphRemoteBranchSelection === null,

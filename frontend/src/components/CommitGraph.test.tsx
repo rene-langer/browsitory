@@ -67,7 +67,7 @@ describe("CommitGraph", () => {
         status,
         commits,
         selectedRow: { commitId: "bbb222..." } as SelectedRow,
-        pending: false,
+        operationsBlocked: false,
         onSelectRow: vi.fn(),
         onBranchFromCommit: vi.fn(),
         onRebaseFromCommit: vi.fn(),
@@ -92,7 +92,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -109,7 +109,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -126,7 +126,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -147,7 +147,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -167,7 +167,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -188,7 +188,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -209,7 +209,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow={{ commitId: "bbb222..." }}
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -229,7 +229,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -249,7 +249,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={onBranchFromCommit}
         onRebaseFromCommit={vi.fn()}
@@ -270,7 +270,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -293,7 +293,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commitsWithBranch}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -312,7 +312,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -334,7 +334,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -355,7 +355,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commitsWithRemoteBranch}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -376,7 +376,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commitsWithRemoteBranch}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -398,7 +398,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commitsWithRemoteBranch}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -420,7 +420,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commitsWithRemoteBranch}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -442,7 +442,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commitsWithBothBadges}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -462,7 +462,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -479,7 +479,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -499,7 +499,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow={{ commitId: "aaa111..." }}
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -519,7 +519,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={onRebaseFromCommit}
@@ -577,7 +577,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={forkCommits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -629,7 +629,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={chainCommits}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -696,7 +696,7 @@ describe("CommitGraph", () => {
   });
 
   it("disables multi-commit pick and revert while an operation is pending", () => {
-    renderChain({ pending: true, onCherryPickMany: vi.fn(), onRevertMany: vi.fn() });
+    renderChain({ operationsBlocked: true, onCherryPickMany: vi.fn(), onRevertMany: vi.fn() });
     fireEvent.click(row("D"));
     fireEvent.click(row("C"), { ctrlKey: true });
     expect(screen.getByRole("button", { name: "Cherry-pick 2 commits" })).toBeDisabled();
@@ -730,7 +730,7 @@ describe("CommitGraph", () => {
   });
 
   it("keeps Compare these commits enabled while an operation is pending", () => {
-    renderChain({ pending: true, onCompareCommits: vi.fn() });
+    renderChain({ operationsBlocked: true, onCompareCommits: vi.fn() });
     fireEvent.click(row("C"));
     fireEvent.click(row("B"), { shiftKey: true });
     expect(screen.getByRole("button", { name: "Compare these commits" })).toBeEnabled();
@@ -738,7 +738,7 @@ describe("CommitGraph", () => {
 
   it("saves one commit, or the selected ones oldest first, as a patch even while busy (#448)", () => {
     const onSavePatch = vi.fn();
-    renderChain({ pending: true, onSavePatch });
+    renderChain({ operationsBlocked: true, onSavePatch });
     fireEvent.contextMenu(row("C"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Save as patch…" }));
     expect(onSavePatch).toHaveBeenLastCalledWith(["C"]);
@@ -753,7 +753,7 @@ describe("CommitGraph", () => {
 
   it("offers Diff against working tree on a single commit", () => {
     const onCompareWithWorkingTree = vi.fn();
-    renderChain({ pending: true, onCompareWithWorkingTree });
+    renderChain({ operationsBlocked: true, onCompareWithWorkingTree });
     fireEvent.contextMenu(row("C"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Diff against working tree" }));
     expect(onCompareWithWorkingTree).toHaveBeenCalledWith("C");
@@ -837,7 +837,7 @@ describe("CommitGraph", () => {
   });
 
   it("disables every multi-select action while a repository operation is pending", () => {
-    renderChain({ pending: true });
+    renderChain({ operationsBlocked: true });
 
     fireEvent.click(row("C"));
     fireEvent.click(row("B"), { shiftKey: true });
@@ -938,7 +938,7 @@ describe("CommitGraph", () => {
       ...historyProps,
       status,
       commits: chainCommits,
-      pending: false,
+      operationsBlocked: false,
       onSelectRow: vi.fn(),
       onBranchFromCommit: vi.fn(),
       onRebaseFromCommit: vi.fn(),
@@ -962,7 +962,7 @@ describe("CommitGraph", () => {
     const props = {
       ...historyProps,
       status,
-      pending: false,
+      operationsBlocked: false,
       onSelectRow: vi.fn(),
       onBranchFromCommit: vi.fn(),
       onRebaseFromCommit: vi.fn(),
@@ -1017,7 +1017,7 @@ describe("CommitGraph", () => {
         status={status}
         commits={commits}
         selectedRow="uncommitted"
-        pending={true}
+        operationsBlocked={true}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -1045,7 +1045,7 @@ describe("CommitGraph — keyboard access", () => {
       onRebaseSelection: vi.fn(),
     };
     const utils = render(
-      <CommitGraph {...historyProps} status={status} commits={chain} selectedRow={selectedRow} pending={false} {...handlers} />,
+      <CommitGraph {...historyProps} status={status} commits={chain} selectedRow={selectedRow} operationsBlocked={false} {...handlers} />,
     );
     return { ...utils, ...handlers, list: screen.getByRole("listbox") };
   }
@@ -1058,7 +1058,7 @@ describe("CommitGraph — keyboard access", () => {
         status={status}
         commits={chain}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}
@@ -1127,7 +1127,7 @@ describe("CommitGraph — keyboard access", () => {
         status={status}
         commits={chain}
         selectedRow={{ commitId: "B" }}
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={onSelectRow}
         onBranchFromCommit={rest.onBranchFromCommit}
         onRebaseFromCommit={rest.onRebaseFromCommit}
@@ -1154,7 +1154,7 @@ describe("CommitGraph history metadata and pagination", () => {
     status,
     commits,
     selectedRow: "uncommitted" as const,
-    pending: false,
+    operationsBlocked: false,
     onSelectRow: vi.fn(),
     onBranchFromCommit: vi.fn(),
     onRebaseFromCommit: vi.fn(),
@@ -1227,7 +1227,7 @@ describe("CommitGraph — history actions", () => {
         status={status}
         commits={chain}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         headInfo={{ ...NO_HEAD, headId: "C" }}
         currentBranch="main"
         {...handlers}
@@ -1317,7 +1317,7 @@ describe("CommitGraph — history actions", () => {
   });
 
   it("disables the new actions while pending", () => {
-    const { openMenu } = setup({ pending: true });
+    const { openMenu } = setup({ operationsBlocked: true });
     openMenu("B");
     for (const name of ["Cherry-pick", "Revert", "Checkout (detached)", "Reset main to here…"]) {
       expect(screen.getByRole("menuitem", { name })).toBeDisabled();
@@ -1362,7 +1362,7 @@ describe("CommitGraph — one-click history edits", () => {
         status={[]}
         commits={chain}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         headInfo={{ ...NO_HEAD, headId: "E" }}
         currentBranch="main"
         {...handlers}
@@ -1421,7 +1421,7 @@ describe("CommitGraph — one-click history edits", () => {
   });
 
   it("disables every edit while an operation is pending", () => {
-    const { openMenu } = setup({ pending: true });
+    const { openMenu } = setup({ operationsBlocked: true });
     openMenu("C");
     for (const name of EDIT_ITEMS) expect(screen.getByRole("menuitem", { name })).toBeDisabled();
   });
@@ -1458,7 +1458,7 @@ describe("CommitGraph — tag badges", () => {
         status={[]}
         commits={tagged}
         selectedRow="uncommitted"
-        pending={false}
+        operationsBlocked={false}
         headInfo={{ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }}
         currentBranch="main"
         {...handlers}
@@ -1476,7 +1476,7 @@ describe("CommitGraph — tag badges", () => {
     fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete tag…" }));
 
-    rerenderWith({ pending: true, pendingReason: "A transfer is in progress." });
+    rerenderWith({ operationsBlocked: true, operationsBlockedReason: "A transfer is in progress." });
     const dialog = screen.getByRole("dialog", { name: "Delete local tag v2.0" });
     expect(dialog).toHaveTextContent("A transfer is in progress.");
     const confirm = within(dialog).getByRole("button", { name: "Delete tag" });
@@ -1558,7 +1558,7 @@ describe("CommitGraph — Create tag…", () => {
         status={[]}
         commits={commits}
         selectedRow={{ commitId: commits[1].id }}
-        pending={false}
+        operationsBlocked={false}
         onSelectRow={vi.fn()}
         onBranchFromCommit={vi.fn()}
         onRebaseFromCommit={vi.fn()}

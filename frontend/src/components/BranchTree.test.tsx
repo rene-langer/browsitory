@@ -28,7 +28,6 @@ function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps {
     onOpenCreateBranchDraft: vi.fn(),
     onCloseCreateBranchDraft: vi.fn(),
     onMergeBranch: vi.fn(),
-    isMerging: false,
     isRebasing: false,
     operationDisabled: false,
     operationDisabledReason: null,
@@ -186,6 +185,19 @@ describe("BranchTree — local branches", () => {
     const item = screen.getByRole("menuitem", { name: "Delete" });
     expect(item).toBeDisabled();
     expect(item).toHaveAttribute("title", "A merge is in progress.");
+  });
+
+  // #509: the palette's rule (`branchActions`); before, only a rebase run here disabled them.
+  it("disables Checkout and Rename, and ignores a double-click, during a merge, like the palette", () => {
+    const { props } = renderTree({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    for (const name of ["Checkout", "Rename"]) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute("title", "A merge is in progress.");
+    }
+    fireEvent.doubleClick(screen.getByRole("button", { name: "foo" }));
+    expect(props.onSwitchBranch).not.toHaveBeenCalled();
   });
 
   it("blocks an open force-delete confirmation, saying why, once the repository is busy (#521)", async () => {
@@ -530,7 +542,7 @@ describe("BranchTree — local branches", () => {
   });
 
   it("disables the merge action while a merge is already in progress", () => {
-    renderTree({ isMerging: true });
+    renderTree({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
 
@@ -558,7 +570,7 @@ describe("BranchTree — local branches", () => {
   });
 
   it("does not switch branches while a rebase is in progress", () => {
-    const { props } = renderTree({ isRebasing: true });
+    const { props } = renderTree({ isRebasing: true, operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
 
     fireEvent.doubleClick(screen.getByRole("button", { name: "foo" }));
 
@@ -585,6 +597,18 @@ describe("BranchTree — remotes", () => {
   });
 
   const oneRemote = [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }];
+
+  // #509: the palette's rule (`remoteActions`); before, Edit remote and Manage credentials stayed
+  // enabled and Remove remote gave no reason.
+  it("disables every remote action with the reason while the repository is busy, like the palette", () => {
+    renderTree({ remotes: oneRemote, operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
+    for (const name of ["Fetch", "Push current branch here", "Edit remote", "Manage credentials", "Remove remote"]) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute("title", "A transfer is in progress.");
+    }
+  });
 
   it("lists remote folders and lazily loads their branches on first expand", async () => {
     const onListRemoteBranches = vi.fn().mockResolvedValue(["main", "feat/foo"]);
