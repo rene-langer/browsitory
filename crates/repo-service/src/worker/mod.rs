@@ -28,6 +28,7 @@ use crate::pull_requests::{
 };
 
 mod atomic_file;
+mod background_fetch;
 mod branch;
 mod cancel;
 mod compare;
@@ -688,8 +689,9 @@ pub(crate) enum Command {
     },
     FetchAllRemotes {
         prune: Option<bool>,
-        /// `FetchAll`, or `BackgroundFetch` (see `WorkerHandle::background_fetch`).
-        operation: TransferOperation,
+        /// `None` for the user's Fetch all; `Some` for the "Fetch automatically" tick (see
+        /// `WorkerHandle::background_fetch`), whose `prune` is the command's.
+        background: Option<background_fetch::BackgroundFetchOptions>,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
         reply: Sender<Result<String, String>>,
@@ -817,7 +819,7 @@ impl Worker {
     /// GitHub/Bitbucket account. Production code only ever calls this through `spawn`, above.
     fn spawn_with<S, A>(path: PathBuf, credential_store: S, forge_api: A) -> Result<Self, String>
     where
-        S: CredentialStore + Send + 'static,
+        S: CredentialStore + Send + Sync + 'static,
         A: ForgeApi + Send + 'static,
     {
         Self::spawn_paused(path, credential_store, forge_api, None)
@@ -857,7 +859,7 @@ impl Worker {
         pause: Option<PauseHook>,
     ) -> Result<Self, String>
     where
-        S: CredentialStore + Send + 'static,
+        S: CredentialStore + Send + Sync + 'static,
         A: ForgeApi + Send + 'static,
     {
         let repo_path = path;
@@ -871,7 +873,9 @@ impl Worker {
         thread::spawn(move || {
             let search_generation = worker_search_generation;
             let mut repo = repo;
-            let credential_service = CredentialService::new(credential_store);
+            // Shared with background fetch helpers (see `background_fetch`).
+            let credential_service = Arc::new(CredentialService::new(credential_store));
+            let background_memory = background_fetch::Memory::default();
             let pull_request_service = PullRequestService::new(forge_api);
             let mut undo_recorder = undo::UndoRecorder::open(&repo);
             // A stopped multi-commit cherry-pick/revert, persisted so it survives a restart.
@@ -1644,6 +1648,7 @@ impl Worker {
                     } => remote::fetch(
                         &repo,
                         &credential_service,
+                        &background_memory,
                         remote_name,
                         prune,
                         remote::TransferOp::new(operation_id),
@@ -1695,15 +1700,30 @@ impl Worker {
                     ),
                     Command::FetchAllRemotes {
                         prune,
-                        operation,
+                        background: None,
                         operation_id,
                         events,
                         reply,
                     } => remote::fetch_all(
                         &repo,
                         &credential_service,
+                        &background_memory,
                         prune,
-                        operation,
+                        remote::TransferOp::new(operation_id),
+                        events,
+                        reply,
+                    ),
+                    Command::FetchAllRemotes {
+                        background: Some(options),
+                        operation_id,
+                        events,
+                        reply,
+                        ..
+                    } => background_fetch::run(
+                        &repo,
+                        &credential_service,
+                        &background_memory,
+                        options,
                         remote::TransferOp::new(operation_id),
                         events,
                         reply,

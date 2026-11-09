@@ -1030,8 +1030,10 @@ export interface RepoClient {
    * The "Fetch automatically" tick: a Fetch all reported as `BackgroundFetch` (with
    * `RemoteFailed` events like `fetchAllRemotes`). Resolves `null`, starting nothing, while the
    * repository has another operation queued or running (a fetch, pull, push, commit, …).
+   * `intervalMinutes` is the setting's interval: a remote that can't be reached is skipped for
+   * twice the interval, doubling with each failure in a row up to an hour (#462).
    */
-  backgroundFetch(repoPath: string, prune: boolean | null): Promise<string | null>;
+  backgroundFetch(repoPath: string, prune: boolean | null, intervalMinutes: number): Promise<string | null>;
   /**
    * Pushes `localBranch` to `remoteBranch` on `remoteName`, and when `setUpstream` is set and the
    * push lands, records it as the branch's upstream.

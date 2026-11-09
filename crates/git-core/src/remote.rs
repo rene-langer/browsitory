@@ -1,15 +1,105 @@
 use std::cell::{Cell, RefCell};
 
 use git2::{
-    build::CheckoutBuilder, BranchType, Cred, CredentialType, ErrorCode, FetchOptions, FetchPrune,
-    PushOptions, RemoteCallbacks, Repository, StatusOptions, Tag,
+    build::CheckoutBuilder, BranchType, Cred, CredentialType, Direction, ErrorClass, ErrorCode,
+    FetchOptions, FetchPrune, PushOptions, RemoteCallbacks, Repository, StatusOptions, Tag,
 };
 use thiserror::Error;
 use url::Url;
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_remote_message;
+    use super::{connect_error, is_local_url, is_network_failure, sanitize_remote_message};
+    use super::{ErrorClass, ErrorCode, RemoteError};
+
+    fn error(class: ErrorClass, message: &str) -> git2::Error {
+        git2::Error::new(ErrorCode::GenericError, class, message)
+    }
+
+    #[test]
+    fn only_failures_to_reach_the_host_are_network_failures() {
+        for (class, message) in [
+            (
+                ErrorClass::Os,
+                "failed to connect to 127.0.0.1: Connection refused",
+            ),
+            (
+                ErrorClass::Net,
+                "failed to connect to example.com: Operation timed out",
+            ),
+            (
+                ErrorClass::Net,
+                "failed to resolve address for example.invalid: Name or service not known",
+            ),
+            (
+                ErrorClass::Os,
+                "failed to send request: A connection with the server could not be established",
+            ),
+        ] {
+            assert!(is_network_failure(&error(class, message)), "{message}");
+        }
+        for (class, message) in [
+            (ErrorClass::Net, "unsupported URL protocol"),
+            (ErrorClass::Net, "failed to send request: timed out"),
+            (ErrorClass::Http, "unexpected http status code: 404"),
+            (ErrorClass::Http, "failed to connect to example.com"),
+            (ErrorClass::Ssl, "failed to resolve address for example.com"),
+        ] {
+            assert!(!is_network_failure(&error(class, message)), "{message}");
+        }
+    }
+
+    #[test]
+    fn a_connect_failure_is_unreachable_only_for_a_host_and_not_after_a_cancel() {
+        let refused = || {
+            error(
+                ErrorClass::Os,
+                "failed to connect to 127.0.0.1: Connection refused",
+            )
+        };
+        assert!(matches!(
+            connect_error(&|| false, refused(), false),
+            RemoteError::Unreachable(_)
+        ));
+        assert!(matches!(
+            connect_error(&|| false, refused(), true),
+            RemoteError::Git(_)
+        ));
+        assert!(matches!(
+            connect_error(&|| true, refused(), false),
+            RemoteError::Cancelled
+        ));
+        let status = error(ErrorClass::Http, "unexpected http status code: 404");
+        assert!(matches!(
+            connect_error(&|| false, status, false),
+            RemoteError::Git(_)
+        ));
+    }
+
+    #[test]
+    fn paths_are_local_and_hosts_are_not() {
+        for local in [
+            "/srv/repo.git",
+            "file:///srv/repo.git",
+            "../repo.git",
+            "repo.git",
+            "./a:b",
+        ] {
+            assert!(is_local_url(local), "{local}");
+        }
+        #[cfg(windows)]
+        assert!(is_local_url(r"C:\repos\x"));
+        for remote in [
+            "https://example.com/repo.git",
+            "http://127.0.0.1:9/repo.git",
+            "ssh://git@example.com/repo.git",
+            "git://example.com/repo.git",
+            "git@example.com:owner/repo.git",
+            "example.com:repo.git",
+        ] {
+            assert!(!is_local_url(remote), "{remote}");
+        }
+    }
 
     #[test]
     fn arbitrary_remote_messages_are_dropped_before_progress_records_are_built() {
@@ -356,6 +446,11 @@ pub enum RemoteError {
     StaleLease,
     #[error("the transfer was cancelled")]
     Cancelled,
+    /// Connecting to the remote failed at the network level (the host name did not resolve, the
+    /// connection was refused or timed out) before anything was transferred (#462). Reported
+    /// as `TransferFailed`, like any other transport failure.
+    #[error("could not reach the remote: {0}")]
+    Unreachable(git2::Error),
     /// `push.default` does not settle where `local_branch` goes on `remote` (e.g. `simple` with a
     /// differently named upstream): the caller must ask, e.g. with the "Push to…" dialog.
     #[error(
@@ -437,6 +532,44 @@ pub fn fetch_remote(
         credentials,
         reporter,
         cancel,
+        None,
+    )
+}
+
+/// Told when a fetch has connected to its remote (#462): the remote answered and sent its
+/// references, and nothing has been downloaded or written yet.
+pub trait ConnectWatch {
+    /// `false` stops the fetch there, as `Cancelled`, before it downloads or writes anything.
+    fn connected(&self) -> bool;
+}
+
+/// `fetch_remote`, reporting progress as `operation` and telling `watch` once connected, so a
+/// caller waiting on another thread can tell a fetch still connecting (which no callback
+/// interrupts) from one that is transferring, and give up on the first safely: a fetch whose
+/// `watch` answers `false` writes nothing. A connect that fails at the network level is
+/// `RemoteError::Unreachable`.
+#[allow(clippy::too_many_arguments)]
+pub fn fetch_remote_watched(
+    operation: TransferOperation,
+    repo: &Repository,
+    remote_name: &str,
+    prune: Option<bool>,
+    operation_id: &str,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+    watch: &dyn ConnectWatch,
+) -> Result<(), RemoteError> {
+    fetch_with(
+        repo,
+        remote_name,
+        prune,
+        operation,
+        operation_id,
+        credentials,
+        reporter,
+        cancel,
+        Some(watch),
     )
 }
 
@@ -496,6 +629,7 @@ pub fn fetch_all_as<'c>(
                 provider.as_mut(),
                 reporter,
                 cancel,
+                None,
             )
         });
         match result {
@@ -517,10 +651,28 @@ fn fetch_with(
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
+    watch: Option<&dyn ConnectWatch>,
 ) -> Result<(), RemoteError> {
     let mut remote = repo.find_remote(remote_name)?;
     let credentials = RefCell::new(credentials);
     let reporter = RefCell::new(reporter);
+
+    // Connect first, on its own: `fetch` below reuses this connection (libgit2's
+    // `connect_or_reset_options`), so the fetch is the same, but the caller learns when the
+    // remote answered (`watch`), and a network-level connect failure is told apart from a
+    // failure later in the transfer (#462).
+    let mut connect_callbacks = RemoteCallbacks::new();
+    connect_callbacks.credentials(|url, username, allowed| {
+        credentials.borrow_mut().credential(url, username, allowed)
+    });
+    let local = !remote.url().is_ok_and(|url| !is_local_url(url));
+    let mut connection = remote
+        .connect_auth(Direction::Fetch, Some(connect_callbacks), None)
+        .map_err(|error| connect_error(cancel, error, local))?;
+    if watch.is_some_and(|watch| !watch.connected()) || cancel() {
+        return Err(RemoteError::Cancelled);
+    }
+
     let mut callbacks = RemoteCallbacks::new();
 
     callbacks.credentials(|url, username, allowed| {
@@ -575,7 +727,10 @@ fn fetch_with(
     let mut options = FetchOptions::new();
     options.remote_callbacks(callbacks);
     options.prune(fetch_prune(prune));
-    match remote.fetch(&[] as &[&str], Some(&mut options), None) {
+    match connection
+        .remote()
+        .fetch(&[] as &[&str], Some(&mut options), None)
+    {
         Ok(()) => Ok(()),
         Err(error) => Err(cancellation_or(cancel, error)),
     }
@@ -589,6 +744,52 @@ fn cancellation_or(cancel: &dyn Fn() -> bool, error: git2::Error) -> RemoteError
         RemoteError::Cancelled
     } else {
         RemoteError::Git(error)
+    }
+}
+
+/// Classifies a failed connect: a cancel, a network-level failure (`Unreachable`), or any other
+/// error (credentials, HTTP status, TLS, a local path that isn't a repository). A remote on the
+/// file system is never unreachable: on Windows libgit2 reads a missing `C:\…` path as an
+/// SSH host `C` and fails to resolve it.
+fn connect_error(cancel: &dyn Fn() -> bool, error: git2::Error, local: bool) -> RemoteError {
+    if cancel() {
+        RemoteError::Cancelled
+    } else if !local && is_network_failure(&error) {
+        RemoteError::Unreachable(error)
+    } else {
+        RemoteError::Git(error)
+    }
+}
+
+/// A remote URL that names a path, not a host: `file://`, or an absolute or relative path.
+fn is_local_url(url: &str) -> bool {
+    if url.starts_with("file://") || std::path::Path::new(url).is_absolute() {
+        return true;
+    }
+    // `scheme://` and scp-like `[user@]host:path` name a host; anything else is a path.
+    !(url.contains("://")
+        || url
+            .split_once(':')
+            .is_some_and(|(host, _)| !host.contains('/')))
+}
+
+/// libgit2 gives no error code for a host it couldn't reach, only its messages. Its socket
+/// stream (HTTP(S) and SSH on Unix, SSH on Windows): the name didn't resolve, or no address
+/// accepted the connection (refused, unreachable, timed out). WinHTTP (HTTP(S) on Windows): the
+/// request could not be sent, with the system's reason (class `Os`). Other errors (an unsupported
+/// URL, a protocol error, an HTTP status) are not about reaching the host. Pinned by
+/// `a_fetch_whose_connection_is_refused_is_unreachable` and
+/// `fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref`.
+fn is_network_failure(error: &git2::Error) -> bool {
+    let message = error.message();
+    match error.class() {
+        ErrorClass::Net | ErrorClass::Os => {
+            message.starts_with("failed to connect to ")
+                || message.starts_with("failed to resolve address for ")
+                || (error.class() == ErrorClass::Os
+                    && message.starts_with("failed to send request: "))
+        }
+        _ => false,
     }
 }
 

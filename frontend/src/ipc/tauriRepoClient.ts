@@ -287,9 +287,9 @@ export const tauriRepoClient: RepoClient = {
     await transferListenersReady;
     return loggedInvoke<string>("fetch_all_remotes", { repoPath, prune });
   },
-  backgroundFetch: async (repoPath: string, prune: boolean | null) => {
+  backgroundFetch: async (repoPath: string, prune: boolean | null, intervalMinutes: number) => {
     await transferListenersReady;
-    return loggedInvoke<string | null>("background_fetch", { repoPath, prune });
+    return loggedInvoke<string | null>("background_fetch", { repoPath, prune, intervalMinutes });
   },
   pushBranch: async (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean) => {
     await transferListenersReady;
