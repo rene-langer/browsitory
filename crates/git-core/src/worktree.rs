@@ -69,6 +69,10 @@ pub enum WorktreeError {
     },
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// The tree holds a case pair while `core.ignorecase` is on: the new worktree's checkout
+    /// would keep only one of its names (#532).
+    #[error(transparent)]
+    CasePairBroughtIn(#[from] crate::CasePairBroughtIn),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
@@ -340,6 +344,13 @@ pub fn create_worktree_with(
     let tree = commit.tree()?;
     crate::worktree_guard::refuse_case_collision_if::<WorktreeError, &str>(
         case_matters,
+        &crate::worktree_guard::GuardSource::Tree(&tree),
+        None,
+    )?;
+    // The new worktree's checkout starts from an empty index: with `core.ignorecase` on,
+    // libgit2's ignore-case index keeps only one name of any case pair the tree holds (#532).
+    crate::worktree_guard::refuse_case_pair_brought_in::<WorktreeError>(
+        repo,
         &crate::worktree_guard::GuardSource::Tree(&tree),
         None,
     )?;
