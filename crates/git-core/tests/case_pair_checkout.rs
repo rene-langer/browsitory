@@ -576,3 +576,62 @@ fn cherry_pick_abort_keeps_an_edit_to_one_of_a_case_pair() {
         }
     }
 }
+
+#[test]
+fn cherry_pick_abort_after_a_conflict_on_one_of_a_case_pair() {
+    // #543: a conflict on a name of the pair is the pick's own, never a local change: Abort
+    // goes ahead, puts HEAD's file back and removes the picked name's.
+    for pair in CASE_PAIRS {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), pair.0, "first\n");
+        commit_all(&repo, "base");
+        {
+            let base = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("side", &base, false).unwrap();
+        }
+        write_file(dir.path(), pair.0, "main\n");
+        commit_all(&repo, "main");
+        let main = head_id(&repo);
+        let main_ref = repo.head().unwrap().name().unwrap().to_string();
+        repo.set_head("refs/heads/side").unwrap();
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.force();
+        repo.checkout_head(Some(&mut checkout)).unwrap();
+        write_file(dir.path(), pair.0, "side\n");
+        write_file(dir.path(), pair.1, "second\n");
+        commit_all(&repo, "side");
+        let side = head_id(&repo);
+        repo.set_head(&main_ref).unwrap();
+        repo.checkout_head(Some(&mut checkout)).unwrap();
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", true)
+            .unwrap();
+        drop(repo);
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        repo.cherrypick(
+            &repo
+                .find_commit(git2::Oid::from_str(&side).unwrap())
+                .unwrap(),
+            None,
+        )
+        .unwrap();
+        assert!(repo.index().unwrap().has_conflicts(), "{pair:?}");
+        assert_eq!(
+            read(dir.path(), pair.1).as_deref(),
+            Some("second\n"),
+            "{pair:?}"
+        );
+
+        let result = git_core::merge::abort_merge(&repo);
+
+        assert!(result.is_ok(), "{pair:?}: {result:?}");
+        assert_eq!(head_id(&repo), main, "{pair:?}");
+        assert_eq!(
+            read(dir.path(), pair.0).as_deref(),
+            Some("main\n"),
+            "{pair:?}"
+        );
+        assert_eq!(read(dir.path(), pair.1), None, "{pair:?}");
+    }
+}
