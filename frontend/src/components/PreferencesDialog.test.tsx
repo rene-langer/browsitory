@@ -201,7 +201,7 @@ describe("DiffSection", () => {
   it("loads and saves the word wrap setting with the other diff settings", async () => {
     const setDiffSettings = vi.fn(async () => {});
     const client = {
-      getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const }),
+      getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const, algorithm: "Default" as const }),
       setDiffSettings,
     } as Partial<RepoClient> as RepoClient;
     render(
@@ -222,6 +222,39 @@ describe("DiffSection", () => {
         contextLines: 5,
         syntaxHighlight: true,
         wordWrap: "Auto",
+        algorithm: "Default",
+      }),
+    );
+  });
+
+  it("loads and saves the diff algorithm (#469)", async () => {
+    const setDiffSettings = vi.fn(async () => {});
+    const client = {
+      getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Patience" as const }),
+      setDiffSettings,
+    } as Partial<RepoClient> as RepoClient;
+    render(
+      <DiffSettingsProvider client={client}>
+        <PreferencesDialog onClose={vi.fn()}>
+          <DiffSection />
+        </PreferencesDialog>
+      </DiffSettingsProvider>,
+    );
+    const algorithm = within(screen.getByRole("group", { name: "Diff" })).getByRole("combobox", { name: "Diff algorithm" });
+    await waitFor(() => expect(algorithm).toHaveValue("Patience"));
+    expect(within(algorithm).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Default (Myers)",
+      "Patience",
+      "Minimal",
+    ]);
+    fireEvent.change(algorithm, { target: { value: "Minimal" } });
+    await waitFor(() =>
+      expect(setDiffSettings).toHaveBeenCalledWith({
+        ignoreWhitespace: false,
+        contextLines: 3,
+        syntaxHighlight: true,
+        wordWrap: "Auto",
+        algorithm: "Minimal",
       }),
     );
   });

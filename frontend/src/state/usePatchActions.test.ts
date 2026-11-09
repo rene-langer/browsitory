@@ -34,7 +34,7 @@ const change: CommitChangeRequest = {
   commitId: "1234567890abcdef",
   path: "a.txt",
   oldPath: null,
-  hunk: { oldStart: 3, newStart: 3, contextLines: 3 },
+  hunk: { oldStart: 3, newStart: 3, contextLines: 3, algorithm: "Patience" },
   reverse: true,
   stage: false,
 };

@@ -134,6 +134,18 @@ pub struct DiffSettings {
     pub context_lines: u32,
     pub syntax_highlight: bool,
     pub word_wrap: WordWrap,
+    pub algorithm: DiffAlgorithm,
+}
+
+/// The diff algorithm every diff and hunk/line action uses (#469). Stored as `"default"`,
+/// `"patience"` or `"minimal"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffAlgorithm {
+    #[default]
+    Default,
+    Patience,
+    Minimal,
 }
 
 /// Whether diff lines wrap at the pane's width (`On`) or scroll sideways (`Off`). `Auto` leaves
@@ -155,6 +167,7 @@ impl Default for DiffSettings {
             context_lines: 3,
             syntax_highlight: true,
             word_wrap: WordWrap::Auto,
+            algorithm: DiffAlgorithm::Default,
         }
     }
 }

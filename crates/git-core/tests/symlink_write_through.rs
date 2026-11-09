@@ -259,7 +259,13 @@ fn discard_hunk_leaf_never_writes_through() {
     f.link_leaf();
     let hunks = git_core::diff::working_diff(&f.repo, "tc", false, &Default::default()).unwrap();
     for hunk in hunks {
-        let _ = git_core::stage::discard_hunk(&f.repo, "tc", hunk.old_start, hunk.new_start, 3);
+        let _ = git_core::stage::discard_hunk(
+            &f.repo,
+            "tc",
+            hunk.old_start,
+            hunk.new_start,
+            common::hunk_ctx(3),
+        );
     }
     f.untouched();
 }
@@ -1436,7 +1442,13 @@ fn stage_hunk_ancestor_is_refused() {
     f.link_ancestor();
     let hunks = git_core::diff::working_diff(&f.repo, "d/f", false, &Default::default()).unwrap();
     for hunk in hunks {
-        let result = git_core::stage::stage_hunk(&f.repo, "d/f", hunk.old_start, hunk.new_start, 3);
+        let result = git_core::stage::stage_hunk(
+            &f.repo,
+            "d/f",
+            hunk.old_start,
+            hunk.new_start,
+            common::hunk_ctx(3),
+        );
         assert!(
             matches!(result, Err(StageError::BeyondSymlink(_))),
             "{result:?}"
@@ -1918,8 +1930,13 @@ fn discard_hunk_below_the_linked_folder_is_beyond_a_symbolic_link() {
     let hunks = git_core::diff::working_diff(&f.repo, "d/f", false, &Default::default()).unwrap();
     assert!(!hunks.is_empty());
     for hunk in hunks {
-        let result =
-            git_core::stage::discard_hunk(&f.repo, "d/f", hunk.old_start, hunk.new_start, 3);
+        let result = git_core::stage::discard_hunk(
+            &f.repo,
+            "d/f",
+            hunk.old_start,
+            hunk.new_start,
+            common::hunk_ctx(3),
+        );
         assert!(
             matches!(&result, Err(StageError::BeyondSymlink(path)) if path == "d/f"),
             "{result:?}"

@@ -914,7 +914,7 @@ describe("buildCommands", () => {
       ],
     ])("omits the stash commands while %s, like DiffPane's Stash button", (_label, overrides) => {
       const ids = buildCommands(makeAppState(overrides), undefined, [], undefined, undefined, undefined, undefined, {
-        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" },
+        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
         update: vi.fn(),
         currentFile: "a.txt",
         requestDiscardCurrentFile: vi.fn(),
@@ -1364,7 +1364,7 @@ describe("history commands", () => {
 });
 
 describe("diff option and discard commands", () => {
-  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const };
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const };
   const build = (state: ReturnType<typeof makeAppState>, extra: Record<string, unknown> = {}) => {
     const diffCommands = {
       settings,
@@ -1416,6 +1416,29 @@ describe("diff option and discard commands", () => {
     expect(diffCommands.update).toHaveBeenCalledWith({ syntaxHighlight: false });
     expect(commands.some((c) => c.id === "discard-current-file")).toBe(false);
     expect(commands.some((c) => c.id === "discard-all-unstaged")).toBe(false);
+  });
+
+  it("offers wrap lines and show whole file for the current diff (#469)", () => {
+    const currentDiff = { path: "src/a.ts", canShowWholeFile: true, toggleWrap: vi.fn(), toggleWholeFile: vi.fn() };
+    const { commands } = build(makeAppState(), { currentDiff });
+    const wrap = commands.find((c) => c.id === "toggle-wrap-lines")!;
+    expect(wrap.label).toBe("Toggle wrap lines (src/a.ts)");
+    wrap.run();
+    expect(currentDiff.toggleWrap).toHaveBeenCalled();
+    const whole = commands.find((c) => c.id === "toggle-show-whole-file")!;
+    expect(whole.label).toBe("Toggle show whole file (src/a.ts)");
+    whole.run();
+    expect(currentDiff.toggleWholeFile).toHaveBeenCalled();
+  });
+
+  it("omits show whole file where the current diff has none, and both without a current diff", () => {
+    const currentDiff = { path: null, canShowWholeFile: false, toggleWrap: vi.fn(), toggleWholeFile: vi.fn() };
+    const ids = build(makeAppState(), { currentDiff }).commands.map((c) => c.id);
+    expect(ids).toContain("toggle-wrap-lines");
+    expect(ids).not.toContain("toggle-show-whole-file");
+    const none = build(makeAppState()).commands.map((c) => c.id);
+    expect(none).not.toContain("toggle-wrap-lines");
+    expect(none).not.toContain("toggle-show-whole-file");
   });
 
   it("offers discard commands that only request a confirmation", () => {
@@ -1525,7 +1548,7 @@ describe("preferences and external tool commands", () => {
     onOpenCurrentFileInDiffTool: vi.fn(),
   });
   const diffCommands = (currentFile: string | null) => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const },
     update: vi.fn(),
     currentFile,
     requestDiscardCurrentFile: vi.fn(),

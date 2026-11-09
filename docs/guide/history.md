@@ -83,3 +83,16 @@ working tree, commits, stashes and compares. In the working tree the whole file 
 **Stage hunk** then stages every change in the file, and selected lines stage just those lines.
 A file longer than 10,000 lines is too long to show whole: a note says so and the diff keeps the
 normal context.
+
+The command palette also has **Toggle wrap lines** and **Toggle show whole file**. They act on
+the current diff: the one you last clicked or moved the focus into, or the working tree's current
+file. Without either, they act on the first diff on screen.
+
+**Preferences → Diff → Diff algorithm** chooses how the old and new lines are lined up, for every
+diff: **Default** (Myers, what `git diff` uses), **Patience** or **Minimal**. Patience lines up
+the lines that occur once on each side first, which often keeps a moved or reordered block of
+code readable where Default interleaves it with unrelated braces and blank lines. Minimal
+searches longer for the smallest diff. The choice also changes where hunks start and end, so
+hunk and line actions always work on the hunks as you see them: staging, unstaging, discarding,
+reverting or applying a hunk or lines uses the algorithm the diff was shown with. git's
+`histogram` algorithm isn't offered.

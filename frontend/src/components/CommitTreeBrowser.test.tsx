@@ -172,6 +172,7 @@ describe("CommitTreeBrowser", () => {
       expect(client.getWorkingTreeCompareDiff).toHaveBeenCalledWith("/repo", COMMIT, "README.txt", null, {
         ignoreWhitespace: false,
         contextLines: 3,
+        algorithm: "Default",
       }),
     );
     expect(screen.getByRole("button", { name: "Compare with working tree" })).toHaveAttribute("aria-pressed", "true");

@@ -896,8 +896,14 @@ fn discarding_a_hunk_or_lines_below_a_folder_that_is_now_a_file_names_the_file()
     for (rel, file) in [("d/f", "d"), ("a/b/c", "a")] {
         let (dir, repo) = tracked_below_a_file(rel, file);
         let hunk = first_hunk(&repo, rel);
-        let err = git_core::stage::discard_hunk(&repo, rel, hunk.old_start, hunk.new_start, 3)
-            .unwrap_err();
+        let err = git_core::stage::discard_hunk(
+            &repo,
+            rel,
+            hunk.old_start,
+            hunk.new_start,
+            common::hunk_ctx(3),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, StageError::FolderIsNowAFile { ref parent, .. } if parent == file),
             "{rel}: {err:?}"
@@ -910,7 +916,7 @@ fn discarding_a_hunk_or_lines_below_a_folder_that_is_now_a_file_names_the_file()
             rel,
             hunk.old_start,
             hunk.new_start,
-            3,
+            common::hunk_ctx(3),
             &[0],
             &expected,
         )
@@ -937,7 +943,7 @@ fn staging_lines_below_a_folder_that_is_now_a_file_leaves_the_file() {
             rel,
             hunk.old_start,
             hunk.new_start,
-            3,
+            common::hunk_ctx(3),
             &[0],
             &expected,
         )

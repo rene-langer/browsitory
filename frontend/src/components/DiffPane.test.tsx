@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_DIFF_OPTIONS, RepoError, WHOLE_FILE_CONTEXT_LINES, WHOLE_FILE_LINE_LIMIT } from "../ipc/RepoClient";
-import type { BlameLine, ConflictSegment, DiffHunk, DiffOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import type { BlameLine, ConflictSegment, DiffAlgorithm, DiffHunk, DiffOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { CommitMessageSettingsContext } from "../state/useCommitMessageSettings";
@@ -321,7 +321,7 @@ describe("DiffPane", () => {
 
       fireEvent.click(await screen.findByText("Stage hunk"));
 
-      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4, 3);
+      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4, { contextLines: 3, algorithm: "Default" });
     });
 
     it("refetches only the file whose hunk was staged, not every other open section (PERF-001)", async () => {
@@ -381,7 +381,7 @@ describe("DiffPane", () => {
       getWorkingDiff.mockClear();
 
       fireEvent.click(await screen.findByText("Stage hunk"));
-      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4, 3);
+      expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4, { contextLines: 3, algorithm: "Default" });
       // Nothing refetches while the mutation is still in flight — a refetch now could read the
       // index before the backend applied the change, with nothing to correct it afterward.
       await act(async () => {});
@@ -1591,7 +1591,7 @@ describe("DiffPane line staging", () => {
   const TestDiffSettings = ({ ignoreWhitespace, children }: { ignoreWhitespace: boolean; children: ReactNode }) => (
     <DiffSettingsContext.Provider
       value={{
-        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" },
+        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
         update: () => {},
         error: null,
         dismissError: () => {},
@@ -1611,7 +1611,7 @@ describe("DiffPane line staging", () => {
     await screen.findByText("Stage hunk");
     fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
     fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
-    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 3, [2], ["a\n", "b\n", "B\n", "c\n", "d\n"]));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: 3, algorithm: "Default" }, [2], ["a\n", "b\n", "B\n", "c\n", "d\n"]));
   });
 
   it("a staged section never discards, with or without a line selection", async () => {
@@ -1703,7 +1703,7 @@ describe("DiffPane patch actions (#448)", () => {
       commitId: "abcdef1234567890",
       path: "src/f.txt",
       oldPath: null,
-      hunk: { oldStart: 7, newStart: 7, contextLines: 3 },
+      hunk: { oldStart: 7, newStart: 7, contextLines: 3, algorithm: "Default" },
       reverse: true,
       stage: false,
     });
@@ -1744,12 +1744,12 @@ describe("DiffPane diff options contract", () => {
 
   function pane(
     client: RepoClient,
-    settings: { ignoreWhitespace: boolean; contextLines: number },
+    settings: { ignoreWhitespace: boolean; contextLines: number; algorithm?: DiffAlgorithm },
     handlers: Partial<React.ComponentProps<typeof DiffPane>>,
   ) {
     return (
       <DiffSettingsContext.Provider
-        value={{ settings: { ...settings, syntaxHighlight: false, wordWrap: "Auto" }, update: () => {}, error: null, dismissError: () => {} }}
+        value={{ settings: { algorithm: "Default", ...settings, syntaxHighlight: false, wordWrap: "Auto" }, update: () => {}, error: null, dismissError: () => {} }}
       >
         <DiffPane
           repoPath={TEST_REPO_PATH}
@@ -1781,12 +1781,12 @@ describe("DiffPane diff options contract", () => {
       pane(fakeClient({ getWorkingDiff }), { ignoreWhitespace: false, contextLines: 7 }, { onStageHunk, onStageLines }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
-    expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 7 });
-    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, 7));
+    expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 7, algorithm: "Default" });
+    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: 7, algorithm: "Default" }));
 
     fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
     fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
-    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, 7, [2], shown));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: 7, algorithm: "Default" }, [2], shown));
   });
 
   it("Show whole file refetches with whole-file context and forwards it to hunk and line actions", async () => {
@@ -1802,17 +1802,18 @@ describe("DiffPane diff options contract", () => {
       expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, {
         ignoreWhitespace: false,
         contextLines: WHOLE_FILE_CONTEXT_LINES,
+        algorithm: "Default",
       }),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
-    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, WHOLE_FILE_CONTEXT_LINES));
+    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: WHOLE_FILE_CONTEXT_LINES, algorithm: "Default" }));
     fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
     fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
-    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, WHOLE_FILE_CONTEXT_LINES, [2], shown));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: WHOLE_FILE_CONTEXT_LINES, algorithm: "Default" }, [2], shown));
 
     fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
     await waitFor(() =>
-      expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3 }),
+      expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }),
     );
   });
 
@@ -1832,7 +1833,7 @@ describe("DiffPane diff options contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
     expect(await screen.findByText(/too long to show whole \(10,001 lines\)/)).toBeInTheDocument();
     await waitFor(() =>
-      expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3 }),
+      expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }),
     );
     expect(screen.queryByText("l5000")).toBeNull();
     expect(screen.getByRole("button", { name: "Stage hunk" })).toBeInTheDocument();
@@ -1852,7 +1853,7 @@ describe("DiffPane diff options contract", () => {
 
     rerender(pane(client, { ignoreWhitespace: false, contextLines: 7 }, { onStageHunk }));
 
-    expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 7 });
+    expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 7, algorithm: "Default" });
     expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Discard hunk" })).toBeNull();
     expect(screen.queryByRole("group", { name: "Diff hunks" })).toBeNull();
@@ -1861,8 +1862,66 @@ describe("DiffPane diff options contract", () => {
 
     await act(async () => pending.resolve([lineHunk]));
     fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
-    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, 7));
+    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: 7, algorithm: "Default" }));
     expect(onStageHunk).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches with the diff algorithm and passes the shown diff's algorithm to every hunk and line action (#469)", async () => {
+    const getWorkingDiff = vi.fn(async () => [lineHunk]);
+    const onStageHunk = vi.fn();
+    const onDiscardHunk = vi.fn();
+    const onStageLines = vi.fn();
+    const onDiscardLines = vi.fn();
+    const { container } = render(
+      pane(
+        fakeClient({ getWorkingDiff }),
+        { ignoreWhitespace: false, contextLines: 5, algorithm: "Patience" },
+        { onStageHunk, onDiscardHunk, onStageLines, onDiscardLines },
+      ),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
+    expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "f.txt", false, {
+      ignoreWhitespace: false,
+      contextLines: 5,
+      algorithm: "Patience",
+    });
+    const hunk = { contextLines: 5, algorithm: "Patience" };
+    await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, hunk));
+    fireEvent.click(screen.getByText("Discard hunk"));
+    fireEvent.click(screen.getByText("Confirm discard"));
+    await waitFor(() => expect(onDiscardHunk).toHaveBeenCalledWith("f.txt", 1, 1, hunk));
+
+    fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, hunk, [2], shown));
+  });
+
+  it("offers no hunk action while an algorithm change is refetching, then uses the new algorithm", async () => {
+    const pending = deferred<DiffHunk[]>();
+    const getWorkingDiff = vi
+      .fn<RepoClient["getWorkingDiff"]>()
+      .mockResolvedValue([lineHunk])
+      .mockResolvedValueOnce([lineHunk])
+      .mockReturnValueOnce(pending.promise);
+    const onStageHunk = vi.fn();
+    const client = fakeClient({ getWorkingDiff });
+    const { rerender } = render(pane(client, { ignoreWhitespace: false, contextLines: 3 }, { onStageHunk }));
+    await screen.findByRole("button", { name: "Stage hunk" });
+
+    rerender(pane(client, { ignoreWhitespace: false, contextLines: 3, algorithm: "Minimal" }, { onStageHunk }));
+    expect(getWorkingDiff).toHaveBeenLastCalledWith(TEST_REPO_PATH, "f.txt", false, {
+      ignoreWhitespace: false,
+      contextLines: 3,
+      algorithm: "Minimal",
+    });
+    // The shown hunks are Myers hunks: staging one under Minimal could pick other lines.
+    expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
+
+    await act(async () => pending.resolve([lineHunk]));
+    fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
+    await waitFor(() =>
+      expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: 3, algorithm: "Minimal" }),
+    );
   });
 
   it("keeps partial actions off until hunks fetched without ignore-whitespace arrive", async () => {

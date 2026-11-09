@@ -25,7 +25,7 @@ the right:
   your system's setting.
 - The gear button opens **Preferences**: the commit message settings, **Fetch automatically**
   (see [Branches and remotes](branches-and-remotes.md#fetching-automatically)), diff word wrap
-  (see [Diff options](history.md#diff-options)), and your editor, terminal and diff tools (see
+  and diff algorithm (see [Diff options](history.md#diff-options)), and your editor, terminal and diff tools (see
   [External tools](external-tools.md)).
 - The sparkle button (**What's new**) opens the **Release notes**: what changed in each version. They also open
   by themselves the first time you start a new version. The buttons at the bottom stay in view

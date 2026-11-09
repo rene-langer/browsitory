@@ -6,6 +6,7 @@ import { toCloneError, toRepoError } from "./RepoClient";
 import type {
   AmendOptions,
   CommitChangeRequest,
+  HunkOptions,
   PatchContent,
   PatchSource,
   CommitMessageSettings,
@@ -196,18 +197,18 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke<CommitSignature>("get_commit_signature", { repoPath, commitId }),
   stageFile: (repoPath: string, path: string) => loggedInvoke("stage_file", { repoPath, path }),
   unstageFile: (repoPath: string, path: string) => loggedInvoke("unstage_file", { repoPath, path }),
-  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
-    loggedInvoke("stage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
-  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
-    loggedInvoke("unstage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
-  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
-    loggedInvoke("discard_hunk", { repoPath, path, oldStart, newStart, contextLines }),
-  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
-    loggedInvoke("stage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
-  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
-    loggedInvoke("unstage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
-  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
-    loggedInvoke("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
+    loggedInvoke("stage_hunk", { repoPath, path, oldStart, newStart, ...hunk }),
+  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
+    loggedInvoke("unstage_hunk", { repoPath, path, oldStart, newStart, ...hunk }),
+  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
+    loggedInvoke("discard_hunk", { repoPath, path, oldStart, newStart, ...hunk }),
+  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
+    loggedInvoke("stage_lines", { repoPath, path, oldStart, newStart, ...hunk, lineIndices, expectedLines }),
+  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
+    loggedInvoke("unstage_lines", { repoPath, path, oldStart, newStart, ...hunk, lineIndices, expectedLines }),
+  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
+    loggedInvoke("discard_lines", { repoPath, path, oldStart, newStart, ...hunk, lineIndices, expectedLines }),
   discardFile: (repoPath: string, path: string) => loggedInvoke("discard_file", { repoPath, path }),
   discardAllUnstaged: (repoPath: string, paths: string[]) => loggedInvoke("discard_all_unstaged", { repoPath, paths }),
   applyCommitChange: (repoPath: string, change: CommitChangeRequest) =>

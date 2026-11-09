@@ -306,3 +306,12 @@ pub fn hold_open_without_share_delete(path: &Path) -> std::fs::File {
         .open(path)
         .unwrap()
 }
+
+/// Hunk options with `context_lines` and the default algorithm, as most staging tests use.
+#[allow(dead_code)]
+pub fn hunk_ctx(context_lines: u32) -> git_core::diff::HunkOptions {
+    git_core::diff::HunkOptions {
+        context_lines,
+        algorithm: git_core::diff::DiffAlgorithm::Default,
+    }
+}

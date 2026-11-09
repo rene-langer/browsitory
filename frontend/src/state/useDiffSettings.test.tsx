@@ -5,7 +5,7 @@ import { useDiffSettings, useDiffSettingsContext } from "./useDiffSettings";
 
 function clientWith(overrides: Partial<RepoClient>): RepoClient {
   return {
-    getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const })),
+    getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const })),
     setDiffSettings: vi.fn(async () => {}),
     ...overrides,
   } as unknown as RepoClient; // only the two settings methods are used by this hook
@@ -13,7 +13,7 @@ function clientWith(overrides: Partial<RepoClient>): RepoClient {
 
 describe("useDiffSettings", () => {
   it("loads persisted settings", async () => {
-    const client = clientWith({ getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: true, contextLines: 7, syntaxHighlight: false, wordWrap: "Auto" as const })) });
+    const client = clientWith({ getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: true, contextLines: 7, syntaxHighlight: false, wordWrap: "Auto" as const, algorithm: "Default" as const })) });
     const { result } = renderHook(() => useDiffSettings(client));
     await waitFor(() => expect(result.current.settings.contextLines).toBe(7));
     expect(result.current.settings.ignoreWhitespace).toBe(true);
@@ -26,7 +26,7 @@ describe("useDiffSettings", () => {
     act(() => result.current.update({ contextLines: 5 }));
     expect(result.current.settings.contextLines).toBe(5);
     await waitFor(() =>
-      expect(client.setDiffSettings).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 5, syntaxHighlight: true, wordWrap: "Auto" as const }),
+      expect(client.setDiffSettings).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 5, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const }),
     );
   });
 
@@ -46,7 +46,7 @@ describe("useDiffSettings", () => {
     const { result } = renderHook(() => useDiffSettings(client));
     await waitFor(() => expect(result.current.settings.contextLines).toBe(4));
     expect(result.current.settings.wordWrap).toBe("Auto");
-    act(() => result.current.update({ wordWrap: "Off" }));
+    act(() => result.current.update({ wordWrap: "Off", algorithm: "Default" }));
     expect(result.current.settings.wordWrap).toBe("Off");
   });
 
@@ -67,6 +67,6 @@ describe("useDiffSettings", () => {
 
   it("falls back to defaults without a provider", () => {
     const { result } = renderHook(() => useDiffSettingsContext());
-    expect(result.current.settings).toEqual({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const });
+    expect(result.current.settings).toEqual({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const });
   });
 });

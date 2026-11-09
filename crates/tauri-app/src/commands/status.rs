@@ -275,10 +275,12 @@ pub async fn stage_hunk(
     old_start: u32,
     new_start: u32,
     context_lines: u32,
+    algorithm: repo_service::wire::DiffAlgorithmDto,
     state: State<'_, AppState>,
 ) -> Result<(), ErrorDto> {
+    let hunk = repo_service::wire::hunk_options(context_lines, algorithm);
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.stage_hunk(path, old_start, new_start, context_lines))
+        .call(move |w| w.stage_hunk(path, old_start, new_start, hunk))
         .await
 }
 
@@ -289,10 +291,12 @@ pub async fn unstage_hunk(
     old_start: u32,
     new_start: u32,
     context_lines: u32,
+    algorithm: repo_service::wire::DiffAlgorithmDto,
     state: State<'_, AppState>,
 ) -> Result<(), ErrorDto> {
+    let hunk = repo_service::wire::hunk_options(context_lines, algorithm);
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.unstage_hunk(path, old_start, new_start, context_lines))
+        .call(move |w| w.unstage_hunk(path, old_start, new_start, hunk))
         .await
 }
 
@@ -303,10 +307,12 @@ pub async fn discard_hunk(
     old_start: u32,
     new_start: u32,
     context_lines: u32,
+    algorithm: repo_service::wire::DiffAlgorithmDto,
     state: State<'_, AppState>,
 ) -> Result<(), ErrorDto> {
+    let hunk = repo_service::wire::hunk_options(context_lines, algorithm);
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.discard_hunk(path, old_start, new_start, context_lines))
+        .call(move |w| w.discard_hunk(path, old_start, new_start, hunk))
         .await
 }
 
@@ -319,17 +325,19 @@ pub async fn stage_lines(
     old_start: u32,
     new_start: u32,
     context_lines: u32,
+    algorithm: repo_service::wire::DiffAlgorithmDto,
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), ErrorDto> {
+    let hunk = repo_service::wire::hunk_options(context_lines, algorithm);
     repo_worker(&state, &repo_path)?
         .call(move |w| {
             w.stage_lines(
                 path,
                 old_start,
                 new_start,
-                context_lines,
+                hunk,
                 line_indices,
                 expected_lines,
             )
@@ -346,17 +354,19 @@ pub async fn unstage_lines(
     old_start: u32,
     new_start: u32,
     context_lines: u32,
+    algorithm: repo_service::wire::DiffAlgorithmDto,
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), ErrorDto> {
+    let hunk = repo_service::wire::hunk_options(context_lines, algorithm);
     repo_worker(&state, &repo_path)?
         .call(move |w| {
             w.unstage_lines(
                 path,
                 old_start,
                 new_start,
-                context_lines,
+                hunk,
                 line_indices,
                 expected_lines,
             )
@@ -373,17 +383,19 @@ pub async fn discard_lines(
     old_start: u32,
     new_start: u32,
     context_lines: u32,
+    algorithm: repo_service::wire::DiffAlgorithmDto,
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<(), ErrorDto> {
+    let hunk = repo_service::wire::hunk_options(context_lines, algorithm);
     repo_worker(&state, &repo_path)?
         .call(move |w| {
             w.discard_lines(
                 path,
                 old_start,
                 new_start,
-                context_lines,
+                hunk,
                 line_indices,
                 expected_lines,
             )

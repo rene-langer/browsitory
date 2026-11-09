@@ -23,21 +23,23 @@ function setup() {
   return { client, actions: result.current };
 }
 
+const HUNK = { contextLines: 5, algorithm: "Patience" } as const;
+
 describe("useStagingActions", () => {
-  it("passes contextLines through hunk actions", async () => {
+  it("passes the hunk options through hunk actions", async () => {
     const { client, actions } = setup();
-    await actions.stageHunk("f.txt", 1, 2, 5);
-    expect(client.stageHunk).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5);
+    await actions.stageHunk("f.txt", 1, 2, HUNK);
+    expect(client.stageHunk).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, HUNK);
   });
 
   it("line actions call through with repoPath", async () => {
     const { client, actions } = setup();
-    await actions.stageLines("f.txt", 1, 2, 5, [3], ["x\n"]);
-    await actions.unstageLines("f.txt", 1, 2, 5, [3], ["x\n"]);
-    await actions.discardLines("f.txt", 1, 2, 5, [3], ["x\n"]);
-    expect(client.stageLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
-    expect(client.unstageLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
-    expect(client.discardLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]);
+    await actions.stageLines("f.txt", 1, 2, HUNK, [3], ["x\n"]);
+    await actions.unstageLines("f.txt", 1, 2, HUNK, [3], ["x\n"]);
+    await actions.discardLines("f.txt", 1, 2, HUNK, [3], ["x\n"]);
+    expect(client.stageLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, HUNK, [3], ["x\n"]);
+    expect(client.unstageLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, HUNK, [3], ["x\n"]);
+    expect(client.discardLines).toHaveBeenCalledWith("/repo", "f.txt", 1, 2, HUNK, [3], ["x\n"]);
   });
 
   it("file, discard-all, ignore and restore actions call through", async () => {

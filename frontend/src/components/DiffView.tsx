@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEve
 import { MAX_CONTEXT_LINES, type DiffHunk, type DiffLine, type DiffLineOrigin } from "../ipc/RepoClient";
 import { EMPTY_SELECTION, reduceSelection, type LineSelection, type SelectionAction } from "../lib/lineSelection";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
+import { useRegisterDiffView } from "../state/useCurrentDiff";
 import { Toolbar } from "./primitives/Toolbar";
 import { wordDiff, type Segment } from "../lib/wordDiff";
 import { useHunkTokens } from "../lib/highlight";
@@ -168,6 +169,7 @@ export function DiffView({
   path,
   wholeFile,
   hunkActions,
+  current = false,
 }: {
   hunks: DiffHunk[] | null;
   onStageHunk?: (oldStart: number, newStart: number) => void;
@@ -181,6 +183,11 @@ export function DiffView({
   wholeFile?: WholeFileToggle;
   /** Extra buttons in each hunk's header (a commit's Revert hunk / Apply hunk, #448). */
   hunkActions?: (hunk: DiffHunk) => HunkHeaderAction[];
+  /**
+   * The working tree's current file: the palette's "Wrap lines" and "Show whole file" then act on
+   * this diff. Clicking or focusing a diff makes it current too.
+   */
+  current?: boolean;
 }) {
   const [previousHunks, setPreviousHunks] = useState(hunks);
   const [confirmingDiscardIndex, setConfirmingDiscardIndex] = useState<number | null>(null);
@@ -200,6 +207,12 @@ export function DiffView({
   );
   const wrap = wrapOverride ?? wrapBySetting;
   const wholeFileOn = wholeFile?.on === true;
+  const claimCurrent = useRegisterDiffView(
+    path ?? null,
+    { toggleWrap: () => setWrapOverride(!wrap), toggleWholeFile: wholeFile?.onToggle ?? null },
+    current,
+  );
+  const claimHandlers = { onPointerDownCapture: claimCurrent, onFocusCapture: claimCurrent };
 
   // A stale armed confirmation must never carry over to a different hunk list — `hunkIndex` is
   // only meaningful relative to the `hunks` array it was armed against. Reset-during-render (as
@@ -229,7 +242,7 @@ export function DiffView({
   }, []);
 
   const toolbar = (
-    <div className={styles.viewOptions}>
+    <div className={styles.viewOptions} {...claimHandlers}>
     <Toolbar aria-label="Diff view options">
       <button type="button" onClick={() => setSplit((prev) => !prev)}>
         {split ? "Unified view" : "Split view"}
@@ -429,6 +442,7 @@ export function DiffView({
       <div
         className={wrap ? styles.diff : `${styles.diff} ${styles.nowrap}`}
         data-wrap={wrap}
+        {...claimHandlers}
         {...(hasActions
           ? {
               tabIndex: 0,

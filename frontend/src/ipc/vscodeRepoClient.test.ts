@@ -148,15 +148,15 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.getExternalToolSettings(), "get_external_tool_settings", {}, { editor: null, terminal: null }],
       [() => vscodeRepoClient.setExternalToolSettings({ editor: null, terminal: "kitty" }), "set_external_tool_settings", { settings: { editor: null, terminal: "kitty" } }, null],
       [() => vscodeRepoClient.getGitTools("/r"), "get_git_tools", { repoPath: "/r" }, { diffTool: null, mergeTool: null }],
-      [() => vscodeRepoClient.getWorkingDiff("/repo", "f.txt", false, { ignoreWhitespace: true, contextLines: 5 }), "get_working_diff", { repoPath: "/repo", path: "f.txt", staged: false, opts: { ignoreWhitespace: true, contextLines: 5 }, oldPath: null }, []],
-      [() => vscodeRepoClient.getWorkingDiff("/repo", "new.txt", true, { ignoreWhitespace: true, contextLines: 5 }, "old.txt"), "get_working_diff", { repoPath: "/repo", path: "new.txt", staged: true, opts: { ignoreWhitespace: true, contextLines: 5 }, oldPath: "old.txt" }, []],
-      [() => vscodeRepoClient.getCommitDiff("/repo", "abc", "f.txt", { ignoreWhitespace: true, contextLines: 5 }), "get_commit_diff", { repoPath: "/repo", commitId: "abc", path: "f.txt", opts: { ignoreWhitespace: true, contextLines: 5 } }, []],
-      [() => vscodeRepoClient.stageHunk("/repo", "f.txt", 1, 2, 5), "stage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 }, null],
-      [() => vscodeRepoClient.unstageHunk("/repo", "f.txt", 1, 2, 5), "unstage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 }, null],
-      [() => vscodeRepoClient.discardHunk("/repo", "f.txt", 1, 2, 5), "discard_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5 }, null],
-      [() => vscodeRepoClient.stageLines("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]), "stage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3], expectedLines: ["x\n"] }, null],
-      [() => vscodeRepoClient.unstageLines("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]), "unstage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3], expectedLines: ["x\n"] }, null],
-      [() => vscodeRepoClient.discardLines("/repo", "f.txt", 1, 2, 5, [3], ["x\n"]), "discard_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, lineIndices: [3], expectedLines: ["x\n"] }, null],
+      [() => vscodeRepoClient.getWorkingDiff("/repo", "f.txt", false, { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" }), "get_working_diff", { repoPath: "/repo", path: "f.txt", staged: false, opts: { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" }, oldPath: null }, []],
+      [() => vscodeRepoClient.getWorkingDiff("/repo", "new.txt", true, { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" }, "old.txt"), "get_working_diff", { repoPath: "/repo", path: "new.txt", staged: true, opts: { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" }, oldPath: "old.txt" }, []],
+      [() => vscodeRepoClient.getCommitDiff("/repo", "abc", "f.txt", { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" }), "get_commit_diff", { repoPath: "/repo", commitId: "abc", path: "f.txt", opts: { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" } }, []],
+      [() => vscodeRepoClient.stageHunk("/repo", "f.txt", 1, 2, { contextLines: 5, algorithm: "Patience" }), "stage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, algorithm: "Patience" }, null],
+      [() => vscodeRepoClient.unstageHunk("/repo", "f.txt", 1, 2, { contextLines: 5, algorithm: "Patience" }), "unstage_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, algorithm: "Patience" }, null],
+      [() => vscodeRepoClient.discardHunk("/repo", "f.txt", 1, 2, { contextLines: 5, algorithm: "Patience" }), "discard_hunk", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, algorithm: "Patience" }, null],
+      [() => vscodeRepoClient.stageLines("/repo", "f.txt", 1, 2, { contextLines: 5, algorithm: "Patience" }, [3], ["x\n"]), "stage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, algorithm: "Patience", lineIndices: [3], expectedLines: ["x\n"] }, null],
+      [() => vscodeRepoClient.unstageLines("/repo", "f.txt", 1, 2, { contextLines: 5, algorithm: "Patience" }, [3], ["x\n"]), "unstage_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, algorithm: "Patience", lineIndices: [3], expectedLines: ["x\n"] }, null],
+      [() => vscodeRepoClient.discardLines("/repo", "f.txt", 1, 2, { contextLines: 5, algorithm: "Patience" }, [3], ["x\n"]), "discard_lines", { repoPath: "/repo", path: "f.txt", oldStart: 1, newStart: 2, contextLines: 5, algorithm: "Patience", lineIndices: [3], expectedLines: ["x\n"] }, null],
       [() => vscodeRepoClient.discardFile("/repo", "f.txt"), "discard_file", { repoPath: "/repo", path: "f.txt" }, null],
       [() => vscodeRepoClient.discardAllUnstaged("/repo", ["a.txt"]), "discard_all_unstaged", { repoPath: "/repo", paths: ["a.txt"] }, null],
       [() => vscodeRepoClient.ignorePath("/repo", "*.log"), "ignore_path", { repoPath: "/repo", pattern: "*.log" }, null],
@@ -186,12 +186,12 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.setCommitMessageSettings({ summaryLimit: 60, bodyRuler: 80, showRuler: false }), "set_commit_message_settings", { settings: { summaryLimit: 60, bodyRuler: 80, showRuler: false } }, null],
       [() => vscodeRepoClient.commit("/r", "m", false, [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]), "commit", { repoPath: "/r", message: "m", noVerify: false, trailers: [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }] }, { kind: "Committed", commitId: "c" }],
       [() => vscodeRepoClient.amendCommit("/r", "m", true, { author: { name: "Ada", email: "ada@x.org" }, trailers: [] }), "amend_commit", { repoPath: "/r", message: "m", noVerify: true, author: { name: "Ada", email: "ada@x.org" }, trailers: [] }, { kind: "Committed", commitId: "c" }],
-      [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" }],
+      [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const }],
       [() => vscodeRepoClient.getFetchSettings(), "get_fetch_settings", {}, { autoFetchMinutes: 0 }],
       [() => vscodeRepoClient.setFetchSettings({ autoFetchMinutes: 10 }), "set_fetch_settings", { settings: { autoFetchMinutes: 10 } }, null],
       [() => vscodeRepoClient.backgroundFetch("/r", null), "background_fetch", { repoPath: "/r", prune: null }, "background-fetch-1"],
       [() => vscodeRepoClient.backgroundFetch("/r", true), "background_fetch", { repoPath: "/r", prune: true }, null],
-      [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" } }, null],
+      [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const } }, null],
     ] as const;
 
     for (const [index, [call, method, params, result]] of methods.entries()) {
@@ -461,7 +461,7 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires the compare methods", async () => {
-    const opts = { ignoreWhitespace: true, contextLines: 5 };
+    const opts = { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" as const };
     const files = vscodeRepoClient.getRangeFiles("/repo", "a", "b");
     expect(postMessage).toHaveBeenLastCalledWith({
       jsonrpc: "2.0",
@@ -551,21 +551,21 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires stageHunk, unstageHunk, and discardHunk", async () => {
-    const stagePromise = vscodeRepoClient.stageHunk("/repo", "a.txt", 1, 1, 3);
+    const stagePromise = vscodeRepoClient.stageHunk("/repo", "a.txt", 1, 1, { contextLines: 3, algorithm: "Patience" });
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "stage_hunk",
-      params: { repoPath: "/repo", path: "a.txt", oldStart: 1, newStart: 1, contextLines: 3 },
+      params: { repoPath: "/repo", path: "a.txt", oldStart: 1, newStart: 1, contextLines: 3, algorithm: "Patience" },
     });
     respond(1, null);
     await expect(stagePromise).resolves.toBeNull();
 
-    const unstagePromise = vscodeRepoClient.unstageHunk("/repo", "a.txt", 1, 1, 3);
+    const unstagePromise = vscodeRepoClient.unstageHunk("/repo", "a.txt", 1, 1, { contextLines: 3, algorithm: "Patience" });
     respond(2, null);
     await expect(unstagePromise).resolves.toBeNull();
 
-    const discardPromise = vscodeRepoClient.discardHunk("/repo", "a.txt", 1, 1, 3);
+    const discardPromise = vscodeRepoClient.discardHunk("/repo", "a.txt", 1, 1, { contextLines: 3, algorithm: "Patience" });
     respond(3, null);
     await expect(discardPromise).resolves.toBeNull();
   });

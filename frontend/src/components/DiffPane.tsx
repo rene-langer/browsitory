@@ -25,6 +25,7 @@ import type {
   FileConflictChoice,
   GraphCommit,
   HeadInfo,
+  HunkOptions,
   MarkResolvedOutcome,
   ConflictSide,
   RepoClient,
@@ -151,12 +152,12 @@ function UncommittedFileSection({
   selectionBusyReason: string | null;
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
-  onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
-  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void;
-  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void;
-  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void;
+  onStageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void;
+  onStageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void;
   onSelectRow: (row: SelectedRow) => void;
   onResolveConflict: (path: string, resolvedContent: string) => void;
   onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
@@ -271,7 +272,11 @@ function UncommittedFileSection({
   const { settings } = useDiffSettingsContext();
   // "Show whole file" fetches with whole-file context; hunk and line actions then pass it too.
   const wholeFile = useWholeFile(settings.contextLines);
-  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: wholeFile.contextLines };
+  const diffOptions: DiffOptions = {
+    ignoreWhitespace: settings.ignoreWhitespace,
+    contextLines: wholeFile.contextLines,
+    algorithm: settings.algorithm,
+  };
   const loadDiff = () => {
     let ignore = false;
     const requested = diffOptions;
@@ -303,7 +308,7 @@ function UncommittedFileSection({
     if (mode !== "diff" || isConflicted || showImage || collapsed || !nearViewport) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoPath, client, entry.path, entry.staged, renamedFrom, isConflicted, showImage, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, wholeFile.contextLines]);
+  }, [repoPath, client, entry.path, entry.staged, renamedFrom, isConflicted, showImage, mode, diffVersion, collapsed, nearViewport, settings.ignoreWhitespace, wholeFile.contextLines, settings.algorithm]);
 
   // `status` is a dependency for the same reason as the diff effect above: staging or committing
   // the file on screen while its blame view is open must not leave stale pre-commit attribution
@@ -340,8 +345,13 @@ function UncommittedFileSection({
   const optionsCurrent =
     fetchedOptions !== null &&
     fetchedOptions.ignoreWhitespace === settings.ignoreWhitespace &&
-    fetchedOptions.contextLines === wholeFile.contextLines;
-  const fetchedContext = fetchedOptions?.contextLines ?? wholeFile.contextLines;
+    fetchedOptions.contextLines === wholeFile.contextLines &&
+    fetchedOptions.algorithm === settings.algorithm;
+  // The displayed hunks' context and algorithm: hunk and line actions re-diff with exactly these.
+  const fetchedHunk: HunkOptions = {
+    contextLines: fetchedOptions?.contextLines ?? wholeFile.contextLines,
+    algorithm: fetchedOptions?.algorithm ?? settings.algorithm,
+  };
   const unstagedActions = optionsCurrent && !entry.staged;
   const stagedActions = optionsCurrent && entry.staged;
 
@@ -544,14 +554,15 @@ function UncommittedFileSection({
             <DiffView
               hunks={hunks}
               path={entry.path}
-              onStageHunk={unstagedActions ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, fetchedContext) : undefined}
-              onUnstageHunk={stagedActions ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, fetchedContext) : undefined}
-              onDiscardHunk={unstagedActions ? (oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, fetchedContext) : undefined}
-              onStageLines={unstagedActions ? (o, n, idx, shown) => onStageLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
-              onUnstageLines={stagedActions ? (o, n, idx, shown) => onUnstageLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
-              onDiscardLines={unstagedActions ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, fetchedContext, idx, shown) : undefined}
+              onStageHunk={unstagedActions ? (oldStart, newStart) => onStageHunk(entry.path, oldStart, newStart, fetchedHunk) : undefined}
+              onUnstageHunk={stagedActions ? (oldStart, newStart) => onUnstageHunk(entry.path, oldStart, newStart, fetchedHunk) : undefined}
+              onDiscardHunk={unstagedActions ? (oldStart, newStart) => onDiscardHunk(entry.path, oldStart, newStart, fetchedHunk) : undefined}
+              onStageLines={unstagedActions ? (o, n, idx, shown) => onStageLines(entry.path, o, n, fetchedHunk, idx, shown) : undefined}
+              onUnstageLines={stagedActions ? (o, n, idx, shown) => onUnstageLines(entry.path, o, n, fetchedHunk, idx, shown) : undefined}
+              onDiscardLines={unstagedActions ? (o, n, idx, shown) => onDiscardLines(entry.path, o, n, fetchedHunk, idx, shown) : undefined}
               partialActionsDisabled={fetchedOptions?.ignoreWhitespace ?? settings.ignoreWhitespace}
               wholeFile={wholeFile}
+              current={isCurrent}
             />
             </>
           )}
@@ -724,12 +735,12 @@ export function DiffPane({
   onUnstageAllFiles: (paths: string[]) => void;
   // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
   // before marking that path's diff stale, so the refetch can't race the mutation itself.
-  onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
-  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
-  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
-  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onStageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>;
+  onStageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
   onDiscardFile: (path: string) => void | Promise<void>;
   // The paths the confirm dialog listed; only those are discarded.
   onDiscardAllUnstaged: (paths: string[]) => void;
@@ -1016,12 +1027,12 @@ function UncommittedDiffPane({
   onUnstageAllFiles: (paths: string[]) => void;
   // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
   // before marking that path's diff stale, so the refetch can't race the mutation itself.
-  onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>;
-  onStageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
-  onUnstageLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
-  onDiscardLines: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onStageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>;
+  onUnstageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>;
+  onDiscardHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>;
+  onStageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onUnstageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
+  onDiscardLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
   onDiscardFile: (path: string) => void | Promise<void>;
   // The paths the confirm dialog listed; only those are discarded.
   onDiscardAllUnstaged: (paths: string[]) => void;
@@ -1117,18 +1128,18 @@ function UncommittedDiffPane({
     });
   };
   const wrapHunkAction =
-    (action: (path: string, oldStart: number, newStart: number, contextLines: number) => void | Promise<void>) =>
-    (path: string, oldStart: number, newStart: number, contextLines: number) => {
+    (action: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>) =>
+    (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => {
       // `useAppState`'s hunk actions never reject (`runMutation` records failures in
       // `state.error`), but `finally` keeps a rejecting caller from skipping the bump too — a
       // failed mutation may still have partially applied.
-      void Promise.resolve(action(path, oldStart, newStart, contextLines)).finally(() => bumpPathVersions(path));
+      void Promise.resolve(action(path, oldStart, newStart, hunk)).finally(() => bumpPathVersions(path));
     };
   const wrapLineAction =
-    (action: (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => void | Promise<void>) =>
-    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) => {
+    (action: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>) =>
+    (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => {
       // Same settle-then-bump contract as `wrapHunkAction`.
-      void Promise.resolve(action(path, oldStart, newStart, contextLines, lineIndices, expectedLines)).finally(() =>
+      void Promise.resolve(action(path, oldStart, newStart, hunk, lineIndices, expectedLines)).finally(() =>
         bumpPathVersions(path),
       );
     };

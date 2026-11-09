@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { WHOLE_FILE_CONTEXT_LINES, type DiffSource, type RepoClient } from "../ipc/RepoClient";
+import { DEFAULT_DIFF_SETTINGS, WHOLE_FILE_CONTEXT_LINES, type DiffSource, type RepoClient } from "../ipc/RepoClient";
+import { DiffSettingsContext } from "../state/useDiffSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 
@@ -23,7 +24,7 @@ function renderSection(overrides: Partial<Parameters<typeof ReadOnlyFileSection>
 describe("ReadOnlyFileSection", () => {
   it("fetches through fetchDiff with the diff settings and refetches when diffKey changes", async () => {
     const { props, rerender } = renderSection();
-    await waitFor(() => expect(props.fetchDiff).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 3 }));
+    await waitFor(() => expect(props.fetchDiff).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }));
 
     rerender(<ReadOnlyFileSection {...props} diffKey="k2" />);
     await waitFor(() => expect(props.fetchDiff).toHaveBeenCalledTimes(2));
@@ -34,7 +35,11 @@ describe("ReadOnlyFileSection", () => {
     const { props } = renderSection({ fetchDiff: vi.fn(async () => [hunk]) });
     fireEvent.click(await screen.findByRole("button", { name: "Show whole file" }));
     await waitFor(() =>
-      expect(props.fetchDiff).toHaveBeenLastCalledWith({ ignoreWhitespace: false, contextLines: WHOLE_FILE_CONTEXT_LINES }),
+      expect(props.fetchDiff).toHaveBeenLastCalledWith({
+        ignoreWhitespace: false,
+        contextLines: WHOLE_FILE_CONTEXT_LINES,
+        algorithm: "Default",
+      }),
     );
     expect(screen.getByRole("button", { name: "Show whole file" })).toHaveAttribute("aria-pressed", "true");
   });
@@ -51,15 +56,48 @@ describe("ReadOnlyFileSection", () => {
     };
     renderSection({ fetchDiff: vi.fn(async () => [hunk]), patch });
     fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
-    expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3 });
+    expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" });
     fireEvent.click(screen.getByRole("button", { name: "Apply hunk" }));
-    expect(patch.onApplyHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3 });
+    expect(patch.onApplyHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Default" });
 
     // The file menu opens without external tools, and holds the file's actions.
     fireEvent.click(screen.getByRole("button", { name: "Actions for a.txt" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Revert this file" }));
     expect(patch.onRevertFile).toHaveBeenCalled();
     expect(screen.queryByRole("menuitem", { name: "Open in editor" })).toBeNull();
+  });
+
+  it("a commit's hunk action carries the algorithm the diff was fetched with (#469)", async () => {
+    const hunk = { oldStart: 4, oldLines: 1, newStart: 5, newLines: 1, lines: [{ origin: "Add" as const, content: "x\n" }] };
+    const patch = {
+      blockedReason: null,
+      onRevertFile: vi.fn(),
+      onApplyFile: vi.fn(),
+      onSavePatch: vi.fn(),
+      onRevertHunk: vi.fn(),
+      onApplyHunk: vi.fn(),
+    };
+    const fetchDiff = vi.fn(async () => [hunk]);
+    const settings = { ...DEFAULT_DIFF_SETTINGS, algorithm: "Patience" as const };
+    render(
+      <DiffSettingsContext.Provider value={{ settings, update: vi.fn(), error: null, dismissError: vi.fn() }}>
+        <ReadOnlyFileSection
+          repoPath="/repo"
+          client={{ getBlame: vi.fn(async () => []) } as unknown as RepoClient}
+          path="a.txt"
+          diffKey="k1"
+          fetchDiff={fetchDiff}
+          blameAt="abc"
+          collapsed={false}
+          onToggleCollapse={vi.fn()}
+          onSelectRow={vi.fn()}
+          patch={patch}
+        />
+      </DiffSettingsContext.Provider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
+    expect(fetchDiff).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 3, algorithm: "Patience" });
+    expect(patch.onRevertHunk).toHaveBeenCalledWith({ oldStart: 4, newStart: 5, contextLines: 3, algorithm: "Patience" });
   });
 
   it("disables a commit's hunk actions with the reason while repository actions are blocked", async () => {

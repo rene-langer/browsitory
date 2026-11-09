@@ -90,6 +90,7 @@ impl Fx {
         let opts = DiffOptions {
             ignore_whitespace: false,
             context_lines: 3,
+            algorithm: git_core::diff::DiffAlgorithm::Default,
         };
         working_diff(&self.repo, "d/f.txt", false, &opts).unwrap()[0]
             .lines
@@ -114,7 +115,7 @@ fn discarding_a_hunk_replaces_the_hardlinked_file() {
     let fx = Fx::new("1\n2\n3\n");
     common::write_file(fx.path(), "d/f.txt", "1\nX\n3\n");
     fx.link();
-    git_core::stage::discard_hunk(&fx.repo, "d/f.txt", 1, 1, 3).unwrap();
+    git_core::stage::discard_hunk(&fx.repo, "d/f.txt", 1, 1, common::hunk_ctx(3)).unwrap();
     assert_eq!(fx.work(), "1\n2\n3\n");
     assert_eq!(fx.other_content(), "1\nX\n3\n");
 }
@@ -126,7 +127,16 @@ fn discarding_lines_replaces_the_hardlinked_file() {
     fx.link();
     let shown = fx.shown();
     // " 1", "-2", "+X", " 3", "+Y": discard the change of line 2 only.
-    git_core::stage::discard_lines(&fx.repo, "d/f.txt", 1, 1, 3, &[1, 2], &shown).unwrap();
+    git_core::stage::discard_lines(
+        &fx.repo,
+        "d/f.txt",
+        1,
+        1,
+        common::hunk_ctx(3),
+        &[1, 2],
+        &shown,
+    )
+    .unwrap();
     assert_eq!(fx.work(), "1\n2\n3\nY\n");
     assert_eq!(fx.other_content(), "1\nX\n3\nY\n");
 }
@@ -138,7 +148,15 @@ fn a_patch_that_does_not_apply_leaves_the_hard_link() {
     fx.link();
     // The hunk as displayed earlier, before the file changed again: nothing is discarded.
     let stale = vec!["1".to_string(), "2".into(), "Z".into(), "3".into()];
-    let _ = git_core::stage::discard_lines(&fx.repo, "d/f.txt", 1, 1, 3, &[1], &stale);
+    let _ = git_core::stage::discard_lines(
+        &fx.repo,
+        "d/f.txt",
+        1,
+        1,
+        common::hunk_ctx(3),
+        &[1],
+        &stale,
+    );
     assert_eq!(fx.work(), "1\nX\n3\n");
     fx.write_other_check();
 }

@@ -27,7 +27,7 @@ reverse: boolean,
  */
 stage: boolean, };
 
-export type CommitHunk = { oldStart: number, newStart: number, contextLines: number, };
+export type CommitHunk = { oldStart: number, newStart: number, contextLines: number, algorithm: DiffAlgorithm, };
 
 export type CommitLocation = { commitId: string, position: number | null, branches: Array<string>, remoteBranches: Array<string>, };
 
@@ -47,15 +47,17 @@ export type ConflictSide = "Ours" | "Theirs";
 
 export type CreatePullRequest = { title: string, description: string | null, sourceBranch: string, targetBranch: string, };
 
+export type DiffAlgorithm = "Default" | "Patience" | "Minimal";
+
 export type DiffHunk = { oldStart: number, oldLines: number, newStart: number, newLines: number, lines: Array<DiffLine>, };
 
 export type DiffLine = { origin: DiffLineOrigin, content: string, };
 
 export type DiffLineOrigin = "Add" | "Remove" | "Context";
 
-export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, };
+export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, algorithm: DiffAlgorithm, };
 
-export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, wordWrap: WordWrap, };
+export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, wordWrap: WordWrap, algorithm: DiffAlgorithm, };
 
 export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 

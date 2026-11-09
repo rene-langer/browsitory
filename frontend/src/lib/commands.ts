@@ -197,6 +197,16 @@ export interface DiffCommands {
   selection?: { staged: boolean; paths: string[] } | null;
   /** Opens the discard confirm dialog for the selected unstaged files; never discards directly. */
   requestDiscardSelection?(): void;
+  /**
+   * The current diff's own toggles (#469): the diff last clicked or focused, or the working tree's
+   * current file. Absent while no diff is shown.
+   */
+  currentDiff?: {
+    path: string | null;
+    canShowWholeFile: boolean;
+    toggleWrap(): void;
+    toggleWholeFile(): void;
+  } | null;
 }
 
 function selectedFiles(n: number): string {
@@ -874,6 +884,25 @@ export function buildCommands(
         run: () => update({ syntaxHighlight: !settings.syntaxHighlight }),
       },
     );
+    const currentDiff = diffCommands.currentDiff ?? null;
+    if (currentDiff !== null) {
+      const of = currentDiff.path === null ? "" : ` (${currentDiff.path})`;
+      const fileKeywords = currentDiff.path === null ? [] : [currentDiff.path];
+      commands.push({
+        id: "toggle-wrap-lines",
+        label: `Toggle wrap lines${of}`,
+        keywords: ["diff", "wrap", "lines", "word", "long", ...fileKeywords],
+        run: currentDiff.toggleWrap,
+      });
+      if (currentDiff.canShowWholeFile) {
+        commands.push({
+          id: "toggle-show-whole-file",
+          label: `Toggle show whole file${of}`,
+          keywords: ["diff", "whole", "file", "full", "context", ...fileKeywords],
+          run: currentDiff.toggleWholeFile,
+        });
+      }
+    }
     if (diffCommands.currentFile !== null) {
       commands.push({
         id: "file-history-current-file",

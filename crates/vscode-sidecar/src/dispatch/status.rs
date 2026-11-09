@@ -299,6 +299,7 @@ pub(super) struct HunkParams {
     old_start: u32,
     new_start: u32,
     context_lines: u32,
+    algorithm: repo_service::wire::DiffAlgorithmDto,
 }
 
 pub(super) fn stage_hunk(params: HunkParams, repos: &Repos) -> Result<Value, String> {
@@ -306,7 +307,7 @@ pub(super) fn stage_hunk(params: HunkParams, repos: &Repos) -> Result<Value, Str
         params.path,
         params.old_start,
         params.new_start,
-        params.context_lines,
+        repo_service::wire::hunk_options(params.context_lines, params.algorithm),
     )?;
     Ok(Value::Null)
 }
@@ -316,7 +317,7 @@ pub(super) fn unstage_hunk(params: HunkParams, repos: &Repos) -> Result<Value, S
         params.path,
         params.old_start,
         params.new_start,
-        params.context_lines,
+        repo_service::wire::hunk_options(params.context_lines, params.algorithm),
     )?;
     Ok(Value::Null)
 }
@@ -326,7 +327,7 @@ pub(super) fn discard_hunk(params: HunkParams, repos: &Repos) -> Result<Value, S
         params.path,
         params.old_start,
         params.new_start,
-        params.context_lines,
+        repo_service::wire::hunk_options(params.context_lines, params.algorithm),
     )?;
     Ok(Value::Null)
 }
@@ -339,6 +340,7 @@ pub(super) struct LinesParams {
     old_start: u32,
     new_start: u32,
     context_lines: u32,
+    algorithm: repo_service::wire::DiffAlgorithmDto,
     line_indices: Vec<u32>,
     /// Every line's `content` of the hunk as the webview displayed it (stale-view guard).
     expected_lines: Vec<String>,
@@ -349,7 +351,7 @@ pub(super) fn stage_lines(params: LinesParams, repos: &Repos) -> Result<Value, S
         params.path,
         params.old_start,
         params.new_start,
-        params.context_lines,
+        repo_service::wire::hunk_options(params.context_lines, params.algorithm),
         params.line_indices,
         params.expected_lines,
     )?;
@@ -361,7 +363,7 @@ pub(super) fn unstage_lines(params: LinesParams, repos: &Repos) -> Result<Value,
         params.path,
         params.old_start,
         params.new_start,
-        params.context_lines,
+        repo_service::wire::hunk_options(params.context_lines, params.algorithm),
         params.line_indices,
         params.expected_lines,
     )?;
@@ -373,7 +375,7 @@ pub(super) fn discard_lines(params: LinesParams, repos: &Repos) -> Result<Value,
         params.path,
         params.old_start,
         params.new_start,
-        params.context_lines,
+        repo_service::wire::hunk_options(params.context_lines, params.algorithm),
         params.line_indices,
         params.expected_lines,
     )?;

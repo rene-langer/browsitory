@@ -63,14 +63,27 @@ fn effective_context_lines(context_lines: u32) -> u32 {
     }
 }
 
+/// How libgit2 lines up the old and new side (#469). git's `histogram` isn't in libgit2.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DiffAlgorithm {
+    /// Myers, as `git diff` without options.
+    #[default]
+    Default,
+    /// `--patience`: anchors on lines that occur once on each side.
+    Patience,
+    /// `--minimal`: spends extra time to find the smallest diff.
+    Minimal,
+}
+
 /// Display options shared by every diff the UI shows. Staging builds its diff through
-/// `working_diff_options` with the same `context_lines`, so the `(old_start, new_start)` hunk
-/// identity the UI captured always matches. `context_lines` is clamped to `MAX_CONTEXT_LINES`
-/// unless it is `WHOLE_FILE_CONTEXT_LINES`.
+/// `working_diff_options` with the same `context_lines` and `algorithm` (`HunkOptions`), so the
+/// `(old_start, new_start)` hunk identity the UI captured always matches. `context_lines` is
+/// clamped to `MAX_CONTEXT_LINES` unless it is `WHOLE_FILE_CONTEXT_LINES`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiffOptions {
     pub ignore_whitespace: bool,
     pub context_lines: u32,
+    pub algorithm: DiffAlgorithm,
 }
 
 impl Default for DiffOptions {
@@ -78,6 +91,28 @@ impl Default for DiffOptions {
         Self {
             ignore_whitespace: false,
             context_lines: 3,
+            algorithm: DiffAlgorithm::Default,
+        }
+    }
+}
+
+/// The options a hunk was read with, which a hunk or line action re-diffs with to find it again:
+/// another context or algorithm can split, merge or move hunks, so both must be the displayed
+/// diff's. Whitespace is always significant for those actions (the UI disables them while
+/// ignore-whitespace is on).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HunkOptions {
+    pub context_lines: u32,
+    pub algorithm: DiffAlgorithm,
+}
+
+impl HunkOptions {
+    /// The display options that produce the hunk.
+    pub fn diff_options(self) -> DiffOptions {
+        DiffOptions {
+            ignore_whitespace: false,
+            context_lines: self.context_lines,
+            algorithm: self.algorithm,
         }
     }
 }
@@ -100,7 +135,9 @@ pub struct CompareRange {
 fn apply_display_options(git_opts: &mut git2::DiffOptions, opts: &DiffOptions) {
     git_opts
         .ignore_whitespace(opts.ignore_whitespace)
-        .context_lines(effective_context_lines(opts.context_lines));
+        .context_lines(effective_context_lines(opts.context_lines))
+        .patience(opts.algorithm == DiffAlgorithm::Patience)
+        .minimal(opts.algorithm == DiffAlgorithm::Minimal);
 }
 
 /// Literal pathspec for `path` (and `old_path`, for a rename) plus the display options.

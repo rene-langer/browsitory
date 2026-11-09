@@ -8,6 +8,10 @@ use super::policy::{self, reply_of, BusyReply, CommandPolicy, Gate};
 use super::undo::{hold_reply, reply_busy, HeldReplies, DISCARD_BUSY, UNDO_BUSY};
 use super::Command;
 
+const HUNK: git_core::diff::HunkOptions = git_core::diff::HunkOptions {
+    context_lines: 3,
+    algorithm: git_core::diff::DiffAlgorithm::Default,
+};
 const ONTO: &str = "707e824e1af1b266aaa5c4faf7517e586b174183";
 
 /// `undo(<scope>, <label>) lock busy=<reply> hold gate[=…] abort`, each part only when it
@@ -186,7 +190,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 path: s("a.txt"),
                 old_start: 1,
                 new_start: 1,
-                context_lines: 3
+                hunk: HUNK
             }),
             "undo(RefsAndIndex, Stage hunk in a.txt) lock hold",
         ),
@@ -195,7 +199,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 path: s("a.txt"),
                 old_start: 1,
                 new_start: 1,
-                context_lines: 3
+                hunk: HUNK
             }),
             "undo(RefsAndIndex, Unstage hunk in a.txt) lock hold",
         ),
@@ -204,7 +208,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 path: s("a.txt"),
                 old_start: 1,
                 new_start: 1,
-                context_lines: 3
+                hunk: HUNK
             }),
             "undo(Full, Discard hunk in a.txt) lock busy=Discard hold",
         ),
@@ -213,7 +217,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 path: s("a.txt"),
                 old_start: 1,
                 new_start: 1,
-                context_lines: 3,
+                hunk: HUNK,
                 line_indices: vec![],
                 expected_lines: vec![]
             }),
@@ -224,7 +228,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 path: s("a.txt"),
                 old_start: 1,
                 new_start: 1,
-                context_lines: 3,
+                hunk: HUNK,
                 line_indices: vec![],
                 expected_lines: vec![]
             }),
@@ -235,7 +239,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 path: s("a.txt"),
                 old_start: 1,
                 new_start: 1,
-                context_lines: 3,
+                hunk: HUNK,
                 line_indices: vec![],
                 expected_lines: vec![]
             }),
@@ -271,7 +275,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                     hunk: Some(git_core::patch::CommitHunk {
                         old_start: 1,
                         new_start: 1,
-                        context_lines: 3
+                        options: HUNK,
                     }),
                     reverse: false,
                     stage: false,

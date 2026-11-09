@@ -2,18 +2,9 @@ use std::path::{Component, Path};
 
 use thiserror::Error;
 
-use crate::diff::{working_diff_options, DiffOptions};
+use crate::diff::{working_diff_options, HunkOptions};
 use crate::line_patch::{self, Direction, FileRef, HunkRef, LinePatchError, PatchLine};
 use crate::worktree_guard::Leaf;
-
-fn staging_opts(context_lines: u32) -> DiffOptions {
-    // Partial staging is disabled in the UI while ignore-whitespace is on, so staging always
-    // diffs with whitespace significant.
-    DiffOptions {
-        ignore_whitespace: false,
-        context_lines,
-    }
-}
 
 #[derive(Debug, Error)]
 pub enum StageError {
@@ -625,19 +616,20 @@ fn staged_rename_sources(
 }
 
 /// Stages one whole hunk of the index→workdir diff, identified by the `(old_start, new_start)`
-/// read from `diff::working_diff(.., staged: false, ..)` with the same `context_lines`.
+/// read from `diff::working_diff(.., staged: false, ..)` with the same `hunk` options
+/// (context and algorithm).
 pub fn stage_hunk(
     repo: &git2::Repository,
     path: &str,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: HunkOptions,
 ) -> Result<(), StageError> {
     apply_selection(
         repo,
         path,
         (old_start, new_start),
-        context_lines,
+        hunk,
         Selection::WholeHunk,
         Target::Stage,
     )
@@ -649,13 +641,13 @@ pub fn discard_hunk(
     path: &str,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: HunkOptions,
 ) -> Result<(), StageError> {
     apply_selection(
         repo,
         path,
         (old_start, new_start),
-        context_lines,
+        hunk,
         Selection::WholeHunk,
         Target::Discard,
     )
@@ -667,13 +659,13 @@ pub fn unstage_hunk(
     path: &str,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: HunkOptions,
 ) -> Result<(), StageError> {
     apply_selection(
         repo,
         path,
         (old_start, new_start),
-        context_lines,
+        hunk,
         Selection::WholeHunk,
         Target::Unstage,
     )
@@ -767,7 +759,7 @@ fn apply_selection(
     repo: &git2::Repository,
     path: &str,
     (old_start, new_start): (u32, u32),
-    context_lines: u32,
+    hunk_opts: HunkOptions,
     selection: Selection,
     target: Target,
 ) -> Result<(), StageError> {
@@ -782,7 +774,7 @@ fn apply_selection(
         Target::Unstage => (true, Direction::Reverse, git2::ApplyLocation::Index),
         Target::Discard => (false, Direction::Reverse, git2::ApplyLocation::WorkDir),
     };
-    let mut opts = working_diff_options(path, staged_side, &staging_opts(context_lines));
+    let mut opts = working_diff_options(path, staged_side, &hunk_opts.diff_options());
     let diff = if staged_side {
         let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
         repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?
@@ -873,7 +865,7 @@ pub fn stage_lines(
     path: &str,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: HunkOptions,
     line_indices: &[u32],
     expected_lines: &[String],
 ) -> Result<(), StageError> {
@@ -881,7 +873,7 @@ pub fn stage_lines(
         repo,
         path,
         (old_start, new_start),
-        context_lines,
+        hunk,
         Selection::Lines {
             indices: line_indices,
             expected: expected_lines,
@@ -896,7 +888,7 @@ pub fn unstage_lines(
     path: &str,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: HunkOptions,
     line_indices: &[u32],
     expected_lines: &[String],
 ) -> Result<(), StageError> {
@@ -904,7 +896,7 @@ pub fn unstage_lines(
         repo,
         path,
         (old_start, new_start),
-        context_lines,
+        hunk,
         Selection::Lines {
             indices: line_indices,
             expected: expected_lines,
@@ -920,7 +912,7 @@ pub fn discard_lines(
     path: &str,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: HunkOptions,
     line_indices: &[u32],
     expected_lines: &[String],
 ) -> Result<(), StageError> {
@@ -928,7 +920,7 @@ pub fn discard_lines(
         repo,
         path,
         (old_start, new_start),
-        context_lines,
+        hunk,
         Selection::Lines {
             indices: line_indices,
             expected: expected_lines,

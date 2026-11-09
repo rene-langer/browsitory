@@ -16,7 +16,7 @@ use std::path::{Component, Path};
 
 use thiserror::Error;
 
-use crate::diff::DiffOptions;
+use crate::diff::{DiffOptions, HunkOptions};
 use crate::line_patch::{self, Direction, FileRef, HunkRef, PatchLine};
 use crate::worktree_guard;
 
@@ -70,12 +70,12 @@ impl From<crate::diff::DiffError> for PatchError {
 }
 
 /// A hunk of a commit's diff, as the commit view showed it: `(old_start, new_start)` read with
-/// `context_lines` (whitespace significant, as for staging).
+/// `options` (whitespace significant, as for staging).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommitHunk {
     pub old_start: u32,
     pub new_start: u32,
-    pub context_lines: u32,
+    pub options: HunkOptions,
 }
 
 /// Where an apply lands.
@@ -292,11 +292,7 @@ fn commit_hunk_patch(
     let (old_tree, new_tree) = crate::diff::commit_and_parent_trees(repo, commit_id)?;
     // The same options as the commit view's diff (`diff::commit_diff`/`commit_rename_diff`),
     // whitespace significant, so the hunk identity matches.
-    let display = DiffOptions {
-        ignore_whitespace: false,
-        context_lines: hunk.context_lines,
-    };
-    let mut opts = crate::diff::literal_path_options(path, old_path, &display);
+    let mut opts = crate::diff::literal_path_options(path, old_path, &hunk.options.diff_options());
     let mut diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
     if old_path.is_some() {
         crate::diff::detect_renames(&mut diff)?;

@@ -1,5 +1,14 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { WORD_WRAP_VALUES, type GitConfigSource, type GitToolInfo, type GitTools, type RepoClient, type WordWrap } from "../ipc/RepoClient";
+import {
+  DIFF_ALGORITHM_VALUES,
+  WORD_WRAP_VALUES,
+  type DiffAlgorithm,
+  type GitConfigSource,
+  type GitToolInfo,
+  type GitTools,
+  type RepoClient,
+  type WordWrap,
+} from "../ipc/RepoClient";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useExternalToolSettings } from "../state/useExternalToolSettings";
@@ -109,8 +118,16 @@ export function CommitMessageSection() {
 }
 
 const WORD_WRAP_LABEL: Record<WordWrap, string> = { Auto: "Auto", On: "On", Off: "Off" };
+const DIFF_ALGORITHM_LABEL: Record<DiffAlgorithm, string> = {
+  Default: "Default (Myers)",
+  Patience: "Patience",
+  Minimal: "Minimal",
+};
 
-/** "Diff": the default for wrapping long lines (#444); each diff's "Wrap lines" overrides it. */
+/**
+ * "Diff": the default for wrapping long lines (#444), each diff's "Wrap lines" overriding it, and
+ * the diff algorithm every diff uses (#469).
+ */
 export function DiffSection() {
   const { settings, update, error, dismissError } = useDiffSettingsContext();
   return (
@@ -133,6 +150,25 @@ export function DiffSection() {
       <p className={styles.hint}>
         Auto wraps the split view, prose files and diffs with very long lines. The Wrap lines button
         above a diff changes it for that diff only.
+      </p>
+      <Field label="Diff algorithm">
+        {(props) => (
+          <select
+            {...props}
+            value={settings.algorithm}
+            onChange={(event) => update({ algorithm: event.target.value as DiffAlgorithm })}
+          >
+            {DIFF_ALGORITHM_VALUES.map((value) => (
+              <option key={value} value={value}>
+                {DIFF_ALGORITHM_LABEL[value]}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      <p className={styles.hint}>
+        Patience lines up the lines that occur once on each side, which often keeps moved or
+        reordered blocks readable. Minimal searches longer for the smallest diff.
       </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>

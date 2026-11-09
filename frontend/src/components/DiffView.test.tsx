@@ -546,7 +546,7 @@ describe("DiffView options toolbar", () => {
   it("toggles ignore whitespace and steps context lines through the settings context", () => {
     const update = vi.fn();
     render(
-      <TestDiffSettings value={{ settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" }, update }}>
+      <TestDiffSettings value={{ settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" }, update }}>
         <DiffView hunks={[lineHunk]} />
       </TestDiffSettings>,
     );
@@ -568,7 +568,7 @@ describe("DiffView syntax highlighting", () => {
 
 describe("DiffView word wrap", () => {
   const settingsWith = (wordWrap: "Auto" | "On" | "Off") => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap, algorithm: "Default" as const },
     update: vi.fn(),
   });
   const wrapButton = () => screen.getByRole("button", { name: "Wrap lines" });
