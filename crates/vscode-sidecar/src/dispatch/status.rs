@@ -1,7 +1,8 @@
 use git_core::graph::GraphSelection;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, StatusEntryDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, LineHistoryDto,
+    StatusEntryDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -140,6 +141,33 @@ pub(super) fn get_file_history(
         .map(FileHistoryEntryDto::from)
         .collect();
     serde_json::to_value(entries).map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GetLineHistoryParams {
+    repo_path: String,
+    revision: String,
+    path: String,
+    start_line: usize,
+    end_line: usize,
+    limit: usize,
+}
+
+pub(super) fn get_line_history(
+    params: GetLineHistoryParams,
+    repos: &Repos,
+) -> Result<Value, String> {
+    let history: LineHistoryDto = worker_handle(repos, &params.repo_path)?
+        .get_line_history(
+            params.revision,
+            params.path,
+            params.start_line,
+            params.end_line,
+            params.limit,
+        )?
+        .into();
+    serde_json::to_value(history).map_err(|error| error.to_string())
 }
 
 #[derive(Deserialize)]

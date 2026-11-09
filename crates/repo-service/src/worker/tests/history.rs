@@ -46,6 +46,36 @@ fn get_file_history_and_rename_diff_round_trip_through_the_worker() {
 }
 
 #[test]
+fn get_line_history_round_trips_through_the_worker() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "l1\nl2\nl3\nl4\nl5\n");
+    commit_all(&repo, "add file");
+    write_file(dir.path(), "file.txt", "l1\nTWO\nl3\nl4\nl5\n");
+    commit_all(&repo, "edit two");
+    write_file(dir.path(), "file.txt", "l1\nTWO\nl3\nl4\nFIVE\n");
+    commit_all(&repo, "edit five");
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let history = handle
+        .get_line_history("HEAD".into(), "file.txt".into(), 1, 3, 10)
+        .unwrap();
+
+    let summaries: Vec<&str> = history
+        .entries
+        .iter()
+        .map(|e| e.commit.summary.as_str())
+        .collect();
+    assert_eq!(summaries, vec!["edit two", "add file"]);
+    assert!(!history.truncated);
+
+    let error = handle
+        .get_line_history("HEAD".into(), "file.txt".into(), 4, 9, 10)
+        .unwrap_err();
+    assert_eq!(error, "Lines 4-9 aren't in the file, which has 5 lines.");
+}
+
+#[test]
 fn range_and_working_tree_compares_round_trip_through_the_worker() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "a.txt", "one\n");

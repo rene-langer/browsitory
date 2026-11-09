@@ -10,6 +10,7 @@ mod hardlink;
 pub mod history;
 pub mod hooks;
 pub mod launch;
+pub mod line_history;
 mod line_patch;
 pub mod locate;
 pub mod merge;

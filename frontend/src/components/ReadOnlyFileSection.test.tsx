@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WHOLE_FILE_CONTEXT_LINES, type DiffSource, type RepoClient } from "../ipc/RepoClient";
 import type { ExternalToolsApi } from "../state/useExternalTools";
@@ -57,6 +57,97 @@ describe("ReadOnlyFileSection", () => {
     expect(screen.getByText("Renamed from old.txt")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "History of new.txt" }));
     expect(onOpenFileHistory).toHaveBeenCalledWith("new.txt");
+  });
+
+  describe("line and folder history (#447)", () => {
+    const hunk = {
+      oldStart: 4,
+      oldLines: 1,
+      newStart: 4,
+      newLines: 3,
+      lines: [
+        { origin: "Context" as const, content: "four\n" },
+        { origin: "Remove" as const, content: "old five\n" },
+        { origin: "Add" as const, content: "new five\n" },
+        { origin: "Add" as const, content: "six\n" },
+      ],
+    };
+
+    function select(from: Node, to: Node) {
+      const range = document.createRange();
+      range.setStart(from, 0);
+      range.setEnd(to, to.childNodes.length);
+      const selection = window.getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      act(() => {
+        document.dispatchEvent(new Event("selectionchange"));
+      });
+    }
+
+    function lineElement(line: number): HTMLElement {
+      return document.querySelector(`[data-line-number="${line}"]`)!;
+    }
+
+    it("opens the history of the diff lines selected, at blameAt", async () => {
+      const onOpenLineHistory = vi.fn();
+      renderSection({ path: "src/a.txt", fetchDiff: vi.fn(async () => [hunk]), onOpenLineHistory });
+      await screen.findByText("six");
+      const button = screen.getByRole("button", { name: "History of selected lines of src/a.txt" });
+      expect(button).toBeDisabled();
+
+      select(lineElement(5), lineElement(6));
+
+      fireEvent.click(screen.getByRole("button", { name: "History of lines 5–6 of src/a.txt" }));
+      expect(onOpenLineHistory).toHaveBeenCalledWith("src/a.txt", "abc", 5, 6);
+    });
+
+    it("counts only new-side lines: a selection of removed lines alone selects nothing", async () => {
+      renderSection({ fetchDiff: vi.fn(async () => [hunk]), onOpenLineHistory: vi.fn() });
+      await screen.findByText("six");
+      const removed = document.querySelector(".diff-line-remove")!;
+
+      select(removed, removed);
+
+      expect(screen.getByRole("button", { name: "History of selected lines of a.txt" })).toBeDisabled();
+    });
+
+    it("opens the history of lines selected in the blame view", async () => {
+      const onOpenLineHistory = vi.fn();
+      const blame = [1, 2, 3].map((n) => ({
+        lineNumber: n,
+        content: `line ${n}`,
+        commitId: "c",
+        shortId: "c",
+        authorName: "A",
+        timestamp: 0,
+      }));
+      renderSection({ client: { getBlame: vi.fn(async () => blame) } as unknown as RepoClient, onOpenLineHistory });
+      fireEvent.click(screen.getByRole("button", { name: "Blame" }));
+      await screen.findByText("line 3");
+
+      select(lineElement(2), lineElement(2));
+
+      fireEvent.click(screen.getByRole("button", { name: "History of line 2 of a.txt" }));
+      expect(onOpenLineHistory).toHaveBeenCalledWith("a.txt", "abc", 2, 2);
+    });
+
+    it("has no line history button without the callback", async () => {
+      renderSection({ fetchDiff: vi.fn(async () => [hunk]) });
+      await screen.findByText("six");
+      expect(screen.queryByRole("button", { name: /selected lines/ })).toBeNull();
+    });
+
+    it("opens the history of the file's folder, and has none at the root", () => {
+      const onOpenFolderHistory = vi.fn();
+      const { unmount } = renderSection({ path: "src/ui/a.txt", onOpenFolderHistory });
+      fireEvent.click(screen.getByRole("button", { name: "History of folder src/ui" }));
+      expect(onOpenFolderHistory).toHaveBeenCalledWith("src/ui");
+      unmount();
+
+      renderSection({ path: "a.txt", onOpenFolderHistory });
+      expect(screen.queryByRole("button", { name: /History of folder/ })).toBeNull();
+    });
   });
 
   it("opens the file menu with the Menu key from a header button and returns focus to '…' on Escape", () => {

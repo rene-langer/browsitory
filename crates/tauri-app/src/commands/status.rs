@@ -3,7 +3,8 @@ use git_core::graph::GraphSelection;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, StatusEntryDto, TrailerDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, LineHistoryDto,
+    StatusEntryDto, TrailerDto,
 };
 use std::path::Path;
 use tauri::{AppHandle, State};
@@ -210,6 +211,22 @@ pub async fn get_file_history(
         .into_iter()
         .map(FileHistoryEntryDto::from)
         .collect())
+}
+
+#[tauri::command]
+pub async fn get_line_history(
+    repo_path: String,
+    revision: String,
+    path: String,
+    start_line: usize,
+    end_line: usize,
+    limit: usize,
+    state: State<'_, AppState>,
+) -> Result<LineHistoryDto, ErrorDto> {
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_line_history(revision, path, start_line, end_line, limit))
+        .await?
+        .into())
 }
 
 #[tauri::command]

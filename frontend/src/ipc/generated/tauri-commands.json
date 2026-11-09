@@ -64,6 +64,7 @@
   "get_graph_remote_branch_selection",
   "get_head_info",
   "get_last_seen_version",
+  "get_line_history",
   "get_merge_message",
   "get_merge_options",
   "get_range_diff",

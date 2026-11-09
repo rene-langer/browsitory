@@ -103,6 +103,18 @@ export type HookProgressPhase = "Started" | "Finished";
 
 export type HookSource = "Commit" | "Checkout" | "Merge" | "Pick";
 
+export type LineHistory = { entries: Array<LineHistoryEntry>, 
+/**
+ * The walk stopped at its commit cap, so older changes may be missing.
+ */
+truncated: boolean, };
+
+export type LineHistoryEntry = { commit: GraphCommit, path: string, oldPath: string | null, 
+/**
+ * The tracked lines in this commit's version of the file, 1-based and inclusive.
+ */
+startLine: number, endLine: number, };
+
 export type MarkResolvedOutcome = "Resolved" | "MarkersRemain";
 
 export type MergeOptions = { fastForward: FastForwardMode, squash: boolean, };

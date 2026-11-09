@@ -166,6 +166,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetCommitSignature { .. }
         | Command::GetBlame { .. }
         | Command::GetFileHistory { .. }
+        | Command::GetLineHistory { .. }
         | Command::SearchCommits { .. }
         | Command::GetCommitRenameDiff { .. }
         | Command::GetRangeFiles { .. }
@@ -417,6 +418,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetCommitSignature,
         GetBlame,
         GetFileHistory,
+        GetLineHistory,
         SearchCommits,
         GetCommitRenameDiff,
         GetRangeFiles,

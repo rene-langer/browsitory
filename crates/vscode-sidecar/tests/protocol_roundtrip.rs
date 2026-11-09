@@ -2369,6 +2369,37 @@ fn file_history_and_rename_diff_round_trip_through_the_sidecar() {
     assert_eq!(hunks.len(), 1);
 }
 
+#[test]
+fn line_history_round_trips_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "l1\nl2\nl3\n");
+    commit_all(&repo, "add");
+    write_file(dir.path(), "a.txt", "l1\nTWO\nl3\n");
+    commit_all(&repo, "edit");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let history = sidecar.call(
+        2,
+        "get_line_history",
+        serde_json::json!({
+            "repoPath": repo_path, "revision": "HEAD", "path": "a.txt",
+            "startLine": 2, "endLine": 2, "limit": 10,
+        }),
+    );
+    let entries = history["result"]["entries"]
+        .as_array()
+        .expect("line history entries");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["commit"]["summary"], "edit");
+    assert_eq!(entries[0]["startLine"], 2);
+    assert_eq!(entries[0]["endLine"], 2);
+    assert!(entries[0]["oldPath"].is_null());
+    assert_eq!(history["result"]["truncated"], false);
+}
+
 /// `feature` adds feature.txt; the checked-out main branch adds main.txt.
 fn diverged_feature_repo() -> (tempfile::TempDir, git2::Repository) {
     let (dir, repo) = init_repo();

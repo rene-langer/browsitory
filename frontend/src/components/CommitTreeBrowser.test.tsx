@@ -180,6 +180,43 @@ describe("CommitTreeBrowser", () => {
     expect(onOpenFileHistory).toHaveBeenCalledWith("README.txt");
   });
 
+  it("opens a folder's history from its row and from a file's header (#447)", async () => {
+    const onOpenFolderHistory = vi.fn();
+    renderBrowser({ onOpenFolderHistory });
+    const tree = await screen.findByRole("tree");
+
+    fireEvent.click(within(tree).getByRole("button", { name: "History of folder src" }));
+    expect(onOpenFolderHistory).toHaveBeenCalledWith("src");
+    // The folder stays closed: the history button is not the row's toggle.
+    expect(screen.getByRole("treeitem", { name: /^src/ })).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(within(tree).getByRole("button", { name: "src" }));
+    fireEvent.click(await screen.findByRole("button", { name: /main\.txt/ }));
+    await screen.findByText("main");
+    const header = screen.getByRole("region", { name: `src/main.txt at 0123456` });
+    fireEvent.click(within(header).getByRole("button", { name: "History of folder src" }));
+    expect(onOpenFolderHistory).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the history of lines selected in a text file at this commit (#447)", async () => {
+    const onOpenLineHistory = vi.fn();
+    renderBrowser({ onOpenLineHistory });
+    fireEvent.click(await screen.findByRole("button", { name: /README\.txt/ }));
+    await screen.findByText("line two");
+    expect(screen.getByRole("button", { name: "History of selected lines of README.txt" })).toBeDisabled();
+
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('[data-line-number="2"]')!);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "History of line 2 of README.txt" }));
+    expect(onOpenLineHistory).toHaveBeenCalledWith("README.txt", COMMIT, 2, 2);
+  });
+
   it("offers Retry when a folder fails to load", async () => {
     const getCommitTree = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValue(FOLDERS[""]);
     renderBrowser({ client: fakeClient({ getCommitTree }) });

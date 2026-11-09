@@ -15,6 +15,7 @@ export function BlameView({
         {lines.map((line) => (
           <tr
             key={line.lineNumber}
+            data-line-number={line.lineNumber}
             className={styles.row}
             onClick={() => onSelectRow({ commitId: line.commitId })}
           >

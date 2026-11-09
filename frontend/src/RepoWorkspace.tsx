@@ -6,6 +6,7 @@ import { ShortcutSheet } from "./components/ShortcutSheet";
 import { CommitGraph } from "./components/CommitGraph";
 import { CompareDiffPane } from "./components/CompareDiffPane";
 import { FileHistoryList } from "./components/FileHistoryList";
+import { folderSearchQuery } from "./lib/folderHistory";
 import { CommitSearchBar } from "./components/CommitSearchBar";
 import { CommitSearchResults } from "./components/CommitSearchResults";
 import { GoToNotice } from "./components/GoToNotice";
@@ -185,6 +186,8 @@ export function RepoWorkspace({
     },
     [setSearchQuery, requestSearchFocus],
   );
+  // "Folder history" (#447) is a `path:` search for the folder.
+  const openFolderHistory = useCallback((folder: string) => searchHistory(folderSearchQuery(folder)), [searchHistory]);
   const selectedRow = appState.state.selectedRow;
   const historyEntry =
     fileHistory.history !== null && typeof selectedRow === "object"
@@ -1037,6 +1040,8 @@ export function RepoWorkspace({
                   onRetry={compare.retry}
                   onSelectRow={selectRowClosingCompare}
                   onOpenFileHistory={fileHistory.open}
+                  onOpenLineHistory={fileHistory.openLines}
+                  onOpenFolderHistory={openFolderHistory}
                   externalTools={externalTools}
                 />
               ) : (
@@ -1057,6 +1062,8 @@ export function RepoWorkspace({
                     disabledReason: stashApplyDisabledReason,
                   }}
                   onOpenFileHistory={fileHistory.open}
+                  onOpenLineHistory={fileHistory.openLines}
+                  onOpenFolderHistory={openFolderHistory}
                   externalTools={externalTools}
                   onRestoreFileVersion={(commitId, path) =>
                     announce(`Restored ${path} from ${commitId.slice(0, 7)}`, appState.restoreFileVersion)(commitId, path)

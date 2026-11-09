@@ -517,6 +517,7 @@ export function DiffView({
                       return (
                         <div
                           key={rowIndex}
+                          data-line-number={newNo}
                           className={`${styles.line} ${styles.lineContext} diff-line diff-line-context`}
                         >
                           <span className={styles.gutter} aria-hidden="true">
@@ -554,6 +555,7 @@ export function DiffView({
                           </div>
                           <div
                             data-diff-column="new"
+                            data-line-number={newNo}
                             {...lineProps(hunkIndex, newIndex)}
                             className={`${styles.splitColumn} ${styles.line} ${styles.lineAdd} diff-line diff-line-add${lineClass(hunkIndex, newIndex)}`}
                           >
@@ -597,6 +599,7 @@ export function DiffView({
                         <div className={styles.splitColumn} aria-hidden="true" />
                         <div
                           data-diff-column="new"
+                          data-line-number={newNo}
                           {...lineProps(hunkIndex, index)}
                           className={`${styles.splitColumn} ${styles.line} ${styles.lineAdd} diff-line diff-line-add${lineClass(hunkIndex, index)}`}
                         >
@@ -621,6 +624,7 @@ export function DiffView({
                     return (
                       <div
                         key={lineIndex}
+                        data-line-number={newNo ?? undefined}
                         {...(selectable ? lineProps(hunkIndex, lineIndex) : {})}
                         className={`${styles.line} ${styles[`line${line.origin}`]} diff-line diff-line-${line.origin.toLowerCase()}${selectable ? lineClass(hunkIndex, lineIndex) : ""}`}
                       >

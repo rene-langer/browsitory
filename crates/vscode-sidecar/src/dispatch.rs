@@ -139,6 +139,7 @@ methods!(|params, repos, stdout| {
     "get_working_diff" => get_working_diff(GetWorkingDiffParams, repos),
     "get_commit_diff" => get_commit_diff(GetCommitDiffParams, repos),
     "get_file_history" => get_file_history(GetFileHistoryParams, repos),
+    "get_line_history" => get_line_history(GetLineHistoryParams, repos),
     "search_commits" => search_commits(SearchCommitsParams, repos),
     "cancel_search" => cancel_search(RepoPathParams, repos),
     "get_commit_rename_diff" => get_commit_rename_diff(GetCommitRenameDiffParams, repos),

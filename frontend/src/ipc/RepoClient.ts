@@ -551,6 +551,23 @@ export interface FileHistoryEntry {
   oldPath: string | null;
 }
 
+/** One commit that changed a range of lines (#447). `path`/`oldPath` as in `FileHistoryEntry`;
+ *  `startLine`..`endLine` (1-based, inclusive) are the followed lines in this commit's version. */
+export interface LineHistoryEntry {
+  commit: GraphCommit;
+  path: string;
+  oldPath: string | null;
+  startLine: number;
+  endLine: number;
+}
+
+/** `getLineHistory`'s answer. `truncated`: the walk stopped at its commit cap, so older changes
+ *  may be missing. */
+export interface LineHistory {
+  entries: LineHistoryEntry[];
+  truncated: boolean;
+}
+
 /** One changed path in a compare; `oldPath` is set when the file was renamed (then `path` is the new name). */
 export interface ChangedFile {
   path: string;
@@ -839,6 +856,19 @@ export interface RepoClient {
   getWorkingDiff(repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath?: string | null): Promise<DiffHunk[]>;
   getCommitDiff(repoPath: string, commitId: string, path: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getFileHistory(repoPath: string, path: string, limit: number): Promise<FileHistoryEntry[]>;
+  /**
+   * The commits that changed lines `startLine`..`endLine` (1-based, inclusive) of `path` as it is
+   * in `revision` (a commit id or "HEAD"), newest first, at most `limit`, following the lines
+   * back through earlier changes (#447). Rejects when the range isn't in the file.
+   */
+  getLineHistory(
+    repoPath: string,
+    revision: string,
+    path: string,
+    startLine: number,
+    endLine: number,
+    limit: number,
+  ): Promise<LineHistory>;
   /**
    * One page of commits matching `query` (see the search syntax help). `refs` and
    * `remoteBranches` mean what `getCommitGraph`'s `selectedBranches` and `remoteBranches` mean,

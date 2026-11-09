@@ -8,6 +8,7 @@ export const SEARCH_SYNTAX: { syntax: string; meaning: string }[] = [
   { syntax: "commit:SHA", meaning: "SHA starts with it" },
   { syntax: "path:PATTERN", meaning: "Changes a matching path (src/, *.md)" },
   { syntax: "contents:TEXT", meaning: "An added or removed line contains it" },
+  { syntax: "line:PATH:FROM-TO", meaning: "Changed those lines of the file at HEAD, followed back" },
   { syntax: "after:YYYY-MM-DD", meaning: "Committed on or after that day" },
   { syntax: "before:YYYY-MM-DD", meaning: "Committed on or before that day" },
   { syntax: "branch:NAME", meaning: "Only commits reachable from NAME" },

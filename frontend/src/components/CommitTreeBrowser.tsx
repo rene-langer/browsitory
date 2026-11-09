@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronRight, File, FileCode, Folder, FolderOpen, Link, Package } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronRight, File, FileCode, Folder, FolderOpen, History, Link, Package } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { FileContent, RepoClient, TreeEntry, TreeListing } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { HIGHLIGHT_LINE_LIMIT, highlightLines, type Token } from "../lib/highlight";
@@ -11,6 +11,8 @@ import type { ExternalToolsApi } from "../state/useExternalTools";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import styles from "./CommitTreeBrowser.module.css";
 import diffPaneStyles from "./DiffPane.module.css";
+import { FolderHistoryButton } from "./FolderHistoryButton";
+import { LineHistoryButton } from "./LineHistoryButton";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
@@ -31,6 +33,10 @@ export interface CommitTreeBrowserProps {
   commitId: string;
   onSelectRow: (row: SelectedRow) => void;
   onOpenFileHistory?: (path: string) => void;
+  /** "History of lines" (#447) for lines selected in a file's content. */
+  onOpenLineHistory?: (path: string, revision: string, startLine: number, endLine: number) => void;
+  /** "Folder history" (#447) on folder rows and in a file's header. */
+  onOpenFolderHistory?: (folder: string) => void;
   externalTools?: ExternalToolsApi;
   /** Restores a file version to the work tree; omitted, there is no Restore action. */
   onRestoreFileVersion?: (commitId: string, path: string) => void | Promise<void>;
@@ -49,6 +55,8 @@ export function CommitTreeBrowser({
   commitId,
   onSelectRow,
   onOpenFileHistory,
+  onOpenLineHistory,
+  onOpenFolderHistory,
   externalTools,
   onRestoreFileVersion,
   restoreBlockedReason = null,
@@ -141,6 +149,17 @@ export function CommitTreeBrowser({
             {open ? <FolderOpen size={14} aria-hidden="true" /> : <Folder size={14} aria-hidden="true" />}
             <span className={styles.name}>{entry.name}</span>
           </button>
+          {onOpenFolderHistory !== undefined && (
+            <button
+              type="button"
+              className={styles.folderHistory}
+              aria-label={`History of folder ${entry.path}`}
+              title={`Folder history: commits that changed anything in ${entry.path}/`}
+              onClick={() => onOpenFolderHistory(entry.path)}
+            >
+              <History size={14} aria-hidden="true" />
+            </button>
+          )}
           {open && folderBody(entry.path, level + 1)}
         </li>
       );
@@ -275,6 +294,8 @@ export function CommitTreeBrowser({
           entry={selected}
           onSelectRow={onSelectRow}
           onOpenFileHistory={onOpenFileHistory}
+          onOpenLineHistory={onOpenLineHistory}
+          onOpenFolderHistory={onOpenFolderHistory}
           externalTools={externalTools}
           onRestoreFileVersion={onRestoreFileVersion}
           restoreBlockedReason={restoreBlockedReason}
@@ -296,6 +317,8 @@ export function CommitFileView({
   entry,
   onSelectRow,
   onOpenFileHistory,
+  onOpenLineHistory,
+  onOpenFolderHistory,
   externalTools,
   onRestoreFileVersion,
   restoreBlockedReason = null,
@@ -306,11 +329,14 @@ export function CommitFileView({
   entry: TreeEntry;
   onSelectRow: (row: SelectedRow) => void;
   onOpenFileHistory?: (path: string) => void;
+  onOpenLineHistory?: (path: string, revision: string, startLine: number, endLine: number) => void;
+  onOpenFolderHistory?: (folder: string) => void;
   externalTools?: ExternalToolsApi;
   onRestoreFileVersion?: (commitId: string, path: string) => void | Promise<void>;
   restoreBlockedReason?: string | null;
 }) {
   const { path } = entry;
+  const contentRef = useRef<HTMLDivElement>(null);
   const submodule = entry.kind === "Submodule";
   const [content, setContent] = useState<FileContent | null>(null);
   const [error, setError] = useState<DescribedError | null>(null);
@@ -412,6 +438,10 @@ export function CommitFileView({
               History
             </button>
           )}
+          {onOpenLineHistory !== undefined && content?.kind === "Text" && !comparing && (
+            <LineHistoryButton container={contentRef} path={path} revision={commitId} onOpen={onOpenLineHistory} />
+          )}
+          {onOpenFolderHistory !== undefined && <FolderHistoryButton path={path} onOpen={onOpenFolderHistory} />}
           <button type="button" aria-pressed={comparing} disabled={submodule} onClick={() => setComparing((on) => !on)}>
             Compare with working tree
           </button>
@@ -435,7 +465,7 @@ export function CommitFileView({
           {saveNote}
         </p>
       )}
-      {body}
+      <div ref={contentRef}>{body}</div>
       {confirmRestore && onRestoreFileVersion !== undefined && (
         <ConfirmDialog
           ariaLabel="Confirm restore"
@@ -499,7 +529,7 @@ function FileText({ path, text }: { path: string; text: string }) {
     <>
       <div className={styles.code} role="region" aria-label={`Content of ${path}`} tabIndex={0}>
         {lines.map((line, i) => (
-          <div key={i} className={styles.line}>
+          <div key={i} className={styles.line} data-line-number={i + 1}>
             <span className={styles.lineNumber} aria-hidden="true">
               {i + 1}
             </span>

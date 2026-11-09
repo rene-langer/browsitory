@@ -62,6 +62,7 @@ HookProgress/Started-Checkout key-order
 HookProgress/Started-Commit key-order
 HookProgress/Started-Merge key-order
 HookProgress/Started-Pick key-order
+LineHistory/complete key-order
 MergeOutcome/Conflicted key-order
 PickOutcome/Committed key-order
 PickOutcome/Conflicted key-order

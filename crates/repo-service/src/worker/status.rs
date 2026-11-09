@@ -112,6 +112,25 @@ pub(super) fn get_file_history(
     );
 }
 
+pub(super) fn get_line_history(
+    repo: &git2::Repository,
+    revision: String,
+    path: String,
+    start_line: usize,
+    end_line: usize,
+    limit: usize,
+    reply: Sender<Result<git_core::line_history::LineHistory, String>>,
+) {
+    let lines = git_core::line_history::LineRange {
+        start: start_line,
+        end: end_line,
+    };
+    let _ = reply.send(
+        git_core::line_history::line_history(repo, &revision, &path, lines, limit)
+            .map_err(|error| error.to_string()),
+    );
+}
+
 pub(super) fn get_commit_rename_diff(
     repo: &git2::Repository,
     commit_id: String,
@@ -509,6 +528,29 @@ impl WorkerHandle {
         self.tx
             .send(Command::GetFileHistory {
                 path,
+                limit,
+                reply: tx,
+            })
+            .map_err(|_| "worker thread stopped".to_string())?;
+        rx.recv()
+            .map_err(|_| "worker thread stopped before replying".to_string())?
+    }
+
+    pub fn get_line_history(
+        &self,
+        revision: String,
+        path: String,
+        start_line: usize,
+        end_line: usize,
+        limit: usize,
+    ) -> Result<git_core::line_history::LineHistory, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.tx
+            .send(Command::GetLineHistory {
+                revision,
+                path,
+                start_line,
+                end_line,
                 limit,
                 reply: tx,
             })

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
 import { formatShortDate } from "../lib/formatDate";
+import { lineRangeLabel } from "../lib/selectedLines";
 import type { SelectedRow } from "../state/useAppState";
 import type { FileHistoryState } from "../state/useFileHistory";
 import { InlineError } from "./primitives/InlineError";
@@ -9,8 +10,8 @@ import { RefBadges } from "./RefBadges";
 import graphStyles from "./CommitGraph.module.css";
 import styles from "./FileHistoryList.module.css";
 
-/** The commit graph's place while a file's history is open: flat rows, no lanes (history
- *  parents are rarely adjacent rows). */
+/** The commit graph's place while a file's (or a line range's, #447) history is open: flat rows,
+ *  no lanes (history parents are rarely adjacent rows). */
 export function FileHistoryList({
   history,
   selectedRow,
@@ -37,6 +38,9 @@ export function FileHistoryList({
     if (typeof selected?.scrollIntoView === "function") selected.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
+  const target = history.target;
+  const what = target.kind === "lines" ? `${lineRangeLabel(target.startLine, target.endLine)} of ` : "";
+
   const handleKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -54,11 +58,12 @@ export function FileHistoryList({
 
   return (
     <>
-      <div className={styles.banner} role="toolbar" aria-label="File history">
+      <div className={styles.banner} role="toolbar" aria-label={target.kind === "lines" ? "Line history" : "File history"}>
         <span>
-          History: <code className={styles.path}>{history.path}</code>
+          History{target.kind === "lines" ? ` of ${what.trimEnd()}` : ":"} <code className={styles.path}>{history.path}</code>
+          {target.kind === "lines" && target.revision !== "HEAD" && <> at {target.revision.slice(0, 7)}</>}
         </span>
-        <button type="button" aria-label="Close file history" onClick={onClose}>
+        <button type="button" aria-label={target.kind === "lines" ? "Close line history" : "Close file history"} onClick={onClose}>
           ×
         </button>
       </div>
@@ -67,7 +72,7 @@ export function FileHistoryList({
       )}
       {history.error === null && !history.loading && history.entries.length === 0 && (
         <p className={styles.empty}>
-          No committed history for <code className={styles.path}>{history.path}</code>.
+          No committed history for {what}<code className={styles.path}>{history.path}</code>.
         </p>
       )}
       {history.loading && history.entries.length === 0 && history.error === null && (
@@ -95,6 +100,11 @@ export function FileHistoryList({
               {entry.commit.shortId} {entry.commit.summary}
             </span>
             {entry.oldPath !== null && <span className={styles.renameChip}>renamed from {entry.oldPath}</span>}
+            {"startLine" in entry && (
+              <span className={styles.renameChip} title={`The lines in this commit's version of ${entry.path}`}>
+                {lineRangeLabel(entry.startLine, entry.endLine)}
+              </span>
+            )}
             <span className={graphStyles.author} title={entry.commit.authorEmail}>
               {entry.commit.authorName}
             </span>
@@ -104,6 +114,11 @@ export function FileHistoryList({
           </ListRow>
         ))}
       </ul>
+      {history.truncated && (
+        <p className={styles.empty}>
+          Stopped after a long stretch of history; older changes to these lines may be missing.
+        </p>
+      )}
       {history.hasMore && (
         <div className={graphStyles.loadMore}>
           <span>Showing latest {history.entries.length} changes</span>

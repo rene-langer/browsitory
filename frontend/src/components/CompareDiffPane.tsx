@@ -24,6 +24,8 @@ export function CompareDiffPane({
   onRetry,
   onSelectRow,
   onOpenFileHistory,
+  onOpenLineHistory,
+  onOpenFolderHistory,
   externalTools,
 }: {
   repoPath: string;
@@ -36,6 +38,8 @@ export function CompareDiffPane({
   onRetry: () => void;
   onSelectRow: (row: SelectedRow) => void;
   onOpenFileHistory?: (path: string) => void;
+  onOpenLineHistory?: (path: string, revision: string, startLine: number, endLine: number) => void;
+  onOpenFolderHistory?: (folder: string) => void;
   externalTools?: ExternalToolsApi;
 }) {
   const { target, range } = compare;
@@ -146,6 +150,9 @@ export function CompareDiffPane({
               onToggleCollapse={() => toggleCollapse(file.path)}
               onSelectRow={onSelectRow}
               onOpenFileHistory={onOpenFileHistory}
+              // Against the working tree the new side's line numbers aren't a commit's.
+              onOpenLineHistory={toId === null ? undefined : onOpenLineHistory}
+              onOpenFolderHistory={onOpenFolderHistory}
               externalTools={externalTools}
               toolSource={{ kind: "Range", fromId: fromId as string, toId, oldPath: file.oldPath }}
               previewSource={{ kind: "Range", fromId: fromId as string, toId, oldPath: file.oldPath }}
