@@ -1075,11 +1075,25 @@ pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, 
     )?;
     if !pairs.is_empty() {
         let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
-        for entry in index.iter().filter(|entry| pairs.contains(&entry.path)) {
-            if (entry.flags >> 12) & 0x3 != 0 {
+        // Every name a source holds, the index's entry or not: libgit2's index may have taken
+        // the other name for HEAD's entry, and the abort still puts HEAD's name back.
+        // Matched byte for byte: libgit2's index lookup folds case under `core.ignorecase`.
+        let entries: Vec<git2::IndexEntry> = index
+            .iter()
+            .filter(|entry| pairs.covers(&entry.path))
+            .collect();
+        let stage_zero = |path: &[u8]| {
+            entries
+                .iter()
+                .find(|entry| entry.path == path && (entry.flags >> 12) & 0x3 == 0)
+        };
+        for name in pairs.tracked() {
+            let entry = stage_zero(name);
+            if entry.is_none() && entries.iter().any(|entry| entry.path == name) {
+                // A conflict on the name: the operation's own.
                 continue;
             }
-            let Ok(rel) = std::str::from_utf8(&entry.path) else {
+            let Ok(rel) = std::str::from_utf8(name) else {
                 continue;
             };
             let disk = match crate::worktree_guard::read_beneath(workdir, rel)? {
@@ -1088,10 +1102,23 @@ pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, 
                 None => continue,
             };
             let id = git2::Oid::hash_object(git2::ObjectType::Blob, &disk)?;
-            let in_head = head_tree
-                .get_path(&path_from_bytes(&entry.path))
-                .is_ok_and(|head| head.id() == id);
-            if id != entry.id && !in_head {
+            let in_head = |path: &[u8]| {
+                head_tree
+                    .get_path(&path_from_bytes(path))
+                    .is_ok_and(|head| head.id() == id)
+            };
+            let kept = match entry {
+                Some(entry) => id == entry.id || in_head(name),
+                // Not in the index under this name: what the operation wrote under the other
+                // name (on a drive where case folds, the same file) is no local change either.
+                None => pairs
+                    .tracked()
+                    .filter(|other| other.eq_ignore_ascii_case(name))
+                    .any(|other| {
+                        in_head(other) || stage_zero(other).is_some_and(|entry| entry.id == id)
+                    }),
+            };
+            if !kept {
                 return Err(MergeError::WouldDiscard(rel.to_string()));
             }
         }

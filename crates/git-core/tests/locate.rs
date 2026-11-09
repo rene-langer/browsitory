@@ -83,6 +83,9 @@ fn a_sha_prefix_a_branch_name_and_a_tag_resolve_to_their_commit() {
     let by_upper = locate_commit(&repo, &ids[2].to_string()[..7].to_uppercase(), &selection)
         .unwrap()
         .unwrap();
+    let by_full_upper = locate_commit(&repo, &ids[2].to_string().to_uppercase(), &selection)
+        .unwrap()
+        .unwrap();
     let by_branch = locate_commit(&repo, "refs/heads/side", &selection)
         .unwrap()
         .unwrap();
@@ -95,6 +98,7 @@ fn a_sha_prefix_a_branch_name_and_a_tag_resolve_to_their_commit() {
 
     assert_eq!(by_prefix.commit_id, ids[2].to_string());
     assert_eq!(by_upper.commit_id, ids[2].to_string());
+    assert_eq!(by_full_upper.commit_id, ids[2].to_string());
     assert_eq!(by_branch.commit_id, ids[7].to_string());
     assert_eq!(by_light.commit_id, ids[2].to_string());
     assert_eq!(by_annotated.commit_id, ids[2].to_string());
