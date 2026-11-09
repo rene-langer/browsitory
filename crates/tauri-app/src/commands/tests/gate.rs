@@ -213,7 +213,9 @@ fn repo_worker_call_does_not_hold_a_runtime_thread_while_a_hook_runs() {
 fn hold_gate_with_hook(
     state: &super::super::AppState,
     key: &str,
-) -> tauri::async_runtime::JoinHandle<Result<git_core::commit::CommitOutcome, String>> {
+) -> tauri::async_runtime::JoinHandle<
+    Result<git_core::commit::CommitOutcome, repo_service::wire::ErrorDto>,
+> {
     let (started_tx, started_rx) = mpsc::channel();
     let commit = tauri::async_runtime::spawn(
         super::super::repo_worker(state, key)
@@ -311,7 +313,10 @@ fn a_search_waiting_at_the_gate_is_cancelled_before_it_runs() {
 
     assert!(tauri::async_runtime::block_on(commit).unwrap().is_ok());
     assert_eq!(
-        tauri::async_runtime::block_on(search).unwrap().unwrap_err(),
+        tauri::async_runtime::block_on(search)
+            .unwrap()
+            .unwrap_err()
+            .message,
         "Search cancelled."
     );
     // A search started after the cancel runs normally.
@@ -338,7 +343,7 @@ fn calls_for_one_repo_keep_their_order() {
     git2::Repository::init(dir.path()).unwrap();
     let (state, keys) = state_with_repos(&[dir.path()]);
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    type Call = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
+    type Call = Pin<Box<dyn Future<Output = Result<(), repo_service::wire::ErrorDto>> + Send>>;
     let mut calls: Vec<Option<Call>> = (0..10u64)
         .map(|i| {
             let seen = seen.clone();

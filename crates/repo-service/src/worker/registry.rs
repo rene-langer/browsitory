@@ -526,8 +526,10 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("worker did not report an error after crashing; call hung")
             .expect_err("a crashed worker must return an error, not a status list");
-        assert!(
-            error.contains("worker thread stopped"),
+        // Either text: the call may reach the worker before or after it crashed.
+        assert_eq!(
+            crate::wire::ErrorKind::of(&error),
+            crate::wire::ErrorKind::WorkerStopped,
             "unexpected error message: {error}"
         );
 

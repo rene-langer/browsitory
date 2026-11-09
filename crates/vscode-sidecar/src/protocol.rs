@@ -2,6 +2,7 @@
 //! host (eventually relaying from the webview via `postMessage`) and this sidecar process. One
 //! JSON object per line on stdin (a request), one JSON object per line on stdout (a response).
 
+use repo_service::wire::ErrorDto;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -23,10 +24,13 @@ pub struct JsonRpcResponse {
     pub error: Option<JsonRpcError>,
 }
 
+/// A JSON-RPC error. `data` carries the shared error envelope (`repo_service::wire::ErrorDto`,
+/// #496): the same `message` and the `kind` the frontend switches on.
 #[derive(Debug, Serialize)]
 pub struct JsonRpcError {
     pub code: i32,
     pub message: String,
+    pub data: ErrorDto,
 }
 
 impl JsonRpcResponse {
@@ -46,6 +50,7 @@ impl JsonRpcResponse {
             result: None,
             error: Some(JsonRpcError {
                 code: -32000,
+                data: ErrorDto::from(message.clone()),
                 message,
             }),
         }
@@ -85,7 +90,20 @@ mod tests {
 
         assert_eq!(
             serialized,
-            r#"{"jsonrpc":"2.0","id":4,"error":{"code":-32000,"message":"boom"}}"#
+            r#"{"jsonrpc":"2.0","id":4,"error":{"code":-32000,"message":"boom","data":{"kind":"Other","message":"boom"}}}"#
+        );
+    }
+
+    /// #496: the error's `data` names the kind the frontend switches on.
+    #[test]
+    fn err_response_carries_the_error_kind() {
+        let response = JsonRpcResponse::err(5, repo_service::wire::WORKER_STOPPED.to_string());
+
+        let serialized = serde_json::to_string(&response).expect("serialize response");
+
+        assert_eq!(
+            serialized,
+            r#"{"jsonrpc":"2.0","id":5,"error":{"code":-32000,"message":"worker thread stopped","data":{"kind":"WorkerStopped","message":"worker thread stopped"}}}"#
         );
     }
 }

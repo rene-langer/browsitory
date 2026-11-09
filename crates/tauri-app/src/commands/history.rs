@@ -1,4 +1,5 @@
 use super::{emit_hook_events, hook_event_channel, repo_worker, AppState};
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, CommitOutcomeDto, ConfirmedAbortDto, HeadInfoDto, PickOutcomeDto, ResetModeDto,
     SequenceAbortDto, SequenceOutcomeDto, SignatureInputDto, TrailerDto,
@@ -9,7 +10,7 @@ use tauri::{AppHandle, State};
 pub async fn get_head_info(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<HeadInfoDto, String> {
+) -> Result<HeadInfoDto, ErrorDto> {
     Ok(HeadInfoDto::from(
         repo_worker(&state, &repo_path)?
             .call(move |w| w.get_head_info())
@@ -28,7 +29,7 @@ pub async fn amend_commit(
     trailers: Option<Vec<TrailerDto>>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<CommitOutcomeDto, String> {
+) -> Result<CommitOutcomeDto, ErrorDto> {
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(CommitOutcomeDto::from(
@@ -51,7 +52,7 @@ pub async fn amend_commit(
 pub async fn list_recent_authors(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<SignatureInputDto>, String> {
+) -> Result<Vec<SignatureInputDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.list_recent_authors())
         .await?
@@ -69,7 +70,7 @@ pub async fn cherry_pick(
     mainline: Option<u32>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<PickOutcomeDto, String> {
+) -> Result<PickOutcomeDto, ErrorDto> {
     let events = hook_event_channel(app, &repo_path);
     Ok(PickOutcomeDto::from(
         repo_worker(&state, &repo_path)?
@@ -85,7 +86,7 @@ pub async fn revert_commit(
     mainline: Option<u32>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<PickOutcomeDto, String> {
+) -> Result<PickOutcomeDto, ErrorDto> {
     let events = hook_event_channel(app, &repo_path);
     Ok(PickOutcomeDto::from(
         repo_worker(&state, &repo_path)?
@@ -101,7 +102,7 @@ pub async fn cherry_pick_many(
     commit_ids: Vec<String>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<SequenceOutcomeDto, String> {
+) -> Result<SequenceOutcomeDto, ErrorDto> {
     let events = hook_event_channel(app, &repo_path);
     Ok(SequenceOutcomeDto::from(
         repo_worker(&state, &repo_path)?
@@ -117,7 +118,7 @@ pub async fn revert_many(
     commit_ids: Vec<String>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<SequenceOutcomeDto, String> {
+) -> Result<SequenceOutcomeDto, ErrorDto> {
     let events = hook_event_channel(app, &repo_path);
     Ok(SequenceOutcomeDto::from(
         repo_worker(&state, &repo_path)?
@@ -134,7 +135,7 @@ pub async fn continue_sequence(
     no_verify: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<SequenceOutcomeDto, String> {
+) -> Result<SequenceOutcomeDto, ErrorDto> {
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(SequenceOutcomeDto::from(
@@ -149,7 +150,7 @@ pub async fn abort_sequence(
     repo_path: String,
     confirmed: Option<ConfirmedAbortDto>,
     state: State<'_, AppState>,
-) -> Result<SequenceAbortDto, String> {
+) -> Result<SequenceAbortDto, ErrorDto> {
     let confirmed = confirmed.map(git_core::pick::ConfirmedAbort::from);
     Ok(SequenceAbortDto::from(
         repo_worker(&state, &repo_path)?
@@ -164,7 +165,7 @@ pub async fn reset_to_commit(
     commit_id: String,
     mode: ResetModeDto,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.reset_to_commit(commit_id, mode.into()))
         .await
@@ -177,7 +178,7 @@ pub async fn checkout_commit(
     commit_id: String,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let events = hook_event_channel(app, &repo_path);
     repo_worker(&state, &repo_path)?
         .call(move |w| w.checkout_commit(commit_id, events))

@@ -1576,6 +1576,37 @@ fn pull_current_upstream_streams_notifications_and_returns_an_outcome() {
         .any(|n| n["params"]["phase"] == "Starting" && n["params"]["operation"] == "Pull"));
 }
 
+/// #496: a refused request names its kind in the JSON-RPC error's `data`, next to the message.
+#[test]
+fn a_dirty_pull_answers_the_dirty_worktree_kind() {
+    let fixture = local_and_bare_remote();
+    let repo_path = fixture.local_path();
+    write_file(std::path::Path::new(&repo_path), "untracked.txt", "x");
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    sidecar.call(
+        2,
+        "set_current_upstream",
+        serde_json::json!({"repoPath": repo_path, "remoteName": "origin", "remoteBranch": "main"}),
+    );
+
+    let (response, _notifications) = sidecar.call_and_collect_notifications(
+        3,
+        "pull_current_upstream",
+        serde_json::json!({"repoPath": repo_path}),
+        false,
+    );
+
+    assert_eq!(
+        response["error"],
+        serde_json::json!({
+            "code": -32000,
+            "message": "cannot pull with a dirty worktree",
+            "data": {"kind": "DirtyWorktree", "message": "cannot pull with a dirty worktree"},
+        })
+    );
+}
+
 #[test]
 fn transfer_progress_notifications_carry_no_id_and_are_rejected_as_requests() {
     // Guards the wire distinction the TypeScript client relies on: a notification has a `method`

@@ -79,6 +79,24 @@ describe("vscodeRepoClient", () => {
     await expect(promise).rejects.toThrow("repo not open: /missing");
   });
 
+  // #496: the kind comes from the error's `data` (the sidecar's `RepoErrorPayload`), or from the
+  // extension host's transport-loss code; `String(error)` is the message alone.
+  it.each([
+    [{ code: -32000, message: "worker thread stopped", data: { kind: "WorkerStopped", message: "worker thread stopped" } }, "WorkerStopped"],
+    [{ code: -32000, message: "repo not open: /missing", data: { kind: "Other", message: "repo not open: /missing" } }, "Other"],
+    [{ code: -32000, message: "from the extension host" }, "Other"],
+    [{ code: -32000, message: "newer sidecar", data: { kind: "SomethingNew", message: "newer sidecar" } }, "Other"],
+    [{ code: -32001, message: "Browsitory sidecar exited with code 1" }, "TransportLost"],
+  ])("rejects a JSON-RPC error %j with the kind %s", async (error, kind) => {
+    const promise = vscodeRepoClient.getStatus("/repo");
+
+    window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", id: 1, error } }));
+
+    const rejection: unknown = await promise.catch((caught: unknown) => caught);
+    expect((rejection as { kind: unknown }).kind).toBe(kind);
+    expect(String(rejection)).toBe(error.message);
+  });
+
   it("loads without the Tauri transport module", async () => {
     // A VS Code webview does not ship @tauri-apps/api. Its adapter must therefore be loadable
     // even when the Tauri-specific client cannot be imported.
@@ -196,7 +214,7 @@ describe("vscodeRepoClient", () => {
     }));
 
     await expect(first).rejects.toThrow("sidecar is reconnecting");
-    await expect(second).rejects.toThrow("sidecar is reconnecting");
+    await expect(second).rejects.toMatchObject({ kind: "TransportLost", message: "sidecar is reconnecting" });
     expect(received).toHaveBeenCalledWith({ state: "reconnecting", message: "sidecar is reconnecting" });
 
     const afterReconnect = vscodeRepoClient.getStatus("/repo");

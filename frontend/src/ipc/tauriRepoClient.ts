@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { error as logError } from "@tauri-apps/plugin-log";
 import { validateRemoteUrls } from "./validateRemoteUrls";
-import { toCloneError } from "./RepoClient";
+import { toCloneError, toRepoError } from "./RepoClient";
 import type {
   AmendOptions,
   CommitMessageSettings,
@@ -87,9 +87,19 @@ function logFrontendError(context: string, error: unknown): Promise<void> {
 // Every backend command failure surfaces to the UI as a rejected `invoke` promise, so this
 // is the single point that can log all of them (including ones a component only shows in its
 // own error state, never in the browser console) without instrumenting each RepoClient method.
+// Commands answer a `RepoErrorPayload` (#496), read here into the `RepoError` every method
+// rejects with. Clone and init answer their own payload and go through `loggedRawInvoke`.
 function loggedInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  return loggedRawInvoke<T>(command, args).catch((error: unknown) => {
+    throw toRepoError(error);
+  });
+}
+
+function loggedRawInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(command, args).catch((error: unknown) => {
-    void logFrontendError(`IPC ${command} failed`, error);
+    // A command's error payload is a plain object (`{ kind, message }`): log it as JSON.
+    const logged = typeof error === "object" && error !== null && !(error instanceof Error) ? JSON.stringify(error) : error;
+    void logFrontendError(`IPC ${command} failed`, logged);
     throw error;
   });
 }
@@ -114,12 +124,12 @@ export const tauriRepoClient: RepoClient = {
   // `loggedInvoke` logs only the command name and the rejection payload (`{ kind, message }`),
   // never the arguments, so the `request.https.token` is not logged.
   cloneRepo: (operationId: string, request: CloneRequest) =>
-    loggedInvoke<CloneOutcome>("clone_repo", { operationId, request }).catch((error: unknown) => {
+    loggedRawInvoke<CloneOutcome>("clone_repo", { operationId, request }).catch((error: unknown) => {
       throw toCloneError(error);
     }),
   cancelClone: (operationId: string) => loggedInvoke<void>("cancel_clone", { operationId }),
   initRepo: (path: string) =>
-    loggedInvoke<void>("init_repo", { path }).catch((error: unknown) => {
+    loggedRawInvoke<void>("init_repo", { path }).catch((error: unknown) => {
       throw toCloneError(error);
     }),
   listWorkspaces: () => loggedInvoke<Workspace[]>("list_workspaces"),
@@ -153,7 +163,9 @@ export const tauriRepoClient: RepoClient = {
   // Plain `invoke` on purpose: query errors and cancellations are expected while typing and are
   // shown in the UI, not logged.
   searchCommits: (repoPath: string, query: string, refs: string[] | null, remoteBranches: string[], cursor: string | null) =>
-    invoke<SearchPage>("search_commits", { repoPath, query, refs, remoteBranches, cursor }),
+    invoke<SearchPage>("search_commits", { repoPath, query, refs, remoteBranches, cursor }).catch((error: unknown) => {
+      throw toRepoError(error);
+    }),
   cancelSearch: (repoPath: string) => loggedInvoke<void>("cancel_search", { repoPath }),
   getCommitRenameDiff: (repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions) =>
     loggedInvoke<DiffHunk[]>("get_commit_rename_diff", { repoPath, commitId, oldPath, newPath, opts }),

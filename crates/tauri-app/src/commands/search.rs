@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use std::future::Future;
 
 use git_core::graph::GraphSelection;
@@ -15,7 +16,7 @@ pub async fn search_commits(
     remote_branches: Vec<String>,
     cursor: Option<String>,
     state: State<'_, AppState>,
-) -> Result<SearchPageDto, String> {
+) -> Result<SearchPageDto, ErrorDto> {
     let selection = GraphSelection {
         local: refs,
         remote: remote_branches,
@@ -33,7 +34,7 @@ pub(crate) fn queue_search(
     query: String,
     selection: GraphSelection,
     cursor: Option<String>,
-) -> Result<impl Future<Output = Result<SearchPage, String>> + Send + 'static, String> {
+) -> Result<impl Future<Output = Result<SearchPage, ErrorDto>> + Send + 'static, String> {
     let worker = repo_worker(state, repo_path)?;
     let generation = worker.signal().claim_search_generation();
     Ok(worker.call(move |w| w.search_commits_claimed(generation, query, selection, cursor)))
@@ -42,7 +43,7 @@ pub(crate) fn queue_search(
 /// Stops the repo's in-flight search, if any. Never queued behind it — see
 /// `WorkerHandle::cancel_search`.
 #[tauri::command]
-pub async fn cancel_search(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn cancel_search(repo_path: String, state: State<'_, AppState>) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?.signal().cancel_search();
     Ok(())
 }

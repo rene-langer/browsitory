@@ -1,4 +1,5 @@
 use super::{repo_worker, AppState};
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     CreatePullRequestDto, ForgeProviderDto, ForgeRepositoryDto, PullRequestDto, PullRequestListDto,
 };
@@ -8,7 +9,7 @@ use tauri::State;
 pub async fn detect_forge_repository(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<ForgeRepositoryDto>, String> {
+) -> Result<Vec<ForgeRepositoryDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.detect_forge_repository())
         .await?
@@ -24,7 +25,7 @@ pub async fn save_forge_token(
     account: String,
     token: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.save_forge_token(provider.into(), account, token))
         .await
@@ -36,7 +37,7 @@ pub async fn forget_forge_token(
     provider: ForgeProviderDto,
     account: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.forget_forge_token(provider.into(), account))
         .await
@@ -48,7 +49,7 @@ pub async fn list_pull_requests(
     remote_name: String,
     account: String,
     state: State<'_, AppState>,
-) -> Result<PullRequestListDto, String> {
+) -> Result<PullRequestListDto, ErrorDto> {
     Ok(PullRequestListDto::from(
         repo_worker(&state, &repo_path)?
             .call(move |w| w.list_pull_requests(remote_name, account))
@@ -63,7 +64,7 @@ pub async fn create_pull_request(
     account: String,
     pull_request: CreatePullRequestDto,
     state: State<'_, AppState>,
-) -> Result<PullRequestDto, String> {
+) -> Result<PullRequestDto, ErrorDto> {
     Ok(PullRequestDto::from(
         repo_worker(&state, &repo_path)?
             .call(move |w| w.create_pull_request(remote_name, account, pull_request.into()))

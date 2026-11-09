@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use std::path::PathBuf;
 
 use tauri::State;
@@ -9,7 +10,7 @@ use repo_service::wire::WorktreeInfoDto;
 pub async fn list_worktrees(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<WorktreeInfoDto>, String> {
+) -> Result<Vec<WorktreeInfoDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.list_worktrees())
         .await?
@@ -26,7 +27,7 @@ pub async fn create_worktree(
     branch: String,
     start_point: Option<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.create_worktree(name, PathBuf::from(path), branch, start_point))
         .await
@@ -37,14 +38,17 @@ pub async fn remove_worktree(
     repo_path: String,
     name: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.remove_worktree(name))
         .await
 }
 
 #[tauri::command]
-pub async fn prune_worktrees(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn prune_worktrees(
+    repo_path: String,
+    state: State<'_, AppState>,
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.prune_worktrees())
         .await

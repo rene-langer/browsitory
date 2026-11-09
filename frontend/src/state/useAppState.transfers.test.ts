@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { BranchInfo, TransferProgress } from "../ipc/RepoClient";
+import { RepoError, type BranchInfo, type TransferProgress } from "../ipc/RepoClient";
 import { lastFetchAt } from "../lib/autoFetch";
 import { useAppState } from "./useAppState";
 import { unimplemented, TEST_REPO_PATH, upstream, transferClient } from "./useAppStateTestClient";
@@ -270,7 +270,7 @@ describe("useAppState", () => {
   it("reports a dirty pull without leaving reconciliation pending", async () => {
     const client = transferClient({
       pullCurrentUpstream: async () => {
-        throw new Error("cannot pull with a dirty worktree");
+        throw new RepoError("DirtyWorktree", "cannot pull with a dirty worktree");
       },
     });
 
@@ -282,6 +282,50 @@ describe("useAppState", () => {
     expect(result.current.state.error).toBe("Commit or stash your changes before pulling.");
   });
 
+  // #496: the kind decides, not the text.
+  it("shows a pull failure that only mentions a dirty worktree as it is", async () => {
+    const client = transferClient({
+      pullCurrentUpstream: async () => {
+        throw new RepoError("Other", "post-merge: cannot pull with a dirty worktree");
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.pullCurrentUpstream());
+
+    expect(result.current.state.error).toBe("post-merge: cannot pull with a dirty worktree");
+    expect(result.current.state.pending).toBe(false);
+  });
+
+  // #496: a cancelled pull rejects before its terminal event arrives; the event says so.
+  it("reports a cancelled pull from its terminal event, not the rejection", async () => {
+    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      pullCurrentUpstream: async () => {
+        listener?.({ operationId: "cancelled-pull", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+        throw new RepoError("Cancelled", "the transfer was cancelled");
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    await act(() => result.current.pullCurrentUpstream());
+
+    expect(result.current.state.error).toBeNull();
+
+    act(() => {
+      listener?.({ operationId: "cancelled-pull", operation: "Pull", phase: "Failed", errorKind: "Cancelled", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+    });
+
+    expect(result.current.state.pending).toBe(false);
+    expect(result.current.state.error).toBe("Pull cancelled.");
+  });
+
   it("uses the terminal missing-credential event after a pull request rejects", async () => {
     let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
     const client = transferClient({
@@ -291,7 +335,7 @@ describe("useAppState", () => {
       },
       pullCurrentUpstream: async () => {
         listener?.({ operationId: "rejected-pull", operation: "Pull", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
-        throw new Error("pull failed");
+        throw new RepoError("PullFailed", "pull failed");
       },
     });
 
@@ -461,21 +505,23 @@ describe("useAppState", () => {
     expect(result.current.state.error).toBe("Save an HTTPS token for this remote before retrying.");
   });
 
-  it("uses the terminal missing-credential event after a direct fetch request rejects", async () => {
-    let listener: ((progress: import("../ipc/RepoClient").TransferProgress) => void) | null = null;
+  // A fetch answers its operation id at once and reports a failure only through its terminal
+  // event, so a rejected fetch request is shown like any failed request (#496: the old "Fetch
+  // failed" rejection is gone).
+  it("shows a rejected fetch request's error", async () => {
     const client = transferClient({
-      subscribeTransferProgress: (next) => { listener = next; return () => {}; },
       fetchRemote: async () => {
-        listener?.({ operationId: "rejected-fetch", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
-        throw new Error("Fetch failed");
+        throw new RepoError("WorkerStopped", "worker thread stopped");
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
     await act(() => result.current.fetchRemote("origin"));
-    act(() => listener?.({ operationId: "rejected-fetch", operation: "Fetch", phase: "Failed", errorKind: "MissingCredential", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
 
-    expect(result.current.state.error).toBe("Save an HTTPS token for this remote before retrying.");
+    expect(result.current.state.error).toBe(
+      "Connection to this repository was lost. Close and reopen the repository to reconnect.",
+    );
+    expect(result.current.state.pending).toBe(false);
   });
 
   it("renders safe keychain and SSH-agent transfer remediation without provider diagnostics", async () => {

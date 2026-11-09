@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ConflictSegment, RepoClient } from "../ipc/RepoClient";
+import { RepoError, type ConflictSegment, type RepoClient } from "../ipc/RepoClient";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
 
 const TEST_REPO_PATH = "/repo";
@@ -306,7 +306,7 @@ describe("ConflictResolutionPane", () => {
   it("shows a keep-ours/keep-theirs/delete fallback for an add/delete conflict", async () => {
     const client = fakeClient({
       getConflictHunks: async () => {
-        throw new Error("'binary.dat' is an add/delete conflict, not a text conflict");
+        throw new RepoError("AddDeleteConflict", "'binary.dat' is an add/delete conflict, not a text conflict");
       },
     });
 
@@ -325,11 +325,33 @@ describe("ConflictResolutionPane", () => {
     expect(screen.getByText("Delete file")).toBeInTheDocument();
   });
 
+  // #496: the kind decides, not the text; the old substring check matched this one.
+  it("shows any other failure as an error, even one that mentions add/delete conflicts", async () => {
+    const client = fakeClient({
+      getConflictHunks: async () => {
+        throw new RepoError("Other", "'binary.dat' is a text conflict, not an add/delete conflict");
+      },
+    });
+
+    render(
+      <ConflictResolutionPane
+        repoPath={TEST_REPO_PATH}
+        client={client}
+        path="binary.dat"
+        onResolve={vi.fn()}
+        onResolveAddDelete={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("'binary.dat' is a text conflict, not an add/delete conflict")).toBeInTheDocument();
+    expect(screen.queryByText("Keep our version")).not.toBeInTheDocument();
+  });
+
   it("clicking Keep their version calls onResolveAddDelete with Theirs", async () => {
     const onResolveAddDelete = vi.fn();
     const client = fakeClient({
       getConflictHunks: async () => {
-        throw new Error("'binary.dat' is an add/delete conflict, not a text conflict");
+        throw new RepoError("AddDeleteConflict", "'binary.dat' is an add/delete conflict, not a text conflict");
       },
     });
 
@@ -417,7 +439,7 @@ describe("ConflictResolutionPane whole-file header", () => {
   });
 
   it("keeps the header for add/delete conflicts next to their own buttons", async () => {
-    renderPane(() => Promise.reject("'x' is an add/delete conflict, not a text conflict"));
+    renderPane(() => Promise.reject(new RepoError("AddDeleteConflict", "'x' is an add/delete conflict, not a text conflict")));
     expect(await screen.findByRole("button", { name: "Keep our version" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Mark resolved" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Use theirs (whole file)" })).toBeEnabled();

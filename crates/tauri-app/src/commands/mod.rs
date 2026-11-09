@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
 use repo_service::wire::{
-    hook_progress_dto, transfer_progress_dto, CommitMessageSettingsDto, DiffSettingsDto,
+    hook_progress_dto, transfer_progress_dto, CommitMessageSettingsDto, DiffSettingsDto, ErrorDto,
     FetchSettingsDto, OpenRepoEntryDto, OpenRepoEntryInput, TransferProgressDto, WorkspaceDto,
 };
 use repo_service::worker::{HookEvent, TransferEvent, WorkerHandle, WorkerRegistry};
@@ -147,7 +147,7 @@ pub struct AppState {
 type RepoGate = tauri::async_runtime::Mutex<()>;
 
 #[tauri::command]
-pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), ErrorDto> {
     remember_repo(&state, &path)?;
     // Best-effort: a repo that opened successfully should count as "recent" even if we can't
     // persist that fact (e.g. an unwritable config dir) — don't fail the whole open_repo call
@@ -157,7 +157,7 @@ pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), S
 }
 
 #[tauri::command]
-pub async fn close_repo(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn close_repo(repo_path: String, state: State<'_, AppState>) -> Result<(), ErrorDto> {
     forget_repo(&state, &repo_path);
     Ok(())
 }
@@ -194,7 +194,7 @@ fn drop_gate(state: &AppState, key: &str) {
 }
 
 #[tauri::command]
-pub fn list_open_repos() -> Result<(Vec<OpenRepoEntryDto>, Option<String>), String> {
+pub fn list_open_repos() -> Result<(Vec<OpenRepoEntryDto>, Option<String>), ErrorDto> {
     let (entries, active) = config::list_open_repos().map_err(|e| e.to_string())?;
     Ok((
         entries.into_iter().map(OpenRepoEntryDto::from).collect(),
@@ -206,7 +206,7 @@ pub fn list_open_repos() -> Result<(Vec<OpenRepoEntryDto>, Option<String>), Stri
 pub fn persist_open_repos(
     entries: Vec<OpenRepoEntryInput>,
     active_path: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let entries = entries
         .into_iter()
         .map(|entry| config::OpenRepoEntry {
@@ -214,8 +214,10 @@ pub fn persist_open_repos(
             workspace_id: entry.workspace_id,
         })
         .collect::<Vec<_>>();
-    config::set_open_repos(&entries, active_path.as_deref().map(Path::new))
-        .map_err(|e| e.to_string())
+    Ok(
+        config::set_open_repos(&entries, active_path.as_deref().map(Path::new))
+            .map_err(|e| e.to_string())?,
+    )
 }
 
 #[tauri::command]
@@ -251,105 +253,109 @@ pub async fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
 // cold-start variable, which is the more direct fix for microsecond-scale work: block a thread
 // pool only when the work is actually slow enough to need one.
 #[tauri::command]
-pub async fn scan_repos_in_root(root: String) -> Result<Vec<String>, String> {
-    config::scan_repos_in_root(Path::new(&root))
+pub async fn scan_repos_in_root(root: String) -> Result<Vec<String>, ErrorDto> {
+    Ok(config::scan_repos_in_root(Path::new(&root))
         .map(|paths| {
             paths
                 .into_iter()
                 .map(|path| path.to_string_lossy().into_owned())
                 .collect()
         })
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?)
 }
 
 #[tauri::command]
-pub fn list_workspaces() -> Result<Vec<WorkspaceDto>, String> {
-    config::list_workspaces()
+pub fn list_workspaces() -> Result<Vec<WorkspaceDto>, ErrorDto> {
+    Ok(config::list_workspaces()
         .map(|workspaces| workspaces.into_iter().map(WorkspaceDto::from).collect())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?)
 }
 
 #[tauri::command]
-pub fn save_workspace(name: String, root: String, members: Vec<String>) -> Result<String, String> {
-    config::save_workspace(
+pub fn save_workspace(
+    name: String,
+    root: String,
+    members: Vec<String>,
+) -> Result<String, ErrorDto> {
+    Ok(config::save_workspace(
         &name,
         Path::new(&root),
         &members.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
     )
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?)
 }
 
 #[tauri::command]
-pub fn update_workspace(id: String, name: String, members: Vec<String>) -> Result<(), String> {
-    config::update_workspace(
+pub fn update_workspace(id: String, name: String, members: Vec<String>) -> Result<(), ErrorDto> {
+    Ok(config::update_workspace(
         &id,
         &name,
         &members.into_iter().map(PathBuf::from).collect::<Vec<_>>(),
     )
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?)
 }
 
 #[tauri::command]
-pub fn delete_workspace(id: String) -> Result<(), String> {
-    config::delete_workspace(&id).map_err(|error| error.to_string())
+pub fn delete_workspace(id: String) -> Result<(), ErrorDto> {
+    Ok(config::delete_workspace(&id).map_err(|error| error.to_string())?)
 }
 
 #[tauri::command]
-pub fn list_recent_repos() -> Result<Vec<String>, String> {
-    config::list_recent_repos()
+pub fn list_recent_repos() -> Result<Vec<String>, ErrorDto> {
+    Ok(config::list_recent_repos()
         .map(|paths| {
             paths
                 .into_iter()
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect()
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub fn get_diff_settings() -> Result<DiffSettingsDto, String> {
-    config::get_diff_settings()
+pub fn get_diff_settings() -> Result<DiffSettingsDto, ErrorDto> {
+    Ok(config::get_diff_settings()
         .map(DiffSettingsDto::from)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub fn set_diff_settings(settings: DiffSettingsDto) -> Result<(), String> {
-    config::set_diff_settings(&settings.into()).map_err(|e| e.to_string())
+pub fn set_diff_settings(settings: DiffSettingsDto) -> Result<(), ErrorDto> {
+    Ok(config::set_diff_settings(&settings.into()).map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub fn get_commit_message_settings() -> Result<CommitMessageSettingsDto, String> {
-    config::get_commit_message_settings()
+pub fn get_commit_message_settings() -> Result<CommitMessageSettingsDto, ErrorDto> {
+    Ok(config::get_commit_message_settings()
         .map(CommitMessageSettingsDto::from)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub fn set_commit_message_settings(settings: CommitMessageSettingsDto) -> Result<(), String> {
-    config::set_commit_message_settings(&settings.into()).map_err(|e| e.to_string())
+pub fn set_commit_message_settings(settings: CommitMessageSettingsDto) -> Result<(), ErrorDto> {
+    Ok(config::set_commit_message_settings(&settings.into()).map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub fn get_fetch_settings() -> Result<FetchSettingsDto, String> {
-    config::get_fetch_settings()
+pub fn get_fetch_settings() -> Result<FetchSettingsDto, ErrorDto> {
+    Ok(config::get_fetch_settings()
         .map(FetchSettingsDto::from)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub fn set_fetch_settings(settings: FetchSettingsDto) -> Result<(), String> {
-    config::set_fetch_settings(&settings.into()).map_err(|e| e.to_string())
+pub fn set_fetch_settings(settings: FetchSettingsDto) -> Result<(), ErrorDto> {
+    Ok(config::set_fetch_settings(&settings.into()).map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub fn get_last_seen_version() -> Result<Option<String>, String> {
-    config::get_last_seen_version().map_err(|e| e.to_string())
+pub fn get_last_seen_version() -> Result<Option<String>, ErrorDto> {
+    Ok(config::get_last_seen_version().map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub fn set_last_seen_version(version: String) -> Result<(), String> {
-    config::set_last_seen_version(&version).map_err(|e| e.to_string())
+pub fn set_last_seen_version(version: String) -> Result<(), ErrorDto> {
+    Ok(config::set_last_seen_version(&version).map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
@@ -386,7 +392,7 @@ impl RepoWorker {
     ///
     /// The guard moves into the blocking closure: if the caller's future is dropped while the
     /// round trip runs, the gate stays held until the round trip ends.
-    pub(crate) async fn call<T, F>(self, f: F) -> Result<T, String>
+    pub(crate) async fn call<T, F>(self, f: F) -> Result<T, ErrorDto>
     where
         F: FnOnce(&WorkerHandle) -> Result<T, String> + Send + 'static,
         T: Send + 'static,
@@ -398,6 +404,7 @@ impl RepoWorker {
             f(&handle)
         })
         .await?
+        .map_err(ErrorDto::from)
     }
 
     /// Ungated access for what never waits on the worker's queue: `cancel_transfer`,
@@ -455,8 +462,8 @@ pub(crate) async fn off_runtime<T: Send + 'static>(
 /// window away with no way back short of restarting it. Does not touch `AppState`/the worker:
 /// this is a plain OS-level operation, not a git one.
 #[tauri::command]
-pub async fn open_external_url(url: String) -> Result<(), String> {
-    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|error| error.to_string())
+pub async fn open_external_url(url: String) -> Result<(), ErrorDto> {
+    Ok(tauri_plugin_opener::open_url(url, None::<&str>).map_err(|error| error.to_string())?)
 }
 
 #[cfg(test)]

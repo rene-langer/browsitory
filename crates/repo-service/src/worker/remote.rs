@@ -146,7 +146,7 @@ pub(super) fn forget_https<S: CredentialStore>(
 fn credential_operation_error(error: CredentialStoreError) -> String {
     match error {
         CredentialStoreError::Keychain(diagnostic) => {
-            format!("credential keychain failure: {diagnostic}")
+            crate::wire::credential_store_failure_message(&diagnostic)
         }
         CredentialStoreError::InvalidHttpsUrl => error.to_string(),
     }
@@ -379,7 +379,7 @@ fn pull_error_message(error: git_core::remote::RemoteError) -> String {
         | git_core::remote::RemoteError::HeldOpen(_)
         // Static, secret-free text: the user asked for this by pressing Cancel.
         | git_core::remote::RemoteError::Cancelled => error.to_string(),
-        _ => "pull failed".to_string(),
+        _ => crate::wire::PULL_FAILED.to_string(),
     }
 }
 
@@ -1136,9 +1136,27 @@ mod tests {
         let error =
             CredentialStoreError::Keychain("CredWrite failed with Windows error 1312".to_owned());
 
+        let message = credential_operation_error(error);
+
         assert_eq!(
-            credential_operation_error(error),
+            message,
             "credential keychain failure: CredWrite failed with Windows error 1312"
+        );
+        assert_eq!(
+            crate::wire::ErrorKind::of(&message),
+            crate::wire::ErrorKind::CredentialStoreFailure
+        );
+    }
+
+    /// #496: a cancelled pull answers `Cancelled`, so the frontend leaves it to the pull's
+    /// terminal transfer event ("Pull cancelled.").
+    #[test]
+    fn a_cancelled_pull_answers_the_cancelled_kind() {
+        let message = pull_error_message(git_core::remote::RemoteError::Cancelled);
+
+        assert_eq!(
+            crate::wire::ErrorKind::of(&message),
+            crate::wire::ErrorKind::Cancelled
         );
     }
 }

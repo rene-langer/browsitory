@@ -64,6 +64,7 @@ import type {
   UndoState,
   ResetMode,
 } from "./RepoClient";
+import { RepoError, toRepoError } from "./RepoClient";
 import { validateRemoteUrls } from "./validateRemoteUrls";
 import { __resetHostVisibilityForTests, publishHostVisibility } from "./hostVisibility";
 import {
@@ -90,7 +91,18 @@ interface JsonRpcSuccess {
 interface JsonRpcFailure {
   jsonrpc: "2.0";
   id: number;
-  error: { code: number; message: string };
+  /** `data` is the sidecar's `RepoErrorPayload` (#496); the extension host's own errors have none. */
+  error: { code: number; message: string; data?: unknown };
+}
+
+// The JSON-RPC code the extension host answers a request with when it lost the sidecar
+// (`TRANSPORT_ERROR_CODE` in `extension/src/sidecarBridge.ts`).
+const TRANSPORT_LOST_CODE = -32001;
+
+function rejectionOf(error: JsonRpcFailure["error"]): RepoError {
+  if (error.code === TRANSPORT_LOST_CODE) return new RepoError("TransportLost", error.message);
+  const kind = toRepoError(error.data).kind;
+  return new RepoError(kind, error.message);
 }
 
 type JsonRpcResponse = JsonRpcSuccess | JsonRpcFailure;
@@ -153,7 +165,7 @@ function handleMessage(event: MessageEvent) {
     if (!waiting) return;
     pending.delete(message.id);
     if ("error" in message) {
-      waiting.reject(new Error(message.error.message));
+      waiting.reject(rejectionOf(message.error));
     } else {
       waiting.resolve(message.result);
     }
@@ -179,7 +191,7 @@ function handleMessage(event: MessageEvent) {
   }
   if (message.method !== "transportStatus" || !isTransportStatus(message.params)) return;
   const status = message.params;
-  const error = new Error(status.message);
+  const error = new RepoError("TransportLost", status.message);
   const waitingCalls = [...pending.values()];
   pending.clear();
   for (const waiting of waitingCalls) waiting.reject(error);

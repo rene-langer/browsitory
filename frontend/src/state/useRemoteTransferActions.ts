@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef } from "react";
-import type { PullOutcome, RemoteAuthMode, RepoClient, TransferProgress } from "../ipc/RepoClient";
+import { errorKind, type PullOutcome, type RemoteAuthMode, type RepoClient, type TransferProgress } from "../ipc/RepoClient";
 import { recordFetch } from "../lib/autoFetch";
 import { writeFetchPrune } from "../lib/fetchPrune";
 import { upstreamPushBranch } from "../lib/pushTarget";
-import { credentialFailureMessage } from "./useMutationRunner";
+import { credentialFailureMessage, credentialRemediation } from "./useMutationRunner";
 import type {
   RunMutation,
   RunMutationWithMessage,
@@ -30,9 +30,9 @@ function transferFailureMessage(progress: TransferProgress, upstreamLabel: strin
     return "Push cancelled.";
   }
   if (progress.errorKind === "HookFailed") return hookFailedMessage("pre-push");
-  if (progress.errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
-  if (progress.errorKind === "CredentialStoreFailure") return credentialFailureMessage("credential keychain failure");
-  if (progress.errorKind === "SshAgentFailure") return credentialFailureMessage("SSH agent failure");
+  if (progress.errorKind === "MissingCredential") return credentialRemediation("MissingCredential");
+  if (progress.errorKind === "CredentialStoreFailure") return credentialRemediation("CredentialStoreFailure");
+  if (progress.errorKind === "SshAgentFailure") return credentialRemediation("SshAgentFailure");
   if (progress.errorKind === "StaleLease") {
     return `${upstreamLabel} changed since your last fetch. Fetch and review before force pushing.`;
   }
@@ -71,9 +71,9 @@ interface FailedRemote {
 
 // The same fixed hints `transferFailureMessage` gives a single-remote transfer.
 function credentialHint(errorKind: TransferProgress["errorKind"]): string | null {
-  if (errorKind === "MissingCredential") return credentialFailureMessage("missing credential");
-  if (errorKind === "CredentialStoreFailure") return credentialFailureMessage("credential keychain failure");
-  if (errorKind === "SshAgentFailure") return credentialFailureMessage("SSH agent failure");
+  if (errorKind === "MissingCredential") return credentialRemediation("MissingCredential");
+  if (errorKind === "CredentialStoreFailure") return credentialRemediation("CredentialStoreFailure");
+  if (errorKind === "SshAgentFailure") return credentialRemediation("SshAgentFailure");
   return null;
 }
 
@@ -424,8 +424,7 @@ export function useRemoteTransferActions(
           }));
         }
       } catch (err) {
-        const message = String(err);
-        if (operation === "Fetch" && (message === "Fetch failed" || message.endsWith(": Fetch failed"))) return;
+        const message = credentialFailureMessage(err);
         transferRequestPending.current = false;
         activeTransferId.current = null;
         setState((prev) => ({ ...prev, error: message, pending: false }));
@@ -626,8 +625,11 @@ export function useRemoteTransferActions(
       await refresh();
       setState((prev) => ({ ...prev, pending: false, pullOutcome: outcome }));
     } catch (err) {
-      const message = String(err);
-      if (message === "pull failed" || message.endsWith(": pull failed")) return;
+      // The pull's terminal transfer event says why (`transferFailureMessage`), so it is shown
+      // from there: a credential remediation, or "Pull cancelled.".
+      const kind = errorKind(err);
+      if (kind === "PullFailed" || kind === "Cancelled") return;
+      const message = credentialFailureMessage(err);
       transferRequestPending.current = false;
       activeTransferId.current = null;
       setState((prev) => ({
@@ -636,9 +638,7 @@ export function useRemoteTransferActions(
         pending: false,
         pendingPull: null,
         pullOutcome: null,
-        error: message.includes("cannot pull with a dirty worktree")
-          ? "Commit or stash your changes before pulling."
-          : message,
+        error: kind === "DirtyWorktree" ? "Commit or stash your changes before pulling." : message,
       }));
     }
   }, [client, refresh, repoPath, setState]);

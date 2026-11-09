@@ -2038,6 +2038,117 @@ pub fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
     }
 }
 
+/// What every `WorkerHandle` method answers when the repository's worker thread has stopped
+/// (crashed) before it took the command; [`WORKER_STOPPED_BEFORE_REPLYING`] when it stopped while
+/// the command ran. Both are [`ErrorKind::WorkerStopped`].
+pub const WORKER_STOPPED: &str = "worker thread stopped";
+/// See [`WORKER_STOPPED`].
+pub const WORKER_STOPPED_BEFORE_REPLYING: &str = "worker thread stopped before replying";
+/// What a pull answers for a failure its terminal transfer event reports with a
+/// `TransferErrorKind` (a transport error may quote a URL with credentials, so the reply keeps
+/// none of its text). [`ErrorKind::PullFailed`].
+pub const PULL_FAILED: &str = "pull failed";
+
+/// The kind of a rejected request, for the failures the frontend tells apart (#496). Every
+/// request that fails answers an [`ErrorDto`]; the frontend switches on its `kind` and never on
+/// the message text, which stays free to change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+pub enum ErrorKind {
+    /// Anything the frontend shows as it is.
+    Other,
+    /// The repository's worker thread has stopped; nothing on this repository works until it is
+    /// closed and reopened ([`WORKER_STOPPED`]).
+    WorkerStopped,
+    /// The operating-system credential store failed while saving or forgetting an HTTPS token,
+    /// or while changing a remote's authentication.
+    CredentialStoreFailure,
+    /// A pull refused to start over uncommitted changes.
+    DirtyWorktree,
+    /// A pull failed and its terminal transfer event says why ([`PULL_FAILED`]).
+    PullFailed,
+    /// The user cancelled the transfer (a pull's); its terminal transfer event says so too.
+    Cancelled,
+    /// `get_conflict_hunks` on an add/delete conflict, which has no text hunks.
+    AddDeleteConflict,
+}
+
+impl ErrorKind {
+    /// The kind of `message`, a request's error text. Each kind is recognised by the constant or
+    /// typed error its producer formats, never by a copy of the text, so rewording one keeps its
+    /// kind. Exact matches only, apart from the parts the producer fills in.
+    pub fn of(message: &str) -> Self {
+        use git_core::remote::RemoteError;
+        if message == WORKER_STOPPED || message == WORKER_STOPPED_BEFORE_REPLYING {
+            Self::WorkerStopped
+        } else if message == PULL_FAILED {
+            Self::PullFailed
+        } else if message == RemoteError::DirtyWorktree.to_string() {
+            Self::DirtyWorktree
+        } else if message == RemoteError::Cancelled.to_string() {
+            Self::Cancelled
+        } else if fills(message, |diagnostic| {
+            credential_store_failure_message(&diagnostic)
+        }) {
+            Self::CredentialStoreFailure
+        } else if fills(message, |path| {
+            git_core::merge::MergeError::NotATextConflict(path).to_string()
+        }) {
+            Self::AddDeleteConflict
+        } else {
+            Self::Other
+        }
+    }
+}
+
+/// The error text of a credential store failure while saving or forgetting a token, or while
+/// changing a remote's authentication: [`ErrorKind::CredentialStoreFailure`].
+pub fn credential_store_failure_message(diagnostic: &str) -> String {
+    format!(
+        "{}: {diagnostic}",
+        git_core::remote::CREDENTIAL_STORE_FAILURE_ERROR
+    )
+}
+
+/// Whether `message` is what `render` makes of some value: the text around the value must
+/// match exactly.
+fn fills(message: &str, render: impl Fn(String) -> String) -> bool {
+    const SLOT: char = '\u{0}';
+    let template = render(SLOT.to_string());
+    let Some((before, after)) = template.split_once(SLOT) else {
+        return message == template;
+    };
+    message.len() >= before.len() + after.len()
+        && message.starts_with(before)
+        && message.ends_with(after)
+}
+
+/// A rejected request (#496): the desktop app sends it as the command's error, the sidecar as
+/// the JSON-RPC error's `data` (next to the same `message`). Built from the error text with
+/// [`ErrorKind::of`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "RepoErrorPayload"))]
+pub struct ErrorDto {
+    pub kind: ErrorKind,
+    pub message: String,
+}
+
+impl From<String> for ErrorDto {
+    fn from(message: String) -> Self {
+        Self {
+            kind: ErrorKind::of(&message),
+            message,
+        }
+    }
+}
+
+impl From<&str> for ErrorDto {
+    fn from(message: &str) -> Self {
+        message.to_string().into()
+    }
+}
+
 /// #306: the TypeScript shape of every wire DTO above, checked in as
 /// `frontend/src/ipc/generated/wire-dto.ts`. `frontend/src/ipc/dtoContract.ts` checks it against
 /// the hand-written types in `RepoClient.ts`, so a renamed field fails the frontend type check.
@@ -2059,6 +2170,8 @@ mod ts_bindings {
             git_core::repo::OperationKind,
             git_core::repo::TerminalRebaseKind,
             git_core::status::StatusKind,
+            ErrorKind,
+            ErrorDto,
             crate::worker::HookSource,
             TransferProgressDto,
             TransferProgressPhaseDto,
@@ -2143,6 +2256,70 @@ mod ts_bindings {
         test_support::assert_generated_file(
             &test_support::repo_root().join("frontend/src/ipc/generated/wire-dto.ts"),
             &bindings,
+        );
+    }
+}
+
+/// #496: each `ErrorKind` comes from its producer's own text, and nothing else gets one.
+#[cfg(test)]
+mod error_kinds {
+    use super::*;
+    use git_core::merge::MergeError;
+    use git_core::remote::RemoteError;
+
+    #[test]
+    fn each_producer_gets_its_kind() {
+        let cases = [
+            (WORKER_STOPPED.to_string(), ErrorKind::WorkerStopped),
+            (
+                WORKER_STOPPED_BEFORE_REPLYING.to_string(),
+                ErrorKind::WorkerStopped,
+            ),
+            (PULL_FAILED.to_string(), ErrorKind::PullFailed),
+            (
+                RemoteError::DirtyWorktree.to_string(),
+                ErrorKind::DirtyWorktree,
+            ),
+            (RemoteError::Cancelled.to_string(), ErrorKind::Cancelled),
+            (
+                credential_store_failure_message("CredWrite failed: locked"),
+                ErrorKind::CredentialStoreFailure,
+            ),
+            (
+                MergeError::NotATextConflict("dir/it's: here.bin".into()).to_string(),
+                ErrorKind::AddDeleteConflict,
+            ),
+        ];
+        for (message, kind) in cases {
+            assert_eq!(ErrorKind::of(&message), kind, "{message}");
+        }
+    }
+
+    /// Texts that only contain a recognised one, or only look like it, stay `Other`. The
+    /// frontend's old substring checks matched the first two.
+    #[test]
+    fn near_misses_stay_other() {
+        let messages = [
+            MergeError::NotAnAddDeleteConflict("x".into()).to_string(),
+            format!("hook said: {}", RemoteError::DirtyWorktree),
+            format!("{WORKER_STOPPED}!"),
+            "Pull failed".to_string(),
+            git_core::remote::CREDENTIAL_STORE_FAILURE_ERROR.to_string(),
+            RemoteError::NoUpstream.to_string(),
+            String::new(),
+        ];
+        for message in messages {
+            assert_eq!(ErrorKind::of(&message), ErrorKind::Other, "{message}");
+        }
+    }
+
+    #[test]
+    fn the_envelope_keeps_the_message() {
+        let error = ErrorDto::from(WORKER_STOPPED);
+
+        assert_eq!(
+            serde_json::to_string(&error).unwrap(),
+            r#"{"kind":"WorkerStopped","message":"worker thread stopped"}"#
         );
     }
 }

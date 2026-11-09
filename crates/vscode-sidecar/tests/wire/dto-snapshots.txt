@@ -194,3 +194,11 @@ SignatureInput/plain {"email":"ada@example.com","name":"Ada Lovelace"}
 OpenRepos/loose {"activePath":"/repos/app","entries":[{"path":"/repos/app","workspaceId":null}]}
 OpenRepos/in-workspace {"activePath":"/repos/lib","entries":[{"path":"/repos/lib","workspaceId":"ws-1"}]}
 OpenRepos/none {"activePath":null,"entries":[]}
+RepoErrorPayload/Other {"kind":"Other","message":"repo not open: /repo"}
+RepoErrorPayload/WorkerStopped {"kind":"WorkerStopped","message":"worker thread stopped"}
+RepoErrorPayload/WorkerStoppedBeforeReplying {"kind":"WorkerStopped","message":"worker thread stopped before replying"}
+RepoErrorPayload/CredentialStoreFailure {"kind":"CredentialStoreFailure","message":"credential keychain failure: locked"}
+RepoErrorPayload/DirtyWorktree {"kind":"DirtyWorktree","message":"cannot pull with a dirty worktree"}
+RepoErrorPayload/PullFailed {"kind":"PullFailed","message":"pull failed"}
+RepoErrorPayload/Cancelled {"kind":"Cancelled","message":"the transfer was cancelled"}
+RepoErrorPayload/AddDeleteConflict {"kind":"AddDeleteConflict","message":"'a.bin' is an add/delete conflict, not a text conflict"}

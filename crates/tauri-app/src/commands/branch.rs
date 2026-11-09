@@ -1,11 +1,12 @@
 use super::{hook_event_channel, repo_worker, AppState};
 use repo_service::wire::BranchInfoDto;
+use repo_service::wire::ErrorDto;
 use tauri::{AppHandle, State};
 #[tauri::command]
 pub async fn list_branches(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<BranchInfoDto>, String> {
+) -> Result<Vec<BranchInfoDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.list_branches())
         .await?
@@ -19,7 +20,7 @@ pub async fn create_branch(
     name: String,
     start_point: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.create_branch(name, start_point))
         .await
@@ -31,7 +32,7 @@ pub async fn switch_branch(
     name: String,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let events = hook_event_channel(app, &repo_path);
     repo_worker(&state, &repo_path)?
         .call(move |w| w.switch_branch(name, events))
@@ -43,7 +44,7 @@ pub async fn delete_branch(
     name: String,
     force: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.delete_branch(name, force))
         .await
@@ -54,7 +55,7 @@ pub async fn rename_branch(
     old_name: String,
     new_name: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.rename_branch(old_name, new_name))
         .await

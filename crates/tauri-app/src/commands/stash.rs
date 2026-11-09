@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use tauri::State;
 
 use super::{repo_worker, AppState};
@@ -7,7 +8,7 @@ use repo_service::wire::{StashApplyOutcomeDto, StashEntryDto, StashFilesDto, Sta
 pub async fn list_stashes(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<StashEntryDto>, String> {
+) -> Result<Vec<StashEntryDto>, ErrorDto> {
     let stashes = repo_worker(&state, &repo_path)?
         .call(move |w| w.list_stashes())
         .await?;
@@ -19,7 +20,7 @@ pub async fn save_stash(
     repo_path: String,
     options: StashOptionsDto,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.save_stash(options.into()))
         .await
@@ -32,7 +33,7 @@ pub async fn apply_stash(
     commit_id: String,
     restore_index: bool,
     state: State<'_, AppState>,
-) -> Result<StashApplyOutcomeDto, String> {
+) -> Result<StashApplyOutcomeDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.apply_stash(index, commit_id, restore_index))
         .await?
@@ -46,7 +47,7 @@ pub async fn pop_stash(
     commit_id: String,
     restore_index: bool,
     state: State<'_, AppState>,
-) -> Result<StashApplyOutcomeDto, String> {
+) -> Result<StashApplyOutcomeDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.pop_stash(index, commit_id, restore_index))
         .await?
@@ -58,7 +59,7 @@ pub async fn get_stash_files(
     repo_path: String,
     commit_id: String,
     state: State<'_, AppState>,
-) -> Result<StashFilesDto, String> {
+) -> Result<StashFilesDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_stash_files(commit_id))
         .await?
@@ -71,7 +72,7 @@ pub async fn drop_stash(
     index: usize,
     commit_id: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.drop_stash(index, commit_id))
         .await

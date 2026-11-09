@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { GraphCommit, RepoClient, StatusEntry, TagInfo } from "../ipc/RepoClient";
+import { RepoError, type GraphCommit, type RepoClient, type StatusEntry, type TagInfo } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 import { unimplemented, TEST_REPO_PATH, remote, upstream, remoteManagementClient, transferClient } from "./useAppStateTestClient";
 
@@ -8,7 +8,7 @@ describe("useAppState", () => {
   it("reports a failed remote-auth mutation to dependent callers", async () => {
     const client = transferClient({
       setRemoteAuthMode: async () => {
-        throw new Error("credential keychain failure");
+        throw new RepoError("CredentialStoreFailure", "credential keychain failure: locked");
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -24,17 +24,16 @@ describe("useAppState", () => {
 
   // AUD-2026-09-05-CONC-002: the per-repo worker thread can die mid-session, and every
   // `WorkerHandle` method in `crates/repo-service/src/worker/*` then rejects every subsequent
-  // call on that repo with one of two verbatim strings ("worker thread stopped" / "worker thread
-  // stopped before replying" — see `branch.rs`, `status.rs`, etc.). Retrying the same action can
-  // never help there (the worker is gone for good), so both should surface as a distinct
-  // reconnect message instead of the raw string riding the generic error path unchanged.
+  // call on that repo with the `WorkerStopped` kind (#496). Retrying the same action can never
+  // help there (the worker is gone for good), so it should surface as a distinct reconnect
+  // message instead of the raw text riding the generic error path unchanged.
   it.each([
     "worker thread stopped",
     "worker thread stopped before replying",
   ])("reports a %s failure as a reconnect message, not the raw worker error", async (workerError) => {
     const client = transferClient({
       setRemoteAuthMode: async () => {
-        throw new Error(workerError);
+        throw new RepoError("WorkerStopped", workerError);
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -51,10 +50,26 @@ describe("useAppState", () => {
     expect(result.current.state.error).not.toBe(workerError);
   });
 
+  // #496: the kind decides, not the text.
+  it("shows a failure that only mentions a stopped worker as it is", async () => {
+    const client = transferClient({
+      setRemoteAuthMode: async () => {
+        throw new RepoError("Other", "hook output: worker thread stopped");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(async () => {
+      await result.current.setRemoteAuthMode("origin", "HttpsToken", "rene");
+    });
+
+    expect(result.current.state.error).toBe("hook output: worker thread stopped");
+  });
+
   it("reports a worker-death failure hit during refresh as the same reconnect message", async () => {
     const client = transferClient({
       getStatus: async () => {
-        throw new Error("worker thread stopped before replying");
+        throw new RepoError("WorkerStopped", "worker thread stopped before replying");
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
