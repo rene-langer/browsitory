@@ -1252,6 +1252,15 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   didn't write the other's file). Only the result is compared with HEAD, not their union: a
   case-only rename (`A` in HEAD, only `a` in the result) holds no pair, and libgit2 commits it
   correctly. A pair HEAD already holds is #512's.
+- Switches and checkouts refuse a case pair they bring in the same way (#532): `switch_branch`,
+  `checkout_commit` (a commit, tag or remote branch) and `create_branch` (before the branch is
+  created) run `refuse_case_pair_brought_in` on the target tree against HEAD's tree, after the
+  linked-folder check. libgit2's safe checkout kept one name in the index and didn't write the
+  other's file, so the next commit recorded a deletion. `create_worktree` runs it with no base
+  (the new worktree's index starts empty), so any pair in the tree is refused. Refused rather
+  than written around (as undo and aborts do): on the case-insensitive drives
+  `core.ignorecase` exists for, both files can't exist at once anyway. Reflog restore moves
+  only a ref and checks nothing out.
 - Aborts never refuse a case pair (#511): a pick outside Browsitory (or one before #522) can
   bring one in that no up-front check sees (libgit2's merge then records one name in the index
   and writes the other's file, so the pair is split between HEAD, the index and the disk).

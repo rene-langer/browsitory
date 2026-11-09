@@ -684,3 +684,171 @@ fn sequence_abort_keeps_a_local_change_to_one_of_a_case_pair() {
         );
     }
 }
+
+// #532: a switch or a checkout whose tree holds a case pair HEAD's tree doesn't. libgit2's safe
+// checkout kept one name in the index and didn't write the other's file, so the next commit
+// dropped it.
+
+#[test]
+fn switch_branch_refuses_a_branch_that_brings_in_a_case_pair() {
+    for pair in CASE_PAIRS {
+        let (dir, repo) = ahead_adds_the_other_name(pair);
+        let tip = head_id(&repo);
+
+        let error = git_core::branch::switch_branch(&repo, "ahead").unwrap_err();
+
+        assert!(
+            matches!(error, git_core::branch::BranchError::CasePairBroughtIn(_)),
+            "{pair:?}: {error:?}"
+        );
+        assert_brought_in(&error, pair);
+        assert_untouched(dir.path(), &repo, pair, &tip);
+    }
+}
+
+#[test]
+fn checkout_commit_refuses_a_commit_that_brings_in_a_case_pair() {
+    for pair in CASE_PAIRS {
+        let (dir, repo) = ahead_adds_the_other_name(pair);
+        let tip = head_id(&repo);
+        let ahead = commit_id(&repo, "ahead");
+
+        let error = git_core::branch::checkout_commit(&repo, &ahead).unwrap_err();
+
+        assert!(
+            matches!(error, git_core::branch::BranchError::CasePairBroughtIn(_)),
+            "{pair:?}: {error:?}"
+        );
+        assert_untouched(dir.path(), &repo, pair, &tip);
+    }
+}
+
+#[test]
+fn checkout_commit_refuses_a_tag_or_remote_branch_that_brings_in_a_case_pair() {
+    // A tag or a remote branch is checked out by its commit (detached).
+    for pair in CASE_PAIRS {
+        let (dir, repo) = ahead_adds_the_other_name(pair);
+        let tip = head_id(&repo);
+        let ahead = repo.revparse_single("ahead").unwrap().id();
+        repo.reference("refs/remotes/origin/ahead", ahead, true, "test")
+            .unwrap();
+        let target = commit_id(&repo, "origin/ahead");
+
+        let error = git_core::branch::checkout_commit(&repo, &target).unwrap_err();
+
+        assert!(
+            matches!(error, git_core::branch::BranchError::CasePairBroughtIn(_)),
+            "{pair:?}: {error:?}"
+        );
+        assert_untouched(dir.path(), &repo, pair, &tip);
+    }
+}
+
+#[test]
+fn create_branch_refuses_a_start_point_that_brings_in_a_case_pair_and_creates_nothing() {
+    for pair in CASE_PAIRS {
+        let (dir, repo) = ahead_adds_the_other_name(pair);
+        let tip = head_id(&repo);
+
+        let error = git_core::branch::create_branch(&repo, "topic", "ahead").unwrap_err();
+
+        assert!(
+            matches!(error, git_core::branch::BranchError::CasePairBroughtIn(_)),
+            "{pair:?}: {error:?}"
+        );
+        assert!(
+            repo.find_branch("topic", git2::BranchType::Local).is_err(),
+            "{pair:?}"
+        );
+        assert_untouched(dir.path(), &repo, pair, &tip);
+    }
+}
+
+#[test]
+fn switch_branch_keeps_a_case_only_rename_where_names_fold() {
+    // A rename `A` -> `a` holds no pair: the switch goes ahead.
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "A", "first\n");
+    write_file(dir.path(), "conf", "base\n");
+    commit_all(&repo, "base");
+    {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("side", &base, false).unwrap();
+    }
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    switch(&repo, "side");
+    std::fs::rename(dir.path().join("A"), dir.path().join("a")).unwrap();
+    {
+        let mut index = repo.index().unwrap();
+        index.remove_path(std::path::Path::new("A")).unwrap();
+        index.write().unwrap();
+    }
+    commit_all(&repo, "rename A to a");
+    switch(&repo, &main);
+    let repo = ignore_case(dir.path(), repo);
+
+    git_core::branch::switch_branch(&repo, "side").unwrap();
+
+    assert_eq!(head_id(&repo), commit_id(&repo, "side"));
+    assert_eq!(index_paths(dir.path()), sorted(&["a", "conf"]));
+    assert_eq!(read(dir.path(), "a").as_deref(), Some("first\n"));
+}
+
+#[test]
+fn switch_branch_goes_ahead_when_head_already_holds_the_pair() {
+    // A pair HEAD already holds is #512's, not brought in: the check lets the switch through.
+    for pair in CASE_PAIRS {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), pair.0, "first\n");
+        write_file(dir.path(), pair.1, "second\n");
+        write_file(dir.path(), "conf", "base\n");
+        commit_all(&repo, "base");
+        {
+            let base = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("same", &base, false).unwrap();
+        }
+        let repo = ignore_case(dir.path(), repo);
+
+        git_core::branch::switch_branch(&repo, "same").unwrap();
+
+        assert_eq!(
+            repo.head().unwrap().shorthand().unwrap(),
+            "same",
+            "{pair:?}"
+        );
+    }
+}
+
+#[test]
+fn create_worktree_refuses_a_branch_that_holds_a_case_pair() {
+    for pair in CASE_PAIRS {
+        let (dir, repo) = ahead_adds_the_other_name(pair);
+        let tip = head_id(&repo);
+        let parent = tempfile::tempdir().unwrap();
+        let path = parent.path().join("wt");
+
+        let error = git_core::worktree::create_worktree_with(
+            &repo,
+            "wt",
+            &path,
+            "topic",
+            Some("ahead"),
+            |_| Ok(false),
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                git_core::worktree::WorktreeError::CasePairBroughtIn(_)
+            ),
+            "{pair:?}: {error:?}"
+        );
+        assert!(!path.exists(), "{pair:?}");
+        assert!(
+            repo.find_branch("topic", git2::BranchType::Local).is_err(),
+            "{pair:?}"
+        );
+        assert_untouched(dir.path(), &repo, pair, &tip);
+    }
+}

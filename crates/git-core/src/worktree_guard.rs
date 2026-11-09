@@ -369,7 +369,8 @@ pub struct CasePairBroughtIn {
 /// Refuses a merge-like step whose `result` (the in-memory `cherrypick_commit`,
 /// `revert_commit`, `merge_commits` or `merge_trees`, or the tree a fast-forward checks out)
 /// holds a case pair that `base` (HEAD's tree, which the step lands on) doesn't, when
-/// `core.ignorecase` is on (#522). Call it before the step writes anything. A pair `base`
+/// `core.ignorecase` is on (#522). Switches, checkouts and a new worktree's checkout (no `base`)
+/// use it too (#532). Call it before the step writes anything. A pair `base`
 /// already holds is not this check's (#512); a case-only rename (`A` in `base`, only `a` in
 /// `result`) is no pair and goes ahead.
 pub(crate) fn refuse_case_pair_brought_in<E>(

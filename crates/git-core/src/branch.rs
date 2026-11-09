@@ -17,6 +17,10 @@ pub enum BranchError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// The target's tree holds a case pair HEAD's doesn't, while `core.ignorecase` is on: the
+    /// checkout would keep only one of its names (#532).
+    #[error(transparent)]
+    CasePairBroughtIn(#[from] crate::CasePairBroughtIn),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
@@ -79,11 +83,31 @@ fn resolve_start_point<'repo>(
 
 pub fn create_branch(repo: &Repository, name: &str, start_point: &str) -> Result<(), BranchError> {
     let commit = resolve_start_point(repo, start_point)?;
+    // Before the branch is created: a start point whose tree brings in a case pair would only
+    // leave a branch the switch below refuses (#532).
+    refuse_case_pair_brought_in(repo, &commit.tree()?)?;
     repo.branch(name, &commit, false)?;
     // The branch ref above is created regardless of what happens next — if switch_branch
     // fails (e.g. a dirty-tree conflict), the branch stays created rather than being rolled
     // back, matching `git checkout -b`'s own behavior. See the design spec's note on this.
     switch_branch(repo, name)
+}
+
+/// Refuses a switch or checkout whose `tree` holds a case pair (`A` and `a`) HEAD's tree doesn't,
+/// while `core.ignorecase` is on (#532). libgit2's safe checkout keeps only one of the two names
+/// in its ignore-case index and doesn't write the other's file, so the next commit would drop
+/// it. Refused rather than written around: on the case-insensitive drives `core.ignorecase` is
+/// meant for, the two files can't both exist anyway. Writes nothing.
+fn refuse_case_pair_brought_in(
+    repo: &Repository,
+    tree: &git2::Tree<'_>,
+) -> Result<(), BranchError> {
+    let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
+    crate::worktree_guard::refuse_case_pair_brought_in(
+        repo,
+        &crate::worktree_guard::GuardSource::Tree(tree),
+        head_tree.as_ref(),
+    )
 }
 
 pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
@@ -114,6 +138,7 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&tree)],
     )?;
+    refuse_case_pair_brought_in(repo, &tree)?;
     // A file with other hard links gets a name of its own before it is written (#420).
     let mut checkout = git2::build::CheckoutBuilder::new();
     crate::hardlink::on_checkout(repo, &mut checkout);
@@ -138,6 +163,7 @@ pub fn checkout_commit(repo: &Repository, commit_id: &str) -> Result<(), BranchE
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&tree)],
     )?;
+    refuse_case_pair_brought_in(repo, &tree)?;
     // A file with other hard links gets a name of its own before it is written (#420).
     let mut checkout = git2::build::CheckoutBuilder::new();
     crate::hardlink::on_checkout(repo, &mut checkout);
