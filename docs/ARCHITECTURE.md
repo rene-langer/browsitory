@@ -106,7 +106,15 @@ file directly for the current method list rather than a copy here, which would j
 `frontend/src/ipc/tauriRepoClient.ts` implements it over `@tauri-apps/api`'s `invoke()`. This
 is the *only* file allowed to import `@tauri-apps/api` — every other frontend file receives a
 `RepoClient` as a prop/context value, so it can't accidentally couple to Tauri.
-`frontend/src/ipc/vscodeRepoClient.ts` implements the same interface over webview `postMessage`;
+`frontend/src/ipc/vscodeRepoClient.ts` implements the same interface over webview `postMessage`.
+Both build most of it from `createRepoClient(call)` in `frontend/src/ipc/createRepoClient.ts`
+(#504), which holds every method the transports send alike (backend name and params) once; a
+transport passes its call function and adds only the members that really differ, listed in
+`TransportSpecific` there (clone and init, `listOpenRepos`'s reply shape, the event
+subscriptions, `logFrontendError`). What a transport does around a call (logging, error mapping,
+the desktop's wait for its event listeners before a command that emits transfer or hook events)
+lives in its call function, not in a per-method override. A new operation is one line in
+`createRepoClient.ts`.
 `frontend/src/ipc/transportStatus.ts` is a transport-neutral lifecycle seam that lets `App`
 reuse its global `InlineError` path without importing VSCode APIs. Tauri registers no lifecycle
 status listener and retains its existing updater/error behavior.
@@ -2034,8 +2042,8 @@ only `error`.
   `frontend/src/state/useAppStateTestClient.ts`, which adds an empty repository tracking
   `origin/main` on top.
 - Transport parity (#306): `frontend/src/ipc/transportParity.test.ts` calls every method of
-  both `RepoClient` implementations with a mocked transport and records the backend name each
-  sends. It checks those names against four generated lists in `frontend/src/ipc/generated/`:
+  both `RepoClient` implementations with a mocked transport and records the backend name and
+  params each sends; the params must match for every method both send (#504). It checks those names against four generated lists in `frontend/src/ipc/generated/`:
   the Tauri commands (`tauri-commands.json`), the sidecar methods (`sidecar-methods.json`),
   the methods the extension host answers itself (`extension-native-methods.json`) and the
   sidecar methods only the extension host may call (`extension-host-sidecar-methods.json`).
