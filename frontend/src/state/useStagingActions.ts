@@ -25,6 +25,9 @@ export interface StagingActions {
   discardFile(path: string): Promise<void>;
   discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
+  // A multi-file selection's "Ignore" (#449): one pattern after another in a single
+  // `runMutation`, like `stageAllFiles`.
+  ignorePaths(patterns: string[]): Promise<void>;
   // Resolves `true` once committed; `false` on any failure (a hook failure also stores
   // `hookFailure`), so CommitBox only clears the message after a commit that landed.
   commit(message: string, noVerify: boolean, trailers?: Trailer[]): Promise<boolean>;
@@ -155,6 +158,15 @@ export function useStagingActions(
     (pattern: string) => runMutation(() => client.ignorePath(repoPath, pattern)),
     [client, runMutation, repoPath],
   );
+  const ignorePaths = useCallback(
+    (patterns: string[]) =>
+      runMutation(async () => {
+        for (const pattern of patterns) {
+          await client.ignorePath(repoPath, pattern);
+        }
+      }),
+    [client, runMutation, repoPath],
+  );
   const commit = useCallback(
     async (message: string, noVerify: boolean, trailers: Trailer[] = []) => {
       const ok = await runMutationWithOutcome(async () => {
@@ -194,6 +206,7 @@ export function useStagingActions(
     discardFile,
     discardAllUnstaged,
     ignorePath,
+    ignorePaths,
     commit,
   };
 }

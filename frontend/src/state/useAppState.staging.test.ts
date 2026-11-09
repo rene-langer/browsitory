@@ -217,6 +217,29 @@ describe("useAppState", () => {
     expect(getStatusCalls - refreshesBefore).toBe(1);
   });
 
+  it("ignorePaths adds every pattern in order but refreshes only once (#449)", async () => {
+    const patterns: string[] = [];
+    let getStatusCalls = 0;
+    const client = transferClient({
+      getStatus: async () => {
+        getStatusCalls += 1;
+        return [];
+      },
+      ignorePath: async (_repoPath: string, pattern: string) => {
+        patterns.push(pattern);
+      },
+    });
+
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    const refreshesBefore = getStatusCalls;
+
+    await act(() => result.current.ignorePaths(["/a.log", "/b.log"]));
+
+    expect(patterns).toEqual(["/a.log", "/b.log"]);
+    expect(getStatusCalls - refreshesBefore).toBe(1);
+  });
+
   it("stageHunk calls client.stageHunk then refreshes status", async () => {
     const entryA: StatusEntry = { path: "a.txt", oldPath: null, staged: true, kind: "Modified" };
     let getStatusCalls = 0;

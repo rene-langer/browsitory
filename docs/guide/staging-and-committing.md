@@ -16,6 +16,26 @@ but not staged yet shows as deleted plus new, like `git status`.
 
 ![Staging a change, with the diff and commit message visible](assets/staging.png)
 
+## Selecting several files
+
+Click a file's header to select it. **Ctrl+click** (**Cmd+click** on macOS) adds a file to the
+selection or removes it, and **Shift+click** selects every file from the last one clicked. With
+the **Changes** or **Staged** list focused, `↑`/`↓` move to the next file, `Shift+↑`/`Shift+↓`
+extend the selection, **Ctrl/Cmd+A** selects the whole list and **Esc** keeps only the current
+file. A selection stays within one list: clicking a file in the other list starts a new one.
+Clicks inside a diff select lines there, not files. The current file (marked by a bar on its
+left) is the one the pane scrolls to; screen readers announce how many files are selected.
+
+With two or more files selected, a bar above the list shows how many and offers **Stage N
+files** (or **Unstage N files**), **Discard N files…**, **Ignore N untracked files** (when the
+selection has untracked files) and **Stash N files…**; `s`, a selected file's **⋯** menu and
+the command palette offer the same actions. **Discard N files…** asks once for all of them and
+is one step for **Undo**. **Ignore** adds each untracked file to `.gitignore` as **Ignore file**
+does. Staging, unstaging and ignoring a selection (like **Stage all** and **Unstage all**) record
+one undo step per file. Conflicted files in
+a selection are left out of these actions, as **Stage all** leaves them out. While another
+action is running, the bar's buttons are disabled.
+
 ## Writing the commit message
 
 Below the message, **Summary 42/50** counts the characters of the first line. Past the limit it

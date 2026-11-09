@@ -7,7 +7,7 @@ describe("ShortcutSheet", () => {
     render(<ShortcutSheet onClose={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "Keyboard shortcuts" })).toBeInTheDocument();
     expect(screen.getByText("Open the command palette")).toBeInTheDocument();
-    expect(screen.getByText("Stage or unstage the selected file")).toBeInTheDocument();
+    expect(screen.getByText("Stage or unstage the selected files")).toBeInTheDocument();
     expect(screen.getByText("Ctrl/Cmd+Enter")).toBeInTheDocument();
   });
 

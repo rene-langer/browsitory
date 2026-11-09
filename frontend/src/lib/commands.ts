@@ -193,6 +193,14 @@ export interface DiffCommands {
   requestDiscardAllUnstaged(): void;
   /** Opens the current file's history in place of the commit graph. */
   openCurrentFileHistory(): void;
+  /** DiffPane's selection of two or more changed files (#449), if any. */
+  selection?: { staged: boolean; paths: string[] } | null;
+  /** Opens the discard confirm dialog for the selected unstaged files; never discards directly. */
+  requestDiscardSelection?(): void;
+}
+
+function selectedFiles(n: number): string {
+  return `${n} selected ${n === 1 ? "file" : "files"}`;
 }
 
 /**
@@ -387,6 +395,15 @@ export function buildCommands(
       label: `Stash ${stashFile}…`,
       keywords: ["stash", "file", "save", stashFile],
       run: () => appState.openStashDialog([stashFile]),
+    });
+  }
+  const fileSelection = diffCommands?.selection ?? null;
+  if (canStash && fileSelection !== null) {
+    commands.push({
+      id: "stash-selected-files",
+      label: `Stash ${selectedFiles(fileSelection.paths.length)}…`,
+      keywords: ["stash", "selected", "files", "save"],
+      run: () => appState.openStashDialog(fileSelection.paths),
     });
   }
   if (!repositoryOperationDisabled) {
@@ -847,8 +864,38 @@ export function buildCommands(
         run: diffCommands.openCurrentFileHistory,
       });
     }
+    // A selection of several files (#449): the same actions as its selection bar. Staging is not
+    // behind the full repository guard (it is how a merge's resolutions get staged), only behind
+    // another action in flight, as the selection bar is.
+    const selection = diffCommands.selection ?? null;
+    if (selection !== null && !state.pending) {
+      const paths = selection.paths;
+      commands.push(
+        selection.staged
+          ? {
+              id: "unstage-selected-files",
+              label: `Unstage ${selectedFiles(paths.length)}`,
+              keywords: ["unstage", "selected", "files", "reset"],
+              run: () => void appState.unstageAllFiles(paths),
+            }
+          : {
+              id: "stage-selected-files",
+              label: `Stage ${selectedFiles(paths.length)}`,
+              keywords: ["stage", "add", "selected", "files"],
+              run: () => void appState.stageAllFiles(paths),
+            },
+      );
+    }
     // Both only open the confirm dialogs; staged and conflicted entries have no discard action.
     if (!repositoryOperationDisabled) {
+      if (selection !== null && !selection.staged && diffCommands.requestDiscardSelection !== undefined) {
+        commands.push({
+          id: "discard-selected-files",
+          label: `Discard ${selectedFiles(selection.paths.length)}…`,
+          keywords: ["discard", "revert", "selected", "files"],
+          run: diffCommands.requestDiscardSelection,
+        });
+      }
       if (diffCommands.currentFile !== null) {
         commands.push({
           id: "discard-current-file",
@@ -1075,6 +1122,7 @@ export function commandGroup(id: string): CommandGroup {
     id === "save-stash" ||
     id === "stash-with-options" ||
     id === "stash-current-file" ||
+    id === "stash-selected-files" ||
     id.startsWith("show-stash:") ||
     id.startsWith("apply-stash:") ||
     id.startsWith("pop-stash:") ||
@@ -1089,6 +1137,9 @@ export function commandGroup(id: string): CommandGroup {
     id === "toggle-syntax-highlighting" ||
     id === "discard-current-file" ||
     id === "discard-all-unstaged" ||
+    id === "stage-selected-files" ||
+    id === "unstage-selected-files" ||
+    id === "discard-selected-files" ||
     id === "open-current-file-in-editor" ||
     id === "open-current-file-in-diff-tool"
   ) {

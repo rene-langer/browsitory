@@ -12,7 +12,7 @@ import {
   MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type {
   AmendOptions,
   BlameLine,
@@ -52,9 +52,21 @@ import {
   discardAllConfirmMessage,
   discardConfirmMessage,
   fileMenuItems,
+  fileToolItems,
   isUntracked,
+  selectionMenuItems,
   type FileAction,
+  type SelectionSummary,
 } from "./FileActionsMenu";
+import {
+  EMPTY_FILE_SELECTION,
+  extendFileSelection,
+  selectAllFiles,
+  selectOnlyFile,
+  selectedPaths,
+  toggleFile,
+  type FileSelection,
+} from "../lib/fileSelection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
@@ -78,10 +90,15 @@ function UncommittedFileSection({
   entry,
   status,
   isCurrent,
+  selected,
+  rowId,
   collapsed,
   diffVersion,
   onToggleCollapse,
   onSelect,
+  selectionSummary,
+  onSelectionAction,
+  selectionBusyReason,
   onStageFile,
   onUnstageFile,
   onStageHunk,
@@ -107,7 +124,11 @@ function UncommittedFileSection({
   client: RepoClient;
   entry: StatusEntry;
   status: StatusEntry[];
+  /** The focused file: its diff is scrolled into view, and single-file keys act on it. */
   isCurrent: boolean;
+  /** Part of the selection (`aria-selected`); the current file always is. */
+  selected: boolean;
+  rowId: string;
   collapsed: boolean;
   // This section's staleness signal: its own per-path version plus the pane-wide refresh
   // generation, combined by the parent (`UncommittedDiffPane`) into one monotonically increasing
@@ -115,7 +136,12 @@ function UncommittedFileSection({
   // be stale, refetch it".
   diffVersion: number;
   onToggleCollapse: () => void;
-  onSelect: () => void;
+  onSelect: (event?: MouseEvent) => void;
+  /** Set while this row is part of a selection of two or more files: its menu acts on all of them. */
+  selectionSummary: SelectionSummary | null;
+  onSelectionAction: (kind: SelectionActionKind) => void;
+  /** Why the selection's repository actions are disabled (another action is running), else `null`. */
+  selectionBusyReason: string | null;
   onStageFile: (path: string) => void;
   onUnstageFile: (path: string) => void;
   onStageHunk: (path: string, oldStart: number, newStart: number, contextLines: number) => void;
@@ -166,16 +192,27 @@ function UncommittedFileSection({
         return externalTools?.openDiffTool(entry.path, diffSource);
       case "mergeTool":
         return externalTools?.openMergeTool(entry.path);
+      case "stageSelection":
+      case "unstageSelection":
+      case "discardSelection":
+      case "ignoreSelection":
+      case "stashSelection":
+        return onSelectionAction(action.kind);
     }
   };
   // Without external tools, conflicted entries have no actions and staged ones only "Stash file…"
   // (see `fileMenuItems`).
-  const menuItems = fileMenuItems(
-    entry,
-    onPickFileAction,
-    externalTools === undefined ? undefined : { mergeToolRunning: externalTools.mergeToolRunning.has(entry.path) },
-    stashDisabledReason,
-  );
+  const tools =
+    externalTools === undefined ? undefined : { mergeToolRunning: externalTools.mergeToolRunning.has(entry.path) };
+  // A row in a multi-file selection offers the selection's actions (like the commit graph's
+  // multi-select menu), plus this file's own external-tool items.
+  const menuItems =
+    selectionSummary !== null
+      ? [
+          ...selectionMenuItems(selectionSummary, onPickFileAction, selectionBusyReason, stashDisabledReason),
+          ...(tools === undefined ? [] : fileToolItems(entry, onPickFileAction, tools)),
+        ]
+      : fileMenuItems(entry, onPickFileAction, tools, stashDisabledReason);
   const hasFileActions = menuItems.length > 0;
   const markResolved = async (force: boolean) => {
     if (onMarkResolved === undefined) return;
@@ -302,9 +339,12 @@ function UncommittedFileSection({
 
   return (
     <ListRow
-      selected={isCurrent}
+      id={rowId}
+      selected={selected}
       onClick={onSelect}
-      className={isConflicted ? `${styles.fileSection} ${styles.conflicted}` : styles.fileSection}
+      className={[styles.fileSection, isConflicted ? styles.conflicted : null, isCurrent ? styles.current : null]
+        .filter((name) => name !== null)
+        .join(" ")}
     >
       <div
         className={styles.fileSectionHeader}
@@ -436,7 +476,7 @@ function UncommittedFileSection({
         </div>
       )}
       {!collapsed && (
-        <div className={styles.fileSectionBody} ref={sectionRef}>
+        <div className={styles.fileSectionBody} data-file-body="" ref={sectionRef}>
           {mode === "blame" ? (
             <>
               {error !== null ? (
@@ -602,7 +642,21 @@ export function DiffPane({
   externalTools,
   onMarkResolved,
   onResolveWholeFile,
+  onDiscardFiles,
+  onIgnorePaths,
+  onSelectionChange,
+  selectionBusyReason = null,
 }: {
+  // A multi-file selection's discard (#449): exactly the confirmed paths, one undo step.
+  // Defaults to `onDiscardAllUnstaged`.
+  onDiscardFiles?: (paths: string[]) => void;
+  // A multi-file selection's "Ignore": one `/path` pattern per untracked file. Defaults to one
+  // `onIgnorePath` per pattern.
+  onIgnorePaths?: (patterns: string[]) => void;
+  // Reports the working-tree selection while it holds two or more files, else `null`.
+  onSelectionChange?: (selection: ReportedFileSelection | null) => void;
+  // Why the selection's actions can't run now (another action is in progress), else `null`.
+  selectionBusyReason?: string | null;
   // The stash list: a selected commit id that is a stash's renders the stash view instead of
   // the commit view.
   stashes?: StashEntry[];
@@ -739,6 +793,10 @@ export function DiffPane({
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
         onResolveWholeFile={onResolveWholeFile}
+        onDiscardFiles={onDiscardFiles ?? onDiscardAllUnstaged}
+        onIgnorePaths={onIgnorePaths ?? ((patterns) => patterns.forEach(onIgnorePath))}
+        onSelectionChange={onSelectionChange}
+        selectionBusyReason={selectionBusyReason}
         commits={commits}
         branchCommits={branchCommits}
       />
@@ -784,10 +842,23 @@ export interface StashActions {
 }
 
 /** What the discard confirm dialogs are currently asking about; null when none is open. */
-export type DiscardRequest = { kind: "file"; path: string } | { kind: "all" };
+export type DiscardRequest = { kind: "file"; path: string } | { kind: "all" } | { kind: "files"; paths: string[] };
+
+/** The multi-file selection DiffPane reports to the command palette (two or more files). */
+export interface ReportedFileSelection {
+  staged: boolean;
+  paths: string[];
+}
+
+type SelectionActionKind = "stageSelection" | "unstageSelection" | "discardSelection" | "ignoreSelection" | "stashSelection";
 
 /** The file whose history the graph is showing, at the selected commit. */
 export type FileHistoryFocus = { path: string; oldPath: string | null };
+
+// The change lists' keys (#449): arrows/j/k move, Shift extends, Ctrl/Cmd+A selects the group,
+// Escape keeps only the current file, `s` stages or unstages, the Menu key opens the menu.
+const FILE_LIST_SHORTCUTS =
+  "ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown Control+A Meta+A Escape s ContextMenu Shift+F10";
 
 function entryKey(entry: { path: string; staged: boolean }): string {
   return `${entry.staged}:${entry.path}`;
@@ -845,7 +916,15 @@ function UncommittedDiffPane({
   externalTools,
   onMarkResolved,
   onResolveWholeFile,
+  onDiscardFiles,
+  onIgnorePaths,
+  onSelectionChange,
+  selectionBusyReason,
 }: {
+  onDiscardFiles: (paths: string[]) => void;
+  onIgnorePaths: (patterns: string[]) => void;
+  onSelectionChange?: (selection: ReportedFileSelection | null) => void;
+  selectionBusyReason: string | null;
   onOpenFileHistory?: (path: string) => void;
   externalTools?: ExternalToolsApi;
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
@@ -945,6 +1024,10 @@ function UncommittedDiffPane({
     };
   }, [amendMode, headInfo.headId, client, repoPath]);
   const [current, setCurrent] = useState<{ path: string; staged: boolean } | null>(null);
+  // The files selected for a multi-file action (#449), within one group. The current file is
+  // always part of it; a plain click or arrow key makes it the only one.
+  const [selection, setSelection] = useState<FileSelection>(EMPTY_FILE_SELECTION);
+  const rowIdPrefix = useId();
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Per-`entryKey` version counters: the per-path half of each section's staleness signal (the
@@ -1013,12 +1096,65 @@ function UncommittedDiffPane({
   const allKeys = allEntries.map(entryKey);
   const allCollapsed = allKeys.length > 0 && allKeys.every((key) => collapsedKeys.has(key));
 
-  const isEntrySelected = (entry: StatusEntry) =>
+  const isEntryCurrent = (entry: StatusEntry) =>
     current !== null && current.path === entry.path && current.staged === entry.staged;
+  const isEntrySelected = (entry: StatusEntry) =>
+    selection.staged === entry.staged && selection.paths.has(entry.path);
 
-  const selectEntry = (entry: StatusEntry) => {
+  const groupEntries = (staged: boolean) => (staged ? stagedEntries : unstagedEntries);
+  const groupPaths = (staged: boolean) => groupEntries(staged).map((entry) => entry.path);
+
+  /** Makes `entry` the current file with `next` as the selection. */
+  const focusEntry = (entry: StatusEntry, next: FileSelection) => {
     setCurrent({ path: entry.path, staged: entry.staged });
+    setSelection(next);
   };
+  const selectEntry = (entry: StatusEntry) => focusEntry(entry, selectOnlyFile(entry.staged, entry.path));
+
+  // Ctrl/Cmd+click toggles a file, Shift+click selects the range from the anchor. Clicks inside a
+  // file's diff keep their own meaning (Shift/Ctrl+click select diff lines there): they only make
+  // the file current, keeping the selection when the file is already part of it.
+  const handleRowClick = (entry: StatusEntry) => (event?: MouseEvent) => {
+    const inBody = event?.target instanceof Element && event.target.closest("[data-file-body]") !== null;
+    if (inBody) {
+      if (isEntrySelected(entry)) setCurrent({ path: entry.path, staged: entry.staged });
+      else selectEntry(entry);
+      return;
+    }
+    if (event?.shiftKey) {
+      focusEntry(entry, extendFileSelection(selection, entry.staged, groupPaths(entry.staged), entry.path));
+    } else if (event?.ctrlKey || event?.metaKey) {
+      const next = toggleFile(selection, entry.staged, entry.path);
+      if (next.paths.has(entry.path)) {
+        focusEntry(entry, next);
+      } else {
+        // Toggled off: the current file moves to the anchor (or none is left).
+        setSelection(next);
+        const anchor = groupEntries(entry.staged).find((candidate) => candidate.path === next.anchor);
+        setCurrent(anchor === undefined ? null : { path: anchor.path, staged: anchor.staged });
+      }
+    } else {
+      selectEntry(entry);
+    }
+  };
+
+  const selectedEntries = (staged: boolean) =>
+    selectedPaths(selection, staged, groupPaths(staged)).map(
+      (path) => groupEntries(staged).find((entry) => entry.path === path) as StatusEntry,
+    );
+  // The selection's actions skip conflicted files, as "Stage all" and "Discard all…" do: staging a
+  // conflicted file marks it resolved with whatever is in the working tree.
+  const summaryOf = (staged: boolean): SelectionSummary | null => {
+    const entries = selectedEntries(staged);
+    if (entries.length < 2) return null;
+    return {
+      staged,
+      actionable: entries.filter((entry) => entry.kind !== "Conflicted").length,
+      untracked: entries.filter(isUntracked).length,
+    };
+  };
+  const unstagedSummary = summaryOf(false);
+  const stagedSummary = summaryOf(true);
 
   const toggleCollapse = (key: string) => {
     setCollapsedKeys((prev) => {
@@ -1036,14 +1172,60 @@ function UncommittedDiffPane({
     setCollapsedKeys(allCollapsed ? new Set() : new Set(allKeys));
   };
 
-  const navigateGroup = (entries: StatusEntry[], direction: 1 | -1) => {
+  // Shift+arrow (`extend`) moves the current file and selects the range from the anchor to it.
+  const navigateGroup = (entries: StatusEntry[], direction: 1 | -1, extend = false) => {
     if (entries.length === 0) return;
     const currentIndex = entries.findIndex(
       (entry) => current !== null && entry.path === current.path && entry.staged === current.staged,
     );
     const nextIndex =
       currentIndex === -1 ? 0 : Math.min(Math.max(currentIndex + direction, 0), entries.length - 1);
-    selectEntry(entries[nextIndex]);
+    const next = entries[nextIndex];
+    if (!extend) {
+      selectEntry(next);
+      return;
+    }
+    // The range starts at the current file; without one in this group, at the file moved to.
+    const anchorPath = entries[Math.max(currentIndex, 0)].path;
+    const base =
+      currentIndex !== -1 && selection.staged === next.staged && selection.paths.size > 0
+        ? selection
+        : selectOnlyFile(next.staged, anchorPath);
+    focusEntry(next, extendFileSelection(base, next.staged, entries.map((entry) => entry.path), next.path));
+  };
+
+  const runSelectionAction = (staged: boolean, kind: SelectionActionKind) => {
+    const entries = selectedEntries(staged);
+    const paths = entries.filter((entry) => entry.kind !== "Conflicted").map((entry) => entry.path);
+    if (kind === "stashSelection") {
+      if (stashReason !== null || selectionBusyReason !== null || paths.length === 0) return;
+      onOpenStashDialog(paths);
+      return;
+    }
+    if (selectionBusyReason !== null) return;
+    switch (kind) {
+      case "stageSelection":
+        if (paths.length === 0) return;
+        onStageAllFiles(paths);
+        break;
+      case "unstageSelection":
+        if (paths.length === 0) return;
+        onUnstageAllFiles(paths);
+        break;
+      case "discardSelection":
+        // Opens the confirmation; nothing is discarded until it is confirmed.
+        if (paths.length > 0) setDiscardRequest({ kind: "files", paths });
+        return;
+      case "ignoreSelection": {
+        const patterns = entries.filter(isUntracked).map((entry) => `/${entry.path}`);
+        if (patterns.length === 0) return;
+        onIgnorePaths(patterns);
+        break;
+      }
+    }
+    // The files leave this group (or the list): don't keep a selection that would come back if
+    // they reappeared.
+    setSelection(EMPTY_FILE_SELECTION);
   };
 
   // The per-row Stage/Unstage controls are `<button>`s nested inside a `role="option"` row. That
@@ -1054,6 +1236,11 @@ function UncommittedDiffPane({
   // whole stage/unstage flow is doable without ever reaching those buttons. See
   // `primitives/ListRow.tsx`'s doc comment for why the buttons weren't moved out of the row.
   const toggleStageSelected = (entries: StatusEntry[]) => {
+    const staged = entries[0]?.staged;
+    if (staged !== undefined && summaryOf(staged) !== null) {
+      runSelectionAction(staged, staged ? "unstageSelection" : "stageSelection");
+      return;
+    }
     const entry = entries.find(
       (candidate) => current !== null && candidate.path === current.path && candidate.staged === current.staged,
     );
@@ -1069,12 +1256,28 @@ function UncommittedDiffPane({
     // The file menu and discard dialog render inside their row (React events bubble through the
     // tree), so keys typed in them must not drive the list underneath.
     if ((event.target as HTMLElement).closest('[role="menu"], dialog') !== null) return;
+    // Inside a file's diff (or a text field) Ctrl/Cmd+A and Shift+arrows keep their own meaning.
+    const inBody = (event.target as HTMLElement).closest("[data-file-body], input, textarea") !== null;
+    const staged = entries[0]?.staged ?? false;
     if (event.key === "ArrowDown" || event.key === "j") {
+      if (event.shiftKey && inBody) return;
       event.preventDefault();
-      navigateGroup(entries, 1);
+      navigateGroup(entries, 1, event.shiftKey);
     } else if (event.key === "ArrowUp" || event.key === "k") {
+      if (event.shiftKey && inBody) return;
       event.preventDefault();
-      navigateGroup(entries, -1);
+      navigateGroup(entries, -1, event.shiftKey);
+    } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "a") {
+      if (inBody || entries.length === 0) return;
+      event.preventDefault();
+      const next = selectAllFiles(selection, staged, entries.map((entry) => entry.path));
+      const keepCurrent = current !== null && current.staged === staged && next.paths.has(current.path);
+      if (keepCurrent) setSelection(next);
+      else focusEntry(entries[0], next);
+    } else if (event.key === "Escape" && summaryOf(staged) !== null && current !== null && current.staged === staged) {
+      // Back to just the current file.
+      event.preventDefault();
+      setSelection(selectOnlyFile(staged, current.path));
     } else if (event.key === "s") {
       event.preventDefault();
       toggleStageSelected(entries);
@@ -1084,7 +1287,7 @@ function UncommittedDiffPane({
       // selected row. A row without a "⋯" (no actions for it) makes this a no-op.
       const row =
         (event.target as HTMLElement).closest('[role="option"]') ??
-        event.currentTarget.querySelector('[aria-selected="true"]');
+        event.currentTarget.querySelector(`.${styles.current}`);
       const trigger = row?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]') ?? null;
       if (trigger !== null) {
         event.preventDefault();
@@ -1102,6 +1305,11 @@ function UncommittedDiffPane({
     discardRequest?.kind === "file"
       ? discardableEntries.find((entry) => entry.path === discardRequest.path)
       : undefined;
+  // A selection's discard (#449): the requested files that can still be discarded.
+  const discardFilesEntries =
+    discardRequest?.kind === "files"
+      ? discardableEntries.filter((entry) => discardRequest.paths.includes(entry.path))
+      : [];
 
   // A request whose target is gone (refresh, staging, unmount) must not linger: otherwise the
   // destructive dialog would pop up unprompted when the path later reappears.
@@ -1109,7 +1317,9 @@ function UncommittedDiffPane({
     discardRequest !== null &&
     (discardRequest.kind === "all"
       ? discardableEntries.length === 0
-      : discardFileEntry === undefined);
+      : discardRequest.kind === "files"
+        ? discardFilesEntries.length === 0
+        : discardFileEntry === undefined);
   useEffect(() => {
     if (requestTargetGone) setDiscardRequest(null);
   }, [requestTargetGone, setDiscardRequest]);
@@ -1139,8 +1349,71 @@ function UncommittedDiffPane({
 
   const stashReason = stashBlockReason({ status, rebaseProgress, headInfo });
 
-  const renderSection = (entry: StatusEntry) => {
+  // Reports a selection of two or more files to the command palette; keyed on its content so an
+  // unchanged selection reports nothing new.
+  const reportedSelection = unstagedSummary !== null ? false : stagedSummary !== null ? true : null;
+  // Conflicted files are left out, as the selection's actions leave them out.
+  const reportedPaths =
+    reportedSelection === null
+      ? []
+      : selectedEntries(reportedSelection)
+          .filter((entry) => entry.kind !== "Conflicted")
+          .map((entry) => entry.path);
+  const reportedKey =
+    reportedSelection === null || reportedPaths.length === 0 ? "" : `${reportedSelection}\0${reportedPaths.join("\0")}`;
+  useEffect(() => {
+    if (reportedKey === "") {
+      onSelectionChange?.(null);
+      return;
+    }
+    const [staged, ...paths] = reportedKey.split("\0");
+    onSelectionChange?.({ staged: staged === "true", paths });
+  }, [reportedKey, onSelectionChange]);
+  useEffect(() => () => onSelectionChange?.(null), [onSelectionChange]);
+
+  // What the live region announces: the size of a multi-file selection, or the one current file.
+  const selectionAnnouncement = (() => {
+    for (const staged of [false, true]) {
+      const paths = selectedPaths(selection, staged, groupPaths(staged));
+      if (paths.length >= 2) return `${paths.length} files selected in ${staged ? "Staged" : "Changes"}`;
+      if (paths.length === 1) return `${paths[0]} selected`;
+    }
+    return "";
+  })();
+
+  const renderSelectionBar = (summary: SelectionSummary) => (
+    <div
+      className={styles.selectionBar}
+      role="group"
+      aria-label={summary.staged ? "Selected staged files" : "Selected unstaged files"}
+    >
+      <span>{selectedPaths(selection, summary.staged, groupPaths(summary.staged)).length} selected</span>
+      {selectionMenuItems(
+        summary,
+        (action) => runSelectionAction(summary.staged, action.kind as SelectionActionKind),
+        selectionBusyReason,
+        stashReason,
+      ).map((item) => (
+        <button key={item.label} type="button" onClick={item.onSelect} disabled={item.disabled} title={item.title}>
+          {item.label}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={() =>
+          current !== null && current.staged === summary.staged
+            ? setSelection(selectOnlyFile(summary.staged, current.path))
+            : setSelection(EMPTY_FILE_SELECTION)
+        }
+      >
+        Clear selection
+      </button>
+    </div>
+  );
+
+  const renderSection = (entry: StatusEntry, index: number) => {
     const key = entryKey(entry);
+    const summary = isEntrySelected(entry) ? (entry.staged ? stagedSummary : unstagedSummary) : null;
     return (
       <UncommittedFileSection
         key={key}
@@ -1148,11 +1421,16 @@ function UncommittedDiffPane({
         client={client}
         entry={entry}
         status={status}
-        isCurrent={isEntrySelected(entry)}
+        isCurrent={isEntryCurrent(entry)}
+        selected={isEntrySelected(entry)}
+        rowId={`${rowIdPrefix}-${entry.staged ? "staged" : "unstaged"}-${index}`}
         collapsed={collapsedKeys.has(key)}
         diffVersion={staleness(key)}
         onToggleCollapse={() => toggleCollapse(key)}
-        onSelect={() => selectEntry(entry)}
+        onSelect={handleRowClick(entry)}
+        selectionSummary={summary}
+        onSelectionAction={(kind) => runSelectionAction(entry.staged, kind)}
+        selectionBusyReason={selectionBusyReason}
         onStageFile={onStageFile}
         onUnstageFile={onUnstageFile}
         onStageHunk={wrapHunkAction(onStageHunk)}
@@ -1181,6 +1459,9 @@ function UncommittedDiffPane({
 
   return (
     <div>
+      <span aria-live="polite" aria-atomic="true" className={styles.srOnly} data-testid="file-selection-announcement">
+        {selectionAnnouncement}
+      </span>
       {allKeys.length > 0 && (
         <div className={styles.groupHeading}>
           <CollapseAllToggle allCollapsed={allCollapsed} onToggle={toggleCollapseAll} />
@@ -1208,11 +1489,13 @@ function UncommittedDiffPane({
               Discard all…
             </button>
           </div>
+          {unstagedSummary !== null && renderSelectionBar(unstagedSummary)}
           <ul
             className={styles.fileList}
             role="listbox"
+            aria-multiselectable="true"
             aria-label="Unstaged changes"
-            aria-keyshortcuts="s"
+            aria-keyshortcuts={FILE_LIST_SHORTCUTS}
             tabIndex={0}
             onKeyDown={handleGroupKeyDown(unstagedEntries)}
           >
@@ -1228,11 +1511,13 @@ function UncommittedDiffPane({
               Unstage all
             </button>
           </div>
+          {stagedSummary !== null && renderSelectionBar(stagedSummary)}
           <ul
             className={styles.fileList}
             role="listbox"
+            aria-multiselectable="true"
             aria-label="Staged changes"
-            aria-keyshortcuts="s"
+            aria-keyshortcuts={FILE_LIST_SHORTCUTS}
             tabIndex={0}
             onKeyDown={handleGroupKeyDown(stagedEntries)}
           >
@@ -1248,6 +1533,22 @@ function UncommittedDiffPane({
           onConfirm={() => {
             setDiscardRequest(null);
             onDiscardAllUnstaged(discardableEntries.map((e) => e.path));
+          }}
+          onCancel={() => setDiscardRequest(null)}
+        />
+      )}
+      {discardRequest?.kind === "files" && discardFilesEntries.length > 0 && (
+        <ConfirmDialog
+          ariaLabel="Discard selected changes"
+          message={discardAllConfirmMessage(discardFilesEntries)}
+          confirmLabel={`Discard ${discardFilesEntries.length} ${discardFilesEntries.length === 1 ? "file" : "files"}`}
+          confirmDisabled={selectionBusyReason !== null}
+          confirmTitle={selectionBusyReason ?? undefined}
+          onConfirm={() => {
+            if (selectionBusyReason !== null) return;
+            setDiscardRequest(null);
+            setSelection(EMPTY_FILE_SELECTION);
+            onDiscardFiles(discardFilesEntries.map((entry) => entry.path));
           }}
           onCancel={() => setDiscardRequest(null)}
         />

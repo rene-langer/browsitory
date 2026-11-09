@@ -2448,3 +2448,218 @@ describe("DiffPane co-authors and amend author", () => {
     expect(onCommit).toHaveBeenCalledWith("Fix", [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]);
   });
 });
+
+describe("DiffPane multi-select (#449)", () => {
+  const files: StatusEntry[] = [
+    { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+    { path: "b.txt", oldPath: null, staged: false, kind: "New" },
+    { path: "c.txt", oldPath: null, staged: false, kind: "Modified" },
+    { path: "d.txt", oldPath: null, staged: false, kind: "Conflicted" },
+    { path: "s1.txt", oldPath: null, staged: true, kind: "Modified" },
+    { path: "s2.txt", oldPath: null, staged: true, kind: "New" },
+  ];
+  const client = () => fakeClient({ getWorkingDiff: async () => [], getConflictHunks: async () => [] });
+  const row = (path: string) => screen.getByText(new RegExp(`^${path.replace(".", "\\.")} \\(`)).closest('[role="option"]');
+  const header = (path: string) => screen.getByText(new RegExp(`^${path.replace(".", "\\.")} \\(`));
+  const selectionBar = (name = "Selected unstaged files") => screen.getByRole("group", { name });
+
+  it("marks both lists multi-selectable and Ctrl/Cmd+click adds and removes files", () => {
+    renderUncommitted(client(), files);
+    for (const list of screen.getAllByRole("listbox")) expect(list).toHaveAttribute("aria-multiselectable", "true");
+
+    fireEvent.click(header("a.txt"));
+    fireEvent.click(header("c.txt"), { ctrlKey: true });
+
+    expect(row("a.txt")).toHaveAttribute("aria-selected", "true");
+    expect(row("b.txt")).toHaveAttribute("aria-selected", "false");
+    expect(row("c.txt")).toHaveAttribute("aria-selected", "true");
+    // The last clicked file is the current one (its diff is the one scrolled to).
+    expect(row("c.txt")).toHaveClass(styles.current);
+    expect(row("a.txt")).not.toHaveClass(styles.current);
+    expect(within(selectionBar()).getByText("2 selected")).toBeInTheDocument();
+    expect(screen.getByTestId("file-selection-announcement")).toHaveTextContent("2 files selected in Changes");
+
+    fireEvent.click(header("c.txt"), { metaKey: true });
+    expect(row("c.txt")).toHaveAttribute("aria-selected", "false");
+    expect(row("a.txt")).toHaveClass(styles.current);
+    expect(screen.queryByRole("group", { name: "Selected unstaged files" })).toBeNull();
+    expect(screen.getByTestId("file-selection-announcement")).toHaveTextContent("a.txt selected");
+  });
+
+  it("Shift+click selects the range from the anchor", () => {
+    renderUncommitted(client(), files);
+    fireEvent.click(header("a.txt"));
+    fireEvent.click(header("c.txt"), { shiftKey: true });
+
+    for (const path of ["a.txt", "b.txt", "c.txt"]) expect(row(path)).toHaveAttribute("aria-selected", "true");
+    expect(row("d.txt")).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("keeps a selection to one group: clicking the other group starts a new one", () => {
+    renderUncommitted(client(), files);
+    fireEvent.click(header("a.txt"));
+    fireEvent.click(header("b.txt"), { ctrlKey: true });
+    fireEvent.click(header("s1.txt"), { ctrlKey: true });
+
+    expect(row("a.txt")).toHaveAttribute("aria-selected", "false");
+    expect(row("b.txt")).toHaveAttribute("aria-selected", "false");
+    expect(row("s1.txt")).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("Shift+arrows extend, Ctrl/Cmd+A selects the group and Escape keeps only the current file", () => {
+    renderUncommitted(client(), files);
+    const list = screen.getByRole("listbox", { name: "Unstaged changes" });
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
+    fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
+
+    for (const path of ["a.txt", "b.txt", "c.txt"]) expect(row(path)).toHaveAttribute("aria-selected", "true");
+    expect(row("c.txt")).toHaveClass(styles.current);
+
+    fireEvent.keyDown(list, { key: "ArrowUp", shiftKey: true });
+    expect(row("c.txt")).toHaveAttribute("aria-selected", "false");
+    expect(row("b.txt")).toHaveClass(styles.current);
+
+    fireEvent.keyDown(list, { key: "a", ctrlKey: true });
+    for (const path of ["a.txt", "b.txt", "c.txt", "d.txt"]) expect(row(path)).toHaveAttribute("aria-selected", "true");
+    expect(row("s1.txt")).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.keyDown(list, { key: "Escape" });
+    expect(row("b.txt")).toHaveAttribute("aria-selected", "true");
+    expect(row("a.txt")).toHaveAttribute("aria-selected", "false");
+
+    // A plain arrow moves the current file and drops the rest of the selection.
+    fireEvent.keyDown(list, { key: "a", metaKey: true });
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    expect(row("c.txt")).toHaveAttribute("aria-selected", "true");
+    expect(row("a.txt")).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("stages the selection without its conflicted files, from the bar and with 's'", () => {
+    const onStageAllFiles = vi.fn();
+    const onStageFile = vi.fn();
+    renderUncommitted(client(), files, { onStageAllFiles, onStageFile });
+    const list = screen.getByRole("listbox", { name: "Unstaged changes" });
+    fireEvent.keyDown(list, { key: "a", ctrlKey: true });
+
+    fireEvent.click(within(selectionBar()).getByRole("button", { name: "Stage 3 files" }));
+    expect(onStageAllFiles).toHaveBeenLastCalledWith(["a.txt", "b.txt", "c.txt"]);
+    // The selection is used up.
+    expect(screen.queryByRole("group", { name: "Selected unstaged files" })).toBeNull();
+
+    fireEvent.keyDown(list, { key: "a", ctrlKey: true });
+    fireEvent.keyDown(list, { key: "s" });
+    expect(onStageAllFiles).toHaveBeenCalledTimes(2);
+    expect(onStageFile).not.toHaveBeenCalled();
+  });
+
+  it("unstages a staged selection", () => {
+    const onUnstageAllFiles = vi.fn();
+    renderUncommitted(client(), files, { onUnstageAllFiles });
+    fireEvent.click(header("s1.txt"));
+    fireEvent.click(header("s2.txt"), { shiftKey: true });
+
+    fireEvent.click(within(selectionBar("Selected staged files")).getByRole("button", { name: "Unstage 2 files" }));
+
+    expect(onUnstageAllFiles).toHaveBeenCalledWith(["s1.txt", "s2.txt"]);
+  });
+
+  it("discards the selection after one confirmation, as one call", () => {
+    const onDiscardFiles = vi.fn();
+    const onDiscardAllUnstaged = vi.fn();
+    renderUncommitted(client(), files, { onDiscardFiles, onDiscardAllUnstaged });
+    fireEvent.click(header("a.txt"));
+    fireEvent.click(header("b.txt"), { ctrlKey: true });
+
+    fireEvent.click(within(selectionBar()).getByRole("button", { name: "Discard 2 files…" }));
+    expect(onDiscardFiles).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Discard selected changes" });
+    expect(dialog).toHaveTextContent("Discard changes to 2 files (1 untracked will be deleted)? This can't be undone.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard 2 files" }));
+
+    expect(onDiscardFiles).toHaveBeenCalledWith(["a.txt", "b.txt"]);
+    expect(onDiscardAllUnstaged).not.toHaveBeenCalled();
+  });
+
+  it("ignores only the selection's untracked files", () => {
+    const onIgnorePaths = vi.fn();
+    renderUncommitted(client(), files, { onIgnorePaths });
+    fireEvent.click(header("a.txt"));
+    fireEvent.click(header("b.txt"), { ctrlKey: true });
+
+    fireEvent.click(within(selectionBar()).getByRole("button", { name: "Ignore 1 untracked file" }));
+
+    expect(onIgnorePaths).toHaveBeenCalledWith(["/b.txt"]);
+  });
+
+  it("stashes the selection through the stash dialog, unless stashing is blocked", () => {
+    const onOpenStashDialog = vi.fn();
+    const { unmount } = renderUncommitted(client(), files, { onOpenStashDialog });
+    fireEvent.click(header("a.txt"));
+    fireEvent.click(header("d.txt"), { shiftKey: true });
+
+    fireEvent.click(within(selectionBar()).getByRole("button", { name: "Stash 3 files…" }));
+    expect(onOpenStashDialog).toHaveBeenCalledWith(["a.txt", "b.txt", "c.txt"]);
+    unmount();
+
+    renderUncommitted(client(), files, { onOpenStashDialog, rebaseProgress: { currentStep: 1, totalSteps: 2 } });
+    fireEvent.click(header("a.txt"));
+    fireEvent.click(header("b.txt"), { ctrlKey: true });
+    const stash = within(selectionBar()).getByRole("button", { name: "Stash 2 files…" });
+    expect(stash).toBeDisabled();
+    expect(stash).toHaveAttribute("title", "A rebase is in progress.");
+  });
+
+  it("disables the selection's actions while another action is running", () => {
+    const onStageAllFiles = vi.fn();
+    renderUncommitted(client(), files, { onStageAllFiles, selectionBusyReason: "Another action is in progress." });
+    const list = screen.getByRole("listbox", { name: "Unstaged changes" });
+    fireEvent.keyDown(list, { key: "a", ctrlKey: true });
+
+    const stage = within(selectionBar()).getByRole("button", { name: "Stage 3 files" });
+    expect(stage).toBeDisabled();
+    expect(stage).toHaveAttribute("title", "Another action is in progress.");
+    expect(within(selectionBar()).getByRole("button", { name: "Discard 3 files…" })).toBeDisabled();
+    fireEvent.keyDown(list, { key: "s" });
+    expect(onStageAllFiles).not.toHaveBeenCalled();
+  });
+
+  it("a selected row's menu offers the selection's actions", () => {
+    const onStageAllFiles = vi.fn();
+    renderUncommitted(client(), files, { onStageAllFiles });
+    fireEvent.click(header("a.txt"));
+    fireEvent.click(header("b.txt"), { ctrlKey: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Actions for b.txt" }));
+    const menu = screen.getByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: "Discard changes…" })).toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Stage 2 files" }));
+
+    expect(onStageAllFiles).toHaveBeenCalledWith(["a.txt", "b.txt"]);
+  });
+
+  it("modifier clicks inside a file's diff don't change the file selection", async () => {
+    renderUncommitted(client(), files);
+    fireEvent.click(header("a.txt"));
+    fireEvent.click(header("b.txt"), { ctrlKey: true });
+    const body = (row("c.txt") as HTMLElement).querySelector("[data-file-body]") as HTMLElement;
+
+    fireEvent.click(body, { shiftKey: true });
+
+    expect(row("a.txt")).toHaveAttribute("aria-selected", "false");
+    expect(row("c.txt")).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(row("c.txt")).toHaveClass(styles.current));
+  });
+
+  it("reports a selection of two or more files, without conflicted ones", async () => {
+    const onSelectionChange = vi.fn();
+    renderUncommitted(client(), files, { onSelectionChange });
+    fireEvent.click(header("c.txt"));
+    await waitFor(() => expect(onSelectionChange).toHaveBeenLastCalledWith(null));
+
+    fireEvent.click(header("d.txt"), { shiftKey: true });
+    fireEvent.click(header("b.txt"), { ctrlKey: true });
+
+    await waitFor(() => expect(onSelectionChange).toHaveBeenLastCalledWith({ staged: false, paths: ["b.txt", "c.txt"] }));
+  });
+});
