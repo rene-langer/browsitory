@@ -188,7 +188,7 @@ fn a_rebase_continued_while_another_worker_reads_is_still_one_undo_entry() {
         combined_message: None,
     }];
     assert_eq!(
-        handle_a.start_rebase(onto.to_string(), plan).unwrap(),
+        handle_a.start_rebase(onto.to_string(), plan, None).unwrap(),
         git_core::rebase::RebaseStepResult::PausedForEdit
     );
     assert_eq!(handle_b.get_undo_state().unwrap(), no_undo());

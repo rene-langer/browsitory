@@ -66,6 +66,8 @@ export type DtoContract = [
   Expect<Equal<Hand.GitTools, Wire.GitTools>>,
   Expect<Equal<Hand.GraphCommit, Loosen<Wire.GraphCommit, "tags">>>,
   Expect<Equal<Hand.HeadInfo, Wire.HeadInfo>>,
+  Expect<Equal<Hand.HistoryEditKind, Wire.HistoryEditKind>>,
+  Expect<Equal<Hand.HistoryEditTarget, Wire.HistoryEditTarget>>,
   Expect<Equal<Hand.HookProgress, Wire.HookProgress>>,
   Expect<Equal<Hand.HookSource, Wire.HookSource>>,
   Expect<Equal<Hand.MarkResolvedOutcome, Wire.MarkResolvedOutcome>>,

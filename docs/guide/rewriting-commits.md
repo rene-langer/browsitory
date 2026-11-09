@@ -37,7 +37,8 @@ branch:
 Each one is a small interactive rebase (see [Rebase](rebase.md)): the commits after the edited
 one are rewritten, so they get new ids. A conflict pauses it like any rebase: the progress panel
 shows **Continue rebase** and **Abort rebase**, the paused rebase survives a restart, and Abort
-puts the branch back as it was. A finished edit is one **Undo** step ("Rebase onto …").
+puts the branch back as it was. A finished edit is one **Undo** step named after the edit
+("Drop 1a2b3c4", "Squash 1a2b3c4 into its parent", "Move 1a2b3c4 up").
 
 An edit is disabled, with the reason as its tooltip, when:
 

@@ -515,9 +515,21 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
         (
             cmd!(StartRebase {
                 onto: s(ONTO),
-                plan: vec![]
+                plan: vec![],
+                edit: None
             }),
             "undo(Full, Rebase onto 707e824) lock hold gate",
+        ),
+        (
+            cmd!(StartRebase {
+                onto: s(ONTO),
+                plan: vec![],
+                edit: Some(super::HistoryEdit {
+                    kind: super::HistoryEditKind::Squash,
+                    commit_id: s("1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"),
+                })
+            }),
+            "undo(Full, Squash 1a2b3c4 into its parent) lock hold gate",
         ),
         (cmd!(RebaseContinue), "lock hold"),
         (cmd!(AbortRebase), "lock hold abort"),

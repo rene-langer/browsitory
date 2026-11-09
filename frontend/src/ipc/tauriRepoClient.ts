@@ -43,6 +43,7 @@ import type {
   PullRequest,
   PullRequestList,
   RebasePlanCommit,
+  HistoryEditTarget,
   RebasePlanEntry,
   ReflogEntry,
   RebaseStepResult,
@@ -407,8 +408,8 @@ export const tauriRepoClient: RepoClient = {
     loggedInvoke("resolve_add_delete_conflict", { repoPath, path, choice }),
   commitsSince: (repoPath: string, onto: string) =>
     loggedInvoke<RebasePlanCommit[]>("commits_since", { repoPath, onto }),
-  startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[]) =>
-    loggedInvoke<RebaseStepResult>("start_rebase", { repoPath, onto, plan }),
+  startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[], edit?: HistoryEditTarget | null) =>
+    loggedInvoke<RebaseStepResult>("start_rebase", { repoPath, onto, plan, edit: edit ?? null }),
   rebaseContinue: (repoPath: string) => loggedInvoke<RebaseStepResult>("rebase_continue", { repoPath }),
   abortRebase: (repoPath: string) => loggedInvoke<RebaseAbort>("abort_rebase", { repoPath }),
   detectForgeRepository: (repoPath: string) =>

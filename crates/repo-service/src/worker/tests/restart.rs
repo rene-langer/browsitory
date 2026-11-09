@@ -49,7 +49,7 @@ fn paused_for_edit(
     let worker = Worker::spawn(dir.to_path_buf()).unwrap();
     let handle = worker.handle();
     assert_eq!(
-        handle.start_rebase(onto, plan).unwrap(),
+        handle.start_rebase(onto, plan, None).unwrap(),
         git_core::rebase::RebaseStepResult::PausedForEdit
     );
     (worker, handle, branch, tip)
@@ -87,7 +87,7 @@ fn a_refused_rebase_start_records_no_undo_entry_and_keeps_the_edit() {
     let (_worker, handle, onto, plan) = dirty_before_rebase(dir.path(), &repo);
     let before = handle.get_undo_state().unwrap();
 
-    let error = handle.start_rebase(onto, plan).unwrap_err();
+    let error = handle.start_rebase(onto, plan, None).unwrap_err();
     assert_eq!(
         error,
         "You have uncommitted changes to f.txt. Commit or stash them before starting a rebase."
@@ -103,7 +103,7 @@ fn a_refused_rebase_start_records_no_undo_entry_and_keeps_the_edit() {
 fn a_refused_rebase_start_leaves_no_rebase_stored() {
     let (dir, repo) = init_repo();
     let (_worker, handle, onto, plan) = dirty_before_rebase(dir.path(), &repo);
-    handle.start_rebase(onto, plan).unwrap_err();
+    handle.start_rebase(onto, plan, None).unwrap_err();
     assert_eq!(rebase_progress(&handle), None);
     assert!(!rebase_file(&repo).exists());
 }
@@ -164,7 +164,7 @@ fn a_crashed_worker_keeps_the_paused_rebase() {
     let path = dir.path().to_string_lossy().into_owned();
     let registry = WorkerRegistry::new();
     let (_, handle) = registry.open(&path).unwrap();
-    handle.start_rebase(onto, plan).unwrap();
+    handle.start_rebase(onto, plan, None).unwrap();
 
     handle.crash_for_test();
     while handle.get_status().is_ok() {
@@ -228,7 +228,7 @@ fn a_failed_abort_keeps_the_stored_rebase() {
         combined_message: None,
     }];
     assert_eq!(
-        handle.start_rebase(onto, plan).unwrap(),
+        handle.start_rebase(onto, plan, None).unwrap(),
         git_core::rebase::RebaseStepResult::PausedForEdit
     );
     assert!(!dir.path().join("d/new.txt").exists());
@@ -269,7 +269,7 @@ fn a_failed_save_keeps_the_rebase_for_the_session() {
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
 
-    let error = handle.start_rebase(onto, plan).unwrap_err();
+    let error = handle.start_rebase(onto, plan, None).unwrap_err();
 
     assert!(error.contains("could not be saved"), "{error}");
     let short = branch.trim_start_matches("refs/heads/");
@@ -340,7 +340,10 @@ fn assert_moves_are_refused(handle: &super::super::WorkerHandle, path: &Path) {
             .unwrap_err(),
         busy
     );
-    assert_eq!(handle.start_rebase(id.clone(), vec![]).unwrap_err(), busy);
+    assert_eq!(
+        handle.start_rebase(id.clone(), vec![], None).unwrap_err(),
+        busy
+    );
     assert_eq!(
         handle
             .reset_to_commit(id.clone(), git_core::reset::ResetMode::Hard)
@@ -392,7 +395,7 @@ fn staging_and_conflict_resolution_stay_available_during_a_rebase() {
         combined_message: None,
     }];
     assert!(matches!(
-        handle.start_rebase(onto, plan).unwrap(),
+        handle.start_rebase(onto, plan, None).unwrap(),
         git_core::rebase::RebaseStepResult::Conflicted { .. }
     ));
 

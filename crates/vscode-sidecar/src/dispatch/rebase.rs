@@ -1,5 +1,6 @@
 use repo_service::wire::{
-    RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto, RebaseStepResultDto,
+    HistoryEditTargetDto, RebaseAbortDto, RebasePlanCommitDto, RebasePlanEntryDto,
+    RebaseStepResultDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -28,12 +29,15 @@ pub(super) struct StartRebaseParams {
     repo_path: String,
     onto: String,
     plan: Vec<RebasePlanEntryDto>,
+    #[serde(default)]
+    edit: Option<HistoryEditTargetDto>,
 }
 
 pub(super) fn start_rebase(params: StartRebaseParams, repos: &Repos) -> Result<Value, String> {
     let result = worker_handle(repos, &params.repo_path)?.start_rebase(
         params.onto,
         params.plan.into_iter().map(Into::into).collect(),
+        params.edit.map(Into::into),
     )?;
     serde_json::to_value(RebaseStepResultDto::from(result)).map_err(|error| error.to_string())
 }

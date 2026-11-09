@@ -1644,6 +1644,46 @@ impl From<RebasePlanEntryDto> for git_core::rebase::RebasePlanEntry {
     }
 }
 
+/// `RepoClient.startRebase`'s optional `edit`: the one-click history edit from the commit menu
+/// the rebase runs, `{ "kind", "commitId" }`, so its undo entry names it (#473).
+#[derive(Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "HistoryEditTarget"))]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEditTargetDto {
+    pub kind: HistoryEditKindDto,
+    pub commit_id: String,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "HistoryEditKind"))]
+pub enum HistoryEditKindDto {
+    Reword,
+    Squash,
+    Fixup,
+    MoveUp,
+    MoveDown,
+    Drop,
+}
+
+impl From<HistoryEditTargetDto> for crate::worker::HistoryEdit {
+    fn from(dto: HistoryEditTargetDto) -> Self {
+        use crate::worker::HistoryEditKind as Kind;
+        Self {
+            kind: match dto.kind {
+                HistoryEditKindDto::Reword => Kind::Reword,
+                HistoryEditKindDto::Squash => Kind::Squash,
+                HistoryEditKindDto::Fixup => Kind::Fixup,
+                HistoryEditKindDto::MoveUp => Kind::MoveUp,
+                HistoryEditKindDto::MoveDown => Kind::MoveDown,
+                HistoryEditKindDto::Drop => Kind::Drop,
+            },
+            commit_id: dto.commit_id,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "RebaseStepResult"))]
@@ -2239,6 +2279,8 @@ mod ts_bindings {
             RebasePlanCommitDto,
             RebaseActionDto,
             RebasePlanEntryDto,
+            HistoryEditTargetDto,
+            HistoryEditKindDto,
             RebaseStepResultDto,
             DiffLineDto,
             DiffHunkDto,

@@ -12,7 +12,7 @@ use git_core::reset::ResetMode;
 use git_core::undo::SnapshotScope::{self, Full, RefsAndIndex};
 
 use super::undo::{
-    amend_label, count_label, fit, merge_label, quoted, rebase_label, reset_label, short,
+    amend_label, count_label, fit, merge_label, quoted, reset_label, short, start_rebase_label,
     with_path, HeldReplies, UndoPlan, DISCARD_BUSY, UNDO_BUSY,
 };
 use super::Command;
@@ -337,7 +337,9 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
             ..
         } => P::recorded(merge_label(branch_name, options.squash), Full).gated(Refused),
         Command::AbortMerge { .. } => P::aborting(),
-        Command::StartRebase { onto, .. } => P::recorded(rebase_label(onto), Full).gated(Refused),
+        Command::StartRebase { onto, edit, .. } => {
+            P::recorded(start_rebase_label(onto, edit.as_ref()), Full).gated(Refused)
+        }
         Command::RebaseContinue { .. } => P::continuing(),
         Command::AbortRebase { .. } => P::aborting(),
         Command::CherryPick { commit_id, .. } => {

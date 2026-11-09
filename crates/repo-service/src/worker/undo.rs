@@ -8,6 +8,7 @@ use git_core::reset::ResetMode;
 use git_core::undo::{capture, restore, RepoSnapshot, SnapshotScope, UndoError};
 
 use super::policy::{reply_of, BusyReply};
+use super::rebase::{HistoryEdit, HistoryEditKind};
 use super::state_lock::{Acquire, StateGuard, StateLock, LOCK_WAIT};
 use super::undo_store::{PendingEntry, UndoEntry, UndoStacks, UndoStore, UNDO_LIMIT};
 use super::{Command, WorkerHandle};
@@ -90,7 +91,7 @@ pub(super) fn relabel_sequence(
 
 /// "Rebase onto <onto>", with a commit id shortened like every other label's (the frontend's
 /// "Rebase onto here" passes the full id) and a ref name kept as it is.
-pub(super) fn rebase_label(onto: &str) -> String {
+fn rebase_label(onto: &str) -> String {
     let is_full_id = matches!(onto.len(), 40 | 64) && onto.bytes().all(|b| b.is_ascii_hexdigit());
     if is_full_id {
         format!("Rebase onto {}", short(onto))
@@ -99,13 +100,29 @@ pub(super) fn rebase_label(onto: &str) -> String {
     }
 }
 
+/// A `StartRebase`'s label: what the user did for a one-click history edit (#473), else
+/// [`rebase_label`].
+pub(super) fn start_rebase_label(onto: &str, edit: Option<&HistoryEdit>) -> String {
+    let Some(edit) = edit else {
+        return rebase_label(onto);
+    };
+    let id = short(&edit.commit_id);
+    match edit.kind {
+        HistoryEditKind::Reword => format!("Reword {id}"),
+        HistoryEditKind::Squash => format!("Squash {id} into its parent"),
+        HistoryEditKind::Fixup => format!("Fix up {id} into its parent"),
+        HistoryEditKind::MoveUp => format!("Move {id} up"),
+        HistoryEditKind::MoveDown => format!("Move {id} down"),
+        HistoryEditKind::Drop => format!("Drop {id}"),
+    }
+}
+
 /// The label of a failed rebase start that still changed the repository. `git_core::rebase`
 /// rolls a failed start back to the branch; an entry is only left when the rollback didn't
 /// restore everything (or failed: `rolled_back` is false while HEAD is still detached). Its
 /// Undo restores the state before the start, so the entry is kept, but must not read like a
-/// rebase that happened.
-fn failed_rebase_label(onto: &str, rolled_back: bool) -> String {
-    let base = rebase_label(onto);
+/// rebase that happened. `base` is the start's own label ([`start_rebase_label`]).
+fn failed_rebase_label(base: &str, rolled_back: bool) -> String {
     if rolled_back {
         fit(format!("{base} failed (rolled back)"))
     } else {
@@ -113,16 +130,17 @@ fn failed_rebase_label(onto: &str, rolled_back: bool) -> String {
     }
 }
 
-/// Renames the entry of a `StartRebase` that failed (see [`failed_rebase_label`]).
+/// Renames the entry of a `StartRebase` that failed (see [`failed_rebase_label`]); `label` is
+/// the one it was recorded under.
 pub(super) fn relabel_rebase_start(
     recorder: &mut UndoRecorder,
     repo: &Repository,
-    onto: &str,
+    label: &str,
     result: &Result<git_core::rebase::RebaseStepResult, String>,
 ) {
     if result.is_err() {
         let rolled_back = !repo.head_detached().unwrap_or(true);
-        recorder.relabel(failed_rebase_label(onto, rolled_back));
+        recorder.relabel(failed_rebase_label(label, rolled_back));
     }
 }
 
@@ -1110,14 +1128,17 @@ mod tests {
 
     const ONTO: &str = "707e824e1af1b266aaa5c4faf7517e586b174183";
 
-    fn rebase_label(onto: &str) -> Option<String> {
-        let (tx, _rx) = channel();
-        label(Command::StartRebase {
+    fn start_rebase(onto: &str, edit: Option<HistoryEdit>) -> Command {
+        Command::StartRebase {
             onto: onto.into(),
             plan: Vec::new(),
-            reply: tx,
-        })
-        .map(|(l, _)| l)
+            edit,
+            reply: channel().0,
+        }
+    }
+
+    fn rebase_label(onto: &str) -> Option<String> {
+        label(start_rebase(onto, None)).map(|(l, _)| l)
     }
 
     #[test]
@@ -1130,45 +1151,92 @@ mod tests {
         );
     }
 
+    const EDITED: &str = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d";
+
+    /// #473: a one-click history edit's entry names the edit and the edited commit, not `onto`.
+    #[test]
+    fn a_history_edit_is_labelled_with_what_the_user_did() {
+        let cases = [
+            (HistoryEditKind::Reword, "Reword 1a2b3c4"),
+            (HistoryEditKind::Squash, "Squash 1a2b3c4 into its parent"),
+            (HistoryEditKind::Fixup, "Fix up 1a2b3c4 into its parent"),
+            (HistoryEditKind::MoveUp, "Move 1a2b3c4 up"),
+            (HistoryEditKind::MoveDown, "Move 1a2b3c4 down"),
+            (HistoryEditKind::Drop, "Drop 1a2b3c4"),
+        ];
+        for (kind, expected) in cases {
+            let edit = HistoryEdit {
+                kind,
+                commit_id: EDITED.into(),
+            };
+            assert_eq!(
+                label(start_rebase(ONTO, Some(edit))),
+                Some((expected.to_string(), SnapshotScope::Full)),
+                "{kind:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_failed_rebase_start_is_labelled_as_failed() {
         assert_eq!(
-            failed_rebase_label(ONTO, true),
+            failed_rebase_label("Rebase onto 707e824", true),
             "Rebase onto 707e824 failed (rolled back)"
         );
         assert_eq!(
-            failed_rebase_label(ONTO, false),
+            failed_rebase_label("Rebase onto 707e824", false),
             "Rebase onto 707e824 failed"
         );
 
         let dir = tempfile::TempDir::new().unwrap();
         let repo = Repository::init(dir.path()).unwrap();
         let mut recorder = UndoRecorder::open(&repo);
-        let (tx, _rx) = channel();
-        let command = Command::StartRebase {
-            onto: ONTO.into(),
-            plan: Vec::new(),
-            reply: tx,
-        };
-        recorder.begin(&repo, plan_for(&command).unwrap(), None);
+        let command = start_rebase(ONTO, None);
+        let plan = plan_for(&command).unwrap();
+        recorder.begin(&repo, plan.clone(), None);
         std::fs::write(dir.path().join("b.txt"), "b\n").unwrap();
-        relabel_rebase_start(&mut recorder, &repo, ONTO, &Err("Signing failed".into()));
+        relabel_rebase_start(
+            &mut recorder,
+            &repo,
+            &plan.label,
+            &Err("Signing failed".into()),
+        );
         recorder.finish(&repo, None, || None, false);
         assert_eq!(
             recorder.state().undo,
             Some("Rebase onto 707e824 failed (rolled back)".into())
         );
 
-        recorder.begin(&repo, plan_for(&command).unwrap(), None);
+        recorder.begin(&repo, plan.clone(), None);
         std::fs::write(dir.path().join("c.txt"), "c\n").unwrap();
         relabel_rebase_start(
             &mut recorder,
             &repo,
-            ONTO,
+            &plan.label,
             &Ok(git_core::rebase::RebaseStepResult::Done),
         );
         recorder.finish(&repo, None, || None, false);
         assert_eq!(recorder.state().undo, Some("Rebase onto 707e824".into()));
+
+        // A failed history edit keeps its own label (#473).
+        let edit = HistoryEdit {
+            kind: HistoryEditKind::Drop,
+            commit_id: EDITED.into(),
+        };
+        let plan = plan_for(&start_rebase(ONTO, Some(edit))).unwrap();
+        recorder.begin(&repo, plan.clone(), None);
+        std::fs::write(dir.path().join("d.txt"), "d\n").unwrap();
+        relabel_rebase_start(
+            &mut recorder,
+            &repo,
+            &plan.label,
+            &Err("Signing failed".into()),
+        );
+        recorder.finish(&repo, None, || None, false);
+        assert_eq!(
+            recorder.state().undo,
+            Some("Drop 1a2b3c4 failed (rolled back)".into())
+        );
     }
 
     #[test]

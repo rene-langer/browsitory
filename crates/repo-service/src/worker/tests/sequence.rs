@@ -422,7 +422,9 @@ fn a_terminal_rebase_is_reported_and_refused() {
         combined_message: None,
     }];
     assert_eq!(
-        handle.start_rebase(main_tip.to_string(), plan).unwrap_err(),
+        handle
+            .start_rebase(main_tip.to_string(), plan, None)
+            .unwrap_err(),
         refusal
     );
     assert_eq!(
