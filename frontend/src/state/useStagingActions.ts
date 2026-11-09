@@ -23,7 +23,7 @@ export interface StagingActions {
   unstageLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(path: string): Promise<void>;
-  // Writes `path` as it is in `commitId` to the work tree (#446); one undo step.
+  // Writes `path` as it is in `commitId` to the work tree, not the index (#446); one undo step.
   restoreFileVersion(commitId: string, path: string): Promise<void>;
   discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
@@ -31,7 +31,8 @@ export interface StagingActions {
   // `runMutation`, like `stageAllFiles`.
   ignorePaths(patterns: string[]): Promise<void>;
   // Resolves `true` once committed; `false` on any failure (a hook failure also stores
-  // `hookFailure`), so CommitBox only clears the message after a commit that landed.
+  // `hookFailure`), so CommitBox only clears the message after a commit that landed. `noVerify`
+  // skips the `pre-commit` and `commit-msg` hooks.
   commit(message: string, noVerify: boolean, trailers?: Trailer[]): Promise<boolean>;
 }
 
