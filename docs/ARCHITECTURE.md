@@ -1223,8 +1223,20 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   #392). Seen: `reset_to(Hard)` deleted `d/f` of `D/f`/`d/f`, rebase abort dropped it from the
   index too, and `discard_file("x/B")` left `x/b` twice in the index. A path-limited checkout of
   other paths keeps the pair and goes ahead. `start_rebase` runs the same check (onto, HEAD and
-  index) before it writes anything, so a rebase it starts can always be aborted. Undo/redo
-  routes around it: a pair member is never one of `checkout_from_index`'s paths but a raw write.
+  index) before it writes anything. Undo/redo routes around it: a pair member is never one of
+  `checkout_from_index`'s paths but a raw write.
+- Aborts never refuse a case pair (#511): a picked commit can bring one in that no up-front
+  check sees (libgit2's merge then records one name in the index and writes the other's file,
+  so the pair is split between HEAD, the index and the disk; #522). `restore_original_branch`
+  (rebase abort) and `abort_merge`'s reset collect `worktree_guard::case_pairs_for_abort` (target,
+  HEAD, index, and the names on disk below the folders they name), leave every name of a pair
+  out of the forced checkout (a path-limited checkout of the other paths) and put them back with
+  `restore_case_pairs`: the target's blob written raw, or the file removed. A name only on disk
+  is removed only when its content is a blob the repository holds, else it is the user's and
+  stays. The index is then written from the target tree (rebase) or HEAD (`abort_merge`).
+  `plan_operation_reset` compares a pair name's file with its own index entry instead of
+  libgit2's diff, which under the fold reports the other name's file as a change
+  (`WouldDiscard`).
 - "Stash all" cannot clear links in between libgit2's record and reset, so with a hazard it goes
   through the path-limited stash (batch 4c) with every changed path: a file link is stashed and
   then replaced, a folder link is refused (`BeyondSymlink`).

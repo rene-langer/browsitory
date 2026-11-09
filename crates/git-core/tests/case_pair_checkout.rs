@@ -3,7 +3,7 @@
 //! pair for one entry: a forced checkout that includes both keeps one of them in the index and,
 //! depending on the order the directory lists them in, deletes the other's file (#392). Such
 //! checkouts are refused (`CasePair`) before anything is written; checkouts limited to other
-//! paths keep the pair and go ahead.
+//! paths keep the pair and go ahead. Aborts never refuse: they write the pair's files directly (#511).
 #![cfg(target_os = "linux")]
 
 mod common;
@@ -257,5 +257,228 @@ fn undo_restores_one_of_a_case_pair_and_keeps_the_other() {
             assert_pair_kept(dir.path(), pair, "c2\n");
             assert_eq!(read(dir.path(), "new"), None, "{picked:?}");
         }
+    }
+}
+
+/// `base` holds `pair.0`; `onto` adds `conf` on top of it. The branch, forked at `base`, edits
+/// `other` (`c1`), adds `pair.1` (`c2`), adds `conf` (`c3`, which conflicts with `onto`'s) and
+/// deletes `pair.1` again (`c4`). Neither tip holds the pair, so the rebase starts; picking `c2`
+/// brings the pair into HEAD and the index, and `c3` pauses on its conflict. Committed with
+/// `core.ignorecase` off, then turned on and the repository reopened. Returns `(onto, tip)`.
+fn pair_brought_in_by_a_rebase(
+    pair: (&str, &str),
+) -> (tempfile::TempDir, git2::Repository, String, String) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), pair.0, "first\n");
+    write_file(dir.path(), "other", "x\n");
+    commit_all(&repo, "base");
+    {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("topic", &base, false).unwrap();
+    }
+    write_file(dir.path(), "conf", "upstream\n");
+    commit_all(&repo, "upstream");
+    let onto = head_id(&repo);
+
+    repo.set_head("refs/heads/topic").unwrap();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force().remove_untracked(true);
+    repo.checkout_head(Some(&mut checkout)).unwrap();
+    write_file(dir.path(), "other", "c1\n");
+    commit_all(&repo, "c1");
+    write_file(dir.path(), pair.1, "second\n");
+    commit_all(&repo, "c2 adds the other name");
+    write_file(dir.path(), "conf", "branch\n");
+    commit_all(&repo, "c3 conflicts");
+    {
+        let mut index = repo.index().unwrap();
+        index.remove_path(std::path::Path::new(pair.1)).unwrap();
+        index.write().unwrap();
+        std::fs::remove_file(dir.path().join(pair.1)).unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let parent = repo.head().unwrap().peel_to_commit().unwrap();
+        let signature = repo.signature().unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "c4 deletes it again",
+            &tree,
+            &[&parent],
+        )
+        .unwrap();
+    }
+    let tip = head_id(&repo);
+
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    drop(repo);
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    (dir, repo, onto, tip)
+}
+
+#[test]
+fn rebase_abort_restores_the_branch_after_a_pick_brought_in_a_case_pair() {
+    // #511: `start_rebase` checks onto, HEAD and the index for a case pair, but a picked commit
+    // can bring one in. Abort refused with `CasePair`, so the rebase couldn't be aborted. Abort
+    // now leaves the pair out of its forced checkout and writes the pair's files directly.
+    use git_core::rebase::{abort_rebase, RebaseAction, RebasePlanEntry, RebaseStepResult};
+    for (pair, own) in CASE_PAIRS
+        .into_iter()
+        .flat_map(|pair| [(pair, false), (pair, true)])
+    {
+        let (dir, repo, onto, tip) = pair_brought_in_by_a_rebase(pair);
+        let plan: Vec<RebasePlanEntry> = git_core::rebase::commits_since(&repo, &onto)
+            .unwrap()
+            .into_iter()
+            .map(|commit| RebasePlanEntry {
+                commit_id: commit.id,
+                action: RebaseAction::Pick,
+                combined_message: None,
+            })
+            .collect();
+        assert_eq!(plan.len(), 4, "{pair:?}");
+
+        let (state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
+        assert_eq!(
+            result,
+            RebaseStepResult::Conflicted {
+                files: vec!["conf".to_string()]
+            },
+            "{pair:?}"
+        );
+        // libgit2's pick of `c2` took `pair.1` for `pair.0`'s entry: the pair is split between
+        // HEAD, the index and the disk, which holds both files.
+        assert_eq!(
+            read(dir.path(), pair.0).as_deref(),
+            Some("first\n"),
+            "{pair:?}"
+        );
+        assert_eq!(
+            read(dir.path(), pair.1).as_deref(),
+            Some("second\n"),
+            "{pair:?}"
+        );
+        // Unless the index tracks it (then Abort discards it like any change to a file the
+        // rebase tracks), what the user wrote there during the pause stays: the repository
+        // doesn't hold it.
+        let kept = own && !index_paths(dir.path()).contains(&pair.1.to_string());
+        if own {
+            write_file(dir.path(), pair.1, "mine\n");
+        }
+
+        let abort = abort_rebase(&repo, &state).unwrap();
+
+        assert!(abort.restored, "{pair:?}");
+        assert!(!repo.head_detached().unwrap(), "{pair:?}");
+        assert_eq!(head_id(&repo), tip, "{pair:?}");
+        assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
+        let mut expected = vec![pair.0.to_string(), "conf".to_string(), "other".to_string()];
+        expected.sort();
+        assert_eq!(index_paths(dir.path()), expected, "{pair:?}");
+        assert_eq!(
+            read(dir.path(), pair.0).as_deref(),
+            Some("first\n"),
+            "{pair:?}"
+        );
+        assert_eq!(
+            read(dir.path(), pair.1).as_deref(),
+            kept.then_some("mine\n"),
+            "{pair:?}"
+        );
+        assert_eq!(
+            read(dir.path(), "conf").as_deref(),
+            Some("branch\n"),
+            "{pair:?}"
+        );
+        assert_eq!(
+            read(dir.path(), "other").as_deref(),
+            Some("c1\n"),
+            "{pair:?}"
+        );
+    }
+}
+
+#[test]
+fn cherry_pick_abort_after_a_pick_brought_in_a_case_pair() {
+    // #511: the same for a paused cherry-pick, whose Abort resets the paths the pick touched.
+    // It refused with `WouldDiscard` (libgit2's diff took the file on disk for a change to the
+    // other name's entry), or left the picked file behind.
+    for pair in CASE_PAIRS {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), pair.0, "first\n");
+        write_file(dir.path(), "conf", "base\n");
+        commit_all(&repo, "base");
+        {
+            let base = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("side", &base, false).unwrap();
+        }
+        write_file(dir.path(), "conf", "main\n");
+        commit_all(&repo, "main");
+        let main = head_id(&repo);
+        let main_ref = repo.head().unwrap().name().unwrap().to_string();
+        repo.set_head("refs/heads/side").unwrap();
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.force();
+        repo.checkout_head(Some(&mut checkout)).unwrap();
+        write_file(dir.path(), pair.1, "second\n");
+        write_file(dir.path(), "conf", "side\n");
+        commit_all(&repo, "side");
+        let side = head_id(&repo);
+        repo.set_head(&main_ref).unwrap();
+        repo.checkout_head(Some(&mut checkout)).unwrap();
+        assert_eq!(read(dir.path(), pair.1), None);
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", true)
+            .unwrap();
+        drop(repo);
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        assert_eq!(head_id(&repo), main);
+
+        let outcome = git_core::pick::cherry_pick(
+            &repo,
+            &side,
+            None,
+            git_core::hooks::HookOptions::default(),
+        )
+        .unwrap();
+        assert!(
+            matches!(outcome, git_core::pick::PickOutcome::Conflicted { .. }),
+            "{pair:?}: {outcome:?}"
+        );
+        assert_eq!(
+            read(dir.path(), pair.1).as_deref(),
+            Some("second\n"),
+            "{pair:?}"
+        );
+        // For `a`/`A` libgit2's index kept `a` and dropped the picked `A` (its file is written
+        // all the same): Abort resets only what the pick touched, so `A` stays, untracked.
+        let staged = index_paths(dir.path()).contains(&pair.1.to_string());
+
+        git_core::merge::abort_merge(&repo).unwrap();
+
+        assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
+        assert_eq!(head_id(&repo), main, "{pair:?}");
+        let mut expected = vec![pair.0.to_string(), "conf".to_string()];
+        expected.sort();
+        assert_eq!(index_paths(dir.path()), expected, "{pair:?}");
+        assert_eq!(
+            read(dir.path(), pair.0).as_deref(),
+            Some("first\n"),
+            "{pair:?}"
+        );
+        assert_eq!(
+            read(dir.path(), pair.1).as_deref(),
+            (!staged).then_some("second\n"),
+            "{pair:?}"
+        );
+        assert_eq!(
+            read(dir.path(), "conf").as_deref(),
+            Some("main\n"),
+            "{pair:?}"
+        );
     }
 }
