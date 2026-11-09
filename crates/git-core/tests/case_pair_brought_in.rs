@@ -922,3 +922,95 @@ fn a_sequence_abort_without_a_case_pair_rewinds_by_checkout() {
     );
     assert_eq!(read(dir.path(), "conf").as_deref(), Some("staged\n"));
 }
+
+#[test]
+fn a_sequence_abort_around_a_case_pair_keeps_unrelated_staged_changes() {
+    // #553: like the safe checkout it stands in for (`git reset --merge`), the rewind around a
+    // pair resets only the index entries of the paths it changes. A change staged on a file
+    // neither HEAD nor the original commit changes, and a newly staged file, stay staged.
+    for pair in CASE_PAIRS {
+        let (dir, repo, mut state, main) = sequence_after_a_split_step(pair);
+        // Stopped between steps: `s2`'s conflict on `conf` resolved by staging a change of the
+        // user's own, and the pick's state cleared.
+        write_file(dir.path(), "conf", "staged\n");
+        write_file(dir.path(), "extra", "new\n");
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("conf")).unwrap();
+        index.add_path(std::path::Path::new("extra")).unwrap();
+        index.write().unwrap();
+        assert!(!index.has_conflicts(), "{pair:?}");
+        repo.cleanup_state().unwrap();
+        state.stopped_on_conflict = false;
+        let staged = index.get_path(std::path::Path::new("conf"), 0).unwrap().id;
+        let extra = index.get_path(std::path::Path::new("extra"), 0).unwrap().id;
+
+        let abort = git_core::pick::abort_sequence(&repo, &state).unwrap();
+
+        assert!(abort.rewound, "{pair:?}");
+        assert_eq!(head_id(&repo), main, "{pair:?}");
+        assert_eq!(
+            index_paths(dir.path()),
+            sorted(&[pair.0, "conf", "extra", "notes"]),
+            "{pair:?}"
+        );
+        let index = git2::Index::open(&dir.path().join(".git/index")).unwrap();
+        assert_eq!(
+            index.get_path(std::path::Path::new("conf"), 0).unwrap().id,
+            staged,
+            "{pair:?}"
+        );
+        assert_eq!(
+            index.get_path(std::path::Path::new("extra"), 0).unwrap().id,
+            extra,
+            "{pair:?}"
+        );
+        assert_eq!(
+            read(dir.path(), "conf").as_deref(),
+            Some("staged\n"),
+            "{pair:?}"
+        );
+        assert_eq!(
+            read(dir.path(), pair.0).as_deref(),
+            Some("first\n"),
+            "{pair:?}"
+        );
+        assert_eq!(read(dir.path(), pair.1), None, "{pair:?}");
+        assert_eq!(
+            read(dir.path(), "notes").as_deref(),
+            Some("base\n"),
+            "{pair:?}"
+        );
+    }
+}
+
+#[test]
+fn a_sequence_abort_around_a_case_pair_keeps_an_unrelated_staged_deletion() {
+    // #553: a file removed and staged as removed (`git rm`) stays removed, as the safe checkout
+    // without a pair leaves it: neither HEAD nor the original commit changes it.
+    for pair in CASE_PAIRS {
+        let (dir, repo, mut state, main) = sequence_after_a_split_step(pair);
+        let mut index = repo.index().unwrap();
+        index.remove_path(std::path::Path::new("conf")).unwrap();
+        index.write().unwrap();
+        std::fs::remove_file(dir.path().join("conf")).unwrap();
+        repo.cleanup_state().unwrap();
+        state.stopped_on_conflict = false;
+
+        let abort = git_core::pick::abort_sequence(&repo, &state).unwrap();
+
+        assert!(abort.rewound, "{pair:?}");
+        assert_eq!(head_id(&repo), main, "{pair:?}");
+        assert_eq!(
+            index_paths(dir.path()),
+            sorted(&[pair.0, "notes"]),
+            "{pair:?}"
+        );
+        assert_eq!(read(dir.path(), "conf"), None, "{pair:?}");
+        assert_eq!(
+            read(dir.path(), pair.0).as_deref(),
+            Some("first\n"),
+            "{pair:?}"
+        );
+        assert_eq!(read(dir.path(), pair.1), None, "{pair:?}");
+    }
+}
