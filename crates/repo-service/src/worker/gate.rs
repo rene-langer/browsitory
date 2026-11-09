@@ -1,10 +1,9 @@
 //! What the worker knows about a paused operation: the commands it refuses meanwhile, whether
 //! one is in progress, and a marker that names it for the undo recorder.
-use std::sync::mpsc::Sender;
-
 use git2::{Repository, RepositoryState};
 use git_core::rebase::RebaseState;
 
+use super::policy::{reply_of, Gate};
 use super::rebase_store::RebaseStore;
 use super::sequence_store::SequenceStore;
 use super::Command;
@@ -21,11 +20,23 @@ pub(super) struct GateScope {
     pub refuse_stash_save: bool,
 }
 
+impl Gate {
+    /// Whether a stored operation with `scope` refuses a command with this gate.
+    pub fn refuses(&self, scope: &GateScope) -> bool {
+        match self {
+            Gate::Open => false,
+            Gate::Refused => true,
+            Gate::Branch(name) => scope.branch.as_deref() == Some(name.as_str()),
+            Gate::StashSave => scope.refuse_stash_save,
+        }
+    }
+}
+
 /// Replaces a command that must not run while a sequence or a rebase is stored with a no-op,
-/// after replying with git-core's `OperationInProgress` text on its own reply. Refused: anything
-/// that starts another operation or moves HEAD or the index under it (picks, merge, rebase,
-/// commit and amend, reset, checkout, branch switch or create (it checks the branch out), pull,
-/// stash apply/pop, reflog restore).
+/// after replying with git-core's `OperationInProgress` text on its own reply. Which commands
+/// that is, is their policy's `gate` (`policy::of`): anything that starts another operation or
+/// moves HEAD or the index under it (picks, merge, rebase, commit and amend, reset, checkout,
+/// branch switch or create (it checks the branch out), pull, stash apply/pop, reflog restore).
 /// Read-only commands, fetch, staging and conflict resolution stay available.
 ///
 /// Deleting or renaming `scope.branch` (the rebased branch, or the branch a sequence runs on),
@@ -33,40 +44,19 @@ pub(super) struct GateScope {
 /// operation once it isn't checked out, and a renamed branch can't be rewound to by Abort. So is
 /// a stash save while `scope.refuse_stash_save` (it would carry the paused step away from the
 /// index). Other branches stay manageable.
-pub(super) fn gate_during_operation(command: Command, scope: &GateScope) -> Command {
-    let protected = scope.branch.as_deref();
-    fn refuse<T>(reply: Sender<Result<T, String>>) -> Command {
-        let _ = reply.send(Err(
-            git_core::pick::PickError::OperationInProgress.to_string()
-        ));
-        let (reply, _) = std::sync::mpsc::channel();
-        Command::Ping { reply }
+pub(super) fn gate_during_operation(
+    mut command: Command,
+    gate: &Gate,
+    scope: &GateScope,
+) -> Command {
+    if !gate.refuses(scope) {
+        return command;
     }
-    match command {
-        Command::CherryPick { reply, .. } | Command::RevertCommit { reply, .. } => refuse(reply),
-        Command::CherryPickMany { reply, .. } | Command::RevertMany { reply, .. } => refuse(reply),
-        Command::StartMerge { reply, .. } => refuse(reply),
-        Command::StartRebase { reply, .. } => refuse(reply),
-        Command::Commit { reply, .. } | Command::AmendCommit { reply, .. } => refuse(reply),
-        Command::ResetToCommit { reply, .. }
-        | Command::CreateBranch { reply, .. }
-        | Command::CheckoutCommit { reply, .. }
-        | Command::SwitchBranch { reply, .. }
-        | Command::RestoreReflogEntry { reply, .. } => refuse(reply),
-        Command::PullCurrentUpstream { reply, .. } => refuse(reply),
-        Command::ApplyStash { reply, .. } | Command::PopStash { reply, .. } => refuse(reply),
-        Command::DeleteBranch { name, reply, .. } if protected == Some(name.as_str()) => {
-            refuse(reply)
-        }
-        Command::RenameBranch {
-            old_name, reply, ..
-        } if protected == Some(old_name.as_str()) => refuse(reply),
-        Command::CreateWorktree { branch, reply, .. } if protected == Some(branch.as_str()) => {
-            refuse(reply)
-        }
-        Command::SaveStash { reply, .. } if scope.refuse_stash_save => refuse(reply),
-        other => other,
+    if let Some(reply) = reply_of(&mut command) {
+        reply.refuse(&git_core::pick::PickError::OperationInProgress.to_string());
     }
+    let (reply, _) = std::sync::mpsc::channel();
+    Command::Ping { reply }
 }
 
 /// What this worker remembers about the stored rebase beyond `rebase.json`, for when the file

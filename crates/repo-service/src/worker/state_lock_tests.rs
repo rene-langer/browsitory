@@ -74,67 +74,6 @@ fn conflicting_branches() -> (TempDir, Repository) {
     (dir, repo)
 }
 
-#[test]
-fn locks_state_covers_every_recordable_and_operation_ending_command() {
-    use super::Command;
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::StageFile {
-        path: "a".into(),
-        reply: tx
-    }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::StartRebase {
-        onto: "x".into(),
-        plan: Vec::new(),
-        reply: tx
-    }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::RebaseContinue {
-        reply: tx
-    }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::AbortRebase {
-        reply: tx
-    }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::ContinueSequence {
-        no_verify: false,
-        operation_id: "continue-1".into(),
-        events: mpsc::channel().0,
-        reply: tx
-    }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::AbortSequence {
-        confirmed: None,
-        reply: tx
-    }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::AbortMerge { reply: tx }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::Undo { reply: tx }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::Redo { reply: tx }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::SaveStash {
-        options: git_core::stash::StashOptions::default(),
-        reply: tx
-    }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(super::undo::locks_state(&Command::CreateWorktree {
-        name: "wt".into(),
-        path: "wt".into(),
-        branch: "x".into(),
-        start_point: None,
-        reply: tx
-    }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(!super::undo::locks_state(&Command::GetStatus { reply: tx }));
-    let (tx, _rx) = mpsc::channel();
-    assert!(!super::undo::locks_state(&Command::GetUndoState {
-        reply: tx
-    }));
-}
-
 /// Starts a cherry-pick sequence of `side_commits_with_a_conflict` through git-core, as the
 /// other window's worker would, and stores it. Returns the branch it runs on.
 fn start_sequence_outside(repo: &Repository, ids: Vec<String>) -> String {

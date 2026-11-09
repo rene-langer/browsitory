@@ -36,6 +36,7 @@ mod gate;
 mod history;
 mod hooks;
 mod merge;
+mod policy;
 mod rebase;
 mod rebase_store;
 mod reflog;
@@ -869,14 +870,14 @@ impl Worker {
             // brief hold is still waited out (#175, #197).
             let mut contention = state_lock::Contention::default();
             for mut command in rx {
+                let policy = policy::of(&command);
                 // A command that can record an entry or end a paused operation holds the lock
                 // from before `settle` until its `finish`, so no other holder ever sees "the
                 // operation ended, but its entry isn't recorded yet". Reads never wait.
                 let mut unrecorded = false;
-                let guard = if undo::locks_state(&command) {
+                let guard = if policy.locks_state {
                     match state_lock.acquire_with(
-                        contention
-                            .wait(std::time::Instant::now(), undo::refuses_when_busy(&command)),
+                        contention.wait(std::time::Instant::now(), policy.busy.is_some()),
                         || {
                             if let Some(pause) = &pause {
                                 pause.pause_here(PausePoint::LockWait);
@@ -889,7 +890,8 @@ impl Worker {
                         }
                         state_lock::Acquire::Busy => {
                             contention.busy(std::time::Instant::now());
-                            if undo::reply_busy(&command) {
+                            if let Some(busy) = policy.busy {
+                                undo::reply_busy(&mut command, busy);
                                 continue;
                             }
                             if !logged_busy {
@@ -914,16 +916,11 @@ impl Worker {
                     None
                 };
                 undo_recorder.settle(&repo, guard.as_ref(), || marker(&repo, &rebase_memory));
-                let plan = undo::plan_for(&command).filter(|_| !unrecorded);
+                let plan = policy.undo.filter(|_| !unrecorded);
                 let track = plan.is_some() || undo_recorder.has_pending();
-                let aborts = matches!(
-                    command,
-                    Command::AbortMerge { .. }
-                        | Command::AbortRebase { .. }
-                        | Command::AbortSequence { .. }
-                );
+                let aborts = policy.aborts;
                 let mut held = undo::HeldReplies::default();
-                if track {
+                if track && policy.holds_reply {
                     undo::hold_reply(&mut command, &mut held);
                 }
                 if let Some(plan) = plan {
@@ -932,7 +929,7 @@ impl Worker {
                 // While a cherry-pick/revert sequence or a rebase is stored, commands that would
                 // move HEAD or rewrite the index under it are refused before git-core runs.
                 if let Some(scope) = probe!().gate_scope(&repo) {
-                    command = gate::gate_during_operation(command, &scope);
+                    command = gate::gate_during_operation(command, &policy.gate, &scope);
                 }
                 match command {
                     Command::Ping { reply } => {
@@ -1906,3 +1903,6 @@ mod tests;
 /// #172: the worker holds the state lock across commands that can end an operation.
 #[cfg(test)]
 mod state_lock_tests;
+
+#[cfg(test)]
+mod policy_tests;
