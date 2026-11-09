@@ -82,6 +82,7 @@ import { CommitTreeBrowser } from "./CommitTreeBrowser";
 import treeStyles from "./CommitTreeBrowser.module.css";
 import { FolderHistoryButton } from "./FolderHistoryButton";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
+import { stashActions as stashActionRules, type StashBlockers } from "../lib/actions/stashActions";
 
 const STATUS_ICONS: Record<StatusKind, LucideIcon> = {
   New: FilePlus,
@@ -921,11 +922,9 @@ export interface StashActions {
   onDrop: (index: number) => void;
   restoreIndex: boolean;
   onSetRestoreIndex: (on: boolean) => void;
-  // Why Apply/Pop can't run now (staged changes, conflicts, a running operation), else `null`.
-  disabledReason: string | null;
-  // Why Drop can't run now (`busyReason`: an action in flight or a transfer), else `null`. Like
-  // the stash list's Drop…; a paused merge, rebase or sequence step allows it (#521).
-  dropDisabledReason: string | null;
+  // Why Apply/Pop and Drop can't run now (`stashBlockers`, shared with the stash list and the
+  // palette, #509). A paused merge, rebase or sequence step allows Drop (#521).
+  blockers: StashBlockers;
 }
 
 /**
@@ -2043,7 +2042,8 @@ function StashDiffPane({
     });
   };
 
-  const applyTitle = actions.disabledReason ?? undefined;
+  const rules = stashActionRules(actions.blockers, stash);
+  const dropDisabledReason = actions.blockers.drop;
   const untrackedCommitId = files?.untrackedCommitId ?? null;
 
   return (
@@ -2058,27 +2058,27 @@ function StashDiffPane({
         <Toolbar aria-label="Stash actions">
           <button
             type="button"
-            disabled={actions.disabledReason !== null}
-            title={applyTitle}
+            disabled={!rules.apply.enabled}
+            title={rules.apply.reason}
             onClick={() => actions.onApply(stash.index)}
           >
-            Apply
+            {rules.apply.label}
           </button>
           <button
             type="button"
-            disabled={actions.disabledReason !== null}
-            title={applyTitle}
+            disabled={!rules.pop.enabled}
+            title={rules.pop.reason}
             onClick={() => actions.onPop(stash.index)}
           >
-            Pop
+            {rules.pop.label}
           </button>
           <button
             type="button"
-            disabled={actions.dropDisabledReason !== null}
-            title={actions.dropDisabledReason ?? undefined}
+            disabled={!rules.drop.enabled}
+            title={rules.drop.reason}
             onClick={() => setConfirmingDrop(true)}
           >
-            Drop…
+            {rules.drop.label}
           </button>
           <label className={styles.restoreIndex}>
             <input
@@ -2149,12 +2149,12 @@ function StashDiffPane({
       {confirmingDrop && (
         <ConfirmDialog
           ariaLabel={`Drop stash ${stash.message}`}
-          message={withBlockedReason(<p>Drop "{stash.message}"? This cannot be undone.</p>, actions.dropDisabledReason)}
+          message={withBlockedReason(<p>Drop "{stash.message}"? This cannot be undone.</p>, dropDisabledReason)}
           confirmLabel="Drop stash"
-          confirmDisabled={actions.dropDisabledReason !== null}
-          confirmTitle={actions.dropDisabledReason ?? undefined}
+          confirmDisabled={dropDisabledReason !== null}
+          confirmTitle={dropDisabledReason ?? undefined}
           onConfirm={() => {
-            if (actions.dropDisabledReason !== null) return;
+            if (dropDisabledReason !== null) return;
             setConfirmingDrop(false);
             actions.onDrop(stash.index);
           }}

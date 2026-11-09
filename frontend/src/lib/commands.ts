@@ -1,6 +1,11 @@
 import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit } from "../ipc/RepoClient";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
+import type { PaletteAction } from "./actions/action";
+import { branchActions } from "./actions/branchActions";
 import { commitActions } from "./actions/commitActions";
+import { addRemoteAction, remoteActions } from "./actions/remoteActions";
+import { stashActions, stashBlockers } from "./actions/stashActions";
+import { pruneWorktreesAction, worktreeActions } from "./actions/worktreeActions";
 import { busyReason, operationBlockers, stashBlockReason } from "./operationStatus";
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
@@ -308,6 +313,16 @@ export function buildCommands(
   // (merge-abort/rebase-continue/rebase-abort/refresh) stay.
   const blockers = operationBlockers(state);
   const repositoryOperationDisabled = blockers.blocked;
+  // A shared action (`lib/actions`, #495, #509), under its palette label: offered exactly where
+  // its menu or panel enables it.
+  const offer = (
+    id: string,
+    action: Pick<PaletteAction, "paletteLabel" | "enabled">,
+    keywords: string[],
+    run: () => void,
+  ) => {
+    if (action.enabled) commands.push({ id, label: action.paletteLabel, keywords, run });
+  };
 
   // Read-only, so available even while an operation is running.
   if (searchCommands !== undefined) {
@@ -434,14 +449,10 @@ export function buildCommands(
       run: () => appState.openStashDialog(fileSelection.paths),
     });
   }
-  if (!repositoryOperationDisabled) {
-    commands.push({
-      id: "prune-worktrees",
-      label: "Prune worktrees",
-      keywords: ["worktree", "prune"],
-      run: () => void appState.pruneWorktrees(),
-    });
-  }
+  const prune = pruneWorktreesAction(blockers);
+  offer("prune-worktrees", { paletteLabel: prune.label, enabled: prune.enabled }, ["worktree", "prune"], () =>
+    void appState.pruneWorktrees(),
+  );
   if (state.rebaseProgress !== null) {
     // An interrupted rebase (changed outside Browsitory) can only be aborted.
     if (state.headInfo.rebase?.health.kind !== "Diverged") {
@@ -509,14 +520,6 @@ export function buildCommands(
     // leaves out what the menu disables.
     const actions = commitActions({ blockers, headId: state.headInfo.headId, currentBranch }, selectedCommit);
     const commitId = selectedCommit.id;
-    const offer = (
-      id: string,
-      action: { paletteLabel: string; enabled: boolean },
-      keywords: string[],
-      run: () => void,
-    ) => {
-      if (action.enabled) commands.push({ id, label: action.paletteLabel, keywords, run });
-    };
     // The menu's own actions (#507); a merge commit's pick and revert ask for the parent first.
     if (commitCommands !== undefined) {
       offer("cherry-pick-selected", actions.cherryPick, ["cherry", "pick", "apply", "commit"], () =>
@@ -630,39 +633,37 @@ export function buildCommands(
     });
   }
 
-  if (!repositoryOperationDisabled) {
-    for (const branch of state.branches) {
-      if (branch.isCurrent) continue;
-      commands.push({
-        id: `switch-branch:${branch.name}`,
-        label: `Switch to ${branch.name}`,
-        keywords: ["branch", "switch", "checkout", branch.name],
-        run: () => void appState.switchBranch(branch.name),
-      });
-      commands.push({
-        id: `merge-branch:${branch.name}`,
-        label: `Merge ${branch.name} into current branch…`,
-        keywords: ["branch", "merge", "squash", branch.name],
-        run: () => appState.openMergeDialog(branch.name),
-      });
-    }
+  // The branch menu's Checkout and Merge (`branchActions`, #509): every branch but the current one.
+  const branchContext = { blockers, remoteCount: state.remotes.length, upstream: state.upstream };
+  for (const branch of state.branches) {
+    const actions = branchActions(branchContext, branch);
+    offer(`switch-branch:${branch.name}`, actions.checkout, ["branch", "switch", "checkout", branch.name], () =>
+      void appState.switchBranch(branch.name),
+    );
+    offer(`merge-branch:${branch.name}`, actions.merge, ["branch", "merge", "squash", branch.name], () =>
+      appState.openMergeDialog(branch.name),
+    );
+  }
 
-    if (state.remotes.length > 0) {
+  if (state.remotes.length > 0) {
+    if (!repositoryOperationDisabled) {
       commands.push({
         id: "fetch-all-remotes",
         label: "Fetch all remotes",
         keywords: ["fetch", "all", "remotes", "prune"],
         run: () => void appState.fetchAllRemotes(),
       });
-      const current = state.branches.find((branch) => branch.isCurrent);
-      if (current !== undefined && state.headInfo.detachedAt === null) {
-        commands.push({
-          id: "push-branch-to",
-          label: "Push branch to…",
-          keywords: ["push", "publish", "upstream", "remote", "branch"],
-          run: () => appState.openPushDialog(current.name),
-        });
-      }
+    }
+    const current = state.branches.find((branch) => branch.isCurrent);
+    if (current !== undefined && state.headInfo.detachedAt === null) {
+      offer(
+        "push-branch-to",
+        branchActions(branchContext, current).pushTo,
+        ["push", "publish", "upstream", "remote", "branch"],
+        () => appState.openPushDialog(current.name),
+      );
+    }
+    if (!repositoryOperationDisabled) {
       commands.push({
         id: "delete-remote-branch",
         label: "Delete remote branch…",
@@ -670,20 +671,19 @@ export function buildCommands(
         run: () => appState.openDeleteRemoteBranchDialog(null, null),
       });
     }
+  }
 
-    for (const remote of state.remotes) {
-      commands.push({
-        id: `fetch-remote:${remote.name}`,
-        label: `Fetch ${remote.name}`,
-        keywords: ["fetch", "remote", remote.name],
-        run: () => void appState.fetchRemote(remote.name),
-      });
-      commands.push({
-        id: `push-branch:${remote.name}`,
-        label: `Push to ${remote.name}`,
-        keywords: ["push", "remote", remote.name],
-        run: () => void appState.pushCurrentBranch(remote.name),
-      });
+  for (const remote of state.remotes) {
+    // The remote folder menu's actions (`remoteActions`, #509). App state owns their dialogs, so
+    // they open even while the Branches section is collapsed.
+    const actions = remoteActions(blockers, remote.name);
+    offer(`fetch-remote:${remote.name}`, actions.fetch, ["fetch", "remote", remote.name], () =>
+      void appState.fetchRemote(remote.name),
+    );
+    offer(`push-branch:${remote.name}`, actions.pushCurrentBranch, ["push", "remote", remote.name], () =>
+      void appState.pushCurrentBranch(remote.name),
+    );
+    if (!repositoryOperationDisabled) {
       commands.push({
         id: `push-tags:${remote.name}`,
         label: `Push all tags to ${remote.name}`,
@@ -699,44 +699,32 @@ export function buildCommands(
         keywords: ["remote", "branch", "checkout", "upstream", "browse", remote.name],
         run: () => expandRemoteBranches(remote.name),
       });
-      // The remote folder menu's dialogs. App state owns them, so they open even while the
-      // Branches section is collapsed.
-      commands.push(
-        {
-          id: `edit-remote:${remote.name}`,
-          label: `Edit remote ${remote.name}…`,
-          keywords: ["remote", "edit", "url", "rename", remote.name],
-          run: () => appState.openRemoteDialog("edit", remote.name),
-        },
-        {
-          id: `manage-credentials:${remote.name}`,
-          label: `Manage credentials for ${remote.name}…`,
-          keywords: ["remote", "credentials", "token", "ssh", "https", "auth", "password", remote.name],
-          run: () => appState.openRemoteDialog("credentials", remote.name),
-        },
-        {
-          // Opens the same confirmation as the remote's menu; never removes directly.
-          id: `remove-remote:${remote.name}`,
-          label: `Remove remote ${remote.name}…`,
-          keywords: ["remote", "remove", "delete", remote.name],
-          run: () => appState.openRemoteDialog("remove", remote.name),
-        },
-      );
     }
+    offer(`edit-remote:${remote.name}`, actions.edit, ["remote", "edit", "url", "rename", remote.name], () =>
+      appState.openRemoteDialog("edit", remote.name),
+    );
+    offer(
+      `manage-credentials:${remote.name}`,
+      actions.credentials,
+      ["remote", "credentials", "token", "ssh", "https", "auth", "password", remote.name],
+      () => appState.openRemoteDialog("credentials", remote.name),
+    );
+    // Opens the same confirmation as the remote's menu; never removes directly.
+    offer(`remove-remote:${remote.name}`, actions.remove, ["remote", "remove", "delete", remote.name], () =>
+      appState.openRemoteDialog("remove", remote.name),
+    );
+  }
 
-    commands.push({
-      id: "add-remote",
-      label: "Add remote",
-      keywords: ["remote", "add"],
-      run: () => appState.openAddRemoteDraft(),
-    });
+  // Only opens the form, whose Add remote button carries the busy rule (`addRemoteAction`).
+  offer("add-remote", addRemoteAction(), ["remote", "add"], () => appState.openAddRemoteDraft());
 
-    // Every loop below is also skipped while its sidebar panel is hidden (the new sidebar
-    // panel-visibility toggles fully unmount hidden panels, not just CSS-hide them) — otherwise
-    // these commands either navigate to a section that no longer renders (Tags/Worktrees'
-    // `goToSidebarSection` calls) or silently mutate state the user can't see the result of
-    // (stash/submodule). "Branches" has no toggle, so it's never filtered.
+  // Every loop below is also skipped while its sidebar panel is hidden (the new sidebar
+  // panel-visibility toggles fully unmount hidden panels, not just CSS-hide them) — otherwise
+  // these commands either navigate to a section that no longer renders (Tags/Worktrees'
+  // `goToSidebarSection` calls) or silently mutate state the user can't see the result of
+  // (stash/submodule). "Branches" has no toggle, so it's never filtered.
 
+  if (!repositoryOperationDisabled) {
     // The keyboard path for the tag badge menu's "Checkout (detached)". Not tied to the Tags
     // panel's visibility: it doesn't navigate there.
     for (const tag of state.tags) {
@@ -763,61 +751,47 @@ export function buildCommands(
         });
       }
     }
+  }
 
-    if (panelVisibility.stash) {
-      for (const stash of state.stashes) {
-        commands.push({
-          id: `show-stash:${stash.index}`,
-          label: `Show stash: ${stash.message}`,
-          keywords: ["stash", "show", "view", "diff"],
-          run: () => appState.selectRow({ commitId: stash.commitId }),
-        });
-        commands.push({
-          id: `apply-stash:${stash.index}`,
-          label: `Apply stash: ${stash.message}`,
-          keywords: ["stash", "apply"],
-          run: () => void appState.applyStash(stash.index),
-        });
-        commands.push({
-          id: `pop-stash:${stash.index}`,
-          label: `Pop stash: ${stash.message}`,
-          keywords: ["stash", "pop", "apply"],
-          run: () => void appState.popStash(stash.index),
-        });
-        // Dropping has a confirmation in the Stashes panel and the stash view; like "Delete
-        // tag", the palette only shows the stash and opens the section, never drops directly.
-        commands.push({
-          id: `drop-stash:${stash.index}`,
-          label: `Drop stash: ${stash.message}`,
-          keywords: ["stash", "drop", "delete"],
-          run: () => {
-            appState.selectRow({ commitId: stash.commitId });
-            goToSidebarSection("Stashes");
-          },
-        });
-      }
+  if (panelVisibility.stash) {
+    // The Stashes panel's Apply, Pop and Drop… (`stashActions`, #509): Drop stays available while
+    // resolving a paused step (#521). Showing a stash only selects it, so it is always offered.
+    const storedStashBlockers = stashBlockers(state);
+    for (const stash of state.stashes) {
+      const actions = stashActions(storedStashBlockers, stash);
+      commands.push({
+        id: `show-stash:${stash.index}`,
+        label: `Show stash: ${stash.message}`,
+        keywords: ["stash", "show", "view", "diff"],
+        run: () => appState.selectRow({ commitId: stash.commitId }),
+      });
+      offer(`apply-stash:${stash.index}`, actions.apply, ["stash", "apply"], () => void appState.applyStash(stash.index));
+      offer(`pop-stash:${stash.index}`, actions.pop, ["stash", "pop", "apply"], () => void appState.popStash(stash.index));
+      // Dropping has a confirmation in the Stashes panel and the stash view; like "Delete tag", the
+      // palette only shows the stash and opens the section, never drops directly.
+      offer(`drop-stash:${stash.index}`, actions.drop, ["stash", "drop", "delete"], () => {
+        appState.selectRow({ commitId: stash.commitId });
+        goToSidebarSection("Stashes");
+      });
     }
+  }
 
-    if (panelVisibility.worktree) {
-      for (const worktree of state.worktrees) {
-        if (worktree.isMain) continue;
-        commands.push({
-          id: `open-worktree:${worktree.path}`,
-          label: `Open worktree ${worktree.name}`,
-          keywords: ["worktree", "open", worktree.name],
-          run: () => onOpenRepoTab(worktree.path),
-        });
-        // Removing a worktree has a real confirmation dialog in WorktreePanel —
-        // navigate there instead of removing directly from the palette.
-        commands.push({
-          id: `remove-worktree:${worktree.name}`,
-          label: `Remove worktree ${worktree.name}`,
-          keywords: ["worktree", "remove", "delete", worktree.name],
-          run: () => goToSidebarSection("Worktrees"),
-        });
-      }
+  if (panelVisibility.worktree) {
+    for (const worktree of state.worktrees) {
+      if (worktree.isMain) continue;
+      const actions = worktreeActions(blockers, worktree);
+      offer(`open-worktree:${worktree.path}`, actions.open, ["worktree", "open", worktree.name], () =>
+        onOpenRepoTab(worktree.path),
+      );
+      // Removing a worktree has a real confirmation dialog in WorktreePanel — navigate there
+      // instead of removing directly from the palette.
+      offer(`remove-worktree:${worktree.name}`, actions.remove, ["worktree", "remove", "delete", worktree.name], () =>
+        goToSidebarSection("Worktrees"),
+      );
     }
+  }
 
+  if (!repositoryOperationDisabled) {
     if (panelVisibility.submodule) {
       for (const submodule of state.submodules) {
         if (submodule.initialized) {

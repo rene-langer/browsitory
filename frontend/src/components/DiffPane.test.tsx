@@ -1954,8 +1954,7 @@ describe("DiffPane stash view", () => {
     onDrop: vi.fn(),
     restoreIndex: true,
     onSetRestoreIndex: vi.fn(),
-    disabledReason: null,
-    dropDisabledReason: null,
+    blockers: { apply: null, drop: null },
     ...overrides,
   });
 
@@ -2032,7 +2031,7 @@ describe("DiffPane stash view", () => {
   it("disables Apply and Pop with the reason, keeping Drop", async () => {
     renderStash(
       { tracked: ["a.txt"], untracked: [], untrackedCommitId: null },
-      stashActions({ disabledReason: "Unstage or commit staged changes first." }),
+      stashActions({ blockers: { apply: "Unstage or commit staged changes first.", drop: null } }),
     );
     const section = await screen.findByRole("region", { name: "Stash details" });
 
@@ -2066,7 +2065,7 @@ describe("DiffPane stash view", () => {
     const section = await screen.findByRole("region", { name: "Stash details" });
     fireEvent.click(within(section).getByRole("button", { name: "Drop…" }));
 
-    rerender(<DiffPane {...props({ ...actions, dropDisabledReason: reason })} />);
+    rerender(<DiffPane {...props({ ...actions, blockers: { apply: null, drop: reason } })} />);
     const drop = within(section).getByRole("button", { name: "Drop…" });
     expect(drop).toBeDisabled();
     expect(drop).toHaveAttribute("title", reason);
@@ -2397,8 +2396,7 @@ describe("DiffPane image preview", () => {
           onDrop: vi.fn(),
           restoreIndex: true,
           onSetRestoreIndex: vi.fn(),
-          disabledReason: null,
-          dropDisabledReason: null,
+          blockers: { apply: null, drop: null },
         },
       },
     );

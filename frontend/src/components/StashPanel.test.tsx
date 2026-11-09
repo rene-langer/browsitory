@@ -19,10 +19,7 @@ function panel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) {
       onDropStash={vi.fn()}
       restoreIndex={true}
       onSetRestoreIndex={vi.fn()}
-      applyDisabledReason={null}
-      operationDisabled={false}
-      operationDisabledReason={null}
-      dropDisabledReason={null}
+      blockers={{ apply: null, drop: null }}
       {...overrides}
     />
   );
@@ -366,7 +363,7 @@ describe("StashPanel", () => {
 
   it("disables every menu action, with the reason as its title, while a transfer runs", () => {
     const reason = "A transfer is in progress.";
-    renderPanel({ operationDisabled: true, operationDisabledReason: reason, dropDisabledReason: reason });
+    renderPanel({ blockers: { apply: reason, drop: reason } });
 
     openMenu(/stash0fix/);
     for (const name of ["Apply", "Pop", "Drop…"]) {
@@ -378,7 +375,7 @@ describe("StashPanel", () => {
 
   it("keeps Drop… during a paused merge, which only blocks Apply and Pop (#521)", () => {
     const onDropStash = vi.fn();
-    renderPanel({ onDropStash, operationDisabled: true, operationDisabledReason: "A merge is in progress." });
+    renderPanel({ onDropStash, blockers: { apply: "A merge is in progress.", drop: null } });
 
     openMenu(/stash0fix/);
     expect(screen.getByRole("menuitem", { name: "Apply" })).toBeDisabled();
@@ -394,7 +391,7 @@ describe("StashPanel", () => {
     openMenu(/stash0fix/);
     fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
 
-    rerender(panel({ onDropStash, dropDisabledReason: "Another action is in progress." }));
+    rerender(panel({ onDropStash, blockers: { apply: null, drop: "Another action is in progress." } }));
     const dialog = screen.getByRole("dialog", { name: /Drop stash/ });
     const confirm = within(dialog).getByRole("button", { name: "Drop stash" });
     expect(confirm).toBeDisabled();
@@ -431,7 +428,7 @@ describe("StashPanel pop and restore staged changes", () => {
   });
 
   it("disables Apply and Pop, not Drop, with the apply-disabled reason", () => {
-    renderPanel({ applyDisabledReason: "Unstage or commit staged changes first." });
+    renderPanel({ blockers: { apply: "Unstage or commit staged changes first.", drop: null } });
 
     openMenu(/stash0fix/);
     for (const name of ["Apply", "Pop"]) {
