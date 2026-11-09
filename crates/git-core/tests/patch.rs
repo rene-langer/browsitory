@@ -624,6 +624,8 @@ fn a_series_can_delete_a_file_and_add_it_back() {
     assert_eq!(read(dir.path(), "g.txt"), "new\n");
 }
 
+// Linux: on the drives that fold case, the file check above already finds `a.txt`.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_new_file_meeting_an_untracked_one_where_case_folds_does_not_apply() {
     // `core.ignorecase` on a drive that doesn't fold: the check for a file already there finds
