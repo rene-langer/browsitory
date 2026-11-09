@@ -374,6 +374,11 @@ pub enum RemoteError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` is on and the step's result holds two paths that differ only in case
+    /// which HEAD doesn't (#522): the index would keep only one. Nothing the step would write
+    /// was written.
+    #[error(transparent)]
+    CasePairBroughtIn(#[from] crate::CasePairBroughtIn),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
@@ -984,6 +989,13 @@ pub fn pull_after_fetch(
     crate::worktree_guard::refuse_linked_folders::<RemoteError>(
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&upstream_tree)],
+    )?;
+    // libgit2's ignore-case index keeps one name of a case pair the checkout brings in and
+    // doesn't write the other's file (#522).
+    crate::worktree_guard::refuse_case_pair_brought_in::<RemoteError>(
+        repo,
+        &crate::worktree_guard::GuardSource::Tree(&upstream_tree),
+        Some(&repo.head()?.peel_to_tree()?),
     )?;
     let local_ref = format!("refs/heads/{local_branch}");
     let mut checkout = CheckoutBuilder::new();

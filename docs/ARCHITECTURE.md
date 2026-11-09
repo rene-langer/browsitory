@@ -1239,9 +1239,23 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   other paths keeps the pair and goes ahead. `start_rebase` runs the same check (onto, HEAD and
   index) before it writes anything. Undo/redo routes around it: a pair member is never one of
   `checkout_from_index`'s paths but a raw write.
-- Aborts never refuse a case pair (#511): a picked commit can bring one in that no up-front
-  check sees (libgit2's merge then records one name in the index and writes the other's file,
-  so the pair is split between HEAD, the index and the disk; #522). `restore_original_branch`
+- Merge-like steps refuse a case pair they bring in (#522): with `core.ignorecase` on,
+  `worktree_guard::refuse_case_pair_brought_in` (`CasePairBroughtIn`, writing nothing) refuses
+  a result that holds a pair HEAD's tree doesn't. libgit2's in-memory merge holds both names,
+  but its ignore-case index takes `a` for `A`'s entry: the commit made from it kept one name
+  (`a` without `A`, or `A` not recorded) and left the other's file untracked. It runs next to
+  `refuse_file_folder_conflict` on each in-memory result: a rebase step (`advance`; the step
+  stops as an error, so Continue retries and Abort works, or `start_rebase` rolls back), a
+  cherry-pick or revert step (`pick::step`, single or in a sequence), a merge or squash
+  (`merge_commits`), a stash apply's `merge_trees` (with `--index` both), and the tree a
+  fast-forward merge or pull checks out (libgit2's safe checkout kept one name in the index and
+  didn't write the other's file). Only the result is compared with HEAD, not their union: a
+  case-only rename (`A` in HEAD, only `a` in the result) holds no pair, and libgit2 commits it
+  correctly. A pair HEAD already holds is #512's.
+- Aborts never refuse a case pair (#511): a pick outside Browsitory (or one before #522) can
+  bring one in that no up-front check sees (libgit2's merge then records one name in the index
+  and writes the other's file, so the pair is split between HEAD, the index and the disk).
+  `restore_original_branch`
   (rebase abort) and `abort_merge`'s reset collect `worktree_guard::case_pairs_for_abort` (target,
   HEAD, index, and the names on disk below the folders they name), leave every name of a pair
   out of the forced checkout (a path-limited checkout of the other paths) and put them back with
@@ -1250,7 +1264,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   stays. The index is then written from the target tree (rebase) or HEAD (`abort_merge`).
   `plan_operation_reset` compares a pair name's file with its own index entry instead of
   libgit2's diff, which under the fold reports the other name's file as a change
-  (`WouldDiscard`).
+  (`WouldDiscard`). A sequence abort's rewind (`pick::rewind_to`, a safe checkout of the
+  original commit) failed after such a step had landed ("1 conflict prevents checkout": HEAD
+  holds the other name, and the original name's file is on disk); with pairs it checks out the
+  other paths safely, writes the pair with `restore_case_pairs` and the index from the original
+  tree (as `git reset --merge`), and refuses (`RewindBlocked`) first when a pair name's file
+  holds neither HEAD's nor the original's content (#522).
 - "Stash all" cannot clear links in between libgit2's record and reset, so with a hazard it goes
   through the path-limited stash (batch 4c) with every changed path: a file link is stashed and
   then replaced, a folder link is refused (`BeyondSymlink`).
