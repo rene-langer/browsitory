@@ -528,6 +528,18 @@ certificate.
 - **Recording** (`repo-service::worker::undo`): the worker snapshots before/after each
   recordable command; failed/no-op commands record nothing; operations that stop on conflicts
   stay pending until completed (one entry) or aborted (none).
+- **Command policy** (`repo-service::worker::policy`, #485): one function, `policy::of`, states
+  for every worker `Command` the undo entry it records (label and snapshot scope), whether it
+  takes the state lock, is refused while that lock stays busy (and with which text), has its
+  reply held until `finish`, is refused while a rebase or sequence is stored (`policy::Gate`:
+  always, only on the protected branch, or only a stash save), and aborts a paused operation.
+  It names every variant (no catch-all), so a new command doesn't compile until it has a
+  policy, and it builds each policy from a few constructors (`recorded`, `locked`,
+  `continuing`, `aborting`, `free`) so the pairings can't drift: whatever is recorded or ends a
+  paused operation holds its reply, and whatever holds its reply takes the lock. The worker
+  loop, `undo` and `gate` only read it; the typed reply they answer or hold is reached through
+  `policy::reply_of`, which also names every variant. `worker/policy_tests.rs` pins every
+  command's policy in one table.
 - **Pending entry**: the paused operation's label and pre-operation snapshot are stored in
   `undo.json` as `pending` (optional, still version 1: older builds ignore it and drop it on
   their next save), pinned by the undo anchor like the stacks. It carries the marker of the
@@ -566,7 +578,7 @@ certificate.
   mtime check, which misses a second write in the same tick), and re-checks its decision there,
   so two processes (the Tauri app and the VSCode sidecar) or two workers never lose an entry.
   The worker holds the lock from before `settle` until `finish` for every command
-  `undo::locks_state` lists (everything `plan_for` records, `RebaseContinue`, `AbortRebase`,
+  whose policy has `locks_state` (everything recorded, `RebaseContinue`, `AbortRebase`,
   `ContinueSequence`, `AbortSequence`, `AbortMerge`, Undo, Redo), so no other holder ever sees
   "the operation ended, but its entry isn't recorded yet" and drops it as stale. Stash save and
   worktree add (#174) take it too, though they record nothing: the gate refuses them while a
@@ -583,15 +595,15 @@ certificate.
   `Busy` after the first opens a window of single tries that lasts until `CONTENDED_WAIT` after
   the last unrecorded command finished (`state_lock::Contention`), so a burst of queued commands
   costs about one `CONTENDED_WAIT`, not one each, however long each takes. Commands that would
-  refuse (`undo::refuses_when_busy`: Undo, Redo, discards, Reset hard) still wait
+  refuse (policy `busy`: Undo, Redo, discards, Reset hard) still wait
   `CONTENDED_WAIT` inside the window. After a quiet `CONTENDED_WAIT` the next command waits
   again, and taking the lock resets it (#197). The commands that destroy work-tree content with
   no other way back (discard hunk, lines, file or all unstaged, and a hard reset) are refused
   instead with "Another Browsitory window is changing this repository's undo history. Try again
   in a moment, so this change can be undone." (`undo::reply_busy`); Undo/Redo instead reply
   "Another Browsitory window is changing this repository's undo history. Try again in a
-  moment." `undo::refuses_when_busy` and `undo::reply_busy` read one list,
-  `undo::busy_refusal` (#225). The lock is an OS lock on a handle, so a process that exits or is
+  moment." Both the wait and the reply read the command's policy (`policy::BusyReply`, #225,
+  #485). The lock is an OS lock on a handle, so a process that exits or is
   killed, or a worker thread that panics, releases it; the file is never deleted (that would
   let the next opener lock a new inode). The guard unlocks explicitly on drop (#175): a child
   that any thread forks (a hook, a signer, git) holds a copy of every descriptor until it
@@ -826,7 +838,8 @@ certificate.
   update-ref -m`), so it is a heuristic: a forged rename entry at such a commit would count.
 - A stored sequence counts as "in progress" for undo (one pending entry, dropped on abort),
   blocks picks, merge, rebase, commit/amend, reset, checkout, branch switch, pull, stash
-  apply/pop and reflog restore in the worker (`gate::gate_during_operation`), and, like a
+  apply/pop and reflog restore in the worker (`gate::gate_during_operation`, reading each
+  command's `policy::Gate`), and, like a
   rebase, protects its branch (`gate::GateScope`, #171): deleting or renaming the branch named
   by `originalRef`, or adding a worktree on it, and stash save are refused while it is stored
   (a renamed branch would make Abort answer `rewound: false`; a stash would carry the paused

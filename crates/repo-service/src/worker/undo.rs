@@ -7,6 +7,7 @@ use git2::Repository;
 use git_core::reset::ResetMode;
 use git_core::undo::{capture, restore, RepoSnapshot, SnapshotScope, UndoError};
 
+use super::policy::{reply_of, BusyReply};
 use super::state_lock::{Acquire, StateGuard, StateLock, LOCK_WAIT};
 use super::undo_store::{PendingEntry, UndoEntry, UndoStacks, UndoStore, UNDO_LIMIT};
 use super::{Command, WorkerHandle};
@@ -29,283 +30,46 @@ pub(super) struct UndoPlan {
     pub scope: SnapshotScope,
 }
 
-pub(super) fn plan_for(command: &Command) -> Option<UndoPlan> {
-    use SnapshotScope::{Full, RefsAndIndex};
-    let (label, scope) = match command {
-        Command::StageFile { path, .. } => (with_path("Stage ", path, ""), RefsAndIndex),
-        Command::UnstageFile { path, .. } => (with_path("Unstage ", path, ""), RefsAndIndex),
-        Command::StageHunk { path, .. } => (with_path("Stage hunk in ", path, ""), RefsAndIndex),
-        Command::UnstageHunk { path, .. } => {
-            (with_path("Unstage hunk in ", path, ""), RefsAndIndex)
-        }
-        Command::StageLines { path, .. } => (with_path("Stage lines in ", path, ""), RefsAndIndex),
-        Command::UnstageLines { path, .. } => {
-            (with_path("Unstage lines in ", path, ""), RefsAndIndex)
-        }
-        Command::Commit { message, .. } => (quoted("Commit ", message), RefsAndIndex),
-        Command::AmendCommit { message, .. } => {
-            if message.trim().is_empty() {
-                ("Amend last commit".to_string(), RefsAndIndex)
-            } else {
-                (quoted("Amend ", message), RefsAndIndex)
-            }
-        }
-        Command::CreateBranch { name, .. } => (fit(format!("Create branch {name}")), RefsAndIndex),
-        Command::DeleteBranch { name, .. } => (fit(format!("Delete branch {name}")), RefsAndIndex),
-        Command::RenameBranch {
-            old_name, new_name, ..
-        } => (
-            fit(format!("Rename branch {old_name} to {new_name}")),
-            RefsAndIndex,
-        ),
-        Command::CreateTag { name, .. } => (fit(format!("Create tag {name}")), RefsAndIndex),
-        Command::DeleteTag { name, .. } => (fit(format!("Delete tag {name}")), RefsAndIndex),
-        Command::DiscardHunk { path, .. } => (with_path("Discard hunk in ", path, ""), Full),
-        Command::DiscardLines { path, .. } => (with_path("Discard lines in ", path, ""), Full),
-        Command::DiscardFile { path, .. } => (with_path("Discard changes to ", path, ""), Full),
-        Command::DiscardAllUnstaged { .. } => ("Discard all unstaged changes".to_string(), Full),
-        Command::IgnorePath { pattern, .. } => (with_path("Ignore ", pattern, ""), Full),
-        Command::SwitchBranch { name, .. } => (fit(format!("Switch to {name}")), Full),
-        Command::CheckoutCommit { commit_id, .. } => {
-            (format!("Check out {}", short(commit_id)), Full)
-        }
-        Command::ResetToCommit {
-            commit_id, mode, ..
-        } => {
-            let mode = match mode {
-                ResetMode::Soft => "soft",
-                ResetMode::Mixed => "mixed",
-                ResetMode::Hard => "hard",
-            };
-            (format!("Reset to {} ({mode})", short(commit_id)), Full)
-        }
-        Command::CherryPick { commit_id, .. } => {
-            (format!("Cherry-pick {}", short(commit_id)), Full)
-        }
-        Command::RevertCommit { commit_id, .. } => (format!("Revert {}", short(commit_id)), Full),
-        Command::CherryPickMany { commit_ids, .. } => {
-            (count_label("Cherry-pick", commit_ids.len()), Full)
-        }
-        Command::RevertMany { commit_ids, .. } => (count_label("Revert", commit_ids.len()), Full),
-        Command::StartMerge {
-            branch_name,
-            options,
-            ..
-        } => {
-            let verb = if options.squash {
-                "Squash merge"
-            } else {
-                "Merge"
-            };
-            let name = branch_name
-                .strip_prefix("refs/heads/")
-                .or_else(|| branch_name.strip_prefix("refs/remotes/"))
-                .unwrap_or(branch_name);
-            (fit(format!("{verb} {name}")), Full)
-        }
-        Command::StartRebase { onto, .. } => (rebase_label(onto), Full),
-        Command::PullCurrentUpstream { .. } => ("Pull".to_string(), Full),
-        Command::RestoreReflogEntry {
-            reference, new_id, ..
-        } => (
-            fit(format!("Restore {reference} to {}", short(new_id))),
-            Full,
-        ),
-        _ => return None,
+/// While another holder keeps the state lock past `LOCK_WAIT`, a command whose policy refuses it
+/// then (`CommandPolicy::busy`) gets `busy`'s text and must not run: Undo/Redo (D7-A), and the
+/// commands that destroy work-tree content with no other way back (discarding a hunk, lines, a
+/// file or all unstaged changes, and a hard reset), which would run unrecorded, so nothing could
+/// bring the content back. Every other command runs unrecorded instead (D6-A): branch, tag and
+/// reflog changes stay recoverable from the reflog; switches, merges, picks and pulls refuse to
+/// overwrite local changes.
+pub(super) fn reply_busy(command: &mut Command, busy: BusyReply) {
+    if let Some(reply) = reply_of(command) {
+        reply.refuse(busy.text());
+    }
+}
+
+/// "Amend “<summary>”", or a fallback for an empty message.
+pub(super) fn amend_label(message: &str) -> String {
+    if message.trim().is_empty() {
+        "Amend last commit".to_string()
+    } else {
+        quoted("Amend ", message)
+    }
+}
+
+pub(super) fn reset_label(commit_id: &str, mode: ResetMode) -> String {
+    let mode = match mode {
+        ResetMode::Soft => "soft",
+        ResetMode::Mixed => "mixed",
+        ResetMode::Hard => "hard",
     };
-    Some(UndoPlan { label, scope })
+    format!("Reset to {} ({mode})", short(commit_id))
 }
 
-/// Commands that hold the state lock (#172) from before `settle` until their `finish`: every
-/// recordable one (which covers everything that starts an operation, and `Commit`/`AmendCommit`,
-/// which end a merge or pick), the ones that end a paused operation, Undo/Redo, and the gated
-/// commands that start no operation: stash save and worktree add (#174). They record nothing,
-/// but under the lock their gate check and the change itself can't interleave with the other
-/// window starting a rebase or a cherry-pick/revert sequence.
-pub(super) fn locks_state(command: &Command) -> bool {
-    plan_for(command).is_some()
-        || matches!(
-            command,
-            Command::RebaseContinue { .. }
-                | Command::AbortRebase { .. }
-                | Command::ContinueSequence { .. }
-                | Command::AbortSequence { .. }
-                | Command::AbortMerge { .. }
-                | Command::Undo { .. }
-                | Command::Redo { .. }
-                | Command::SaveStash { .. }
-                | Command::CreateWorktree { .. }
-        )
-}
-
-/// The reply [`reply_busy`] sends to a command that refuses while the state lock stays busy.
-enum BusyRefusal<'a> {
-    /// `UNDO_BUSY`.
-    Undo(&'a Sender<Result<UndoOutcome, String>>),
-    /// `DISCARD_BUSY`.
-    Discard(&'a Sender<Result<(), String>>),
-}
-
-/// The one list of commands that refuse while the state lock stays busy, with the reply each
-/// gets. [`refuses_when_busy`] and [`reply_busy`] both read it, so they can't drift apart. The
-/// match names every `Command` variant (no catch-all), so a new command doesn't compile until
-/// it is placed on one side (#225).
-fn busy_refusal(command: &Command) -> Option<BusyRefusal<'_>> {
-    match command {
-        Command::Undo { reply } | Command::Redo { reply } => Some(BusyRefusal::Undo(reply)),
-        Command::DiscardHunk { reply, .. }
-        | Command::DiscardLines { reply, .. }
-        | Command::DiscardFile { reply, .. }
-        | Command::DiscardAllUnstaged { reply, .. }
-        | Command::ResetToCommit {
-            mode: ResetMode::Hard,
-            reply,
-            ..
-        } => Some(BusyRefusal::Discard(reply)),
-        // A reset that keeps the work tree runs unrecorded instead.
-        Command::ResetToCommit {
-            mode: ResetMode::Soft | ResetMode::Mixed,
-            ..
-        } => None,
-        // Every other command, listed so a new variant must be placed here or above.
-        Command::Ping { .. }
-        | Command::GetStatus { .. }
-        | Command::GetCommitGraph { .. }
-        | Command::LocateCommit { .. }
-        | Command::GetWorkingDiff { .. }
-        | Command::GetCommitDiff { .. }
-        | Command::GetCommitFiles { .. }
-        | Command::GetCommitMessage { .. }
-        | Command::GetCommitSignature { .. }
-        | Command::GetBlame { .. }
-        | Command::GetFileHistory { .. }
-        | Command::SearchCommits { .. }
-        | Command::GetCommitRenameDiff { .. }
-        | Command::GetRangeFiles { .. }
-        | Command::GetRangeDiff { .. }
-        | Command::GetWorkingTreeCompareFiles { .. }
-        | Command::GetWorkingTreeCompareDiff { .. }
-        | Command::GetBranchCompareRange { .. }
-        | Command::StageFile { .. }
-        | Command::UnstageFile { .. }
-        | Command::StageHunk { .. }
-        | Command::UnstageHunk { .. }
-        | Command::StageLines { .. }
-        | Command::UnstageLines { .. }
-        | Command::IgnorePath { .. }
-        | Command::Commit { .. }
-        | Command::ListBranches { .. }
-        | Command::CreateBranch { .. }
-        | Command::SwitchBranch { .. }
-        | Command::DeleteBranch { .. }
-        | Command::RenameBranch { .. }
-        | Command::ListWorktrees { .. }
-        | Command::CreateWorktree { .. }
-        | Command::RemoveWorktree { .. }
-        | Command::PruneWorktrees { .. }
-        | Command::ListSubmodules { .. }
-        | Command::InitSubmodule { .. }
-        | Command::UpdateSubmodule { .. }
-        | Command::ListReflogRefs { .. }
-        | Command::GetReflog { .. }
-        | Command::RestoreReflogEntry { .. }
-        | Command::ListRemotes { .. }
-        | Command::ListRemoteBranches { .. }
-        | Command::GetCurrentUpstream { .. }
-        | Command::GetRemoteUpstreams { .. }
-        | Command::GetRemoteAuthMode { .. }
-        | Command::SaveHttpsCredential { .. }
-        | Command::ForgetHttpsCredential { .. }
-        | Command::SetRemoteAuthMode { .. }
-        | Command::AddRemote { .. }
-        | Command::RenameRemote { .. }
-        | Command::UpdateRemoteUrls { .. }
-        | Command::RemoveRemote { .. }
-        | Command::SetCurrentUpstream { .. }
-        | Command::ClearCurrentUpstream { .. }
-        | Command::ListTags { .. }
-        | Command::CreateTag { .. }
-        | Command::DeleteTag { .. }
-        | Command::ListStashes { .. }
-        | Command::SaveStash { .. }
-        | Command::ApplyStash { .. }
-        | Command::PopStash { .. }
-        | Command::GetStashFiles { .. }
-        | Command::DropStash { .. }
-        | Command::StartMerge { .. }
-        | Command::GetMergeDefaults { .. }
-        | Command::GetConflictHunks { .. }
-        | Command::ResolveConflict { .. }
-        | Command::AbortMerge { .. }
-        | Command::GetMergeMessage { .. }
-        | Command::ResolveAddDeleteConflict { .. }
-        | Command::MarkResolved { .. }
-        | Command::ResolveWholeFile { .. }
-        | Command::PrepareDiffTool { .. }
-        | Command::PrepareMergeTool { .. }
-        | Command::GetGitTools { .. }
-        | Command::GetFileSides { .. }
-        | Command::ListRecentAuthors { .. }
-        | Command::CheckMergeTarget { .. }
-        | Command::ReadFileVersion { .. }
-        | Command::CommitsSince { .. }
-        | Command::StartRebase { .. }
-        | Command::RebaseContinue { .. }
-        | Command::AbortRebase { .. }
-        | Command::FetchRemote { .. }
-        | Command::PullCurrentUpstream { .. }
-        | Command::GetHeadInfo { .. }
-        | Command::AmendCommit { .. }
-        | Command::CherryPick { .. }
-        | Command::RevertCommit { .. }
-        | Command::CherryPickMany { .. }
-        | Command::RevertMany { .. }
-        | Command::ContinueSequence { .. }
-        | Command::AbortSequence { .. }
-        | Command::CheckoutCommit { .. }
-        | Command::ForcePushCurrentBranch { .. }
-        | Command::PushCurrentBranch { .. }
-        | Command::PushTags { .. }
-        | Command::FetchAllRemotes { .. }
-        | Command::PushBranch { .. }
-        | Command::DeleteRemoteBranch { .. }
-        | Command::DeleteRemoteTag { .. }
-        | Command::DetectForgeRepository { .. }
-        | Command::SaveForgeToken { .. }
-        | Command::ForgetForgeToken { .. }
-        | Command::ListPullRequests { .. }
-        | Command::CreatePullRequest { .. }
-        | Command::GetUndoState { .. } => None,
-        #[cfg(test)]
-        Command::PanicNow => None,
-    }
-}
-
-/// Whether [`reply_busy`] refuses `command` (instead of running it unrecorded) when the lock
-/// stays busy; such a command waits for the lock even inside a burst (#197).
-pub(super) fn refuses_when_busy(command: &Command) -> bool {
-    busy_refusal(command).is_some()
-}
-
-/// While another holder keeps the state lock past `LOCK_WAIT`, replies `UNDO_BUSY` to Undo/Redo
-/// (D7-A) and `DISCARD_BUSY` to the commands that destroy work-tree content with no other way
-/// back: discarding a hunk, lines, a file or all unstaged changes, and a hard reset (they would
-/// run unrecorded, so nothing could bring the content back). `true` when it replied (the command
-/// must not run); `false` for every other command, which runs unrecorded instead (D6-A). Branch,
-/// tag and reflog changes stay recoverable from the reflog; switches, merges, picks and pulls
-/// refuse to overwrite local changes.
-pub(super) fn reply_busy(command: &Command) -> bool {
-    match busy_refusal(command) {
-        Some(BusyRefusal::Undo(reply)) => {
-            let _ = reply.send(Err(UNDO_BUSY.to_string()));
-            true
-        }
-        Some(BusyRefusal::Discard(reply)) => {
-            let _ = reply.send(Err(DISCARD_BUSY.to_string()));
-            true
-        }
-        None => false,
-    }
+/// "Merge <branch>" or "Squash merge <branch>", with the branch's `refs/heads/` or
+/// `refs/remotes/` prefix dropped.
+pub(super) fn merge_label(branch_name: &str, squash: bool) -> String {
+    let verb = if squash { "Squash merge" } else { "Merge" };
+    let name = branch_name
+        .strip_prefix("refs/heads/")
+        .or_else(|| branch_name.strip_prefix("refs/remotes/"))
+        .unwrap_or(branch_name);
+    fit(format!("{verb} {name}"))
 }
 
 /// A finished sequence's undo entry names the commits it actually applied (skipped ones
@@ -326,7 +90,7 @@ pub(super) fn relabel_sequence(
 
 /// "Rebase onto <onto>", with a commit id shortened like every other label's (the frontend's
 /// "Rebase onto here" passes the full id) and a ref name kept as it is.
-fn rebase_label(onto: &str) -> String {
+pub(super) fn rebase_label(onto: &str) -> String {
     let is_full_id = matches!(onto.len(), 40 | 64) && onto.bytes().all(|b| b.is_ascii_hexdigit());
     if is_full_id {
         format!("Rebase onto {}", short(onto))
@@ -362,7 +126,7 @@ pub(super) fn relabel_rebase_start(
     }
 }
 
-fn count_label(verb: &str, count: usize) -> String {
+pub(super) fn count_label(verb: &str, count: usize) -> String {
     format!(
         "{verb} {count} {}",
         if count == 1 { "commit" } else { "commits" }
@@ -370,20 +134,20 @@ fn count_label(verb: &str, count: usize) -> String {
 }
 
 /// Char-based: an id that isn't a real hex oid (any user/IPC string) must not panic.
-fn short(oid: &str) -> String {
+pub(super) fn short(oid: &str) -> String {
     oid.chars().take(7).collect()
 }
 
-fn fit(label: String) -> String {
+pub(super) fn fit(label: String) -> String {
     truncate_end(&label, MAX_LABEL_CHARS)
 }
 
-fn with_path(prefix: &str, path: &str, suffix: &str) -> String {
+pub(super) fn with_path(prefix: &str, path: &str, suffix: &str) -> String {
     let budget = MAX_LABEL_CHARS.saturating_sub(prefix.chars().count() + suffix.chars().count());
     format!("{prefix}{}{suffix}", ellipsize_middle(path, budget))
 }
 
-fn quoted(prefix: &str, message: &str) -> String {
+pub(super) fn quoted(prefix: &str, message: &str) -> String {
     let summary = message.lines().next().unwrap_or("").trim();
     // prefix + “ + summary + ”
     let budget = MAX_LABEL_CHARS.saturating_sub(prefix.chars().count() + 2);
@@ -825,7 +589,7 @@ enum Direction {
 pub(super) struct HeldReplies(Vec<Box<dyn FnOnce()>>);
 
 impl HeldReplies {
-    fn hold<T: 'static>(&mut self, reply: &mut Sender<T>) {
+    pub(super) fn hold<T: 'static>(&mut self, reply: &mut Sender<T>) {
         let (proxy, rx) = std::sync::mpsc::channel();
         let original = std::mem::replace(reply, proxy);
         self.0.push(Box::new(move || {
@@ -842,50 +606,12 @@ impl HeldReplies {
     }
 }
 
-/// Swaps the reply of every command that can change what the recorder snapshots: everything
-/// `plan_for` records, plus the commands that can end a pending operation (`RebaseContinue`,
-/// `AbortMerge`, `AbortRebase`, `ContinueSequence`, `AbortSequence`). Guarded by
-/// `every_recordable_command_has_its_reply_held` and `ending_commands_have_their_reply_held`.
-///
-/// Arms are grouped by reply type: an or-pattern must bind `reply` at one type, so commands
-/// whose reply isn't `Sender<Result<(), String>>` (`Commit`/`AmendCommit` reply with a
-/// `CommitOutcome`, `StartMerge` with a `MergeOutcome`, ...) get arms of their own.
+/// Swaps `command`'s reply for a proxy, keeping the original in `held`. The worker calls it for
+/// every command whose policy holds its reply (`CommandPolicy::holds_reply`: everything recorded,
+/// and the commands that can end a pending operation) while the recorder tracks the command.
 pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
-    match command {
-        Command::StageFile { reply, .. }
-        | Command::UnstageFile { reply, .. }
-        | Command::StageHunk { reply, .. }
-        | Command::UnstageHunk { reply, .. }
-        | Command::StageLines { reply, .. }
-        | Command::UnstageLines { reply, .. }
-        | Command::CreateBranch { reply, .. }
-        | Command::DeleteBranch { reply, .. }
-        | Command::RenameBranch { reply, .. }
-        | Command::CreateTag { reply, .. }
-        | Command::DeleteTag { reply, .. }
-        | Command::DiscardHunk { reply, .. }
-        | Command::DiscardLines { reply, .. }
-        | Command::DiscardFile { reply, .. }
-        | Command::DiscardAllUnstaged { reply, .. }
-        | Command::IgnorePath { reply, .. }
-        | Command::SwitchBranch { reply, .. }
-        | Command::CheckoutCommit { reply, .. }
-        | Command::ResetToCommit { reply, .. }
-        | Command::RestoreReflogEntry { reply, .. }
-        | Command::AbortMerge { reply, .. } => held.hold(reply),
-        Command::AbortRebase { reply } => held.hold(reply),
-        Command::Commit { reply, .. } | Command::AmendCommit { reply, .. } => held.hold(reply),
-        Command::StartMerge { reply, .. } => held.hold(reply),
-        Command::StartRebase { reply, .. } | Command::RebaseContinue { reply, .. } => {
-            held.hold(reply)
-        }
-        Command::PullCurrentUpstream { reply, .. } => held.hold(reply),
-        Command::CherryPick { reply, .. } | Command::RevertCommit { reply, .. } => held.hold(reply),
-        Command::CherryPickMany { reply, .. }
-        | Command::RevertMany { reply, .. }
-        | Command::ContinueSequence { reply, .. } => held.hold(reply),
-        Command::AbortSequence { reply, .. } => held.hold(reply),
-        _ => {}
+    if let Some(reply) = reply_of(command) {
+        reply.hold(held);
     }
 }
 
@@ -926,6 +652,10 @@ impl WorkerHandle {
 mod tests {
     use super::*;
     use std::sync::mpsc::channel;
+
+    fn plan_for(command: &Command) -> Option<UndoPlan> {
+        super::super::policy::of(command).undo
+    }
 
     fn label(command: Command) -> Option<(String, SnapshotScope)> {
         plan_for(&command).map(|plan| (plan.label, plan.scope))
@@ -1339,228 +1069,6 @@ mod tests {
         assert!(text.ends_with("…”"));
     }
 
-    /// Builds the command with a fresh reply channel, then checks it is recordable and that
-    /// `hold_reply` moved the original sender into `HeldReplies`: with the command (and its
-    /// proxy sender) dropped, the original receiver stays connected but empty until release.
-    macro_rules! assert_held {
-        ($variant:ident { $($field:ident: $value:expr),* $(,)? }) => {{
-            let (reply, rx) = channel();
-            let mut command = Command::$variant { $($field: $value,)* reply };
-            assert!(plan_for(&command).is_some(), "{} is not recordable", stringify!($variant));
-            let mut held = HeldReplies::default();
-            hold_reply(&mut command, &mut held);
-            drop(command);
-            assert_eq!(
-                rx.try_recv().map(|_| ()),
-                Err(std::sync::mpsc::TryRecvError::Empty),
-                "{} reply was not held",
-                stringify!($variant)
-            );
-            held.release();
-            assert_eq!(
-                rx.try_recv().map(|_| ()),
-                Err(std::sync::mpsc::TryRecvError::Disconnected)
-            );
-        }};
-    }
-
-    #[test]
-    fn every_recordable_command_has_its_reply_held() {
-        let s = || String::from("x");
-        assert_held!(StageFile { path: s() });
-        assert_held!(UnstageFile { path: s() });
-        assert_held!(StageHunk {
-            path: s(),
-            old_start: 1,
-            new_start: 1,
-            context_lines: 3
-        });
-        assert_held!(UnstageHunk {
-            path: s(),
-            old_start: 1,
-            new_start: 1,
-            context_lines: 3
-        });
-        assert_held!(StageLines {
-            path: s(),
-            old_start: 1,
-            new_start: 1,
-            context_lines: 3,
-            line_indices: vec![],
-            expected_lines: vec![],
-        });
-        assert_held!(UnstageLines {
-            path: s(),
-            old_start: 1,
-            new_start: 1,
-            context_lines: 3,
-            line_indices: vec![],
-            expected_lines: vec![],
-        });
-        assert_held!(Commit {
-            message: s(),
-            no_verify: false,
-            trailers: Vec::new(),
-            operation_id: s().into(),
-            events: channel().0
-        });
-        assert_held!(AmendCommit {
-            message: s(),
-            no_verify: false,
-            author: None,
-            trailers: Vec::new(),
-            operation_id: s().into(),
-            events: channel().0
-        });
-        assert_held!(CreateBranch {
-            name: s(),
-            start_point: s()
-        });
-        assert_held!(DeleteBranch {
-            name: s(),
-            force: false
-        });
-        assert_held!(RenameBranch {
-            old_name: s(),
-            new_name: s()
-        });
-        assert_held!(CreateTag {
-            name: s(),
-            message: None,
-            target: None
-        });
-        assert_held!(DeleteTag { name: s() });
-        assert_held!(DiscardHunk {
-            path: s(),
-            old_start: 1,
-            new_start: 1,
-            context_lines: 3
-        });
-        assert_held!(DiscardLines {
-            path: s(),
-            old_start: 1,
-            new_start: 1,
-            context_lines: 3,
-            line_indices: vec![],
-            expected_lines: vec![],
-        });
-        assert_held!(DiscardFile { path: s() });
-        assert_held!(DiscardAllUnstaged { paths: vec![] });
-        assert_held!(IgnorePath { pattern: s() });
-        assert_held!(SwitchBranch {
-            operation_id: String::new().into(),
-            events: channel().0,
-            name: s()
-        });
-        assert_held!(CheckoutCommit {
-            operation_id: String::new().into(),
-            events: channel().0,
-            commit_id: s()
-        });
-        assert_held!(ResetToCommit {
-            commit_id: s(),
-            mode: ResetMode::Hard
-        });
-        assert_held!(CherryPick {
-            operation_id: String::new().into(),
-            events: channel().0,
-            commit_id: s(),
-            mainline: None
-        });
-        assert_held!(RevertCommit {
-            operation_id: String::new().into(),
-            events: channel().0,
-            commit_id: s(),
-            mainline: Some(1)
-        });
-        assert_held!(CherryPickMany {
-            operation_id: String::new().into(),
-            events: channel().0,
-            commit_ids: vec![s()]
-        });
-        assert_held!(RevertMany {
-            operation_id: String::new().into(),
-            events: channel().0,
-            commit_ids: vec![s()]
-        });
-        assert_held!(StartMerge {
-            operation_id: String::new().into(),
-            events: channel().0,
-            branch_name: s(),
-            options: git_core::merge::MergeOptions::default()
-        });
-        assert_held!(StartRebase {
-            onto: s(),
-            plan: vec![]
-        });
-        assert_held!(PullCurrentUpstream {
-            operation_id: s().into(),
-            events: channel().0
-        });
-        assert_held!(RestoreReflogEntry {
-            reference: s(),
-            new_id: s()
-        });
-    }
-
-    /// Not recordable themselves, but they can end a pending operation's entry.
-    #[test]
-    fn ending_commands_have_their_reply_held() {
-        macro_rules! assert_only_held {
-            ($variant:ident) => {{
-                let (reply, rx) = channel();
-                let mut command = Command::$variant { reply };
-                assert!(plan_for(&command).is_none());
-                let mut held = HeldReplies::default();
-                hold_reply(&mut command, &mut held);
-                drop(command);
-                assert_eq!(
-                    rx.try_recv().map(|_| ()),
-                    Err(std::sync::mpsc::TryRecvError::Empty),
-                    "{} reply was not held",
-                    stringify!($variant)
-                );
-                held.release();
-            }};
-        }
-        assert_only_held!(AbortMerge);
-        assert_only_held!(AbortRebase);
-        assert_only_held!(RebaseContinue);
-        let (reply, rx) = channel();
-        let mut command = Command::AbortSequence {
-            confirmed: None,
-            reply,
-        };
-        assert!(plan_for(&command).is_none());
-        let mut held = HeldReplies::default();
-        hold_reply(&mut command, &mut held);
-        drop(command);
-        assert_eq!(
-            rx.try_recv().map(|_| ()),
-            Err(std::sync::mpsc::TryRecvError::Empty),
-            "AbortSequence reply was not held"
-        );
-        held.release();
-        // ContinueSequence carries more than a reply.
-        let (reply, rx) = channel();
-        let mut command = Command::ContinueSequence {
-            no_verify: false,
-            operation_id: "continue-1".into(),
-            events: channel().0,
-            reply,
-        };
-        assert!(plan_for(&command).is_none());
-        let mut held = HeldReplies::default();
-        hold_reply(&mut command, &mut held);
-        drop(command);
-        assert_eq!(
-            rx.try_recv().map(|_| ()),
-            Err(std::sync::mpsc::TryRecvError::Empty),
-            "ContinueSequence reply was not held"
-        );
-        held.release();
-    }
-
     #[test]
     fn sequences_are_labelled_by_count() {
         let (tx, _rx) = channel();
@@ -1679,49 +1187,5 @@ mod tests {
             .map(|(l, _)| l),
             Some("Amend last commit".into())
         );
-    }
-
-    /// `refuses_when_busy` and `reply_busy` read one list: a command refuses exactly when it
-    /// gets a busy reply, with the text for its kind.
-    #[test]
-    fn busy_refusal_and_its_reply_agree() {
-        macro_rules! check {
-            ($variant:ident { $($field:ident: $value:expr),* }, $text:expr) => {{
-                let (reply, rx) = channel();
-                let command = Command::$variant { $($field: $value,)* reply };
-                let text: Option<&str> = $text;
-                assert_eq!(refuses_when_busy(&command), text.is_some());
-                assert_eq!(reply_busy(&command), text.is_some());
-                let sent = rx.try_recv().ok().and_then(Result::err);
-                assert_eq!(sent.as_deref(), text, "{}", stringify!($variant));
-            }};
-        }
-        let s = || String::from("x");
-        check!(Undo {}, Some(UNDO_BUSY));
-        check!(Redo {}, Some(UNDO_BUSY));
-        check!(DiscardFile { path: s() }, Some(DISCARD_BUSY));
-        check!(DiscardAllUnstaged { paths: vec![] }, Some(DISCARD_BUSY));
-        check!(
-            ResetToCommit {
-                commit_id: s(),
-                mode: ResetMode::Hard
-            },
-            Some(DISCARD_BUSY)
-        );
-        check!(
-            ResetToCommit {
-                commit_id: s(),
-                mode: ResetMode::Mixed
-            },
-            None
-        );
-        check!(
-            ResetToCommit {
-                commit_id: s(),
-                mode: ResetMode::Soft
-            },
-            None
-        );
-        check!(StageFile { path: s() }, None);
     }
 }
