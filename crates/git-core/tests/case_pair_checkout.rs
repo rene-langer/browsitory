@@ -262,9 +262,9 @@ fn undo_restores_one_of_a_case_pair_and_keeps_the_other() {
 
 /// `base` holds `pair.0`; `onto` adds `conf` on top of it. The branch, forked at `base`, edits
 /// `other` (`c1`), adds `pair.1` (`c2`), adds `conf` (`c3`, which conflicts with `onto`'s) and
-/// deletes `pair.1` again (`c4`). Neither tip holds the pair, so the rebase starts; picking `c2`
-/// brings the pair into HEAD and the index, and `c3` pauses on its conflict. Committed with
-/// `core.ignorecase` off, then turned on and the repository reopened. Returns `(onto, tip)`.
+/// deletes `pair.1` again (`c4`). Neither tip holds the pair, so a rebase starts, and picking
+/// `c2` brings the pair in (refused since #522). Committed with `core.ignorecase` off, then
+/// turned on and the repository reopened. Returns `(onto, tip)`.
 fn pair_brought_in_by_a_rebase(
     pair: (&str, &str),
 ) -> (tempfile::TempDir, git2::Repository, String, String) {
@@ -319,36 +319,84 @@ fn pair_brought_in_by_a_rebase(
     (dir, repo, onto, tip)
 }
 
+/// What a rebase that picked `c2` before #522 refused it left (a pick outside Browsitory can
+/// still leave it): `c1` and `c2` landed through libgit2's ignore-case index on a detached HEAD,
+/// `c3` paused on its conflict, and the state the rebase kept for it.
+fn rebase_paused_after_a_pick_brought_in_a_case_pair(
+    repo: &git2::Repository,
+    onto: &str,
+    tip: &str,
+) -> git_core::rebase::RebaseState {
+    use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseState, RebaseStop};
+    let plan: Vec<RebasePlanEntry> = git_core::rebase::commits_since(repo, onto)
+        .unwrap()
+        .into_iter()
+        .map(|commit| RebasePlanEntry {
+            commit_id: commit.id,
+            action: RebaseAction::Pick,
+            combined_message: None,
+        })
+        .collect();
+    assert_eq!(plan.len(), 4);
+    let original_branch_ref = repo.head().unwrap().name().unwrap().to_string();
+    let onto = repo
+        .revparse_single(onto)
+        .unwrap()
+        .peel_to_commit()
+        .unwrap();
+    repo.checkout_tree(onto.as_object(), None).unwrap();
+    repo.set_head_detached(onto.id()).unwrap();
+    for entry in &plan[..2] {
+        let commit = repo
+            .find_commit(git2::Oid::from_str(&entry.commit_id).unwrap())
+            .unwrap();
+        repo.cherrypick(&commit, None).unwrap();
+        let mut index = repo.index().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let committer = repo.signature().unwrap();
+        repo.commit(
+            Some("HEAD"),
+            &commit.author(),
+            &committer,
+            commit.message().unwrap(),
+            &tree,
+            &[&head],
+        )
+        .unwrap();
+        repo.cleanup_state().unwrap();
+    }
+    let expected_head = repo.head().unwrap().target().unwrap();
+    let c3 = repo
+        .find_commit(git2::Oid::from_str(&plan[2].commit_id).unwrap())
+        .unwrap();
+    repo.cherrypick(&c3, None).unwrap();
+    assert!(repo.index().unwrap().has_conflicts());
+    RebaseState {
+        plan,
+        cursor: 2,
+        original_branch_ref,
+        original_tip: git2::Oid::from_str(tip).unwrap(),
+        onto: onto.id(),
+        group_start_parent: None,
+        expected_head,
+        stop: RebaseStop::Conflict,
+    }
+}
+
 #[test]
 fn rebase_abort_restores_the_branch_after_a_pick_brought_in_a_case_pair() {
     // #511: `start_rebase` checks onto, HEAD and the index for a case pair, but a picked commit
-    // can bring one in. Abort refused with `CasePair`, so the rebase couldn't be aborted. Abort
-    // now leaves the pair out of its forced checkout and writes the pair's files directly.
-    use git_core::rebase::{abort_rebase, RebaseAction, RebasePlanEntry, RebaseStepResult};
+    // can bring one in (refused since #522; a pick outside Browsitory still can). Abort refused
+    // with `CasePair`, so the rebase couldn't be aborted. Abort now leaves the pair out of its
+    // forced checkout and writes the pair's files directly.
+    use git_core::rebase::abort_rebase;
     for (pair, own) in CASE_PAIRS
         .into_iter()
         .flat_map(|pair| [(pair, false), (pair, true)])
     {
         let (dir, repo, onto, tip) = pair_brought_in_by_a_rebase(pair);
-        let plan: Vec<RebasePlanEntry> = git_core::rebase::commits_since(&repo, &onto)
-            .unwrap()
-            .into_iter()
-            .map(|commit| RebasePlanEntry {
-                commit_id: commit.id,
-                action: RebaseAction::Pick,
-                combined_message: None,
-            })
-            .collect();
-        assert_eq!(plan.len(), 4, "{pair:?}");
-
-        let (state, result) = git_core::rebase::start_rebase(&repo, &onto, plan).unwrap();
-        assert_eq!(
-            result,
-            RebaseStepResult::Conflicted {
-                files: vec!["conf".to_string()]
-            },
-            "{pair:?}"
-        );
+        let state = rebase_paused_after_a_pick_brought_in_a_case_pair(&repo, &onto, &tip);
         // libgit2's pick of `c2` took `pair.1` for `pair.0`'s entry: the pair is split between
         // HEAD, the index and the disk, which holds both files.
         assert_eq!(
@@ -405,7 +453,8 @@ fn rebase_abort_restores_the_branch_after_a_pick_brought_in_a_case_pair() {
 fn cherry_pick_abort_after_a_pick_brought_in_a_case_pair() {
     // #511: the same for a paused cherry-pick, whose Abort resets the paths the pick touched.
     // It refused with `WouldDiscard` (libgit2's diff took the file on disk for a change to the
-    // other name's entry), or left the picked file behind.
+    // other name's entry), or left the picked file behind. Browsitory's own pick refuses such a
+    // commit since #522: the pick here is libgit2's, as a terminal's would be.
     for pair in CASE_PAIRS {
         let (dir, repo) = init_repo();
         write_file(dir.path(), pair.0, "first\n");
@@ -438,17 +487,14 @@ fn cherry_pick_abort_after_a_pick_brought_in_a_case_pair() {
         let repo = git2::Repository::open(dir.path()).unwrap();
         assert_eq!(head_id(&repo), main);
 
-        let outcome = git_core::pick::cherry_pick(
-            &repo,
-            &side,
+        repo.cherrypick(
+            &repo
+                .find_commit(git2::Oid::from_str(&side).unwrap())
+                .unwrap(),
             None,
-            git_core::hooks::HookOptions::default(),
         )
         .unwrap();
-        assert!(
-            matches!(outcome, git_core::pick::PickOutcome::Conflicted { .. }),
-            "{pair:?}: {outcome:?}"
-        );
+        assert!(repo.index().unwrap().has_conflicts(), "{pair:?}");
         assert_eq!(
             read(dir.path(), pair.1).as_deref(),
             Some("second\n"),

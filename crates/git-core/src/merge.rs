@@ -55,6 +55,11 @@ pub enum MergeError {
     /// (#403); nothing was changed.
     #[error(transparent)]
     CasePair(#[from] crate::CasePair),
+    /// `core.ignorecase` is on and the step's result holds two paths that differ only in case
+    /// which HEAD doesn't (#522): the index would keep only one. Nothing the step would write
+    /// was written.
+    #[error(transparent)]
+    CasePairBroughtIn(#[from] crate::CasePairBroughtIn),
     /// libgit2 merged a file and a folder of the same name without a conflict; nothing was
     /// changed (#410).
     #[error(transparent)]
@@ -135,25 +140,44 @@ impl NotStagedReason {
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
 /// fast-forward checks out `theirs`' tree, any other merge writes the merged index. A merged
 /// index that holds a file and a folder of the same name libgit2 didn't see as a conflict is
-/// refused too (#410).
+/// refused too (#410), and so is an outcome (merged index or fast-forward tree) holding a case
+/// pair HEAD doesn't, while `core.ignorecase` is on (#522).
 fn refuse_unsafe_merge(
     repo: &Repository,
     theirs: &git2::Commit,
     fast_forward: bool,
 ) -> Result<(), MergeError> {
     use crate::worktree_guard::{GuardSource, Incoming};
+    let ours = repo.head()?.peel_to_commit()?;
+    let our_tree = ours.tree()?;
     if fast_forward {
         let tree = theirs.tree()?;
-        return crate::worktree_guard::refuse_linked_folders(repo, &[Incoming::Checkout(&tree)]);
+        crate::worktree_guard::refuse_linked_folders::<MergeError>(
+            repo,
+            &[Incoming::Checkout(&tree)],
+        )?;
+        // libgit2's ignore-case index keeps one name of a case pair the checkout brings in and
+        // doesn't write the other's file (#522).
+        return crate::worktree_guard::refuse_case_pair_brought_in(
+            repo,
+            &GuardSource::Tree(&tree),
+            Some(&our_tree),
+        );
     }
-    let ours = repo.head()?.peel_to_commit()?;
     let merged = repo.merge_commits(&ours, theirs, None)?;
     // The link check first: its refusal is the more specific one when the "file" is a link.
     crate::worktree_guard::refuse_linked_folders::<MergeError>(
         repo,
         &[Incoming::Merge(GuardSource::Index(&merged))],
     )?;
-    Ok(crate::file_folder::refuse_file_folder_conflict(&merged)?)
+    crate::file_folder::refuse_file_folder_conflict(&merged)?;
+    // libgit2's ignore-case index would keep one name of a case pair the merge brings in, and
+    // the merge would be committed without the other (#522).
+    crate::worktree_guard::refuse_case_pair_brought_in(
+        repo,
+        &GuardSource::Index(&merged),
+        Some(&our_tree),
+    )
 }
 
 /// Refuses a path whose existing parent folders include a symlink, so a resolution can never

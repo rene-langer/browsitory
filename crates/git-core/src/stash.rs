@@ -106,6 +106,11 @@ pub enum StashError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` is on and the step's result holds two paths that differ only in case
+    /// which HEAD doesn't (#522): the index would keep only one. Nothing the step would write
+    /// was written.
+    #[error(transparent)]
+    CasePairBroughtIn(#[from] crate::CasePairBroughtIn),
     /// libgit2 would merge a file and a folder of the same name without a conflict; nothing was
     /// changed and the stash is kept (#410).
     #[error(transparent)]
@@ -1494,7 +1499,8 @@ pub fn apply_stash(
 }
 
 /// Refuses when libgit2's merges of `stash@{index}` would hold a file and a folder of the same
-/// name without a conflict (#410), before anything is written. Redoes in memory the merges
+/// name without a conflict (#410), or a case pair HEAD doesn't hold while `core.ignorecase` is
+/// on (#522), before anything is written. Redoes in memory the merges
 /// libgit2's `git_stash_apply` checks out and stages: the stash's worktree tree onto the index
 /// (against the stash's base), and with `restore_index` its index tree. libgit2 merges onto the
 /// index and refuses unless it matches HEAD (`StagedChanges`), so HEAD's tree stands in for it;
@@ -1524,6 +1530,12 @@ fn refuse_file_folder_merge(
     let base = stash.parent(0)?.tree()?;
     let modified = repo.merge_trees(&base, &head_tree, &stash.tree()?, None)?;
     crate::file_folder::refuse_file_folder_conflict(&modified)?;
+    // libgit2's ignore-case index would keep one name of a case pair the stash brings in (#522).
+    crate::worktree_guard::refuse_case_pair_brought_in::<StashError>(
+        repo,
+        &crate::worktree_guard::GuardSource::Index(&modified),
+        Some(&head_tree),
+    )?;
     if restore_index {
         let index_commit = stash.parent(1)?;
         let index_tree = index_commit.tree()?;
@@ -1531,6 +1543,11 @@ fn refuse_file_folder_merge(
             let index_base = index_commit.parent(0)?.tree()?;
             let unstashed = repo.merge_trees(&index_base, &head_tree, &index_tree, None)?;
             crate::file_folder::refuse_file_folder_conflict(&unstashed)?;
+            crate::worktree_guard::refuse_case_pair_brought_in::<StashError>(
+                repo,
+                &crate::worktree_guard::GuardSource::Index(&unstashed),
+                Some(&head_tree),
+            )?;
         }
     }
     Ok(())

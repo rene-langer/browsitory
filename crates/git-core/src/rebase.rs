@@ -27,6 +27,11 @@ pub enum RebaseError {
     /// (#403); nothing was changed.
     #[error(transparent)]
     CasePair(#[from] crate::CasePair),
+    /// `core.ignorecase` is on and the step's result holds two paths that differ only in case
+    /// which HEAD doesn't (#522): the index would keep only one. Nothing the step would write
+    /// was written.
+    #[error(transparent)]
+    CasePairBroughtIn(#[from] crate::CasePairBroughtIn),
     /// libgit2 merged a file and a folder of the same name without a conflict; nothing the
     /// step would write was written (#410).
     #[error(transparent)]
@@ -758,6 +763,15 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
         // libgit2 can miss a file/folder conflict and would land the step without one of them
         // (#410). After the link check, whose refusal is the more specific one for a link.
         crate::file_folder::refuse_file_folder_conflict(&merged)?;
+        // libgit2's ignore-case index would keep one name of a case pair the step brings in, and
+        // the step would be committed without the other (#522). Nothing is written yet: the
+        // step stops as an error (Continue tries it again, Abort goes back to the branch), or
+        // `start_rebase` rolls back.
+        crate::worktree_guard::refuse_case_pair_brought_in::<RebaseError>(
+            repo,
+            &crate::worktree_guard::GuardSource::Index(&merged),
+            Some(&head_commit.tree()?),
+        )?;
         // A checkout that stops part-way (a file another program holds open, a read-only file,
         // a full disk) is rolled back, like `pick::apply`'s (#329): the step is then as if never
         // started, HEAD stays at `expected_head`, and Continue applies it again. libgit2's own

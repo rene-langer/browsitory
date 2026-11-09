@@ -350,6 +350,66 @@ pub struct CasePair {
     pub other: String,
 }
 
+/// A merge-like step (a rebase step, cherry-pick, revert, merge, pull or stash apply) whose
+/// result holds a case pair (see [`CasePair`]) that HEAD doesn't, while `core.ignorecase` is on
+/// (#522): the commits or the stash being applied add `a` next to HEAD's `A`. libgit2's
+/// in-memory result holds both, but its ignore-case index takes `a` for `A`'s entry, so the
+/// index, and the commit made from it, would keep only one of them.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "'{path}' and '{other}' differ only in case, which this repository's core.ignorecase \
+     setting takes for one name, so the result would keep only one of them. Rename one of the \
+     two where it was added, then try again."
+)]
+pub struct CasePairBroughtIn {
+    pub path: String,
+    pub other: String,
+}
+
+/// Refuses a merge-like step whose `result` (the in-memory `cherrypick_commit`,
+/// `revert_commit`, `merge_commits` or `merge_trees`, or the tree a fast-forward checks out)
+/// holds a case pair that `base` (HEAD's tree, which the step lands on) doesn't, when
+/// `core.ignorecase` is on (#522). Call it before the step writes anything. A pair `base`
+/// already holds is not this check's (#512); a case-only rename (`A` in `base`, only `a` in
+/// `result`) is no pair and goes ahead.
+pub(crate) fn refuse_case_pair_brought_in<E>(
+    repo: &git2::Repository,
+    result: &GuardSource,
+    base: Option<&git2::Tree>,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<CasePairBroughtIn> + From<CaseConfigUnreadable>,
+{
+    if !core_ignorecase(repo)? {
+        return Ok(());
+    }
+    let held: BTreeSet<Vec<u8>> = match base {
+        Some(base) => case_pairs(&[&GuardSource::Tree(base)])?
+            .into_iter()
+            .filter_map(|names| names.first().map(|name| name.to_ascii_lowercase()))
+            .collect(),
+        None => BTreeSet::new(),
+    };
+    let brought_in = case_pairs(&[result])?.into_iter().find(|names| {
+        names
+            .first()
+            .is_some_and(|name| !held.contains(&name.to_ascii_lowercase()))
+    });
+    match brought_in {
+        Some(names) => {
+            let mut names = names
+                .into_iter()
+                .map(|name| String::from_utf8_lossy(&name).into_owned());
+            Err(CasePairBroughtIn {
+                path: names.next().unwrap_or_default(),
+                other: names.next().unwrap_or_default(),
+            }
+            .into())
+        }
+        None => Ok(()),
+    }
+}
+
 /// The case pairs (see [`CasePair`]) among the entries of `sources`: groups of whole paths that
 /// libgit2's ignore-case index takes for one (byte by byte, ASCII letters folded), each sorted.
 /// Submodule entries count too: the index holds them like files.
@@ -465,6 +525,45 @@ impl CasePairs {
             .chain(&self.untracked)
             .any(|name| name.to_ascii_lowercase() == folded)
     }
+}
+
+/// For a rewind that must not lose local changes (`pick::rewind_to`, like `git reset --merge`):
+/// the first name of `pairs` whose file [`restore_case_pairs`] would overwrite or remove
+/// although it holds something that neither `head` nor `target` has under that very name. Only
+/// names a source holds count: `restore_case_pairs` removes a name only on disk only when its
+/// content is a blob the repository holds (what the operation wrote from a commit) and keeps
+/// anything else. `None` when rewinding loses nothing.
+pub(crate) fn case_pair_with_local_change<E>(
+    repo: &git2::Repository,
+    pairs: &CasePairs,
+    head: &git2::Tree,
+    target: &git2::Tree,
+) -> Result<Option<String>, E>
+where
+    E: From<git2::Error> + From<io::Error>,
+{
+    let Some(workdir) = repo.workdir() else {
+        return Ok(None);
+    };
+    for path in &pairs.tracked {
+        let Ok(rel) = std::str::from_utf8(path) else {
+            continue;
+        };
+        let content = match read_beneath(workdir, rel)? {
+            Some(Leaf::File { bytes, .. }) => bytes,
+            Some(Leaf::Link { target, .. }) => target,
+            None => continue,
+        };
+        let id = git2::Oid::hash_object(git2::ObjectType::Blob, &content)?;
+        let committed = [head, target].iter().any(|tree| {
+            tree.get_path(&path_from_bytes(path))
+                .is_ok_and(|entry| entry.id() == id)
+        });
+        if !committed {
+            return Ok(Some(rel.to_string()));
+        }
+    }
+    Ok(None)
 }
 
 /// The [`CasePairs`] of an abort's forced checkout of `target` (optionally limited to the

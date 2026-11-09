@@ -54,6 +54,11 @@ pub enum PickError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` is on and the step's result holds two paths that differ only in case
+    /// which HEAD doesn't (#522): the index would keep only one. Nothing the step would write
+    /// was written.
+    #[error(transparent)]
+    CasePairBroughtIn(#[from] crate::CasePairBroughtIn),
     /// libgit2 merged a file and a folder of the same name without a conflict; nothing was
     /// changed (#410).
     #[error(transparent)]
@@ -599,6 +604,13 @@ fn step(
     // libgit2 can miss a file/folder conflict and would commit without one of them (#410).
     // After the link check, whose refusal is the more specific one for a link.
     crate::file_folder::refuse_file_folder_conflict(&merged)?;
+    // libgit2's ignore-case index would keep one name of a case pair the step brings in, and the
+    // step would be committed without the other (#522).
+    crate::worktree_guard::refuse_case_pair_brought_in::<PickError>(
+        repo,
+        &crate::worktree_guard::GuardSource::Index(&merged),
+        Some(&head.tree()?),
+    )?;
     // A checkout that stops part-way (a file another program holds open, a read-only file) is
     // rolled back, so the step can be tried again (#321). libgit2's own default strategy for a
     // pick is safe with conflicts allowed; a builder of our own must say so.
@@ -1435,15 +1447,73 @@ fn rewind_to(repo: &Repository, original: &Commit<'_>, reflog: &str) -> Result<(
         &[crate::worktree_guard::Incoming::Checkout(&tree)],
         Some(&tree),
     )?;
-    let mut checkout = git2::build::CheckoutBuilder::new();
-    crate::hardlink::on_checkout(repo, &mut checkout);
-    repo.checkout_tree(original.as_object(), Some(&mut checkout))?;
+    // A step that brought in a case pair under `core.ignorecase` (landed outside Browsitory, or
+    // by a version before #522): libgit2 committed one name and wrote the other's file, so HEAD
+    // may hold the other name of the pair than `original`. Its safe checkout then refused with
+    // a raw "1 conflict prevents checkout" (the file of `original`'s name is on disk, untracked
+    // as HEAD sees it), and Abort couldn't rewind. The pair's names are left out of the
+    // checkout and put back directly, as the rebase abort does (#511), once they hold nothing
+    // that `original` or HEAD doesn't.
+    let pairs = crate::worktree_guard::case_pairs_for_abort::<PickError, &str>(
+        repo,
+        &crate::worktree_guard::GuardSource::Tree(&tree),
+        None,
+    )?;
+    if pairs.is_empty() {
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        crate::hardlink::on_checkout(repo, &mut checkout);
+        repo.checkout_tree(original.as_object(), Some(&mut checkout))?;
+    } else {
+        rewind_around_case_pairs(repo, &tree, &pairs)?;
+    }
     if repo.head_detached()? {
         // With the reflog message, unlike `set_head_detached` ("checkout: moving from …").
         repo.reference("HEAD", original.id(), true, reflog)?;
     } else {
         repo.head()?.set_target(original.id(), reflog)?;
     }
+    Ok(())
+}
+
+/// `rewind_to`'s checkout of `tree` when `pairs` isn't empty: the other paths with libgit2's
+/// safe checkout, the pair's names written directly (`restore_case_pairs`), then the index from
+/// `tree`, as `git reset --merge` resets it. A pair name whose file holds something neither
+/// `tree` nor HEAD has under that name is `RewindBlocked`, before anything is written.
+fn rewind_around_case_pairs(
+    repo: &Repository,
+    tree: &git2::Tree<'_>,
+    pairs: &crate::worktree_guard::CasePairs,
+) -> Result<(), PickError> {
+    use crate::merge::MergeError;
+    let head_tree = repo.head()?.peel_to_tree()?;
+    if let Some(path) = crate::worktree_guard::case_pair_with_local_change::<MergeError>(
+        repo, pairs, &head_tree, tree,
+    )? {
+        return Err(PickError::RewindBlocked(path));
+    }
+    let mut others = std::collections::BTreeSet::new();
+    for source in [tree, &head_tree] {
+        let mut flat = git2::Index::new()?;
+        flat.read_tree(source)?;
+        others.extend(flat.iter().map(|entry| entry.path));
+    }
+    others.extend(fresh_index(repo)?.iter().map(|entry| entry.path));
+    others.retain(|path| !pairs.covers(path));
+    // No paths would mean the whole tree.
+    if !others.is_empty() {
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        crate::hardlink::on_checkout(repo, &mut checkout);
+        checkout.disable_pathspec_match(true);
+        for path in others {
+            checkout.path(path);
+        }
+        repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
+    }
+    crate::worktree_guard::restore_case_pairs::<MergeError>(repo, tree, pairs)?;
+    let mut index = repo.index()?;
+    index.read(true)?;
+    index.read_tree(tree)?;
+    index.write()?;
     Ok(())
 }
 
