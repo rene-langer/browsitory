@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RepoClient } from "../ipc/RepoClient";
+import { COMMIT_MESSAGE_COLUMNS, type RepoClient } from "../ipc/RepoClient";
 import { CommitMessageSettingsProvider } from "../state/CommitMessageSettingsProvider";
 import { __resetAutoFetchForTests, readAutoFetchOverride } from "../lib/autoFetch";
 import { FetchSettingsProvider } from "../state/FetchSettingsProvider";
@@ -152,6 +152,9 @@ describe("Commit message preferences", () => {
     const group = await screen.findByRole("group", { name: "Commit message" });
     const summary = within(group).getByRole("spinbutton", { name: "Summary length limit" });
     await waitFor(() => expect(summary).toHaveValue(50));
+    // The backend's clamp range (#497).
+    expect(summary).toHaveAttribute("min", String(COMMIT_MESSAGE_COLUMNS.min));
+    expect(summary).toHaveAttribute("max", String(COMMIT_MESSAGE_COLUMNS.max));
     fireEvent.change(summary, { target: { value: "60" } });
     expect(setCommitMessageSettings).not.toHaveBeenCalled();
     fireEvent.blur(summary);

@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
+  COMMIT_MESSAGE_COLUMNS,
   DIFF_ALGORITHM_VALUES,
   WORD_WRAP_VALUES,
   type DiffAlgorithm,
@@ -53,7 +54,7 @@ export function PreferencesSection({ title, children }: { title: string; childre
   );
 }
 
-/** A 10–200 number field that saves on blur (or Enter), clamped by the settings hook. */
+/** A `COMMIT_MESSAGE_COLUMNS` number field that saves on blur (or Enter), clamped by the settings hook. */
 function ColumnField({ label, value, onCommit }: { label: string; value: number; onCommit: (value: number) => void }) {
   // Local text while typing; `null` shows the saved value.
   const [draft, setDraft] = useState<string | null>(null);
@@ -69,8 +70,8 @@ function ColumnField({ label, value, onCommit }: { label: string; value: number;
         <input
           {...props}
           type="number"
-          min={10}
-          max={200}
+          min={COMMIT_MESSAGE_COLUMNS.min}
+          max={COMMIT_MESSAGE_COLUMNS.max}
           step={1}
           className={styles.number}
           value={draft ?? String(value)}

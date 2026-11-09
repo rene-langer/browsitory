@@ -580,6 +580,7 @@ name = "config"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "git-core",
  "serde",
  "tempfile",
  "thiserror 2.0.21",

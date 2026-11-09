@@ -29,8 +29,9 @@ everything else, as server-initiated notifications (`crates/vscode-sidecar/src/d
 bundle the `extension/` host, the `frontend/dist-vscode` webview bundle, and exactly one matching
 sidecar binary.
 
-Dependency direction: `tauri-app` → `repo-service` ← `vscode-sidecar`, and `repo-service` →
-`git-core`, `config`. Neither transport depends on the other.
+Dependency direction: `tauri-app` → `repo-service` ← `vscode-sidecar`, `repo-service` →
+`git-core`, `config`, and `config` → `git-core` (for the limits both enforce, such as
+`MAX_CONTEXT_LINES`). Neither transport depends on the other.
 
 ### Wire DTOs
 
@@ -2101,6 +2102,13 @@ only `error`.
   Rust field is renamed, retyped or made optional. The few intended differences are written out
   there. `dtoContract.test.ts` checks that every generated type is compared, and that no type
   name is generated in two files.
+  - Limits and defaults (#497): `wire_bindings_are_current` also writes
+    `frontend/src/ipc/generated/wire-constants.ts`: `MAX_CONTEXT_LINES`,
+    `WHOLE_FILE_CONTEXT_LINES`, `COMMIT_MESSAGE_COLUMNS`, the `Default` of `config`'s
+    `DiffSettings`, `CommitMessageSettings` and `FetchSettings` serialized as their DTOs, and the
+    commit search keys (`git_core::search::KEYS`). `RepoClient.ts` re-exports them; the frontend
+    declares none of these values itself. `searchSyntax.test.ts` checks the search help's keys
+    against `SEARCH_KEYS`.
   - Fields with a fixed set of names hold the `Serialize` enum itself (see "Wire DTOs"), so
     ts-rs generates their string-literal union. The `git-core`/`repo-service` enums derive
     `TS` behind the same `ts` feature (enabled only by dev-dependencies).
