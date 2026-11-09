@@ -231,7 +231,9 @@ fn tokenize(input: &str) -> Result<Vec<Token>, SearchError> {
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
     let mut tokens = Vec::new();
-    while i < chars.len() {
+    // Every token takes at least one char, so the second bound only ends a loop whose index
+    // stopped advancing (a bug) before it fills memory.
+    while i < chars.len() && tokens.len() <= chars.len() {
         match chars[i] {
             c if c.is_whitespace() => {
                 i += 1;
@@ -294,26 +296,24 @@ fn tokenize(input: &str) -> Result<Vec<Token>, SearchError> {
         };
 
         let value = if chars[i] == '"' {
-            i += 1;
+            // An iterator, not index arithmetic: it always advances, so the loop that grows
+            // `value` always ends.
+            let mut rest = chars[i + 1..].iter();
             let mut value = String::new();
             let mut closed = false;
-            while i < chars.len() {
-                match chars[i] {
+            while let Some(&c) = rest.next() {
+                match c {
                     '"' => {
                         closed = true;
-                        i += 1;
                         break;
                     }
-                    '\\' if i + 1 < chars.len() && matches!(chars[i + 1], '"' | '\\') => {
-                        value.push(chars[i + 1]);
-                        i += 2;
+                    '\\' if matches!(rest.as_slice().first(), Some('"' | '\\')) => {
+                        value.extend(rest.next());
                     }
-                    c => {
-                        value.push(c);
-                        i += 1;
-                    }
+                    c => value.push(c),
                 }
             }
+            i = chars.len() - rest.as_slice().len();
             if !closed {
                 return Err(invalid("Missing closing quote."));
             }
@@ -392,7 +392,8 @@ impl Parser<'_> {
 
     fn or(&mut self) -> Result<SearchExpr, SearchError> {
         let mut parts = vec![self.and()?];
-        while self.peek() == Some(&Token::Or) {
+        // Every part takes at least one token; see `tokenize` for the second bound.
+        while self.peek() == Some(&Token::Or) && parts.len() <= self.tokens.len() {
             self.pos += 1;
             parts.push(self.and()?);
         }
@@ -401,7 +402,8 @@ impl Parser<'_> {
 
     fn and(&mut self) -> Result<SearchExpr, SearchError> {
         let mut parts = Vec::new();
-        loop {
+        // Every part takes at least one token; see `tokenize` for the second bound.
+        while parts.len() <= self.tokens.len() {
             match self.peek() {
                 None | Some(Token::Close) | Some(Token::Or) => break,
                 Some(Token::And) => {
