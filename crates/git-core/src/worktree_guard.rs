@@ -512,6 +512,11 @@ impl CasePairs {
         self.tracked.is_empty() && self.untracked.is_empty()
     }
 
+    /// The names a source (the target, HEAD or the index) holds.
+    pub(crate) fn tracked(&self) -> impl Iterator<Item = &[u8]> {
+        self.tracked.iter().map(Vec::as_slice)
+    }
+
     /// Whether a forced checkout must leave `path` out (a name a source holds).
     pub(crate) fn contains(&self, path: &[u8]) -> bool {
         self.tracked.contains(path)

@@ -12,7 +12,13 @@ use common::{commit_all, init_repo, write_file};
 use git_core::hooks::HookOptions;
 
 /// `(first, second)`: `first` is committed where the step lands, `second` comes with the step.
-const CASE_PAIRS: [(&str, &str); 4] = [("A", "a"), ("a", "A"), ("x/B", "x/b"), ("D/f", "d/f")];
+const CASE_PAIRS: [(&str, &str); 5] = [
+    ("A", "a"),
+    ("a", "A"),
+    ("x/B", "x/b"),
+    ("x/b", "x/B"),
+    ("D/f", "d/f"),
+];
 
 fn head_id(repo: &git2::Repository) -> String {
     repo.head().unwrap().target().unwrap().to_string()
@@ -555,8 +561,8 @@ fn stash_apply_refuses_a_stash_that_brings_in_a_case_pair() {
     }
 }
 
-/// `main` holds `pair.0` and `conf`. `side`, forked before `main`'s last commit, adds `pair.1`
-/// (`s1`) and edits `conf` (`s2`, which conflicts). Then, with `core.ignorecase` on, what a
+/// `main` holds `pair.0`, `conf` and `notes`. `side`, forked before `main`'s last commit, adds
+/// `pair.1` and edits `notes` (`s1`), then edits `conf` (`s2`, which conflicts). Then, with `core.ignorecase` on, what a
 /// pick outside Browsitory (or one before #522) did: `s1` landed through libgit2's ignore-case
 /// index, which committed one name and wrote the other's file, and `s2` paused on its conflict.
 /// Returns the sequence's state and `main`'s tip.
@@ -572,6 +578,7 @@ fn sequence_after_a_split_step(
     let (dir, repo) = init_repo();
     write_file(dir.path(), pair.0, "first\n");
     write_file(dir.path(), "conf", "base\n");
+    write_file(dir.path(), "notes", "base\n");
     commit_all(&repo, "base");
     let main_ref = repo.head().unwrap().name().unwrap().to_string();
     {
@@ -583,6 +590,7 @@ fn sequence_after_a_split_step(
     let main = head_id(&repo);
     switch(&repo, "side");
     write_file(dir.path(), pair.1, "second\n");
+    write_file(dir.path(), "notes", "s1\n");
     commit_all(&repo, "s1 adds the other name");
     let s1 = head_id(&repo);
     write_file(dir.path(), "conf", "side\n");
@@ -606,7 +614,7 @@ fn sequence_after_a_split_step(
     };
     repo.cleanup_state().unwrap();
     // The landed step lost one name: what #522 refuses now.
-    assert_eq!(tree_paths(&repo, "HEAD").len(), 2, "{pair:?}");
+    assert_eq!(tree_paths(&repo, "HEAD").len(), 3, "{pair:?}");
     repo.cherrypick(&repo.find_commit(s2.parse().unwrap()).unwrap(), None)
         .unwrap();
     assert!(repo.index().unwrap().has_conflicts(), "{pair:?}");
@@ -628,7 +636,8 @@ fn sequence_abort_rewinds_after_a_step_brought_in_a_case_pair() {
     // The issue's comment on #522: Abort's rewind is a safe checkout of the original commit,
     // which HEAD's other name of the pair kept from working ("1 conflict prevents checkout",
     // for `A` then `a`). The pair's names are now put back directly; the picked name's file,
-    // which the step wrote, is removed.
+    // which the step wrote, is removed. The step's other file is rewound too, by the safe
+    // checkout of every path outside the pair.
     for pair in CASE_PAIRS {
         let (dir, repo, state, main) = sequence_after_a_split_step(pair);
 
@@ -640,7 +649,7 @@ fn sequence_abort_rewinds_after_a_step_brought_in_a_case_pair() {
         assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
         assert_eq!(
             index_paths(dir.path()),
-            sorted(&[pair.0, "conf"]),
+            sorted(&[pair.0, "conf", "notes"]),
             "{pair:?}"
         );
         assert_eq!(
@@ -649,6 +658,18 @@ fn sequence_abort_rewinds_after_a_step_brought_in_a_case_pair() {
             "{pair:?}"
         );
         assert_eq!(read(dir.path(), pair.1), None, "{pair:?}");
+        // Written back as the original commit has it: not executable.
+        let mode = std::os::unix::fs::PermissionsExt::mode(
+            &std::fs::metadata(dir.path().join(pair.0))
+                .unwrap()
+                .permissions(),
+        );
+        assert_eq!(mode & 0o111, 0, "{pair:?}");
+        assert_eq!(
+            read(dir.path(), "notes").as_deref(),
+            Some("base\n"),
+            "{pair:?}"
+        );
         assert_eq!(
             read(dir.path(), "conf").as_deref(),
             Some("main\n"),
@@ -666,7 +687,7 @@ fn sequence_abort_keeps_a_local_change_to_one_of_a_case_pair() {
         let (dir, repo, state, main) = sequence_after_a_split_step(pair);
         let held = tree_paths(&repo, "HEAD")
             .into_iter()
-            .find(|path| path != "conf")
+            .find(|path| path != "conf" && path != "notes")
             .unwrap();
         write_file(dir.path(), &held, "mine\n");
 
@@ -851,4 +872,53 @@ fn create_worktree_refuses_a_branch_that_holds_a_case_pair() {
         );
         assert_untouched(dir.path(), &repo, pair, &tip);
     }
+}
+
+#[test]
+fn a_sequence_abort_without_a_case_pair_rewinds_by_checkout() {
+    // The refused step wrote nothing, so no pair is left: the rewind is libgit2's safe checkout,
+    // which runs the file's filters and keeps a change staged on a file the rewind doesn't
+    // change. The direct writes that stand in for it around a pair are only for the pair.
+    let pair = ("A", "a");
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), ".gitattributes", "other text eol=crlf\n");
+    write_file(dir.path(), pair.0, "first\n");
+    write_file(dir.path(), "conf", "base\n");
+    write_file(dir.path(), "other", "base\n");
+    commit_all(&repo, "base");
+    let main = repo.head().unwrap().shorthand().unwrap().to_string();
+    {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("side", &base, false).unwrap();
+    }
+    switch(&repo, "side");
+    write_file(dir.path(), "other", "side\n");
+    commit_all(&repo, "s1 edits other");
+    let s1 = head_id(&repo);
+    write_file(dir.path(), pair.1, "second\n");
+    commit_all(&repo, "s2 adds the other name");
+    let s2 = head_id(&repo);
+    switch(&repo, &main);
+    let repo = ignore_case(dir.path(), repo);
+    let tip = head_id(&repo);
+    let run = git_core::pick::cherry_pick_many(&repo, &[s1, s2], HookOptions::default());
+    assert!(run.outcome.is_err());
+    let state = run.state.expect("the sequence stopped after a landed step");
+    write_file(dir.path(), "conf", "staged\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("conf")).unwrap();
+    index.write().unwrap();
+    let staged = index.get_path(std::path::Path::new("conf"), 0).unwrap().id;
+
+    let abort = git_core::pick::abort_sequence(&repo, &state).unwrap();
+
+    assert!(abort.rewound);
+    assert_eq!(head_id(&repo), tip);
+    assert_eq!(read(dir.path(), "other").as_deref(), Some("base\r\n"));
+    let index = git2::Index::open(&dir.path().join(".git/index")).unwrap();
+    assert_eq!(
+        index.get_path(std::path::Path::new("conf"), 0).unwrap().id,
+        staged
+    );
+    assert_eq!(read(dir.path(), "conf").as_deref(), Some("staged\n"));
 }

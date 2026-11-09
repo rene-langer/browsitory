@@ -1281,7 +1281,9 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   stays. The index is then written from the target tree (rebase) or HEAD (`abort_merge`).
   `plan_operation_reset` compares a pair name's file with its own index entry instead of
   libgit2's diff, which under the fold reports the other name's file as a change
-  (`WouldDiscard`). A sequence abort's rewind (`pick::rewind_to`, a safe checkout of the
+  (`WouldDiscard`). A name the index lost to the other spelling is compared with HEAD's blob
+  and the blobs of its other spellings, so an edit to it is refused rather than overwritten
+  (#543). A sequence abort's rewind (`pick::rewind_to`, a safe checkout of the
   original commit) failed after such a step had landed ("1 conflict prevents checkout": HEAD
   holds the other name, and the original name's file is on disk); with pairs it checks out the
   other paths safely, writes the pair with `restore_case_pairs` and the index from the original
