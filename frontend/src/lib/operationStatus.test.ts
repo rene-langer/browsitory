@@ -4,12 +4,14 @@ import {
   abortToast,
   conflictReason,
   leftoverReason,
+  operationBlockers,
   pickToast,
   rebaseAbortSwitchTarget,
   rebaseAbortToast,
   rebaseDivergenceText,
   sequenceLabel,
   sequenceToast,
+  stashBlockReason,
   terminalAbortConfirm,
   terminalRebaseLabel,
   terminalRebaseReason,
@@ -193,5 +195,65 @@ describe("rebase status text", () => {
       expect(revert.title).toBe("Abort the whole revert?");
       expect(revert.confirmLabel).toBe("Abort revert");
     });
+  });
+});
+
+describe("operationBlockers (#495)", () => {
+  const headInfo = { sequence: null, terminalRebase: null, operation: null, operationLeftover: false };
+  const idle = { pending: false, transfer: null, mergeMessage: null, rebaseProgress: null, headInfo };
+  const terminalRebase: TerminalRebase = { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 };
+
+  it("blocks nothing when nothing runs", () => {
+    expect(operationBlockers(idle)).toEqual({ blocked: false, reason: null });
+  });
+
+  it.each([
+    ["an action is pending", { pending: true }, "Another action is in progress."],
+    ["a transfer runs", { transfer: {} }, "A transfer is in progress."],
+    ["a sequence is stored", { headInfo: { ...headInfo, sequence: { kind: "Revert" as const, currentStep: 1, totalSteps: 2, currentCommit: "c" } } }, "A revert is in progress."],
+    ["a terminal rebase is paused (#503)", { headInfo: { ...headInfo, terminalRebase } }, "A rebase started in a terminal is in progress."],
+    ["a terminal git am is paused (#503)", { headInfo: { ...headInfo, terminalRebase: { ...terminalRebase, kind: "Am" as const } } }, "A git am started in a terminal is in progress."],
+    ["a merge is in progress", { mergeMessage: "m" }, "A merge is in progress."],
+    ["a cherry-pick is in progress", { mergeMessage: "m", headInfo: { ...headInfo, operation: "CherryPick" as const } }, "A cherry-pick is in progress."],
+    ["a leftover is there", { mergeMessage: "m", headInfo: { ...headInfo, operation: "Merge" as const, operationLeftover: true } }, leftoverReason("Merge")],
+    ["a rebase is in progress", { rebaseProgress: { currentStep: 1, totalSteps: 2 } }, "A rebase is in progress."],
+  ])("blocks while %s, saying so", (_label, overrides, reason) => {
+    expect(operationBlockers({ ...idle, ...overrides })).toEqual({ blocked: true, reason });
+  });
+
+  it("names a terminal rebase before the MERGE_MSG its conflicted step writes", () => {
+    expect(operationBlockers({ ...idle, mergeMessage: "m", headInfo: { ...headInfo, terminalRebase } }).reason).toBe(
+      terminalRebaseReason(terminalRebase),
+    );
+  });
+});
+
+describe("stashBlockReason (#495)", () => {
+  const headInfo = { sequence: null, terminalRebase: null };
+  const changes = [{}];
+
+  it("allows stashing changes, even during a merge", () => {
+    expect(stashBlockReason({ status: changes, rebaseProgress: null, headInfo })).toBeNull();
+  });
+
+  it("refuses without changes and during a paused rebase, sequence or terminal rebase", () => {
+    expect(stashBlockReason({ status: [], rebaseProgress: null, headInfo })).toBe("No changes to stash.");
+    expect(stashBlockReason({ status: changes, rebaseProgress: { currentStep: 1, totalSteps: 2 }, headInfo })).toBe(
+      "A rebase is in progress.",
+    );
+    expect(
+      stashBlockReason({
+        status: changes,
+        rebaseProgress: null,
+        headInfo: { ...headInfo, sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c" } },
+      }),
+    ).toBe("A cherry-pick is in progress.");
+    expect(
+      stashBlockReason({
+        status: changes,
+        rebaseProgress: null,
+        headInfo: { ...headInfo, terminalRebase: { kind: "Am", branch: "", onto: "", currentStep: 0, totalSteps: 0 } },
+      }),
+    ).toBe("A git am started in a terminal is in progress.");
   });
 });

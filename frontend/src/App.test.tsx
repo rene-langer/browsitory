@@ -1533,6 +1533,44 @@ describe("App", () => {
       expect(screen.getByRole("menuitem", { name: "Revert" })).toBeDisabled();
     });
 
+    // #503: between steps a terminal rebase leaves no MERGE_MSG; the palette must still agree
+    // with the commit menu.
+    it("blocks cherry-pick, revert and checkout in the menu and the palette during a terminal rebase (#503)", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        render(
+          <App
+            client={pickClient({
+              getHeadInfo: async () => ({ headId: "c2", detachedAt: "c2", headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 } }),
+              getMergeMessage: async () => null,
+            })}
+          />,
+        );
+        const strip = await screen.findByRole("status", { name: "Operation status" });
+        await waitFor(() => expect(strip).toHaveTextContent("Rebasing topic, step 1 of 2 (started in a terminal)"));
+
+        const row = (await screen.findByText(/c1 one/)).closest("li")!;
+        fireEvent.click(row);
+        fireEvent.contextMenu(row);
+        for (const name of ["Cherry-pick", "Revert", "Checkout (detached)"]) {
+          const item = screen.getByRole("menuitem", { name });
+          expect(item).toBeDisabled();
+          expect(item).toHaveAttribute("title", "A rebase started in a terminal is in progress.");
+        }
+        fireEvent.keyDown(screen.getByRole("menuitem", { name: "Cherry-pick" }), { key: "Escape" });
+
+        fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+        fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "c1" } });
+        const results = await screen.findByRole("listbox", { name: "Command results" });
+        for (const name of ["Cherry-pick c1", "Revert c1", "Checkout c1 (detached)", "Reset to c1…"]) {
+          expect(within(results).queryByRole("option", { name })).toBeNull();
+        }
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
     it("shows a stored sequence in the strip, continues it, and blocks other picks meanwhile", async () => {
       const sequence = { kind: "CherryPick" as const, currentStep: 1, totalSteps: 2, currentCommit: "c1" };
       let stored: typeof sequence | null = sequence;

@@ -1,5 +1,6 @@
 import type {
   BisectInfo,
+  HeadInfo,
   OperationKind,
   PickOutcome,
   RebaseAbort,
@@ -219,4 +220,70 @@ export function rebaseAbortToast(abort: RebaseAbort, info: RebaseInfo | null): s
 export function rebaseAbortSwitchTarget(abort: RebaseAbort, info: RebaseInfo | null): string | null {
   if (abort.restored || info === null) return null;
   return info.health.kind === "Diverged" && info.health.reason === "BranchMoved" ? info.branch : null;
+}
+
+/**
+ * The parts of the app state that decide whether repository operations are blocked. Structural,
+ * so the full `AppState` passes as it is.
+ */
+export interface OperationState {
+  pending: boolean;
+  transfer: object | null;
+  mergeMessage: string | null;
+  rebaseProgress: object | null;
+  headInfo: Pick<HeadInfo, "sequence" | "terminalRebase" | "operation" | "operationLeftover">;
+}
+
+/** Whether repository operations are blocked, and the reason disabled controls show. */
+export interface OperationBlockers {
+  blocked: boolean;
+  /** `null` exactly when nothing blocks. */
+  reason: string | null;
+}
+
+/**
+ * The one "repository busy" rule (#495) for menus, buttons, the command palette and shortcuts:
+ * an action in flight, a transfer, a merge/cherry-pick/revert (MERGE_MSG), a rebase run here, a
+ * stored cherry-pick/revert sequence, or a rebase or `git am` started in a terminal (#503). The
+ * reason names the first match in that order of precedence.
+ */
+export function operationBlockers(state: OperationState): OperationBlockers {
+  const reason = operationBlockReason(state);
+  return { blocked: reason !== null, reason };
+}
+
+function operationBlockReason(state: OperationState): string | null {
+  const { headInfo } = state;
+  if (state.pending) return "Another action is in progress.";
+  if (state.transfer !== null) return "A transfer is in progress.";
+  if (headInfo.sequence !== null) return `A ${sequenceNoun(headInfo.sequence.kind)} is in progress.`;
+  if (headInfo.terminalRebase !== null) return terminalRebaseReason(headInfo.terminalRebase);
+  if (state.mergeMessage !== null) {
+    if (headInfo.operationLeftover && headInfo.operation !== null) return leftoverReason(headInfo.operation);
+    return headInfo.operation === "CherryPick" || headInfo.operation === "Revert"
+      ? `A ${sequenceNoun(headInfo.operation)} is in progress.`
+      : "A merge is in progress.";
+  }
+  if (state.rebaseProgress !== null) return "A rebase is in progress.";
+  return null;
+}
+
+/**
+ * Why stashing is unavailable, or `null` when it is allowed. Narrower than
+ * `operationBlockers`: stashing during a merge is fine, but stashing a paused rebase or
+ * cherry-pick/revert step's working tree away and continuing lands an empty (or wrong) commit,
+ * which nothing undoes. Shared by DiffPane's Stash button, the file menu's "Stash file…" and the
+ * palette's stash commands (#495).
+ */
+export function stashBlockReason(state: {
+  status: readonly unknown[];
+  rebaseProgress: object | null;
+  headInfo: Pick<HeadInfo, "sequence" | "terminalRebase">;
+}): string | null {
+  const { headInfo } = state;
+  if (state.rebaseProgress !== null) return "A rebase is in progress.";
+  if (headInfo.sequence !== null) return `A ${sequenceNoun(headInfo.sequence.kind)} is in progress.`;
+  if (headInfo.terminalRebase !== null) return terminalRebaseReason(headInfo.terminalRebase);
+  if (state.status.length === 0) return "No changes to stash.";
+  return null;
 }

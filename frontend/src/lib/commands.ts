@@ -1,5 +1,7 @@
 import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit } from "../ipc/RepoClient";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
+import { commitActions } from "./actions/commitActions";
+import { operationBlockers, stashBlockReason } from "./operationStatus";
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
@@ -280,16 +282,12 @@ export function buildCommands(
     }
   }
 
-  // Same guard RepoWorkspace.tsx derives as `repositoryOperationDisabled` and gates every
-  // sidebar mutation button behind. Mutating command families must be omitted
-  // (not merely disabled) while it's true; navigation and the in-progress
-  // escape hatches (merge-abort/rebase-continue/rebase-abort/refresh) stay.
-  const repositoryOperationDisabled =
-    state.pending ||
-    state.transfer !== null ||
-    state.mergeMessage !== null ||
-    state.rebaseProgress !== null ||
-    state.headInfo.sequence !== null;
+  // The same rule RepoWorkspace gates every menu and sidebar mutation button behind
+  // (`operationBlockers`, #495). Mutating command families must be omitted (not merely disabled)
+  // while it blocks; navigation and the in-progress escape hatches
+  // (merge-abort/rebase-continue/rebase-abort/refresh) stay.
+  const blockers = operationBlockers(state);
+  const repositoryOperationDisabled = blockers.blocked;
 
   // Read-only, so available even while an operation is running.
   if (searchCommands !== undefined) {
@@ -361,24 +359,27 @@ export function buildCommands(
       run: () => void appState.pullCurrentUpstream(),
     });
   }
-  // DiffPane's real Stash button is only disabled by
-  // `status.length === 0 || rebaseProgress !== null` — it does not carry the
-  // full repositoryOperationDisabled guard, so this command stays unconditional.
-  // The id stays "save-stash" so recents recorded under the old label keep working.
-  commands.push({
-    id: "save-stash",
-    label: "Stash all changes",
-    keywords: ["stash", "save", "all"],
-    run: () => void appState.saveStash(),
-  });
-  commands.push({
-    id: "stash-with-options",
-    label: "Stash…",
-    keywords: ["stash", "save", "message", "untracked", "keep", "index", "options"],
-    run: () => appState.openStashDialog([]),
-  });
+  // Stashing has its own, narrower rule (`stashBlockReason`): the same one DiffPane's Stash
+  // button and the file menu's "Stash file…" follow. It allows stashing during a merge, so these
+  // commands are not behind the full repository guard.
+  const canStash = stashBlockReason(state) === null;
+  if (canStash) {
+    // The id stays "save-stash" so recents recorded under the old label keep working.
+    commands.push({
+      id: "save-stash",
+      label: "Stash all changes",
+      keywords: ["stash", "save", "all"],
+      run: () => void appState.saveStash(),
+    });
+    commands.push({
+      id: "stash-with-options",
+      label: "Stash…",
+      keywords: ["stash", "save", "message", "untracked", "keep", "index", "options"],
+      run: () => appState.openStashDialog([]),
+    });
+  }
   const stashFile = diffCommands?.currentFile ?? null;
-  if (stashFile !== null) {
+  if (canStash && stashFile !== null) {
     commands.push({
       id: "stash-current-file",
       label: `Stash ${stashFile}…`,
@@ -453,51 +454,54 @@ export function buildCommands(
     run: () => void appState.refresh(),
   });
 
+  const selected = state.selectedRow === "uncommitted" ? null : state.selectedRow.commitId;
+  const selectedCommit = selected === null ? undefined : state.commits.find((c) => c.id === selected);
+  const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
+  if (selectedCommit !== undefined) {
+    // The commit menu's actions, with the same availability (`commitActions`, #495): the palette
+    // leaves out what the menu disables.
+    const actions = commitActions({ blockers, headId: state.headInfo.headId, currentBranch }, selectedCommit);
+    const commitId = selectedCommit.id;
+    const offer = (
+      id: string,
+      action: { paletteLabel: string; enabled: boolean },
+      keywords: string[],
+      run: () => void,
+    ) => {
+      if (action.enabled) commands.push({ id, label: action.paletteLabel, keywords, run });
+    };
+    // A merge commit's pick and revert need the parent picker, which lives behind the commit
+    // menu (navigate to the real UI, as Reset does).
+    offer("cherry-pick-selected", actions.cherryPick, ["cherry", "pick", "apply", "commit"], () =>
+      actions.cherryPick.needsParent ? goToCommitMenu(commitId) : void appState.cherryPick(commitId),
+    );
+    offer("revert-selected", actions.revert, ["revert", "undo", "commit"], () =>
+      actions.revert.needsParent ? goToCommitMenu(commitId) : void appState.revertCommit(commitId),
+    );
+    offer("checkout-selected", actions.checkout, ["checkout", "detach", "commit"], () =>
+      void appState.checkoutCommit(commitId),
+    );
+    // The keyboard path for the commit menu's "Create tag…" (#438). Only opens the dialog, whose
+    // Create button carries the busy rule, so it is offered while an operation runs.
+    offer("create-tag-selected", actions.createTag, ["tag", "create", "new", "release", "commit"], () =>
+      appState.openCreateTagDialog(commitId),
+    );
+    // Reset needs the mode dialog behind the commit menu.
+    offer("reset-selected", actions.reset, ["reset", "soft", "mixed", "hard"], () => goToCommitMenu(commitId));
+  }
+  if (state.headInfo.headId !== null) {
+    const headId = state.headInfo.headId;
+    commands.push({
+      id: "create-tag-head",
+      label: "Create tag at HEAD…",
+      keywords: ["tag", "create", "new", "release", "head"],
+      run: () => appState.openCreateTagDialog(headId),
+    });
+  }
+
   if (!repositoryOperationDisabled) {
-    const selected = state.selectedRow === "uncommitted" ? null : state.selectedRow.commitId;
-    const selectedCommit = selected === null ? undefined : state.commits.find((c) => c.id === selected);
     if (selectedCommit !== undefined) {
-      const isMerge = selectedCommit.parentIds.length > 1;
       const isHead = state.headInfo.headId === selectedCommit.id;
-      if (!isMerge && !isHead) {
-        commands.push({
-          id: "cherry-pick-selected",
-          label: `Cherry-pick ${selectedCommit.shortId}`,
-          keywords: ["cherry", "pick", "apply", "commit"],
-          run: () => void appState.cherryPick(selectedCommit.id),
-        });
-      }
-      if (!isMerge) {
-        commands.push({
-          id: "revert-selected",
-          label: `Revert ${selectedCommit.shortId}`,
-          keywords: ["revert", "undo", "commit"],
-          run: () => void appState.revertCommit(selectedCommit.id),
-        });
-      }
-      commands.push({
-        id: "checkout-selected",
-        label: `Checkout ${selectedCommit.shortId} (detached)`,
-        keywords: ["checkout", "detach", "commit"],
-        run: () => void appState.checkoutCommit(selectedCommit.id),
-      });
-      // The keyboard path for the commit menu's "Create tag…" (#438).
-      commands.push({
-        id: "create-tag-selected",
-        label: `Create tag at ${selectedCommit.shortId}…`,
-        keywords: ["tag", "create", "new", "release", "commit"],
-        run: () => appState.openCreateTagDialog(selectedCommit.id),
-      });
-      // Same condition as CommitGraph's context-menu Reset item (disabled without a current
-      // branch), so the palette never opens a menu whose Reset entry is greyed out.
-      if (state.branches.some((branch) => branch.isCurrent)) {
-        commands.push({
-          id: "reset-selected",
-          label: `Reset to ${selectedCommit.shortId}…`,
-          keywords: ["reset", "soft", "mixed", "hard"],
-          run: () => goToCommitMenu(selectedCommit.id),
-        });
-      }
       // The commit menu's one-click history edits (#442), only where the menu enables them.
       // HEAD's Reword… is "Amend last commit" below.
       const commitId = selectedCommit.id;
@@ -506,7 +510,7 @@ export function buildCommands(
         {
           commits: state.commits,
           headInfo: state.headInfo,
-          currentBranch: state.branches.find((branch) => branch.isCurrent)?.name ?? null,
+          currentBranch,
           status: state.status,
         },
         commitId,
@@ -526,15 +530,6 @@ export function buildCommands(
         const { onto } = check;
         commands.push({ id, label, keywords: [...keywords, "edit", "rebase", "commit"], run: () => run(onto) });
       }
-    }
-    if (state.headInfo.headId !== null) {
-      const headId = state.headInfo.headId;
-      commands.push({
-        id: "create-tag-head",
-        label: "Create tag at HEAD…",
-        keywords: ["tag", "create", "new", "release", "head"],
-        run: () => appState.openCreateTagDialog(headId),
-      });
     }
     // The keyboard path for a tag badge's "Delete from remote…" (#439); the dialog confirms.
     if (state.remotes.length > 0) {

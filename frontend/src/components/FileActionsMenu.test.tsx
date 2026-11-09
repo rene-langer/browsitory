@@ -15,6 +15,13 @@ describe("FileActionsMenu", () => {
     expect(fileMenuItems(tracked, vi.fn()).map((i) => i.label)).toEqual(["Discard changes…", "Stash file…"]);
   });
 
+  it("disables Stash file… with the stash rule's reason (#495)", () => {
+    const stash = fileMenuItems(tracked, vi.fn(), undefined, "A rebase is in progress.").find((i) => i.label === "Stash file…")!;
+    expect(stash.disabled).toBe(true);
+    expect(stash.title).toBe("A rebase is in progress.");
+    expect(fileMenuItems(tracked, vi.fn()).find((i) => i.label === "Stash file…")!.disabled).toBe(false);
+  });
+
   it("offers ignore options for untracked files", () => {
     expect(fileMenuItems(untracked, vi.fn()).map((i) => i.label)).toEqual([
       "Discard changes…", "Stash file…", "Ignore file", "Ignore all *.log", "Ignore folder logs/",
