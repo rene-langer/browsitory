@@ -20,9 +20,9 @@ describe("Browsitory commit message history (#443)", () => {
 
   it("recalls a committed message from Recent messages and undoes the pick with Ctrl+Z", async () => {
     const box = await $("textarea[aria-label='Commit message']");
-    await box.waitForExist({ timeout: 10000 });
+    await box.waitForExist();
     const stageButton = await $(`button[aria-label="Stage ${FIXTURE_FILE}"]`);
-    await stageButton.waitForExist({ timeout: 10000 });
+    await stageButton.waitForExist();
     // Transparent until hovered: clicked in the page (see `first-flow.spec.ts`).
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
@@ -36,22 +36,20 @@ describe("Browsitory commit message history (#443)", () => {
       MESSAGE,
     );
     await clickInPage("button", "Commit");
-    await $("li*=e2e: remembered message").waitForExist({ timeout: 10000 });
+    await $("li*=e2e: remembered message").waitForExist();
     await browser.waitUntil(async () => (await boxValue()) === "", {
-      timeout: 10000,
       timeoutMsg: "expected the commit to clear the message box",
     });
 
     // Keyboard: the menu opens with its first item focused; Enter picks it.
     await clickInPage("button", "Recent messages");
-    await $("[role='menu']").waitForExist({ timeout: 10000 });
+    await $("[role='menu']").waitForExist();
     await browser.waitUntil(
       async () => (await browser.execute(() => document.activeElement?.textContent)) === "e2e: remembered message",
-      { timeout: 10000, timeoutMsg: "expected the newest committed message to be focused first" },
+      { timeoutMsg: "expected the newest committed message to be focused first" },
     );
     await browser.keys(["Enter"]);
     await browser.waitUntil(async () => (await boxValue()) === MESSAGE, {
-      timeout: 10000,
       timeoutMsg: "expected the pick to fill the box with the full message",
     });
     expect(await browser.execute(() => document.activeElement?.getAttribute("aria-label"))).toBe("Commit message");
@@ -59,7 +57,6 @@ describe("Browsitory commit message history (#443)", () => {
     // Ctrl+Z in the field brings back what the pick replaced (here: an empty box).
     await browser.keys(["Control", "z"]);
     await browser.waitUntil(async () => (await boxValue()) === "", {
-      timeout: 10000,
       timeoutMsg: "expected Ctrl+Z to restore the replaced text",
     });
   });

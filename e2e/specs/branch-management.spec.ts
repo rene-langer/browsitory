@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { expandSidebarSection } from "../support/sidebar";
+import { git } from "../support/git";
 
 // Deviation from the task brief: the brief assumed the fixture repo already has a commit by the
 // time this spec runs, so a branch can be created "from HEAD". But `wdio.conf.ts`'s `onPrepare`
@@ -22,11 +22,7 @@ const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
 describe("Browsitory branch management", () => {
   before(() => {
-    execFileSync(
-      "git",
-      ["commit", "--allow-empty", "-m", "e2e: seed commit so HEAD is resolvable"],
-      { cwd: E2E_REPO_PATH, stdio: "inherit" },
-    );
+    git(E2E_REPO_PATH, "commit", "--allow-empty", "-m", "e2e: seed commit so HEAD is resolvable");
   });
 
   it("creates a branch from HEAD, switches to it, and shows it as current", async () => {
@@ -35,7 +31,7 @@ describe("Browsitory branch management", () => {
     await expandSidebarSection("Branches");
 
     const addButton = await $('[aria-label="Add"]');
-    await addButton.waitForExist({ timeout: 10000 });
+    await addButton.waitForExist();
     await addButton.click();
 
     const newBranchButton = await $("button=New branch…");
@@ -54,7 +50,7 @@ describe("Browsitory branch management", () => {
     const branchButton = await $('//li[@role="button" and contains(., "e2e-branch")]');
     await browser.waitUntil(
       async () => (await branchButton.getText()) === "e2e-branch (current)",
-      { timeout: 10000, timeoutMsg: "expected the new branch to show as current in the tree" },
+      { timeoutMsg: "expected the new branch to show as current in the tree" },
     );
   });
 });

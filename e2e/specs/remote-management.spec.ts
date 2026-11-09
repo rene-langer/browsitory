@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { ADD_REMOTE_NAME_INPUT, expandSidebarSection, sidebarRemoteFolder } from "../support/sidebar";
+import { git } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-remote.git");
@@ -13,13 +13,10 @@ const REMOTE = "e2e-managed-remote";
 
 describe("Browsitory remote management", () => {
   before(() => {
-    execFileSync("git", ["add", "README.md"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "--allow-empty", "-m", "e2e: seed remote management branch"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "README.md");
+    git(E2E_REPO_PATH, "commit", "--allow-empty", "-m", "e2e: seed remote management branch");
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
-    execFileSync("git", ["init", "--bare", BARE_REMOTE_PATH], { stdio: "inherit" });
+    git(os.tmpdir(), "init", "--bare", BARE_REMOTE_PATH);
   });
 
   after(() => {
@@ -34,14 +31,14 @@ describe("Browsitory remote management", () => {
     // Adding a remote is reached via the tree's "Add" toolbar button (opens a context menu with
     // "New branch…"/"Add remote…"), not a standalone "Add remote" toggle.
     const addButton = await $('[aria-label="Add"]');
-    await addButton.waitForExist({ timeout: 10000 });
+    await addButton.waitForExist();
     await addButton.click();
     await (await $("button=Add remote…")).click();
 
     const remoteNameInput = await $(ADD_REMOTE_NAME_INPUT);
-    await remoteNameInput.waitForExist({ timeout: 10000 });
+    await remoteNameInput.waitForExist();
     const addRemoteButton = await (await $("form[aria-label='Add remote']")).$("button=Add remote");
-    await addRemoteButton.waitForEnabled({ timeout: 10000 });
+    await addRemoteButton.waitForEnabled();
     await remoteNameInput.setValue(REMOTE);
     const fetchUrlInput = await $("[data-testid='add-remote-fetch-url']");
     await fetchUrlInput.setValue(BARE_REMOTE_PATH);
@@ -49,13 +46,13 @@ describe("Browsitory remote management", () => {
 
     // The new remote renders as its own folder header in the tree.
     const remoteFolderHeader = await $(sidebarRemoteFolder(REMOTE));
-    await remoteFolderHeader.waitForExist({ timeout: 10000 });
+    await remoteFolderHeader.waitForExist();
 
     // Setting upstream is a context-menu action on the *current* local branch (its row carries
     // the " (current)" suffix, and the row itself is the interactive element — a `role="button"`
     // `<li>`, not a nested `<button>` — see `ListRow.tsx`).
     const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
-    await currentBranchButton.waitForExist({ timeout: 10000 });
+    await currentBranchButton.waitForExist();
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -64,7 +61,7 @@ describe("Browsitory remote management", () => {
     await (await $("button=Set upstream…")).click();
 
     const upstreamDialog = await $("dialog[aria-label^='Set upstream for']");
-    await upstreamDialog.waitForExist({ timeout: 10000 });
+    await upstreamDialog.waitForExist();
     const upstreamRemote = await upstreamDialog.$("select");
     await upstreamRemote.selectByAttribute("value", REMOTE);
     const upstreamBranch = await upstreamDialog.$("input");
@@ -82,7 +79,7 @@ describe("Browsitory remote management", () => {
     // confirmation `<dialog>` never appears).
     await browser.waitUntil(
       async () => (await upstreamSection.getText()).includes(`tracks ${REMOTE}/main`),
-      { timeout: 10000, timeoutMsg: "expected the upstream to be set before removing its remote" },
+      { timeoutMsg: "expected the upstream to be set before removing its remote" },
     );
 
     // Removing a remote is now a context-menu item ("Remove remote") on the remote's folder
@@ -94,17 +91,17 @@ describe("Browsitory remote management", () => {
     }, remoteFolderHeader);
     await (await $("button=Remove remote")).click();
     const blockingDialog = await $("dialog[aria-label='Remove remote confirmation']");
-    await blockingDialog.waitForExist({ timeout: 10000 });
+    await blockingDialog.waitForExist();
     expect(await blockingDialog.getText()).toContain("clear upstreams for");
     await (await blockingDialog.$("button=Confirm remove")).click();
     await browser.waitUntil(
       async () => (await upstreamSection.getText()).includes("No upstream"),
-      { timeout: 10000, timeoutMsg: "expected removing the remote to clear its upstream" },
+      { timeoutMsg: "expected removing the remote to clear its upstream" },
     );
 
     await browser.waitUntil(
-      () => !execFileSync("git", ["remote"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).split("\n").includes(REMOTE),
-      { timeout: 10000, timeoutMsg: `expected ${REMOTE} to be removed after confirmation` },
+      () => !git(E2E_REPO_PATH, "remote").split("\n").includes(REMOTE),
+      { timeoutMsg: `expected ${REMOTE} to be removed after confirmation` },
     );
   });
 });

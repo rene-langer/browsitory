@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "@wdio/globals";
 import { reloadSessionWithRetry } from "../support/session";
+import { RESTART_TIMEOUT } from "../support/timeouts";
 
 // The app's webview storage and logs live in `$XDG_DATA_HOME/<identifier>` (wdio.conf.ts points
 // XDG_DATA_HOME at this throwaway dir).
@@ -118,19 +119,19 @@ describe("Browsitory identifier migration", () => {
     // WebKitGTK writes localStorage to disk asynchronously, and ending the session stops the
     // app: without this wait the write can be lost before the folder is moved (#465).
     await browser.waitUntil(async () => filesWithProbe(NEW_DIR).length > 0, {
-      timeout: 20000,
+      timeout: RESTART_TIMEOUT,
       interval: 200,
       timeoutMsg: `the localStorage probe never reached the disk; files under ${NEW_DIR}: ${listing(NEW_DIR)}`,
     });
 
     await browser.deleteSession();
     await browser.waitUntil(async () => !appIsRunning(), {
-      timeout: 20000,
+      timeout: RESTART_TIMEOUT,
       timeoutMsg: "the app did not exit after the session ended",
     });
     // Its WebKit helpers too: one that is still running can recreate the folder (#465).
     await browser.waitUntil(async () => dataHomeProcesses().length === 0, {
-      timeout: 20000,
+      timeout: RESTART_TIMEOUT,
       interval: 200,
       timeoutMsg: `processes still use ${E2E_DATA_HOME} after the app exited: ${dataHomeProcesses().join("; ")}`,
     });
@@ -165,7 +166,7 @@ describe("Browsitory identifier migration", () => {
           seen = await browser.execute((key) => window.localStorage.getItem(key), PROBE_KEY);
           return seen === "kept";
         },
-        { timeout: 20000 },
+        { timeout: RESTART_TIMEOUT },
       )
       .catch(() => {
         throw new Error(

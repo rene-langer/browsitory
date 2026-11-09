@@ -2080,6 +2080,18 @@ only `error`.
     `waitForDisplayed({ reverse: true })` on an element that stays mounted is fine. After a
     commit made through the UI, wait on the repository (`e2e/support/git.ts`), not on a row
     whose text may already match something else.
+  - Shared spec helpers (#500): specs run the git CLI only through `e2e/support/git.ts`
+    (`git(cwd, ...args)` returns trimmed output and throws with git's stderr; `gitIn(repo)`
+    binds a repository; `gitWith` keeps output untrimmed or discards it). The child inherits
+    the runner's environment, so the screenshot run's isolated HOME and git config reach it.
+    `wdio.conf.ts` sets `waitforTimeout` to `UI_TIMEOUT` (`e2e/support/timeouts.ts`, 10 s), so
+    a wait passes `timeout` only when it needs longer, as a named constant (`SLOW_UI_TIMEOUT`,
+    `RESTART_TIMEOUT`, or a spec's own). `e2e/support/app.ts` holds `waitForAppReady` and the
+    retrying `openPalette`. The fixture repository set-up (`initFixtureRepo`, the "Test User"
+    identity) is one file, `extension/e2e/src/support/fixtureRepo.ts`, which both suites
+    import: there because `extension/e2e/` compiles with `rootDir: "src"` and can't import
+    from outside it, while `e2e/` runs TypeScript through tsx and can. Keep it to Node
+    built-ins.
   - Harness hardening (#182): `wdio.conf.ts` starts `tauri-driver` in its own process group,
     which also holds WebKitWebDriver and the app, and records the group id in
     `target/e2e-tauri-driver.pgid`. `afterSession` SIGTERMs the group, waits up to 5 s and

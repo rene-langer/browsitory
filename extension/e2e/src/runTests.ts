@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { runTests } from "@vscode/test-electron";
+import { initFixtureRepo } from "./support/fixtureRepo";
 import {
   getFreePort,
   killStaleDconfWatchers,
@@ -18,12 +18,7 @@ const E2E_REPO_PATH =
   process.env["VSCODE_E2E_REPO_PATH"] ?? path.join(os.tmpdir(), "browsitory-vscode-e2e-repo");
 
 function setupFixtureRepo() {
-  fs.rmSync(E2E_REPO_PATH, { recursive: true, force: true });
-  fs.mkdirSync(E2E_REPO_PATH, { recursive: true });
-  execFileSync("git", ["init"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-  execFileSync("git", ["config", "user.name", "Test User"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-  fs.writeFileSync(path.join(E2E_REPO_PATH, "README.md"), "vscode e2e fixture repo\n");
+  initFixtureRepo(E2E_REPO_PATH, "vscode e2e fixture repo\n");
   execFileSync("git", ["add", "README.md"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
   execFileSync("git", ["commit", "-m", "e2e: base commit"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
 }

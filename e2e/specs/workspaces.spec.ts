@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { expect } from "@wdio/globals";
+import { waitForAppReady } from "../support/app";
 import { waitUntilGoneInPage } from "../support/dom";
 import { reloadSessionWithRetry } from "../support/session";
-import { sidebarSectionToggle } from "../support/sidebar";
 
 const E2E_WORKSPACE_ROOT = path.join(os.tmpdir(), "browsitory-e2e-workspace-root");
 const E2E_WORKSPACE_REPO_A = path.join(E2E_WORKSPACE_ROOT, "repo-a");
@@ -12,10 +12,9 @@ const E2E_WORKSPACE_REPO_B = path.join(E2E_WORKSPACE_ROOT, "repo-b");
 const E2E_WORKSPACE_REPO_C = path.join(E2E_WORKSPACE_ROOT, "repo-c");
 const E2E_CONFIG_FILE = path.join(os.tmpdir(), "browsitory-e2e-config", "config.toml");
 const E2E_RESTORE_OPEN_REPOS_ONCE = "browsitory-e2e-restore-open-repos-once";
-
-async function waitForAppReady(): Promise<void> {
-  await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 10000 });
-}
+// The budget for the waits behind a `listWorkspaces()` round trip after a reload: see the
+// evidence in the comments below.
+const WORKSPACE_IPC_TIMEOUT = 45_000;
 
 async function openPickerOverlay(): Promise<void> {
   await waitForAppReady();
@@ -42,21 +41,21 @@ describe("Browsitory multi-repo workspaces", function () {
     await openPickerOverlay();
 
     const openAllButton = await $('button=Open all');
-    await openAllButton.waitForExist({ timeout: 10000 });
+    await openAllButton.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), openAllButton);
 
     await browser.waitUntil(
       async () => (await (await $$('[role="tab"]')).length) >= 2,
-      { timeout: 10000, timeoutMsg: "expected the workspace's two members to open as tabs" },
+      { timeoutMsg: "expected the workspace's two members to open as tabs" },
     );
 
     const groupLabel = await $('span*=E2E Workspace');
-    await groupLabel.waitForExist({ timeout: 10000 });
+    await groupLabel.waitForExist();
 
     const repoATab = await $(`button[title="${E2E_WORKSPACE_REPO_A}"]`);
     const repoBTab = await $(`button[title="${E2E_WORKSPACE_REPO_B}"]`);
-    await repoATab.waitForExist({ timeout: 10000 });
-    await repoBTab.waitForExist({ timeout: 10000 });
+    await repoATab.waitForExist();
+    await repoBTab.waitForExist();
 
     await browser.waitUntil(
       async () => {
@@ -66,16 +65,16 @@ describe("Browsitory multi-repo workspaces", function () {
           config.includes(`[[open_repos]]\npath = "${E2E_WORKSPACE_REPO_B}"`)
         );
       },
-      { timeout: 10000, timeoutMsg: "expected workspace members to persist before restart" },
+      { timeoutMsg: "expected workspace members to persist before restart" },
     );
 
     await browser.execute((key) => window.localStorage.setItem(key, "true"), E2E_RESTORE_OPEN_REPOS_ONCE);
     await reloadSessionWithRetry();
     await waitForAppReady();
 
-    await $('span*=E2E Workspace').waitForExist({ timeout: 10000 });
-    await $(`button[title="${E2E_WORKSPACE_REPO_A}"]`).waitForExist({ timeout: 10000 });
-    await $(`button[title="${E2E_WORKSPACE_REPO_B}"]`).waitForExist({ timeout: 10000 });
+    await $('span*=E2E Workspace').waitForExist();
+    await $(`button[title="${E2E_WORKSPACE_REPO_A}"]`).waitForExist();
+    await $(`button[title="${E2E_WORKSPACE_REPO_B}"]`).waitForExist();
 
     const closeGroupButton = await $('button[aria-label="Close E2E Workspace"]');
     await browser.execute((el) => (el as HTMLElement).click(), closeGroupButton);
@@ -95,7 +94,7 @@ describe("Browsitory multi-repo workspaces", function () {
     // also been observed to blow past 10s. Match the 45s budget used for that other IPC round
     // trip rather than a shorter one that only held up under low contention.
     const editButton = await $('button=Edit');
-    await editButton.waitForExist({ timeout: 45000 });
+    await editButton.waitForExist({ timeout: WORKSPACE_IPC_TIMEOUT });
     await browser.execute((el) => (el as HTMLElement).click(), editButton);
 
     // This is the first `scan_repos_in_root` invocation anywhere in this spec's session. A
@@ -105,7 +104,7 @@ describe("Browsitory multi-repo workspaces", function () {
     // real margin over both observed failures; `this.retries(1)`/`this.timeout(90000)` above are
     // the other half of this defense (see that comment for the full evidence).
     const repoCCheckbox = await $(`input[aria-label="${E2E_WORKSPACE_REPO_C}"]`);
-    await repoCCheckbox.waitForExist({ timeout: 45000 });
+    await repoCCheckbox.waitForExist({ timeout: WORKSPACE_IPC_TIMEOUT });
     expect(await repoCCheckbox.isSelected()).toBe(false);
 
     const repoACheckbox = await $(`input[aria-label="${E2E_WORKSPACE_REPO_A}"]`);
@@ -117,10 +116,10 @@ describe("Browsitory multi-repo workspaces", function () {
     // Saving waits for the config update and workspace refresh before returning to the picker.
     // Observe that return before reopening Edit so the second edit reads persisted membership.
     const openAllAfterSave = await $('button=Open all');
-    await openAllAfterSave.waitForExist({ timeout: 10000 });
+    await openAllAfterSave.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Edit'));
     const repoCCheckboxAfterSave = await $(`input[aria-label="${E2E_WORKSPACE_REPO_C}"]`);
-    await repoCCheckboxAfterSave.waitForExist({ timeout: 45000 });
+    await repoCCheckboxAfterSave.waitForExist({ timeout: WORKSPACE_IPC_TIMEOUT });
     expect(await repoCCheckboxAfterSave.isSelected()).toBe(true);
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Cancel'));
   });
@@ -139,10 +138,10 @@ describe("Browsitory multi-repo workspaces", function () {
     // Same `listWorkspaces()`-after-reload contention as the Edit test above — 45s budget, not
     // just enough for the picker overlay itself to render.
     const deleteButton = await $('button=Delete E2E Workspace');
-    await deleteButton.waitForExist({ timeout: 45000 });
+    await deleteButton.waitForExist({ timeout: WORKSPACE_IPC_TIMEOUT });
     await browser.execute((el) => (el as HTMLElement).click(), deleteButton);
     const confirmDialog = await $('dialog[aria-label="Delete workspace E2E Workspace"]');
-    await confirmDialog.waitForExist({ timeout: 10000 });
+    await confirmDialog.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), await $('button=Delete workspace'));
 
     // Expected: the workspace is removed from the list.

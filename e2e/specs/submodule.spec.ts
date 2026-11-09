@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { expandSidebarSection } from "../support/sidebar";
+import { git, gitWith } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const E2E_SUBMODULE_PATH = "deps/e2e-child";
@@ -13,15 +13,15 @@ const OPEN_IN_NEW_TAB = "//*[@role='menu']//button[@role='menuitem' and normaliz
 // so focused by script rather than clicked) and press Shift+F10.
 async function openSubmoduleMenu(): Promise<void> {
   const actions = await $(`section[aria-label='Submodules'] button[aria-label='Actions for ${E2E_SUBMODULE_PATH}']`);
-  await actions.waitForExist({ timeout: 10000 });
+  await actions.waitForExist();
   await browser.execute((el) => (el as HTMLElement).focus(), actions);
   await browser.keys(["Shift", "F10"]);
-  await $("[role='menu']").waitForExist({ timeout: 10000 });
+  await $("[role='menu']").waitForExist();
 }
 
 async function closeMenu(): Promise<void> {
   await browser.keys(["Escape"]);
-  await $("[role='menu']").waitForExist({ reverse: true, timeout: 10000 });
+  await $("[role='menu']").waitForExist({ reverse: true });
 }
 
 describe("Browsitory submodules", () => {
@@ -30,7 +30,7 @@ describe("Browsitory submodules", () => {
     await expandSidebarSection("Submodules");
 
     const initializeButton = await $("button=Initialize " + E2E_SUBMODULE_PATH);
-    await initializeButton.waitForExist({ timeout: 10000 });
+    await initializeButton.waitForExist();
 
     // Not checked out yet: nothing to open in a tab (#445), and the menu offers Initialize.
     await openSubmoduleMenu();
@@ -42,45 +42,39 @@ describe("Browsitory submodules", () => {
 
     await initializeButton.click();
     const initializedIndicator = await $("span=Initialized");
-    await initializedIndicator.waitForExist({ timeout: 10000 });
+    await initializedIndicator.waitForExist();
 
     const updateButton = await $("button=Update " + E2E_SUBMODULE_PATH);
     await updateButton.click();
     const childPath = path.join(E2E_REPO_PATH, E2E_SUBMODULE_PATH);
-    await updateButton.waitForEnabled({ timeout: 10000 });
+    await updateButton.waitForEnabled();
     await browser.waitUntil(
       () => {
         try {
-          const topLevel = execFileSync("git", ["rev-parse", "--show-toplevel"], {
-            cwd: childPath,
-            encoding: "utf8",
-          }).trim();
+          const topLevel = git(childPath, "rev-parse", "--show-toplevel");
           if (path.resolve(topLevel) !== path.resolve(childPath)) {
             return false;
           }
-          execFileSync("git", ["rev-parse", "--verify", "HEAD^{commit}"], {
-            cwd: childPath,
-            stdio: "ignore",
-          });
+          gitWith(childPath, ["rev-parse", "--verify", "HEAD^{commit}"], { stdio: "ignore" });
           return true;
         } catch {
           return false;
         }
       },
-      { timeout: 10000, timeoutMsg: "expected the child checkout to have its own valid HEAD" },
+      { timeoutMsg: "expected the child checkout to have its own valid HEAD" },
     );
 
-    execFileSync("git", ["config", "user.name", "Test User"], { cwd: childPath });
+    git(childPath, "config", "user.name", "Test User");
     fs.writeFileSync(path.join(childPath, "advanced.txt"), "advanced child commit\n");
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: childPath });
-    execFileSync("git", ["add", "."], { cwd: childPath });
-    execFileSync("git", ["commit", "-m", "e2e: advance child"], { cwd: childPath });
+    git(childPath, "config", "user.email", "test@example.com");
+    git(childPath, "add", ".");
+    git(childPath, "commit", "-m", "e2e: advance child");
 
     await initializeButton.click();
     // The uncommitted file list renders each row's `{path} ({kind})` text in a `<span>` inside
     // an `<li role="option">` (see `DiffPane.tsx`'s `FileListRow`), not in a `<button>`.
     const gitlinkStatus = await $("span=" + E2E_SUBMODULE_PATH + " (Modified)");
-    await gitlinkStatus.waitForExist({ timeout: 10000 });
+    await gitlinkStatus.waitForExist();
     await expect(gitlinkStatus).toBeExisting();
   });
 
@@ -90,7 +84,6 @@ describe("Browsitory submodules", () => {
     await openSubmoduleMenu();
     const openItem = await $(OPEN_IN_NEW_TAB);
     await browser.waitUntil(() => openItem.isEnabled(), {
-      timeout: 10000,
       timeoutMsg: "expected Open in new tab to be enabled for the checked-out submodule",
     });
     // The menu focuses its first enabled item, Open in new tab.
@@ -98,22 +91,21 @@ describe("Browsitory submodules", () => {
     await browser.keys(["Enter"]);
 
     await browser.waitUntil(async () => (await $$('[role="tab"]')).length === 2, {
-      timeout: 10000,
       timeoutMsg: "expected a second tab for the submodule",
     });
     const submoduleTab = await $(`//button[@role="tab" and contains(@title, "e2e-child")]`);
-    await submoduleTab.waitForExist({ timeout: 10000 });
+    await submoduleTab.waitForExist();
     expect(await submoduleTab.getAttribute("aria-selected")).toBe("true");
     expect(path.resolve((await submoduleTab.getAttribute("title")) ?? "")).toBe(
       path.resolve(E2E_REPO_PATH, E2E_SUBMODULE_PATH),
     );
     // The tab shows the submodule's own history, not the superproject's.
-    await $("li*=e2e: seed submodule").waitForExist({ timeout: 10000 });
+    await $("li*=e2e: seed submodule").waitForExist();
     // The submodule is checked out detached, and the commit the test above made on it is on no
     // branch: it shows anyway, marked HEAD (#467).
     const advancedRow = await $("li.commit-row*=e2e: advance child");
-    await advancedRow.waitForExist({ timeout: 10000, timeoutMsg: "expected the detached HEAD's commit in the submodule's graph" });
-    await advancedRow.$("span=HEAD").waitForExist({ timeout: 10000, timeoutMsg: "expected a HEAD badge on the detached HEAD's commit" });
+    await advancedRow.waitForExist({ timeoutMsg: "expected the detached HEAD's commit in the submodule's graph" });
+    await advancedRow.$("span=HEAD").waitForExist({ timeoutMsg: "expected a HEAD badge on the detached HEAD's commit" });
 
     // Close it again (the close button sits right after the tab, see `multi-repo.spec.ts`).
     await browser.execute(
@@ -121,7 +113,6 @@ describe("Browsitory submodules", () => {
       await $(`//button[@role="tab" and contains(@title, "e2e-child")]/following-sibling::button[1]`),
     );
     await browser.waitUntil(async () => (await $$('[role="tab"]')).length === 1, {
-      timeout: 10000,
       timeoutMsg: "expected the submodule tab to close",
     });
   });

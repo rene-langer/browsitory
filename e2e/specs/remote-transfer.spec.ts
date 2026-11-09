@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { createServer } from "node:https";
 import os from "node:os";
@@ -6,6 +5,7 @@ import path from "node:path";
 import { expect } from "@wdio/globals";
 import { clickInPage } from "../support/dom";
 import { ADD_REMOTE_NAME_INPUT, expandSidebarSection, sidebarRemoteFolder } from "../support/sidebar";
+import { git, gitWith } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_REMOTE_PATH = path.join(os.tmpdir(), "browsitory-e2e-transfer-remote.git");
@@ -54,7 +54,7 @@ async function startCredentialChallengeServer(): Promise<{
 // past this call.
 async function clickRemoteContextItem(remoteName: string, itemLabel: string) {
   const remoteHeader = await $(sidebarRemoteFolder(remoteName));
-  await remoteHeader.waitForExist({ timeout: 10000 });
+  await remoteHeader.waitForExist();
   await browser.execute((el) => {
     el.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -62,8 +62,8 @@ async function clickRemoteContextItem(remoteName: string, itemLabel: string) {
   }, remoteHeader);
   // The context menu's item, not the sync bar's button of the same name (Fetch).
   const menuItem = await $("[role='menu']").$(`button=${itemLabel}`);
-  await menuItem.waitForExist({ timeout: 10000 });
-  await menuItem.waitForEnabled({ timeout: 10000 });
+  await menuItem.waitForExist();
+  await menuItem.waitForEnabled();
   await menuItem.click();
 }
 
@@ -72,7 +72,7 @@ async function clickRemoteContextItem(remoteName: string, itemLabel: string) {
 // `<li>`, not a nested `<button>` — see `ListRow.tsx`).
 async function openSetUpstreamDialog() {
   const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
-  await currentBranchButton.waitForExist({ timeout: 10000 });
+  await currentBranchButton.waitForExist();
   await browser.execute((el) => {
     el.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -80,28 +80,28 @@ async function openSetUpstreamDialog() {
   }, currentBranchButton);
   await (await $("button=Set upstream…")).click();
   const dialog = await $("dialog[aria-label^='Set upstream for']");
-  await dialog.waitForExist({ timeout: 10000 });
+  await dialog.waitForExist();
   return dialog;
 }
 
 describe("Browsitory remote transfer", () => {
   before(() => {
     fs.writeFileSync(path.join(E2E_REPO_PATH, TRANSFER_SEED_FILE), "transfer seed\n");
-    execFileSync("git", ["add", "README.md", TRANSFER_SEED_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: seed transfer base"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    git(E2E_REPO_PATH, "add", "README.md", TRANSFER_SEED_FILE);
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: seed transfer base");
     fs.rmSync(BARE_REMOTE_PATH, { recursive: true, force: true });
     fs.rmSync(REMOTE_SOURCE_PATH, { recursive: true, force: true });
-    execFileSync("git", ["init", "--bare", BARE_REMOTE_PATH], { stdio: "inherit" });
-    const localBranch = execFileSync("git", ["branch", "--show-current"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+    git(os.tmpdir(), "init", "--bare", BARE_REMOTE_PATH);
+    const localBranch = git(E2E_REPO_PATH, "branch", "--show-current");
     const initialRefspecs = localBranch === "main" ? ["HEAD:main"] : ["HEAD:main", `HEAD:${localBranch}`];
-    execFileSync("git", ["push", BARE_REMOTE_PATH, ...initialRefspecs], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["clone", "--branch", "main", BARE_REMOTE_PATH, REMOTE_SOURCE_PATH], { stdio: "inherit" });
-    execFileSync("git", ["config", "user.name", "Test User"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
+    git(E2E_REPO_PATH, "push", BARE_REMOTE_PATH, ...initialRefspecs);
+    git(os.tmpdir(), "clone", "--branch", "main", BARE_REMOTE_PATH, REMOTE_SOURCE_PATH);
+    git(REMOTE_SOURCE_PATH, "config", "user.name", "Test User");
+    git(REMOTE_SOURCE_PATH, "config", "user.email", "test@example.com");
     fs.writeFileSync(path.join(REMOTE_SOURCE_PATH, "remote-change.txt"), "remote change\n");
-    execFileSync("git", ["add", "remote-change.txt"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: remote change"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
-    execFileSync("git", ["push", "origin", "main"], { cwd: REMOTE_SOURCE_PATH, stdio: "inherit" });
+    git(REMOTE_SOURCE_PATH, "add", "remote-change.txt");
+    git(REMOTE_SOURCE_PATH, "commit", "-m", "e2e: remote change");
+    git(REMOTE_SOURCE_PATH, "push", "origin", "main");
   });
 
   after(() => {
@@ -117,37 +117,30 @@ describe("Browsitory remote transfer", () => {
     // Adding a remote is reached via the tree's "Add" toolbar button (opens a context menu with
     // "New branch…"/"Add remote…"), not a standalone "Add remote" toggle.
     const addButton = await $('[aria-label="Add"]');
-    await addButton.waitForExist({ timeout: 10000 });
+    await addButton.waitForExist();
     await addButton.click();
     await (await $("button=Add remote…")).click();
 
     const remoteNameInput = await $(ADD_REMOTE_NAME_INPUT);
-    await remoteNameInput.waitForExist({ timeout: 10000 });
+    await remoteNameInput.waitForExist();
     const addRemoteButton = await (await $("form[aria-label='Add remote']")).$("button=Add remote");
-    await addRemoteButton.waitForEnabled({ timeout: 10000 });
+    await addRemoteButton.waitForEnabled();
     await remoteNameInput.setValue("transfer-origin");
     await (await $("[data-testid='add-remote-fetch-url']")).setValue(BARE_REMOTE_PATH);
     await addRemoteButton.click();
 
     const remoteFolderHeader = await $(sidebarRemoteFolder("transfer-origin"));
-    await remoteFolderHeader.waitForExist({ timeout: 10000 });
+    await remoteFolderHeader.waitForExist();
     await clickRemoteContextItem("transfer-origin", "Fetch");
 
-    const remoteHead = execFileSync("git", ["rev-parse", "refs/heads/main"], {
-      cwd: REMOTE_SOURCE_PATH,
-      encoding: "utf8",
-    }).trim();
+    const remoteHead = git(REMOTE_SOURCE_PATH, "rev-parse", "refs/heads/main");
     await browser.waitUntil(() => {
       try {
-        return execFileSync("git", ["rev-parse", "refs/remotes/transfer-origin/main"], {
-          cwd: E2E_REPO_PATH,
-          encoding: "utf8",
-        }).trim() === remoteHead;
+        return git(E2E_REPO_PATH, "rev-parse", "refs/remotes/transfer-origin/main") === remoteHead;
       } catch {
         return false;
       }
     }, {
-      timeout: 10000,
       timeoutMsg: "expected Fetch to update the transfer-origin tracking ref",
     });
     // The old "fetch button stays enabled after completion" check doesn't translate: "Fetch" is
@@ -166,36 +159,32 @@ describe("Browsitory remote transfer", () => {
       // open it here if that isn't the case.
       if (!(await $("form[aria-label='Add remote']").isExisting())) {
         const addButton = await $('[aria-label="Add"]');
-        await addButton.waitForExist({ timeout: 10000 });
+        await addButton.waitForExist();
         await addButton.click();
         await (await $("button=Add remote…")).click();
       }
       const remoteNameInput = await $(ADD_REMOTE_NAME_INPUT);
       const addRemoteButton = await (await $("form[aria-label='Add remote']")).$("button=Add remote");
-      await addRemoteButton.waitForEnabled({ timeout: 10000 });
+      await addRemoteButton.waitForEnabled();
       await remoteNameInput.setValue("credential-origin");
       await (await $("[data-testid='add-remote-fetch-url']")).setValue(challenge.url);
       await addRemoteButton.click();
-      await (await $(sidebarRemoteFolder("credential-origin"))).waitForExist({ timeout: 10000 });
+      await (await $(sidebarRemoteFolder("credential-origin"))).waitForExist();
 
       // This is the non-secret metadata the UI normally persists before saving a token. No
       // token is saved, so the loopback server invokes the real missing-credential callback.
-      execFileSync("git", ["config", "--local", "browsitory.remote.credential-origin.auth-mode", "https-token"], { cwd: E2E_REPO_PATH });
-      execFileSync("git", ["config", "--local", "browsitory.remote.credential-origin.username", "e2e-user"], { cwd: E2E_REPO_PATH });
+      git(E2E_REPO_PATH, "config", "--local", "browsitory.remote.credential-origin.auth-mode", "https-token");
+      git(E2E_REPO_PATH, "config", "--local", "browsitory.remote.credential-origin.username", "e2e-user");
       expect(
-        execFileSync("git", ["remote", "get-url", "credential-origin"], {
-          cwd: E2E_REPO_PATH,
-          encoding: "utf8",
-        }).trim(),
+        git(E2E_REPO_PATH, "remote", "get-url", "credential-origin"),
       ).toBe(challenge.url);
 
       await clickRemoteContextItem("credential-origin", "Fetch");
       await browser.waitUntil(() => challenge.requests() > 0, {
-        timeout: 10000,
         timeoutMsg: "expected Fetch to reach the loopback HTTPS credential challenge",
       });
       const alert = await $("p[role='alert']");
-      await alert.waitForExist({ timeout: 10000 });
+      await alert.waitForExist();
       await expect(alert).toHaveText(expect.stringMatching(/Save an HTTPS token for this remote before retrying\.|operating-system credential store is unavailable/));
       expect(await alert.getText()).not.toContain(challenge.url);
     } finally {
@@ -207,7 +196,7 @@ describe("Browsitory remote transfer", () => {
     // Idempotent re-expand — see the first test's comment.
     await expandSidebarSection("Branches");
 
-    expect(execFileSync("git", ["status", "--porcelain"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim()).toBe("");
+    expect(git(E2E_REPO_PATH, "status", "--porcelain")).toBe("");
     const upstreamDialog = await openSetUpstreamDialog();
     const upstreamRemote = await upstreamDialog.$("select");
     await upstreamRemote.selectByAttribute("value", "transfer-origin");
@@ -217,16 +206,13 @@ describe("Browsitory remote transfer", () => {
 
     // The sidebar's Upstream Pull, next to the upstream just set; the sync bar has one too.
     const pullButton = await $("div[aria-label='Upstream actions']").$("button=Pull");
-    await pullButton.waitForEnabled({ timeout: 10000 });
+    await pullButton.waitForEnabled();
     await pullButton.click();
 
-    const remoteHead = execFileSync("git", ["rev-parse", "refs/heads/main"], {
-      cwd: REMOTE_SOURCE_PATH,
-      encoding: "utf8",
-    }).trim();
+    const remoteHead = git(REMOTE_SOURCE_PATH, "rev-parse", "refs/heads/main");
     await browser.waitUntil(
-      () => execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim() === remoteHead,
-      { timeout: 10000, timeoutMsg: "expected Pull to fast-forward the local branch" },
+      () => git(E2E_REPO_PATH, "rev-parse", "HEAD") === remoteHead,
+      { timeoutMsg: "expected Pull to fast-forward the local branch" },
     );
   });
 
@@ -237,22 +223,18 @@ describe("Browsitory remote transfer", () => {
     await expandSidebarSection("Tags");
 
     try {
-      execFileSync("git", ["config", "--local", "--unset-all", "browsitory.remote.transfer-origin.auth-mode"], {
-        cwd: E2E_REPO_PATH,
+      gitWith(E2E_REPO_PATH, ["config", "--local", "--unset-all", "browsitory.remote.transfer-origin.auth-mode"], {
         stdio: "ignore",
       });
     } catch {
       // Auth mode may be absent in a fresh fixture.
     }
-    const currentBranch = execFileSync("git", ["branch", "--show-current"], {
-      cwd: E2E_REPO_PATH,
-      encoding: "utf8",
-    }).trim();
+    const currentBranch = git(E2E_REPO_PATH, "branch", "--show-current");
     // Pin git's default push.default so the host's config cannot change the flow below.
-    execFileSync("git", ["config", "--local", "push.default", "simple"], { cwd: E2E_REPO_PATH, stdio: "ignore" });
+    gitWith(E2E_REPO_PATH, ["config", "--local", "push.default", "simple"], { stdio: "ignore" });
     const configured = (key: string) => {
       try {
-        return execFileSync("git", ["config", key], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+        return git(E2E_REPO_PATH, "config", key);
       } catch {
         return null;
       }
@@ -267,10 +249,7 @@ describe("Browsitory remote transfer", () => {
     const needsChoice = upstreamBranch !== null && upstreamBranch !== currentBranch;
     const bareTip = (branch: string) => {
       try {
-        return execFileSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], {
-          cwd: BARE_REMOTE_PATH,
-          encoding: "utf8",
-        }).trim();
+        return git(BARE_REMOTE_PATH, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
       } catch {
         return null;
       }
@@ -278,37 +257,36 @@ describe("Browsitory remote transfer", () => {
     const remoteHeadBeforePush = bareTip(currentBranch);
     const upstreamBeforePush = upstreamBranch === null ? null : bareTip(upstreamBranch);
     fs.writeFileSync(path.join(E2E_REPO_PATH, BRANCH_PUSH_FILE), "branch push\n");
-    execFileSync("git", ["add", BRANCH_PUSH_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: branch push change"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    const localHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+    git(E2E_REPO_PATH, "add", BRANCH_PUSH_FILE);
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: branch push change");
+    const localHead = git(E2E_REPO_PATH, "rev-parse", "HEAD");
     expect(localHead).not.toBe(remoteHeadBeforePush);
 
     await clickRemoteContextItem("transfer-origin", "Push current branch here");
     if (needsChoice) {
       const dialog = await $(`dialog[aria-label="Push ${currentBranch}"]`);
-      await dialog.waitForExist({ timeout: 10000 });
+      await dialog.waitForExist();
       await expect(await dialog.$("select")).toHaveValue("transfer-origin");
       await expect(await dialog.$("input:not([type='checkbox'])")).toHaveValue(currentBranch);
       await expect(await dialog.$("input[type='checkbox']")).not.toBeSelected();
       await (await dialog.$("button=Push")).click();
     }
     await browser.waitUntil(() => bareTip(currentBranch) === localHead, {
-      timeout: 10000,
       timeoutMsg: "expected Push to advance the remote branch",
     });
     // The differently named upstream branch is never the silent target.
     if (needsChoice) expect(bareTip(upstreamBranch)).toBe(upstreamBeforePush);
 
     // #438: tag the commit before HEAD from its row in the graph, without checking it out.
-    const parent = execFileSync("git", ["rev-parse", "HEAD~1"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+    const parent = git(E2E_REPO_PATH, "rev-parse", "HEAD~1");
     const parentRow = await $(`li.commit-row[data-commit-id="${parent}"]`);
-    await parentRow.waitForExist({ timeout: 10000 });
+    await parentRow.waitForExist();
     await browser.execute((el) => {
       el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     }, parentRow);
     await clickInPage("[role='menu'] button", "Create tag…");
     const tagDialog = await $("dialog[aria-label='Create tag']");
-    await tagDialog.waitForExist({ timeout: 10000 });
+    await tagDialog.waitForExist();
     await expect(tagDialog).toHaveText(expect.stringContaining(parent.slice(0, 7)));
     await (await tagDialog.$("//label[contains(., 'Tag name')]/following-sibling::input")).setValue("e2e-transfer-tag");
     await clickInPage("dialog[aria-label='Create tag'] button[type='submit']", "Create tag");
@@ -316,33 +294,30 @@ describe("Browsitory remote transfer", () => {
       () => {
         try {
           return (
-            execFileSync("git", ["rev-parse", "refs/tags/e2e-transfer-tag^{commit}"], {
-              cwd: E2E_REPO_PATH,
-              encoding: "utf8",
-            }).trim() === parent
+            git(E2E_REPO_PATH, "rev-parse", "refs/tags/e2e-transfer-tag^{commit}") === parent
           );
         } catch {
           return false;
         }
       },
-      { timeout: 10000, timeoutMsg: "expected the tag to be created at the older commit" },
+      { timeoutMsg: "expected the tag to be created at the older commit" },
     );
-    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim()).toBe(localHead);
+    expect(git(E2E_REPO_PATH, "rev-parse", "HEAD")).toBe(localHead);
     const pushTags = await $("button=Push all tags");
-    await pushTags.waitForEnabled({ timeout: 10000 });
+    await pushTags.waitForEnabled();
     await $("section[aria-labelledby='push-tags-heading'] select").selectByAttribute("value", "transfer-origin");
     await browser.execute((el) => (el as HTMLElement).click(), pushTags);
 
     await browser.waitUntil(
       () => {
         try {
-          execFileSync("git", ["show-ref", "--verify", "refs/tags/e2e-transfer-tag"], { cwd: BARE_REMOTE_PATH, stdio: "ignore" });
+          gitWith(BARE_REMOTE_PATH, ["show-ref", "--verify", "refs/tags/e2e-transfer-tag"], { stdio: "ignore" });
           return true;
         } catch {
           return false;
         }
       },
-      { timeout: 10000, timeoutMsg: "expected tag push to complete" },
+      { timeoutMsg: "expected tag push to complete" },
     );
   });
 
@@ -351,7 +326,7 @@ describe("Browsitory remote transfer", () => {
     await expandSidebarSection("Tags");
     const hasTag = (cwd: string) => {
       try {
-        execFileSync("git", ["show-ref", "--verify", "refs/tags/e2e-transfer-tag"], { cwd, stdio: "ignore" });
+        gitWith(cwd, ["show-ref", "--verify", "refs/tags/e2e-transfer-tag"], { stdio: "ignore" });
         return true;
       } catch {
         return false;
@@ -361,11 +336,11 @@ describe("Browsitory remote transfer", () => {
 
     // The Tags panel row's "…" menu (shown on hover/focus, clickable in the page either way).
     const actions = await $('button[aria-label="Actions for e2e-transfer-tag"]');
-    await actions.waitForExist({ timeout: 10000 });
+    await actions.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), actions);
     await clickInPage("[role='menu'] button", "Delete from remote…");
     const dialog = await $("dialog[aria-label='Delete tag e2e-transfer-tag from remote']");
-    await dialog.waitForExist({ timeout: 10000 });
+    await dialog.waitForExist();
     // A picker only appears with several remotes; aim at this spec's own remote either way.
     const picker = await dialog.$("select");
     if (await picker.isExisting()) await picker.selectByAttribute("value", "transfer-origin");
@@ -374,11 +349,9 @@ describe("Browsitory remote transfer", () => {
     await (await dialog.$("button=Delete from remote")).click();
 
     await browser.waitUntil(() => !hasTag(BARE_REMOTE_PATH), {
-      timeout: 10000,
       timeoutMsg: "expected the tag to be deleted on the remote",
     });
     await browser.waitUntil(() => !hasTag(E2E_REPO_PATH), {
-      timeout: 10000,
       timeoutMsg: "expected the local tag to be deleted after the remote delete",
     });
   });
@@ -391,7 +364,7 @@ describe("Browsitory remote transfer", () => {
     // The `aria-label` naming this dialog now lives on the `<dialog>` itself, not a nested
     // `<form>` (the form carries no attributes of its own).
     const credentialsForm = await $("dialog[aria-label='Credentials for transfer-origin']");
-    await credentialsForm.waitForExist({ timeout: 10000 });
+    await credentialsForm.waitForExist();
     await credentialsForm.$("select").selectByAttribute("value", "SshAgent");
 
     expect(await credentialsForm.$("input[type='password']").isExisting()).toBe(false);
@@ -400,22 +373,15 @@ describe("Browsitory remote transfer", () => {
     await browser.waitUntil(
       () => {
         try {
-          return execFileSync(
-            "git",
-            ["config", "--get", "browsitory.remote.transfer-origin.auth-mode"],
-            { cwd: E2E_REPO_PATH, encoding: "utf8" },
-          ).trim() === "ssh-agent";
+          return git(E2E_REPO_PATH, "config", "--get", "browsitory.remote.transfer-origin.auth-mode") === "ssh-agent";
         } catch {
           return false;
         }
       },
-      { timeout: 10000, timeoutMsg: "expected SSH-agent mode to be stored without an HTTPS credential" },
+      { timeoutMsg: "expected SSH-agent mode to be stored without an HTTPS credential" },
     );
     expect(
-      execFileSync("git", ["config", "--get-regexp", "^browsitory\\.remote\\.transfer-origin\\."], {
-        cwd: E2E_REPO_PATH,
-        encoding: "utf8",
-      }).trim(),
+      git(E2E_REPO_PATH, "config", "--get-regexp", "^browsitory\\.remote\\.transfer-origin\\."),
     ).toBe("browsitory.remote.transfer-origin.auth-mode ssh-agent");
   });
 });

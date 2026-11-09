@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { git } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const HUNK_FIXTURE_FILE = "hunk-fixture.txt";
@@ -12,11 +12,8 @@ describe("Browsitory hunk staging", () => {
     const filePath = path.join(E2E_REPO_PATH, HUNK_FIXTURE_FILE);
     const original = Array.from({ length: 15 }, (_, i) => `line ${i + 1}`).join("\n") + "\n";
     fs.writeFileSync(filePath, original);
-    execFileSync("git", ["add", HUNK_FIXTURE_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: seed hunk fixture file"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", HUNK_FIXTURE_FILE);
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: seed hunk fixture file");
     const lines = original.split("\n");
     lines[1] = "line 2 changed";
     lines[13] = "line 14 changed";
@@ -29,12 +26,12 @@ describe("Browsitory hunk staging", () => {
     // already makes; nothing in this suite asserts an exact commit count. All that matters for
     // the next spec (alphabetically after "hunk-") is a clean working tree, so just check the
     // fixture file back out to match the latest commit.
-    execFileSync("git", ["checkout", "--", HUNK_FIXTURE_FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    git(E2E_REPO_PATH, "checkout", "--", HUNK_FIXTURE_FILE);
   });
 
   it("stages a single hunk, commits it, and leaves the other hunk's edit unstaged", async () => {
     const fileRow = await $(`li*=${HUNK_FIXTURE_FILE}`);
-    await fileRow.waitForExist({ timeout: 10000 });
+    await fileRow.waitForExist();
     // The row's `{path} ({kind})` text lives in a `<span>` inside `<li role="option">` (see
     // `DiffPane.tsx`'s `FileListRow`), not in a `<button>`; the click bubbles to the `<li>`.
     await browser.execute((el) => (el as HTMLElement).click(), await $(`span=${HUNK_FIXTURE_FILE} (Modified)`));
@@ -45,7 +42,7 @@ describe("Browsitory hunk staging", () => {
 
     await browser.waitUntil(
       async () => (await (await $$("button=Stage hunk")).length) === 1,
-      { timeout: 10000, timeoutMsg: "expected only one unstaged hunk to remain after staging the other" },
+      { timeoutMsg: "expected only one unstaged hunk to remain after staging the other" },
     );
 
     const commitMessageBox = await $("textarea");
@@ -58,16 +55,13 @@ describe("Browsitory hunk staging", () => {
     // could still see the seed commit, without "line 2 changed" (#182).
     await browser.waitUntil(
       () =>
-        execFileSync("git", ["log", "-1", "--format=%s"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim() ===
+        git(E2E_REPO_PATH, "log", "-1", "--format=%s") ===
         "stage one hunk",
-      { timeout: 10000, timeoutMsg: "the commit of the staged hunk did not land" },
+      { timeoutMsg: "the commit of the staged hunk did not land" },
     );
     expect(fs.readFileSync(path.join(E2E_REPO_PATH, HUNK_FIXTURE_FILE), "utf8")).toContain("line 14 changed");
 
-    const committedShow = execFileSync("git", ["show", "HEAD:" + HUNK_FIXTURE_FILE], {
-      cwd: E2E_REPO_PATH,
-      encoding: "utf8",
-    });
+    const committedShow = git(E2E_REPO_PATH, "show", "HEAD:" + HUNK_FIXTURE_FILE);
     expect(committedShow).toContain("line 2 changed");
     expect(committedShow).not.toContain("line 14 changed");
   });

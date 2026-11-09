@@ -1,21 +1,19 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { gitIn } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const OLD_NAME = "history-old.txt";
 const NEW_NAME = "history-new.txt";
 const BODY = "l1\nl2\nl3\nl4\nl5\n";
 
-function git(...args: string[]) {
-  execFileSync("git", args, { cwd: E2E_REPO_PATH, stdio: "inherit" });
-}
+const git = gitIn(E2E_REPO_PATH);
 
 async function clickViaScript(selector: string) {
   const el = await $(selector);
-  await el.waitForExist({ timeout: 10000 });
+  await el.waitForExist();
   await browser.execute((node) => (node as HTMLElement).scrollIntoView({ block: "center" }), el);
   await browser.execute((node) => (node as HTMLElement).click(), el);
 }
@@ -37,23 +35,23 @@ describe("Browsitory file history", () => {
     await clickViaScript(`button[aria-label="History of ${NEW_NAME}"]`);
 
     const banner = await $(`[role="toolbar"][aria-label="File history"]`);
-    await banner.waitForExist({ timeout: 10000 });
+    await banner.waitForExist();
     await expect(banner).toHaveText(expect.stringContaining(NEW_NAME));
 
     const renameRow = await $("li*=e2e: history rename");
-    await renameRow.waitForExist({ timeout: 10000 });
+    await renameRow.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), renameRow);
-    await (await $(`span=Renamed from ${OLD_NAME}`)).waitForExist({ timeout: 10000 });
+    await (await $(`span=Renamed from ${OLD_NAME}`)).waitForExist();
 
     // The rename diff is against the old path, so only the edited line is added.
-    await (await $(".diff-line-add*=CHANGED")).waitForExist({ timeout: 10000 });
+    await (await $(".diff-line-add*=CHANGED")).waitForExist();
 
     const addRow = await $("li*=e2e: history add");
-    await addRow.waitForExist({ timeout: 10000 });
+    await addRow.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), addRow);
-    await (await $(".diff-line-add*=l1")).waitForExist({ timeout: 10000 });
+    await (await $(".diff-line-add*=l1")).waitForExist();
 
     await clickViaScript(`button[aria-label="Close file history"]`);
-    await (await $(`ul[aria-label="Commit history"]`)).waitForExist({ timeout: 10000 });
+    await (await $(`ul[aria-label="Commit history"]`)).waitForExist();
   });
 });

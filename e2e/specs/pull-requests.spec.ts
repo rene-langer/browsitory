@@ -61,17 +61,16 @@ async function addRemote(name: string, url: string) {
   // test, typically).
   if (!(await $("form[aria-label='Add remote']").isExisting())) {
     const addButton = await $('[aria-label="Add"]');
-    await addButton.waitForExist({ timeout: 10000 });
+    await addButton.waitForExist();
     await addButton.click();
     await (await $("button=Add remote…")).click();
   }
   const remoteNameInput = await $(ADD_REMOTE_NAME_INPUT);
-  await remoteNameInput.waitForExist({ timeout: 10000 });
+  await remoteNameInput.waitForExist();
   await remoteNameInput.setValue(name);
   await (await $("[data-testid='add-remote-fetch-url']")).setValue(url);
   await (await $("button=Add remote")).click();
   await browser.waitUntil(async () => (await remoteNameInput.getValue()) === "", {
-    timeout: 10000,
     timeoutMsg: `expected remote ${name} to finish being added`,
   });
 }
@@ -103,7 +102,7 @@ describe("Browsitory pull requests", () => {
     // `aria-label` on the section, composed as "{provider}: {owner}/{name} ({remoteName})" (see
     // `PullRequestPanel.tsx`'s `sectionLabel`) — selectors below match that new label text.
     const githubSection = await $("section[aria-label='GitHub: acme/widget (gh-origin)']");
-    await githubSection.waitForExist({ timeout: 10000 });
+    await githubSection.waitForExist();
     const bitbucketSection = await $("section[aria-label='Bitbucket: acme/widget (bb-origin)']");
     await expect(bitbucketSection).toBeExisting();
 
@@ -133,12 +132,12 @@ describe("Browsitory pull requests", () => {
     await (await section.$("button=Save token")).click();
     await browser.waitUntil(
       async () => (await (await section.$("aria/Access token")).getValue()) === "",
-      { timeout: 10000, timeoutMsg: "expected the GitHub token input to clear after save" },
+      { timeoutMsg: "expected the GitHub token input to clear after save" },
     );
 
     await (await section.$("button=List pull requests")).click();
     const listedRow = await section.$("li*=Add pull request support");
-    await listedRow.waitForExist({ timeout: 10000 });
+    await listedRow.waitForExist();
     expect(await listedRow.getText()).toContain("#7");
     expect(await listedRow.getText()).toContain("feature/pr");
 
@@ -152,7 +151,7 @@ describe("Browsitory pull requests", () => {
     await (await createForm.$("button=Create pull request")).click();
 
     const createdRow = await section.$("li*=Add feature");
-    await createdRow.waitForExist({ timeout: 10000 });
+    await createdRow.waitForExist();
     expect(await createdRow.getText()).toContain("#8");
     // The row above renders as soon as `createPullRequest`'s own state update lands, but the form
     // only clears once that call's wrapping `runMutationWithOutcome` also finishes its trailing
@@ -160,7 +159,7 @@ describe("Browsitory pull requests", () => {
     // asserted immediately, same as the token-clear wait above.
     await browser.waitUntil(
       async () => (await (await createForm.$("aria/Title")).getValue()) === "",
-      { timeout: 10000, timeoutMsg: "expected the Title field to clear after a successful create" },
+      { timeoutMsg: "expected the Title field to clear after a successful create" },
     );
 
     const createRequest = await server.lastRequestFor("github-create");
@@ -191,12 +190,12 @@ describe("Browsitory pull requests", () => {
     await (await section.$("button=Save token")).click();
     await browser.waitUntil(
       async () => (await (await section.$("aria/Access token")).getValue()) === "",
-      { timeout: 10000, timeoutMsg: "expected the Bitbucket token input to clear after save" },
+      { timeoutMsg: "expected the Bitbucket token input to clear after save" },
     );
 
     await (await section.$("button=List pull requests")).click();
     const listedRow = await section.$("li*=Add pull request support");
-    await listedRow.waitForExist({ timeout: 10000 });
+    await listedRow.waitForExist();
     expect(await listedRow.getText()).toContain("#12");
 
     const listRequest = await server.lastRequestFor("bitbucket-list");
@@ -209,7 +208,7 @@ describe("Browsitory pull requests", () => {
     await (await createForm.$("button=Create pull request")).click();
 
     const createdRow = await section.$("li*=Add feature");
-    await createdRow.waitForExist({ timeout: 10000 });
+    await createdRow.waitForExist();
     expect(await createdRow.getText()).toContain("#13");
 
     const createRequest = await server.lastRequestFor("bitbucket-create");

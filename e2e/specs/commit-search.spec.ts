@@ -1,9 +1,10 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { clickInPage } from "../support/dom";
+import { gitIn } from "../support/git";
+import { SLOW_UI_TIMEOUT } from "../support/timeouts";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "search-e2e.txt";
@@ -11,9 +12,7 @@ const SUMMARY = "e2e: search target";
 const AUTHOR = "Searchy McAuthor <searchy@example.com>";
 const QUERY = "author:searchy";
 
-function git(...args: string[]) {
-  execFileSync("git", args, { cwd: E2E_REPO_PATH, stdio: "inherit" });
-}
+const git = gitIn(E2E_REPO_PATH);
 
 describe("Browsitory commit search", () => {
   before(() => {
@@ -24,7 +23,7 @@ describe("Browsitory commit search", () => {
 
   it("finds a commit by author, opens it, and closes back to the graph", async () => {
     const input = await $(`input[aria-label="Search commits"]`);
-    await input.waitForExist({ timeout: 10000 });
+    await input.waitForExist();
     // Type the query and wait for the matching row, checking both in one in-page step per
     // poll. A chained `$(list).$(row)` lookup gives up when the list is not there after the
     // implicit wait, and in CI (#479) the list never appeared at all: the list renders as soon as
@@ -50,14 +49,14 @@ describe("Browsitory commit search", () => {
           QUERY,
           SUMMARY,
         ),
-      { timeout: 15000, timeoutMsg: `no search result for "${QUERY}" containing "${SUMMARY}"` },
+      { timeout: SLOW_UI_TIMEOUT, timeoutMsg: `no search result for "${QUERY}" containing "${SUMMARY}"` },
     );
     await clickInPage(`ul[aria-label="Search results"] li`, SUMMARY, { contains: true });
-    await (await $(`dd*=Searchy McAuthor`)).waitForExist({ timeout: 10000 });
+    await (await $(`dd*=Searchy McAuthor`)).waitForExist();
 
     const close = await $(`button[aria-label="Close search"]`);
     await browser.execute((el) => (el as HTMLElement).click(), close);
-    await (await $(`ul[aria-label="Commit history"]`)).waitForExist({ timeout: 10000 });
+    await (await $(`ul[aria-label="Commit history"]`)).waitForExist();
     await expect($(`input[aria-label="Search commits"]`)).toHaveValue("");
   });
 });

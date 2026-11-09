@@ -1,10 +1,11 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { waitUntilGoneInPage } from "../support/dom";
 import { expandSidebarSection, sidebarRemoteFolder } from "../support/sidebar";
+import { git, gitWith } from "../support/git";
+import { SLOW_UI_TIMEOUT } from "../support/timeouts";
 
 // Owns everything it touches: the remote `publish-origin`, the local branch `e2e-publish` and
 // the bare directory. It never uses Fetch all (other specs may leave unreachable remotes in the
@@ -13,10 +14,6 @@ const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const BARE_PATH = path.join(os.tmpdir(), "browsitory-e2e-publish-remote.git");
 const REMOTE = "publish-origin";
 const BRANCH = "e2e-publish";
-
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
-}
 
 function bareHas(branch: string): boolean {
   try {
@@ -39,7 +36,7 @@ function localHas(ref: string): boolean {
 // Right-click via a synthetic DOM event (see rebase.spec.ts on why not `.click({ button: "right" })`).
 async function contextMenu(selector: string) {
   const element = await $(selector);
-  await element.waitForExist({ timeout: 10000 });
+  await element.waitForExist();
   await browser.execute((el) => {
     el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
   }, element);
@@ -50,7 +47,7 @@ describe("Browsitory refs and remotes", () => {
     // Order-independent: some earlier spec may or may not have committed yet.
     git(E2E_REPO_PATH, "commit", "--allow-empty", "-m", "e2e: seed for publish");
     fs.rmSync(BARE_PATH, { recursive: true, force: true });
-    execFileSync("git", ["init", "--bare", BARE_PATH], { stdio: "ignore" });
+    gitWith(os.tmpdir(), ["init", "--bare", BARE_PATH], { stdio: "ignore" });
     try {
       git(E2E_REPO_PATH, "remote", "remove", REMOTE);
     } catch {
@@ -81,11 +78,11 @@ describe("Browsitory refs and remotes", () => {
     // Local row for e2e-publish, found by its unique swatch label (remote rows say "<remote>/<name>").
     await contextMenu(`//button[@aria-label="Show ${BRANCH} in graph"]/ancestor::li[1]`);
     const pushTo = await $("button=Push to…");
-    await pushTo.waitForEnabled({ timeout: 10000 });
+    await pushTo.waitForEnabled();
     await pushTo.click();
 
     const dialog = await $(`dialog[aria-label="Push ${BRANCH}"]`);
-    await dialog.waitForExist({ timeout: 10000 });
+    await dialog.waitForExist();
     const remoteSelect = await dialog.$("select");
     await browser.execute(
       (el, value) => {
@@ -101,7 +98,7 @@ describe("Browsitory refs and remotes", () => {
     await (await dialog.$("button=Push")).click();
 
     await browser.waitUntil(() => bareHas(BRANCH), {
-      timeout: 15000,
+      timeout: SLOW_UI_TIMEOUT,
       timeoutMsg: "expected the bare remote to receive the published branch",
     });
     expect(git(BARE_PATH, "rev-parse", `refs/heads/${BRANCH}`)).toBe(pushedTip);
@@ -116,25 +113,25 @@ describe("Browsitory refs and remotes", () => {
           return false;
         }
       },
-      { timeout: 10000, timeoutMsg: "expected Set as upstream to record the upstream" },
+      { timeoutMsg: "expected Set as upstream to record the upstream" },
     );
 
     // Expand the remote folder and delete the branch from its row's menu.
     const remoteFolder = await $(sidebarRemoteFolder(REMOTE));
-    await remoteFolder.waitForExist({ timeout: 10000 });
+    await remoteFolder.waitForExist();
     await remoteFolder.click();
     await contextMenu(`//button[@aria-label="Show ${REMOTE}/${BRANCH} in graph"]/ancestor::li[1]`);
     const deleteItem = await $(`button=Delete ${REMOTE}/${BRANCH}…`);
-    await deleteItem.waitForEnabled({ timeout: 10000 });
+    await deleteItem.waitForEnabled();
     await deleteItem.click();
 
     const confirm = await $(`dialog[aria-label="Delete remote branch"]`);
-    await confirm.waitForExist({ timeout: 10000 });
+    await confirm.waitForExist();
     await expect(confirm).toHaveText(expect.stringContaining(`Delete ${REMOTE}/${BRANCH} on the remote?`));
     await (await confirm.$("button=Delete remote branch")).click();
 
     await browser.waitUntil(() => !bareHas(BRANCH) && !localHas(`refs/remotes/${REMOTE}/${BRANCH}`), {
-      timeout: 15000,
+      timeout: SLOW_UI_TIMEOUT,
       timeoutMsg: "expected the remote branch and its tracking ref to be deleted",
     });
     // The open remote folder reloads after the refresh, so the row disappears in place.

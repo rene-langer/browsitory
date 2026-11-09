@@ -1,4 +1,5 @@
 import { browser } from "@wdio/globals";
+import { UI_TIMEOUT } from "./timeouts";
 
 // In-page waits and clicks for elements that unmount (#182).
 //
@@ -32,7 +33,7 @@ function describeTarget(selector: string, text: string | undefined, contains: bo
 export async function waitUntilGoneInPage(
   selector: string,
   text?: string,
-  { contains = false, timeout = 10000 }: InPageOptions = {},
+  { contains = false, timeout = UI_TIMEOUT }: InPageOptions = {},
 ): Promise<void> {
   await browser.waitUntil(
     () =>
@@ -60,7 +61,7 @@ export async function waitUntilGoneInPage(
 export async function waitUntilInPage(
   selector: string,
   text?: string,
-  { contains = false, timeout = 10000 }: InPageOptions = {},
+  { contains = false, timeout = UI_TIMEOUT }: InPageOptions = {},
 ): Promise<void> {
   await browser.waitUntil(
     () =>
@@ -85,7 +86,7 @@ export async function waitUntilInPage(
 export async function clickInPage(
   selector: string,
   text?: string,
-  { contains = false, timeout = 10000 }: InPageOptions = {},
+  { contains = false, timeout = UI_TIMEOUT }: InPageOptions = {},
 ): Promise<void> {
   await browser.waitUntil(
     () =>

@@ -48,7 +48,7 @@ export const ADD_REMOTE_NAME_INPUT = "//form[@aria-label='Add remote']//label[co
 // call unconditionally regardless of what earlier specs left behind.
 export async function expandSidebarSection(title: string): Promise<void> {
   const trigger = await $(sidebarSectionToggle(title));
-  await trigger.waitForExist({ timeout: 10000 });
+  await trigger.waitForExist();
   if ((await trigger.getAttribute("aria-expanded")) !== "true") {
     await trigger.click();
   }

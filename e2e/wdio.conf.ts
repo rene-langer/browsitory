@@ -12,8 +12,12 @@ import { fileURLToPath } from "node:url";
 // packages ship their own types rather than `@types/*` packages.
 import "webdriverio";
 import "@wdio/types";
+// Shared with the VSCode suite; see that file's header for why it lives there.
+import { initFixtureRepo, setTestIdentity } from "../extension/e2e/src/support/fixtureRepo";
 import { closeSharedForgeFixtureServer, startSharedForgeFixtureServer } from "./support/forgeFixtureServer";
+import { git } from "./support/git";
 import { registerDriverRestart } from "./support/session";
+import { UI_TIMEOUT } from "./support/timeouts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -53,54 +57,25 @@ const CREDENTIAL_CERT_PATH = path.join(CREDENTIAL_CERT_DIR, "cert.pem");
 // `before`/`it` hook in the spec file gets to run. So the fixture repo has to exist on disk
 // before the session starts, which means `onPrepare` (runs once, before any session) rather
 // than a per-spec mocha `before` hook (runs after the session/app is already up).
+// The set-up is shared with the VSCode suite (`initFixtureRepo`, #500).
 function setupFixtureRepo(repoPath: string) {
-  fs.rmSync(repoPath, { recursive: true, force: true });
-  fs.mkdirSync(repoPath, { recursive: true });
-  execFileSync("git", ["init"], { cwd: repoPath, stdio: "inherit" });
-  // Local (not global) identity — GitHub-hosted runners ship no global git identity, and
-  // `git_core::commit::commit`'s `repo.signature()` call errors without one (the same failure
-  // mode `crates/git-core/tests/stage_commit.rs`'s
-  // `commit_without_a_configured_identity_returns_an_error` test exists to cover). Setting it
-  // locally here, rather than relying on the host's `~/.gitconfig`, also makes this fixture
-  // hermetic for local runs. Matches the "Test User"/"test@example.com" convention from
-  // `crates/git-core/tests/common/mod.rs`'s `init_repo()` helper.
-  execFileSync("git", ["config", "user.name", "Test User"], { cwd: repoPath, stdio: "inherit" });
-  execFileSync("git", ["config", "user.email", "test@example.com"], {
-    cwd: repoPath,
-    stdio: "inherit",
-  });
-  fs.writeFileSync(path.join(repoPath, "README.md"), "e2e fixture repo\n");
+  initFixtureRepo(repoPath, "e2e fixture repo\n");
 }
 
 function resetFixtureRepo() {
   fs.rmSync(E2E_REPO_PATH, { recursive: true, force: true });
-  execFileSync("git", ["clone", E2E_PARENT_SOURCE_PATH, E2E_REPO_PATH], { cwd: os.tmpdir(), stdio: "inherit" });
-  execFileSync("git", ["config", "user.name", "Test User"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-  execFileSync("git", ["config", "core.autocrlf", "false"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+  git(os.tmpdir(), "clone", E2E_PARENT_SOURCE_PATH, E2E_REPO_PATH);
+  setTestIdentity(E2E_REPO_PATH);
+  git(E2E_REPO_PATH, "config", "core.autocrlf", "false");
 }
 
 function setupSubmoduleFixture(repoPath: string) {
-  fs.rmSync(E2E_SUBMODULE_REPO_PATH, { recursive: true, force: true });
-  fs.mkdirSync(E2E_SUBMODULE_REPO_PATH, { recursive: true });
-  execFileSync("git", ["init"], { cwd: E2E_SUBMODULE_REPO_PATH, stdio: "inherit" });
-  execFileSync("git", ["config", "user.name", "Test User"], {
-    cwd: E2E_SUBMODULE_REPO_PATH,
-    stdio: "inherit",
-  });
-  execFileSync("git", ["config", "user.email", "test@example.com"], {
-    cwd: E2E_SUBMODULE_REPO_PATH,
-    stdio: "inherit",
-  });
-  fs.writeFileSync(path.join(E2E_SUBMODULE_REPO_PATH, "README.md"), "e2e submodule\n");
-  execFileSync("git", ["add", "."], { cwd: E2E_SUBMODULE_REPO_PATH, stdio: "inherit" });
-  execFileSync("git", ["commit", "-m", "e2e: seed submodule"], {
-    cwd: E2E_SUBMODULE_REPO_PATH,
-    stdio: "inherit",
-  });
-  execFileSync("git", ["-c", "protocol.file.allow=always", "submodule", "add", E2E_SUBMODULE_REPO_PATH, E2E_SUBMODULE_PATH], { cwd: repoPath, stdio: "inherit" });
-  execFileSync("git", ["add", "."], { cwd: repoPath, stdio: "inherit" });
-  execFileSync("git", ["commit", "-m", "e2e: add submodule"], { cwd: repoPath, stdio: "inherit" });
+  initFixtureRepo(E2E_SUBMODULE_REPO_PATH, "e2e submodule\n");
+  git(E2E_SUBMODULE_REPO_PATH, "add", ".");
+  git(E2E_SUBMODULE_REPO_PATH, "commit", "-m", "e2e: seed submodule");
+  git(repoPath, "-c", "protocol.file.allow=always", "submodule", "add", E2E_SUBMODULE_REPO_PATH, E2E_SUBMODULE_PATH);
+  git(repoPath, "add", ".");
+  git(repoPath, "commit", "-m", "e2e: add submodule");
 }
 
 function setupCredentialCertificate() {
@@ -425,6 +400,8 @@ export const config: WebdriverIO.Config = {
       },
     },
   ],
+  // The default for every wait (#500): `support/timeouts.ts`, which also names the longer ones.
+  waitforTimeout: UI_TIMEOUT,
   // `$` is strict (WebdriverIO 10's default): it throws when a selector matches more than one
   // element, so a spec can't silently act on the wrong one. Make a selector unique; where the
   // first match is really meant, say so with `$$(selector)[0]` (#394).
@@ -452,8 +429,8 @@ export const config: WebdriverIO.Config = {
     // multi-repo.spec.ts, seeded with one real commit so it has a resolvable HEAD immediately.
     setupFixtureRepo(E2E_SECOND_REPO_PATH);
     fs.writeFileSync(path.join(E2E_SECOND_REPO_PATH, "second.txt"), "second repo\n");
-    execFileSync("git", ["add", "second.txt"], { cwd: E2E_SECOND_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: second repo base commit"], { cwd: E2E_SECOND_REPO_PATH, stdio: "inherit" });
+    git(E2E_SECOND_REPO_PATH, "add", "second.txt");
+    git(E2E_SECOND_REPO_PATH, "commit", "-m", "e2e: second repo base commit");
 
     // Fixture root for workspaces.spec.ts: three member repos under one root. The saved
     // workspace below deliberately references only repo-a and repo-b as members — repo-c
@@ -464,8 +441,8 @@ export const config: WebdriverIO.Config = {
     fs.mkdirSync(E2E_WORKSPACE_ROOT, { recursive: true });
     for (const repoPath of [E2E_WORKSPACE_REPO_A, E2E_WORKSPACE_REPO_B, E2E_WORKSPACE_REPO_C]) {
       setupFixtureRepo(repoPath);
-      execFileSync("git", ["add", "README.md"], { cwd: repoPath, stdio: "inherit" });
-      execFileSync("git", ["commit", "-m", "e2e: workspace member base commit"], { cwd: repoPath, stdio: "inherit" });
+      git(repoPath, "add", "README.md");
+      git(repoPath, "commit", "-m", "e2e: workspace member base commit");
     }
 
     // Seed a BROWSITORY_CONFIG_DIR the app will read/write for the whole suite run, so the

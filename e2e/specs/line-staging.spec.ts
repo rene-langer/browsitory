@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { clickInPage, waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
+import { git, gitWith } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "line-fixture.txt";
@@ -12,21 +12,21 @@ const UNTRACKED = "line-untracked.tmp";
 describe("Browsitory line staging and discard", () => {
   before(() => {
     fs.writeFileSync(path.join(E2E_REPO_PATH, FILE), "a\nb\nc\n");
-    execFileSync("git", ["add", FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: seed line fixture"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    git(E2E_REPO_PATH, "add", FILE);
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: seed line fixture");
     fs.writeFileSync(path.join(E2E_REPO_PATH, FILE), "a\nB\nc\nd\n");
     fs.writeFileSync(path.join(E2E_REPO_PATH, UNTRACKED), "tmp\n");
   });
 
   after(() => {
-    execFileSync("git", ["reset", "-q", "--", FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["checkout", "--", FILE], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    git(E2E_REPO_PATH, "reset", "-q", "--", FILE);
+    git(E2E_REPO_PATH, "checkout", "--", FILE);
     fs.rmSync(path.join(E2E_REPO_PATH, UNTRACKED), { force: true });
   });
 
   it("stages two selected lines of a hunk", async () => {
     const row = await $(`span=${FILE} (Modified)`);
-    await row.waitForExist({ timeout: 10000 });
+    await row.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), row);
 
     await waitUntilInPage(".diff-line-add");
@@ -40,8 +40,9 @@ describe("Browsitory line staging and discard", () => {
     await browser.execute((el) => (el as HTMLElement).click(), stageLines);
 
     await browser.waitUntil(
-      () => execFileSync("git", ["show", `:${FILE}`], { cwd: E2E_REPO_PATH, encoding: "utf8" }) === "a\nb\nB\nc\nd\n",
-      { timeout: 10000, timeoutMsg: "expected exactly the two added lines in the index" },
+      // Untrimmed: the index blob is compared whole, trailing newline included.
+      () => gitWith(E2E_REPO_PATH, ["show", `:${FILE}`], { trim: false }) === "a\nb\nB\nc\nd\n",
+      { timeoutMsg: "expected exactly the two added lines in the index" },
     );
   });
 
@@ -52,7 +53,6 @@ describe("Browsitory line staging and discard", () => {
     await clickInPage("button", "Discard changes…");
     await clickInPage("button", "Delete file");
     await browser.waitUntil(() => !fs.existsSync(path.join(E2E_REPO_PATH, UNTRACKED)), {
-      timeout: 10000,
       timeoutMsg: "expected the untracked file to be deleted",
     });
     // Even waitForExist({ reverse: true }) hit a stale element when the row unmounted

@@ -1,18 +1,17 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { waitUntilGoneInPage } from "../support/dom";
 import { expandSidebarSection } from "../support/sidebar";
+import { gitIn } from "../support/git";
+import { SLOW_UI_TIMEOUT } from "../support/timeouts";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "hooks-e2e.txt";
 const SUMMARY = "e2e: committed without hooks";
 const HOOK_OUTPUT = "e2e-hook: lint failed";
 
-function git(...args: string[]): string {
-  return execFileSync("git", args, { cwd: E2E_REPO_PATH }).toString().trim();
-}
+const git = gitIn(E2E_REPO_PATH);
 
 describe("Browsitory git hooks", () => {
   let hookPath = "";
@@ -43,14 +42,14 @@ describe("Browsitory git hooks", () => {
 
   it("shows a failing pre-commit's output and commits without hooks", async () => {
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
-    await commitMessageInput.waitForExist({ timeout: 10000 });
+    await commitMessageInput.waitForExist();
     const stageButton = await $(`button[aria-label="Stage ${FILE}"]`);
-    await stageButton.waitForExist({ timeout: 10000 });
+    await stageButton.waitForExist();
     // Same opacity-0 workaround as first-flow.spec.ts.
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     // The installed hook makes the "Skip hooks" checkbox appear.
-    await (await $("label*=Skip hooks")).waitForExist({ timeout: 10000 });
+    await (await $("label*=Skip hooks")).waitForExist();
     await browser.execute(
       (el, value) => {
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
@@ -62,16 +61,14 @@ describe("Browsitory git hooks", () => {
     );
     const commitButton = await $("button=Commit");
     await browser.waitUntil(async () => commitButton.isEnabled(), {
-      timeout: 10000,
       timeoutMsg: "Commit did not enable after staging",
     });
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
     const dialog = await $(`dialog[aria-label="pre-commit hook failed"]`);
-    await dialog.waitForExist({ timeout: 10000 });
+    await dialog.waitForExist();
     const output = await $(`pre[aria-label="Hook output"]`);
     await browser.waitUntil(async () => (await output.getText()).includes(HOOK_OUTPUT), {
-      timeout: 10000,
       timeoutMsg: "hook output not shown",
     });
     if (git("log", "-1", "--format=%s") === SUMMARY) throw new Error("commit landed despite the failing hook");
@@ -81,12 +78,10 @@ describe("Browsitory git hooks", () => {
     await browser.execute((el) => (el as HTMLElement).click(), await $("button=Commit without hooks"));
 
     await browser.waitUntil(() => git("log", "-1", "--format=%s") === SUMMARY, {
-      timeout: 10000,
       timeoutMsg: "commit without hooks did not land",
     });
     await waitUntilGoneInPage(`dialog[aria-label="pre-commit hook failed"]`);
     await browser.waitUntil(async () => (await commitMessageInput.getValue()) === "", {
-      timeout: 10000,
       timeoutMsg: "commit message was not cleared after the retried commit",
     });
   });
@@ -127,14 +122,13 @@ describe("Browsitory post-checkout status", () => {
   it("shows a running post-checkout hook with Cancel, and Cancel keeps the switch", async () => {
     await expandSidebarSection("Branches");
     const row = await $(`//li[@role="button" and contains(., "${BRANCH}")]`);
-    await row.waitForExist({ timeout: 10000 });
+    await row.waitForExist();
     // Double-click switches (BranchTree); dispatched in the page like the other row clicks.
     await browser.execute((el) => {
       (el as HTMLElement).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     }, row);
 
     await browser.waitUntil(async () => (await hookStatusText())?.includes("Running post-checkout hook…") === true, {
-      timeout: 10000,
       timeoutMsg: "the Hook status strip did not show the running post-checkout hook",
     });
     const clicked = await browser.execute(() => {
@@ -150,7 +144,7 @@ describe("Browsitory post-checkout status", () => {
     // Well before the hook's `sleep 30` ends: Cancel stopped it.
     // The strip's live region stays mounted; it empties when the hook ends.
     await browser.waitUntil(async () => !((await hookStatusText()) ?? "").includes("Running"), {
-      timeout: 15000,
+      timeout: SLOW_UI_TIMEOUT,
       timeoutMsg: "the Hook status strip stayed after Cancel",
     });
     if (git("rev-parse", "--abbrev-ref", "HEAD") !== BRANCH) {

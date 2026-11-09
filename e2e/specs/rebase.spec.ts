@@ -1,22 +1,16 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { clickInPage, waitUntilGoneInPage } from "../support/dom";
+import { git } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
 // A rebase start refuses tracked local changes (#170), so every case here needs a clean tracked
 // tree. Untracked files and submodules don't count, as in the app.
 function assertCleanTrackedTree() {
-  const dirty = execFileSync(
-    "git",
-    ["status", "--porcelain", "--untracked-files=no", "--ignore-submodules"],
-    { cwd: E2E_REPO_PATH },
-  )
-    .toString()
-    .trim();
+  const dirty = git(E2E_REPO_PATH, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules");
   if (dirty !== "") {
     throw new Error(`rebase.spec.ts needs a clean tracked tree, but the fixture repo has:\n${dirty}`);
   }
@@ -36,7 +30,7 @@ function abortLeftoverRebase() {
       originalBranchRef: string;
       originalTip: string;
     };
-    const run = (...args: string[]) => execFileSync("git", args, { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    const run = (...args: string[]) => git(E2E_REPO_PATH, ...args);
     run("reset", "--hard", "--quiet");
     if (state.originalBranchRef.startsWith("refs/heads/")) {
       run("checkout", "--force", "--quiet", state.originalBranchRef.slice("refs/heads/".length));
@@ -55,39 +49,23 @@ describe("Browsitory interactive rebase", () => {
 
   before(() => {
     assertCleanTrackedTree();
-    const baseBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const baseBranch = git(E2E_REPO_PATH, "rev-parse", "--abbrev-ref", "HEAD");
 
     fs.writeFileSync(path.join(E2E_REPO_PATH, "rebase-base.txt"), "v1\n");
-    execFileSync("git", ["add", "rebase-base.txt"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: rebase onto-point commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "rebase-base.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: rebase onto-point commit");
 
     fs.writeFileSync(path.join(E2E_REPO_PATH, "rebase-a.txt"), "a\n");
-    execFileSync("git", ["add", "rebase-a.txt"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: rebase commit a"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "rebase-a.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: rebase commit a");
 
     fs.writeFileSync(path.join(E2E_REPO_PATH, "rebase-b.txt"), "b\n");
-    execFileSync("git", ["add", "rebase-b.txt"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: rebase commit b (to drop)"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "rebase-b.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: rebase commit b (to drop)");
 
     fs.writeFileSync(path.join(E2E_REPO_PATH, "rebase-c.txt"), "c\n");
-    execFileSync("git", ["add", "rebase-c.txt"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: rebase commit c (squash target)"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "rebase-c.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: rebase commit c (squash target)");
 
     void baseBranch;
   });
@@ -100,7 +78,7 @@ describe("Browsitory interactive rebase", () => {
     await browser.refresh();
 
     const commitEntry = await $("li*=e2e: rebase onto-point commit");
-    await commitEntry.waitForExist({ timeout: 10000 });
+    await commitEntry.waitForExist();
     // Trigger the row's context menu via a synthetic DOM `contextmenu` event rather than
     // WebdriverIO's `.click({ button: "right" })`. The latter drives a real secondary-button
     // pointer action through the WebKitGTK/tauri-driver automation stack, and in this
@@ -124,14 +102,14 @@ describe("Browsitory interactive rebase", () => {
     }, commitEntry);
 
     const rebaseButton = await $("button*=Rebase onto here");
-    await rebaseButton.waitForExist({ timeout: 10000 });
+    await rebaseButton.waitForExist();
     await rebaseButton.click();
 
     // Mark "rebase commit b (to drop)" as Drop.
     const dropRowSelect = await $(
       "//li[contains(., 'rebase commit b (to drop)')]//select[@aria-label='Action']",
     );
-    await dropRowSelect.waitForExist({ timeout: 10000 });
+    await dropRowSelect.waitForExist();
     await dropRowSelect.selectByVisibleText("Drop");
 
     // Mark "rebase commit c (squash target)" as Squash.
@@ -141,13 +119,13 @@ describe("Browsitory interactive rebase", () => {
     await squashRowSelect.selectByVisibleText("Squash");
 
     const combinedMessageField = await $("[aria-label='Combined message']");
-    await combinedMessageField.waitForExist({ timeout: 10000 });
+    await combinedMessageField.waitForExist();
     await combinedMessageField.setValue("e2e: combined rebase commit");
 
     const startButton = await $("button=Start rebase");
     await startButton.click();
 
-    await browser.waitUntil(async () => (await $("li*=e2e: combined rebase commit")).isExisting(), { timeout: 10000 });
+    await browser.waitUntil(async () => (await $("li*=e2e: combined rebase commit")).isExisting());
     const commitGraphAfter = await $("li*=e2e: combined rebase commit");
     await waitUntilGoneInPage("li", "rebase commit b (to drop)", { contains: true });
   });
@@ -160,8 +138,8 @@ describe("Browsitory interactive rebase", () => {
   // UI instead of the API.
   function writeConflictCommit(fileName: string, content: string, message: string) {
     fs.writeFileSync(path.join(E2E_REPO_PATH, fileName), content);
-    execFileSync("git", ["add", fileName], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", message], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    git(E2E_REPO_PATH, "add", fileName);
+    git(E2E_REPO_PATH, "commit", "-m", message);
   }
 
   it("pauses on a rebase conflict, resolves it, and continues to completion", async () => {
@@ -184,7 +162,7 @@ describe("Browsitory interactive rebase", () => {
     await browser.refresh();
 
     const ontoEntry = await $("li*=e2e: conflict-resume onto point");
-    await ontoEntry.waitForExist({ timeout: 10000 });
+    await ontoEntry.waitForExist();
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -192,7 +170,7 @@ describe("Browsitory interactive rebase", () => {
     }, ontoEntry);
 
     const rebaseButton = await $("button*=Rebase onto here");
-    await rebaseButton.waitForExist({ timeout: 10000 });
+    await rebaseButton.waitForExist();
     await rebaseButton.click();
 
     // Drop "change on top" so replaying "conflicting change" lands on `onto`'s original content
@@ -200,40 +178,36 @@ describe("Browsitory interactive rebase", () => {
     const dropRowSelect = await $(
       "//li[contains(., 'e2e: conflict-resume change on top')]//select[@aria-label='Action']",
     );
-    await dropRowSelect.waitForExist({ timeout: 10000 });
+    await dropRowSelect.waitForExist();
     await dropRowSelect.selectByVisibleText("Drop");
 
     const startButton = await $("button=Start rebase");
     await startButton.click();
 
     const rebasePanel = await $("h2*=Rebase in progress");
-    await rebasePanel.waitForExist({ timeout: 10000 });
+    await rebasePanel.waitForExist();
 
     const conflictedRow = await $("span*=rebase-conflict-resume.txt (Conflicted)");
-    await conflictedRow.waitForExist({ timeout: 10000 });
+    await conflictedRow.waitForExist();
     await conflictedRow.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
 
     const acceptTheirs = await $("button=Accept theirs");
-    await acceptTheirs.waitForExist({ timeout: 10000 });
+    await acceptTheirs.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), acceptTheirs);
     const saveResolution = await $("button=Save resolution");
     await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
 
     const continueButton = await $("button=Continue rebase");
-    await continueButton.waitForEnabled({ timeout: 10000 });
+    await continueButton.waitForEnabled();
     await browser.execute((el) => (el as HTMLElement).click(), continueButton);
 
     await waitUntilGoneInPage("h2", "Rebase in progress", { contains: true });
     const landedEntry = await $("li*=e2e: conflict-resume conflicting change");
-    await landedEntry.waitForExist({ timeout: 10000 });
+    await landedEntry.waitForExist();
     await waitUntilGoneInPage("li", "e2e: conflict-resume change on top", { contains: true });
 
-    const headMessage = execFileSync("git", ["log", "-1", "--format=%s"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const headMessage = git(E2E_REPO_PATH, "log", "-1", "--format=%s");
     expect(headMessage).toBe("e2e: conflict-resume conflicting change");
   });
 
@@ -254,16 +228,12 @@ describe("Browsitory interactive rebase", () => {
       "e2e: conflict-abort conflicting change",
     );
 
-    const headBeforeRebase = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const headBeforeRebase = git(E2E_REPO_PATH, "rev-parse", "HEAD");
 
     await browser.refresh();
 
     const ontoEntry = await $("li*=e2e: conflict-abort onto point");
-    await ontoEntry.waitForExist({ timeout: 10000 });
+    await ontoEntry.waitForExist();
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -271,22 +241,22 @@ describe("Browsitory interactive rebase", () => {
     }, ontoEntry);
 
     const rebaseButton = await $("button*=Rebase onto here");
-    await rebaseButton.waitForExist({ timeout: 10000 });
+    await rebaseButton.waitForExist();
     await rebaseButton.click();
 
     const dropRowSelect = await $(
       "//li[contains(., 'e2e: conflict-abort change on top')]//select[@aria-label='Action']",
     );
-    await dropRowSelect.waitForExist({ timeout: 10000 });
+    await dropRowSelect.waitForExist();
     await dropRowSelect.selectByVisibleText("Drop");
 
     const startButton = await $("button=Start rebase");
     await startButton.click();
 
     const rebasePanel = await $("h2*=Rebase in progress");
-    await rebasePanel.waitForExist({ timeout: 10000 });
+    await rebasePanel.waitForExist();
     const conflictedRow = await $("span*=rebase-conflict-abort.txt (Conflicted)");
-    await conflictedRow.waitForExist({ timeout: 10000 });
+    await conflictedRow.waitForExist();
 
     // The operation status strip has an "Abort rebase" button too; this is the panel's. Clicked
     // in the page, like Continue above: a native WebDriver click sent right after the conflict
@@ -295,11 +265,7 @@ describe("Browsitory interactive rebase", () => {
 
     await waitUntilGoneInPage("h2", "Rebase in progress", { contains: true });
 
-    const headAfterAbort = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const headAfterAbort = git(E2E_REPO_PATH, "rev-parse", "HEAD");
     expect(headAfterAbort).toBe(headBeforeRebase);
 
     const fileContents = fs.readFileSync(
@@ -313,39 +279,35 @@ describe("Browsitory interactive rebase", () => {
     }
 
     const stillOnTopEntry = await $("li*=e2e: conflict-abort conflicting change");
-    await stillOnTopEntry.waitForExist({ timeout: 10000 });
+    await stillOnTopEntry.waitForExist();
   });
 
   it("refuses to start a rebase over uncommitted changes and keeps them", async () => {
     assertCleanTrackedTree();
     writeConflictCommit("dirty-onto.txt", "onto\n", "e2e: dirty onto point");
     writeConflictCommit("dirty-tracked.txt", "committed\n", "e2e: dirty tracked file");
-    const headBefore = execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH })
-      .toString()
-      .trim();
+    const headBefore = git(E2E_REPO_PATH, "rev-parse", "HEAD");
     const dirtyFile = path.join(E2E_REPO_PATH, "dirty-tracked.txt");
     fs.writeFileSync(dirtyFile, "my uncommitted edit\n");
 
     try {
       await browser.refresh();
       const ontoEntry = await $("li*=e2e: dirty onto point");
-      await ontoEntry.waitForExist({ timeout: 10000 });
+      await ontoEntry.waitForExist();
       await browser.execute((el) => {
         el.dispatchEvent(
           new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
         );
       }, ontoEntry);
       const rebaseButton = await $("button*=Rebase onto here");
-      await rebaseButton.waitForExist({ timeout: 10000 });
+      await rebaseButton.waitForExist();
       await rebaseButton.click();
-      await $("//li[contains(., 'e2e: dirty tracked file')]//select[@aria-label='Action']").waitForExist({
-        timeout: 10000,
-      });
+      await $("//li[contains(., 'e2e: dirty tracked file')]//select[@aria-label='Action']").waitForExist();
 
       await (await $("button=Start rebase")).click();
 
       const alert = await $("//p[@role='alert'][contains(., 'You have uncommitted changes to')]");
-      await alert.waitForExist({ timeout: 10000 });
+      await alert.waitForExist();
       const alertText = await browser.execute((el) => (el as HTMLElement).textContent ?? "", alert);
       expect(alertText).toContain(
         "You have uncommitted changes to dirty-tracked.txt. Commit or stash them before starting a rebase.",
@@ -353,16 +315,14 @@ describe("Browsitory interactive rebase", () => {
       // The planner stays open, nothing moved, and the edit is intact.
       await expect($("button=Start rebase")).toBeExisting();
       expect(fs.readFileSync(dirtyFile, "utf8")).toBe("my uncommitted edit\n");
-      const headAfter = execFileSync("git", ["rev-parse", "HEAD"], { cwd: E2E_REPO_PATH })
-        .toString()
-        .trim();
+      const headAfter = git(E2E_REPO_PATH, "rev-parse", "HEAD");
       expect(headAfter).toBe(headBefore);
       expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git/browsitory/rebase.json"))).toBe(false);
 
       await (await $("button=Cancel")).click();
       await waitUntilGoneInPage("button", "Start rebase");
     } finally {
-      execFileSync("git", ["checkout", "--", "dirty-tracked.txt"], { cwd: E2E_REPO_PATH });
+      git(E2E_REPO_PATH, "checkout", "--", "dirty-tracked.txt");
     }
   });
 
@@ -375,7 +335,7 @@ describe("Browsitory interactive rebase", () => {
     await browser.refresh();
 
     const first = await $("li*=e2e: multi 1 (drop)");
-    await first.waitForExist({ timeout: 10000 });
+    await first.waitForExist();
     await first.click();
 
     // A synthetic `click` carrying `ctrlKey` instead of a real modifier key press: a held
@@ -388,12 +348,12 @@ describe("Browsitory interactive rebase", () => {
     }, third);
 
     const dropButton = await $("button=Drop 2 commits");
-    await dropButton.waitForExist({ timeout: 10000 });
+    await dropButton.waitForExist();
     await dropButton.click();
 
     // The planner lists the whole span; only the two selected commits are pre-marked Drop.
     const dropRow1 = await $("//li[contains(., 'multi 1 (drop)')]//select[@aria-label='Action']");
-    await dropRow1.waitForExist({ timeout: 10000 });
+    await dropRow1.waitForExist();
     await expect(dropRow1).toHaveValue("Drop");
     const keepRow = await $("//li[contains(., 'multi 2 (keep)')]//select[@aria-label='Action']");
     await expect(keepRow).toHaveValue("Pick");

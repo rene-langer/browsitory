@@ -1,8 +1,8 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { git } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 // Spec-unique name on purpose — see the same constant in `blame-viewer.spec.ts` for why two
@@ -15,42 +15,29 @@ describe("Browsitory commit graph", () => {
   before(() => {
     const fixturePath = path.join(E2E_REPO_PATH, "graph-fixture.txt");
     fs.writeFileSync(fixturePath, "base\n");
-    execFileSync("git", ["add", "graph-fixture.txt"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: commit graph base commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "graph-fixture.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: commit graph base commit");
 
-    const baseBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const baseBranch = git(E2E_REPO_PATH, "rev-parse", "--abbrev-ref", "HEAD");
 
-    execFileSync("git", ["checkout", "-b", "e2e-graph-feature"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "checkout", "-b", "e2e-graph-feature");
     fs.writeFileSync(path.join(E2E_REPO_PATH, "feature-fixture.txt"), "feature\n");
-    execFileSync("git", ["add", "feature-fixture.txt"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: commit graph feature commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "feature-fixture.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: commit graph feature commit");
 
-    execFileSync("git", ["checkout", baseBranch], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    git(E2E_REPO_PATH, "checkout", baseBranch);
     fs.writeFileSync(path.join(E2E_REPO_PATH, PRIME_FILE), "prime\n");
   });
 
   it("shows commits from every local branch with correct branch labels", async () => {
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
-    await commitMessageInput.waitForExist({ timeout: 10000 });
+    await commitMessageInput.waitForExist();
 
     // The per-row stage control is icon-only (aria-label only, no visible text) since the
     // file-list migration to `ListRow` — target the throwaway file this spec's `before` hook
     // wrote for exactly this "prime the refresh" commit.
     const stageButton = await $(`button[aria-label="Stage ${PRIME_FILE}"]`);
-    await stageButton.waitForExist({ timeout: 10000 });
+    await stageButton.waitForExist();
     // `opacity: 0` until the row is hovered/focused — see `first-flow.spec.ts`'s note on why
     // both the scroll and the click go through `browser.execute`.
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
@@ -60,9 +47,9 @@ describe("Browsitory commit graph", () => {
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
     const baseCommitEntry = await $("li*=e2e: commit graph base commit");
-    await baseCommitEntry.waitForExist({ timeout: 10000 });
+    await baseCommitEntry.waitForExist();
     const featureCommitEntry = await $("li*=e2e: commit graph feature commit");
-    await featureCommitEntry.waitForExist({ timeout: 10000 });
+    await featureCommitEntry.waitForExist();
 
     // The feature branch's tip commit should carry a branch-name badge in the same row —
     // confirms `branch_refs` made it end-to-end from git-core through to the rendered row.
@@ -75,11 +62,11 @@ describe("Browsitory commit graph", () => {
 
   // #467: a commit on a detached HEAD that no branch contains used to be missing from the graph.
   it("shows a commit made on a detached HEAD, marked HEAD", async () => {
-    execFileSync("git", ["checkout", "--detach"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    git(E2E_REPO_PATH, "checkout", "--detach");
     fs.writeFileSync(path.join(E2E_REPO_PATH, DETACHED_FILE), "detached\n");
 
     const stageButton = await $(`button[aria-label="Stage ${DETACHED_FILE}"]`);
-    await stageButton.waitForExist({ timeout: 10000 });
+    await stageButton.waitForExist();
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
@@ -89,22 +76,18 @@ describe("Browsitory commit graph", () => {
 
     await browser.waitUntil(
       () =>
-        execFileSync("git", ["log", "-1", "--format=%s"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim() ===
+        git(E2E_REPO_PATH, "log", "-1", "--format=%s") ===
         "e2e: commit on a detached HEAD",
-      { timeout: 10000, timeoutMsg: "the commit on the detached HEAD did not land" },
+      { timeoutMsg: "the commit on the detached HEAD did not land" },
     );
     // No branch contains it: only HEAD reaches it.
     expect(
-      execFileSync("git", ["for-each-ref", "--contains", "HEAD", "refs/heads"], {
-        cwd: E2E_REPO_PATH,
-        encoding: "utf8",
-      }).trim(),
+      git(E2E_REPO_PATH, "for-each-ref", "--contains", "HEAD", "refs/heads"),
     ).toBe("");
 
     const detachedRow = await $("li.commit-row*=e2e: commit on a detached HEAD");
-    await detachedRow.waitForExist({ timeout: 10000 });
+    await detachedRow.waitForExist();
     await detachedRow.$("span=HEAD").waitForExist({
-      timeout: 10000,
       timeoutMsg: "the detached HEAD's row has no HEAD badge",
     });
   });

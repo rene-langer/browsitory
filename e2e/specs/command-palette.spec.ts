@@ -1,39 +1,6 @@
 import { expect } from "@wdio/globals";
+import { openPalette, waitForAppReady } from "../support/app";
 import { sidebarSectionToggle } from "../support/sidebar";
-
-// App.tsx's Ctrl/Cmd+K handler no-ops until `state.repoPath` is set (see its early return), and
-// `wdio.conf.ts`'s `beforeTest` reloads the page before every `it`, so the repo's async auto-open
-// (and this guard) can still be in flight right when a test starts — sending Ctrl+K too early is
-// silently swallowed. Sidebar sections only render once the repo has loaded, so waiting for one
-// to exist is this suite's established way to gate on "app finished loading" (see how
-// `pull-requests.spec.ts`/`remote-management.spec.ts`/etc. all wait on a section's trigger or
-// form before their first interaction).
-async function waitForAppReady(): Promise<void> {
-  await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 10000 });
-}
-
-// Sends Ctrl/Cmd+K until the palette is showing. Even after `waitForAppReady`, a keypress sent
-// right after `beforeTest`'s reload was occasionally lost (1 failure in 3 full-suite runs; the
-// palette never opened, no error) — most likely because the Branches section can already be in
-// the DOM a beat before the workspace's window keydown listener (attached in a passive effect)
-// is live, or before the startup tab reconciliation has settled. Re-pressing
-// only while the input still isn't displayed keeps the toggle from closing a palette that
-// opened late.
-async function openPalette() {
-  const input = await $('input[aria-label="Command palette"]');
-  await browser.waitUntil(
-    async () => {
-      if (await input.isDisplayed()) return true;
-      await browser.keys(["Control", "k"]);
-      return input.waitForDisplayed({ timeout: 1000 }).then(
-        () => true,
-        () => false,
-      );
-    },
-    { timeout: 10000, interval: 0, timeoutMsg: "expected Ctrl/Cmd+K to open the command palette" },
-  );
-  return input;
-}
 
 describe("command palette", () => {
   it("opens with Ctrl/Cmd+K, filters, and runs a zero-arg command", async () => {
@@ -51,7 +18,7 @@ describe("command palette", () => {
     const input = await openPalette();
     await input.setValue("refresh");
     await browser.keys(["Enter"]);
-    await input.waitForDisplayed({ reverse: true, timeout: 10000 });
+    await input.waitForDisplayed({ reverse: true });
 
     const after = await browser.execute(() => document.documentElement.dataset.theme);
     expect(after).toBe(before);
@@ -82,18 +49,17 @@ describe("command palette", () => {
     await browser.waitUntil(
       async () => (await browser.execute(() => document.querySelector("dialog li")?.textContent ?? "")).includes("Prune worktrees"),
       {
-        timeout: 10000,
         timeoutMsg: "expected filtering on 'prune worktrees' to surface Prune worktrees as the top result",
       },
     );
 
     await browser.keys(["Enter"]);
-    await input.waitForDisplayed({ reverse: true, timeout: 10000 });
+    await input.waitForDisplayed({ reverse: true });
   });
 
   it("a navigate command expands the target sidebar section", async () => {
     const trigger = await $(sidebarSectionToggle("Worktrees"));
-    await trigger.waitForExist({ timeout: 10000 });
+    await trigger.waitForExist();
     // This section is always rendered (even with no linked worktrees), so no worktree fixture
     // data is needed here. Its open/closed state is persisted to localStorage (see
     // `AccordionSection`) in the same on-disk webview profile this whole suite reuses run over
@@ -103,7 +69,6 @@ describe("command palette", () => {
     if ((await trigger.getAttribute("aria-expanded")) === "true") {
       await trigger.click();
       await browser.waitUntil(async () => (await trigger.getAttribute("aria-expanded")) === "false", {
-        timeout: 10000,
         timeoutMsg: "expected the Worktrees sidebar section to start closed",
       });
     }
@@ -111,10 +76,9 @@ describe("command palette", () => {
     const input = await openPalette();
     await input.setValue("go to worktrees");
     await browser.keys(["Enter"]);
-    await input.waitForDisplayed({ reverse: true, timeout: 10000 });
+    await input.waitForDisplayed({ reverse: true });
 
     await browser.waitUntil(async () => (await trigger.getAttribute("aria-expanded")) === "true", {
-      timeout: 10000,
       timeoutMsg: "expected the Worktrees sidebar section to expand after the navigate command",
     });
   });
@@ -124,7 +88,7 @@ describe("command palette", () => {
     const input = await openPalette();
     await input.setValue("third-party licences");
     await browser.keys(["Enter"]);
-    await input.waitForDisplayed({ reverse: true, timeout: 10000 });
+    await input.waitForDisplayed({ reverse: true });
 
     // The text region renders only once third-party-notices.md was fetched from the app's own
     // assets, so this proves the CSP's connect-src and the asset path. `textContent` via
@@ -134,7 +98,7 @@ describe("command palette", () => {
         (await browser.execute(
           () => document.querySelector('pre[aria-label="Licence texts"]')?.textContent ?? "",
         )).includes("option-ext"),
-      { timeout: 10000, timeoutMsg: "expected the licences dialog to show the notices file" },
+      { timeoutMsg: "expected the licences dialog to show the notices file" },
     );
     await browser.keys(["Escape"]);
   });
@@ -144,6 +108,6 @@ describe("command palette", () => {
     const input = await openPalette();
     await input.setValue("prune worktrees");
     await browser.keys(["Escape"]);
-    await input.waitForDisplayed({ reverse: true, timeout: 10000 });
+    await input.waitForDisplayed({ reverse: true });
   });
 });

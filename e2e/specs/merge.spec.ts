@@ -1,10 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
-import { waitForMergeCommit } from "../support/git";
+import { git, waitForMergeCommit } from "../support/git";
 import { expandSidebarSection, sidebarBranchRow } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -16,12 +15,11 @@ const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
  */
 async function confirmMergeDialog(branch: string) {
   const dialog = `dialog[aria-label="Merge ${branch}"]`;
-  await $(dialog).waitForExist({ timeout: 10000 });
+  await $(dialog).waitForExist();
   // WebdriverIO cannot mix a CSS prefix with its `button=Text` selector, so chain them.
   const confirmMerge = await $(dialog).$("button=Merge");
-  await confirmMerge.waitForExist({ timeout: 10000 });
+  await confirmMerge.waitForExist();
   await browser.waitUntil(async () => confirmMerge.isEnabled(), {
-    timeout: 10000,
     timeoutMsg: "the merge dialog did not load its options",
   });
   const squash = await $(`${dialog} input[type="checkbox"]`);
@@ -36,44 +34,28 @@ async function confirmMergeDialog(branch: string) {
  * `li*=<subject>` selector: the subject quotes the branch name.)
  */
 async function expectMergeCommitInGraph() {
-  const subject = execFileSync("git", ["log", "-1", "--format=%s"], { cwd: E2E_REPO_PATH, encoding: "utf8" }).trim();
+  const subject = git(E2E_REPO_PATH, "log", "-1", "--format=%s");
   await waitUntilInPage("li", subject, { contains: true });
 }
 
 describe("Browsitory merge with conflict resolution", () => {
   before(() => {
     fs.writeFileSync(path.join(E2E_REPO_PATH, "shared.txt"), "line one\nline two\nline three\n");
-    execFileSync("git", ["add", "shared.txt"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: merge base commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "shared.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: merge base commit");
 
-    const baseBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const baseBranch = git(E2E_REPO_PATH, "rev-parse", "--abbrev-ref", "HEAD");
 
-    execFileSync("git", ["checkout", "-b", "e2e-merge-feature"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "checkout", "-b", "e2e-merge-feature");
     fs.writeFileSync(
       path.join(E2E_REPO_PATH, "shared.txt"),
       "line one\nfeature two\nline three\n",
     );
-    execFileSync("git", ["commit", "-am", "e2e: merge feature commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "commit", "-am", "e2e: merge feature commit");
 
-    execFileSync("git", ["checkout", baseBranch], { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    git(E2E_REPO_PATH, "checkout", baseBranch);
     fs.writeFileSync(path.join(E2E_REPO_PATH, "shared.txt"), "line one\nmain two\nline three\n");
-    execFileSync("git", ["commit", "-am", "e2e: merge base-branch commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "commit", "-am", "e2e: merge base-branch commit");
   });
 
   it("merges a diverged branch, resolves a conflict per hunk, and commits the merge", async () => {
@@ -85,7 +67,7 @@ describe("Browsitory merge with conflict resolution", () => {
     // WebdriverIO's `.click({ button: "right" })`). The row itself (a `role="button"` `<li>`, not
     // a nested `<button>` — see `ListRow.tsx`) owns the handler, so dispatch on it directly.
     const branchRow = await $(sidebarBranchRow("e2e-merge-feature"));
-    await branchRow.waitForExist({ timeout: 10000 });
+    await branchRow.waitForExist();
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -93,7 +75,7 @@ describe("Browsitory merge with conflict resolution", () => {
     }, branchRow);
 
     const mergeButton = await $("button*=Merge into current branch");
-    await mergeButton.waitForExist({ timeout: 10000 });
+    await mergeButton.waitForExist();
     await mergeButton.click();
     await confirmMergeDialog("e2e-merge-feature");
 
@@ -102,68 +84,46 @@ describe("Browsitory merge with conflict resolution", () => {
     // per-file `<button>` carrying the path text any more. Clicking the span still selects the
     // row: the click bubbles to the `<li>`'s own onClick (see `DiffPane.tsx`'s `FileListRow`).
     const conflictedRow = await $("span*=shared.txt (Conflicted)");
-    await conflictedRow.waitForExist({ timeout: 10000 });
+    await conflictedRow.waitForExist();
     await conflictedRow.scrollIntoView({ block: "center" });
 
     const acceptTheirs = await $("button=Accept theirs");
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
-    await acceptTheirs.waitForExist({ timeout: 10000 });
+    await acceptTheirs.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), acceptTheirs);
     const saveResolution = await $("button=Save resolution");
     await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
 
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
-    await commitMessageInput.waitForExist({ timeout: 10000 });
+    await commitMessageInput.waitForExist();
     await expect(commitMessageInput).toHaveValue(expect.stringContaining("e2e-merge-feature"));
 
     const commitButton = await $("button=Commit");
-    await commitButton.waitForEnabled({ timeout: 10000 });
+    await commitButton.waitForEnabled();
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
     // Not a `li*=<branch>` row: the sidebar's branch row matches before the commit lands (#182).
     await waitForMergeCommit(E2E_REPO_PATH);
     await expectMergeCommitInGraph();
 
-    const parentsLine = execFileSync("git", ["rev-list", "--parents", "-n", "1", "HEAD"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const parentsLine = git(E2E_REPO_PATH, "rev-list", "--parents", "-n", "1", "HEAD");
     expect(parentsLine.split(" ").length).toBe(3); // commit oid + 2 parents = a real merge commit
   });
 
   it("resolves an add/delete conflict via keep-theirs", async () => {
-    execFileSync("git", ["checkout", "-B", "e2e-merge-adddelete-base"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "checkout", "-B", "e2e-merge-adddelete-base");
     fs.writeFileSync(path.join(E2E_REPO_PATH, "adddelete.txt"), "v1\n");
-    execFileSync("git", ["add", "adddelete.txt"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: add/delete base commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
-    execFileSync("git", ["checkout", "-b", "e2e-merge-adddelete-feature"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "adddelete.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: add/delete base commit");
+    git(E2E_REPO_PATH, "checkout", "-b", "e2e-merge-adddelete-feature");
     fs.writeFileSync(path.join(E2E_REPO_PATH, "adddelete.txt"), "v2\n");
-    execFileSync("git", ["commit", "-am", "e2e: add/delete feature modifies"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
-    execFileSync("git", ["checkout", "e2e-merge-adddelete-base"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "commit", "-am", "e2e: add/delete feature modifies");
+    git(E2E_REPO_PATH, "checkout", "e2e-merge-adddelete-base");
     fs.rmSync(path.join(E2E_REPO_PATH, "adddelete.txt"));
-    execFileSync("git", ["commit", "-am", "e2e: add/delete base deletes"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "commit", "-am", "e2e: add/delete base deletes");
 
     // `state.branches` only refreshes on a `runMutation` call (see `useAppState.ts`), and the
-    // branch/checkout work above was all done directly on disk via `execFileSync`, bypassing the
+    // branch/checkout work above was all done directly on disk via the git CLI, bypassing the
     // app entirely — so the just-created branches aren't in `state.branches` yet. Unlike
     // `commit-graph.spec.ts`'s "prime the refresh" trick (which relies on the app's one-time
     // mount-time `openRepo()` call racing a `before()` hook and losing), this is the second
@@ -179,7 +139,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await expandSidebarSection("Branches");
 
     const branchRow = await $(sidebarBranchRow("e2e-merge-adddelete-feature"));
-    await branchRow.waitForExist({ timeout: 10000 });
+    await branchRow.waitForExist();
     // The row itself owns the context-menu handler (see the previous test's comment).
     await browser.execute((el) => {
       el.dispatchEvent(
@@ -188,81 +148,55 @@ describe("Browsitory merge with conflict resolution", () => {
     }, branchRow);
 
     const mergeButton = await $("button*=Merge into current branch");
-    await mergeButton.waitForExist({ timeout: 10000 });
+    await mergeButton.waitForExist();
     await mergeButton.click();
     await confirmMergeDialog("e2e-merge-adddelete-feature");
 
     // See the first test: the row's path text lives in a `<span>` inside `<li role="option">`.
     const conflictedRow = await $("span*=adddelete.txt (Conflicted)");
-    await conflictedRow.waitForExist({ timeout: 10000 });
+    await conflictedRow.waitForExist();
     await conflictedRow.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
 
     const keepTheirs = await $("button=Keep their version");
-    await keepTheirs.waitForExist({ timeout: 10000 });
+    await keepTheirs.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), keepTheirs);
 
     const commitButton = await $("button=Commit");
-    await commitButton.waitForEnabled({ timeout: 10000 });
+    await commitButton.waitForEnabled();
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
     // Not a `li*=<branch>` row: the sidebar's branch row matches before the commit lands (#182).
     await waitForMergeCommit(E2E_REPO_PATH);
     await expectMergeCommitInGraph();
 
-    const parentsLine = execFileSync("git", ["rev-list", "--parents", "-n", "1", "HEAD"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const parentsLine = git(E2E_REPO_PATH, "rev-list", "--parents", "-n", "1", "HEAD");
     expect(parentsLine.split(" ").length).toBe(3); // commit oid + 2 parents = a real merge commit
   });
 
   it("aborts a conflicted merge from the UI, leaving the working tree clean", async () => {
-    execFileSync("git", ["checkout", "-B", "e2e-merge-abort-base"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "checkout", "-B", "e2e-merge-abort-base");
     fs.writeFileSync(path.join(E2E_REPO_PATH, "abort.txt"), "line one\nline two\n");
-    execFileSync("git", ["add", "abort.txt"], { cwd: E2E_REPO_PATH, stdio: "inherit" });
-    execFileSync("git", ["commit", "-m", "e2e: abort-merge base commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "add", "abort.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: abort-merge base commit");
 
-    execFileSync("git", ["checkout", "-b", "e2e-merge-abort-feature"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "checkout", "-b", "e2e-merge-abort-feature");
     fs.writeFileSync(path.join(E2E_REPO_PATH, "abort.txt"), "line one\nfeature two\n");
-    execFileSync("git", ["commit", "-am", "e2e: abort-merge feature commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "commit", "-am", "e2e: abort-merge feature commit");
 
-    execFileSync("git", ["checkout", "e2e-merge-abort-base"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "checkout", "e2e-merge-abort-base");
     fs.writeFileSync(path.join(E2E_REPO_PATH, "abort.txt"), "line one\nbase two\n");
-    execFileSync("git", ["commit", "-am", "e2e: abort-merge base-branch commit"], {
-      cwd: E2E_REPO_PATH,
-      stdio: "inherit",
-    });
+    git(E2E_REPO_PATH, "commit", "-am", "e2e: abort-merge base-branch commit");
 
-    const headBeforeMerge = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const headBeforeMerge = git(E2E_REPO_PATH, "rev-parse", "HEAD");
 
-    // See the second test's comment: branches created directly via `execFileSync` aren't in
+    // See the second test's comment: branches created directly via the git CLI aren't in
     // `state.branches` until a full reload re-runs the mount-time `openRepo()`.
     await browser.refresh();
     await expandSidebarSection("Branches");
 
     const branchRow = await $(sidebarBranchRow("e2e-merge-abort-feature"));
-    await branchRow.waitForExist({ timeout: 10000 });
+    await branchRow.waitForExist();
     await browser.execute((el) => {
       el.dispatchEvent(
         new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }),
@@ -270,25 +204,21 @@ describe("Browsitory merge with conflict resolution", () => {
     }, branchRow);
 
     const mergeButton = await $("button*=Merge into current branch");
-    await mergeButton.waitForExist({ timeout: 10000 });
+    await mergeButton.waitForExist();
     await mergeButton.click();
     await confirmMergeDialog("e2e-merge-abort-feature");
 
     const conflictedRow = await $("span*=abort.txt (Conflicted)");
-    await conflictedRow.waitForExist({ timeout: 10000 });
+    await conflictedRow.waitForExist();
 
     // The commit box offers "Abort merge" too; this is the operation status strip's.
     const abortMergeButton = await $("div[aria-label='Operation status']").$("button=Abort merge");
-    await abortMergeButton.waitForExist({ timeout: 10000 });
+    await abortMergeButton.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), abortMergeButton);
 
     await waitUntilGoneInPage("button", "Abort merge");
 
-    const headAfterAbort = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: E2E_REPO_PATH,
-    })
-      .toString()
-      .trim();
+    const headAfterAbort = git(E2E_REPO_PATH, "rev-parse", "HEAD");
     expect(headAfterAbort).toBe(headBeforeMerge);
 
     const fileContents = fs.readFileSync(path.join(E2E_REPO_PATH, "abort.txt"), "utf8");
