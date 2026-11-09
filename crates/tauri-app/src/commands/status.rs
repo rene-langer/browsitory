@@ -1,5 +1,6 @@
 use super::{emit_hook_events, repo_worker, AppState};
 use git_core::graph::GraphSelection;
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
     DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, StatusEntryDto, TrailerDto,
@@ -11,7 +12,7 @@ use tauri::{AppHandle, State};
 pub async fn get_status(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<StatusEntryDto>, String> {
+) -> Result<Vec<StatusEntryDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_status())
         .await?
@@ -27,7 +28,7 @@ pub async fn get_commit_graph(
     selected_branches: Option<Vec<String>>,
     remote_branches: Vec<String>,
     state: State<'_, AppState>,
-) -> Result<Vec<GraphCommitDto>, String> {
+) -> Result<Vec<GraphCommitDto>, ErrorDto> {
     let selection = GraphSelection {
         local: selected_branches,
         remote: remote_branches,
@@ -48,7 +49,7 @@ pub async fn locate_commit(
     selected_branches: Option<Vec<String>>,
     remote_branches: Vec<String>,
     state: State<'_, AppState>,
-) -> Result<Option<CommitLocationDto>, String> {
+) -> Result<Option<CommitLocationDto>, ErrorDto> {
     let selection = GraphSelection {
         local: selected_branches,
         remote: remote_branches,
@@ -60,45 +61,57 @@ pub async fn locate_commit(
 }
 
 #[tauri::command]
-pub fn get_graph_branch_selection(repo_path: String) -> Result<Option<Vec<String>>, String> {
-    config::get_graph_branch_selection(Path::new(&repo_path)).map_err(|error| error.to_string())
+pub fn get_graph_branch_selection(repo_path: String) -> Result<Option<Vec<String>>, ErrorDto> {
+    Ok(config::get_graph_branch_selection(Path::new(&repo_path))
+        .map_err(|error| error.to_string())?)
 }
 
 #[tauri::command]
 pub fn set_graph_branch_selection(
     repo_path: String,
     selected_branches: Vec<String>,
-) -> Result<(), String> {
-    config::set_graph_branch_selection(Path::new(&repo_path), &selected_branches)
-        .map_err(|error| error.to_string())
+) -> Result<(), ErrorDto> {
+    Ok(
+        config::set_graph_branch_selection(Path::new(&repo_path), &selected_branches)
+            .map_err(|error| error.to_string())?,
+    )
 }
 
 /// Forgets the saved selection, back to every local branch (#402).
 #[tauri::command]
-pub fn clear_graph_branch_selection(repo_path: String) -> Result<(), String> {
-    config::clear_graph_branch_selection(Path::new(&repo_path)).map_err(|error| error.to_string())
+pub fn clear_graph_branch_selection(repo_path: String) -> Result<(), ErrorDto> {
+    Ok(config::clear_graph_branch_selection(Path::new(&repo_path))
+        .map_err(|error| error.to_string())?)
 }
 
 #[tauri::command]
-pub fn get_graph_remote_branch_selection(repo_path: String) -> Result<Option<Vec<String>>, String> {
-    config::get_graph_remote_branch_selection(Path::new(&repo_path))
-        .map_err(|error| error.to_string())
+pub fn get_graph_remote_branch_selection(
+    repo_path: String,
+) -> Result<Option<Vec<String>>, ErrorDto> {
+    Ok(
+        config::get_graph_remote_branch_selection(Path::new(&repo_path))
+            .map_err(|error| error.to_string())?,
+    )
 }
 
 #[tauri::command]
 pub fn set_graph_remote_branch_selection(
     repo_path: String,
     selected_branches: Vec<String>,
-) -> Result<(), String> {
-    config::set_graph_remote_branch_selection(Path::new(&repo_path), &selected_branches)
-        .map_err(|error| error.to_string())
+) -> Result<(), ErrorDto> {
+    Ok(
+        config::set_graph_remote_branch_selection(Path::new(&repo_path), &selected_branches)
+            .map_err(|error| error.to_string())?,
+    )
 }
 
 /// Forgets the saved remote selection, back to no remote commits and every remote badge (#402).
 #[tauri::command]
-pub fn clear_graph_remote_branch_selection(repo_path: String) -> Result<(), String> {
-    config::clear_graph_remote_branch_selection(Path::new(&repo_path))
-        .map_err(|error| error.to_string())
+pub fn clear_graph_remote_branch_selection(repo_path: String) -> Result<(), ErrorDto> {
+    Ok(
+        config::clear_graph_remote_branch_selection(Path::new(&repo_path))
+            .map_err(|error| error.to_string())?,
+    )
 }
 
 #[tauri::command]
@@ -109,7 +122,7 @@ pub async fn get_working_diff(
     opts: DiffOptionsDto,
     old_path: Option<String>,
     state: State<'_, AppState>,
-) -> Result<Vec<DiffHunkDto>, String> {
+) -> Result<Vec<DiffHunkDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_working_diff(path, staged, opts.into(), old_path))
         .await?
@@ -125,7 +138,7 @@ pub async fn get_commit_diff(
     path: String,
     opts: DiffOptionsDto,
     state: State<'_, AppState>,
-) -> Result<Vec<DiffHunkDto>, String> {
+) -> Result<Vec<DiffHunkDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_commit_diff(commit_id, path, opts.into()))
         .await?
@@ -139,7 +152,7 @@ pub async fn get_commit_files(
     repo_path: String,
     commit_id: String,
     state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.get_commit_files(commit_id))
         .await
@@ -150,7 +163,7 @@ pub async fn get_commit_message(
     repo_path: String,
     commit_id: String,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.get_commit_message(commit_id))
         .await
@@ -161,7 +174,7 @@ pub async fn get_commit_signature(
     repo_path: String,
     commit_id: String,
     state: State<'_, AppState>,
-) -> Result<CommitSignatureDto, String> {
+) -> Result<CommitSignatureDto, ErrorDto> {
     Ok(CommitSignatureDto::from(
         repo_worker(&state, &repo_path)?
             .call(move |w| w.get_commit_signature(commit_id))
@@ -175,7 +188,7 @@ pub async fn get_blame(
     commit_id: String,
     path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<BlameLineDto>, String> {
+) -> Result<Vec<BlameLineDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_blame(commit_id, path))
         .await?
@@ -190,7 +203,7 @@ pub async fn get_file_history(
     path: String,
     limit: usize,
     state: State<'_, AppState>,
-) -> Result<Vec<FileHistoryEntryDto>, String> {
+) -> Result<Vec<FileHistoryEntryDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_file_history(path, limit))
         .await?
@@ -207,7 +220,7 @@ pub async fn get_commit_rename_diff(
     new_path: String,
     opts: DiffOptionsDto,
     state: State<'_, AppState>,
-) -> Result<Vec<DiffHunkDto>, String> {
+) -> Result<Vec<DiffHunkDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_commit_rename_diff(commit_id, old_path, new_path, opts.into()))
         .await?
@@ -221,7 +234,7 @@ pub async fn stage_file(
     repo_path: String,
     path: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.stage_file(path))
         .await
@@ -232,7 +245,7 @@ pub async fn unstage_file(
     repo_path: String,
     path: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.unstage_file(path))
         .await
@@ -246,7 +259,7 @@ pub async fn stage_hunk(
     new_start: u32,
     context_lines: u32,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.stage_hunk(path, old_start, new_start, context_lines))
         .await
@@ -260,7 +273,7 @@ pub async fn unstage_hunk(
     new_start: u32,
     context_lines: u32,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.unstage_hunk(path, old_start, new_start, context_lines))
         .await
@@ -274,7 +287,7 @@ pub async fn discard_hunk(
     new_start: u32,
     context_lines: u32,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.discard_hunk(path, old_start, new_start, context_lines))
         .await
@@ -292,7 +305,7 @@ pub async fn stage_lines(
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| {
             w.stage_lines(
@@ -319,7 +332,7 @@ pub async fn unstage_lines(
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| {
             w.unstage_lines(
@@ -346,7 +359,7 @@ pub async fn discard_lines(
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| {
             w.discard_lines(
@@ -366,7 +379,7 @@ pub async fn discard_file(
     repo_path: String,
     path: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.discard_file(path))
         .await
@@ -377,7 +390,7 @@ pub async fn discard_all_unstaged(
     repo_path: String,
     paths: Vec<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.discard_all_unstaged(paths))
         .await
@@ -388,7 +401,7 @@ pub async fn ignore_path(
     repo_path: String,
     pattern: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.ignore_path(pattern))
         .await
@@ -403,7 +416,7 @@ pub async fn commit(
     trailers: Option<Vec<TrailerDto>>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<CommitOutcomeDto, String> {
+) -> Result<CommitOutcomeDto, ErrorDto> {
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     emit_hook_events(app, repo_path.clone(), event_rx);
     Ok(CommitOutcomeDto::from(

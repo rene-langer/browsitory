@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_DIFF_OPTIONS, WHOLE_FILE_CONTEXT_LINES, WHOLE_FILE_LINE_LIMIT } from "../ipc/RepoClient";
+import { DEFAULT_DIFF_OPTIONS, RepoError, WHOLE_FILE_CONTEXT_LINES, WHOLE_FILE_LINE_LIMIT } from "../ipc/RepoClient";
 import type { BlameLine, ConflictSegment, DiffHunk, DiffOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
@@ -1051,11 +1051,11 @@ describe("DiffPane", () => {
     it("shows the raw error and a plain-language hint, plus a Retry that re-fetches, when the working diff fails", async () => {
       const singleFile: StatusEntry[] = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }];
       const getWorkingDiff = vi.fn<RepoClient["getWorkingDiff"]>().mockResolvedValue([]);
-      getWorkingDiff.mockRejectedValueOnce(new Error("Transport failed: sidecar exited unexpectedly (code 1)"));
+      getWorkingDiff.mockRejectedValueOnce(new RepoError("TransportLost", "Browsitory sidecar exited with code 1"));
       renderUncommitted(fakeClient({ getWorkingDiff }), singleFile);
 
       expect(
-        await screen.findByText("Transport failed: sidecar exited unexpectedly (code 1)"),
+        await screen.findByText("Browsitory sidecar exited with code 1"),
       ).toBeInTheDocument();
       expect(
         screen.getByText("The connection to the backend was lost. Retry, or reopen the repository."),
@@ -1066,7 +1066,7 @@ describe("DiffPane", () => {
 
       await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
       expect(
-        screen.queryByText("Transport failed: sidecar exited unexpectedly (code 1)"),
+        screen.queryByText("Browsitory sidecar exited with code 1"),
       ).not.toBeInTheDocument();
     });
 
@@ -1147,7 +1147,7 @@ describe("DiffPane", () => {
       ];
       const getConflictHunks = vi.fn((_repoPath: string, path: string): Promise<ConflictSegment[]> => {
         if (path === "binary.dat") {
-          return Promise.reject(new Error("'binary.dat' is an add/delete conflict, not a text conflict"));
+          return Promise.reject(new RepoError("AddDeleteConflict", "'binary.dat' is an add/delete conflict, not a text conflict"));
         }
         return Promise.resolve([{ kind: "Clean", content: "shared content" }]);
       });
@@ -1485,14 +1485,11 @@ describe("DiffPane", () => {
 
     it("shows the raw error and a Retry that re-fetches when a commit file's diff fails", async () => {
       const getCommitDiffOnce = vi.fn<RepoClient["getCommitDiff"]>().mockResolvedValue([]);
-      getCommitDiffOnce.mockRejectedValueOnce(new Error("failed to read working diff: permission denied"));
+      getCommitDiffOnce.mockRejectedValueOnce(new RepoError("Other", "failed to compute diff: object not found"));
       renderCommit(fakeClient({ getCommitFiles, getCommitDiff: getCommitDiffOnce }), "abc123");
 
       expect(
-        await screen.findByText("failed to read working diff: permission denied"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText("Could not read this file's changes. Retry, or check the file still exists."),
+        await screen.findByText("failed to compute diff: object not found"),
       ).toBeInTheDocument();
       expect(getCommitDiffOnce).toHaveBeenCalledTimes(1);
 
@@ -1500,7 +1497,7 @@ describe("DiffPane", () => {
 
       await waitFor(() => expect(getCommitDiffOnce).toHaveBeenCalledTimes(2));
       expect(
-        screen.queryByText("failed to read working diff: permission denied"),
+        screen.queryByText("failed to compute diff: object not found"),
       ).not.toBeInTheDocument();
     });
 

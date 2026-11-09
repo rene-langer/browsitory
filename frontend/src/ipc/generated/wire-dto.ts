@@ -43,6 +43,8 @@ export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, sy
 
 export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 
+export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict";
+
 export type ExternalToolSettings = { editor: string | null, terminal: string | null, };
 
 export type FastForwardMode = "Allow" | "Never" | "Only";
@@ -140,6 +142,8 @@ export type RemoteInfo = { name: string, fetchUrl: string, pushUrl: string | nul
  * Effective git-config prune default for this remote (the UI's Prune toggle fallback).
  */
 prune: boolean, };
+
+export type RepoErrorPayload = { kind: ErrorKind, message: string, };
 
 export type ResetMode = "soft" | "mixed" | "hard";
 

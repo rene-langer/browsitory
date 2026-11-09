@@ -346,6 +346,77 @@ export type TransferOperation =
 /** Mirrors `git_core::remote::TransferErrorKind`; the wire value is its Rust variant name. */
 export type TransferErrorKind = "NonFastForward" | "RejectedRemoteRef" | "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure" | "TransferFailed" | "Cancelled" | "StaleLease" | "HookFailed";
 
+/**
+ * Mirrors `repo_service::wire::ErrorKind` (#496): what kind of failure a rejected request was,
+ * for the few the UI tells apart. Code switches on it, never on the message text.
+ */
+export type ErrorKind =
+  | "Other"
+  | "WorkerStopped"
+  | "CredentialStoreFailure"
+  | "DirtyWorktree"
+  | "PullFailed"
+  | "Cancelled"
+  | "AddDeleteConflict";
+
+/** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
+export interface RepoErrorPayload {
+  kind: ErrorKind;
+  message: string;
+}
+
+/**
+ * `ErrorKind`, plus `TransportLost`: the VSCode extension host lost its sidecar process, so the
+ * request never got an answer (JSON-RPC code `-32001`, or a `transportStatus` notification).
+ */
+export type RepoErrorKind = ErrorKind | "TransportLost";
+
+/**
+ * What every `RepoClient` method rejects with when the backend refuses a request (#496).
+ * `String(error)` is the backend's message alone, as when Tauri rejected with a bare string.
+ */
+export class RepoError extends Error {
+  readonly kind: RepoErrorKind;
+  constructor(kind: RepoErrorKind, message: string) {
+    super(message);
+    this.name = "RepoError";
+    this.kind = kind;
+  }
+  override toString(): string {
+    return this.message;
+  }
+}
+
+/** The kind of a caught value: a `RepoError`'s, else `"Other"`. */
+export function errorKind(error: unknown): RepoErrorKind {
+  return error instanceof RepoError ? error.kind : "Other";
+}
+
+const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
+  "Other",
+  "WorkerStopped",
+  "CredentialStoreFailure",
+  "DirtyWorktree",
+  "PullFailed",
+  "Cancelled",
+  "AddDeleteConflict",
+]);
+
+/**
+ * Reads a backend rejection: a `RepoErrorPayload`, or a bare string (an error Tauri raises
+ * itself, such as a bad argument). A kind this frontend doesn't know reads as `"Other"`.
+ */
+export function toRepoError(raw: unknown): RepoError {
+  if (raw instanceof RepoError) return raw;
+  if (typeof raw === "object" && raw !== null && "kind" in raw && "message" in raw) {
+    const { kind, message } = raw as { kind: unknown; message: unknown };
+    if (typeof message === "string") {
+      return new RepoError(typeof kind === "string" && ERROR_KINDS.has(kind) ? (kind as ErrorKind) : "Other", message);
+    }
+  }
+  return new RepoError("Other", raw instanceof Error ? raw.message : String(raw));
+}
+
 export interface CloneRequest {
   url: string;
   dest: string;

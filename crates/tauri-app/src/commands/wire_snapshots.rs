@@ -284,6 +284,13 @@ fn snapshots() -> Vec<(String, String)> {
     for (case, error) in clone_errors() {
         s.0.push((format!("CloneErrorPayload/{case}"), wire_error(&error)));
     }
+    // Every other command's error (#496).
+    for (case, message) in fixtures::error_messages() {
+        s.0.push((
+            format!("RepoErrorPayload/{case}"),
+            wire_error(&repo_service::wire::ErrorDto::from(message)),
+        ));
+    }
     s.0
 }
 

@@ -2,7 +2,7 @@
 pub async fn list_remotes(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<RemoteInfoDto>, String> {
+) -> Result<Vec<RemoteInfoDto>, ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |worker| {
             worker
@@ -17,6 +17,7 @@ pub async fn list_remotes(
         .await
 }
 
+use repo_service::wire::ErrorDto;
 use std::sync::mpsc;
 
 use tauri::{AppHandle, State};
@@ -29,7 +30,7 @@ pub async fn list_remote_branches(
     repo_path: String,
     remote_name: String,
     state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.list_remote_branches(remote_name))
         .await
@@ -39,7 +40,7 @@ pub async fn list_remote_branches(
 pub async fn get_current_upstream(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<Option<UpstreamInfoDto>, String> {
+) -> Result<Option<UpstreamInfoDto>, ErrorDto> {
     let upstream = repo_worker(&state, &repo_path)?
         .call(move |w| w.get_current_upstream())
         .await?;
@@ -50,7 +51,7 @@ pub async fn get_remote_upstreams(
     repo_path: String,
     name: String,
     state: State<'_, AppState>,
-) -> Result<Vec<UpstreamInfoDto>, String> {
+) -> Result<Vec<UpstreamInfoDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_remote_upstreams(name))
         .await?
@@ -66,7 +67,7 @@ pub async fn add_remote(
     fetch_url: String,
     push_url: Option<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.add_remote(name, fetch_url, push_url))
         .await
@@ -78,7 +79,7 @@ pub async fn rename_remote(
     old_name: String,
     new_name: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.rename_remote(old_name, new_name))
         .await
@@ -91,7 +92,7 @@ pub async fn update_remote_urls(
     fetch_url: String,
     push_url: Option<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.update_remote_urls(name, fetch_url, push_url))
         .await
@@ -103,7 +104,7 @@ pub async fn remove_remote(
     name: String,
     clear_upstreams: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.remove_remote(name, clear_upstreams))
         .await
@@ -116,7 +117,7 @@ pub async fn save_https_credential(
     username: String,
     token: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.save_https_credential(remote_name, username, token))
         .await
@@ -127,7 +128,7 @@ pub async fn forget_https_credential(
     repo_path: String,
     remote_name: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.forget_https_credential(remote_name))
         .await
@@ -140,7 +141,7 @@ pub async fn set_remote_auth_mode(
     mode: RemoteAuthModeDto,
     username: Option<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let mode = match mode {
         RemoteAuthModeDto::HttpsToken => git_core::remote::RemoteAuthMode::HttpsToken {
             username: username
@@ -160,7 +161,7 @@ pub async fn set_current_upstream(
     remote_name: String,
     remote_branch: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.set_current_upstream(remote_name, remote_branch))
         .await
@@ -170,7 +171,7 @@ pub async fn set_current_upstream(
 pub async fn clear_current_upstream(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.clear_current_upstream())
         .await
@@ -183,7 +184,7 @@ pub async fn fetch_remote(
     prune: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = repo_worker(&state, &repo_path)?
         .call(move |w| w.fetch_remote(remote_name, prune, event_tx))
@@ -198,7 +199,7 @@ pub async fn fetch_all_remotes(
     prune: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = repo_worker(&state, &repo_path)?
         .call(move |w| w.fetch_all_remotes(prune, event_tx))
@@ -216,7 +217,7 @@ pub async fn background_fetch(
     prune: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = repo_worker(&state, &repo_path)?
         .call(move |w| w.background_fetch(prune, event_tx))
@@ -236,7 +237,7 @@ pub async fn push_branch(
     no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = repo_worker(&state, &repo_path)?
         .call(move |w| {
@@ -262,7 +263,7 @@ pub async fn delete_remote_branch(
     no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = repo_worker(&state, &repo_path)?
         .call(move |w| w.delete_remote_branch(remote_name, branch_name, no_verify, event_tx))
@@ -279,7 +280,7 @@ pub async fn delete_remote_tag(
     no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = repo_worker(&state, &repo_path)?
         .call(move |w| w.delete_remote_tag(remote_name, tag_name, no_verify, event_tx))
@@ -299,7 +300,7 @@ pub async fn cancel_transfer(
     repo_path: String,
     operation_id: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .signal()
         .cancel_transfer(&operation_id);
@@ -313,7 +314,7 @@ pub async fn push_current_branch(
     no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = repo_worker(&state, &repo_path)?
         .call(move |w| w.push_current_branch(remote_name, no_verify, event_tx))
@@ -329,7 +330,7 @@ pub async fn force_push_current_branch(
     no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = repo_worker(&state, &repo_path)?
         .call(move |w| w.force_push_current_branch(remote_name, no_verify, event_tx))
@@ -346,7 +347,7 @@ pub async fn push_tags(
     no_verify: bool,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<String, String> {
+) -> Result<String, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     let operation_id = repo_worker(&state, &repo_path)?
         .call(move |w| w.push_tags(remote_name, names, no_verify, event_tx))
@@ -360,7 +361,7 @@ pub async fn pull_current_upstream(
     repo_path: String,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<PullOutcomeDto, String> {
+) -> Result<PullOutcomeDto, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     emit_transfer_events(app, event_rx);
     Ok(repo_worker(&state, &repo_path)?

@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 
@@ -133,7 +134,7 @@ pub async fn clone_repo(
 pub async fn cancel_clone(
     operation_id: String,
     state: State<'_, CloneState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     state.0.cancel(&operation_id);
     Ok(())
 }

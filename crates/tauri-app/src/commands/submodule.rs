@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use tauri::State;
 
 use super::{repo_worker, AppState};
@@ -7,7 +8,7 @@ use repo_service::wire::SubmoduleInfoDto;
 pub async fn list_submodules(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<Vec<SubmoduleInfoDto>, String> {
+) -> Result<Vec<SubmoduleInfoDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.list_submodules())
         .await?
@@ -21,7 +22,7 @@ pub async fn init_submodule(
     repo_path: String,
     path: String,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.init_submodule(path))
         .await
@@ -33,7 +34,7 @@ pub async fn update_submodule(
     path: String,
     recursive: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     repo_worker(&state, &repo_path)?
         .call(move |w| w.update_submodule(path, recursive))
         .await

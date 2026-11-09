@@ -3,6 +3,7 @@
 //! `cmd` from the user's own git config, which runs as `sh -c` exactly like git runs it). Paths
 //! from the frontend are confined to the repository's work tree by `git_core::launch`.
 
+use repo_service::wire::ErrorDto;
 use std::path::PathBuf;
 
 use git_core::launch::{self, EditorTarget};
@@ -29,17 +30,17 @@ pub async fn open_in_editor(
     path: String,
     line: Option<u32>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let workdir = workdir_of(&state, &repo_path)?;
     let editor = tool_settings()?.editor;
     match launch::prepare_editor(&workdir, &path, line, editor.as_deref())
         .map_err(|e| e.to_string())?
     {
         EditorTarget::Command(invocation) => {
-            launch::run_invocation(&invocation, &workdir).map_err(|e| e.to_string())
+            Ok(launch::run_invocation(&invocation, &workdir).map_err(|e| e.to_string())?)
         }
         EditorTarget::SystemDefault(file) => {
-            tauri_plugin_opener::open_path(file, None::<&str>).map_err(|e| e.to_string())
+            Ok(tauri_plugin_opener::open_path(file, None::<&str>).map_err(|e| e.to_string())?)
         }
     }
 }
@@ -51,19 +52,19 @@ pub async fn reveal_in_file_manager(
     repo_path: String,
     path: Option<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let workdir = workdir_of(&state, &repo_path)?;
     let target = launch::reveal_target(&workdir, path.as_deref()).map_err(|e| e.to_string())?;
-    tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())
+    Ok(tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
-pub async fn open_terminal(repo_path: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn open_terminal(repo_path: String, state: State<'_, AppState>) -> Result<(), ErrorDto> {
     let workdir = workdir_of(&state, &repo_path)?;
     let terminal = tool_settings()?.terminal;
     let invocation =
         launch::prepare_terminal(&workdir, terminal.as_deref()).map_err(|e| e.to_string())?;
-    launch::run_invocation(&invocation, &workdir).map_err(|e| e.to_string())
+    Ok(launch::run_invocation(&invocation, &workdir).map_err(|e| e.to_string())?)
 }
 
 /// Both sides of `path` in `source`, for the image preview (each capped at 20 MB).
@@ -73,7 +74,7 @@ pub async fn get_file_sides(
     path: String,
     source: DiffSourceDto,
     state: State<'_, AppState>,
-) -> Result<FileSidesDto, String> {
+) -> Result<FileSidesDto, ErrorDto> {
     Ok(FileSidesDto::from(
         repo_worker(&state, &repo_path)?
             .call(move |w| w.get_file_sides(path, source.into()))
@@ -89,15 +90,15 @@ pub async fn open_diff_tool(
     path: String,
     source: DiffSourceDto,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), ErrorDto> {
     let prepared = repo_worker(&state, &repo_path)?
         .call(move |w| w.prepare_diff_tool(path, source.into()))
         .await?;
-    off_runtime(move || {
+    Ok(off_runtime(move || {
         git_core::tools::launch_diff_tool(prepared, git_core::tools::DIFF_TOOL_GRACE)
     })
     .await?
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?)
 }
 
 /// Waits for the merge tool on a blocking thread, never on the repo worker, which stays free
@@ -107,7 +108,7 @@ pub async fn open_merge_tool(
     repo_path: String,
     path: String,
     state: State<'_, AppState>,
-) -> Result<MergeToolOutcomeDto, String> {
+) -> Result<MergeToolOutcomeDto, ErrorDto> {
     let prepared = repo_worker(&state, &repo_path)?
         .call(move |w| w.prepare_merge_tool(path))
         .await?;
@@ -118,21 +119,21 @@ pub async fn open_merge_tool(
 }
 
 #[tauri::command]
-pub fn get_external_tool_settings() -> Result<ExternalToolSettingsDto, String> {
-    tool_settings().map(Into::into)
+pub fn get_external_tool_settings() -> Result<ExternalToolSettingsDto, ErrorDto> {
+    Ok(tool_settings().map(Into::into)?)
 }
 
 #[tauri::command]
-pub fn set_external_tool_settings(settings: ExternalToolSettingsDto) -> Result<(), String> {
+pub fn set_external_tool_settings(settings: ExternalToolSettingsDto) -> Result<(), ErrorDto> {
     launch::check_tool_commands(settings.editor.as_deref(), settings.terminal.as_deref())?;
-    config::set_external_tool_settings(&settings.into()).map_err(|e| e.to_string())
+    Ok(config::set_external_tool_settings(&settings.into()).map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
 pub async fn get_git_tools(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<GitToolsDto, String> {
+) -> Result<GitToolsDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_git_tools())
         .await?

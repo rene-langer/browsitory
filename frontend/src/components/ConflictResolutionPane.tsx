@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ConflictSegment, ConflictSide, FileConflictChoice, RepoClient } from "../ipc/RepoClient";
+import { errorKind, type ConflictSegment, type ConflictSide, type FileConflictChoice, type RepoClient } from "../ipc/RepoClient";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./ConflictResolutionPane.module.css";
@@ -54,7 +54,7 @@ export function ConflictResolutionPane({
         if (!ignore) {
           const message = String(err);
           setError(message);
-          setIsAddDeleteConflict(message.includes("add/delete conflict"));
+          setIsAddDeleteConflict(errorKind(err) === "AddDeleteConflict");
           setLoadedPath(path);
         }
       });

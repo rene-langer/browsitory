@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { RepoError } from "../ipc/RepoClient";
 import { describeError } from "./errorMessages";
 
 describe("describeError", () => {
-  it("adds a hint for a sidecar transport failure", () => {
-    const result = describeError(new Error("Transport failed: sidecar exited unexpectedly (code 1)"));
-    expect(result.message).toBe("Transport failed: sidecar exited unexpectedly (code 1)");
+  it("adds a hint when the VSCode extension lost its sidecar", () => {
+    const result = describeError(new RepoError("TransportLost", "Browsitory sidecar exited with code 1"));
+    expect(result.message).toBe("Browsitory sidecar exited with code 1");
     expect(result.hint).toBe("The connection to the backend was lost. Retry, or reopen the repository.");
   });
 
-  it("adds a hint for a working-diff fetch failure", () => {
-    const result = describeError(new Error("failed to read working diff: permission denied"));
-    expect(result.hint).toBe("Could not read this file's changes. Retry, or check the file still exists.");
+  // #496: the hint follows the kind; a message that merely mentions the sidecar gets none.
+  it("adds no hint for another kind, whatever its text", () => {
+    const result = describeError(new RepoError("Other", "Browsitory sidecar exited with code 1"));
+    expect(result.hint).toBeUndefined();
   });
 
   it("falls back to no hint for an unrecognized error", () => {

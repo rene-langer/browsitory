@@ -2,7 +2,8 @@ import { act, renderHook } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import type { AppState } from "./useAppState";
-import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
+import { RepoError } from "../ipc/RepoClient";
+import { credentialFailureMessage, credentialRemediation, useMutationRunner } from "./useMutationRunner";
 
 const BASE_STATE: AppState = {
   repoPath: "/repo",
@@ -73,23 +74,40 @@ function setupRunner(initial: AppState = BASE_STATE) {
 
 describe("credentialFailureMessage", () => {
   // AUD-2026-09-05-CONC-002: `WorkerHandle` methods across `crates/repo-service/src/worker/*`
-  // reject every subsequent call on a repo whose worker thread has died with one of these two
-  // verbatim strings. Both should map to a distinct reconnect message — retrying the same
-  // mutation can't help once the worker itself is gone.
+  // reject every subsequent call on a repo whose worker thread has died, with the `WorkerStopped`
+  // kind (#496). It maps to a distinct reconnect message — retrying the same mutation can't help
+  // once the worker itself is gone.
   it.each([
     "worker thread stopped",
     "worker thread stopped before replying",
-  ])("maps %s to the reconnect message instead of surfacing it verbatim", (workerError) => {
-    expect(credentialFailureMessage(new Error(workerError))).toBe(
+  ])("maps a WorkerStopped %s to the reconnect message instead of surfacing it verbatim", (workerError) => {
+    expect(credentialFailureMessage(new RepoError("WorkerStopped", workerError))).toBe(
       "Connection to this repository was lost. Close and reopen the repository to reconnect.",
     );
   });
 
-  it("leaves unrelated errors and existing credential remediations untouched", () => {
-    expect(credentialFailureMessage(new Error("some other failure"))).toBe("some other failure");
-    expect(credentialFailureMessage("missing credential")).toBe(
-      "Save an HTTPS token for this remote before retrying.",
+  it("maps a CredentialStoreFailure to its remediation", () => {
+    expect(credentialFailureMessage(new RepoError("CredentialStoreFailure", "credential keychain failure: locked"))).toBe(
+      "The operating-system credential store is unavailable. Unlock it and try again.",
     );
+  });
+
+  // #496: only the kind counts; the old substring checks matched these texts.
+  it("leaves other errors as they are, whatever their text", () => {
+    expect(credentialFailureMessage(new Error("some other failure"))).toBe("some other failure");
+    expect(credentialFailureMessage(new RepoError("Other", "worker thread stopped"))).toBe("worker thread stopped");
+    expect(credentialFailureMessage("missing credential")).toBe("missing credential");
+    expect(credentialFailureMessage(new RepoError("Other", "SSH agent failure"))).toBe("SSH agent failure");
+  });
+});
+
+describe("credentialRemediation", () => {
+  it.each([
+    ["MissingCredential", "Save an HTTPS token for this remote before retrying."],
+    ["CredentialStoreFailure", "The operating-system credential store is unavailable. Unlock it and try again."],
+    ["SshAgentFailure", "Load a key into your SSH agent and try again."],
+  ] as const)("gives %s its fixed hint", (kind, hint) => {
+    expect(credentialRemediation(kind)).toBe(hint);
   });
 });
 

@@ -36,8 +36,9 @@ Dependency direction: `tauri-app` → `repo-service` ← `vscode-sidecar`, and `
 
 The JSON shapes both transports send and receive are defined once, in `repo_service::wire`
 (`crates/repo-service/src/wire.rs`): about 70 DTOs, their `From` impls to and from the
-`git-core`, `config` and `repo-service` types, and the transfer and hook event payloads
-(`transfer_progress_dto`, `hook_progress_dto`). The Tauri commands and the sidecar handlers
+`git-core`, `config` and `repo-service` types, the transfer and hook event payloads
+(`transfer_progress_dto`, `hook_progress_dto`), and the error envelope every failed request
+answers (`ErrorDto`, see "Error handling"). The Tauri commands and the sidecar handlers
 both map through these, so a mapping can't drift between the two. Only transport-specific types
 stay in the transport crates:
 
@@ -1889,13 +1890,23 @@ identifier again without extending this migration.
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,
-`StatusError`, ...). `Worker`/Tauri commands map these to `Result<T, String>` crossing the IPC
-boundary (Tauri serializes `Err` as a rejected JS promise). `RepoClient` methods return
-`Promise<T>` that reject with that message — no error is swallowed at the boundary.
-The VSCode bridge additionally synthesizes `-32001` JSON-RPC errors for requests interrupted by
-sidecar loss. Its separate `transportStatus` notification rejects any still-pending webview
-promises and presents the diagnostic globally; it does not extend the transport-neutral
-`RepoClient` interface.
+`StatusError`, ...). The worker maps these to `Result<T, String>`. At the transport boundary
+each error becomes the shared envelope `repo_service::wire::ErrorDto` (`{ kind, message }`,
+#496): Tauri commands return `Result<T, ErrorDto>` (Tauri sends `Err` as the rejected
+promise's value), and the sidecar puts it in the JSON-RPC error's `data`, next to the same
+`message`. `ErrorKind::of` picks the kind from the error text, by the constant or typed error
+its producer formats (`wire::WORKER_STOPPED`, `wire::PULL_FAILED`,
+`RemoteError::DirtyWorktree`, `MergeError::NotATextConflict`, ...), never by a copy of the text,
+so rewording a message keeps its kind; anything else is `Other`. `ErrorKind` lists only the
+failures the frontend tells apart: a new one needs a kind there, not a text check.
+
+`RepoClient` methods reject with `RepoError` (`frontend/src/ipc/RepoClient.ts`): the message,
+whose `String()` is the message alone, and the `kind`. Frontend code switches on the kind
+(`errorKind(err)`) and never on the message text. `RepoErrorKind` adds `TransportLost`, which
+only the VSCode client sets: the extension host's bridge synthesizes `-32001` JSON-RPC errors
+for requests interrupted by sidecar loss, and its separate `transportStatus` notification
+rejects any still-pending webview promises and presents the diagnostic globally; it does not
+extend the transport-neutral `RepoClient` interface. No error is swallowed at the boundary.
 
 In the frontend, a failed action's message lives in `AppState.error` (the banner) until it is
 dismissed or the next change starts (#177). Every `useMutationRunner` variant clears it in the

@@ -263,3 +263,11 @@ CloneErrorPayload/init-AlreadyRepository {"kind":"AlreadyRepository","message":"
 CloneErrorPayload/init-Init {"kind":"InitFailed","message":"failed to create repository: could not create"}
 CloneErrorPayload/init-Io {"kind":"InitFailed","message":"read-only"}
 CloneErrorPayload/task-failed {"kind":"Io","message":"task panicked"}
+RepoErrorPayload/Other {"kind":"Other","message":"repo not open: /repo"}
+RepoErrorPayload/WorkerStopped {"kind":"WorkerStopped","message":"worker thread stopped"}
+RepoErrorPayload/WorkerStoppedBeforeReplying {"kind":"WorkerStopped","message":"worker thread stopped before replying"}
+RepoErrorPayload/CredentialStoreFailure {"kind":"CredentialStoreFailure","message":"credential keychain failure: locked"}
+RepoErrorPayload/DirtyWorktree {"kind":"DirtyWorktree","message":"cannot pull with a dirty worktree"}
+RepoErrorPayload/PullFailed {"kind":"PullFailed","message":"pull failed"}
+RepoErrorPayload/Cancelled {"kind":"Cancelled","message":"the transfer was cancelled"}
+RepoErrorPayload/AddDeleteConflict {"kind":"AddDeleteConflict","message":"'a.bin' is an add/delete conflict, not a text conflict"}

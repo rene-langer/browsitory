@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { error as logError } from "@tauri-apps/plugin-log";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { tauriRepoClient } from "./tauriRepoClient";
-import type { HeadInfo, RebaseAbort } from "./RepoClient";
+import { RepoError, type HeadInfo, type RebaseAbort } from "./RepoClient";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -71,6 +71,31 @@ describe("tauriRepoClient failure logging", () => {
     await expect(tauriRepoClient.getStatus(TEST_REPO_PATH)).rejects.toThrow("backend exploded");
 
     expect(logError).toHaveBeenCalledWith("IPC get_status failed: Error: backend exploded");
+  });
+
+  // #496: commands answer `{ kind, message }`; every method rejects with a `RepoError` whose
+  // string is the message alone, as when commands answered a bare string.
+  it("rejects with the command's error kind and message, and logs the payload", async () => {
+    vi.mocked(invoke).mockRejectedValue({ kind: "WorkerStopped", message: "worker thread stopped" });
+
+    const error: unknown = await tauriRepoClient.getStatus(TEST_REPO_PATH).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(RepoError);
+    expect((error as RepoError).kind).toBe("WorkerStopped");
+    expect(String(error)).toBe("worker thread stopped");
+    expect(logError).toHaveBeenCalledWith('IPC get_status failed: {"kind":"WorkerStopped","message":"worker thread stopped"}');
+  });
+
+  it("reads a bare string rejection, and a kind it doesn't know, as Other", async () => {
+    vi.mocked(invoke).mockRejectedValueOnce("invalid args `repoPath` for command `get_status`");
+    const bare: unknown = await tauriRepoClient.getStatus(TEST_REPO_PATH).catch((caught: unknown) => caught);
+    expect(bare).toEqual(new RepoError("Other", "invalid args `repoPath` for command `get_status`"));
+    expect((bare as RepoError).kind).toBe("Other");
+
+    vi.mocked(invoke).mockRejectedValueOnce({ kind: "SomethingNew", message: "later backend" });
+    const unknownKind: unknown = await tauriRepoClient.getStatus(TEST_REPO_PATH).catch((caught: unknown) => caught);
+    expect((unknownKind as RepoError).kind).toBe("Other");
+    expect(String(unknownKind)).toBe("later backend");
   });
 });
 
@@ -606,9 +631,9 @@ describe("tauriRepoClient commit search", () => {
   });
 
   it("invokes search_commits without logging its errors, and cancel_search", async () => {
-    vi.mocked(invoke).mockRejectedValueOnce("Search cancelled.");
-    await expect(tauriRepoClient.searchCommits("/repo", "author:ada", null, ["origin/x"], "100:abc")).rejects.toBe(
-      "Search cancelled.",
+    vi.mocked(invoke).mockRejectedValueOnce({ kind: "Other", message: "Search cancelled." });
+    await expect(tauriRepoClient.searchCommits("/repo", "author:ada", null, ["origin/x"], "100:abc")).rejects.toEqual(
+      new RepoError("Other", "Search cancelled."),
     );
     expect(invoke).toHaveBeenLastCalledWith("search_commits", {
       repoPath: "/repo",

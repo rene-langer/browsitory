@@ -629,6 +629,10 @@ fn pull_fetch_failure_returns_only_a_sanitized_error() {
 
     assert_eq!(error, "pull failed");
     assert!(!error.contains("alice-secret"));
+    assert_eq!(
+        crate::wire::ErrorKind::of(&error),
+        crate::wire::ErrorKind::PullFailed
+    );
 }
 
 #[test]
@@ -662,6 +666,10 @@ fn pull_with_untracked_file_reports_dirty_worktree() {
         .expect_err("pull should refuse a dirty worktree");
 
     assert_eq!(error, "cannot pull with a dirty worktree");
+    assert_eq!(
+        crate::wire::ErrorKind::of(&error),
+        crate::wire::ErrorKind::DirtyWorktree
+    );
 }
 
 #[test]

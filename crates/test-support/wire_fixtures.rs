@@ -127,6 +127,47 @@ pub fn transfer_error_kinds() -> Vec<TransferErrorKind> {
     })
 }
 
+/// #496: one rejected request's error text per `ErrorKind`, as its producer formats it. Both
+/// transports build their `ErrorDto` from it with `ErrorDto::from`, as they do for every error.
+pub fn error_messages() -> Cases<String> {
+    use git_core::remote::RemoteError;
+    use repo_service::wire::{self, ErrorKind};
+    let cases = vec![
+        case("Other", "repo not open: /repo".to_string()),
+        case("WorkerStopped", wire::WORKER_STOPPED.to_string()),
+        case(
+            "WorkerStoppedBeforeReplying",
+            wire::WORKER_STOPPED_BEFORE_REPLYING.to_string(),
+        ),
+        case(
+            "CredentialStoreFailure",
+            wire::credential_store_failure_message("locked"),
+        ),
+        case("DirtyWorktree", RemoteError::DirtyWorktree.to_string()),
+        case("PullFailed", wire::PULL_FAILED.to_string()),
+        case("Cancelled", RemoteError::Cancelled.to_string()),
+        case(
+            "AddDeleteConflict",
+            git_core::merge::MergeError::NotATextConflict("a.bin".into()).to_string(),
+        ),
+    ];
+    assert_every_variant!(
+        cases
+            .iter()
+            .map(|(_, message)| ErrorKind::of(message))
+            .collect::<Vec<_>>()
+            .iter(),
+        ErrorKind::Other,
+        ErrorKind::WorkerStopped,
+        ErrorKind::CredentialStoreFailure,
+        ErrorKind::DirtyWorktree,
+        ErrorKind::PullFailed,
+        ErrorKind::Cancelled,
+        ErrorKind::AddDeleteConflict,
+    );
+    cases
+}
+
 pub fn hook_sources() -> Vec<HookSource> {
     every!(HookSource {
         Commit,
