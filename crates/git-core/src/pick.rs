@@ -1744,3 +1744,52 @@ fn damage_message(kind: SequenceKind, damage: SequencerDamage, started_at: &str)
          it is."
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_case_pair_entries_keeps_another_paths_conflict_by_stage() {
+        // A conflict outside the pair (the abort clears one before it rewinds, so only reached
+        // directly): its stages are kept, and the tree's stage-0 entry of that path doesn't
+        // stay next to them.
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("conf"), "base\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("conf")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let stage = |stage: u16, content: &[u8]| git2::IndexEntry {
+            ctime: git2::IndexTime::new(0, 0),
+            mtime: git2::IndexTime::new(0, 0),
+            dev: 0,
+            ino: 0,
+            mode: 0o100644,
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id: repo.blob(content).unwrap(),
+            flags: stage << 12 | 4,
+            flags_extended: 0,
+            path: b"conf".to_vec(),
+        };
+        index.remove_path(std::path::Path::new("conf")).unwrap();
+        for (number, content) in [(1, &b"base\n"[..]), (2, b"ours\n"), (3, b"theirs\n")] {
+            index.add(&stage(number, content)).unwrap();
+        }
+        assert!(index.has_conflicts());
+        index.write().unwrap();
+
+        set_case_pair_entries(&repo, &tree, &crate::worktree_guard::CasePairs::default()).unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.read(true).unwrap();
+        let stages: Vec<u16> = index
+            .iter()
+            .map(|entry| (entry.flags >> 12) & 0x3)
+            .collect();
+        assert_eq!(stages, [1, 2, 3]);
+    }
+}
