@@ -98,9 +98,16 @@ the release is published.
 
 Every installed desktop app checks
 `https://github.com/rene-langer/browsitory/releases/latest/download/latest.json`
-(`plugins.updater.endpoints` in `crates/tauri-app/tauri.conf.json`). A bad manifest or bundle
-link makes updating fail for every installed copy until the next release fixes it; a changed
-endpoint or `pubkey` strands them for good. `build-release` writes the manifest with
+(`plugins.updater.endpoints` in `crates/tauri-app/tauri.conf.json`). From the release after
+0.5.0 on (#477), it falls back to a copy on the user guide site,
+`https://rene-langer.github.io/browsitory/latest.json`, when that URL fails (see
+[the second endpoint](#second-endpoint-the-user-guide-site) below); older installs know only the
+first. A bad manifest or bundle link makes updating fail for every installed copy until the next
+release fixes it; a changed endpoint or `pubkey` strands them for good. The app checks at start
+and every 6 hours; after a failed check or download it retries after 10 minutes, doubling up to
+3 hours, until a check succeeds (`frontend/src/components/UpdateBanner.tsx`).
+
+`build-release` writes the manifest with
 `tauri-apps/tauri-action`: each of its three jobs uploads its bundles and `.sig` files to the
 draft release and merges its platforms into the draft's `latest.json`.
 
@@ -169,6 +176,39 @@ python3 scripts/check-updater-manifest.py --version "${tag#release/}" --assets "
    'Accept: application/octet-stream' '<a url from latest.json>'`.
 3. Updater smoke test: install the previous release and update it through the app, on Linux,
    and on macOS and Windows where possible.
+4. The second endpoint, once the `Docs` run that the release started has finished
+   (`gh run list -w docs.yml -L 2`): `curl -sL https://rene-langer.github.io/browsitory/latest.json`
+   shows the same manifest as step 1.
+
+#### Second endpoint: the user guide site
+
+The updater tries its endpoints in order and reads the next one when one fails (no answer, or
+not a 2xx status). The second is `latest.json` on the user guide's Pages site, so an outage of
+the release download host (on 2026-11-09 it answered `504` while the API asset URLs, which the
+bundles are downloaded from, kept working) doesn't stop updates. `release.yml` doesn't write it:
+the `Docs` workflow (`.github/workflows/docs.yml`) copies it from the published release each time
+it builds the site.
+
+- **Never ahead of the published release.** The build asks the API for `releases/latest`, the
+  newest published release that is not a pre-release (drafts are never returned), the same
+  release the first endpoint resolves to. It downloads that release's `latest.json`, `.sig`
+  files and asset list and runs `scripts/check-updater-manifest.py` on them, as
+  `publish-vsix-release` does on the draft. Only a manifest that passes goes into the site. A
+  published release's files can't change (immutable releases), so the copy stays right.
+- **Follows each release.** Publishing the draft fires `release: published`; the
+  `redeploy-on-release` job of `docs.yml` then starts the workflow on `main`
+  (`workflow_dispatch`), which rebuilds and publishes the site with the new `latest.json`. Every
+  other publish of the site (a docs change on `main`) fetches it again too.
+- **A failure doesn't break the docs.** If the release can't be read or the check fails, the
+  build warns ("Updater manifest") and publishes the site without `latest.json`. The second
+  endpoint then answers `404` until the next publish; installed apps still use the first.
+  Pull requests run the same step but publish nothing.
+- **If it is missing or old** (the warning, or step 4 above shows an older version): fix the
+  cause, then `gh workflow run docs.yml --ref main`, or re-run the latest `Docs` run on `main`.
+- A pre-release, or a release published with `--latest=false`, doesn't change either endpoint.
+- Installed apps keep this URL like the first one: moving the user guide site (another Pages
+  address, a custom domain without a redirect) or dropping `latest.json` from it takes the
+  fallback away from every install that has it.
 
 **0.4.0 only (#363):** 0.4.0 is the first release built with v1. #363 stays open until an
 installed 0.3.1 updates to 0.4.0 through the app on Linux, macOS and Windows, after the checks
