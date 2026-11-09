@@ -7,6 +7,7 @@ import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./WorktreePanel.module.css";
+import formStyles from "./primitives/FormDialog.module.css";
 import { pruneWorktreesAction, worktreeActions } from "../lib/actions/worktreeActions";
 import type { OperationBlockers } from "../lib/operationStatus";
 
@@ -47,6 +48,7 @@ export function WorktreePanel({
   // The rows' and Prune's availability and labels, shared with the palette (#509).
   const blockers: OperationBlockers = { blocked: operationDisabled, reason: operationDisabledReason };
   const prune = pruneWorktreesAction(blockers);
+  const busyReason = operationDisabled ? operationDisabledReason : null;
 
   const createWorktree = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -174,11 +176,20 @@ export function WorktreePanel({
       {removeConfirmation !== null && (
         <ConfirmDialog
           ariaLabel={`Remove worktree ${removeConfirmation.path}`}
-          message={<p>Remove worktree at {removeConfirmation.path}?</p>}
+          message={
+            <>
+              <p>Remove worktree at {removeConfirmation.path}?</p>
+              {/* #561: the repository can become busy while the confirmation is open. */}
+              {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
+            </>
+          }
           confirmLabel="Remove worktree"
           confirmDisabled={operationDisabled}
-          confirmTitle={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-          onConfirm={() => void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null))}
+          confirmTitle={busyReason ?? undefined}
+          onConfirm={() => {
+            if (operationDisabled) return;
+            void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null));
+          }}
           onCancel={() => setRemoveConfirmation(null)}
         />
       )}

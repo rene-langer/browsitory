@@ -71,6 +71,20 @@ describe("RemoteCredentialsDialog", () => {
     await waitFor(() => expect(within(dialog).getByLabelText("Access token")).toHaveValue(""));
   });
 
+  it("disables saving and forgetting with the reason while the repository is busy (#561)", () => {
+    const { props, dialog } = renderDialog({ blockedReason: "A merge is in progress." });
+    expect(within(dialog).getByText("A merge is in progress.")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Forget HTTPS credential", hidden: true }));
+    expect(props.onForgetHttpsCredential).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText("Authentication for origin"), { target: { value: "SshAgent" } });
+    const useAgent = within(dialog).getByRole("button", { name: "Use SSH agent", hidden: true });
+    expect(useAgent).toBeDisabled();
+    expect(useAgent).toHaveAttribute("title", "A merge is in progress.");
+    fireEvent.submit(useAgent.closest("form")!);
+    expect(props.onSetAuthMode).not.toHaveBeenCalled();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
   it("forgets the HTTPS credential", () => {
     const { props, dialog } = renderDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "Forget HTTPS credential", hidden: true }));

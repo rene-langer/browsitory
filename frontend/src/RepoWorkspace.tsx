@@ -592,7 +592,7 @@ export function RepoWorkspace({
           remoteDialog={appState.state.remoteDialog}
           remotes={appState.state.remotes}
           remoteUpstreams={appState.state.remoteUpstreams}
-          operationDisabled={repositoryOperationDisabled}
+          blockedReason={operationDisabledReason}
           onRenameRemote={appState.renameRemote}
           onUpdateRemoteUrls={appState.updateRemoteUrls}
           onRemoveRemote={appState.removeRemote}
@@ -798,7 +798,6 @@ export function RepoWorkspace({
               onOpenCreateBranchDraft={appState.openCreateBranchDraft}
               onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
               onMergeBranch={appState.openMergeDialog}
-              isRebasing={appState.state.rebaseProgress !== null}
               operationDisabled={repositoryOperationDisabled}
               operationDisabledReason={operationDisabledReason}
               graphBranchSelection={appState.state.graphBranchSelection}

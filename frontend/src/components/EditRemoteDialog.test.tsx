@@ -99,6 +99,18 @@ describe("EditRemoteDialog", () => {
     expect(within(dialog).queryByRole("button", { name: "Copy push URL for origin", hidden: true })).toBeNull();
   });
 
+  it("disables Save with the reason while the repository is busy (#561)", () => {
+    const { props, dialog } = renderDialog({ blockedReason: "A merge is in progress." });
+    fireEvent.change(within(dialog).getByLabelText("Push URL"), { target: { value: "../push.git" } });
+    const save = within(dialog).getByRole("button", { name: "Save remote", hidden: true });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title", "A merge is in progress.");
+    expect(within(dialog).getByText("A merge is in progress.")).toBeInTheDocument();
+    fireEvent.submit(save.closest("form")!);
+    expect(props.onUpdateUrls).not.toHaveBeenCalled();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
   it("Cancel closes without saving", () => {
     const { props, dialog } = renderDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));

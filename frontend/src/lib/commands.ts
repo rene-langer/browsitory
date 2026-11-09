@@ -778,7 +778,7 @@ export function buildCommands(
 
   if (panelVisibility.worktree) {
     for (const worktree of state.worktrees) {
-      if (worktree.isMain) continue;
+      // The main worktree's remove is refused (`MAIN_WORKTREE`), so only its open is offered (#561).
       const actions = worktreeActions(blockers, worktree);
       offer(`open-worktree:${worktree.path}`, actions.open, ["worktree", "open", worktree.name], () =>
         onOpenRepoTab(worktree.path),
