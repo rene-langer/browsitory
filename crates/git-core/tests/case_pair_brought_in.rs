@@ -1014,3 +1014,187 @@ fn a_sequence_abort_around_a_case_pair_keeps_an_unrelated_staged_deletion() {
         assert_eq!(read(dir.path(), pair.1), None, "{pair:?}");
     }
 }
+
+// #534: a submodule update whose target commit holds a case pair the submodule's HEAD doesn't,
+// with `core.ignorecase` on in the submodule.
+
+/// The paths in the index of the submodule checked out at `sub_dir` (its `.git` is a file).
+fn submodule_index_paths(sub_dir: &std::path::Path) -> Vec<String> {
+    let sub = git2::Repository::open(sub_dir).unwrap();
+    let index = git2::Index::open(&sub.path().join("index")).unwrap();
+    let mut paths: Vec<String> = index
+        .iter()
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .collect();
+    paths.sort();
+    paths
+}
+
+/// Commits `.gitmodules` and the gitlink `sub` at `at` in the superproject.
+fn commit_gitlink(repo: &git2::Repository, at: git2::Oid) {
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new(".gitmodules")).unwrap();
+    index
+        .add(&git2::IndexEntry {
+            ctime: git2::IndexTime::new(0, 0),
+            mtime: git2::IndexTime::new(0, 0),
+            dev: 0,
+            ino: 0,
+            mode: 0o160000,
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id: at,
+            flags: 0,
+            flags_extended: 0,
+            path: b"sub".to_vec(),
+        })
+        .unwrap();
+    index.write().unwrap();
+    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+    let signature = repo.signature().unwrap();
+    let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+    let parents: Vec<_> = parent.iter().collect();
+    repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        "gitlink",
+        &tree,
+        &parents,
+    )
+    .unwrap();
+}
+
+/// A superproject whose submodule `sub` (cloned from [`ahead_adds_the_other_name`]'s
+/// repository) is checked out at `main`, with `core.ignorecase` on in the submodule. Returns the
+/// source (kept alive), the superproject's folder and repository, and `ahead`'s commit.
+fn submodule_behind_the_other_name(
+    pair: (&str, &str),
+) -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    git2::Repository,
+    git2::Oid,
+) {
+    let (src_dir, src) = ahead_adds_the_other_name(pair);
+    let main = src.head().unwrap().target().unwrap();
+    let ahead = src.revparse_single("ahead").unwrap().id();
+    let (dir, repo) = init_repo();
+    let url = src_dir.path().to_string_lossy().into_owned();
+    write_file(
+        dir.path(),
+        ".gitmodules",
+        &format!("[submodule \"sub\"]\n\tpath = sub\n\turl = {url}\n"),
+    );
+    commit_gitlink(&repo, main);
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    git_core::submodule::init_submodule(&repo, "sub").unwrap();
+    git_core::submodule::update_submodule(&repo, "sub", false).unwrap();
+    let sub_dir = dir.path().join("sub");
+    let sub = git2::Repository::open(&sub_dir).unwrap();
+    sub.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    assert_eq!(read(&sub_dir, pair.0).as_deref(), Some("first\n"));
+    (src_dir, dir, repo, ahead)
+}
+
+#[test]
+fn submodule_update_refuses_a_commit_that_brings_in_a_case_pair() {
+    for pair in CASE_PAIRS {
+        let (_src, dir, repo, ahead) = submodule_behind_the_other_name(pair);
+        let sub_dir = dir.path().join("sub");
+        let before = head_id(&git2::Repository::open(&sub_dir).unwrap());
+        commit_gitlink(&repo, ahead);
+
+        let error = git_core::submodule::update_submodule(&repo, "sub", false).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                git_core::submodule::SubmoduleError::CasePairBroughtIn(_)
+            ),
+            "{pair:?}: {error:?}"
+        );
+        assert_brought_in(&error, pair);
+        let sub = git2::Repository::open(&sub_dir).unwrap();
+        assert_eq!(head_id(&sub), before, "{pair:?}");
+        assert_eq!(
+            submodule_index_paths(&sub_dir),
+            sorted(&[pair.0, "conf", "other"]),
+            "{pair:?}"
+        );
+        assert_eq!(
+            read(&sub_dir, pair.0).as_deref(),
+            Some("first\n"),
+            "{pair:?}"
+        );
+        assert_eq!(read(&sub_dir, pair.1), None, "{pair:?}");
+    }
+}
+
+#[test]
+fn submodule_update_refuses_a_case_pair_where_a_refused_clone_left_its_head() {
+    // A fresh clone whose checkout was refused keeps an empty work tree with HEAD already at
+    // the target: retrying the update checks the whole tree out, so HEAD's pair is no excuse.
+    for pair in CASE_PAIRS {
+        let (_src, dir, repo, ahead) = submodule_behind_the_other_name(pair);
+        let sub_dir = dir.path().join("sub");
+        let sub = git2::Repository::open(&sub_dir).unwrap();
+        sub.set_head_detached(ahead).unwrap();
+        for entry in std::fs::read_dir(&sub_dir).unwrap().flatten() {
+            if entry.file_name() != ".git" {
+                let path = entry.path();
+                match path.is_dir() {
+                    true => std::fs::remove_dir_all(path).unwrap(),
+                    false => std::fs::remove_file(path).unwrap(),
+                }
+            }
+        }
+        commit_gitlink(&repo, ahead);
+
+        let error = git_core::submodule::update_submodule(&repo, "sub", false).unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                git_core::submodule::SubmoduleError::CasePairBroughtIn(_)
+            ),
+            "{pair:?}: {error:?}"
+        );
+        assert_brought_in(&error, pair);
+        assert_eq!(read(&sub_dir, pair.0), None, "{pair:?}");
+        assert_eq!(read(&sub_dir, pair.1), None, "{pair:?}");
+    }
+}
+
+#[test]
+fn submodule_update_goes_ahead_when_the_submodule_already_holds_the_pair() {
+    // A pair the checked-out HEAD already holds is #512's, not brought in.
+    for pair in CASE_PAIRS {
+        let (_src, dir, repo, ahead) = submodule_behind_the_other_name(pair);
+        let sub_dir = dir.path().join("sub");
+        let sub = git2::Repository::open(&sub_dir).unwrap();
+        // Check `ahead` out with the case folding off, as a case-sensitive drive holds it.
+        sub.config()
+            .unwrap()
+            .set_bool("core.ignorecase", false)
+            .unwrap();
+        let sub = git2::Repository::open(&sub_dir).unwrap();
+        let target = sub.find_commit(ahead).unwrap();
+        sub.checkout_tree(target.as_object(), None).unwrap();
+        sub.set_head_detached(ahead).unwrap();
+        sub.config()
+            .unwrap()
+            .set_bool("core.ignorecase", true)
+            .unwrap();
+        commit_gitlink(&repo, ahead);
+
+        git_core::submodule::update_submodule(&repo, "sub", false).unwrap();
+
+        let sub = git2::Repository::open(&sub_dir).unwrap();
+        assert_eq!(head_id(&sub), ahead.to_string(), "{pair:?}");
+    }
+}

@@ -1274,6 +1274,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   than written around (as undo and aborts do): on the case-insensitive drives
   `core.ignorecase` exists for, both files can't exist at once anyway. Reflog restore moves
   only a ref and checks nothing out.
+- A submodule update refuses one too (#534): `check_submodule_tree` runs
+  `refuse_case_pair_brought_in` in the submodule, on the target commit's tree against the
+  submodule's HEAD tree, with the submodule's own `core.ignorecase` (a global one applies to a
+  fresh clone). A fresh clone, or one whose checkout was refused (empty work tree, HEAD already
+  at the target), has no base: any pair is refused, and the clone stays with an empty work tree.
 - Aborts never refuse a case pair (#511): a pick outside Browsitory (or one before #522) can
   bring one in that no up-front check sees (libgit2's merge then records one name in the index
   and writes the other's file, so the pair is split between HEAD, the index and the disk).
