@@ -9,7 +9,72 @@ use url::Url;
 
 #[cfg(test)]
 mod tests {
-    use super::{is_local_url, sanitize_remote_message};
+    use super::{connect_error, is_local_url, is_network_failure, sanitize_remote_message};
+    use super::{ErrorClass, ErrorCode, RemoteError};
+
+    fn error(class: ErrorClass, message: &str) -> git2::Error {
+        git2::Error::new(ErrorCode::GenericError, class, message)
+    }
+
+    #[test]
+    fn only_failures_to_reach_the_host_are_network_failures() {
+        for (class, message) in [
+            (
+                ErrorClass::Os,
+                "failed to connect to 127.0.0.1: Connection refused",
+            ),
+            (
+                ErrorClass::Net,
+                "failed to connect to example.com: Operation timed out",
+            ),
+            (
+                ErrorClass::Net,
+                "failed to resolve address for example.invalid: Name or service not known",
+            ),
+            (
+                ErrorClass::Os,
+                "failed to send request: A connection with the server could not be established",
+            ),
+        ] {
+            assert!(is_network_failure(&error(class, message)), "{message}");
+        }
+        for (class, message) in [
+            (ErrorClass::Net, "unsupported URL protocol"),
+            (ErrorClass::Net, "failed to send request: timed out"),
+            (ErrorClass::Http, "unexpected http status code: 404"),
+            (ErrorClass::Http, "failed to connect to example.com"),
+            (ErrorClass::Ssl, "failed to resolve address for example.com"),
+        ] {
+            assert!(!is_network_failure(&error(class, message)), "{message}");
+        }
+    }
+
+    #[test]
+    fn a_connect_failure_is_unreachable_only_for_a_host_and_not_after_a_cancel() {
+        let refused = || {
+            error(
+                ErrorClass::Os,
+                "failed to connect to 127.0.0.1: Connection refused",
+            )
+        };
+        assert!(matches!(
+            connect_error(&|| false, refused(), false),
+            RemoteError::Unreachable(_)
+        ));
+        assert!(matches!(
+            connect_error(&|| false, refused(), true),
+            RemoteError::Git(_)
+        ));
+        assert!(matches!(
+            connect_error(&|| true, refused(), false),
+            RemoteError::Cancelled
+        ));
+        let status = error(ErrorClass::Http, "unexpected http status code: 404");
+        assert!(matches!(
+            connect_error(&|| false, status, false),
+            RemoteError::Git(_)
+        ));
+    }
 
     #[test]
     fn paths_are_local_and_hosts_are_not() {

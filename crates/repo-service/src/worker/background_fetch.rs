@@ -173,6 +173,12 @@ impl git_core::remote::ConnectWatch for SharedPhase {
     }
 }
 
+/// What stops a helper's fetch: the worker gave up on it (the registry has forgotten the
+/// operation then), or the user cancelled while it transfers.
+fn helper_cancelled(phase: &SharedPhase, user_cancel: &dyn Fn() -> bool) -> bool {
+    *phase.lock() == Phase::Abandoned || user_cancel()
+}
+
 enum HelperMessage {
     Progress(TransferProgress),
     Done(Result<(), RemoteError>),
@@ -314,9 +320,7 @@ fn fetch_one<S: CredentialStore + Send + Sync + 'static>(
             .name("background-fetch".to_string())
             .spawn(move || {
                 let _guard = guard;
-                // After the worker gave up, the registry has forgotten the operation: the
-                // abandoned phase is what stops this fetch then.
-                let cancel = || *phase.lock() == Phase::Abandoned || user_cancel();
+                let cancel = || helper_cancelled(&phase, &user_cancel);
                 let result = git2::Repository::open(&git_dir)
                     .map_err(RemoteError::from)
                     .and_then(|repo| {
@@ -349,11 +353,9 @@ fn fetch_one<S: CredentialStore + Send + Sync + 'static>(
     }
     loop {
         match rx.recv_timeout(POLL) {
+            // Already stamped with the operation's id (the helper fetches under it).
             Ok(HelperMessage::Progress(progress)) => {
-                let _ = events.send(TransferEvent::Progress(TransferProgress {
-                    operation_id: op.id.clone(),
-                    ..progress
-                }));
+                let _ = events.send(TransferEvent::Progress(progress));
             }
             Ok(HelperMessage::Done(result)) => return outcome_of(result),
             // The helper panicked.
@@ -421,6 +423,18 @@ mod tests {
     }
 
     #[test]
+    fn a_tick_that_comes_a_little_early_still_tries_again() {
+        let memory = Memory::default();
+        let start = Instant::now() + 10 * MINUTE;
+        let interval = 5 * MINUTE;
+        memory.unreachable("origin", start, interval);
+        // The tick after next, a second earlier than two intervals.
+        let early = start + 2 * interval - Duration::from_secs(1);
+        assert!(!memory.may_try("origin", start + interval));
+        assert!(memory.may_try("origin", early));
+    }
+
+    #[test]
     fn an_interval_of_an_hour_or_more_is_not_lengthened() {
         let memory = Memory::default();
         let start = Instant::now();
@@ -438,6 +452,29 @@ mod tests {
         assert!(memory.may_try("upstream", start + 5 * MINUTE));
         memory.reachable("origin");
         assert!(memory.may_try("origin", start + 5 * MINUTE));
+    }
+
+    fn phase(phase: Phase) -> SharedPhase {
+        SharedPhase(Arc::new(Mutex::new(phase)))
+    }
+
+    #[test]
+    fn a_connected_fetch_goes_on_unless_the_worker_gave_up_on_it() {
+        use git_core::remote::ConnectWatch;
+        let connecting = phase(Phase::Connecting(Instant::now()));
+        assert!(connecting.connected());
+        assert_eq!(*connecting.lock(), Phase::Transferring);
+        let abandoned = phase(Phase::Abandoned);
+        assert!(!abandoned.connected());
+        assert_eq!(*abandoned.lock(), Phase::Abandoned);
+    }
+
+    #[test]
+    fn a_helper_stops_when_abandoned_or_cancelled() {
+        let transferring = phase(Phase::Transferring);
+        assert!(!helper_cancelled(&transferring, &|| false));
+        assert!(helper_cancelled(&transferring, &|| true));
+        assert!(helper_cancelled(&phase(Phase::Abandoned), &|| false));
     }
 
     #[test]

@@ -897,6 +897,22 @@ fn a_cancel_stops_waiting_for_a_background_fetch_that_is_still_connecting() {
         .accepted
         .recv_timeout(Duration::from_secs(30))
         .expect("the background fetch connects to the silent server");
+    // Well within the connect limit, the worker keeps waiting for it.
+    thread::sleep(Duration::from_millis(300));
+    let early: Vec<_> = event_rx.try_iter().collect();
+    assert!(
+        !early
+            .iter()
+            .any(|event| matches!(event, TransferEvent::Completed { .. })),
+        "{early:?}"
+    );
+    assert!(
+        early.iter().any(|event| matches!(
+            event,
+            TransferEvent::Progress(progress) if progress.operation_id == operation_id
+        )),
+        "the other remote's progress is passed on: {early:?}"
+    );
     // The user starts an action: the app cancels the background fetch, then sends the action.
     let started = std::time::Instant::now();
     handle.cancel_transfer(&operation_id);
