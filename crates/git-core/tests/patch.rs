@@ -649,3 +649,48 @@ fn a_new_file_meeting_an_untracked_one_where_case_folds_does_not_apply() {
     assert_eq!(read(dir.path(), "A.txt"), "mine\n");
     assert!(!dir.path().join("a.txt").exists());
 }
+
+/// A two-mail series: the first adds `new/dir/a.txt`, the second `g.txt`. The repository is
+/// reset to the base (no `new/`), with an untracked `g.txt` there, so the second mail doesn't
+/// apply.
+fn series_adding_a_folder_then_failing() -> (tempfile::TempDir, Repository, Vec<u8>) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "one\n");
+    commit_all(&repo, "base");
+    let base = head_id(&repo);
+    write_file(dir.path(), "new/dir/a.txt", "a\n");
+    commit_all(&repo, "add a folder");
+    let first = head_id(&repo);
+    write_file(dir.path(), "g.txt", "g\n");
+    commit_all(&repo, "add g");
+    let second = head_id(&repo);
+    let series = commits_patch(&repo, &[first, second]).unwrap();
+    {
+        let base_commit = repo
+            .find_commit(git2::Oid::from_str(&base).unwrap())
+            .unwrap();
+        repo.reset(base_commit.as_object(), git2::ResetType::Hard, None)
+            .unwrap();
+    }
+    write_file(dir.path(), "g.txt", "mine\n");
+    (dir, repo, series)
+}
+
+#[test]
+fn a_failed_series_removes_the_folders_an_earlier_mail_created() {
+    let (dir, repo, series) = series_adding_a_folder_then_failing();
+    let err = apply_patch(&repo, &series).unwrap_err();
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert!(!dir.path().join("new").exists());
+    assert_eq!(read(dir.path(), "g.txt"), "mine\n");
+}
+
+#[test]
+fn a_failed_series_keeps_a_folder_that_was_there_before() {
+    let (dir, repo, series) = series_adding_a_folder_then_failing();
+    std::fs::create_dir(dir.path().join("new")).unwrap();
+    let err = apply_patch(&repo, &series).unwrap_err();
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert!(dir.path().join("new").is_dir());
+    assert!(!dir.path().join("new/dir").exists());
+}
