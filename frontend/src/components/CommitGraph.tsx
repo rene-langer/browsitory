@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import type { GraphCommit, HeadInfo, RemoteInfo, ResetMode, StatusEntry } from "../ipc/RepoClient";
+import type { GraphCommit, HeadInfo, RemoteInfo, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes } from "../lib/commitGraphLayout";
 import {
   EMPTY_SELECTION,
@@ -19,8 +19,6 @@ import { commitActions } from "../lib/actions/commitActions";
 import { rowsEqual, type SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
-import { ResetDialog } from "./ResetDialog";
-import { ParentPickerDialog } from "./ParentPickerDialog";
 import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
@@ -48,7 +46,8 @@ export function CommitGraph({
   onCherryPickMany,
   onRevertMany,
   onCheckoutCommit,
-  onResetToCommit,
+  onChooseParent,
+  onRequestReset,
   onEditHeadMessage,
   onEditHistory,
   onRewordCommit,
@@ -84,15 +83,21 @@ export function CommitGraph({
   headInfo: HeadInfo;
   // Name of the checked-out branch; `null` on a detached HEAD (reset is then unavailable).
   currentBranch: string | null;
-  // `mainline` is the 1-based parent a merge commit is applied against (from the parent
-  // picker), `null` for any other commit.
+  // A non-merge commit's pick or revert (`mainline` is always `null` here).
   onCherryPick: (commitId: string, mainline: number | null) => void;
   onRevert: (commitId: string, mainline: number | null) => void;
   /** Multi-selection "Cherry-pick N commits" / "Revert N commits"; ids oldest-first. */
   onCherryPickMany?: (commitIdsOldestFirst: string[]) => void;
   onRevertMany?: (commitIdsOldestFirst: string[]) => void;
   onCheckoutCommit: (commitId: string) => void;
-  onResetToCommit: (commitId: string, mode: ResetMode) => void;
+  /**
+   * A merge commit's Cherry-pick… / Revert…: opens the parent picker. Like the reset dialog it
+   * is rendered by `RepoWorkspace`, the one instance the command palette opens too (#514);
+   * `returnFocusTo` is this list (#146).
+   */
+  onChooseParent: (action: "Cherry-pick" | "Revert", commitId: string, returnFocusTo: HTMLElement | null) => void;
+  /** "Reset <branch> to here…": opens the reset dialog (see `onChooseParent`). */
+  onRequestReset: (commitId: string, returnFocusTo: HTMLElement | null) => void;
   /** HEAD's Reword…: opens the amend box with its message. */
   onEditHeadMessage: () => void;
   /**
@@ -141,10 +146,6 @@ export function CommitGraph({
     x: number;
     y: number;
   } | null>(null);
-  const [resetTarget, setResetTarget] = useState<GraphCommit | null>(null);
-  const [parentPicker, setParentPicker] = useState<{ action: "Cherry-pick" | "Revert"; commit: GraphCommit } | null>(
-    null,
-  );
   const [tagMenu, setTagMenu] = useState<{ tag: string; commitId: string; x: number; y: number } | null>(null);
   const [tagToDelete, setTagToDelete] = useState<string | null>(null);
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
@@ -216,14 +217,16 @@ export function CommitGraph({
         // A merge commit needs a parent to apply against: the ellipsis opens the parent picker.
         menuItem(actions.cherryPick, () =>
           actions.cherryPick.needsParent
-            ? setParentPicker({ action: "Cherry-pick", commit })
+            ? onChooseParent("Cherry-pick", commitId, listElement)
             : onCherryPick(commitId, null),
         ),
         menuItem(actions.revert, () =>
-          actions.revert.needsParent ? setParentPicker({ action: "Revert", commit }) : onRevert(commitId, null),
+          actions.revert.needsParent
+            ? onChooseParent("Revert", commitId, listElement)
+            : onRevert(commitId, null),
         ),
         menuItem(actions.checkout, () => onCheckoutCommit(commitId)),
-        menuItem(actions.reset, () => setResetTarget(commit)),
+        menuItem(actions.reset, () => onRequestReset(commitId, listElement)),
       );
     }
     items.push(...editItems(commitId, isHead));
@@ -590,31 +593,6 @@ export function CommitGraph({
         confirmDisabled={pending}
         onConfirm={() => void onDeleteTag?.(tagToDelete).then(() => setTagToDelete(null))}
         onCancel={() => setTagToDelete(null)}
-      />
-    )}
-    {parentPicker !== null && (
-      <ParentPickerDialog
-        action={parentPicker.action}
-        commit={parentPicker.commit}
-        commits={commits}
-        onConfirm={(mainline) => {
-          const { action, commit } = parentPicker;
-          setParentPicker(null);
-          if (action === "Cherry-pick") onCherryPick(commit.id, mainline);
-          else onRevert(commit.id, mainline);
-        }}
-        onCancel={() => setParentPicker(null)}
-      />
-    )}
-    {resetTarget !== null && currentBranch !== null && (
-      <ResetDialog
-        branch={currentBranch}
-        shortId={resetTarget.shortId}
-        onReset={(mode) => {
-          onResetToCommit(resetTarget.id, mode);
-          setResetTarget(null);
-        }}
-        onCancel={() => setResetTarget(null)}
       />
     )}
     {multiSelected && (

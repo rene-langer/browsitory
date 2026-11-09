@@ -51,7 +51,8 @@ const historyProps = {
   onCherryPick: vi.fn(),
   onRevert: vi.fn(),
   onCheckoutCommit: vi.fn(),
-  onResetToCommit: vi.fn(),
+  onChooseParent: vi.fn(),
+  onRequestReset: vi.fn(),
   onEditHeadMessage: vi.fn(),
 };
 
@@ -1202,7 +1203,8 @@ describe("CommitGraph — history actions", () => {
       onCherryPick: vi.fn(),
       onRevert: vi.fn(),
       onCheckoutCommit: vi.fn(),
-      onResetToCommit: vi.fn(),
+      onChooseParent: vi.fn(),
+      onRequestReset: vi.fn(),
       onEditHeadMessage: vi.fn(),
     };
     render(
@@ -1223,7 +1225,7 @@ describe("CommitGraph — history actions", () => {
   }
 
   it("offers cherry-pick, revert, checkout and reset on a single commit", () => {
-    const { openMenu, onCherryPick, onRevert, onCheckoutCommit, onResetToCommit } = setup();
+    const { openMenu, onCherryPick, onRevert, onCheckoutCommit, onRequestReset } = setup();
     openMenu("B");
     fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick" }));
     expect(onCherryPick).toHaveBeenCalledWith("B", null);
@@ -1235,8 +1237,9 @@ describe("CommitGraph — history actions", () => {
     expect(onCheckoutCommit).toHaveBeenCalledWith("B");
     openMenu("B");
     fireEvent.click(screen.getByRole("menuitem", { name: "Reset main to here…" }));
-    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
-    expect(onResetToCommit).toHaveBeenCalledWith("B", "mixed");
+    // The reset dialog is RepoWorkspace's (#514); focus returns to this list (#146).
+    expect(onRequestReset).toHaveBeenCalledWith("B", screen.getByRole("listbox", { name: "Commit history" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("disables cherry-pick on HEAD and rewords HEAD in the amend box", () => {
@@ -1249,39 +1252,33 @@ describe("CommitGraph — history actions", () => {
     expect(screen.queryByRole("menuitem", { name: "Reword…" })).not.toBeInTheDocument();
   });
 
-  it("asks for the parent of a merge commit and passes it as the mainline", () => {
-    const { openMenu, onCherryPick, onRevert } = setup();
+  it("asks RepoWorkspace for the parent picker of a merge commit (#514)", () => {
+    const { openMenu, onCherryPick, onRevert, onChooseParent } = setup();
+    const list = screen.getByRole("listbox", { name: "Commit history" });
     openMenu("M");
     expect(screen.queryByRole("menuitem", { name: "Cherry-pick" })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick…" }));
-    const dialog = screen.getByRole("dialog", { name: "Choose parent" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Cherry-pick" }));
-    expect(onCherryPick).toHaveBeenCalledWith("M", 1);
-    expect(screen.queryByRole("dialog", { name: "Choose parent" })).toBeNull();
-
+    expect(onChooseParent).toHaveBeenCalledWith("Cherry-pick", "M", list);
     openMenu("M");
     fireEvent.click(screen.getByRole("menuitem", { name: "Revert…" }));
-    const revertDialog = screen.getByRole("dialog", { name: "Choose parent" });
-    fireEvent.click(within(revertDialog).getAllByRole("radio")[1]);
-    fireEvent.click(within(revertDialog).getByRole("button", { name: "Revert" }));
-    expect(onRevert).toHaveBeenCalledWith("M", 2);
-
-    openMenu("M");
-    fireEvent.click(screen.getByRole("menuitem", { name: "Revert…" }));
-    fireEvent.click(within(screen.getByRole("dialog", { name: "Choose parent" })).getByRole("button", { name: "Cancel" }));
-    expect(onRevert).toHaveBeenCalledTimes(1);
+    expect(onChooseParent).toHaveBeenCalledWith("Revert", "M", list);
+    expect(onCherryPick).not.toHaveBeenCalled();
+    expect(onRevert).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("returns focus to the commit list after a dialog opened from the menu closes, wherever focus was before", async () => {
+  // The dialogs themselves are RepoWorkspace's (#514, see App.test); the menu hands focus
+  // straight to the list (#146).
+  it("moves focus to the commit list when a dialog entry is chosen, wherever focus was before", () => {
     const { openMenu } = setup();
     const outside = document.createElement("button");
     outside.textContent = "outside";
     document.body.appendChild(outside);
     try {
       const list = screen.getByRole("listbox", { name: "Commit history" });
-      for (const [summary, item, dialogName] of [
-        ["B", "Reset main to here…", "Reset branch"],
-        ["M", "Cherry-pick…", "Choose parent"],
+      for (const [summary, item] of [
+        ["B", "Reset main to here…"],
+        ["M", "Cherry-pick…"],
       ] as const) {
         outside.focus();
         const outsideFocus = vi.spyOn(outside, "focus");
@@ -1290,9 +1287,7 @@ describe("CommitGraph — history actions", () => {
         // Focus goes straight to the list, never back through the element focused before.
         expect(outsideFocus).not.toHaveBeenCalled();
         outsideFocus.mockRestore();
-        const dialog = screen.getByRole("dialog", { name: new RegExp(dialogName) });
-        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
-        await waitFor(() => expect(list).toHaveFocus());
+        expect(list).toHaveFocus();
       }
     } finally {
       outside.remove();
@@ -1341,7 +1336,8 @@ describe("CommitGraph — one-click history edits", () => {
       onCherryPick: vi.fn(),
       onRevert: vi.fn(),
       onCheckoutCommit: vi.fn(),
-      onResetToCommit: vi.fn(),
+      onChooseParent: vi.fn(),
+      onRequestReset: vi.fn(),
       onEditHeadMessage: vi.fn(),
       onEditHistory: vi.fn(),
       onRewordCommit: vi.fn(),
@@ -1438,7 +1434,8 @@ describe("CommitGraph — tag badges", () => {
       onCherryPick: vi.fn(),
       onRevert: vi.fn(),
       onCheckoutCommit: vi.fn(),
-      onResetToCommit: vi.fn(),
+      onChooseParent: vi.fn(),
+      onRequestReset: vi.fn(),
       onEditHeadMessage: vi.fn(),
     };
     render(
@@ -1535,7 +1532,8 @@ describe("CommitGraph — Create tag…", () => {
         onCherryPick={vi.fn()}
         onRevert={vi.fn()}
         onCheckoutCommit={vi.fn()}
-        onResetToCommit={vi.fn()}
+        onChooseParent={vi.fn()}
+        onRequestReset={vi.fn()}
         onEditHeadMessage={vi.fn()}
         headInfo={{ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }}
         currentBranch="main"

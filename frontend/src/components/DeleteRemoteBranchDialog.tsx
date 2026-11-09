@@ -3,12 +3,15 @@ import type { RemoteInfo } from "../ipc/RepoClient";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
 import confirmStyles from "./primitives/ConfirmDialog.module.css";
+import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./PushBranchDialog.module.css";
 
 /**
  * Deletes a branch on a remote. With `initialRemote` and `initialBranch` both set (a remote
  * branch's own menu) it is a plain confirmation; otherwise (the palette) it first lets the user
  * pick a remote and one of its branches. Not undoable, like every network operation.
+ * `blockedReason` (`operationBlockers`) disables Delete while it applies: the repository can
+ * become busy after the dialog opened (#514).
  */
 export function DeleteRemoteBranchDialog({
   remotes,
@@ -17,6 +20,7 @@ export function DeleteRemoteBranchDialog({
   onListRemoteBranches,
   onDelete,
   onCancel,
+  blockedReason = null,
 }: {
   remotes: RemoteInfo[];
   initialRemote: string | null;
@@ -24,6 +28,8 @@ export function DeleteRemoteBranchDialog({
   onListRemoteBranches: (remoteName: string) => Promise<string[]>;
   onDelete: (remoteName: string, branchName: string) => void;
   onCancel: () => void;
+  /** Why repository operations are blocked now, or `null`. */
+  blockedReason?: string | null;
 }) {
   const preset = initialRemote !== null && initialBranch !== null;
   const [remoteName, setRemoteName] = useState(initialRemote ?? remotes[0]?.name ?? "");
@@ -108,12 +114,16 @@ export function DeleteRemoteBranchDialog({
             Delete {remoteName}/{branchName} on the remote? This can&apos;t be undone.
           </p>
         )}
+        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
         <div className={styles.actions}>
           <button
             type="button"
             className={confirmStyles.confirmButton}
-            disabled={branchName === "" || remoteName === ""}
-            onClick={() => onDelete(remoteName, branchName)}
+            disabled={branchName === "" || remoteName === "" || blockedReason !== null}
+            title={blockedReason ?? undefined}
+            onClick={() => {
+              if (blockedReason === null) onDelete(remoteName, branchName);
+            }}
           >
             Delete remote branch
           </button>

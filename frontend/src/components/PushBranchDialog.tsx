@@ -3,6 +3,7 @@ import type { RemoteInfo } from "../ipc/RepoClient";
 import { branchNameProblem } from "../lib/refName";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./PushBranchDialog.module.css";
 
 /** The branch's upstream remote, else `origin` if it exists, else the first remote. */
@@ -24,13 +25,18 @@ function remoteBranchProblem(name: string): string | null {
   return branchNameProblem(name);
 }
 
-/** "Push to…": any local branch to any remote branch, optionally becoming its upstream. */
+/**
+ * "Push to…": any local branch to any remote branch, optionally becoming its upstream.
+ * `blockedReason` (`operationBlockers`) disables Push while it applies: the repository can become
+ * busy after the dialog opened (#514).
+ */
 export function PushBranchDialog({
   localBranch,
   remotes,
   branchUpstream,
   onPush,
   onCancel,
+  blockedReason = null,
 }: {
   localBranch: string;
   remotes: RemoteInfo[];
@@ -38,6 +44,8 @@ export function PushBranchDialog({
   branchUpstream: string | null | undefined;
   onPush: (remoteName: string, remoteBranch: string, setUpstream: boolean) => void;
   onCancel: () => void;
+  /** Why repository operations are blocked now, or `null`. */
+  blockedReason?: string | null;
 }) {
   const [remoteName, setRemoteName] = useState(() => defaultRemote(remotes, branchUpstream));
   const [remoteBranch, setRemoteBranch] = useState(localBranch);
@@ -46,7 +54,7 @@ export function PushBranchDialog({
   const [setUpstream, setSetUpstream] = useState(branchUpstream == null);
   const trimmed = remoteBranch.trim();
   const problem = remoteBranchProblem(trimmed);
-  const blocked = trimmed === "" || problem !== null || remoteName === "";
+  const blocked = trimmed === "" || problem !== null || remoteName === "" || blockedReason !== null;
 
   return (
     <FormDialog ariaLabel={`Push ${localBranch}`} onCancel={onCancel}>
@@ -83,8 +91,9 @@ export function PushBranchDialog({
           <input type="checkbox" checked={setUpstream} onChange={(event) => setSetUpstream(event.target.checked)} />
           Set as upstream
         </label>
+        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
         <div className={styles.actions}>
-          <button type="submit" disabled={blocked}>
+          <button type="submit" disabled={blocked} title={blockedReason ?? undefined}>
             Push
           </button>
           <button type="button" onClick={onCancel}>

@@ -3,11 +3,14 @@ import type { GraphCommit } from "../ipc/RepoClient";
 import { FormDialog } from "./primitives/FormDialog";
 import { Toolbar } from "./primitives/Toolbar";
 import { RefBadges } from "./RefBadges";
+import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./ParentPickerDialog.module.css";
 
 /**
  * Asks which parent a merge commit is cherry-picked or reverted against (`-m <mainline>`), with
  * parent 1 preselected. Parents the graph has loaded show their summary and branch badges.
+ * `blockedReason` (`operationBlockers`) disables the action while it applies: the repository can
+ * become busy after the dialog opened (#514).
  */
 export function ParentPickerDialog({
   action,
@@ -16,6 +19,7 @@ export function ParentPickerDialog({
   onConfirm,
   onCancel,
   returnFocusTo,
+  blockedReason = null,
 }: {
   action: "Cherry-pick" | "Revert";
   commit: GraphCommit;
@@ -26,6 +30,8 @@ export function ParentPickerDialog({
   onCancel: () => void;
   /** `FormDialog`'s: where focus goes on close. */
   returnFocusTo?: HTMLElement | null;
+  /** Why repository operations are blocked now, or `null`. */
+  blockedReason?: string | null;
 }) {
   const [mainline, setMainline] = useState(1);
   return (
@@ -33,7 +39,8 @@ export function ParentPickerDialog({
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          onConfirm(mainline);
+          // Enter on a radio submits even with the button disabled.
+          if (blockedReason === null) onConfirm(mainline);
         }}
       >
         <p>
@@ -63,8 +70,11 @@ export function ParentPickerDialog({
           })}
         </fieldset>
         <p className={styles.hint}>Parent 1 is usually the branch that was merged into.</p>
+        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
         <Toolbar>
-          <button type="submit">{action}</button>
+          <button type="submit" disabled={blockedReason !== null} title={blockedReason ?? undefined}>
+            {action}
+          </button>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>

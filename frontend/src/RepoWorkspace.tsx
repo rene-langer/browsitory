@@ -207,8 +207,9 @@ export function RepoWorkspace({
   const clearFocusCommitMessage = useCallback(() => setFocusCommitMessage(false), []);
   // Discard confirmations live here (not in DiffPane) so the palette can open the same dialogs.
   const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(null);
-  // The palette's parent picker and reset dialog (#507). The commit menu opens its own; these
-  // live here so the palette needs no rendered graph row (search results, file history).
+  // The parent picker and reset dialog of one commit (#507, #514): the commit menu and the
+  // palette open this one instance, so the palette needs no rendered graph row (search results,
+  // file history) and both get the same busy guard.
   const [commitDialog, setCommitDialog] = useState<{
     kind: "Cherry-pick" | "Revert" | "Reset";
     commit: GraphCommit;
@@ -316,24 +317,30 @@ export function RepoWorkspace({
       (outcome) => pickToast("Revert", outcome),
     );
   const resetToCommit = announce("Reset branch", appState.resetToCommit);
-  // The palette's dialogs return focus to the list showing the selection (#146), not to the
-  // palette, which is gone by then.
-  const openCommitDialog = (kind: "Cherry-pick" | "Revert" | "Reset", commitId: string) => {
+  // The dialogs return focus to the list showing the selection (#146): the commit menu passes
+  // its list; from the palette, which is gone by then, it is looked up.
+  const openCommitDialog = (
+    kind: "Cherry-pick" | "Revert" | "Reset",
+    commitId: string,
+    returnFocusTo?: HTMLElement | null,
+  ) => {
     const commit = appState.state.commits.find((candidate) => candidate.id === commitId);
     if (commit === undefined) return;
     setCommitDialog({
       kind,
       commit,
       returnFocusTo:
+        returnFocusTo ??
         workspaceElement?.querySelector<HTMLElement>(
           '[role="listbox"][aria-label="Commit history"], [role="listbox"][aria-label="Search results"], [role="listbox"][aria-label="File history commits"]',
-        ) ?? null,
+        ) ??
+        null,
     });
   };
   const commitCommands: CommitCommands = {
     onCherryPick: (commitId) => cherryPickCommit(commitId, null),
     onRevert: (commitId) => revertCommit(commitId, null),
-    onChooseParent: openCommitDialog,
+    onChooseParent: (action, commitId) => openCommitDialog(action, commitId),
     onReset: (commitId) => openCommitDialog("Reset", commitId),
   };
   const currentLocalBranch = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null;
@@ -445,15 +452,22 @@ export function RepoWorkspace({
         <ConfirmDialog
           ariaLabel="Confirm force push"
           message={
-            <p>
-              Overwrites {appState.state.forcePushConfirm.remoteName}/
-              {forcePushTargetBranch(appState.state.forcePushConfirm.remoteName)} with your local branch.
-            </p>
+            <>
+              <p>
+                Overwrites {appState.state.forcePushConfirm.remoteName}/
+                {forcePushTargetBranch(appState.state.forcePushConfirm.remoteName)} with your local branch.
+              </p>
+              {/* #514: the repository can become busy while the confirmation is open. */}
+              {operationDisabledReason !== null && <p>{operationDisabledReason}</p>}
+            </>
           }
           confirmLabel="Force push"
-          onConfirm={() =>
-            void announce("Force pushed", appState.forcePushCurrentBranch)(appState.state.forcePushConfirm!.remoteName)
-          }
+          confirmDisabled={repositoryOperationDisabled}
+          confirmTitle={operationDisabledReason ?? undefined}
+          onConfirm={() => {
+            if (repositoryOperationDisabled) return;
+            void announce("Force pushed", appState.forcePushCurrentBranch)(appState.state.forcePushConfirm!.remoteName);
+          }}
           onCancel={appState.cancelForcePush}
         />
       )}
@@ -482,7 +496,11 @@ export function RepoWorkspace({
           branchName={mergeDialogBranch}
           currentBranchName={currentBranchName}
           loadOptions={appState.getMergeOptions}
-          onMerge={(options) => void appState.mergeBranch(mergeDialogBranch, options)}
+          blockedReason={operationDisabledReason}
+          onMerge={(options) => {
+            if (repositoryOperationDisabled) return;
+            void appState.mergeBranch(mergeDialogBranch, options);
+          }}
           onCancel={appState.closeMergeDialog}
         />
       )}
@@ -509,7 +527,10 @@ export function RepoWorkspace({
           commit={commitDialog.commit}
           commits={appState.state.commits}
           returnFocusTo={commitDialog.returnFocusTo}
+          blockedReason={operationDisabledReason}
           onConfirm={(mainline) => {
+            // Re-checked: the repository can become busy while the dialog is open (#514).
+            if (repositoryOperationDisabled) return;
             setCommitDialog(null);
             if (commitDialog.kind === "Cherry-pick") cherryPickCommit(commitDialog.commit.id, mainline);
             else revertCommit(commitDialog.commit.id, mainline);
@@ -522,7 +543,9 @@ export function RepoWorkspace({
           branch={currentLocalBranch}
           shortId={commitDialog.commit.shortId}
           returnFocusTo={commitDialog.returnFocusTo}
+          blockedReason={operationDisabledReason}
           onReset={(mode) => {
+            if (repositoryOperationDisabled) return;
             setCommitDialog(null);
             void resetToCommit(commitDialog.commit.id, mode);
           }}
@@ -534,9 +557,11 @@ export function RepoWorkspace({
           localBranch={pushDialogBranch}
           remotes={appState.state.remotes}
           branchUpstream={appState.state.branches.find((branch) => branch.name === pushDialogBranch)?.upstream}
-          onPush={(remoteName, remoteBranch, setUpstream) =>
-            void announce("Push complete", appState.pushBranch)(remoteName, pushDialogBranch, remoteBranch, setUpstream)
-          }
+          blockedReason={operationDisabledReason}
+          onPush={(remoteName, remoteBranch, setUpstream) => {
+            if (repositoryOperationDisabled) return;
+            void announce("Push complete", appState.pushBranch)(remoteName, pushDialogBranch, remoteBranch, setUpstream);
+          }}
           onCancel={appState.closePushDialog}
         />
       )}
@@ -563,9 +588,11 @@ export function RepoWorkspace({
           initialRemote={appState.state.deleteRemoteBranchDialog.remoteName}
           initialBranch={appState.state.deleteRemoteBranchDialog.branchName}
           onListRemoteBranches={appState.listRemoteBranches}
-          onDelete={(remoteName, branchName) =>
-            void announce("Remote branch deleted", appState.deleteRemoteBranch)(remoteName, branchName)
-          }
+          blockedReason={operationDisabledReason}
+          onDelete={(remoteName, branchName) => {
+            if (repositoryOperationDisabled) return;
+            void announce("Remote branch deleted", appState.deleteRemoteBranch)(remoteName, branchName);
+          }}
           onCancel={appState.closeDeleteRemoteBranchDialog}
         />
       )}
@@ -967,7 +994,8 @@ export function RepoWorkspace({
                         )
                       }
                       onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
-                      onResetToCommit={resetToCommit}
+                      onChooseParent={openCommitDialog}
+                      onRequestReset={(commitId, returnFocusTo) => openCommitDialog("Reset", commitId, returnFocusTo)}
                       onEditHeadMessage={() => {
                         appState.selectRow("uncommitted");
                         appState.setAmendMode(true);

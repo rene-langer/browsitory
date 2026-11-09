@@ -1579,6 +1579,122 @@ describe("App", () => {
       expect(saveStash).not.toHaveBeenCalled();
     });
 
+    // #514: the commit menu and the palette open the one dialog RepoWorkspace renders, and it
+    // re-checks `operationBlockers` while open (a rebase started in a terminal, picked up by a
+    // refresh).
+    it("the menu's and the palette's Reset open one dialog, disabled once a terminal rebase starts (#514)", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        let terminalRebase: { kind: "Rebase"; branch: string; onto: string; currentStep: number; totalSteps: number } | null = null;
+        const resetToCommit = vi.fn<RepoClient["resetToCommit"]>().mockResolvedValue(undefined);
+        render(
+          <App
+            client={pickClient({
+              getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase }),
+              resetToCommit,
+            })}
+          />,
+        );
+        const row = (await screen.findByText(/c1 one/)).closest("li")!;
+        fireEvent.click(row);
+        fireEvent.contextMenu(row);
+        fireEvent.click(screen.getByRole("menuitem", { name: "Reset main to here…" }));
+        await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
+        await runPaletteCommand("Reset to c1", "Reset to c1…");
+        await waitFor(() => expect(screen.getAllByRole("dialog", { name: "Reset branch", hidden: true })).toHaveLength(1));
+        const dialog = screen.getByRole("dialog", { name: "Reset branch", hidden: true });
+        expect(within(dialog).getByRole("button", { name: "Reset", hidden: true })).toBeEnabled();
+
+        terminalRebase = { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 };
+        await runPaletteCommand("Refresh", "Refresh");
+        const reset = within(dialog).getByRole("button", { name: "Reset", hidden: true });
+        await waitFor(() => expect(reset).toBeDisabled());
+        expect(reset).toHaveAttribute("title", "A rebase started in a terminal is in progress.");
+        fireEvent.submit(reset.closest("form")!);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(resetToCommit).not.toHaveBeenCalled();
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    it("the menu's parent picker is disabled once a cherry-pick sequence starts (#514)", async () => {
+      let sequence: { kind: "CherryPick"; currentStep: number; totalSteps: number; currentCommit: string } | null = null;
+      const merge = { ...graph[1], id: "m3", shortId: "m3", summary: "merge one", timestamp: 3, parentIds: ["c2", "c1"], branchRefs: [] };
+      const cherryPick = vi.fn<RepoClient["cherryPick"]>().mockResolvedValue({ kind: "Committed", commitId: "c5" });
+      render(
+        <App
+          client={pickClient({
+            getCommitGraph: async () => [merge, ...graph],
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
+            cherryPick,
+          })}
+        />,
+      );
+      fireEvent.contextMenu((await screen.findByText(/m3 merge one/)).closest("li")!);
+      fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Choose parent", hidden: true });
+      expect(within(dialog).getByRole("button", { name: "Cherry-pick", hidden: true })).toBeEnabled();
+
+      sequence = { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c1" };
+      await runPaletteCommand("Refresh", "Refresh");
+      const pick = within(dialog).getByRole("button", { name: "Cherry-pick", hidden: true });
+      await waitFor(() => expect(pick).toBeDisabled());
+      expect(pick).toHaveAttribute("title", "A cherry-pick is in progress.");
+      fireEvent.submit(pick.closest("form")!);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(cherryPick).not.toHaveBeenCalled();
+    });
+
+    it("the force push confirmation is disabled once a terminal rebase starts (#514)", async () => {
+      let terminalRebase: { kind: "Rebase"; branch: string; onto: string; currentStep: number; totalSteps: number } | null = null;
+      const forcePushCurrentBranch = vi.fn<RepoClient["forcePushCurrentBranch"]>().mockResolvedValue("push-1");
+      render(
+        <App
+          client={pickClient({
+            getHeadInfo: async () => ({ headId: "c2", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase }),
+            listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false }],
+            getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 0, behind: 0, pushBranch: "main" }),
+            forcePushCurrentBranch,
+          })}
+        />,
+      );
+      await screen.findByText(/c1 one/);
+      await runPaletteCommand("Force push", "Force push current branch…");
+      const dialog = await screen.findByRole("dialog", { name: "Confirm force push", hidden: true });
+      expect(within(dialog).getByRole("button", { name: "Force push", hidden: true })).toBeEnabled();
+
+      terminalRebase = { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 };
+      await runPaletteCommand("Refresh", "Refresh");
+      const confirm = within(dialog).getByRole("button", { name: "Force push", hidden: true });
+      await waitFor(() => expect(confirm).toBeDisabled());
+      expect(confirm).toHaveAttribute("title", "A rebase started in a terminal is in progress.");
+      expect(within(dialog).getByText("A rebase started in a terminal is in progress.")).toBeInTheDocument();
+      fireEvent.click(confirm);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(forcePushCurrentBranch).not.toHaveBeenCalled();
+    });
+
+    // #146: a dialog opened from the commit menu returns focus to the commit list.
+    it("the menu's Reset and parent picker return focus to the commit list on Cancel (#146)", async () => {
+      const merge = { ...graph[1], id: "m3", shortId: "m3", summary: "merge one", timestamp: 3, parentIds: ["c2", "c1"], branchRefs: [] };
+      render(<App client={pickClient({ getCommitGraph: async () => [merge, ...graph] })} />);
+      const list = await screen.findByRole("listbox", { name: "Commit history" });
+      for (const [summary, item, dialogName] of [
+        [/c1 one/, "Reset main to here…", "Reset branch"],
+        [/m3 merge one/, "Cherry-pick…", "Choose parent"],
+      ] as const) {
+        screen.getByRole("tab", { name: "a" }).focus();
+        fireEvent.contextMenu((await screen.findByText(summary)).closest("li")!);
+        fireEvent.click(screen.getByRole("menuitem", { name: item }));
+        const dialog = await screen.findByRole("dialog", { name: dialogName, hidden: true });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+        await waitFor(() => expect(screen.queryByRole("dialog", { name: dialogName, hidden: true })).toBeNull());
+        await waitFor(() => expect(list).toHaveFocus());
+      }
+    });
+
     it("says Cherry-picked only when the pick committed (#107)", async () => {
       const cherryPick = vi
         .fn<RepoClient["cherryPick"]>()

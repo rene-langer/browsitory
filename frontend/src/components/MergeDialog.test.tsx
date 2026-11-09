@@ -83,4 +83,21 @@ describe("MergeDialog", () => {
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "Merge" })).toBeEnabled());
     expect(screen.getByRole("radio", { name: "Fast-forward if possible" })).toBeChecked();
   });
+
+  // #514: the repository can become busy while the dialog is open.
+  it("disables Merge with the reason and sends nothing while the repository is busy", async () => {
+    const { onMerge } = renderDialog(
+      { fastForward: "Allow", squash: false },
+      { blockedReason: "A rebase started in a terminal is in progress." },
+    );
+    // Wait for the options to load, so only the block keeps Merge disabled.
+    expect(await screen.findByRole("radio", { name: "Fast-forward if possible" })).toBeChecked();
+    await vi.waitFor(() => expect(screen.getByRole("checkbox", { name: "Squash" })).toBeEnabled());
+    const merge = screen.getByRole("button", { name: "Merge" });
+    expect(merge).toBeDisabled();
+    expect(merge).toHaveAttribute("title", "A rebase started in a terminal is in progress.");
+    expect(screen.getByText("A rebase started in a terminal is in progress.")).toBeInTheDocument();
+    fireEvent.submit(merge.closest("form")!);
+    expect(onMerge).not.toHaveBeenCalled();
+  });
 });
