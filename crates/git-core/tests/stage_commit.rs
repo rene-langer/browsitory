@@ -113,7 +113,7 @@ fn stage_hunk_stages_only_the_targeted_hunk_leaving_the_other_unstaged() {
         "tracked.txt",
         hunks[0].old_start,
         hunks[0].new_start,
-        3,
+        common::hunk_ctx(3),
     )
     .unwrap();
 
@@ -151,7 +151,7 @@ fn stage_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
     .unwrap();
     write_file(dir.path(), "tracked.txt", "line one changed\n");
 
-    let result = stage_hunk(&repo, "tracked.txt", 999, 999, 3);
+    let result = stage_hunk(&repo, "tracked.txt", 999, 999, common::hunk_ctx(3));
 
     assert!(matches!(
         result,
@@ -189,7 +189,14 @@ fn unstage_hunk_unstages_only_the_targeted_hunk_leaving_the_other_staged() {
 
     stage_file(&repo, "tracked.txt").unwrap();
 
-    unstage_hunk(&repo, "tracked.txt", target.0, target.1, 3).unwrap();
+    unstage_hunk(
+        &repo,
+        "tracked.txt",
+        target.0,
+        target.1,
+        common::hunk_ctx(3),
+    )
+    .unwrap();
 
     let staged =
         git_core::diff::working_diff(&repo, "tracked.txt", true, &DiffOptions::default()).unwrap();
@@ -226,7 +233,7 @@ fn unstage_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
     write_file(dir.path(), "tracked.txt", "line one changed\n");
     stage_file(&repo, "tracked.txt").unwrap();
 
-    let result = unstage_hunk(&repo, "tracked.txt", 999, 999, 3);
+    let result = unstage_hunk(&repo, "tracked.txt", 999, 999, common::hunk_ctx(3));
 
     assert!(matches!(
         result,
@@ -262,7 +269,7 @@ fn discard_hunk_reverts_only_the_targeted_hunk_in_the_workdir() {
         "tracked.txt",
         hunks[0].old_start,
         hunks[0].new_start,
-        3,
+        common::hunk_ctx(3),
     )
     .unwrap();
 
@@ -291,7 +298,7 @@ fn discard_hunk_on_a_hunk_that_no_longer_matches_returns_hunk_not_found() {
     .unwrap();
     write_file(dir.path(), "tracked.txt", "line one changed\n");
 
-    let result = discard_hunk(&repo, "tracked.txt", 999, 999, 3);
+    let result = discard_hunk(&repo, "tracked.txt", 999, 999, common::hunk_ctx(3));
 
     assert!(matches!(
         result,
@@ -364,10 +371,18 @@ fn stage_hunk_with_wider_context_stages_the_merged_hunk() {
     let five = git_core::diff::DiffOptions {
         ignore_whitespace: false,
         context_lines: 5,
+        algorithm: git_core::diff::DiffAlgorithm::Default,
     };
     let hunks = git_core::diff::working_diff(&repo, "f.txt", false, &five).unwrap();
     assert_eq!(hunks.len(), 1);
-    git_core::stage::stage_hunk(&repo, "f.txt", hunks[0].old_start, hunks[0].new_start, 5).unwrap();
+    git_core::stage::stage_hunk(
+        &repo,
+        "f.txt",
+        hunks[0].old_start,
+        hunks[0].new_start,
+        common::hunk_ctx(5),
+    )
+    .unwrap();
 
     let remaining = git_core::diff::working_diff(&repo, "f.txt", false, &five).unwrap();
     assert!(remaining.is_empty(), "both edits staged in one go");

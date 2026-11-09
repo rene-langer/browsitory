@@ -1,4 +1,8 @@
 use super::*;
+const HUNK: git_core::diff::HunkOptions = git_core::diff::HunkOptions {
+    context_lines: 3,
+    algorithm: git_core::diff::DiffAlgorithm::Default,
+};
 
 #[test]
 fn failed_signing_replies_err_and_records_no_undo_entry() {
@@ -51,7 +55,7 @@ fn stage_hunk_then_commit_round_trips_through_the_worker() {
             "tracked.txt".into(),
             hunks[0].old_start,
             hunks[0].new_start,
-            3,
+            HUNK,
         )
         .unwrap();
 
@@ -81,7 +85,7 @@ fn unstage_hunk_round_trips_through_the_worker() {
             "tracked.txt".into(),
             hunks[0].old_start,
             hunks[0].new_start,
-            3,
+            HUNK,
         )
         .unwrap();
 
@@ -90,7 +94,7 @@ fn unstage_hunk_round_trips_through_the_worker() {
             "tracked.txt".into(),
             hunks[0].old_start,
             hunks[0].new_start,
-            3,
+            HUNK,
         )
         .unwrap();
 
@@ -121,7 +125,7 @@ fn discard_hunk_round_trips_through_the_worker() {
             "tracked.txt".into(),
             hunks[0].old_start,
             hunks[0].new_start,
-            3,
+            HUNK,
         )
         .unwrap();
 
@@ -186,7 +190,7 @@ fn line_and_file_commands_round_trip_through_the_worker() {
         "f.txt".into(),
         hunk.old_start,
         hunk.new_start,
-        3,
+        HUNK,
         vec![4],
         vec!["not what is on disk\n".into()],
     );
@@ -201,7 +205,7 @@ fn line_and_file_commands_round_trip_through_the_worker() {
             "f.txt".into(),
             hunk.old_start,
             hunk.new_start,
-            3,
+            HUNK,
             vec![4],
             shown(&hunk),
         )
@@ -215,7 +219,7 @@ fn line_and_file_commands_round_trip_through_the_worker() {
             "f.txt".into(),
             staged.old_start,
             staged.new_start,
-            3,
+            HUNK,
             vec![staged.lines.len() as u32 - 1],
             shown(&staged),
         )
@@ -234,7 +238,7 @@ fn line_and_file_commands_round_trip_through_the_worker() {
             "f.txt".into(),
             hunk.old_start,
             hunk.new_start,
-            3,
+            HUNK,
             vec![4],
             shown(&hunk),
         )
@@ -263,7 +267,7 @@ fn line_and_file_commands_round_trip_through_the_worker() {
     );
 
     assert!(handle
-        .stage_lines("f.txt".into(), 99, 99, 3, vec![0], vec![])
+        .stage_lines("f.txt".into(), 99, 99, HUNK, vec![0], vec![])
         .is_err());
     assert!(
         handle.get_status().is_ok(),

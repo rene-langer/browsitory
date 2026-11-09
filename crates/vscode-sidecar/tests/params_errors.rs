@@ -218,7 +218,7 @@ fn methods_without_params_ignore_whatever_is_sent() {
             ("list_workspaces", json!([])),
             (
                 "get_diff_settings",
-                json!({"contextLines": 3, "ignoreWhitespace": false, "syntaxHighlight": true, "wordWrap": "Auto"}),
+                json!({"contextLines": 3, "ignoreWhitespace": false, "syntaxHighlight": true, "wordWrap": "Auto", "algorithm": "Default"}),
             ),
         ] {
             let response = sidecar.call(method, params.clone());

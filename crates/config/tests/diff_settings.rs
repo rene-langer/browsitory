@@ -1,5 +1,6 @@
 use config::{
-    get_diff_settings_at, set_diff_settings_at, set_last_seen_version_at, DiffSettings, WordWrap,
+    get_diff_settings_at, set_diff_settings_at, set_last_seen_version_at, DiffAlgorithm,
+    DiffSettings, WordWrap,
 };
 
 #[test]
@@ -13,6 +14,7 @@ fn defaults_when_never_set() {
             context_lines: 3,
             syntax_highlight: true,
             word_wrap: WordWrap::Auto,
+            algorithm: DiffAlgorithm::Default,
         }
     );
 }
@@ -27,6 +29,7 @@ fn round_trips_and_coexists_with_other_keys() {
         context_lines: 7,
         syntax_highlight: false,
         word_wrap: WordWrap::Off,
+        algorithm: DiffAlgorithm::Patience,
     };
     set_diff_settings_at(&file, &wanted).unwrap();
     assert_eq!(get_diff_settings_at(&file).unwrap(), wanted);
@@ -47,6 +50,7 @@ fn clamps_context_lines_on_write() {
             context_lines: 99,
             syntax_highlight: true,
             word_wrap: WordWrap::On,
+            algorithm: DiffAlgorithm::Default,
         },
     )
     .unwrap();
@@ -63,6 +67,7 @@ fn a_partial_diff_table_fills_missing_fields_with_defaults() {
     assert_eq!(s.context_lines, 3);
     assert!(s.syntax_highlight);
     assert_eq!(s.word_wrap, WordWrap::Auto);
+    assert_eq!(s.algorithm, DiffAlgorithm::Default);
 }
 
 #[test]
@@ -81,4 +86,25 @@ fn word_wrap_is_stored_as_a_lowercase_word() {
     assert!(text.contains("word_wrap = \"off\""), "{text}");
     std::fs::write(&file, "[diff]\nword_wrap = \"on\"\n").unwrap();
     assert_eq!(get_diff_settings_at(&file).unwrap().word_wrap, WordWrap::On);
+}
+
+#[test]
+fn algorithm_is_stored_as_a_lowercase_word() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("config.toml");
+    set_diff_settings_at(
+        &file,
+        &DiffSettings {
+            algorithm: DiffAlgorithm::Patience,
+            ..DiffSettings::default()
+        },
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("algorithm = \"patience\""), "{text}");
+    std::fs::write(&file, "[diff]\nalgorithm = \"minimal\"\n").unwrap();
+    assert_eq!(
+        get_diff_settings_at(&file).unwrap().algorithm,
+        DiffAlgorithm::Minimal
+    );
 }

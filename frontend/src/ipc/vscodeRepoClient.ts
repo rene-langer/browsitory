@@ -1,6 +1,7 @@
 import type {
   AmendOptions,
   CommitChangeRequest,
+  HunkOptions,
   PatchContent,
   PatchSource,
   CommitMessageSettings,
@@ -318,18 +319,18 @@ export const vscodeRepoClient: RepoClient = {
     call<CommitSignature>("get_commit_signature", { repoPath, commitId }),
   stageFile: (repoPath: string, path: string) => call<void>("stage_file", { repoPath, path }),
   unstageFile: (repoPath: string, path: string) => call<void>("unstage_file", { repoPath, path }),
-  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
-    call<void>("stage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
-  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
-    call<void>("unstage_hunk", { repoPath, path, oldStart, newStart, contextLines }),
-  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number) =>
-    call<void>("discard_hunk", { repoPath, path, oldStart, newStart, contextLines }),
-  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
-    call<void>("stage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
-  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
-    call<void>("unstage_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
-  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
-    call<void>("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
+  stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
+    call<void>("stage_hunk", { repoPath, path, oldStart, newStart, ...hunk }),
+  unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
+    call<void>("unstage_hunk", { repoPath, path, oldStart, newStart, ...hunk }),
+  discardHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
+    call<void>("discard_hunk", { repoPath, path, oldStart, newStart, ...hunk }),
+  stageLines: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
+    call<void>("stage_lines", { repoPath, path, oldStart, newStart, ...hunk, lineIndices, expectedLines }),
+  unstageLines: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
+    call<void>("unstage_lines", { repoPath, path, oldStart, newStart, ...hunk, lineIndices, expectedLines }),
+  discardLines: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
+    call<void>("discard_lines", { repoPath, path, oldStart, newStart, ...hunk, lineIndices, expectedLines }),
   discardFile: (repoPath: string, path: string) => call<void>("discard_file", { repoPath, path }),
   discardAllUnstaged: (repoPath: string, paths: string[]) => call<void>("discard_all_unstaged", { repoPath, paths }),
   applyCommitChange: (repoPath: string, change: CommitChangeRequest) =>

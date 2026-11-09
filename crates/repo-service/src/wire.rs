@@ -2015,6 +2015,7 @@ impl From<CreatePullRequestDto> for crate::pull_requests::CreatePullRequest {
 pub struct DiffOptionsDto {
     pub ignore_whitespace: bool,
     pub context_lines: u32,
+    pub algorithm: DiffAlgorithmDto,
 }
 
 impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
@@ -2022,12 +2023,65 @@ impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
         git_core::diff::DiffOptions {
             ignore_whitespace: dto.ignore_whitespace,
             context_lines: dto.context_lines,
+            algorithm: dto.algorithm.into(),
         }
     }
 }
 
+/// The diff algorithm (#469): a diff setting, sent with every diff and with every hunk or line
+/// action, which re-diffs with the displayed diff's algorithm to find the hunk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "DiffAlgorithm"))]
+pub enum DiffAlgorithmDto {
+    Default,
+    Patience,
+    Minimal,
+}
+
+impl From<DiffAlgorithmDto> for git_core::diff::DiffAlgorithm {
+    fn from(a: DiffAlgorithmDto) -> Self {
+        match a {
+            DiffAlgorithmDto::Default => git_core::diff::DiffAlgorithm::Default,
+            DiffAlgorithmDto::Patience => git_core::diff::DiffAlgorithm::Patience,
+            DiffAlgorithmDto::Minimal => git_core::diff::DiffAlgorithm::Minimal,
+        }
+    }
+}
+
+impl From<config::DiffAlgorithm> for DiffAlgorithmDto {
+    fn from(a: config::DiffAlgorithm) -> Self {
+        match a {
+            config::DiffAlgorithm::Default => DiffAlgorithmDto::Default,
+            config::DiffAlgorithm::Patience => DiffAlgorithmDto::Patience,
+            config::DiffAlgorithm::Minimal => DiffAlgorithmDto::Minimal,
+        }
+    }
+}
+
+impl From<DiffAlgorithmDto> for config::DiffAlgorithm {
+    fn from(a: DiffAlgorithmDto) -> Self {
+        match a {
+            DiffAlgorithmDto::Default => config::DiffAlgorithm::Default,
+            DiffAlgorithmDto::Patience => config::DiffAlgorithm::Patience,
+            DiffAlgorithmDto::Minimal => config::DiffAlgorithm::Minimal,
+        }
+    }
+}
+
+/// The options a displayed hunk was read with; hunk and line actions re-diff with them.
+pub fn hunk_options(
+    context_lines: u32,
+    algorithm: DiffAlgorithmDto,
+) -> git_core::diff::HunkOptions {
+    git_core::diff::HunkOptions {
+        context_lines,
+        algorithm: algorithm.into(),
+    }
+}
+
 /// A hunk of a commit's diff as the commit view showed it (#448): `(oldStart, newStart)` read
-/// with `contextLines`, whitespace significant.
+/// with `contextLines` and `algorithm`, whitespace significant.
 #[derive(Deserialize, Clone, Copy)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitHunk"))]
@@ -2036,6 +2090,7 @@ pub struct CommitHunkDto {
     pub old_start: u32,
     pub new_start: u32,
     pub context_lines: u32,
+    pub algorithm: DiffAlgorithmDto,
 }
 
 /// A commit's file, or one hunk of it, to revert or apply in the working tree (#448).
@@ -2064,7 +2119,7 @@ impl From<CommitChangeRequestDto> for crate::worker::CommitChange {
             hunk: dto.hunk.map(|h| git_core::patch::CommitHunk {
                 old_start: h.old_start,
                 new_start: h.new_start,
-                context_lines: h.context_lines,
+                options: hunk_options(h.context_lines, h.algorithm),
             }),
             reverse: dto.reverse,
             stage: dto.stage,
@@ -2142,6 +2197,7 @@ pub struct DiffSettingsDto {
     pub context_lines: u32,
     pub syntax_highlight: bool,
     pub word_wrap: WordWrapDto,
+    pub algorithm: DiffAlgorithmDto,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2180,6 +2236,7 @@ impl From<config::DiffSettings> for DiffSettingsDto {
             context_lines: s.context_lines,
             syntax_highlight: s.syntax_highlight,
             word_wrap: s.word_wrap.into(),
+            algorithm: s.algorithm.into(),
         }
     }
 }
@@ -2191,6 +2248,7 @@ impl From<DiffSettingsDto> for config::DiffSettings {
             context_lines: d.context_lines,
             syntax_highlight: d.syntax_highlight,
             word_wrap: d.word_wrap.into(),
+            algorithm: d.algorithm.into(),
         }
     }
 }
@@ -2534,6 +2592,7 @@ mod ts_bindings {
             PullRequestListDto,
             CreatePullRequestDto,
             DiffOptionsDto,
+            DiffAlgorithmDto,
             CommitHunkDto,
             CommitChangeRequestDto,
             PatchSourceDto,

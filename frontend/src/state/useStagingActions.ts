@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { RepoClient, StatusEntry, StatusKind, Trailer } from "../ipc/RepoClient";
+import type { HunkOptions, RepoClient, StatusEntry, StatusKind, Trailer } from "../ipc/RepoClient";
 import type { AppState, SelectedRow } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome, RunOptimisticMutation } from "./useMutationRunner";
 import { hookFailedMessage } from "../lib/hookFailure";
@@ -16,12 +16,12 @@ export interface StagingActions {
   // action from the UI locked the app up on a large changeset.
   stageAllFiles(paths: string[]): Promise<void>;
   unstageAllFiles(paths: string[]): Promise<void>;
-  stageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  unstageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  discardHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  stageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
-  unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
-  discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  stageHunk(path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
+  unstageHunk(path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
+  discardHunk(path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
+  stageLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  unstageLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  discardLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(path: string): Promise<void>;
   // Writes `path` as it is in `commitId` to the work tree (#446); one undo step.
   restoreFileVersion(commitId: string, path: string): Promise<void>;
@@ -119,33 +119,33 @@ export function useStagingActions(
     [client, runOptimisticMutation, repoPath],
   );
   const stageHunk = useCallback(
-    (path: string, oldStart: number, newStart: number, contextLines: number) =>
-      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart, contextLines)),
+    (path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
+      runMutation(() => client.stageHunk(repoPath, path, oldStart, newStart, hunk)),
     [client, runMutation, repoPath],
   );
   const unstageHunk = useCallback(
-    (path: string, oldStart: number, newStart: number, contextLines: number) =>
-      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart, contextLines)),
+    (path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
+      runMutation(() => client.unstageHunk(repoPath, path, oldStart, newStart, hunk)),
     [client, runMutation, repoPath],
   );
   const discardHunk = useCallback(
-    (path: string, oldStart: number, newStart: number, contextLines: number) =>
-      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart, contextLines)),
+    (path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
+      runMutation(() => client.discardHunk(repoPath, path, oldStart, newStart, hunk)),
     [client, runMutation, repoPath],
   );
   const stageLines = useCallback(
-    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
-      runMutation(() => client.stageLines(repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines)),
+    (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
+      runMutation(() => client.stageLines(repoPath, path, oldStart, newStart, hunk, lineIndices, expectedLines)),
     [client, runMutation, repoPath],
   );
   const unstageLines = useCallback(
-    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
-      runMutation(() => client.unstageLines(repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines)),
+    (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
+      runMutation(() => client.unstageLines(repoPath, path, oldStart, newStart, hunk, lineIndices, expectedLines)),
     [client, runMutation, repoPath],
   );
   const discardLines = useCallback(
-    (path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]) =>
-      runMutation(() => client.discardLines(repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines)),
+    (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) =>
+      runMutation(() => client.discardLines(repoPath, path, oldStart, newStart, hunk, lineIndices, expectedLines)),
     [client, runMutation, repoPath],
   );
   const discardFile = useCallback(

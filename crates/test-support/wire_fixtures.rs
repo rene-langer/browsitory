@@ -492,9 +492,10 @@ pub fn diff_settings() -> Cases<config::DiffSettings> {
             context_lines: 5,
             syntax_highlight: false,
             word_wrap: config::WordWrap::Auto,
+            algorithm: config::DiffAlgorithm::Patience,
         },
     )];
-    use config::WordWrap;
+    use config::{DiffAlgorithm, WordWrap};
     // `plain` covers `Auto`.
     for word_wrap in every!(WordWrap { Auto, On, Off }) {
         if word_wrap == WordWrap::Auto {
@@ -504,6 +505,23 @@ pub fn diff_settings() -> Cases<config::DiffSettings> {
             format!("wrap-{word_wrap:?}"),
             config::DiffSettings {
                 word_wrap,
+                ..config::DiffSettings::default()
+            },
+        ));
+    }
+    // `plain` covers `Patience`.
+    for algorithm in every!(DiffAlgorithm {
+        Default,
+        Patience,
+        Minimal
+    }) {
+        if algorithm == DiffAlgorithm::Patience {
+            continue;
+        }
+        cases.push(case(
+            format!("algorithm-{algorithm:?}"),
+            config::DiffSettings {
+                algorithm,
                 ..config::DiffSettings::default()
             },
         ));

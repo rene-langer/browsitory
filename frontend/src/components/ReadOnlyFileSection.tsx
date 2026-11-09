@@ -111,12 +111,18 @@ export function ReadOnlyFileSection({
   };
   const bodyRef = useRef<HTMLDivElement>(null);
   const [hunks, setHunks] = useState<DiffHunk[] | null>(null);
+  // The options `hunks` were fetched with: a hunk action finds the hunk again with them (#469).
+  const [fetchedOptions, setFetchedOptions] = useState<DiffOptions | null>(null);
   const [blameLines, setBlameLines] = useState<BlameLine[]>([]);
   const [error, setError] = useState<DescribedError | null>(null);
 
   const { settings } = useDiffSettingsContext();
   const wholeFile = useWholeFile(settings.contextLines);
-  const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: wholeFile.contextLines };
+  const diffOptions: DiffOptions = {
+    ignoreWhitespace: settings.ignoreWhitespace,
+    contextLines: wholeFile.contextLines,
+    algorithm: settings.algorithm,
+  };
   const hunkActions =
     patch === undefined
       ? undefined
@@ -124,7 +130,8 @@ export function ReadOnlyFileSection({
           const ref: CommitHunk = {
             oldStart: hunk.oldStart,
             newStart: hunk.newStart,
-            contextLines: wholeFile.contextLines,
+            contextLines: fetchedOptions?.contextLines ?? wholeFile.contextLines,
+            algorithm: fetchedOptions?.algorithm ?? settings.algorithm,
           };
           const reason = settings.ignoreWhitespace ? IGNORE_WHITESPACE_REASON : patch.blockedReason;
           const blocked = { disabled: reason !== null, title: reason ?? undefined };
@@ -141,6 +148,7 @@ export function ReadOnlyFileSection({
       .then((next) => {
         if (!ignore && wholeFile.accept(next, requested.contextLines)) {
           setHunks(next);
+          setFetchedOptions(requested);
           setError(null);
         }
       })
@@ -158,7 +166,7 @@ export function ReadOnlyFileSection({
     if (mode !== "diff" || collapsed || showImage) return;
     return loadDiff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diffKey, path, oldPath, mode, collapsed, showImage, settings.ignoreWhitespace, wholeFile.contextLines]);
+  }, [diffKey, path, oldPath, mode, collapsed, showImage, settings.ignoreWhitespace, wholeFile.contextLines, settings.algorithm]);
 
   const loadBlame = () => {
     let ignore = false;

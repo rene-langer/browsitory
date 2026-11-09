@@ -17,7 +17,8 @@ Select a commit in the graph. Each file in its diff has a **…** menu (or right
 Each hunk header in a commit's diff has **Revert hunk** and **Apply hunk** for that hunk only. They
 are disabled while **Ignore whitespace** is on (a hunk is identified with whitespace counted, as
 for staging) and while another action, a merge, a rebase or a cherry-pick or revert is in
-progress.
+progress. A hunk is the one you see, with the [diff algorithm](history.md#diff-options) it was
+shown with.
 
 The change is applied where its lines are now, even when the file has changed above or below it
 since the commit; only the changed lines and up to three lines around them have to match. When

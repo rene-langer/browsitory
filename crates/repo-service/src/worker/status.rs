@@ -163,11 +163,11 @@ pub(super) fn stage_hunk(
     path: String,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: git_core::diff::HunkOptions,
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
-        git_core::stage::stage_hunk(repo, &path, old_start, new_start, context_lines)
+        git_core::stage::stage_hunk(repo, &path, old_start, new_start, hunk)
             .map_err(|error| error.to_string()),
     );
 }
@@ -177,11 +177,11 @@ pub(super) fn unstage_hunk(
     path: String,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: git_core::diff::HunkOptions,
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
-        git_core::stage::unstage_hunk(repo, &path, old_start, new_start, context_lines)
+        git_core::stage::unstage_hunk(repo, &path, old_start, new_start, hunk)
             .map_err(|error| error.to_string()),
     );
 }
@@ -191,11 +191,11 @@ pub(super) fn discard_hunk(
     path: String,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: git_core::diff::HunkOptions,
     reply: Sender<Result<(), String>>,
 ) {
     let _ = reply.send(
-        git_core::stage::discard_hunk(repo, &path, old_start, new_start, context_lines)
+        git_core::stage::discard_hunk(repo, &path, old_start, new_start, hunk)
             .map_err(|error| error.to_string()),
     );
 }
@@ -207,7 +207,7 @@ pub(super) fn stage_lines(
     path: String,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: git_core::diff::HunkOptions,
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
     reply: Sender<Result<(), String>>,
@@ -218,7 +218,7 @@ pub(super) fn stage_lines(
             &path,
             old_start,
             new_start,
-            context_lines,
+            hunk,
             &line_indices,
             &expected_lines,
         )
@@ -233,7 +233,7 @@ pub(super) fn unstage_lines(
     path: String,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: git_core::diff::HunkOptions,
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
     reply: Sender<Result<(), String>>,
@@ -244,7 +244,7 @@ pub(super) fn unstage_lines(
             &path,
             old_start,
             new_start,
-            context_lines,
+            hunk,
             &line_indices,
             &expected_lines,
         )
@@ -259,7 +259,7 @@ pub(super) fn discard_lines(
     path: String,
     old_start: u32,
     new_start: u32,
-    context_lines: u32,
+    hunk: git_core::diff::HunkOptions,
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
     reply: Sender<Result<(), String>>,
@@ -270,7 +270,7 @@ pub(super) fn discard_lines(
             &path,
             old_start,
             new_start,
-            context_lines,
+            hunk,
             &line_indices,
             &expected_lines,
         )
@@ -603,7 +603,7 @@ impl WorkerHandle {
         path: String,
         old_start: u32,
         new_start: u32,
-        context_lines: u32,
+        hunk: git_core::diff::HunkOptions,
     ) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
@@ -611,7 +611,7 @@ impl WorkerHandle {
                 path,
                 old_start,
                 new_start,
-                context_lines,
+                hunk,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -624,7 +624,7 @@ impl WorkerHandle {
         path: String,
         old_start: u32,
         new_start: u32,
-        context_lines: u32,
+        hunk: git_core::diff::HunkOptions,
     ) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
@@ -632,7 +632,7 @@ impl WorkerHandle {
                 path,
                 old_start,
                 new_start,
-                context_lines,
+                hunk,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -645,7 +645,7 @@ impl WorkerHandle {
         path: String,
         old_start: u32,
         new_start: u32,
-        context_lines: u32,
+        hunk: git_core::diff::HunkOptions,
     ) -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
@@ -653,7 +653,7 @@ impl WorkerHandle {
                 path,
                 old_start,
                 new_start,
-                context_lines,
+                hunk,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;
@@ -666,7 +666,7 @@ impl WorkerHandle {
         path: String,
         old_start: u32,
         new_start: u32,
-        context_lines: u32,
+        hunk: git_core::diff::HunkOptions,
         line_indices: Vec<u32>,
         expected_lines: Vec<String>,
     ) -> Result<(), String> {
@@ -676,7 +676,7 @@ impl WorkerHandle {
                 path,
                 old_start,
                 new_start,
-                context_lines,
+                hunk,
                 line_indices,
                 expected_lines,
                 reply: tx,
@@ -691,7 +691,7 @@ impl WorkerHandle {
         path: String,
         old_start: u32,
         new_start: u32,
-        context_lines: u32,
+        hunk: git_core::diff::HunkOptions,
         line_indices: Vec<u32>,
         expected_lines: Vec<String>,
     ) -> Result<(), String> {
@@ -701,7 +701,7 @@ impl WorkerHandle {
                 path,
                 old_start,
                 new_start,
-                context_lines,
+                hunk,
                 line_indices,
                 expected_lines,
                 reply: tx,
@@ -716,7 +716,7 @@ impl WorkerHandle {
         path: String,
         old_start: u32,
         new_start: u32,
-        context_lines: u32,
+        hunk: git_core::diff::HunkOptions,
         line_indices: Vec<u32>,
         expected_lines: Vec<String>,
     ) -> Result<(), String> {
@@ -726,7 +726,7 @@ impl WorkerHandle {
                 path,
                 old_start,
                 new_start,
-                context_lines,
+                hunk,
                 line_indices,
                 expected_lines,
                 reply: tx,

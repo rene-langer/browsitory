@@ -37,7 +37,10 @@ fn reverting_a_commit_hunk_is_undoable_and_commits_nothing() {
             hunk: Some(git_core::patch::CommitHunk {
                 old_start: hunks[0].old_start,
                 new_start: hunks[0].new_start,
-                context_lines: 3,
+                options: git_core::diff::HunkOptions {
+                    context_lines: 3,
+                    algorithm: git_core::diff::DiffAlgorithm::Default,
+                },
             }),
             reverse: true,
             stage: false,

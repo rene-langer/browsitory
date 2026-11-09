@@ -86,7 +86,7 @@ fn setup_staged(head_mode: u32, work_mode: u32) -> (tempfile::TempDir, git2::Rep
 fn staging_a_hunk_of_an_executable_file_keeps_its_index_mode() {
     let (_dir, repo) = setup(EXEC, EXEC);
     let (o, n, _) = hunk(&repo, false);
-    stage::stage_hunk(&repo, "f.sh", o, n, 3).unwrap();
+    stage::stage_hunk(&repo, "f.sh", o, n, common::hunk_ctx(3)).unwrap();
     assert_eq!(index_content(&repo, "f.sh"), "1\ntwo\n3\n");
     assert_eq!(index_mode(&repo, "f.sh"), EXEC);
 }
@@ -97,7 +97,16 @@ fn staging_lines_of_an_executable_file_keeps_its_index_mode() {
     let (o, n, shown) = hunk(&repo, false);
     let add = line_index(&repo, false, DiffLineOrigin::Add, "two\n");
     let remove = line_index(&repo, false, DiffLineOrigin::Remove, "2\n");
-    stage::stage_lines(&repo, "f.sh", o, n, 3, &[remove, add], &shown).unwrap();
+    stage::stage_lines(
+        &repo,
+        "f.sh",
+        o,
+        n,
+        common::hunk_ctx(3),
+        &[remove, add],
+        &shown,
+    )
+    .unwrap();
     assert_eq!(index_content(&repo, "f.sh"), "1\ntwo\n3\n");
     assert_eq!(index_mode(&repo, "f.sh"), EXEC);
 }
@@ -106,7 +115,7 @@ fn staging_lines_of_an_executable_file_keeps_its_index_mode() {
 fn unstaging_a_hunk_of_an_executable_file_keeps_its_index_mode() {
     let (_dir, repo) = setup_staged(EXEC, EXEC);
     let (o, n, _) = hunk(&repo, true);
-    stage::unstage_hunk(&repo, "f.sh", o, n, 3).unwrap();
+    stage::unstage_hunk(&repo, "f.sh", o, n, common::hunk_ctx(3)).unwrap();
     assert_eq!(index_content(&repo, "f.sh"), "1\n2\n3\n");
     assert_eq!(index_mode(&repo, "f.sh"), EXEC);
 }
@@ -117,7 +126,16 @@ fn unstaging_lines_of_an_executable_file_keeps_its_index_mode() {
     let (o, n, shown) = hunk(&repo, true);
     let add = line_index(&repo, true, DiffLineOrigin::Add, "two\n");
     let remove = line_index(&repo, true, DiffLineOrigin::Remove, "2\n");
-    stage::unstage_lines(&repo, "f.sh", o, n, 3, &[remove, add], &shown).unwrap();
+    stage::unstage_lines(
+        &repo,
+        "f.sh",
+        o,
+        n,
+        common::hunk_ctx(3),
+        &[remove, add],
+        &shown,
+    )
+    .unwrap();
     assert_eq!(index_content(&repo, "f.sh"), "1\n2\n3\n");
     assert_eq!(index_mode(&repo, "f.sh"), EXEC);
 }
@@ -126,7 +144,7 @@ fn unstaging_lines_of_an_executable_file_keeps_its_index_mode() {
 fn discarding_a_hunk_of_an_executable_file_keeps_its_exec_bit() {
     let (dir, repo) = setup(EXEC, EXEC);
     let (o, n, _) = hunk(&repo, false);
-    stage::discard_hunk(&repo, "f.sh", o, n, 3).unwrap();
+    stage::discard_hunk(&repo, "f.sh", o, n, common::hunk_ctx(3)).unwrap();
     assert_eq!(common::read(dir.path(), "f.sh"), "1\n2\n3\n");
     assert!(workdir_is_executable(dir.path(), "f.sh"));
 }
@@ -137,7 +155,16 @@ fn discarding_lines_of_an_executable_file_keeps_its_exec_bit() {
     let (o, n, shown) = hunk(&repo, false);
     let add = line_index(&repo, false, DiffLineOrigin::Add, "two\n");
     let remove = line_index(&repo, false, DiffLineOrigin::Remove, "2\n");
-    stage::discard_lines(&repo, "f.sh", o, n, 3, &[remove, add], &shown).unwrap();
+    stage::discard_lines(
+        &repo,
+        "f.sh",
+        o,
+        n,
+        common::hunk_ctx(3),
+        &[remove, add],
+        &shown,
+    )
+    .unwrap();
     assert_eq!(common::read(dir.path(), "f.sh"), "1\n2\n3\n");
     assert!(workdir_is_executable(dir.path(), "f.sh"));
 }
@@ -147,7 +174,7 @@ fn staging_a_hunk_leaves_an_unstaged_exec_bit_change_unstaged() {
     // Work tree turned the file executable; staging the content hunk keeps the index at 644.
     let (dir, repo) = setup(PLAIN, EXEC);
     let (o, n, _) = hunk(&repo, false);
-    stage::stage_hunk(&repo, "f.sh", o, n, 3).unwrap();
+    stage::stage_hunk(&repo, "f.sh", o, n, common::hunk_ctx(3)).unwrap();
     assert_eq!(index_content(&repo, "f.sh"), "1\ntwo\n3\n");
     assert_eq!(index_mode(&repo, "f.sh"), PLAIN);
     assert!(workdir_is_executable(dir.path(), "f.sh"));
@@ -157,7 +184,7 @@ fn staging_a_hunk_leaves_an_unstaged_exec_bit_change_unstaged() {
 fn staging_a_hunk_leaves_an_unstaged_exec_bit_removal_unstaged() {
     let (dir, repo) = setup(EXEC, PLAIN);
     let (o, n, _) = hunk(&repo, false);
-    stage::stage_hunk(&repo, "f.sh", o, n, 3).unwrap();
+    stage::stage_hunk(&repo, "f.sh", o, n, common::hunk_ctx(3)).unwrap();
     assert_eq!(index_mode(&repo, "f.sh"), EXEC);
     assert!(!workdir_is_executable(dir.path(), "f.sh"));
 }
@@ -166,7 +193,7 @@ fn staging_a_hunk_leaves_an_unstaged_exec_bit_removal_unstaged() {
 fn discarding_a_hunk_does_not_revert_an_unstaged_exec_bit_change() {
     let (dir, repo) = setup(PLAIN, EXEC);
     let (o, n, _) = hunk(&repo, false);
-    stage::discard_hunk(&repo, "f.sh", o, n, 3).unwrap();
+    stage::discard_hunk(&repo, "f.sh", o, n, common::hunk_ctx(3)).unwrap();
     assert_eq!(common::read(dir.path(), "f.sh"), "1\n2\n3\n");
     assert!(workdir_is_executable(dir.path(), "f.sh"));
     assert_eq!(index_mode(&repo, "f.sh"), PLAIN);
@@ -176,7 +203,7 @@ fn discarding_a_hunk_does_not_revert_an_unstaged_exec_bit_change() {
 fn unstaging_a_hunk_does_not_unstage_a_staged_exec_bit_change() {
     let (_dir, repo) = setup_staged(PLAIN, EXEC);
     let (o, n, _) = hunk(&repo, true);
-    stage::unstage_hunk(&repo, "f.sh", o, n, 3).unwrap();
+    stage::unstage_hunk(&repo, "f.sh", o, n, common::hunk_ctx(3)).unwrap();
     assert_eq!(index_content(&repo, "f.sh"), "1\n2\n3\n");
     assert_eq!(index_mode(&repo, "f.sh"), EXEC);
 }
@@ -189,7 +216,7 @@ fn staging_lines_of_an_untracked_executable_file_stages_it_executable() {
     common::write_file(dir.path(), "f.sh", "1\n2\n");
     chmod(dir.path(), "f.sh", 0o755);
     let (o, n, shown) = hunk(&repo, false);
-    stage::stage_lines(&repo, "f.sh", o, n, 3, &[0], &shown).unwrap();
+    stage::stage_lines(&repo, "f.sh", o, n, common::hunk_ctx(3), &[0], &shown).unwrap();
     assert_eq!(index_content(&repo, "f.sh"), "1\n");
     assert_eq!(index_mode(&repo, "f.sh"), EXEC);
 }

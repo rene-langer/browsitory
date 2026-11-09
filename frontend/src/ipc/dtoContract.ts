@@ -51,6 +51,7 @@ export type DtoContract = [
   Expect<Equal<Hand.DiffHunk, Wire.DiffHunk>>,
   Expect<Equal<Hand.DiffLine, Wire.DiffLine>>,
   Expect<Equal<Hand.DiffLineOrigin, Wire.DiffLineOrigin>>,
+  Expect<Equal<Hand.DiffAlgorithm, Wire.DiffAlgorithm>>,
   Expect<Equal<Hand.DiffOptions, Wire.DiffOptions>>,
   Expect<Equal<Hand.DiffSettings, Wire.DiffSettings>>,
   Expect<Equal<Hand.DiffSource, Wire.DiffSource>>,

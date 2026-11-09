@@ -69,7 +69,7 @@ describe("CompareDiffPane", () => {
     expect(await screen.findByText("2 files changed")).toBeInTheDocument();
     expect(screen.getByText("Renamed from old.txt")).toBeInTheDocument();
     await waitFor(() =>
-      expect(getRangeDiff).toHaveBeenCalledWith("/repo", A, B, "new.txt", "old.txt", { ignoreWhitespace: false, contextLines: 3 }),
+      expect(getRangeDiff).toHaveBeenCalledWith("/repo", A, B, "new.txt", "old.txt", { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" }),
     );
   });
 

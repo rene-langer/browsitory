@@ -17,9 +17,27 @@ export interface DiffLine {
   content: string;
 }
 
+/**
+ * How the two sides are lined up (#469): Myers (`Default`), `Patience` or `Minimal`. libgit2 has
+ * no histogram.
+ */
+export type DiffAlgorithm = "Default" | "Patience" | "Minimal";
+export const DIFF_ALGORITHM_VALUES: readonly DiffAlgorithm[] = ["Default", "Patience", "Minimal"];
+
 export interface DiffOptions {
   ignoreWhitespace: boolean;
   contextLines: number;
+  algorithm: DiffAlgorithm;
+}
+
+/**
+ * The options a displayed hunk was read with. Hunk and line actions re-diff with exactly these to
+ * find the hunk again (another context or algorithm can split, merge or move hunks), so they must
+ * be the displayed diff's, never the current settings.
+ */
+export interface HunkOptions {
+  contextLines: number;
+  algorithm: DiffAlgorithm;
 }
 
 /** Diff line wrapping: always, never, or `Auto` (see `lib/wordWrap.ts`). */
@@ -36,8 +54,9 @@ export const DEFAULT_DIFF_SETTINGS: DiffSettings = {
   contextLines: 3,
   syntaxHighlight: true,
   wordWrap: "Auto",
+  algorithm: "Default",
 };
-export const DEFAULT_DIFF_OPTIONS: DiffOptions = { ignoreWhitespace: false, contextLines: 3 };
+export const DEFAULT_DIFF_OPTIONS: DiffOptions = { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" };
 export const MAX_CONTEXT_LINES = 20;
 /**
  * `DiffOptions.contextLines` for "Show whole file" (#444): the backend then returns every line of
@@ -665,10 +684,9 @@ export type DiffSource =
   | { kind: "Commit"; commitId: string; oldPath: string | null }
   | { kind: "Range"; fromId: string; toId: string | null; oldPath: string | null };
 /** A hunk of a commit's diff as the commit view showed it (#448), whitespace significant. */
-export interface CommitHunk {
+export interface CommitHunk extends HunkOptions {
   oldStart: number;
   newStart: number;
-  contextLines: number;
 }
 /** A commit's file, or one hunk of it, to revert or apply in the working tree (#448). */
 export interface CommitChangeRequest {
@@ -930,12 +948,12 @@ export interface RepoClient {
   getCommitSignature(repoPath: string, commitId: string): Promise<CommitSignature>;
   stageFile(repoPath: string, path: string): Promise<void>;
   unstageFile(repoPath: string, path: string): Promise<void>;
-  stageHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  stageLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
-  unstageHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  unstageLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
-  discardHunk(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  discardLines(repoPath: string, path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  stageHunk(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
+  stageLines(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  unstageHunk(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
+  unstageLines(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  discardHunk(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
+  discardLines(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(repoPath: string, path: string): Promise<void>;
   // Discards exactly `paths` (the list the user confirmed); folders are skipped and reported.
   discardAllUnstaged(repoPath: string, paths: string[]): Promise<void>;

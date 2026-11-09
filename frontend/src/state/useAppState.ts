@@ -30,6 +30,7 @@ import type {
   ReflogEntry,
   HeadInfo,
   HookSource,
+  HunkOptions,
   RepoClient,
   ResetMode,
   StashEntry,
@@ -203,12 +204,12 @@ export interface UseAppStateResult {
   // action from the UI locked the app up on a large changeset.
   stageAllFiles(paths: string[]): Promise<void>;
   unstageAllFiles(paths: string[]): Promise<void>;
-  stageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  unstageHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  discardHunk(path: string, oldStart: number, newStart: number, contextLines: number): Promise<void>;
-  stageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
-  unstageLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
-  discardLines(path: string, oldStart: number, newStart: number, contextLines: number, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  stageHunk(path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
+  unstageHunk(path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
+  discardHunk(path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
+  stageLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  unstageLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
+  discardLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
   discardFile(path: string): Promise<void>;
   /** Writes `path` as it is in `commitId` to the work tree, not the index (#446); one undo step. */
   restoreFileVersion(commitId: string, path: string): Promise<void>;

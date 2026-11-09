@@ -41,12 +41,13 @@ fn hunk(repo: &Repository, id: &str, path: &str, index: usize, context_lines: u3
     let opts = DiffOptions {
         ignore_whitespace: false,
         context_lines,
+        algorithm: git_core::diff::DiffAlgorithm::Default,
     };
     let hunks = commit_diff(repo, id, path, &opts).unwrap();
     CommitHunk {
         old_start: hunks[index].old_start,
         new_start: hunks[index].new_start,
-        context_lines,
+        options: common::hunk_ctx(context_lines),
     }
 }
 
@@ -231,7 +232,7 @@ fn a_stale_hunk_is_reported_as_not_found() {
     let stale = CommitHunk {
         old_start: 999,
         new_start: 999,
-        context_lines: 3,
+        options: common::hunk_ctx(3),
     };
     let err = apply_commit_change(
         &repo,

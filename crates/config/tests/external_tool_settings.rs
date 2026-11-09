@@ -21,6 +21,7 @@ fn round_trips_next_to_the_diff_table() {
         context_lines: 5,
         syntax_highlight: true,
         word_wrap: config::WordWrap::Off,
+        algorithm: config::DiffAlgorithm::Patience,
     };
     set_diff_settings_at(&file, &diff).unwrap();
     let wanted = ExternalToolSettings {

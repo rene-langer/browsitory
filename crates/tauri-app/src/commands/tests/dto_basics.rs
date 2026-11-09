@@ -97,14 +97,16 @@ fn commit_inputs_and_settings_dtos_are_camel_case() {
 
 #[test]
 fn diff_options_dto_parses_camel_case() {
-    let dto: DiffOptionsDto =
-        serde_json::from_value(serde_json::json!({"ignoreWhitespace": true, "contextLines": 5}))
-            .unwrap();
+    let dto: DiffOptionsDto = serde_json::from_value(
+        serde_json::json!({"ignoreWhitespace": true, "contextLines": 5, "algorithm": "Patience"}),
+    )
+    .unwrap();
     assert_eq!(
         git_core::diff::DiffOptions::from(dto),
         git_core::diff::DiffOptions {
             ignore_whitespace: true,
-            context_lines: 5
+            context_lines: 5,
+            algorithm: git_core::diff::DiffAlgorithm::Patience,
         }
     );
 }
@@ -253,16 +255,18 @@ fn diff_settings_dto_round_trips_camel_case() {
         context_lines: 3,
         syntax_highlight: true,
         word_wrap: config::WordWrap::Off,
+        algorithm: config::DiffAlgorithm::Minimal,
     });
     let json = serde_json::to_value(&dto).unwrap();
     assert_eq!(
         json,
-        serde_json::json!({"ignoreWhitespace": false, "contextLines": 3, "syntaxHighlight": true, "wordWrap": "Off"})
+        serde_json::json!({"ignoreWhitespace": false, "contextLines": 3, "syntaxHighlight": true, "wordWrap": "Off", "algorithm": "Minimal"})
     );
     let back: DiffSettingsDto = serde_json::from_value(json).unwrap();
     let back = config::DiffSettings::from(back);
     assert_eq!(back.context_lines, 3);
     assert_eq!(back.word_wrap, config::WordWrap::Off);
+    assert_eq!(back.algorithm, config::DiffAlgorithm::Minimal);
 }
 
 #[test]

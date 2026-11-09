@@ -68,6 +68,7 @@ import {
 } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
+import { CurrentDiffContext, useCurrentDiffRegistry } from "./state/useCurrentDiff";
 import { useGoTo } from "./state/useGoTo";
 import type { SelectedRow } from "./state/useAppState";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
@@ -225,6 +226,8 @@ export function RepoWorkspace({
   // DiffPane's selection of two or more changed files, for the palette's selection commands (#449).
   const [fileSelection, setFileSelection] = useState<ReportedFileSelection | null>(null);
   const diffSettings = useDiffSettingsContext();
+  // The tab's diff views, for the palette's "Wrap lines" / "Show whole file" (#469).
+  const currentDiff = useCurrentDiffRegistry();
   const narrow = useNarrowLayout();
 
   // Populate this tab's state as soon as it mounts. `useAppState` no longer fetches anything on
@@ -398,6 +401,7 @@ export function RepoWorkspace({
     // `goToSidebarSection` still scopes its `document.querySelector` lookup to it, and this
     // component's own internal gates (`active &&` below) still need a real boolean rather than an
     // assumption that they're always mounted-implies-active.
+    <CurrentDiffContext.Provider value={currentDiff}>
     <div
       ref={setWorkspaceElement}
       style={{ display: active ? "contents" : "none" }}
@@ -711,6 +715,14 @@ export function RepoWorkspace({
                   appState.selectRow("uncommitted");
                   setDiscardRequest({ kind: "all" });
                 },
+                currentDiff:
+                  currentDiff.current === null
+                    ? null
+                    : {
+                        ...currentDiff.current,
+                        toggleWrap: currentDiff.toggleWrap,
+                        toggleWholeFile: currentDiff.toggleWholeFile,
+                      },
                 selection: fileSelection,
                 requestDiscardSelection: () => {
                   if (fileSelection === null || fileSelection.staged) return;
@@ -1164,5 +1176,6 @@ export function RepoWorkspace({
         </Overlay>
       )}
     </div>
+    </CurrentDiffContext.Provider>
   );
 }
