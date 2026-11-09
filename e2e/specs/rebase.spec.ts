@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { waitUntilGoneInPage } from "../support/dom";
+import { clickInPage, waitUntilGoneInPage } from "../support/dom";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
@@ -22,7 +22,37 @@ function assertCleanTrackedTree() {
   }
 }
 
+// A test that fails mid-rebase leaves the fixture repo in a rebase with conflicts, and every
+// later test here then fails on that instead of on its own bug (#479). Undo such a leftover with
+// the git CLI so one failure stays one failure. Browsitory's own rebase keeps its state in
+// `.git/browsitory/rebase.json` (HEAD detached on the rebased commits, a conflicted step as a
+// cherry-pick), not in `rebase-merge/`, so `git rebase --abort` does not apply: put the branch
+// back on its original tip the way the app's Abort does, then drop the state file.
+function abortLeftoverRebase() {
+  const stateFile = path.join(E2E_REPO_PATH, ".git", "browsitory", "rebase.json");
+  if (!fs.existsSync(stateFile)) return;
+  try {
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8")) as {
+      originalBranchRef: string;
+      originalTip: string;
+    };
+    const run = (...args: string[]) => execFileSync("git", args, { cwd: E2E_REPO_PATH, stdio: "inherit" });
+    run("reset", "--hard", "--quiet");
+    if (state.originalBranchRef.startsWith("refs/heads/")) {
+      run("checkout", "--force", "--quiet", state.originalBranchRef.slice("refs/heads/".length));
+    }
+    run("reset", "--hard", "--quiet", state.originalTip);
+    fs.rmSync(stateFile);
+  } catch (err) {
+    console.warn(`[e2e] rebase.spec.ts: could not undo the leftover rebase: ${String(err)}`);
+  }
+}
+
 describe("Browsitory interactive rebase", () => {
+  afterEach(() => {
+    abortLeftoverRebase();
+  });
+
   before(() => {
     assertCleanTrackedTree();
     const baseBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
@@ -258,9 +288,10 @@ describe("Browsitory interactive rebase", () => {
     const conflictedRow = await $("span*=rebase-conflict-abort.txt (Conflicted)");
     await conflictedRow.waitForExist({ timeout: 10000 });
 
-    // The operation status strip has an "Abort rebase" button too; this is the panel's.
-    const abortButton = await $("section[aria-label='Rebase in progress']").$("button=Abort rebase");
-    await abortButton.click();
+    // The operation status strip has an "Abort rebase" button too; this is the panel's. Clicked
+    // in the page, like Continue above: a native WebDriver click sent right after the conflict
+    // row appeared (while the panel was still laying out) left the rebase running in CI (#479).
+    await clickInPage("section[aria-label='Rebase in progress'] button", "Abort rebase");
 
     await waitUntilGoneInPage("h2", "Rebase in progress", { contains: true });
 
