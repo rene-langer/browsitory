@@ -38,10 +38,17 @@ export function fileMenuItems(
   entry: StatusEntry,
   onPick: (action: FileAction) => void,
   tools?: { mergeToolRunning: boolean },
+  /** Why stashing is unavailable (`stashBlockReason`), disabling "Stash file…". */
+  stashDisabledReason: string | null = null,
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [];
   if (entry.kind !== "Conflicted") {
-    const stash: ContextMenuItem = { label: "Stash file…", onSelect: () => onPick({ kind: "stash" }) };
+    const stash: ContextMenuItem = {
+      label: "Stash file…",
+      onSelect: () => onPick({ kind: "stash" }),
+      disabled: stashDisabledReason !== null,
+      title: stashDisabledReason ?? undefined,
+    };
     if (entry.staged) {
       items.push(stash);
     } else {

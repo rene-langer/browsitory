@@ -15,6 +15,7 @@ import {
   type PresetAction,
 } from "../lib/rebaseSelection";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "../lib/historyEdits";
+import { commitActions } from "../lib/actions/commitActions";
 import { rowsEqual, type SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
@@ -35,6 +36,7 @@ export function CommitGraph({
   commits,
   selectedRow,
   pending,
+  pendingReason = null,
   onSelectRow,
   onBranchFromCommit,
   onRebaseFromCommit,
@@ -66,9 +68,11 @@ export function CommitGraph({
   status: StatusEntry[];
   commits: GraphCommit[];
   selectedRow: SelectedRow;
-  // True while a repository operation is in flight. Disables the "Rebase onto here" context
-  // menu entry below.
+  // True while repository operations are blocked (`operationBlockers`): disables the menus'
+  // mutating entries.
   pending: boolean;
+  /** `operationBlockers`' reason, the title of the entries `pending` disables. */
+  pendingReason?: string | null;
   onSelectRow: (row: SelectedRow) => void;
   onBranchFromCommit: (commitId: string) => void;
   onRebaseFromCommit: (commitId: string) => void;
@@ -188,32 +192,40 @@ export function CommitGraph({
     setListElement(element);
   }, []);
 
+  const busyTitle = pending ? (pendingReason ?? undefined) : undefined;
+
   function singleCommitItems(commitId: string): ContextMenuItem[] {
     const commit = commits.find((candidate) => candidate.id === commitId);
     const isHead = headInfo.headId === commitId;
-    const isMerge = (commit?.parentIds.length ?? 0) > 1;
-    const items: ContextMenuItem[] = [
-      { label: "Branch from here", onSelect: () => onBranchFromCommit(commitId) },
-      ...(onCreateTag === undefined ? [] : [{ label: "Create tag…", onSelect: () => onCreateTag(commitId) }]),
-      { label: "Rebase onto here", onSelect: () => onRebaseFromCommit(commitId), disabled: pending },
-      // A merge commit needs a parent to apply against: the ellipsis opens the parent picker.
-      isMerge && commit !== undefined
-        ? {
-            label: "Cherry-pick…",
-            onSelect: () => setParentPicker({ action: "Cherry-pick", commit }),
-            disabled: pending || isHead,
-          }
-        : { label: "Cherry-pick", onSelect: () => onCherryPick(commitId, null), disabled: pending || isHead },
-      isMerge && commit !== undefined
-        ? { label: "Revert…", onSelect: () => setParentPicker({ action: "Revert", commit }), disabled: pending }
-        : { label: "Revert", onSelect: () => onRevert(commitId, null), disabled: pending },
-      { label: "Checkout (detached)", onSelect: () => onCheckoutCommit(commitId), disabled: pending },
-      {
-        label: `Reset ${currentBranch ?? "HEAD"} to here…`,
-        onSelect: () => setResetTarget(commit ?? null),
-        disabled: pending || currentBranch === null,
-      },
-    ];
+    const items: ContextMenuItem[] = [{ label: "Branch from here", onSelect: () => onBranchFromCommit(commitId) }];
+    if (commit !== undefined) {
+      // Availability, reasons and labels shared with the command palette (#495).
+      const actions = commitActions(
+        { blockers: { blocked: pending, reason: pendingReason }, headId: headInfo.headId, currentBranch },
+        commit,
+      );
+      const menuItem = (action: { label: string; enabled: boolean; reason: string | undefined }, run: () => void) => ({
+        label: action.label,
+        onSelect: run,
+        disabled: !action.enabled,
+        title: action.reason,
+      });
+      if (onCreateTag !== undefined) items.push(menuItem(actions.createTag, () => onCreateTag(commitId)));
+      items.push(
+        { label: "Rebase onto here", onSelect: () => onRebaseFromCommit(commitId), disabled: pending, title: busyTitle },
+        // A merge commit needs a parent to apply against: the ellipsis opens the parent picker.
+        menuItem(actions.cherryPick, () =>
+          actions.cherryPick.needsParent
+            ? setParentPicker({ action: "Cherry-pick", commit })
+            : onCherryPick(commitId, null),
+        ),
+        menuItem(actions.revert, () =>
+          actions.revert.needsParent ? setParentPicker({ action: "Revert", commit }) : onRevert(commitId, null),
+        ),
+        menuItem(actions.checkout, () => onCheckoutCommit(commitId)),
+        menuItem(actions.reset, () => setResetTarget(commit)),
+      );
+    }
     items.push(...editItems(commitId, isHead));
     if (onCompareWithWorkingTree !== undefined) {
       items.push({ label: "Diff against working tree", onSelect: () => onCompareWithWorkingTree(commitId) });
@@ -224,7 +236,12 @@ export function CommitGraph({
   // One-click history edits (#442). HEAD's Reword… amends, so it needs neither a clean tree nor
   // a parent, as "Edit commit message…" before it.
   function editItems(commitId: string, isHead: boolean): ContextMenuItem[] {
-    const headReword: ContextMenuItem = { label: "Reword…", onSelect: onEditHeadMessage, disabled: pending };
+    const headReword: ContextMenuItem = {
+      label: "Reword…",
+      onSelect: onEditHeadMessage,
+      disabled: pending,
+      title: busyTitle,
+    };
     if (onEditHistory === undefined) return isHead ? [headReword] : [];
     const checks = historyEditChecks({ commits, headInfo, currentBranch, status }, commitId);
     const item = (label: string, check: HistoryEditCheck, run: (onto: string) => void): ContextMenuItem => ({
@@ -233,7 +250,7 @@ export function CommitGraph({
         if (check.ok) run(check.onto);
       },
       disabled: pending || !check.ok,
-      title: check.ok ? undefined : check.reason,
+      title: check.ok ? busyTitle : check.reason,
     });
     const edit = (request: HistoryEditRequest) => (onto: string) => onEditHistory(commitId, onto, request);
     return [
@@ -252,6 +269,7 @@ export function CommitGraph({
       commitId,
       remotes,
       disabled: pending,
+      disabledReason: pendingReason,
       onPushTag,
       onBranchFromCommit,
       onCheckoutCommit,

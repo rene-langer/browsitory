@@ -55,7 +55,7 @@ import { useFetchSettingsContext } from "./state/useFetchSettings";
 import { upstreamPushBranch } from "./lib/pushTarget";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
-import { leftoverReason, pickToast, sequenceToast, terminalAbortConfirm, terminalRebaseReason } from "./lib/operationStatus";
+import { operationBlockers, pickToast, sequenceToast, terminalAbortConfirm } from "./lib/operationStatus";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import { useGoTo } from "./state/useGoTo";
@@ -216,13 +216,12 @@ export function RepoWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const repositoryOperationDisabled =
-    appState.state.pending ||
-    appState.state.transfer !== null ||
-    appState.state.mergeMessage !== null ||
-    appState.state.rebaseProgress !== null ||
-    appState.state.headInfo.sequence !== null ||
-    appState.state.headInfo.terminalRebase !== null;
+  // The one "repository busy" rule and its reason (#495), shared with the command palette.
+  // `operationDisabledReason` is threaded into the sidebar mutation panels (`BranchTree`,
+  // `WorktreePanel`, `TagPanel`, `PullRequestPanel`) so their disabled buttons carry a `title`
+  // explaining the block instead of just going inert (issue #31/UX-003). Deliberately not a
+  // fine-grained per-panel lock — that's the "Large" option the issue called out of scope.
+  const { blocked: repositoryOperationDisabled, reason: operationDisabledReason } = operationBlockers(appState.state);
 
   const { pending, transfer } = appState.state;
   const { mounted, handleUndo, handleRedo } = useUndoRedoActions(appState, active, pushToast);
@@ -238,35 +237,6 @@ export function RepoWorkspace({
     transfer,
   });
 
-  // A short, human-readable explanation for why `repositoryOperationDisabled` is currently true
-  // — threaded into the sidebar mutation panels (`BranchTree`, `WorktreePanel`, `TagPanel`,
-  // `PullRequestPanel`) so their disabled buttons carry a `title` explaining the
-  // block instead of just going inert with no explanation (issue #31/UX-003). First-match-wins,
-  // in the same order `repositoryOperationDisabled` checks them; `null` when nothing is blocking.
-  // Deliberately not a fine-grained per-panel lock (e.g. "only disable panels that actually
-  // conflict with a rebase") — that's the "Large" effort option the issue explicitly calls out as
-  // out of scope for this pass.
-  const operationDisabledReason: string | null = appState.state.pending
-    ? "Another action is in progress."
-    : appState.state.transfer !== null
-      ? "A transfer is in progress."
-      : appState.state.headInfo.sequence !== null
-        ? appState.state.headInfo.sequence.kind === "CherryPick"
-          ? "A cherry-pick is in progress."
-          : "A revert is in progress."
-      : appState.state.headInfo.terminalRebase !== null
-        ? terminalRebaseReason(appState.state.headInfo.terminalRebase)
-      : appState.state.mergeMessage !== null && appState.state.headInfo.operationLeftover && appState.state.headInfo.operation !== null
-        ? leftoverReason(appState.state.headInfo.operation)
-      : appState.state.mergeMessage !== null
-        ? appState.state.headInfo.operation === "CherryPick"
-          ? "A cherry-pick is in progress."
-          : appState.state.headInfo.operation === "Revert"
-            ? "A revert is in progress."
-            : "A merge is in progress."
-        : appState.state.rebaseProgress !== null
-          ? "A rebase is in progress."
-          : null;
   // Stash Apply/Pop: libgit2 refuses while the index differs from HEAD or has conflicts, so say
   // what to do instead of letting the backend error.
   const stashApplyDisabledReason: string | null = appState.state.status.some((entry) => entry.kind === "Conflicted")
@@ -890,6 +860,7 @@ export function RepoWorkspace({
                       commits={appState.state.commits}
                       selectedRow={appState.state.selectedRow}
                       pending={repositoryOperationDisabled}
+                      pendingReason={operationDisabledReason}
                       onSelectRow={selectRowClosingCompare}
                       onBranchFromCommit={appState.openCreateBranchDraft}
                       onRebaseFromCommit={appState.openRebasePlanner}

@@ -10,6 +10,10 @@ import {
   type Command,
 } from "./commands";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
+import { createElement } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { CommitGraph } from "../components/CommitGraph";
+import { operationBlockers } from "./operationStatus";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
   return {
@@ -572,7 +576,7 @@ describe("buildCommands", () => {
   });
 
   it("offers stash all and stash with options", () => {
-    const appState = makeAppState();
+    const appState = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }] });
     const commands = buildCommands(appState);
     const all = commands.find((c) => c.id === "save-stash");
     expect(all?.label).toBe("Stash all changes");
@@ -828,7 +832,6 @@ describe("buildCommands", () => {
         expect(ids).not.toContain("pull");
         expect(ids.some((id) => id.startsWith("delete-tag:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("delete-remote-tag:"))).toBe(false);
-        expect(ids).not.toContain("create-tag-head");
         expect(ids.some((id) => /^(edit-remote|manage-credentials|remove-remote|checkout-tag):/.test(id))).toBe(false);
         expect(ids.some((id) => id.startsWith("open-worktree:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("remove-worktree:"))).toBe(false);
@@ -868,9 +871,40 @@ describe("buildCommands", () => {
       expect(commands.some((c) => c.id === "rebase-abort")).toBe(true);
     });
 
-    it("keeps save-stash unconditional, matching DiffPane's real button (no full guard)", () => {
-      const commands = buildCommands(makeAppState({ pending: true }));
-      expect(commands.some((c) => c.id === "save-stash")).toBe(true);
+    // DiffPane's Stash button and the palette share `stashBlockReason` (#495).
+    const modified = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }];
+    it.each<[string, Partial<UseAppStateResult["state"]>]>([
+      ["an action is pending", { pending: true }],
+      ["a merge is in progress", { mergeMessage: "Merge branch" }],
+    ])("keeps the stash commands while %s, like DiffPane's Stash button", (_label, overrides) => {
+      const ids = buildCommands(makeAppState({ status: modified, ...overrides })).map((c) => c.id);
+      expect(ids).toContain("save-stash");
+      expect(ids).toContain("stash-with-options");
+    });
+
+    it.each<[string, Partial<UseAppStateResult["state"]>]>([
+      ["there are no changes", { status: [] }],
+      ["a rebase is in progress", { status: modified, rebaseProgress: { currentStep: 1, totalSteps: 3 } }],
+      [
+        "a cherry-pick sequence is paused",
+        { status: modified, headInfo: { ...makeAppState().state.headInfo, sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c1" } } },
+      ],
+      [
+        "a terminal rebase is paused",
+        { status: modified, headInfo: { ...makeAppState().state.headInfo, terminalRebase: { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 } } },
+      ],
+    ])("omits the stash commands while %s, like DiffPane's Stash button", (_label, overrides) => {
+      const ids = buildCommands(makeAppState(overrides), undefined, [], undefined, undefined, undefined, undefined, {
+        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" },
+        update: vi.fn(),
+        currentFile: "a.txt",
+        requestDiscardCurrentFile: vi.fn(),
+        requestDiscardAllUnstaged: vi.fn(),
+        openCurrentFileHistory: vi.fn(),
+      }).map((c) => c.id);
+      expect(ids).not.toContain("save-stash");
+      expect(ids).not.toContain("stash-with-options");
+      expect(ids).not.toContain("stash-current-file");
     });
   });
 
@@ -1050,9 +1084,106 @@ describe("history commands", () => {
     expect(ids).toEqual(expect.arrayContaining(HISTORY_IDS));
   });
 
-  it("omits them while a merge is in progress", () => {
+  it("omits them while a merge is in progress, except Create tag, whose dialog says why it waits", () => {
     const ids = buildCommands(makeAppState({ ...historyState, mergeMessage: "Merge x" })).map((c) => c.id);
-    for (const id of HISTORY_IDS) expect(ids).not.toContain(id);
+    for (const id of HISTORY_IDS) {
+      if (id.startsWith("create-tag-")) expect(ids).toContain(id);
+      else expect(ids).not.toContain(id);
+    }
+  });
+
+  it("offers cherry-pick and revert of a merge commit through the commit menu's parent picker (#495)", () => {
+    const merge = { ...graphCommit("m1", ["c1", "c2"]), shortId: "m1" };
+    const appState = makeAppState({ ...historyState, selectedRow: { commitId: "m1" }, commits: [merge, ...historyState.commits!] });
+    const commands = buildCommands(appState);
+    expect(commands.find((c) => c.id === "cherry-pick-selected")?.label).toBe("Cherry-pick m1…");
+    expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m1…");
+    commands.find((c) => c.id === "cherry-pick-selected")!.run();
+    expect(appState.cherryPick).not.toHaveBeenCalled();
+  });
+
+  // #503: paused between steps, a terminal rebase writes no MERGE_MSG, so only
+  // `headInfo.terminalRebase` says the repository is busy.
+  it.each([
+    ["rebase", { kind: "Rebase" as const, branch: "topic", onto: "c2", currentStep: 1, totalSteps: 2 }],
+    ["git am", { kind: "Am" as const, branch: "", onto: "", currentStep: 1, totalSteps: 2 }],
+  ])("omits cherry-pick, revert, checkout and other mutations during a %s started in a terminal (#503)", (_label, terminalRebase) => {
+    const ids = buildCommands(
+      makeAppState({ ...historyState, headInfo: { ...historyState.headInfo!, terminalRebase } }),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => {},
+    ).map((c) => c.id);
+    for (const id of ["cherry-pick-selected", "revert-selected", "checkout-selected", "reset-selected", "pull", "close-tab"]) {
+      expect(ids).not.toContain(id);
+    }
+    expect(ids.some((id) => id.startsWith("switch-branch:"))).toBe(false);
+    expect(ids).toContain("refresh");
+  });
+
+  // #495: the commit menu and the palette decide with the same rule, in every blocked state.
+  describe("agree with the commit menu", () => {
+    const head = historyState.headInfo!;
+    const states: [string, Partial<AppState>][] = [
+      ["nothing runs", {}],
+      ["an action is pending", { pending: true }],
+      ["a merge is in progress", { mergeMessage: "Merge x" }],
+      ["a rebase is in progress", { rebaseProgress: { currentStep: 1, totalSteps: 2 } }],
+      ["a sequence is stored", { headInfo: { ...head, sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c2" } } }],
+      ["a terminal rebase is paused", { headInfo: { ...head, terminalRebase: { kind: "Rebase", branch: "topic", onto: "c2", currentStep: 1, totalSteps: 2 } } }],
+      ["a terminal git am is paused", { headInfo: { ...head, terminalRebase: { kind: "Am", branch: "", onto: "", currentStep: 1, totalSteps: 2 } } }],
+      ["HEAD is selected on a detached HEAD", { selectedRow: { commitId: "c1" }, branches: [{ name: "main", isCurrent: false }], headInfo: { ...head, detachedAt: "c1" } }],
+    ];
+    const pairs: [string, string][] = [
+      ["Cherry-pick", "cherry-pick-selected"],
+      ["Revert", "revert-selected"],
+      ["Checkout (detached)", "checkout-selected"],
+      ["Create tag…", "create-tag-selected"],
+    ];
+
+    it.each(states)("while %s", (_label, overrides) => {
+      const appState = makeAppState({ ...historyState, ...overrides });
+      const { state } = appState;
+      const blockers = operationBlockers(state);
+      const selectedId = (state.selectedRow as { commitId: string }).commitId;
+      const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
+      render(
+        createElement(CommitGraph, {
+          status: state.status,
+          commits: state.commits,
+          selectedRow: state.selectedRow,
+          pending: blockers.blocked,
+          pendingReason: blockers.reason,
+          headInfo: state.headInfo,
+          currentBranch,
+          onSelectRow: vi.fn(),
+          onBranchFromCommit: vi.fn(),
+          onRebaseFromCommit: vi.fn(),
+          onCherryPick: vi.fn(),
+          onRevert: vi.fn(),
+          onCheckoutCommit: vi.fn(),
+          onResetToCommit: vi.fn(),
+          onEditHeadMessage: vi.fn(),
+          onCreateTag: vi.fn(),
+        }),
+      );
+      try {
+        const row = screen.getAllByRole("option").find((option) => option.textContent?.includes(`commit ${selectedId}`));
+        fireEvent.contextMenu(row!);
+        const ids = buildCommands(appState).map((command) => command.id);
+        const resetItem = screen.getByRole("menuitem", { name: /^Reset .* to here…$/ });
+        for (const [label, id] of [...pairs, [resetItem.textContent!, "reset-selected"] as [string, string]]) {
+          const item = screen.getByRole("menuitem", { name: label });
+          expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !item.hasAttribute("disabled") });
+          if (item.hasAttribute("disabled") && blockers.blocked) expect(item).toHaveAttribute("title", blockers.reason);
+        }
+      } finally {
+        cleanup();
+      }
+    });
   });
 
   it("omits cherry-pick for HEAD and force push on a detached HEAD", () => {
@@ -1179,7 +1310,7 @@ describe("diff option and discard commands", () => {
   };
 
   it("offers stashing the current file only when there is one", () => {
-    const state = makeAppState();
+    const state = makeAppState({ status: [{ path: "src/a.ts", oldPath: null, staged: false, kind: "Modified" }] });
     expect(build(state).commands.some((c) => c.id === "stash-current-file")).toBe(false);
     const { commands } = build(state, { currentFile: "src/a.ts" });
     const command = commands.find((c) => c.id === "stash-current-file");

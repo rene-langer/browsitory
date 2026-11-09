@@ -1,5 +1,5 @@
 import { describeError, type DescribedError } from "../lib/errorMessages";
-import { conflictReason, rebaseInterruption, sequenceNoun } from "../lib/operationStatus";
+import { conflictReason, rebaseInterruption, sequenceNoun, stashBlockReason } from "../lib/operationStatus";
 import {
   AlertTriangle,
   ArrowRightLeft,
@@ -96,6 +96,7 @@ function UncommittedFileSection({
   onRequestDiscardFile,
   onIgnorePath,
   onStashFile,
+  stashDisabledReason,
   onOpenFileHistory,
   externalTools,
   onMarkResolved,
@@ -129,6 +130,8 @@ function UncommittedFileSection({
   onRequestDiscardFile: (path: string) => void;
   onIgnorePath: (pattern: string) => void;
   onStashFile: (path: string) => void;
+  /** `stashBlockReason`: disables "Stash file…" like the Stash button. */
+  stashDisabledReason: string | null;
   onOpenFileHistory?: (path: string) => void;
   externalTools?: ExternalToolsApi;
   onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
@@ -171,6 +174,7 @@ function UncommittedFileSection({
     entry,
     onPickFileAction,
     externalTools === undefined ? undefined : { mergeToolRunning: externalTools.mergeToolRunning.has(entry.path) },
+    stashDisabledReason,
   );
   const hasFileActions = menuItems.length > 0;
   const markResolved = async (force: boolean) => {
@@ -1133,6 +1137,8 @@ function UncommittedDiffPane({
     onUnstageAllFiles(stagedEntries.map((entry) => entry.path));
   };
 
+  const stashReason = stashBlockReason({ status, rebaseProgress, headInfo });
+
   const renderSection = (entry: StatusEntry) => {
     const key = entryKey(entry);
     return (
@@ -1161,6 +1167,7 @@ function UncommittedDiffPane({
         onRequestDiscardFile={(path) => setDiscardRequest({ kind: "file", path })}
         onIgnorePath={onIgnorePath}
         onStashFile={(path) => onOpenStashDialog([path])}
+        stashDisabledReason={stashReason}
         onOpenFileHistory={onOpenFileHistory}
         externalTools={externalTools}
         onMarkResolved={onMarkResolved}
@@ -1260,14 +1267,13 @@ function UncommittedDiffPane({
       <div className={styles.commitDock} role="group" aria-label="Commit actions">
         {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
             resolved/amended content lives in the working tree, so stashing it away and continuing
-            lands an empty (or wrong) commit. Disabled for the whole pause, same rule as
-            `BranchSwitcher`'s ref-mutating actions. */}
+            lands an empty (or wrong) commit. Disabled for the whole pause by the stash rule the
+            file menu and the command palette share (`stashBlockReason`, #495). */}
         <SplitButton
           label="Stash"
           onClick={onSaveStash}
-          disabled={
-            status.length === 0 || rebaseProgress !== null || headInfo.sequence !== null || headInfo.terminalRebase !== null
-          }
+          disabled={stashReason !== null}
+          title={stashReason ?? undefined}
           menuLabel="More stash options"
           items={[
             { label: "Stash all", onSelect: () => onSaveStash() },
