@@ -1094,6 +1094,11 @@ mod tests {
     }
 
     #[test]
+    fn a_backslash_before_any_other_char_stays_in_quotes() {
+        assert_eq!(terms(r#""C:\dir\x""#), vec![Text(r"C:\dir\x".into())]);
+    }
+
+    #[test]
     fn quoted_text_with_a_colon_is_literal() {
         assert_eq!(terms(r#""fix: crash""#), vec![Text("fix: crash".into())]);
     }
