@@ -231,9 +231,12 @@ fn tokenize(input: &str) -> Result<Vec<Token>, SearchError> {
     let chars: Vec<char> = input.chars().collect();
     let mut i = 0;
     let mut tokens = Vec::new();
-    // Every token takes at least one char, so the second bound only ends a loop whose index
-    // stopped advancing (a bug) before it fills memory.
-    while i < chars.len() && tokens.len() <= chars.len() {
+    // Every pass takes at least one char, so the input's length bounds the passes: an index
+    // that stopped advancing (a bug) ends the loop rather than hanging or filling memory.
+    for _ in 0..chars.len() {
+        if i >= chars.len() {
+            break;
+        }
         match chars[i] {
             c if c.is_whitespace() => {
                 i += 1;
@@ -269,10 +272,10 @@ fn tokenize(input: &str) -> Result<Vec<Token>, SearchError> {
         }
 
         // A key is a run of ASCII letters immediately followed by `:`.
-        let mut end = i;
-        while end < chars.len() && chars[end].is_ascii_alphabetic() {
-            end += 1;
-        }
+        let end = i + chars[i..]
+            .iter()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .count();
         let key = if end > i && end < chars.len() && chars[end] == ':' {
             let key: String = chars[i..end].iter().collect::<String>().to_lowercase();
             if !KEYS.contains(&key.as_str()) {
@@ -325,15 +328,23 @@ fn tokenize(input: &str) -> Result<Vec<Token>, SearchError> {
             let start = i;
             // Parentheses opened inside the value; a `)` beyond them closes a group instead.
             let mut depth = 0usize;
-            while i < chars.len() && !chars[i].is_whitespace() {
-                match chars[i] {
-                    '(' => depth += 1,
-                    ')' if depth == 0 => break,
-                    ')' => depth -= 1,
-                    _ => {}
-                }
-                i += 1;
-            }
+            let len = chars[start..]
+                .iter()
+                .take_while(|&&c| match c {
+                    c if c.is_whitespace() => false,
+                    '(' => {
+                        depth += 1;
+                        true
+                    }
+                    ')' if depth == 0 => false,
+                    ')' => {
+                        depth -= 1;
+                        true
+                    }
+                    _ => true,
+                })
+                .count();
+            i = start + len;
             chars[start..i].iter().collect()
         };
 
@@ -392,8 +403,11 @@ impl Parser<'_> {
 
     fn or(&mut self) -> Result<SearchExpr, SearchError> {
         let mut parts = vec![self.and()?];
-        // Every part takes at least one token; see `tokenize` for the second bound.
-        while self.peek() == Some(&Token::Or) && parts.len() <= self.tokens.len() {
+        // Every pass takes at least one token; see `tokenize` for why the passes are bounded.
+        for _ in 0..self.tokens.len() {
+            if self.peek() != Some(&Token::Or) {
+                break;
+            }
             self.pos += 1;
             parts.push(self.and()?);
         }
@@ -402,8 +416,9 @@ impl Parser<'_> {
 
     fn and(&mut self) -> Result<SearchExpr, SearchError> {
         let mut parts = Vec::new();
-        // Every part takes at least one token; see `tokenize` for the second bound.
-        while parts.len() <= self.tokens.len() {
+        // Every pass but the last takes at least one token; see `tokenize` for why the passes
+        // are bounded.
+        for _ in 0..=self.tokens.len() {
             match self.peek() {
                 None | Some(Token::Close) | Some(Token::Or) => break,
                 Some(Token::And) => {
