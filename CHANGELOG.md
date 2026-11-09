@@ -6,6 +6,131 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-09
+
+Tags at any commit and on remotes, go-to pickers, one-click history edits from the commit menu,
+automatic fetching, recent commit messages, word wrap and whole-file view in diffs, submodules in
+their own tab, and the commits of a detached HEAD in the graph.
+
+### Tags
+
+- Added: **Create tag…** in a commit's menu in the graph tags that commit (lightweight or
+  annotated, optionally pushed right away), without checking it out first. The name is checked
+  as you type (invalid or taken names). The command palette has **Create tag at HEAD…** and
+  **Create tag at ⟨commit⟩…** for the selected commit (#438).
+- Added: **Branch from tag** in a tag's menu (#438).
+- Added: **Delete from remote…** for a tag, in the Tags panel, the tag badge menu and the
+  command palette: picks the remote when there are several, can delete the local tag as well,
+  and runs `pre-push` with the remote's credentials like a push (#439).
+- Changed: the Tags panel is now the list of tags: one line per tag with a name filter, and each
+  tag's actions in a menu (the "…" button, right-click, Menu key or Shift+F10) with the same
+  items as its badge in the graph. Creating a tag moved to the graph and the command palette
+  (#438).
+
+### Go to a commit, branch, tag or stash
+
+- Added: **Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** in the
+  command palette select the target and scroll the graph to it without checking anything out.
+  Go to commit takes a SHA prefix, message text or any revision; the graph loads more history
+  when the commit is further down, and when the graph doesn't show it (a hidden branch, a side
+  branch of an isolated branch, no branch at all) a note says why and offers to show it (#441).
+- Added: clicking a tag in the Tags panel, or a branch in the Branches section, selects its
+  commit in the graph the same way. Tag rows are now focusable: Enter or Space goes to the tag,
+  the Menu key or Shift+F10 opens its menu (#441).
+- Changed: in the command palette, a command whose whole label you typed comes first ("go to
+  branch" picks **Go to branch…** over **Go to Branches**) (#441).
+
+### One-click history edits
+
+- Added: the commit menu edits a commit of the current branch in one step: **Reword…**,
+  **Squash with parent**, **Fixup into parent**, **Move up**, **Move down** and **Drop**. Each
+  runs as a one-step interactive rebase, so a conflict pauses it like any rebase and a finished
+  edit is one Undo step. An edit that can't run is disabled with the reason (another branch, a
+  merge commit, the first commit, uncommitted changes, an operation in progress). The palette
+  has them for the selected commit too (#442).
+- Changed: **Edit commit message…** on the latest commit is now **Reword…**; it still opens the
+  amend box (#442).
+
+### Committing
+
+- Added: **Recent messages** in the commit message box puts an earlier message back: the last 20
+  messages committed or amended in Browsitory in this repository (kept per repository on this
+  computer), then the newest commits on the current branch. Picking one replaces the text in the
+  box; Ctrl/Cmd+Z in the field or **Restore message** undoes that (#443).
+- Fixed: with a file history or search results shown in the graph, amending left the **Author**
+  field empty when HEAD wasn't among those results. It now takes HEAD's author from the graph's
+  commits (#464).
+
+### Fetch automatically
+
+- Added: **Preferences → Fetch → Fetch automatically** fetches all remotes in the background
+  every 5, 10 or 30 minutes or every hour (off by default), with an override per repository. It
+  runs quietly for the open tab, uses the repository's Prune choice, waits while the window or
+  VSCode panel is hidden or another action runs, and never asks for credentials or makes the
+  system ask to unlock its credential store: a remote that would need that is skipped and named
+  once in a notice. The sync bar shows when the repository was last fetched (#440).
+
+### Diff
+
+- Added: **Wrap lines** above each diff wraps long lines or lets them scroll sideways, keeping
+  line numbers aligned and line selection working in the unified and split views. Its default
+  is the new **Preferences → Diff → Word wrap** setting: On, Off or Auto (wraps the split view,
+  prose files and diffs with very long lines) (#444).
+- Added: **Show whole file** shows every line of a file with its changes highlighted, in the
+  working tree, commits, stashes and compares. Hunk and line staging work on it; a file over
+  10,000 lines keeps the normal context (#444).
+- Changed: code diffs in the unified view no longer wrap by default (word wrap Auto); choose On
+  in Preferences to wrap everywhere as before (#444).
+
+### Submodules
+
+- Added: **Open in new tab** in a submodule's menu in the Submodules panel (the "…" button,
+  right-click, Menu key or Shift+F10) opens the checked-out submodule as a repository tab of its
+  own, like a worktree; also in the command palette as **Open submodule ⟨path⟩ in new tab**. For
+  a submodule that isn't checked out yet the item is disabled and says why, and the menu offers
+  **Initialize** and **Update** instead. In a linked worktree it opens that worktree's copy of
+  the submodule (#445).
+
+### Detached HEAD in the graph
+
+- Fixed: the graph and commit search now include the commits of a detached HEAD that no branch
+  contains (a commit made after checking out a commit or a tag, a submodule's checkout),
+  whichever branches the graph shows, and the commit HEAD is on has a **HEAD** badge (#467).
+
+### Internal: build and release
+
+- Changed: CI's desktop build and the release build cache the tools the app bundler downloads
+  (for the Windows installers and the Linux AppImage), keyed on the locked bundler version, and
+  download what is missing before bundling with retries and hash checks
+  (`scripts/prefetch-bundler-tools.py`), so a server error during a download no longer fails the
+  bundling (#454).
+- Changed: CI warns on every pull request when the locked bundler version no longer matches the
+  prefetch script's tool list; `docs/RELEASING.md` says how to update it (#458).
+- Changed: the release workflow installs its Linux packages with retries, like CI, so a package
+  mirror hiccup no longer fails a release build (#459).
+- Added: `scripts/prune-merged-branches.sh` lists or deletes local branches whose pull request
+  was squash-merged (#481).
+
+### Internal: test robustness
+
+- Fixed: the desktop E2E test that continues a paused rebase after an app restart could click
+  **Continue rebase** while the restarted app was still settling. It now waits until the button
+  has stayed in place for a second, allows 20 s for the rebase to finish, and names the status
+  strip's last text and any error when it doesn't (#453).
+- Fixed: the E2E test of the data folder move after the identifier change waits until the app
+  has written its stored settings to disk before it stops the app, and says what it found when
+  it fails (#465).
+- Fixed: a desktop E2E test that restarts the app could hang until the test timeout when the new
+  test-driver session never answered. The restart now gets 30 s per attempt and one retry with a
+  fresh driver, and the session logs the driver's and the app's process ids and ports, so a hang
+  shows where it stopped (#457).
+- Fixed: the desktop commit-search E2E test failed now and then because the query typed right
+  after the page reload did not stick; it now types the query again until the matching result
+  shows (#479).
+- Fixed: the desktop rebase-abort E2E test clicks **Abort rebase** once the button is enabled,
+  instead of with a lower-level click that sometimes left the rebase running. A rebase left behind
+  by a failed test is undone afterwards, so the later rebase tests no longer fail on it (#479).
+
 ## [0.4.1] - 2026-11-08
 
 The desktop app 0.4.0 was built but could not be published, so 0.4.1 ships the same changes. If
