@@ -36,3 +36,10 @@
 .dialog form > button {
   align-self: flex-start;
 }
+
+/* Why the dialog's action is disabled (`operationBlockers`' reason, #514). */
+.blocked {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

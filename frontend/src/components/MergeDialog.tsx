@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FastForwardMode, MergeOptions } from "../ipc/RepoClient";
 import { FormDialog } from "./primitives/FormDialog";
 import { Toolbar } from "./primitives/Toolbar";
+import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./MergeDialog.module.css";
 
 const FAST_FORWARD_CHOICES: Array<{ mode: FastForwardMode; label: string }> = [
@@ -16,6 +17,8 @@ const FALLBACK: MergeOptions = { fastForward: "Allow", squash: false };
  * "Merge into current branch…": how to merge `branchName` into the current branch. Preselects
  * `loadOptions()` (the choice remembered for this repo, else `merge.ff`); Merge stays disabled
  * until it resolves. Squash ignores the fast-forward choice, so the radios are disabled then.
+ * `blockedReason` (`operationBlockers`) disables Merge while it applies: the repository can
+ * become busy after the dialog opened (#514).
  */
 export function MergeDialog({
   branchName,
@@ -23,12 +26,15 @@ export function MergeDialog({
   loadOptions,
   onMerge,
   onCancel,
+  blockedReason = null,
 }: {
   branchName: string;
   currentBranchName: string;
   loadOptions: () => Promise<MergeOptions>;
   onMerge: (options: MergeOptions) => void;
   onCancel: () => void;
+  /** Why repository operations are blocked now, or `null`. */
+  blockedReason?: string | null;
 }) {
   const [options, setOptions] = useState<MergeOptions | null>(null);
 
@@ -55,7 +61,7 @@ export function MergeDialog({
         className={styles.form}
         onSubmit={(event) => {
           event.preventDefault();
-          if (options !== null) onMerge(options);
+          if (options !== null && blockedReason === null) onMerge(options);
         }}
       >
         <h2 className={styles.heading}>
@@ -89,8 +95,9 @@ export function MergeDialog({
         <p id="merge-dialog-squash-hint" className={styles.hint}>
           Stage the combined changes; you write the commit.
         </p>
+        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
         <Toolbar>
-          <button type="submit" disabled={options === null}>
+          <button type="submit" disabled={options === null || blockedReason !== null} title={blockedReason ?? undefined}>
             Merge
           </button>
           <button type="button" onClick={onCancel}>

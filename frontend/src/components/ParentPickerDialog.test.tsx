@@ -60,4 +60,27 @@ describe("ParentPickerDialog", () => {
     expect(onConfirm).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Cherry-pick" })).toBeInTheDocument();
   });
+
+  // #514: the repository can become busy while the dialog is open.
+  it("disables the action with the reason and sends nothing while the repository is busy", () => {
+    const merge = commit("m", { parentIds: ["p1", "p2"] });
+    const onConfirm = vi.fn();
+    render(
+      <ParentPickerDialog
+        action="Cherry-pick"
+        commit={merge}
+        commits={[merge]}
+        blockedReason="A cherry-pick is in progress."
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />,
+    );
+    const pick = screen.getByRole("button", { name: "Cherry-pick" });
+    expect(pick).toBeDisabled();
+    expect(pick).toHaveAttribute("title", "A cherry-pick is in progress.");
+    expect(screen.getByText("A cherry-pick is in progress.")).toBeInTheDocument();
+    fireEvent.submit(pick.closest("form")!);
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  });
 });

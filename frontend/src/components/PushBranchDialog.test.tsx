@@ -89,4 +89,25 @@ describe("PushBranchDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancel).toHaveBeenCalled();
   });
+
+  // #514: the repository can become busy while the dialog is open.
+  it("disables Push with the reason and sends nothing while the repository is busy", () => {
+    const onPush = vi.fn();
+    render(
+      <PushBranchDialog
+        localBranch="topic"
+        remotes={[remote("origin")]}
+        branchUpstream={null}
+        blockedReason="A transfer is in progress."
+        onPush={onPush}
+        onCancel={() => {}}
+      />,
+    );
+    const push = screen.getByRole("button", { name: "Push" });
+    expect(push).toBeDisabled();
+    expect(push).toHaveAttribute("title", "A transfer is in progress.");
+    expect(screen.getByText("A transfer is in progress.")).toBeInTheDocument();
+    fireEvent.submit(push.closest("form")!);
+    expect(onPush).not.toHaveBeenCalled();
+  });
 });

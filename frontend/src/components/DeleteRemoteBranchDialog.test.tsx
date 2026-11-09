@@ -96,4 +96,26 @@ describe("DeleteRemoteBranchDialog", () => {
     await waitFor(() => expect(screen.getByLabelText("Branch")).toBeEnabled());
     expect(screen.getByRole("button", { name: "Delete remote branch" })).toBeDisabled();
   });
+
+  // #514: the repository can become busy while the dialog is open.
+  it("disables Delete with the reason while the repository is busy", () => {
+    const onDelete = vi.fn();
+    render(
+      <DeleteRemoteBranchDialog
+        remotes={[remote("origin")]}
+        initialRemote="origin"
+        initialBranch="topic"
+        blockedReason="A transfer is in progress."
+        onListRemoteBranches={vi.fn(async () => [])}
+        onDelete={onDelete}
+        onCancel={() => {}}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "Delete remote branch" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "A transfer is in progress.");
+    expect(screen.getByText("A transfer is in progress.")).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(onDelete).not.toHaveBeenCalled();
+  });
 });

@@ -3,6 +3,7 @@ import type { ResetMode } from "../ipc/RepoClient";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { FormDialog } from "./primitives/FormDialog";
 import { Toolbar } from "./primitives/Toolbar";
+import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./ResetDialog.module.css";
 
 const MODES: Array<{ mode: ResetMode; label: string; detail: string }> = [
@@ -11,12 +12,18 @@ const MODES: Array<{ mode: ResetMode; label: string; detail: string }> = [
   { mode: "hard", label: "Hard", detail: "Discard all changes to tracked files." },
 ];
 
+/**
+ * Reset the current branch to a commit: soft, mixed or hard (hard asks again). `blockedReason`
+ * (`operationBlockers`) disables Reset while it applies: the repository can become busy after
+ * the dialog opened, e.g. a rebase started in a terminal and picked up by a refresh (#514).
+ */
 export function ResetDialog({
   branch,
   shortId,
   onReset,
   onCancel,
   returnFocusTo,
+  blockedReason = null,
 }: {
   branch: string;
   shortId: string;
@@ -24,6 +31,8 @@ export function ResetDialog({
   onCancel: () => void;
   /** `FormDialog`'s: where focus goes on close. */
   returnFocusTo?: HTMLElement | null;
+  /** Why repository operations are blocked now, or `null`. */
+  blockedReason?: string | null;
 }) {
   const [mode, setMode] = useState<ResetMode>("mixed");
   const [confirmingHard, setConfirmingHard] = useState(false);
@@ -32,9 +41,18 @@ export function ResetDialog({
     return (
       <ConfirmDialog
         ariaLabel="Confirm hard reset"
-        message={<p>Discards all uncommitted changes. Cannot be undone.</p>}
+        message={
+          <>
+            <p>Discards all uncommitted changes. Cannot be undone.</p>
+            {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
+          </>
+        }
         confirmLabel="Reset hard"
-        onConfirm={() => onReset("hard")}
+        confirmDisabled={blockedReason !== null}
+        confirmTitle={blockedReason ?? undefined}
+        onConfirm={() => {
+          if (blockedReason === null) onReset("hard");
+        }}
         onCancel={() => setConfirmingHard(false)}
       />
     );
@@ -45,6 +63,8 @@ export function ResetDialog({
       <form
         onSubmit={(event) => {
           event.preventDefault();
+          // Enter on a radio submits even with the button disabled.
+          if (blockedReason !== null) return;
           if (mode === "hard") setConfirmingHard(true);
           else onReset(mode);
         }}
@@ -69,8 +89,11 @@ export function ResetDialog({
             </label>
           ))}
         </fieldset>
+        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
         <Toolbar>
-          <button type="submit">Reset</button>
+          <button type="submit" disabled={blockedReason !== null} title={blockedReason ?? undefined}>
+            Reset
+          </button>
           <button type="button" onClick={onCancel}>
             Cancel
           </button>
