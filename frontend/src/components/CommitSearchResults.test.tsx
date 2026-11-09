@@ -41,6 +41,7 @@ const base: CommitSearchResultsState = {
   scanned: 0,
   loading: false,
   error: null,
+  queryError: null,
 };
 
 it.each([
@@ -50,6 +51,7 @@ it.each([
   [{ commits: [c("a")] }, "1 match"],
   [{ commits: [c("a"), c("b")] }, "2 matches"],
   [{ commits: [c("a"), c("b")], nextCursor: "40000:fp", scanned: 40_000 }, "2 matches in the first 40,000 commits"],
+  [{ queryError: "Invalid search: Missing closing parenthesis." }, "Fix the search above to see results."],
 ])("status for %o is %s", (partial, text) => {
   expect(searchStatusText({ ...base, ...partial })).toBe(text);
 });

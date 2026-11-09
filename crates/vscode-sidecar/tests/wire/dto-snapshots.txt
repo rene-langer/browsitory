@@ -214,3 +214,4 @@ RepoErrorPayload/DirtyWorktree {"kind":"DirtyWorktree","message":"cannot pull wi
 RepoErrorPayload/PullFailed {"kind":"PullFailed","message":"pull failed"}
 RepoErrorPayload/Cancelled {"kind":"Cancelled","message":"the transfer was cancelled"}
 RepoErrorPayload/AddDeleteConflict {"kind":"AddDeleteConflict","message":"'a.bin' is an add/delete conflict, not a text conflict"}
+RepoErrorPayload/InvalidSearchQuery {"kind":"InvalidSearchQuery","message":"Invalid search: Missing closing parenthesis."}

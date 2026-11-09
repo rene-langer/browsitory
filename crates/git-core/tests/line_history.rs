@@ -364,6 +364,24 @@ fn the_line_search_key_matches_the_line_history_and_combines_with_other_terms() 
 }
 
 #[test]
+fn the_line_search_key_keeps_its_set_under_not_and_or() {
+    let (_dir, repo) = linear();
+
+    assert_eq!(
+        search(&repo, "-line:a.txt:10-12").unwrap(),
+        vec!["c4", "c2"]
+    );
+    assert_eq!(
+        search(&repo, "line:a.txt:1 or line:a.txt:10-12").unwrap(),
+        vec!["c5", "c4", "c3", "c1"]
+    );
+    assert_eq!(
+        search(&repo, "not (line:a.txt:10-12 or c4)").unwrap(),
+        vec!["c2"]
+    );
+}
+
+#[test]
 fn the_line_search_key_reads_lines_at_the_branch_terms_tip() {
     let (_dir, repo) = linear();
     let c3 = repo.revparse_single("HEAD~2").unwrap().id();

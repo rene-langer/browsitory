@@ -3,12 +3,13 @@ mod common;
 use git_core::remote::{
     add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
     delete_remote_branch, delete_remote_tag, delete_tag, fetch_all, fetch_all_as, fetch_remote,
-    force_push_current_branch, list_remote_branches, list_remotes, list_tags, pull_after_fetch,
-    push_branch, push_current_branch, push_tags, push_target, remote_upstreams, remove_remote,
-    remove_remote_and_clear_upstreams, rename_remote, resolve_push_target, set_branch_upstream,
-    set_current_upstream, set_remote_auth_profile, update_remote_urls, CredentialProvider,
-    FetchAllOutcome, PullOutcome, PushTarget, RemoteAuthMode, RemoteError, TransferErrorKind,
-    TransferOperation, TransferPhase, TransferProgress, TransferReporter,
+    fetch_remote_watched, force_push_current_branch, list_remote_branches, list_remotes, list_tags,
+    pull_after_fetch, push_branch, push_current_branch, push_tags, push_target, remote_upstreams,
+    remove_remote, remove_remote_and_clear_upstreams, rename_remote, resolve_push_target,
+    set_branch_upstream, set_current_upstream, set_remote_auth_profile, update_remote_urls,
+    ConnectWatch, CredentialProvider, FetchAllOutcome, PullOutcome, PushTarget, RemoteAuthMode,
+    RemoteError, TransferErrorKind, TransferOperation, TransferPhase, TransferProgress,
+    TransferReporter,
 };
 
 #[derive(Default)]
@@ -773,7 +774,7 @@ fn fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref() {
         &|| false,
     );
 
-    assert!(matches!(result, Err(RemoteError::Git(_))));
+    assert!(matches!(result, Err(RemoteError::Git(_))), "{result:?}");
     assert!(repo.find_reference("refs/remotes/origin/main").is_err());
 }
 
@@ -2559,4 +2560,121 @@ fn at_sign_and_refs_prefixed_names_are_rejected_before_connecting() {
     assert!(matches!(forced, Err(RemoteError::Git(_))));
     assert!(reporter.events.is_empty());
     assert!(fixture.bare_tip("main").is_some());
+}
+
+/// A `ConnectWatch` that answers `allow` and counts its calls.
+struct Watch {
+    allow: bool,
+    calls: std::cell::Cell<usize>,
+}
+
+impl ConnectWatch for Watch {
+    fn connected(&self) -> bool {
+        self.calls.set(self.calls.get() + 1);
+        self.allow
+    }
+}
+
+#[test]
+fn a_watched_fetch_tells_the_watch_once_connected_and_fetches() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let watch = Watch {
+        allow: true,
+        calls: 0.into(),
+    };
+
+    fetch_remote_watched(
+        TransferOperation::BackgroundFetch,
+        &fixture.local,
+        "origin",
+        None,
+        "background-fetch-1",
+        &mut NoCredentials,
+        &mut VecReporter::default(),
+        &|| false,
+        &watch,
+    )
+    .unwrap();
+
+    assert_eq!(watch.calls.get(), 1);
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        Some(fixture.remote_tip())
+    );
+}
+
+#[test]
+fn a_watched_fetch_that_the_watch_stops_once_connected_writes_nothing() {
+    let fixture = local_and_bare_remote();
+    fixture.remote_commit_without_fetch("only on the remote");
+    let before = fixture
+        .local
+        .find_reference("refs/remotes/origin/main")
+        .unwrap()
+        .target();
+    let watch = Watch {
+        allow: false,
+        calls: 0.into(),
+    };
+    let mut reporter = VecReporter::default();
+
+    let result = fetch_remote_watched(
+        TransferOperation::BackgroundFetch,
+        &fixture.local,
+        "origin",
+        None,
+        "background-fetch-1",
+        &mut NoCredentials,
+        &mut reporter,
+        &|| false,
+        &watch,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Cancelled)));
+    assert_eq!(
+        fixture
+            .local
+            .find_reference("refs/remotes/origin/main")
+            .unwrap()
+            .target(),
+        before
+    );
+    assert!(reporter.events.is_empty());
+}
+
+#[test]
+fn a_fetch_whose_connection_is_refused_is_unreachable() {
+    let (dir, repo) = common::init_repo();
+    common::write_file(dir.path(), "README.md", "initial commit\n");
+    common::commit_all(&repo, "initial commit");
+    // A port nothing listens on: bound, then closed again.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    repo.remote("origin", &format!("http://127.0.0.1:{port}/repo.git"))
+        .unwrap();
+
+    let result = fetch_remote(
+        &repo,
+        "origin",
+        None,
+        "fetch-1".to_string(),
+        &mut NoCredentials,
+        &mut VecReporter::default(),
+        &|| false,
+    );
+
+    let error = result.unwrap_err();
+    assert!(matches!(error, RemoteError::Unreachable(_)), "{error:?}");
+    assert_eq!(
+        error.transfer_error_kind(),
+        TransferErrorKind::TransferFailed
+    );
 }

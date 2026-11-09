@@ -34,7 +34,7 @@ function fakeClient(script: (id: string, emit: (progress: TransferProgress) => v
   const emit = (progress: TransferProgress) => listeners.forEach((listener) => listener(progress));
   let next = 1;
   const client = {
-    backgroundFetch: vi.fn(async (_repoPath: string, _prune: boolean | null): Promise<string | null> => {
+    backgroundFetch: vi.fn(async (_repoPath: string, _prune: boolean | null, _intervalMinutes: number): Promise<string | null> => {
       const id = `background-fetch-${next++}`;
       script(id, emit);
       return id;
@@ -94,7 +94,7 @@ describe("useAutoFetch", () => {
     expect(client.backgroundFetch).not.toHaveBeenCalled();
 
     await advance(1);
-    expect(client.backgroundFetch).toHaveBeenCalledExactlyOnceWith(REPO, true);
+    expect(client.backgroundFetch).toHaveBeenCalledExactlyOnceWith(REPO, true, 5);
     expect(options.refresh).toHaveBeenCalledOnce();
     expect(lastFetchAt(REPO)).toBe(Date.now());
 

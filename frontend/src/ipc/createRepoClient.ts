@@ -266,8 +266,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<string>("fetch_remote", { repoPath, remoteName, prune }),
     fetchAllRemotes: (repoPath: string, prune: boolean | null) =>
       call<string>("fetch_all_remotes", { repoPath, prune }),
-    backgroundFetch: (repoPath: string, prune: boolean | null) =>
-      call<string | null>("background_fetch", { repoPath, prune }),
+    backgroundFetch: (repoPath: string, prune: boolean | null, intervalMinutes: number) =>
+      call<string | null>("background_fetch", { repoPath, prune, intervalMinutes }),
     pushBranch: (repoPath: string, remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify: boolean) =>
       call<string>("push_branch", { repoPath, remoteName, localBranch, remoteBranch, setUpstream, noVerify }),
     deleteRemoteBranch: (repoPath: string, remoteName: string, branchName: string, noVerify: boolean) =>

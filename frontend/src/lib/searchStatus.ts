@@ -4,6 +4,7 @@ const count = (n: number) => n.toLocaleString("en-US");
 
 /** The status line above the search results. */
 export function searchStatusText(results: CommitSearchResultsState): string {
+  if (results.queryError !== null) return "Fix the search above to see results.";
   if (results.loading) {
     return results.scanned === 0 ? "Searching…" : `Scanned ${count(results.scanned)} commits…`;
   }

@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GraphCommit, RepoClient, SearchPage } from "../ipc/RepoClient";
+import { RepoError, type GraphCommit, type RepoClient, type SearchPage } from "../ipc/RepoClient";
 import type { SelectedRow } from "./useAppState";
 import { SEARCH_DEBOUNCE_MS, SEARCH_ROUND_SIZE, useCommitSearch } from "./useCommitSearch";
 import { fakeRepoClient } from "../test/fakeRepoClient";
@@ -165,6 +165,22 @@ describe("useCommitSearch", () => {
     await waitFor(() => expect(result.current.results?.commits.map((c) => c.id)).toEqual(["fresh"]));
     expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], [], null);
     expect(result.current.results?.error).toBeNull();
+  });
+
+  it("keeps an invalid query's message for the search field, apart from search errors", async () => {
+    const searchCommits = vi.fn()
+      .mockRejectedValueOnce(new RepoError("InvalidSearchQuery", "Invalid search: Missing closing parenthesis."))
+      .mockResolvedValueOnce(page(["c1"], null, 1));
+    const { result } = setup(searchCommits);
+
+    act(() => result.current.setQuery("(a"));
+    await waitFor(() => expect(result.current.results?.loading).toBe(false));
+    expect(result.current.results?.queryError).toBe("Invalid search: Missing closing parenthesis.");
+    expect(result.current.results?.error).toBeNull();
+
+    act(() => result.current.setQuery("(a)"));
+    await waitFor(() => expect(result.current.results?.commits.map((c) => c.id)).toEqual(["c1"]));
+    expect(result.current.results?.queryError).toBeNull();
   });
 
   it("re-runs from the first page on refresh without changing the selection", async () => {

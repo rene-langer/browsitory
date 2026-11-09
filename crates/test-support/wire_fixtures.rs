@@ -150,6 +150,13 @@ pub fn error_messages() -> Cases<String> {
             "AddDeleteConflict",
             git_core::merge::MergeError::NotATextConflict("a.bin".into()).to_string(),
         ),
+        case(
+            "InvalidSearchQuery",
+            git_core::search::SearchError::InvalidQuery {
+                message: "Missing closing parenthesis.".into(),
+            }
+            .to_string(),
+        ),
     ];
     assert_every_variant!(
         cases
@@ -164,6 +171,7 @@ pub fn error_messages() -> Cases<String> {
         ErrorKind::PullFailed,
         ErrorKind::Cancelled,
         ErrorKind::AddDeleteConflict,
+        ErrorKind::InvalidSearchQuery,
     );
     cases
 }

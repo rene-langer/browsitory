@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{mpsc, Arc, Mutex};

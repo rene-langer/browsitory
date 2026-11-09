@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { GraphCommit, RepoClient } from "../ipc/RepoClient";
+import { errorKind, type GraphCommit, type RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "./useAppState";
 
@@ -15,7 +15,10 @@ export interface CommitSearchResultsState {
   nextCursor: string | null;
   scanned: number;
   loading: boolean;
+  /** A failed search, shown with the results. */
   error: DescribedError | null;
+  /** The backend's message when the query itself is invalid (#450); the search field shows it. */
+  queryError: string | null;
 }
 
 export interface UseCommitSearchResult {
@@ -114,7 +117,12 @@ export function useCommitSearch(
       } catch (err: unknown) {
         if (gen !== generation.current) return;
         inFlight.current = false;
-        setResults((prev) => prev && { ...prev, loading: false, error: describeError(err) });
+        if (errorKind(err) === "InvalidSearchQuery") {
+          const message = err instanceof Error ? err.message : String(err);
+          setResults((prev) => prev && { ...prev, loading: false, queryError: message });
+        } else {
+          setResults((prev) => prev && { ...prev, loading: false, error: describeError(err) });
+        }
       }
     },
     [client, repoPath, selectRow],
@@ -125,7 +133,7 @@ export function useCommitSearch(
       if (activeQuery.current === null) previousRow.current = selectedRowRef.current;
       activeQuery.current = q;
       const gen = ++generation.current;
-      setResults({ query: q, commits: [], nextCursor: null, scanned: 0, loading: true, error: null });
+      setResults({ query: q, commits: [], nextCursor: null, scanned: 0, loading: true, error: null, queryError: null });
       void runRound(gen, q, null, selectFirst);
     },
     [runRound],
@@ -172,7 +180,7 @@ export function useCommitSearch(
     const current = resultsRef.current;
     if (current === null || current.loading || current.nextCursor === null) return;
     const gen = ++generation.current;
-    setResults((prev) => prev && { ...prev, loading: true, error: null });
+    setResults((prev) => prev && { ...prev, loading: true, error: null, queryError: null });
     void runRound(gen, current.query, current.nextCursor, false);
   }, [runRound]);
 

@@ -279,8 +279,8 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("fetch_remote", { repoPath: TEST_REPO_PATH, remoteName: "origin", prune: false });
     await tauriRepoClient.fetchAllRemotes(TEST_REPO_PATH, true);
     expect(invoke).toHaveBeenLastCalledWith("fetch_all_remotes", { repoPath: TEST_REPO_PATH, prune: true });
-    await tauriRepoClient.backgroundFetch(TEST_REPO_PATH, null);
-    expect(invoke).toHaveBeenLastCalledWith("background_fetch", { repoPath: TEST_REPO_PATH, prune: null });
+    await tauriRepoClient.backgroundFetch(TEST_REPO_PATH, null, 10);
+    expect(invoke).toHaveBeenLastCalledWith("background_fetch", { repoPath: TEST_REPO_PATH, prune: null, intervalMinutes: 10 });
     await tauriRepoClient.pushBranch(TEST_REPO_PATH, "origin", "topic", "published", true, false);
     expect(invoke).toHaveBeenLastCalledWith("push_branch", {
       repoPath: TEST_REPO_PATH,
