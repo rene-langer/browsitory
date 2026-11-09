@@ -22,8 +22,9 @@ and `CAFÉ`. If the repository holds two files whose names differ only in case (
 committed on a case-sensitive drive), **Stash all** refuses there too, and so does **Stash
 file…** on either of them ("Can't stash: 'a' and 'A' differ only in case, and stashing would
 remove one of them…");
-stashing other files on their own still works. One file at a time: the change lists have no
-multi-select. A file inside a symlinked folder can't be stashed on its own.
+stashing other files on their own still works. To stash several files, select them in the change
+list (see [Selecting several files](staging-and-committing.md#selecting-several-files)) and use
+**Stash N files…**. A file inside a symlinked folder can't be stashed on its own.
 If a tracked file was replaced by a symbolic link, stashing keeps the link in the stash and puts
 the file back; while a symbolic link replaces a tracked folder, **Stash all** refuses (move the
 link away first). So do switching branches, merging, cherry-picking, reverting, rebasing,

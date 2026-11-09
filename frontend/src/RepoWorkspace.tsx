@@ -69,7 +69,7 @@ import { useCompare } from "./state/useCompare";
 import { useGoTo } from "./state/useGoTo";
 import type { SelectedRow } from "./state/useAppState";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
-import type { DiscardRequest } from "./components/DiffPane";
+import type { DiscardRequest, ReportedFileSelection } from "./components/DiffPane";
 import type { OpenRepo } from "./state/useOpenRepos";
 import { useSidebarPanelVisibility } from "./state/useSidebarPanelVisibility";
 import styles from "./App.module.css";
@@ -218,6 +218,8 @@ export function RepoWorkspace({
   // State, not a ref: the palette's commands are built during render (`react-hooks/refs`).
   const [workspaceElement, setWorkspaceElement] = useState<HTMLDivElement | null>(null);
   const [currentFile, setCurrentFile] = useState<string | null>(null);
+  // DiffPane's selection of two or more changed files, for the palette's selection commands (#449).
+  const [fileSelection, setFileSelection] = useState<ReportedFileSelection | null>(null);
   const diffSettings = useDiffSettingsContext();
   const narrow = useNarrowLayout();
 
@@ -697,6 +699,12 @@ export function RepoWorkspace({
                   appState.selectRow("uncommitted");
                   setDiscardRequest({ kind: "all" });
                 },
+                selection: fileSelection,
+                requestDiscardSelection: () => {
+                  if (fileSelection === null || fileSelection.staged) return;
+                  appState.selectRow("uncommitted");
+                  setDiscardRequest({ kind: "files", paths: fileSelection.paths });
+                },
               },
               appCommands,
               {
@@ -1071,6 +1079,14 @@ export function RepoWorkspace({
                   onDiscardLines={(p, o, n, c, idx, shown) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx, shown)}
                   onDiscardFile={(path) => announce(`Discarded changes to ${path}`, appState.discardFile)(path)}
                   onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
+                  onDiscardFiles={(paths) =>
+                    announce(`Discarded changes to ${paths.length} ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged)(paths)
+                  }
+                  onIgnorePaths={(patterns) =>
+                    announce(`Added ${patterns.length} ${patterns.length === 1 ? "pattern" : "patterns"} to .gitignore`, appState.ignorePaths)(patterns)
+                  }
+                  onSelectionChange={setFileSelection}
+                  selectionBusyReason={appState.state.pending ? "Another action is in progress." : null}
                   onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
                   onCommit={(message, trailers) =>
                     announce("Committed", commitAndClearDraft)(message, appState.state.skipHooks, trailers)

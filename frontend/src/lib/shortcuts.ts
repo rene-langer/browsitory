@@ -52,7 +52,10 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: "Down / j", description: "Select next file" },
       { keys: "Up / k", description: "Select previous file" },
-      { keys: "s", description: "Stage or unstage the selected file" },
+      { keys: "Shift+Down / Shift+Up", description: "Extend the selection" },
+      { keys: "Ctrl/Cmd+A", description: "Select every file in the list" },
+      { keys: "Esc", description: "Keep only the current file selected" },
+      { keys: "s", description: "Stage or unstage the selected files" },
       { keys: "Menu / Shift+F10", description: "Open the selected file's menu" },
     ],
   },

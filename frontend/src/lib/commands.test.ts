@@ -109,6 +109,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     discardFile: vi.fn(),
     discardAllUnstaged: vi.fn(),
     ignorePath: vi.fn(),
+    ignorePaths: vi.fn(),
     commit: vi.fn(),
     createBranch: vi.fn(),
     switchBranch: vi.fn(),
@@ -1422,9 +1423,52 @@ describe("diff option and discard commands", () => {
     expect(commands.some((c) => c.id === "toggle-ignore-whitespace")).toBe(true);
   });
 
+  it("offers the selected files' actions while two or more are selected (#449)", () => {
+    const status = [
+      { path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const },
+      { path: "b.txt", oldPath: null, staged: false, kind: "New" as const },
+    ];
+    const state = makeAppState({ status });
+    const selection = { staged: false, paths: ["a.txt", "b.txt"] };
+    const requestDiscardSelection = vi.fn();
+    const { commands } = build(state, { selection, requestDiscardSelection });
+
+    const stage = commands.find((c) => c.id === "stage-selected-files");
+    expect(stage?.label).toBe("Stage 2 selected files");
+    stage!.run();
+    expect(state.stageAllFiles).toHaveBeenCalledWith(["a.txt", "b.txt"]);
+    expect(commands.some((c) => c.id === "unstage-selected-files")).toBe(false);
+    commands.find((c) => c.id === "discard-selected-files")!.run();
+    expect(requestDiscardSelection).toHaveBeenCalled();
+    commands.find((c) => c.id === "stash-selected-files")!.run();
+    expect(state.openStashDialog).toHaveBeenCalledWith(["a.txt", "b.txt"]);
+
+    expect(build(state).commands.some((c) => c.id.endsWith("-selected-files"))).toBe(false);
+  });
+
+  it("offers unstaging, not discarding, a staged selection", () => {
+    const state = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }] });
+    const { commands } = build(state, { selection: { staged: true, paths: ["a.txt", "b.txt"] }, requestDiscardSelection: vi.fn() });
+
+    commands.find((c) => c.id === "unstage-selected-files")!.run();
+    expect(state.unstageAllFiles).toHaveBeenCalledWith(["a.txt", "b.txt"]);
+    expect(commands.some((c) => c.id === "discard-selected-files")).toBe(false);
+  });
+
+  it("omits staging and discarding a selection while an operation is running", () => {
+    const state = makeAppState({ pending: true, status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }] });
+    const { commands } = build(state, { selection: { staged: false, paths: ["a.txt", "b.txt"] }, requestDiscardSelection: vi.fn() });
+
+    expect(commands.some((c) => c.id === "stage-selected-files")).toBe(false);
+    expect(commands.some((c) => c.id === "discard-selected-files")).toBe(false);
+  });
+
   it("groups the new commands", () => {
     expect(commandGroup("toggle-ignore-whitespace")).toBe("Diff");
     expect(commandGroup("discard-all-unstaged")).toBe("Diff");
+    expect(commandGroup("stage-selected-files")).toBe("Diff");
+    expect(commandGroup("discard-selected-files")).toBe("Diff");
+    expect(commandGroup("stash-selected-files")).toBe("Stash");
   });
 });
 

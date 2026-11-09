@@ -206,6 +206,7 @@ export interface UseAppStateResult {
   discardFile(path: string): Promise<void>;
   discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
+  ignorePaths(patterns: string[]): Promise<void>;
   // `true` once committed. `noVerify` skips `pre-commit`/`commit-msg`; a failing hook stores
   // `state.hookFailure` and resolves `false`.
   commit(message: string, noVerify: boolean, trailers?: Trailer[]): Promise<boolean>;
@@ -590,6 +591,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     discardFile,
     discardAllUnstaged,
     ignorePath,
+    ignorePaths,
     commit,
   } = useStagingActions(client, repoPath, runMutation, runMutationWithOutcome, runOptimisticMutation, setState);
 
@@ -806,6 +808,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     discardFile,
     discardAllUnstaged,
     ignorePath,
+    ignorePaths,
     commit,
     createBranch,
     createWorktree,

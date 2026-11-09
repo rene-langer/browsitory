@@ -8,7 +8,13 @@ export type FileAction =
   | { kind: "openInEditor" }
   | { kind: "reveal" }
   | { kind: "diffTool" }
-  | { kind: "mergeTool" };
+  | { kind: "mergeTool" }
+  // A multi-file selection's actions (#449): they act on every selected file, not just this one.
+  | { kind: "stageSelection" }
+  | { kind: "unstageSelection" }
+  | { kind: "discardSelection" }
+  | { kind: "ignoreSelection" }
+  | { kind: "stashSelection" };
 
 export const isUntracked = (entry: StatusEntry) => !entry.staged && entry.kind === "New";
 
@@ -60,27 +66,94 @@ export function fileMenuItems(
       }
     }
   }
-  if (tools !== undefined) {
-    const deleted = entry.kind === "Deleted";
+  if (tools !== undefined) items.push(...fileToolItems(entry, onPick, tools));
+  return items;
+}
+
+/** The external-tool items of a working-tree file's menu (editor, file manager, diff/merge tool). */
+export function fileToolItems(
+  entry: StatusEntry,
+  onPick: (action: FileAction) => void,
+  tools: { mergeToolRunning: boolean },
+): ContextMenuItem[] {
+  const items: ContextMenuItem[] = [];
+  const deleted = entry.kind === "Deleted";
+  items.push(
+    {
+      label: "Open in editor",
+      disabled: deleted,
+      title: deleted ? "The file was deleted" : undefined,
+      onSelect: () => onPick({ kind: "openInEditor" }),
+    },
+    { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }) },
+  );
+  if (entry.kind === "Conflicted") {
+    items.push({
+      label: "Open in merge tool",
+      disabled: tools.mergeToolRunning,
+      onSelect: () => onPick({ kind: "mergeTool" }),
+    });
+  } else {
+    items.push({ label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }) });
+  }
+  return items;
+}
+
+/** What a multi-file selection holds, for its actions' labels and availability. */
+export interface SelectionSummary {
+  staged: boolean;
+  /** Selected files that are not conflicted: what stage, unstage, discard and stash act on. */
+  actionable: number;
+  /** Selected untracked files: what "Ignore" acts on. */
+  untracked: number;
+}
+
+function files(n: number): string {
+  return `${n} ${n === 1 ? "file" : "files"}`;
+}
+
+/**
+ * The actions of a multi-file selection (#449), for the selection bar and the menu of a selected
+ * row. `busyReason` (another action is running) disables the repository actions; `stashReason`
+ * (`stashBlockReason`) disables stashing as it does "Stash file…".
+ */
+export function selectionMenuItems(
+  summary: SelectionSummary,
+  onPick: (action: FileAction) => void,
+  busyReason: string | null,
+  stashReason: string | null,
+): ContextMenuItem[] {
+  const n = summary.actionable;
+  const blocked = (extra: boolean, reason: string | null = busyReason) => ({
+    disabled: reason !== null || extra,
+    title: reason ?? undefined,
+  });
+  const items: ContextMenuItem[] = [];
+  if (summary.staged) {
+    items.push({ label: `Unstage ${files(n)}`, ...blocked(n === 0), onSelect: () => onPick({ kind: "unstageSelection" }) });
+  } else {
     items.push(
+      { label: `Stage ${files(n)}`, ...blocked(n === 0), onSelect: () => onPick({ kind: "stageSelection" }) },
       {
-        label: "Open in editor",
-        disabled: deleted,
-        title: deleted ? "The file was deleted" : undefined,
-        onSelect: () => onPick({ kind: "openInEditor" }),
+        label: `Discard ${files(n)}…`,
+        destructive: true,
+        ...blocked(n === 0),
+        onSelect: () => onPick({ kind: "discardSelection" }),
       },
-      { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }) },
     );
-    if (entry.kind === "Conflicted") {
+    if (summary.untracked > 0) {
       items.push({
-        label: "Open in merge tool",
-        disabled: tools.mergeToolRunning,
-        onSelect: () => onPick({ kind: "mergeTool" }),
+        label: `Ignore ${summary.untracked} untracked ${summary.untracked === 1 ? "file" : "files"}`,
+        ...blocked(false),
+        onSelect: () => onPick({ kind: "ignoreSelection" }),
       });
-    } else {
-      items.push({ label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }) });
     }
   }
+  items.push({
+    label: `Stash ${files(n)}…`,
+    ...blocked(n === 0, stashReason ?? busyReason),
+    onSelect: () => onPick({ kind: "stashSelection" }),
+  });
   return items;
 }
 

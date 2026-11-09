@@ -14,10 +14,11 @@ The palette has almost every action in Browsitory, grouped like this:
 - **Remotes:** fetch, push, **Push branch to…**, **Force push current branch…**, push all tags,
   **Browse branches on ⟨remote⟩**, add, edit or remove a remote, manage its credentials, delete
   a remote branch, and delete a tag on a remote.
-- **Stash:** stash all, **Stash…**, stash the current file, and show, apply, pop or drop a
-  stash.
-- **Diff:** ignore whitespace, more or fewer context lines, syntax highlighting, discard the
-  current file or all unstaged changes, open the current file in your editor or diff tool.
+- **Stash:** stash all, **Stash…**, stash the current file or the selected files, and show,
+  apply, pop or drop a stash.
+- **Diff:** ignore whitespace, more or fewer context lines, syntax highlighting, stage, unstage
+  or discard the selected files, discard the current file or all unstaged changes, open the
+  current file in your editor or diff tool.
 - **Go to:** **Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** (see
   below), and open a sidebar section and move to it, for example **Go to Tags**.
 - **Repositories:** switch to another tab, close the tab, open a terminal, reveal the
@@ -66,9 +67,10 @@ Press **?** (outside a text field) for the full list of shortcuts. The most usef
 | Ctrl/Cmd+F | Search commits (with the commit list focused) |
 | Ctrl/Cmd+Enter | Commit (in the commit message) |
 | ↑/↓ or j/k | Move through commits or changed files |
-| Shift+↑/↓ | Select several commits |
+| Shift+↑/↓ | Select several commits or changed files |
+| Ctrl/Cmd+A | Select every file in a change list (with the list focused) |
 | Home/End, PageUp/PageDown | Jump in the commit list |
-| s | Stage or unstage the selected file, lines or hunk |
+| s | Stage or unstage the selected files, lines or hunk |
 | d d | Discard the selected lines or hunk |
 | [ and ] | Previous and next hunk |
 | Left/Right, Home/End | Switch tabs, with a tab focused |
