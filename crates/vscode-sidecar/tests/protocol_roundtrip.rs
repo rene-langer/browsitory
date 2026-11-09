@@ -3157,6 +3157,38 @@ fn a_sequence_finished_after_a_sidecar_restart_is_one_undo_entry() {
     assert_eq!(undo["result"]["undo"], "Cherry-pick 2 commits");
 }
 
+/// #473: `start_rebase`'s optional `edit` names a one-click history edit's undo entry.
+#[test]
+fn start_rebase_with_an_edit_records_its_undo_label() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    let (onto, a, b) = base_a_b(dir.path(), &repo);
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({ "path": repo_path }));
+    let started = sidecar.call(
+        2,
+        "start_rebase",
+        serde_json::json!({
+            "repoPath": repo_path,
+            "onto": onto,
+            "plan": [
+                {"commitId": a, "action": {"kind": "Drop"}, "combinedMessage": null},
+                {"commitId": b, "action": {"kind": "Pick"}, "combinedMessage": null},
+            ],
+            "edit": {"kind": "Drop", "commitId": a},
+        }),
+    );
+    assert_eq!(started["result"]["kind"], "Done");
+    let undo = sidecar.call(
+        3,
+        "get_undo_state",
+        serde_json::json!({ "repoPath": repo_path }),
+    );
+    assert_eq!(undo["result"]["undo"], format!("Drop {}", &a[..7]));
+}
+
 #[test]
 fn abort_rebase_reports_whether_head_went_back_to_the_branch() {
     let (_guard, config_dir) = ConfigDirGuard::new();

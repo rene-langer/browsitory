@@ -91,6 +91,10 @@ terminalSequence: TerminalSequence | null,
  */
 terminalRebase: TerminalRebase | null, };
 
+export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop";
+
+export type HistoryEditTarget = { kind: HistoryEditKind, commitId: string, };
+
 export type HookProgress = { repoPath: string, operationId: string, hook: string, phase: HookProgressPhase, source: HookSource, };
 
 export type HookProgressPhase = "Started" | "Finished";

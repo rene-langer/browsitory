@@ -6,6 +6,26 @@ use git_core::rebase::{
 };
 use std::sync::mpsc::Sender;
 
+/// Which one-click history edit from the commit menu (#442) a `StartRebase` runs, so its undo
+/// entry names what the user did (#473) instead of "Rebase onto <id>". Only the label uses it:
+/// the plan alone decides what the rebase does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryEdit {
+    pub kind: HistoryEditKind,
+    /// The commit the user edited (a full id; the label shortens it).
+    pub commit_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryEditKind {
+    Reword,
+    Squash,
+    Fixup,
+    MoveUp,
+    MoveDown,
+    Drop,
+}
+
 pub(super) fn commits_since(
     repo: &git2::Repository,
     onto: String,
@@ -169,12 +189,14 @@ impl WorkerHandle {
         &self,
         onto: String,
         plan: Vec<RebasePlanEntry>,
+        edit: Option<HistoryEdit>,
     ) -> Result<RebaseStepResult, String> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::StartRebase {
                 onto,
                 plan,
+                edit,
                 reply: tx,
             })
             .map_err(|_| "worker thread stopped".to_string())?;

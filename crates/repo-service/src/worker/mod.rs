@@ -55,6 +55,7 @@ mod undo_store;
 mod worktree;
 
 pub use hooks::{HookEvent, HookSource};
+pub use rebase::{HistoryEdit, HistoryEditKind};
 pub use registry::{repo_key, WorkerRegistry};
 pub use undo::{UndoOutcome, UndoState};
 
@@ -522,6 +523,8 @@ pub(crate) enum Command {
     StartRebase {
         onto: String,
         plan: Vec<RebasePlanEntry>,
+        /// The one-click history edit this rebase runs, for its undo label (#473).
+        edit: Option<HistoryEdit>,
         reply: Sender<Result<RebaseStepResult, String>>,
     },
     #[allow(dead_code)]
@@ -1545,9 +1548,15 @@ impl Worker {
                     Command::CommitsSince { onto, reply } => {
                         rebase::commits_since(&repo, onto, reply)
                     }
-                    Command::StartRebase { onto, plan, reply } => {
+                    Command::StartRebase {
+                        onto,
+                        plan,
+                        edit,
+                        reply,
+                    } => {
                         let result = rebase::start(&repo, &onto, plan, rebase_slot!());
-                        undo::relabel_rebase_start(&mut undo_recorder, &repo, &onto, &result);
+                        let label = undo::start_rebase_label(&onto, edit.as_ref());
+                        undo::relabel_rebase_start(&mut undo_recorder, &repo, &label, &result);
                         let _ = reply.send(result);
                     }
                     Command::RebaseContinue { reply } => {

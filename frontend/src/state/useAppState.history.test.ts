@@ -53,7 +53,7 @@ describe("history actions", () => {
         { commitId: "p", action: { kind: "Pick" }, combinedMessage: "Parent\n\nbody\n\nChild\n" },
         { commitId: "c", action: { kind: "Squash" }, combinedMessage: null },
         pick("d"),
-      ]);
+      ], { kind: "Squash", commitId: "c" });
       expect(outcome).toEqual({ kind: "Done" });
       expect(result.current.state.historyEditOutcome).toEqual({ message: "Squashed c123456 into its parent" });
     });
@@ -66,7 +66,10 @@ describe("history actions", () => {
       await act(async () => {
         await result.current.editHistory("c", "p", { kind: "MoveUp" });
       });
-      expect(startRebase).toHaveBeenCalledWith(TEST_REPO_PATH, "p", [pick("d"), pick("c")]);
+      expect(startRebase).toHaveBeenCalledWith(TEST_REPO_PATH, "p", [pick("d"), pick("c")], {
+        kind: "MoveUp",
+        commitId: "c",
+      });
       expect(result.current.state.historyEditOutcome).toBeNull();
     });
 

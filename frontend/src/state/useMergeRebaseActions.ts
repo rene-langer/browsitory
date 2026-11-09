@@ -178,7 +178,7 @@ export function useMergeRebaseActions(
           edit = request;
         }
         const plan = buildHistoryEditPlan(edit, commitId, span);
-        const step = await client.startRebase(repoPath, onto, plan);
+        const step = await client.startRebase(repoPath, onto, plan, { kind: request.kind, commitId });
         result = step;
         // A pause shows in the rebase progress panel instead.
         if (step.kind === "Done") {

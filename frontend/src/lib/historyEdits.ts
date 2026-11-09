@@ -1,12 +1,13 @@
-import type { GraphCommit, HeadInfo, RebasePlanCommit, RebasePlanEntry, StatusEntry } from "../ipc/RepoClient";
+import type { GraphCommit, HeadInfo, HistoryEditKind, RebasePlanCommit, RebasePlanEntry, StatusEntry } from "../ipc/RepoClient";
+
+export type { HistoryEditKind };
 
 /**
  * One-click history edits from the commit menu (#442). Each is a one-step interactive rebase:
  * the plan is every commit `commitsSince(onto)` lists, picked, with one entry changed. It runs
- * through `startRebase`, so conflicts pause it like any rebase and it is one Undo step.
+ * through `startRebase`, so conflicts pause it like any rebase and it is one Undo step, named after
+ * the edit (`startRebase`'s `edit`, #473).
  */
-export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop";
-
 export const HISTORY_EDIT_KINDS: readonly HistoryEditKind[] = ["Reword", "Squash", "Fixup", "MoveUp", "MoveDown", "Drop"];
 
 /** What a one-click edit needs on top of its kind: Reword's new message, Squash's combined one. */

@@ -36,6 +36,7 @@ import type {
   PullRequest,
   PullRequestList,
   RebasePlanCommit,
+  HistoryEditTarget,
   RebasePlanEntry,
   RebaseStepResult,
   ReflogEntry,
@@ -491,8 +492,8 @@ export const vscodeRepoClient: RepoClient = {
     call<void>("resolve_add_delete_conflict", { repoPath, path, choice }),
   commitsSince: (repoPath: string, onto: string) =>
     call<RebasePlanCommit[]>("commits_since", { repoPath, onto }),
-  startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[]) =>
-    call<RebaseStepResult>("start_rebase", { repoPath, onto, plan }),
+  startRebase: (repoPath: string, onto: string, plan: RebasePlanEntry[], edit?: HistoryEditTarget | null) =>
+    call<RebaseStepResult>("start_rebase", { repoPath, onto, plan, edit: edit ?? null }),
   rebaseContinue: (repoPath: string) => call<RebaseStepResult>("rebase_continue", { repoPath }),
   abortRebase: (repoPath: string) => call<RebaseAbort>("abort_rebase", { repoPath }),
   detectForgeRepository: (repoPath: string) =>

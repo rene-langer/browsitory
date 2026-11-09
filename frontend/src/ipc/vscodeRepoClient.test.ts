@@ -1212,17 +1212,29 @@ describe("vscodeRepoClient", () => {
       jsonrpc: "2.0",
       id: 2,
       method: "start_rebase",
-      params: { repoPath: "/repo", onto: "main", plan },
+      params: { repoPath: "/repo", onto: "main", plan, edit: null },
     });
     respond(2, { kind: "Done" });
     await expect(startPromise).resolves.toEqual({ kind: "Done" });
 
+    // #473: a one-click history edit names itself for the Undo entry.
+    const edit = { kind: "Drop" as const, commitId: "abc" };
+    const editPromise = vscodeRepoClient.startRebase("/repo", "main", plan, edit);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "start_rebase",
+      params: { repoPath: "/repo", onto: "main", plan, edit },
+    });
+    respond(3, { kind: "Done" });
+    await expect(editPromise).resolves.toEqual({ kind: "Done" });
+
     const continuePromise = vscodeRepoClient.rebaseContinue("/repo");
-    respond(3, { kind: "Advanced" });
+    respond(4, { kind: "Advanced" });
     await expect(continuePromise).resolves.toEqual({ kind: "Advanced" });
 
     const abortPromise = vscodeRepoClient.abortRebase("/repo");
-    respond(4, { restored: true });
+    respond(5, { restored: true });
     await expect(abortPromise).resolves.toEqual({ restored: true });
   });
 

@@ -686,6 +686,18 @@ export interface RebasePlanEntry {
   combinedMessage: string | null;
 }
 
+/** A one-click history edit from the commit menu (#442). */
+export type HistoryEditKind = "Reword" | "Squash" | "Fixup" | "MoveUp" | "MoveDown" | "Drop";
+
+/**
+ * `startRebase`'s `edit`: the one-click history edit the rebase runs, so its Undo entry names it
+ * ("Drop 1a2b3c4") instead of "Rebase onto <id>" (#473). It only changes the label.
+ */
+export interface HistoryEditTarget {
+  kind: HistoryEditKind;
+  commitId: string;
+}
+
 export type RebaseStepResult =
   | { kind: "Conflicted"; files: string[] }
   | { kind: "PausedForEdit" }
@@ -993,7 +1005,13 @@ export interface RepoClient {
   /** Takes one side's whole file for any conflict shape (`git checkout --ours/--theirs` + add). */
   resolveWholeFile(repoPath: string, path: string, side: ConflictSide): Promise<void>;
   commitsSince(repoPath: string, onto: string): Promise<RebasePlanCommit[]>;
-  startRebase(repoPath: string, onto: string, plan: RebasePlanEntry[]): Promise<RebaseStepResult>;
+  /** `edit` names a one-click history edit's Undo entry (#473); omitted for a planned rebase. */
+  startRebase(
+    repoPath: string,
+    onto: string,
+    plan: RebasePlanEntry[],
+    edit?: HistoryEditTarget | null,
+  ): Promise<RebaseStepResult>;
   rebaseContinue(repoPath: string): Promise<RebaseStepResult>;
   abortRebase(repoPath: string): Promise<RebaseAbort>;
   detectForgeRepository(repoPath: string): Promise<ForgeRepository[]>;
