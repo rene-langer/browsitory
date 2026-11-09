@@ -60,6 +60,10 @@ pub enum StageError {
     Status(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` is on and the checkout includes two paths that differ only in case
+    /// (#403); nothing was changed.
+    #[error(transparent)]
+    CasePair(#[from] crate::CasePair),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),

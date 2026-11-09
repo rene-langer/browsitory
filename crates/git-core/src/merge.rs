@@ -51,6 +51,10 @@ pub enum MergeError {
     FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` is on and the checkout includes two paths that differ only in case
+    /// (#403); nothing was changed.
+    #[error(transparent)]
+    CasePair(#[from] crate::CasePair),
     /// libgit2 merged a file and a folder of the same name without a conflict; nothing was
     /// changed (#410).
     #[error(transparent)]

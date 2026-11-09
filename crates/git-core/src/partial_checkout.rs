@@ -292,6 +292,7 @@ pub(crate) enum Unfinished {
     Git(git2::Error),
     Io(std::io::Error),
     CaseCollision(crate::CaseCollision),
+    CasePair(crate::CasePair),
     CaseConfig(crate::CaseConfigUnreadable),
 }
 
@@ -310,6 +311,12 @@ impl From<git2::Error> for Unfinished {
 impl From<std::io::Error> for Unfinished {
     fn from(error: std::io::Error) -> Self {
         Self::Io(error)
+    }
+}
+
+impl From<crate::CasePair> for Unfinished {
+    fn from(error: crate::CasePair) -> Self {
+        Self::CasePair(error)
     }
 }
 
