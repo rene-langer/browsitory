@@ -1476,8 +1476,8 @@ fn rewind_to(repo: &Repository, original: &Commit<'_>, reflog: &str) -> Result<(
 }
 
 /// `rewind_to`'s checkout of `tree` when `pairs` isn't empty: the other paths with libgit2's
-/// safe checkout, the pair's names written directly (`restore_case_pairs`), then the index from
-/// `tree`, as `git reset --merge` resets it. A pair name whose file holds something neither
+/// safe checkout, the pair's names written directly (`restore_case_pairs`), then their index
+/// entries from `tree` (`set_case_pair_entries`). A pair name whose file holds something neither
 /// `tree` nor HEAD has under that name is `RewindBlocked`, before anything is written.
 fn rewind_around_case_pairs(
     repo: &Repository,
@@ -1510,9 +1510,46 @@ fn rewind_around_case_pairs(
         repo.checkout_tree(tree.as_object(), Some(&mut checkout))?;
     }
     crate::worktree_guard::restore_case_pairs::<MergeError>(repo, tree, pairs)?;
+    set_case_pair_entries(repo, tree, pairs)
+}
+
+/// The index after `rewind_around_case_pairs`' limited checkout: the pair's names as `tree` has
+/// them, every other path's entries as that safe checkout left them. It updated only the paths
+/// it changed, so a change staged on a file the rewind doesn't change stays staged, as without
+/// a pair (#553). libgit2's ignore-case index takes one name of a pair for the other on `add`,
+/// not in `read_tree`: so the index is read from `tree`, then the other paths' entries that
+/// differ are put back.
+fn set_case_pair_entries(
+    repo: &Repository,
+    tree: &git2::Tree<'_>,
+    pairs: &crate::worktree_guard::CasePairs,
+) -> Result<(), PickError> {
+    fn key(entry: &git2::IndexEntry) -> (Vec<u8>, u16) {
+        (entry.path.clone(), (entry.flags >> 12) & 0x3)
+    }
     let mut index = repo.index()?;
     index.read(true)?;
+    let kept: Vec<git2::IndexEntry> = index
+        .iter()
+        .filter(|entry| !pairs.covers(&entry.path))
+        .collect();
+    let wanted: std::collections::HashSet<(Vec<u8>, u16)> = kept.iter().map(key).collect();
     index.read_tree(tree)?;
+    let stale: Vec<(Vec<u8>, u16)> = index
+        .iter()
+        .filter(|entry| !pairs.covers(&entry.path))
+        .map(|entry| key(&entry))
+        .filter(|key| !wanted.contains(key))
+        .collect();
+    for (path, stage) in stale {
+        index.remove(
+            &crate::worktree_guard::path_from_bytes(&path),
+            i32::from(stage),
+        )?;
+    }
+    for entry in &kept {
+        index.add(entry)?;
+    }
     index.write()?;
     Ok(())
 }
