@@ -26,6 +26,7 @@ mod history;
 #[cfg(unix)]
 mod hooks;
 mod merge;
+mod patch;
 mod rebase;
 mod remote;
 mod restart;

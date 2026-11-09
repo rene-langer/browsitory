@@ -434,6 +434,14 @@ pub fn commit_locations() -> Cases<git_core::locate::CommitLocation> {
     ]
 }
 
+/// A patch's bytes (#448): text, and bytes that aren't UTF-8.
+pub fn patch_contents() -> Cases<Vec<u8>> {
+    vec![
+        case("text", b"diff --git a/f b/f\n".to_vec()),
+        case("latin-1", vec![b'+', 0xe9, b'\n']),
+    ]
+}
+
 pub fn open_repo_entries() -> Cases<config::OpenRepoEntry> {
     vec![
         case(

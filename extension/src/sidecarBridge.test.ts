@@ -48,6 +48,7 @@ function createBridge(overrides: {
   spawnResults?: Array<FakeSidecar | Error>;
   mergeEditorOpened?: boolean;
   savePath?: string | undefined;
+  fileBytes?: Uint8Array;
 } = {}) {
   const child = new FakeSidecar();
   const spawnResults = overrides.spawnResults ?? [child];
@@ -60,6 +61,8 @@ function createBridge(overrides: {
   const postToWebview = vi.fn();
   const showOpenDialog = vi.fn(async () => overrides.folder);
   const showSaveDialog = vi.fn(async (_fileName: string) => overrides.savePath);
+  const readFile = vi.fn(async (_uri: Uri) => overrides.fileBytes ?? new Uint8Array());
+  const writeFile = vi.fn(async (_path: string, _content: Uint8Array) => {});
   const openExternal = vi.fn(async () => overrides.externalResult ?? true);
   const appendLine = vi.fn();
   const openFile = vi.fn(async (_path: string, _line: number | null) => undefined);
@@ -78,6 +81,8 @@ function createBridge(overrides: {
     postToWebview,
     showOpenDialog,
     showSaveDialog,
+    readFile,
+    writeFile,
     openExternal,
     appendLine,
     openFile,
@@ -93,6 +98,8 @@ function createBridge(overrides: {
     postToWebview,
     showOpenDialog,
     showSaveDialog,
+    readFile,
+    writeFile,
     openExternal,
     appendLine,
     openFile,
@@ -271,6 +278,59 @@ describe("SidecarBridge", () => {
       { jsonrpc: "2.0", id: 4, result: "0.9.0" },
       { jsonrpc: "2.0", id: 5, result: null },
     ]);
+  });
+
+  it("saves a patch where the user picks, without spawning the sidecar (#448)", async () => {
+    const target = "/home/me/fix.patch";
+    const { bridge, spawn, postToWebview, showSaveDialog, writeFile } = createBridge({ savePath: target });
+
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "save_patch_file",
+      params: { suggestedName: "../dir/fix.patch", content: { base64: "aGk=" } },
+    });
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(showSaveDialog).toHaveBeenCalledWith("fix.patch");
+    expect(writeFile).toHaveBeenCalledWith(target, new Uint8Array([0x68, 0x69]));
+    expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, result: "/home/me/fix.patch" });
+  });
+
+  it("writes nothing when the save dialog is cancelled, and refuses content that isn't base64", async () => {
+    const { bridge, postToWebview, writeFile } = createBridge({ savePath: undefined });
+
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "save_patch_file",
+      params: { suggestedName: "x.patch", content: { base64: "aGk=" } },
+    });
+    await bridge.handleWebviewMessage({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "save_patch_file",
+      params: { suggestedName: "x.patch", content: { base64: "not base64!" } },
+    });
+
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, result: null });
+    expect(postToWebview).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 2, error: expect.objectContaining({ code: -32602 }) }),
+    );
+  });
+
+  it("opens a patch file and answers its bytes as base64 (#448)", async () => {
+    const file = { fsPath: "/home/me/in.patch" } as Uri;
+    const { bridge, postToWebview, readFile } = createBridge({
+      folder: [file],
+      fileBytes: new Uint8Array([0x68, 0x69]),
+    });
+
+    await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 1, method: "open_patch_file", params: {} });
+
+    expect(readFile).toHaveBeenCalledWith(file);
+    expect(postToWebview).toHaveBeenCalledWith({ jsonrpc: "2.0", id: 1, result: { base64: "aGk=" } });
   });
 
   it("fails open_external_url when VSCode doesn't open the link (#320)", async () => {

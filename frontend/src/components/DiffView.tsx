@@ -147,6 +147,15 @@ const lineCount = new Intl.NumberFormat("en-US");
  * ArrowUp/ArrowDown with optional Shift) within one hunk; `s`/`d` and the hunk header buttons
  * then act on the selected lines instead of the whole hunk.
  */
+/** A button in a hunk's header (`DiffView`'s `hunkActions`). */
+export interface HunkHeaderAction {
+  label: string;
+  run: () => void;
+  disabled?: boolean;
+  /** Why it is disabled, or what it does. */
+  title?: string;
+}
+
 export function DiffView({
   hunks,
   onStageHunk,
@@ -158,6 +167,7 @@ export function DiffView({
   partialActionsDisabled = false,
   path,
   wholeFile,
+  hunkActions,
 }: {
   hunks: DiffHunk[] | null;
   onStageHunk?: (oldStart: number, newStart: number) => void;
@@ -169,6 +179,8 @@ export function DiffView({
   partialActionsDisabled?: boolean;
   path?: string;
   wholeFile?: WholeFileToggle;
+  /** Extra buttons in each hunk's header (a commit's Revert hunk / Apply hunk, #448). */
+  hunkActions?: (hunk: DiffHunk) => HunkHeaderAction[];
 }) {
   const [previousHunks, setPreviousHunks] = useState(hunks);
   const [confirmingDiscardIndex, setConfirmingDiscardIndex] = useState<number | null>(null);
@@ -465,6 +477,21 @@ export function DiffView({
                 <span className={styles.hunkRange}>
                   @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
                 </span>
+                {hunkActions !== undefined && (
+                  <Toolbar aria-label="Hunk actions">
+                    {hunkActions(hunk).map((action) => (
+                      <button
+                        key={action.label}
+                        type="button"
+                        disabled={action.disabled}
+                        title={action.title}
+                        onClick={action.run}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </Toolbar>
+                )}
                 {hasActions && (
                   <Toolbar>
                     {stage && (

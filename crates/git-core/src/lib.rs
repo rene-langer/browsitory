@@ -15,6 +15,7 @@ mod line_patch;
 pub mod locate;
 pub mod merge;
 mod partial_checkout;
+pub mod patch;
 pub mod pick;
 pub mod process;
 pub mod rebase;

@@ -80,6 +80,8 @@ export function activate(context: vscode.ExtensionContext): void {
         });
         return picked?.fsPath;
       },
+      writeFile: (file, content) => vscode.workspace.fs.writeFile(vscode.Uri.file(file), content),
+      readFile: (uri) => vscode.workspace.fs.readFile(uri),
       openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url, true)),
       appendLine: (message) => output.appendLine(message),
       openFile: (file, line) =>

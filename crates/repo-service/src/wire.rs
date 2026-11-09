@@ -2026,6 +2026,113 @@ impl From<DiffOptionsDto> for git_core::diff::DiffOptions {
     }
 }
 
+/// A hunk of a commit's diff as the commit view showed it (#448): `(oldStart, newStart)` read
+/// with `contextLines`, whitespace significant.
+#[derive(Deserialize, Clone, Copy)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitHunk"))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitHunkDto {
+    pub old_start: u32,
+    pub new_start: u32,
+    pub context_lines: u32,
+}
+
+/// A commit's file, or one hunk of it, to revert or apply in the working tree (#448).
+#[derive(Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitChangeRequest"))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitChangeRequestDto {
+    pub commit_id: String,
+    pub path: String,
+    pub old_path: Option<String>,
+    /// `null`: the whole file.
+    pub hunk: Option<CommitHunkDto>,
+    /// Revert the change rather than apply it.
+    pub reverse: bool,
+    /// Also stage the result.
+    pub stage: bool,
+}
+
+impl From<CommitChangeRequestDto> for crate::worker::CommitChange {
+    fn from(dto: CommitChangeRequestDto) -> Self {
+        Self {
+            commit_id: dto.commit_id,
+            path: dto.path,
+            old_path: dto.old_path,
+            hunk: dto.hunk.map(|h| git_core::patch::CommitHunk {
+                old_start: h.old_start,
+                new_start: h.new_start,
+                context_lines: h.context_lines,
+            }),
+            reverse: dto.reverse,
+            stage: dto.stage,
+        }
+    }
+}
+
+/// What "Save as patch…" writes (#448).
+#[derive(Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PatchSource"))]
+#[serde(tag = "kind")]
+pub enum PatchSourceDto {
+    /// Oldest first.
+    #[serde(rename_all = "camelCase")]
+    Commits {
+        commit_ids: Vec<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    CommitFile {
+        commit_id: String,
+        path: String,
+        old_path: Option<String>,
+    },
+    Staged,
+}
+
+impl From<PatchSourceDto> for crate::worker::PatchSource {
+    fn from(dto: PatchSourceDto) -> Self {
+        match dto {
+            PatchSourceDto::Commits { commit_ids } => Self::Commits(commit_ids),
+            PatchSourceDto::CommitFile {
+                commit_id,
+                path,
+                old_path,
+            } => Self::CommitFile {
+                commit_id,
+                path,
+                old_path,
+            },
+            PatchSourceDto::Staged => Self::Staged,
+        }
+    }
+}
+
+/// A patch's bytes (#448), base64 because a patch may hold any bytes (file content in another
+/// encoding).
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PatchContent"))]
+pub struct PatchContentDto {
+    pub base64: String,
+}
+
+impl PatchContentDto {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self {
+            base64: crate::base64::encode(bytes),
+        }
+    }
+
+    /// The bytes, or an error for text that isn't base64.
+    pub fn into_bytes(self) -> Result<Vec<u8>, String> {
+        crate::base64::decode(&self.base64)
+            .ok_or_else(|| "The patch content is not valid base64.".to_string())
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "DiffSettings"))]
@@ -2427,6 +2534,10 @@ mod ts_bindings {
             PullRequestListDto,
             CreatePullRequestDto,
             DiffOptionsDto,
+            CommitHunkDto,
+            CommitChangeRequestDto,
+            PatchSourceDto,
+            PatchContentDto,
             DiffSettingsDto,
             WordWrapDto,
             CommitMessageSettingsDto,

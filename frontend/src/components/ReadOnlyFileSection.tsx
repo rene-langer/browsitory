@@ -1,6 +1,6 @@
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { BlameLine, DiffHunk, DiffOptions, DiffSource, RepoClient } from "../ipc/RepoClient";
+import type { BlameLine, CommitHunk, DiffHunk, DiffOptions, DiffSource, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
@@ -11,13 +11,30 @@ import { LineHistoryButton } from "./LineHistoryButton";
 import { BlameView } from "./BlameView";
 import { CollapseToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
-import { DiffView } from "./DiffView";
+import { DiffView, type HunkHeaderAction } from "./DiffView";
 import { ImageDiff, ImageTextToggle } from "./ImageDiff";
 import { imageMimeType, isSvgPath } from "../lib/imageTypes";
 import { commitFileMenuItems, type FileAction } from "./FileActionsMenu";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
+
+/**
+ * A commit's file's revert/apply/save actions (#448). The hunk actions get the hunk as the view
+ * showed it (with its context lines), which the backend finds again.
+ */
+export interface CommitFilePatchActions {
+  /** Why reverting or applying can't run now, else `null`. */
+  blockedReason: string | null;
+  onRevertFile: () => void;
+  onApplyFile: () => void;
+  onSavePatch: () => void;
+  onRevertHunk: (hunk: CommitHunk) => void;
+  onApplyHunk: (hunk: CommitHunk) => void;
+}
+
+/** Hunk identity needs whitespace to count, as for staging. */
+const IGNORE_WHITESPACE_REASON = "Turn off Ignore whitespace to revert or apply a hunk.";
 
 /**
  * One file's diff in a read-only view (a commit or a compare), with Blame and History.
@@ -44,6 +61,7 @@ export function ReadOnlyFileSection({
   externalTools,
   toolSource,
   previewSource,
+  patch,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -69,6 +87,8 @@ export function ReadOnlyFileSection({
   toolSource?: DiffSource;
   /** The two versions an image preview shows (the same ones the diff compares). */
   previewSource?: DiffSource;
+  /** A commit's file: Revert / Apply / Save as patch in its menu, Revert / Apply hunk (#448). */
+  patch?: CommitFilePatchActions;
 }) {
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const isImage = previewSource !== undefined && imageMimeType(path) !== null;
@@ -77,7 +97,13 @@ export function ReadOnlyFileSection({
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
   const actionsRef = useRef<HTMLButtonElement>(null);
   const tools = externalTools !== undefined && toolSource !== undefined ? { externalTools, toolSource } : null;
+  const hasMenu = tools !== null || patch !== undefined;
   const onPickFileAction = (action: FileAction) => {
+    if (patch !== undefined) {
+      if (action.kind === "revertCommitFile") return patch.onRevertFile();
+      if (action.kind === "applyCommitFile") return patch.onApplyFile();
+      if (action.kind === "saveFilePatch") return patch.onSavePatch();
+    }
     if (tools === null) return;
     if (action.kind === "openInEditor") tools.externalTools.openInEditor(path, null);
     else if (action.kind === "reveal") tools.externalTools.reveal(path);
@@ -91,6 +117,22 @@ export function ReadOnlyFileSection({
   const { settings } = useDiffSettingsContext();
   const wholeFile = useWholeFile(settings.contextLines);
   const diffOptions = { ignoreWhitespace: settings.ignoreWhitespace, contextLines: wholeFile.contextLines };
+  const hunkActions =
+    patch === undefined
+      ? undefined
+      : (hunk: DiffHunk): HunkHeaderAction[] => {
+          const ref: CommitHunk = {
+            oldStart: hunk.oldStart,
+            newStart: hunk.newStart,
+            contextLines: wholeFile.contextLines,
+          };
+          const reason = settings.ignoreWhitespace ? IGNORE_WHITESPACE_REASON : patch.blockedReason;
+          const blocked = { disabled: reason !== null, title: reason ?? undefined };
+          return [
+            { label: "Revert hunk", run: () => patch.onRevertHunk(ref), ...blocked },
+            { label: "Apply hunk", run: () => patch.onApplyHunk(ref), ...blocked },
+          ];
+        };
   const loadDiff = () => {
     let ignore = false;
     const requested = diffOptions;
@@ -149,7 +191,7 @@ export function ReadOnlyFileSection({
       <div
         className={styles.fileSectionHeader}
         onContextMenu={
-          tools === null
+          !hasMenu
             ? undefined
             : (event) => {
                 event.preventDefault();
@@ -160,7 +202,7 @@ export function ReadOnlyFileSection({
         // file menu at the header. Every header menu (this, or a right-click on the non-focusable
         // header) returns focus to the header's "…" when it closes from the keyboard or an item.
         onKeyDown={
-          tools === null
+          !hasMenu
             ? undefined
             : (event) => {
                 if (!isMenuKey(event)) return;
@@ -191,7 +233,7 @@ export function ReadOnlyFileSection({
             />
           )}
           {onOpenFolderHistory !== undefined && <FolderHistoryButton path={path} onOpen={onOpenFolderHistory} />}
-          {tools !== null && (
+          {hasMenu && (
             <button
               type="button"
               className={styles.stageToggle}
@@ -249,7 +291,7 @@ export function ReadOnlyFileSection({
           ) : (
             <>
               {isImage && <ImageTextToggle asText onToggle={() => setImageAsText(false)} />}
-              <DiffView hunks={hunks} path={path} wholeFile={wholeFile} />
+              <DiffView hunks={hunks} path={path} wholeFile={wholeFile} hunkActions={hunkActions} />
             </>
           )}
         </div>
@@ -259,7 +301,10 @@ export function ReadOnlyFileSection({
           x={menu.x}
           y={menu.y}
           returnFocusTo={menu.returnFocusTo}
-          items={commitFileMenuItems(onPickFileAction)}
+          items={commitFileMenuItems(onPickFileAction, {
+            tools: tools !== null,
+            patch: patch === undefined ? null : { blockedReason: patch.blockedReason },
+          })}
           onClose={() => setMenu(null)}
         />
       )}

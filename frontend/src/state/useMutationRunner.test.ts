@@ -34,6 +34,7 @@ const BASE_STATE: AppState = {
   rebasePreset: null,
   rewordDialog: null,
   historyEditOutcome: null,
+  patchOutcome: null,
   pendingPull: null,
   pullOutcome: null,
   mergeDialog: null,

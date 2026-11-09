@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type {
+  CommitChangeRequest,
+  PatchSource,
   AmendOptions,
   Trailer,
   BranchInfo,
@@ -53,6 +55,7 @@ import { useMergeRebaseActions } from "./useMergeRebaseActions";
 import { useReflogActions } from "./useReflogActions";
 import { useRemoteTransferActions } from "./useRemoteTransferActions";
 import { useStagingActions } from "./useStagingActions";
+import { usePatchActions } from "./usePatchActions";
 import type { PresetAction } from "../lib/rebaseSelection";
 import type { HistoryEditRequest } from "../lib/historyEdits";
 import { useStashActions } from "./useStashActions";
@@ -157,6 +160,9 @@ export interface AppState {
   rewordDialog: { commitId: string; onto: string } | null;
   // The last one-click history edit that finished, for its toast (#442).
   historyEditOutcome: { message: string } | null;
+  // The last finished revert/apply of a commit's file or hunk, saved patch or applied patch file,
+  // for its toast (#448).
+  patchOutcome: { message: string } | null;
   pendingPull: { upstreamRef: string } | null;
   pullOutcome: PullOutcome | null;
   // Non-null while the merge options dialog is open for that branch.
@@ -335,6 +341,10 @@ export interface UseAppStateResult {
   // `setRemoteAuthMode`'s existing `Promise<boolean>` pattern below.
   createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean>;
   openExternalUrl(url: string): Promise<void>;
+  /** See `PatchActions` (#448). */
+  applyCommitChange(change: CommitChangeRequest): Promise<void>;
+  savePatch(source: PatchSource, suggestedName: string): Promise<void>;
+  applyPatchFile(): Promise<void>;
   setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
   setGraphRemoteBranchSelection(selectedBranches: string[]): Promise<void>;
   // See `BranchActions.clearGraphBranchSelection`/`showAllGraphBranches`.
@@ -401,6 +411,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     rebasePreset: null,
     rewordDialog: null,
     historyEditOutcome: null,
+    patchOutcome: null,
     pendingPull: null,
     pullOutcome: null,
     mergeDialog: null,
@@ -597,6 +608,13 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     ignorePaths,
     commit,
   } = useStagingActions(client, repoPath, runMutation, runMutationWithOutcome, runOptimisticMutation, setState);
+
+  const { applyCommitChange, savePatch, applyPatchFile } = usePatchActions(
+    client,
+    repoPath,
+    runMutationWithOutcome,
+    setState,
+  );
 
   const branchNames = useMemo(() => state.branches.map((branch) => branch.name), [state.branches]);
   const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
@@ -905,6 +923,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     forgetForgeToken,
     createPullRequest,
     openExternalUrl,
+    applyCommitChange,
+    savePatch,
+    applyPatchFile,
     setGraphBranchSelection,
     setGraphRemoteBranchSelection,
     clearGraphBranchSelection,

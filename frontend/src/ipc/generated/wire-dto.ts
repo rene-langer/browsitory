@@ -13,6 +13,22 @@ export type BranchInfo = { name: string, isCurrent: boolean, upstream: string | 
 
 export type ChangedFile = { path: string, oldPath: string | null, };
 
+export type CommitChangeRequest = { commitId: string, path: string, oldPath: string | null, 
+/**
+ * `null`: the whole file.
+ */
+hunk: CommitHunk | null, 
+/**
+ * Revert the change rather than apply it.
+ */
+reverse: boolean, 
+/**
+ * Also stage the result.
+ */
+stage: boolean, };
+
+export type CommitHunk = { oldStart: number, newStart: number, contextLines: number, };
+
 export type CommitLocation = { commitId: string, position: number | null, branches: Array<string>, remoteBranches: Array<string>, };
 
 export type CommitMessageSettings = { summaryLimit: number, bodyRuler: number, showRuler: boolean, };
@@ -126,6 +142,10 @@ export type OpenRepoEntry = { path: string, workspaceId: string | null, };
 export type OpenRepoEntryInput = { path: string, workspaceId: string | null, };
 
 export type OperationKind = "Merge" | "CherryPick" | "Revert";
+
+export type PatchContent = { base64: string, };
+
+export type PatchSource = { "kind": "Commits", commitIds: Array<string>, } | { "kind": "CommitFile", commitId: string, path: string, oldPath: string | null, } | { "kind": "Staged" };
 
 export type PickOutcome = { "kind": "Committed", commitId: string, } | { "kind": "Conflicted", files: Array<string>, } | { "kind": "HookFailed", hook: string, output: string, };
 

@@ -1,5 +1,8 @@
 import type {
   AmendOptions,
+  CommitChangeRequest,
+  PatchContent,
+  PatchSource,
   CommitMessageSettings,
   FetchSettings,
   FileSides,
@@ -329,6 +332,13 @@ export const vscodeRepoClient: RepoClient = {
     call<void>("discard_lines", { repoPath, path, oldStart, newStart, contextLines, lineIndices, expectedLines }),
   discardFile: (repoPath: string, path: string) => call<void>("discard_file", { repoPath, path }),
   discardAllUnstaged: (repoPath: string, paths: string[]) => call<void>("discard_all_unstaged", { repoPath, paths }),
+  applyCommitChange: (repoPath: string, change: CommitChangeRequest) =>
+    call<void>("apply_commit_change", { repoPath, change }),
+  getPatch: (repoPath: string, source: PatchSource) => call<PatchContent>("get_patch", { repoPath, source }),
+  applyPatch: (repoPath: string, content: PatchContent) => call<void>("apply_patch", { repoPath, content }),
+  savePatchFile: (suggestedName: string, content: PatchContent) =>
+    call<string | null>("save_patch_file", { suggestedName, content }),
+  openPatchFile: () => call<PatchContent | null>("open_patch_file", {}),
   ignorePath: (repoPath: string, pattern: string) => call<void>("ignore_path", { repoPath, pattern }),
   getDiffSettings: () => call<DiffSettings>("get_diff_settings", {}),
   setDiffSettings: (settings: DiffSettings) => call<void>("set_diff_settings", { settings }),

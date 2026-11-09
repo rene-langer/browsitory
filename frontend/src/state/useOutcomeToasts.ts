@@ -1,7 +1,10 @@
 import { useEffect } from "react";
 import type { AppState } from "./useAppState";
 
-/** Toasts for a finished pull, merge, stash apply/pop or one-click history edit (`RepoWorkspace`). */
+/**
+ * Toasts for a finished pull, merge, stash apply/pop, one-click history edit or patch action
+ * (`RepoWorkspace`).
+ */
 export function useOutcomeToasts(state: AppState, pushToast: (message: string) => void) {
   const pullOutcome = state.pullOutcome;
   useEffect(() => {
@@ -33,4 +36,8 @@ export function useOutcomeToasts(state: AppState, pushToast: (message: string) =
   useEffect(() => {
     if (historyEditOutcome !== null) pushToast(historyEditOutcome.message);
   }, [historyEditOutcome, pushToast]);
+  const patchOutcome = state.patchOutcome;
+  useEffect(() => {
+    if (patchOutcome !== null) pushToast(patchOutcome.message);
+  }, [patchOutcome, pushToast]);
 }

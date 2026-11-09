@@ -89,6 +89,7 @@ nav:
       - files-at-a-commit.md
       - search.md
       - compare.md
+      - patches.md
       - undo-redo.md
   - Branches and sharing:
       - branches-and-remotes.md

@@ -250,6 +250,46 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "undo(Full, Discard all unstaged changes) lock busy=Discard hold",
         ),
         (
+            cmd!(ApplyCommitChange {
+                change: super::CommitChange {
+                    commit_id: s(ONTO),
+                    path: s("a.txt"),
+                    old_path: None,
+                    hunk: None,
+                    reverse: true,
+                    stage: false,
+                }
+            }),
+            "undo(Full, Revert a.txt from 707e824) lock busy=Discard hold",
+        ),
+        (
+            cmd!(ApplyCommitChange {
+                change: super::CommitChange {
+                    commit_id: s(ONTO),
+                    path: s("a.txt"),
+                    old_path: None,
+                    hunk: Some(git_core::patch::CommitHunk {
+                        old_start: 1,
+                        new_start: 1,
+                        context_lines: 3
+                    }),
+                    reverse: false,
+                    stage: false,
+                }
+            }),
+            "undo(Full, Apply hunk in a.txt from 707e824) lock busy=Discard hold",
+        ),
+        (
+            cmd!(GetPatch {
+                source: super::PatchSource::Staged
+            }),
+            "-",
+        ),
+        (
+            cmd!(ApplyPatch { content: vec![] }),
+            "undo(Full, Apply patch) lock busy=Discard hold",
+        ),
+        (
             cmd!(IgnorePath {
                 pattern: s("*.log")
             }),

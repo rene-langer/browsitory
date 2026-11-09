@@ -28,7 +28,13 @@ export const NATIVE_METHODS: ReadonlySet<string> = new Set([
   "open_merge_tool",
   // "Save as…" of a file at a commit (#446): VSCode's save dialog, then `write_file_version`.
   "save_file_version",
+  // "Save as patch…" / "Apply patch…" (#448): the dialogs and the file I/O.
+  "save_patch_file",
+  "open_patch_file",
 ]);
+
+/** The largest patch file "Apply patch…" reads. */
+const MAX_PATCH_FILE_BYTES = 64 * 1024 * 1024;
 
 // Sidecar methods only the extension host calls (#306). The webview may not call them: a
 // request for one gets an error reply instead of reaching the sidecar. Listed in
@@ -100,6 +106,9 @@ export interface SidecarBridgeDependencies {
    * when the user cancelled.
    */
   readonly showSaveDialog: (fileName: string) => PromiseLike<string | undefined>;
+  /** Writes `content` to the file at `path` (a patch the user chose to save). */
+  readonly writeFile: (path: string, content: Uint8Array) => PromiseLike<void>;
+  readonly readFile: (uri: Uri) => PromiseLike<Uint8Array>;
   readonly openExternal: (url: string) => PromiseLike<boolean>;
   readonly appendLine: (message: string) => void;
   /** Opens a work tree file in a VSCode editor, at the 1-based `line` when given. */
@@ -634,6 +643,40 @@ export class SidecarBridge {
           result = destination;
           break;
         }
+        case "save_patch_file": {
+          const params = requireParams(request, { suggestedName: "string", content: "object" });
+          const bytes = requirePatchContent(params["content"]);
+          const fileName = path.basename((params["suggestedName"] as string).replace(/\\/g, "/")) || "changes.patch";
+          const target = await this.dependencies.showSaveDialog(fileName);
+          if (target === undefined) {
+            result = null;
+            break;
+          }
+          await this.dependencies.writeFile(target, bytes);
+          result = target;
+          break;
+        }
+        case "open_patch_file": {
+          requireEmptyParams(request);
+          const selected = await this.dependencies.showOpenDialog({
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: false,
+            openLabel: "Apply Patch",
+            filters: { Patch: ["patch", "diff", "mbox", "txt"], "All files": ["*"] },
+          });
+          const file = selected?.[0];
+          if (file === undefined) {
+            result = null;
+            break;
+          }
+          const bytes = await this.dependencies.readFile(file);
+          if (bytes.byteLength > MAX_PATCH_FILE_BYTES) {
+            throw new Error(`Couldn't read ${file.fsPath}: the file is larger than 64 MB`);
+          }
+          result = { base64: Buffer.from(bytes).toString("base64") };
+          break;
+        }
         default:
           // A name in NATIVE_METHODS without a case here: reply, so the webview's call
           // doesn't wait forever.
@@ -779,6 +822,17 @@ function requireParams(
     throw new InvalidParamsError(`${request.method} requires { ${expected} }`);
   }
   return request.params;
+}
+
+/** The bytes of a `PatchContent` (`{ base64 }`). */
+function requirePatchContent(value: unknown): Uint8Array {
+  const invalid = () => new InvalidParamsError("save_patch_file requires { base64: string } content");
+  if (!isRecord(value) || Object.keys(value).length !== 1 || typeof value["base64"] !== "string") {
+    throw invalid();
+  }
+  const text = value["base64"];
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 !== 0) throw invalid();
+  return new Uint8Array(Buffer.from(text, "base64"));
 }
 
 /** A work-tree-relative path that cannot escape the work tree. */

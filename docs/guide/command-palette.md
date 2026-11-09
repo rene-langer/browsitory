@@ -18,7 +18,8 @@ The palette has almost every action in Browsitory, grouped like this:
   apply, pop or drop a stash.
 - **Diff:** ignore whitespace, more or fewer context lines, syntax highlighting, stage, unstage
   or discard the selected files, discard the current file or all unstaged changes, open the
-  current file in your editor or diff tool.
+  current file in your editor or diff tool, **Apply patch…** and **Save staged changes as
+  patch…** (see [Patches and partial reverts](patches.md)).
 - **Go to:** **Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** (see
   below), and open a sidebar section and move to it, for example **Go to Tags**.
 - **Repositories:** switch to another tab, close the tab, open a terminal, reveal the

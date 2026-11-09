@@ -91,6 +91,11 @@ function fakeClient(overrides: Partial<RepoClient>): RepoClient {
     getWorkingTreeCompareDiff: unused,
     getBranchCompareRange: unused,
     locateCommit: unused,
+    applyCommitChange: unused,
+    getPatch: unused,
+    applyPatch: unused,
+    savePatchFile: unused,
+    openPatchFile: unused,
     getMergeOptions: unused,
     setMergeOptions: unused,
     dropStash: unused,
@@ -1670,6 +1675,56 @@ describe("DiffPane line staging", () => {
     );
     expect(await screen.findByText("B")).toBeInTheDocument();
     expect(screen.queryByText("Turn off Ignore whitespace to stage partially.")).toBeNull();
+  });
+});
+
+describe("DiffPane patch actions (#448)", () => {
+  const hunk: DiffHunk = {
+    oldStart: 7,
+    oldLines: 1,
+    newStart: 7,
+    newLines: 1,
+    lines: [
+      { origin: "Remove", content: "old\n" },
+      { origin: "Add", content: "new\n" },
+    ],
+  };
+
+  it("reverts a commit's hunk and file, and saves the file as a patch", async () => {
+    const patchActions = { blockedReason: null, onApplyCommitChange: vi.fn(), onSavePatch: vi.fn() };
+    const client = fakeClient({
+      getCommitFiles: async () => ["src/f.txt"],
+      getCommitDiff: async () => [hunk],
+      getCommitMessage: async () => "",
+    });
+    renderCommit(client, "abcdef1234567890", { patchActions });
+    fireEvent.click(await screen.findByRole("button", { name: "Revert hunk" }));
+    expect(patchActions.onApplyCommitChange).toHaveBeenLastCalledWith({
+      commitId: "abcdef1234567890",
+      path: "src/f.txt",
+      oldPath: null,
+      hunk: { oldStart: 7, newStart: 7, contextLines: 3 },
+      reverse: true,
+      stage: false,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for src/f.txt" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Apply this file to the working tree" }));
+    expect(patchActions.onApplyCommitChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hunk: null, reverse: false }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Actions for src/f.txt" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save file as patch…" }));
+    expect(patchActions.onSavePatch).toHaveBeenCalledWith(
+      { kind: "CommitFile", commitId: "abcdef1234567890", path: "src/f.txt", oldPath: null },
+      "abcdef1-f.txt.patch",
+    );
+  });
+
+  it("saves the staged changes as a patch from the Staged heading", async () => {
+    const patchActions = { blockedReason: null, onApplyCommitChange: vi.fn(), onSavePatch: vi.fn() };
+    renderUncommitted(fakeClient({}), [{ path: "b.txt", oldPath: null, staged: true, kind: "New" }], { patchActions });
+    fireEvent.click(await screen.findByRole("button", { name: "Save as patch…" }));
+    expect(patchActions.onSavePatch).toHaveBeenCalledWith({ kind: "Staged" }, "staged.patch");
   });
 });
 

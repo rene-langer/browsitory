@@ -40,6 +40,8 @@ function bridgeWithoutSidecar() {
     postToWebview,
     showOpenDialog: async () => undefined,
     showSaveDialog: async () => undefined,
+    readFile: async () => new Uint8Array(),
+    writeFile: async () => {},
     openExternal: async () => true,
     appendLine: () => {},
     openFile: async () => undefined,
