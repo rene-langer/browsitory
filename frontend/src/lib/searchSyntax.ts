@@ -12,6 +12,11 @@ export const SEARCH_SYNTAX: { syntax: string; meaning: string }[] = [
   { syntax: "after:YYYY-MM-DD", meaning: "Committed on or after that day" },
   { syntax: "before:YYYY-MM-DD", meaning: "Committed on or before that day" },
   { syntax: "branch:NAME", meaning: "Only commits reachable from NAME" },
+  { syntax: "merges:only", meaning: "Only merge commits" },
+  { syntax: "merges:none", meaning: "No merge commits" },
+  { syntax: "a or b", meaning: "Either one matches" },
+  { syntax: "-word", meaning: "Leaves out what matches it; also not word" },
+  { syntax: "(a or b) c", meaning: "Parentheses group terms" },
 ];
 
-export const SEARCH_SYNTAX_FOOTER = "Terms combine with AND. Case is ignored except in path:.";
+export const SEARCH_SYNTAX_FOOTER = "Terms side by side combine with AND. Case is ignored except in path:.";

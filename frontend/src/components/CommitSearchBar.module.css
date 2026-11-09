@@ -1,6 +1,7 @@
 .bar {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-1) var(--space-2);
@@ -27,6 +28,20 @@
   outline: 2px solid var(--color-accent);
   outline-offset: -1px;
   border-radius: var(--radius-sm);
+}
+
+.input[aria-invalid="true"] {
+  text-decoration: underline wavy var(--color-danger-text);
+  text-underline-offset: 3px;
+}
+
+/* An invalid query's message, on its own line under the field. */
+.error {
+  flex: 1 0 100%;
+  margin: 0;
+  padding: 0 var(--space-1) var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-danger-text);
 }
 
 /* The native clear button duplicates our ×, which also restores the selection. */

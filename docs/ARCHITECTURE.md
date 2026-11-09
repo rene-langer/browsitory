@@ -673,9 +673,14 @@ certificate.
 
 ## Commit search
 
-- `git-core::search` parses the query once (`parse_query`) and pages a `TOPOLOGICAL | TIME`
-  revwalk (`search_commits`): cheap filters first, first-parent diff filters (`path:`,
-  `contents:`) last. A page ends at 100 matches, after 20,000 scanned commits, or after a
+- `git-core::search` parses the query once (`parse_query`) into a boolean expression
+  (`SearchExpr`: AND of adjacent terms, `or`, `not`/`-`, parentheses, #450) and pages a
+  `TOPOLOGICAL | TIME` revwalk (`search_commits`): within every AND/OR, cheap filters first,
+  first-parent diff filters (`path:`, `contents:`) last. Parsing lives only in the backend; an
+  invalid query is `ErrorKind::InvalidSearchQuery`, which the search field shows. `branch:`
+  sets the start points, so it must be a single top-level AND term; `line:` is a set computed
+  once per page and tested per commit, so it composes under `not`/`or`; `contents:` stays
+  scoped to the top-level AND `path:` terms. A page ends at 100 matches, after 20,000 scanned commits, or after a
   250 ms time budget (`PageLimits::time`, checked after each commit so a page always makes
   progress) — so a commit/stage queued on the single in-order repo worker never waits behind
   thousands of `path:`/`contents:` tree diffs; a time-boxed page just returns `next_cursor`

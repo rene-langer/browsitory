@@ -67,3 +67,17 @@ it("focuses the field when focus is requested and acknowledges it", () => {
   expect(screen.getByRole("searchbox", { name: "Search commits" })).toHaveFocus();
   expect(props.onFocusHandled).toHaveBeenCalled();
 });
+
+it("shows an invalid query's message under the field and marks the field invalid", () => {
+  renderBar({ query: "(a", error: "Invalid search: Missing closing parenthesis." });
+  const input = screen.getByRole("searchbox", { name: "Search commits" });
+  expect(input).toHaveAttribute("aria-invalid", "true");
+  expect(input).toHaveAccessibleDescription("Invalid search: Missing closing parenthesis.");
+  expect(screen.getByRole("alert")).toHaveTextContent("Invalid search: Missing closing parenthesis.");
+});
+
+it("shows no message for a valid query", () => {
+  renderBar({ query: "a" });
+  expect(screen.getByRole("searchbox", { name: "Search commits" })).toHaveAttribute("aria-invalid", "false");
+  expect(screen.queryByRole("alert")).toBeNull();
+});

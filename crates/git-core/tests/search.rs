@@ -313,6 +313,70 @@ fn refs_selection_limits_the_walk_and_skips_missing_refs() {
     assert_eq!(found(None), ["feature work"]);
 }
 
+#[test]
+fn or_not_and_parentheses_combine_terms() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "1");
+    commit_all(&repo, "fix login");
+    write_file(dir.path(), "a.txt", "2");
+    commit_all(&repo, "feat signup");
+    write_file(dir.path(), "a.txt", "3");
+    commit_all(&repo, "fix signup wip");
+    write_file(dir.path(), "a.txt", "4");
+    commit_all(&repo, "docs");
+
+    assert_eq!(
+        summaries(&repo, "login or feat"),
+        ["feat signup", "fix login"]
+    );
+    assert_eq!(summaries(&repo, "fix -wip"), ["fix login"]);
+    assert_eq!(summaries(&repo, "fix not wip"), ["fix login"]);
+    assert_eq!(
+        summaries(&repo, "(fix or feat) signup"),
+        ["fix signup wip", "feat signup"]
+    );
+    assert_eq!(
+        summaries(&repo, "fix or feat signup"),
+        ["fix signup wip", "feat signup", "fix login"]
+    );
+    assert_eq!(summaries(&repo, "-(fix or feat)"), ["docs"]);
+}
+
+#[test]
+fn contents_stays_limited_to_top_level_path_terms_under_or() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "docs/n.md", "needle\n");
+    commit_all(&repo, "in docs");
+    write_file(dir.path(), "src/n.rs", "needle\n");
+    commit_all(&repo, "in src");
+    write_file(dir.path(), "src/m.rs", "other\n");
+    commit_all(&repo, "other in src");
+
+    assert_eq!(
+        summaries(&repo, "path:src (contents:needle or contents:other)"),
+        ["other in src", "in src"]
+    );
+    // A `path:` inside `or` is a test of its own and limits no `contents:`.
+    assert_eq!(
+        summaries(&repo, "path:docs or contents:other"),
+        ["other in src", "in docs"]
+    );
+    assert_eq!(summaries(&repo, "contents:needle -path:src"), ["in docs"]);
+}
+
+#[test]
+fn merges_only_and_none_split_on_parent_count() {
+    let (_dir, repo) = init_repo();
+    merged_side_branch(&repo);
+
+    assert_eq!(summaries(&repo, "merges:only"), ["merge work"]);
+    assert_eq!(
+        summaries(&repo, "work merges:none"),
+        ["after work", "direct work", "side work", "base work"]
+    );
+    assert_eq!(summaries(&repo, "-merges:only after"), ["after work"]);
+}
+
 /// `trunk`: base → direct → merge(direct, side) → after; `side`: base → side work. Every
 /// message contains "work".
 fn merged_side_branch(repo: &Repository) {

@@ -19,10 +19,16 @@ Press ↓ in the field to move into the results.
 | `after:YYYY-MM-DD` | Committed on or after that day |
 | `before:YYYY-MM-DD` | Committed on or before that day |
 | `branch:NAME` | Only commits reachable from NAME |
+| `merges:only` | Only merge commits |
+| `merges:none` | No merge commits |
+| `a or b` | Either one matches |
+| `-word` | Leaves out what matches it; also `not word` |
+| `(a or b) c` | Parentheses group terms |
 
-- Terms combine with AND. Case is ignored except in `path:`.
+- Terms side by side combine with AND. Case is ignored except in `path:`.
 - Quote text with spaces or a colon (`"fix: crash"`). An unquoted `word:` that is not one of the
   keys above is an error, so a conventional-commit prefix like `fix:` needs quotes.
+- A merge commit is one with two or more parents.
 - Dates are whole days in the commit's own timezone, inclusive.
 - `path:` and `contents:` look at what a commit changed compared with its first parent, so a
   merge counts as the changes it brought in.
@@ -36,7 +42,27 @@ Press ↓ in the field to move into the results.
   [line history](file-history.md#history-of-lines) does. The line numbers are the file's at HEAD,
   or at the tip of the `branch:` term's branch. Put a path with spaces in quotes
   (`line:"my file.txt:3-4"`). Lines outside the file are an error.
+- If the search can't be read, the message under the field says why, such as a missing `)`.
 - Results load 100 at a time, and "Scanned N commits…" shows progress on large histories.
 - Selecting a result shows its diff as usual.
 - Esc or × goes back to the graph and the previous selection.
 - File history opened from a result returns to the results when closed.
+
+## Combining terms
+
+`and`, `or` and `not` are operators when they stand alone as words, in any case (`OR` works
+too). Without an operator, terms side by side must all match, so `fix login` and
+`fix and login` are the same search.
+
+- `or` binds looser than AND: `fix login or feat` means `(fix login) or feat`.
+- `not` and `-` apply to the term or group right after them: `-wip`, `not author:bot`,
+  `-(path:docs or path:*.md)`.
+- Parentheses group terms: `(author:ada or author:bob) path:src`.
+- To search for the words `and`, `or` or `not`, or for text that starts with `-` or `(`, put it
+  in quotes (`"not"`, `"-x"`, `"(wip)"`). A `(` inside a word is part of it, so `fix(ui)` needs
+  no quotes.
+- `branch:` sets where the search starts rather than testing each commit, so it can't be
+  negated or used with `or`, and appears at most once.
+- `contents:` looks only at the files of the `path:` terms that are joined to the whole search
+  by AND. In `path:src (contents:a or contents:b)` both look only in `src`; in
+  `path:docs or contents:x` the `contents:` term looks at every file.

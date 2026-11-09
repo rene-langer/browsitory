@@ -2407,6 +2407,9 @@ pub enum ErrorKind {
     Cancelled,
     /// `get_conflict_hunks` on an add/delete conflict, which has no text hunks.
     AddDeleteConflict,
+    /// A commit search whose query doesn't parse or names something that isn't there (#450);
+    /// the search field shows its message.
+    InvalidSearchQuery,
 }
 
 impl ErrorKind {
@@ -2431,6 +2434,10 @@ impl ErrorKind {
             git_core::merge::MergeError::NotATextConflict(path).to_string()
         }) {
             Self::AddDeleteConflict
+        } else if fills(message, |message| {
+            git_core::search::SearchError::InvalidQuery { message }.to_string()
+        }) {
+            Self::InvalidSearchQuery
         } else {
             Self::Other
         }
@@ -2638,6 +2645,12 @@ mod error_kinds {
                 MergeError::NotATextConflict("dir/it's: here.bin".into()).to_string(),
                 ErrorKind::AddDeleteConflict,
             ),
+            (
+                git_core::search::parse_query("a or")
+                    .unwrap_err()
+                    .to_string(),
+                ErrorKind::InvalidSearchQuery,
+            ),
         ];
         for (message, kind) in cases {
             assert_eq!(ErrorKind::of(&message), kind, "{message}");
@@ -2655,6 +2668,8 @@ mod error_kinds {
             "Pull failed".to_string(),
             git_core::remote::CREDENTIAL_STORE_FAILURE_ERROR.to_string(),
             RemoteError::NoUpstream.to_string(),
+            "Invalid search".to_string(),
+            git_core::search::SearchError::StaleCursor.to_string(),
             String::new(),
         ];
         for message in messages {
