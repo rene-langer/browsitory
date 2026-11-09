@@ -1082,17 +1082,81 @@ fn restore_original_branch(
     // Check out first, reattach after: a refused checkout (a folder that can't be written)
     // then leaves HEAD detached where the rebase left it, so Abort can simply be retried.
     let tree = repo.find_reference(branch_ref)?.peel_to_tree()?;
-    // The forced checkout writes (and deletes) through a symlink that replaced a tracked file or
-    // folder; remove such links first, like git (#114).
     let original_tree = repo.find_commit(original_tip)?.tree()?;
-    crate::worktree_guard::prepare_forced_checkout_known::<RebaseError, &str>(
+    // A picked commit can bring in a case pair (`A` and `a`) under `core.ignorecase`, which
+    // `start_rebase` can't check up front (#511): split between HEAD, the index and the disk.
+    // libgit2's forced checkout of a pair keeps one of it in the index and may delete the
+    // other's file (#403), so the checkout leaves the pair out and its files are written
+    // directly, as undo does: Abort must always work.
+    let target = crate::worktree_guard::GuardSource::Tree(&tree);
+    let pairs =
+        crate::worktree_guard::case_pairs_for_abort::<RebaseError, &str>(repo, &target, None)?;
+    if pairs.is_empty() {
+        check_out_original(repo, &tree, &original_tree, None)?;
+    } else {
+        let others = paths_except(repo, &tree, &pairs)?;
+        // No paths would mean the whole tree.
+        if !others.is_empty() {
+            check_out_original(repo, &tree, &original_tree, Some(&others))?;
+        }
+        crate::worktree_guard::restore_case_pairs::<RebaseError>(repo, &tree, &pairs)?;
+        // The limited checkout updated only the other paths' entries; the pair's (and any
+        // conflict on them) go too.
+        let mut index = repo.index()?;
+        index.read(true)?;
+        index.read_tree(&tree)?;
+        index.write()?;
+    }
+    repo.set_head(branch_ref)?;
+    crate::commit::clear_operation_files(repo)?;
+    Ok(())
+}
+
+/// Every path of `tree`, HEAD's tree and the index (any stage), except those in `except`.
+fn paths_except(
+    repo: &Repository,
+    tree: &git2::Tree,
+    except: &crate::worktree_guard::CasePairs,
+) -> Result<Vec<Vec<u8>>, RebaseError> {
+    let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
+    let mut paths = std::collections::BTreeSet::new();
+    for tree in std::iter::once(tree).chain(head_tree.as_ref()) {
+        let mut flat = git2::Index::new()?;
+        flat.read_tree(tree)?;
+        paths.extend(flat.iter().map(|entry| entry.path));
+    }
+    let mut index = repo.index()?;
+    index.read(false)?;
+    paths.extend(index.iter().map(|entry| entry.path));
+    Ok(paths
+        .into_iter()
+        .filter(|path| !except.contains(path))
+        .collect())
+}
+
+/// `restore_original_branch`'s forced checkout of `tree`, limited to the literal `paths` when
+/// given. The forced checkout writes (and deletes) through a symlink that replaced a tracked file
+/// or folder; such links are removed first, like git (#114).
+fn check_out_original(
+    repo: &Repository,
+    tree: &git2::Tree,
+    original_tree: &git2::Tree,
+    paths: Option<&[Vec<u8>]>,
+) -> Result<(), RebaseError> {
+    crate::worktree_guard::prepare_forced_checkout_known::<RebaseError, _>(
         repo,
-        Some(&crate::worktree_guard::GuardSource::Tree(&tree)),
-        None,
-        Some(&original_tree),
+        Some(&crate::worktree_guard::GuardSource::Tree(tree)),
+        paths,
+        Some(original_tree),
     )?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
+    if let Some(paths) = paths {
+        checkout.disable_pathspec_match(true);
+        for path in paths {
+            checkout.path(path.as_slice());
+        }
+    }
     // A file another program holds open: say so, not libgit2's raw error (#303). Aborting again
     // rewrites everything, so nothing is rolled back; the message says whether the checkout
     // had already put some files back (#321).
@@ -1107,7 +1171,5 @@ fn restore_original_branch(
             };
             crate::worktree_guard::held_open::<RebaseError>(repo.workdir(), during)(error)
         })?;
-    repo.set_head(branch_ref)?;
-    crate::commit::clear_operation_files(repo)?;
     Ok(())
 }

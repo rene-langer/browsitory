@@ -431,6 +431,240 @@ where
     }
 }
 
+/// The case pairs an abort meets (#511): paths that differ only in ASCII case, among the
+/// target's, HEAD's and the index's entries and the files on disk, while `core.ignorecase` is
+/// on. A picked commit can bring one in that the operation couldn't check up front: libgit2's
+/// merge then records one name in the index and writes the other's file, so the pair may be
+/// split between HEAD, the index and the disk. An abort leaves every name of a pair out of its
+/// forced checkout (which would drop one of them from the index or delete the other's file,
+/// #403) and puts them back with [`restore_case_pairs`].
+#[derive(Debug, Default)]
+pub(crate) struct CasePairs {
+    /// Names the target, HEAD or the index holds.
+    tracked: BTreeSet<Vec<u8>>,
+    /// Names only on disk.
+    untracked: BTreeSet<Vec<u8>>,
+}
+
+impl CasePairs {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.tracked.is_empty() && self.untracked.is_empty()
+    }
+
+    /// Whether a forced checkout must leave `path` out (a name a source holds).
+    pub(crate) fn contains(&self, path: &[u8]) -> bool {
+        self.tracked.contains(path)
+    }
+
+    /// Whether `path` is one of the pairs' names in any spelling (libgit2's diff under
+    /// `core.ignorecase` may report either).
+    pub(crate) fn covers(&self, path: &[u8]) -> bool {
+        let folded = path.to_ascii_lowercase();
+        self.tracked
+            .iter()
+            .chain(&self.untracked)
+            .any(|name| name.to_ascii_lowercase() == folded)
+    }
+}
+
+/// The [`CasePairs`] of an abort's forced checkout of `target` (optionally limited to the
+/// literal `paths`, matched ignoring case): empty unless `core.ignorecase` is on.
+pub(crate) fn case_pairs_for_abort<E, P>(
+    repo: &git2::Repository,
+    target: &GuardSource,
+    paths: Option<&[P]>,
+) -> Result<CasePairs, E>
+where
+    E: From<git2::Error> + From<CaseConfigUnreadable>,
+    P: AsRef<[u8]>,
+{
+    let mut pairs = CasePairs::default();
+    if !core_ignorecase(repo)? {
+        return Ok(pairs);
+    }
+    let Some(workdir) = repo.workdir() else {
+        return Ok(pairs);
+    };
+    let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
+    let mut index = repo.index()?;
+    index.read(false)?;
+    let mut entries: Vec<Vec<u8>> = Vec::new();
+    for tree in [target_tree(target), head_tree.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        let mut flat = git2::Index::new()?;
+        flat.read_tree(tree)?;
+        entries.extend(flat.iter().map(|entry| entry.path));
+    }
+    if let GuardSource::Index(target) = target {
+        entries.extend(target.iter().map(|entry| entry.path));
+    }
+    entries.extend(index.iter().map(|entry| entry.path));
+    // Folded name -> (spelling -> whether a source holds it).
+    let mut names = std::collections::BTreeMap::<Vec<u8>, HashMap<Vec<u8>, bool>>::new();
+    for path in entries {
+        if paths.is_none_or(|paths| selected(&path, paths, true)) {
+            names
+                .entry(path.to_ascii_lowercase())
+                .or_default()
+                .insert(path, true);
+        }
+    }
+    // The names on disk below the folders the sources name (any spelling of them).
+    let folders: BTreeSet<Vec<u8>> = names
+        .keys()
+        .flat_map(|name| {
+            name.iter()
+                .enumerate()
+                .filter(|(_, byte)| **byte == b'/')
+                .map(|(at, _)| name[..at].to_vec())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let mut on_disk = Vec::new();
+    disk_names(workdir, Vec::new(), &folders, &names, &mut on_disk);
+    for name in on_disk {
+        if let Some(spellings) = names.get_mut(&name.to_ascii_lowercase()) {
+            spellings.entry(name).or_insert(false);
+        }
+    }
+    for spellings in names.into_values().filter(|spellings| spellings.len() > 1) {
+        for (name, held) in spellings {
+            if held {
+                pairs.tracked.insert(name);
+            } else {
+                pairs.untracked.insert(name);
+            }
+        }
+    }
+    Ok(pairs)
+}
+
+fn target_tree<'a>(source: &'a GuardSource) -> Option<&'a git2::Tree<'a>> {
+    match source {
+        GuardSource::Tree(tree) => Some(tree),
+        GuardSource::Index(_) => None,
+    }
+}
+
+/// Collects into `out` the names on disk below the work tree folder `prefix` (its on-disk
+/// spelling, `/`-separated, empty for the root) whose folded name is one of `names`, walking
+/// only into folders whose folded name is one of `folders`. Never follows a link; `.git` is
+/// skipped. A folder that can't be read is skipped too: an abort must not stop at it.
+fn disk_names<V>(
+    workdir: &Path,
+    prefix: Vec<u8>,
+    folders: &BTreeSet<Vec<u8>>,
+    names: &std::collections::BTreeMap<Vec<u8>, V>,
+    out: &mut Vec<Vec<u8>>,
+) {
+    let Ok(entries) = std::fs::read_dir(workdir.join(path_from_bytes(&prefix))) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if prefix.is_empty() && file_name.eq_ignore_ascii_case(".git") {
+            continue;
+        }
+        let mut path = prefix.clone();
+        if !path.is_empty() {
+            path.push(b'/');
+        }
+        path.extend_from_slice(file_name.as_bytes());
+        let folded = path.to_ascii_lowercase();
+        if names.contains_key(&folded) {
+            out.push(path.clone());
+        }
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) && folders.contains(&folded) {
+            disk_names(workdir, path, folders, names, out);
+        }
+    }
+}
+
+/// Puts every name of `pairs` back as `tree` has it, written directly rather than by libgit2's
+/// checkout (#403, #511): the blob (a link as a link where `core.symlinks` allows), or nothing
+/// when `tree` lacks the name (the folders that emptied are removed too). A name only on disk
+/// is removed only when its content is a blob the repository holds (what the operation wrote
+/// from a commit, which stays there); anything else may be the user's own file and stays. No clean or smudge filter runs,
+/// as for undo's raw writes. Never written through a link. A submodule, and a folder where
+/// `tree` has no file, are left as they are. The index is the caller's.
+pub(crate) fn restore_case_pairs<E>(
+    repo: &git2::Repository,
+    tree: &git2::Tree,
+    pairs: &CasePairs,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<io::Error>,
+{
+    let Some(workdir) = repo.workdir() else {
+        return Ok(());
+    };
+    // Removals first: on a drive where the names fold, a write would land in the other name.
+    let odb = repo.odb()?;
+    for path in &pairs.untracked {
+        let Ok(rel) = std::str::from_utf8(path) else {
+            continue;
+        };
+        let wrote = match read_beneath(workdir, rel)? {
+            Some(Leaf::File { bytes, .. }) => {
+                odb.exists(git2::Oid::hash_object(git2::ObjectType::Blob, &bytes)?)
+            }
+            Some(Leaf::Link { target, .. }) => {
+                odb.exists(git2::Oid::hash_object(git2::ObjectType::Blob, &target)?)
+            }
+            None => false,
+        };
+        if wrote {
+            remove_and_prune_beneath(workdir, Path::new(rel))?;
+        }
+    }
+    let symlinks = repo
+        .config()?
+        .get_bool("core.symlinks")
+        .unwrap_or(cfg!(unix));
+    let mut writes = Vec::new();
+    for path in &pairs.tracked {
+        let rel = path_from_bytes(path);
+        match tree.get_path(&rel) {
+            Ok(entry) => writes.push((path, entry.id(), entry.filemode() as u32)),
+            Err(error) if error.code() == git2::ErrorCode::NotFound => {
+                let folder = rel
+                    .to_str()
+                    .map(|rel| probe_beneath(workdir, rel))
+                    .transpose()?
+                    .is_some_and(|probe| matches!(probe, Probe::Folder(_)));
+                if !folder {
+                    remove_and_prune_beneath(workdir, &rel)?;
+                }
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    for (path, id, mode) in writes {
+        let Some(rel) = std::str::from_utf8(path)
+            .ok()
+            .filter(|_| mode != MODE_GITLINK)
+        else {
+            continue;
+        };
+        let blob = repo.find_blob(id)?;
+        let content = if mode == MODE_LINK && symlinks {
+            Content::Link(blob.content())
+        } else {
+            Content::File {
+                bytes: blob.content(),
+                executable: mode == 0o100755,
+            }
+        };
+        replace_beneath(workdir, rel, content)?;
+    }
+    Ok(())
+}
+
 /// The code points HFS+ ignores in names (the list git's `is_hfs_dotgit` uses).
 fn hfs_ignorable(c: char) -> bool {
     matches!(

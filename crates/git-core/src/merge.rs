@@ -983,6 +983,8 @@ pub(crate) fn abort_step_keeping_list(
 /// `reset --merge` would keep; applied by `apply_operation_reset`.
 pub(crate) struct OperationReset {
     touched: Vec<Vec<u8>>,
+    /// The case pairs among the touched paths, put back directly (#511).
+    pairs: crate::worktree_guard::CasePairs,
 }
 
 impl OperationReset {
@@ -1039,6 +1041,37 @@ pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, 
     }
     touched.sort();
     touched.dedup();
+    // A pick that brought in a case pair under `core.ignorecase` (#511): libgit2 records one
+    // name in the index and writes the other's file, so its diff of them below can't be
+    // trusted (it reports the file on disk as changed). They are checked here, name by name.
+    let pairs = crate::worktree_guard::case_pairs_for_abort::<MergeError, _>(
+        repo,
+        &crate::worktree_guard::GuardSource::Tree(&head_tree),
+        Some(&touched),
+    )?;
+    if !pairs.is_empty() {
+        let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
+        for entry in index.iter().filter(|entry| pairs.contains(&entry.path)) {
+            if (entry.flags >> 12) & 0x3 != 0 {
+                continue;
+            }
+            let Ok(rel) = std::str::from_utf8(&entry.path) else {
+                continue;
+            };
+            let disk = match crate::worktree_guard::read_beneath(workdir, rel)? {
+                Some(crate::worktree_guard::Leaf::File { bytes, .. }) => bytes,
+                Some(crate::worktree_guard::Leaf::Link { target, .. }) => target,
+                None => continue,
+            };
+            let id = git2::Oid::hash_object(git2::ObjectType::Blob, &disk)?;
+            let in_head = head_tree
+                .get_path(&path_from_bytes(&entry.path))
+                .is_ok_and(|head| head.id() == id);
+            if id != entry.id && !in_head {
+                return Err(MergeError::WouldDiscard(rel.to_string()));
+            }
+        }
+    }
     let conflicted: std::collections::HashSet<Vec<u8>> = index
         .conflicts()?
         .filter_map(|c| c.ok())
@@ -1049,6 +1082,7 @@ pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, 
     let checked: Vec<&Vec<u8>> = touched
         .iter()
         .filter(|path| !conflicted.contains(*path))
+        .filter(|path| !pairs.covers(path))
         .collect();
     if !checked.is_empty() {
         let mut options = git2::DiffOptions::new();
@@ -1075,7 +1109,7 @@ pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, 
             }
         }
     }
-    Ok(OperationReset { touched })
+    Ok(OperationReset { touched, pairs })
 }
 
 /// `abort_merge` up to the state files: the planned paths back to HEAD, first in the work tree,
@@ -1085,7 +1119,12 @@ pub(crate) fn plan_operation_reset(repo: &Repository) -> Result<OperationReset, 
 /// A file the operation added that can't be removed (Windows: held open) doesn't stop the rest;
 /// it stays in the index for the next abort.
 fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(), MergeError> {
-    let touched = reset.touched;
+    let OperationReset { touched, pairs } = reset;
+    // A case pair's names are put back directly, never by the forced checkout (#511).
+    let touched: Vec<Vec<u8>> = touched
+        .into_iter()
+        .filter(|path| !pairs.covers(path))
+        .collect();
     let head_tree = repo.head()?.peel_to_commit()?.tree()?;
     let workdir = repo.workdir().ok_or(MergeError::NoWorkdir)?;
     // The forced checkout below writes through a symlink that replaced a touched file or a
@@ -1095,6 +1134,7 @@ fn apply_operation_reset(repo: &Repository, reset: OperationReset) -> Result<(),
         Some(&crate::worktree_guard::GuardSource::Tree(&head_tree)),
         Some(&touched),
     )?;
+    crate::worktree_guard::restore_case_pairs::<MergeError>(repo, &head_tree, &pairs)?;
     let written = crate::partial_checkout::Written::default();
     let mut to_checkout = Vec::new();
     // The first file added by the operation that couldn't be removed. The rest of the abort
