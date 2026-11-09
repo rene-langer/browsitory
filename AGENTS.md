@@ -190,6 +190,12 @@ tree it pulls in (`deny.toml`, `scripts/check-dependency-licenses.py`); keep the
   `git-core`/`repo-service` coverage.
 - `e2e/` (Tauri) and `extension/e2e/` (VSCode) are black-box, one flow per major feature area.
   Build steps are order-sensitive — see the "Commands" section above, not a paraphrase of it.
+- Mutation testing: on a PR that changes `crates/git-core/src/` or `crates/repo-service/src/`,
+  CI's `mutants` job posts a "Mutation testing" comment. Triage it before you report the work
+  done: for each missed or timed-out mutant, add a test that fails on it, or say in the PR why
+  it is equivalent or harmless. Mutants in `#[cfg(windows)]` files (such as
+  `crates/git-core/src/worktree_guard/beneath_windows.rs`) are always missed on the Linux
+  runner; ignore them. The job is informational, not a required check.
 
 Full rationale and the wire-format/DTO contract details: `docs/ARCHITECTURE.md`'s "Testing
 strategy".
