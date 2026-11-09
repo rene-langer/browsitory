@@ -631,10 +631,15 @@ describe("buildCommands", () => {
     }
   });
 
-  it("excludes the main worktree from open/remove commands", () => {
+  // #561: like the Worktrees panel, the palette opens the main worktree too, never removes it.
+  it("offers to open the main worktree, not to remove it", () => {
     const appState = makeAppState();
-    const commands = buildCommands(appState);
-    expect(commands.some((c) => c.id === "open-worktree:/repo")).toBe(false);
+    const onOpenRepoTab = vi.fn();
+    const commands = buildCommands(appState, onOpenRepoTab);
+    const openMain = commands.find((c) => c.id === "open-worktree:/repo");
+    expect(openMain?.label).toBe("Open main worktree");
+    openMain?.run();
+    expect(onOpenRepoTab).toHaveBeenCalledWith("/repo");
     expect(commands.some((c) => c.id === "remove-worktree:main")).toBe(false);
 
     const openCmd = commands.find((c) => c.id === "open-worktree:/repo-wt1");
@@ -1883,7 +1888,6 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       onOpenCreateBranchDraft: fn(),
       onCloseCreateBranchDraft: fn(),
       onMergeBranch: fn(),
-      isRebasing: state.rebaseProgress !== null,
       operationDisabled: blockers.blocked,
       operationDisabledReason: blockers.reason,
       graphBranchSelection: null,
@@ -1984,7 +1988,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       ["Drop…", "drop-stash:0", stashRules.drop],
     ], state);
 
-    // The worktree panel's buttons, for the linked worktree (the palette lists linked ones only).
+    // The worktree panel's buttons, for both worktrees (the main one can't be removed, #561).
     const blockers = operationBlockers(state);
     localStorage.clear();
     render(
@@ -2002,13 +2006,15 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
     try {
       fireEvent.click(screen.getByRole("button", { name: "Worktrees" }));
       for (const [label, id] of [
+        ["Open /repo", "open-worktree:/repo"],
+        ["Remove /repo", "remove-worktree:main"],
         ["Open /repo-wt1", "open-worktree:/repo-wt1"],
         ["Remove /repo-wt1", "remove-worktree:wt1"],
         ["Prune worktrees", "prune-worktrees"],
       ]) {
         const button = screen.getByRole("button", { name: label });
         expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !button.hasAttribute("disabled") });
-        if (button.hasAttribute("disabled")) expect(button).toHaveAttribute("title", blockers.reason);
+        if (button.hasAttribute("disabled") && label !== "Remove /repo") expect(button).toHaveAttribute("title", blockers.reason);
       }
       expect(screen.getByRole("button", { name: "Remove /repo" })).toHaveAttribute(
         "title",

@@ -28,7 +28,8 @@ While a merge, rebase, cherry-pick or revert is in progress, or another action, 
 push runs, the branch and remote actions that change something (checkout, rename, merge, push,
 delete, setting or clearing the upstream, and a remote's fetch, edit, credentials and remove) are
 disabled with the reason, and the command palette leaves out their commands; an open
-confirmation says why. **Add remote…** still opens its form, whose **Add remote** button waits.
+confirmation or remote dialog says why and doesn't save. **New branch…** and **Add remote…**
+still open their forms, whose **Create** and **Add remote** buttons wait.
 
 **From the keyboard.** Tab to a branch, a remote branch or a remote folder and press the Menu key
 or Shift+F10 (Fn+Shift+F10 on most Mac keyboards), or use its **…** button, to open the same menu.

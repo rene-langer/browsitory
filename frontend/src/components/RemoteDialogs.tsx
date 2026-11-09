@@ -4,6 +4,7 @@ import type { RemoteDialog } from "../state/useAppState";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { EditRemoteDialog } from "./EditRemoteDialog";
 import { RemoteCredentialsDialog } from "./RemoteCredentialsDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 
 /**
  * The remote folder menu's dialogs (Edit / Credentials / Remove), driven by `AppState.remoteDialog`.
@@ -16,12 +17,16 @@ import { RemoteCredentialsDialog } from "./RemoteCredentialsDialog";
  * or remove is running: those update `remotes` optimistically before the request settles (and roll
  * back on failure), so the dialog keeps a snapshot of its remote and stays mounted with what the
  * user typed.
+ *
+ * `blockedReason` (`operationBlockers`' reason) disables every dialog's save or remove and says
+ * why, and each request is re-checked against it before it is sent: the repository can become
+ * busy while a dialog is open (#561).
  */
 export function RemoteDialogs({
   remoteDialog,
   remotes,
   remoteUpstreams,
-  operationDisabled,
+  blockedReason,
   onRenameRemote,
   onUpdateRemoteUrls,
   onRemoveRemote,
@@ -34,7 +39,8 @@ export function RemoteDialogs({
   remoteDialog: RemoteDialog | null;
   remotes: RemoteInfo[];
   remoteUpstreams: Record<string, UpstreamInfo[]>;
-  operationDisabled: boolean;
+  /** Why repository operations are blocked now, or `null`. */
+  blockedReason: string | null;
   onRenameRemote: (oldName: string, newName: string) => Promise<boolean>;
   onUpdateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
   onRemoveRemote: (name: string, clearUpstreams: boolean) => Promise<void>;
@@ -76,6 +82,7 @@ export function RemoteDialogs({
 
   if (remoteDialog === null || remote === undefined) return null;
   const dialog = remoteDialog;
+  const blocked = blockedReason !== null;
 
   if (dialog.kind === "remove") {
     // Computed now, not when the menu item was clicked: upstreams may change meanwhile.
@@ -85,17 +92,22 @@ export function RemoteDialogs({
       <ConfirmDialog
         ariaLabel="Remove remote confirmation"
         message={
-          clearUpstreams ? (
-            <p>
-              Remove {remote.name} and clear upstreams for {affected.map((item) => item.localBranch).join(", ")}?
-            </p>
-          ) : (
-            <p>Remove remote {remote.name}?</p>
-          )
+          <>
+            {clearUpstreams ? (
+              <p>
+                Remove {remote.name} and clear upstreams for {affected.map((item) => item.localBranch).join(", ")}?
+              </p>
+            ) : (
+              <p>Remove remote {remote.name}?</p>
+            )}
+            {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
+          </>
         }
         confirmLabel="Confirm remove"
-        confirmDisabled={operationDisabled}
+        confirmDisabled={blocked}
+        confirmTitle={blockedReason ?? undefined}
         onConfirm={() => {
+          if (blocked) return;
           ownMutation.current = dialog;
           void onRemoveRemote(remote.name, clearUpstreams).then(onClose);
         }}
@@ -108,14 +120,18 @@ export function RemoteDialogs({
       <EditRemoteDialog
         key={dialog.remoteName}
         remote={remote}
+        blockedReason={blockedReason}
         onRename={async (oldName, newName) => {
+          if (blocked) return false;
           ownMutation.current = dialog;
           const renamed = await onRenameRemote(oldName, newName);
           // A failed rename rolled `remotes` back: outside changes count again.
           if (!renamed && ownMutation.current === dialog) ownMutation.current = null;
           return renamed;
         }}
-        onUpdateUrls={onUpdateRemoteUrls}
+        onUpdateUrls={async (name, fetchUrl, pushUrl) => {
+          if (!blocked) await onUpdateRemoteUrls(name, fetchUrl, pushUrl);
+        }}
         onClose={onClose}
       />
     );
@@ -124,9 +140,16 @@ export function RemoteDialogs({
     <RemoteCredentialsDialog
       key={dialog.remoteName}
       remote={remote}
-      onSetAuthMode={onSetRemoteAuthMode}
-      onSaveHttpsCredential={onSaveHttpsCredential}
-      onForgetHttpsCredential={onForgetHttpsCredential}
+      blockedReason={blockedReason}
+      onSetAuthMode={async (remoteName, mode, username) =>
+        !blocked && (await onSetRemoteAuthMode(remoteName, mode, username))
+      }
+      onSaveHttpsCredential={async (remoteName, username, token) => {
+        if (!blocked) await onSaveHttpsCredential(remoteName, username, token);
+      }}
+      onForgetHttpsCredential={async (remoteName) => {
+        if (!blocked) await onForgetHttpsCredential(remoteName);
+      }}
       onClose={onClose}
     />
   );

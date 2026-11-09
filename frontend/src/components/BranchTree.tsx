@@ -79,7 +79,6 @@ export function BranchTree({
   onOpenCreateBranchDraft,
   onCloseCreateBranchDraft,
   onMergeBranch,
-  isRebasing,
   operationDisabled,
   operationDisabledReason,
   graphBranchSelection,
@@ -133,12 +132,8 @@ export function BranchTree({
   onOpenCreateBranchDraft: (startPoint: string) => void;
   onCloseCreateBranchDraft: () => void;
   onMergeBranch: (name: string) => void;
-  // The New branch form's Create is disabled while a rebase is paused mid-flight: the rebase runs
-  // on a detached HEAD and `git-core::rebase`'s `finish` moves the *original* branch ref at the
-  // end. The branch and remote menus follow `operationDisabled` (`branchActions`,
-  // `remoteActions`, #509), which covers a rebase too.
-  isRebasing: boolean;
-  // `operationBlockers` (#495): every branch and remote action follows it.
+  // `operationBlockers` (#495): every branch and remote action follows it, and so does the New
+  // branch form's Create (#561), which can also switch to the new branch.
   operationDisabled: boolean;
   // Human-readable reason `operationDisabled` is true (e.g. "A rebase is in progress."), shown
   // as a `title` on the buttons it disables so they don't just go inert with no explanation
@@ -672,7 +667,8 @@ export function BranchTree({
     startPoint === "HEAD" ? (currentBranchName ?? "HEAD") : /^[0-9a-f]{40}$/i.test(startPoint) ? startPoint.slice(0, 7) : startPoint;
 
   const submitCreate = async () => {
-    if (newBranchName.trim() === "" || createBranchDraft === null) return;
+    // Re-checked: the repository can become busy while the form is open (#561).
+    if (newBranchName.trim() === "" || createBranchDraft === null || operationDisabled) return;
     const failure = await onCreateBranch(newBranchName.trim(), createBranchDraft.startPoint);
     if (failure !== null) {
       setCreateError(failure);
@@ -719,8 +715,8 @@ export function BranchTree({
     }
   };
 
-  // Why the force delete and upstream dialogs can't act now, shown in them (#521); `null` when
-  // nothing blocks.
+  // Why the force delete and upstream dialogs (#521), the New branch form and the remote dialogs
+  // (#561) can't act now, shown in them; `null` when nothing blocks.
   const busyReason = operationDisabled ? operationDisabledReason : null;
 
   function branchContextItems(branch: BranchInfo): ContextMenuItem[] {
@@ -833,8 +829,13 @@ export function BranchTree({
               />
               Check out after creating
             </label>
+            {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
             <div className={styles.draftActions}>
-              <button type="submit" disabled={newBranchName.trim() === "" || newBranchProblem !== null || isRebasing}>
+              <button
+                type="submit"
+                disabled={newBranchName.trim() === "" || newBranchProblem !== null || operationDisabled}
+                title={busyReason ?? undefined}
+              >
                 Create
               </button>
               <button
@@ -1272,7 +1273,7 @@ export function BranchTree({
           remoteDialog={remoteDialog}
           remotes={remotes}
           remoteUpstreams={remoteUpstreams}
-          operationDisabled={operationDisabled}
+          blockedReason={busyReason}
           onRenameRemote={onRenameRemote}
           onUpdateRemoteUrls={onUpdateRemoteUrls}
           onRemoveRemote={onRemoveRemote}

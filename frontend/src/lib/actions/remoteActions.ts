@@ -16,8 +16,8 @@ export interface RemoteActions {
 /**
  * Availability, reason and labels of a remote's actions (#509), shared by `BranchTree`'s remote
  * folder menu and the command palette. All of them follow the one busy rule
- * (`operationBlockers`); the edit and credentials dialogs change the remote's configuration and
- * don't check the rule themselves.
+ * (`operationBlockers`). The edit and credentials dialogs, and the remove confirmation, check it
+ * again while open and before saving (`RemoteDialogs`, #561).
  */
 export function remoteActions(blockers: OperationBlockers, remoteName: string): RemoteActions {
   return {

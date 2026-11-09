@@ -12,6 +12,15 @@ describe("worktreeActions", () => {
     expect(actions.remove).toMatchObject({ label: "Remove /repo-wt", paletteLabel: "Remove worktree wt", enabled: true });
   });
 
+  it("names the main worktree's open in the palette without its name (#561)", () => {
+    expect(worktreeActions(free, { ...linked, name: "main", path: "/repo", isMain: true }).open).toEqual({
+      label: "Open /repo",
+      paletteLabel: "Open main worktree",
+      enabled: true,
+      reason: undefined,
+    });
+  });
+
   it("refuses to remove the main worktree, saying why", () => {
     expect(worktreeActions(free, { ...linked, isMain: true }).remove).toMatchObject({
       enabled: false,
