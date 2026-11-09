@@ -2188,8 +2188,11 @@ only `error`.
   informational): cargo-mutants mutates the lines a PR changes under `crates/git-core/src/` and `crates/repo-service/src/` and
   runs that package's tests against each mutant. A *missed* mutant is a code change no test
   noticed. It measures whether new tests check the behaviour or merely run the code — the risk
-  when the same agent writes a test and the code it tests. The job never fails a PR; its run
-  summary lists missed mutants and the full `mutants.out` is uploaded as an artifact. To
+  when the same agent writes a test and the code it tests. It is not a required check and its
+  steps never fail it. It posts the counts and the missed and timed-out mutants as one sticky
+  PR comment (marked `<!-- mutants-report -->`, updated on re-runs; not for fork PRs or
+  dispatched runs), repeats them in the run summary, and uploads the full `mutants.out` as an
+  artifact. Agents triage that comment (see `AGENTS.md`'s "Testing conventions"). To
   reproduce locally: `git diff origin/main...HEAD > pr.diff && cargo mutants --in-diff pr.diff
   --package git-core --package repo-service`. Frontend and extension code are not covered.
 

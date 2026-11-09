@@ -198,13 +198,19 @@ jobs:
   # Mutation testing of the code a pull request changes in git-core and repo-service: cargo-mutants
   # makes small edits to that code (return a default, flip a condition, …) and runs the package's
   # tests against each one. A "missed" mutant is a change no test noticed. Informational only:
-  # this job never fails, so it cannot block a merge; read its summary on the run page. Mutants
-  # are only generated for changed lines in `src/`, so a PR that changes only tests or other
-  # crates skips the run. A dispatched run diffs against the default branch instead. See
+  # the job is not a required check, and its steps never fail it (a lost runner or the job
+  # timeout can still show it red). It posts its result as one sticky comment on the pull
+  # request (updated on each run) and in the run summary. Mutants are only generated for
+  # changed lines in `src/`, so a PR that changes only tests or other crates skips the run. A
+  # dispatched run diffs against the default branch instead and posts no comment. See
   # docs/ARCHITECTURE.md's "Testing strategy".
   mutants:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # Replaces the workflow's permissions: checkout needs contents, the comment pull-requests.
+    permissions:
+      contents: read
+      pull-requests: write
     # Backstop only; the mutation step has its own, shorter limit (see there).
     timeout-minutes: 60
     env:
@@ -305,6 +311,88 @@ jobs:
         with:
           name: mutants-out
           path: mutants.out
+      # One sticky comment per pull request, found by its marker and edited on re-runs. Only for
+      # pull requests from this repo: a fork's GITHUB_TOKEN can't comment, and a dispatched run
+      # has no pull request. A skipped mutation run creates no comment but updates an earlier
+      # one. Never fails the job.
+      - name: Comment on the pull request
+        if: >-
+          !cancelled() && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          RELEVANT: ${{ steps.diff.outputs.relevant }}
+          OUTCOME: ${{ steps.mutants.outcome }}
+          STATUS: ${{ steps.mutants.outputs.status }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          marker='<!-- mutants-report -->'
+          out=mutants.out
+          max=100  # lines per list; with lines cut to 200 chars the body stays far below 65536
+          count() { if [ -f "$out/$1" ]; then grep -c . "$out/$1" || true; else echo 0; fi; }
+          list() {  # list <file> <heading>
+            [ -s "$out/$1" ] || return 0
+            n=$(count "$1")
+            echo "### $2 ($n)"
+            echo
+            echo '```'
+            head -n "$max" "$out/$1" | cut -c1-200
+            echo '```'
+            if [ "$n" -gt "$max" ]; then
+              echo
+              echo "First $max of $n; the full list is in the \`mutants-out\` artifact of [the run]($RUN_URL)."
+            fi
+            echo
+          }
+          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id" \
+            | head -n 1)
+          {
+            echo "$marker"
+            echo "## Mutation testing (changed code)"
+            echo
+            if [ "$RELEVANT" != "true" ]; then
+              echo "No Rust source changes in git-core or repo-service at $HEAD_SHA; nothing to mutate."
+              echo
+            else
+              echo "| Caught | Missed | Timed out | Unviable |"
+              echo "|---|---|---|---|"
+              echo "| $(count caught.txt) | $(count missed.txt) | $(count timeout.txt) | $(count unviable.txt) |"
+              echo
+              if [ "$OUTCOME" = "failure" ]; then
+                echo "The run hit its time limit; the counts cover only the mutants it finished."
+                echo
+              fi
+              if [ "$STATUS" = "4" ]; then
+                echo "The tests failed without any mutation, so no mutant was tested. See the \`rust\` job."
+                echo
+              else
+                list missed.txt "Missed: no test noticed these changes"
+                list timeout.txt "Timed out"
+                if [ ! -s "$out/missed.txt" ] && [ ! -s "$out/timeout.txt" ]; then
+                  echo "Every viable mutant was caught by a test."
+                  echo
+                fi
+              fi
+              echo "To triage: for each missed mutant add a test that fails on it, or say in the PR why it is"
+              echo "equivalent or harmless. Mutants in \`#[cfg(windows)]\` files are always missed on this Linux runner."
+              echo
+            fi
+            echo "Informational, not a required check. [Run]($RUN_URL), commit $HEAD_SHA."
+          } > comment.md
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@comment.md > /dev/null
+            echo "Updated comment $existing."
+          elif [ "$RELEVANT" = "true" ]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@comment.md > /dev/null
+            echo "Created a comment."
+          else
+            echo "Nothing to mutate and no earlier comment; not commenting."
+          fi
 
   frontend:
     runs-on: ubuntu-latest

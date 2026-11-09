@@ -25,7 +25,12 @@ win; fix this skill to match.
    override in `frontend/eslint.config.js` (`pnpm lint`). See `docs/ARCHITECTURE.md`'s "The
    `RepoClient` IPC boundary".
 
-3. **Specs and plans are dated records.** Larger work gets a design spec in
+3. **Triage the mutants comment.** A PR changing `git-core`/`repo-service` source gets a
+   "Mutation testing" comment from CI's `mutants` job. Before reporting done, kill each real
+   missed mutant with a test or explain in the PR why it is equivalent or harmless; ignore
+   mutants in `#[cfg(windows)]` files. See AGENTS.md's "Testing conventions".
+
+4. **Specs and plans are dated records.** Larger work gets a design spec in
    `docs/superpowers/specs/` and a plan in `docs/superpowers/plans/`, named
    `YYYY-MM-DD-<slug>[-design].md`. Older specs and plans describe the code as it was; never
    treat one as current without checking the code. (`docs/tasks/` and `docs/TASK_TEMPLATE.md`
