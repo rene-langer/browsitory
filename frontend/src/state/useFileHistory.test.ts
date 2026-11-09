@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { FileHistoryEntry, RepoClient } from "../ipc/RepoClient";
 import type { SelectedRow } from "./useAppState";
 import { FILE_HISTORY_PAGE_SIZE, useFileHistory } from "./useFileHistory";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function entry(id: string, path = "f.txt", oldPath: string | null = null): FileHistoryEntry {
   return {
@@ -31,7 +32,7 @@ function deferred<T>() {
 }
 
 function setup(getFileHistory: RepoClient["getFileHistory"], selectedRow: SelectedRow = "uncommitted") {
-  const client = { getFileHistory } as unknown as RepoClient;
+  const client = fakeRepoClient({ getFileHistory });
   const selectRow = vi.fn();
   const hook = renderHook(
     ({ generation, row }: { generation: number; row: SelectedRow }) =>
@@ -135,7 +136,7 @@ describe("useFileHistory", () => {
 
   describe("line history (#447)", () => {
     function setupLines(getLineHistory: RepoClient["getLineHistory"], getFileHistory: RepoClient["getFileHistory"] = vi.fn()) {
-      const client = { getFileHistory, getLineHistory } as unknown as RepoClient;
+      const client = fakeRepoClient({ getFileHistory, getLineHistory });
       const selectRow = vi.fn();
       const hook = renderHook(
         ({ generation }: { generation: number }) => useFileHistory(client, "/repo", generation, "uncommitted", selectRow),

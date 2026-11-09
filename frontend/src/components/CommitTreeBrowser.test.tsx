@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileContent, RepoClient, TreeEntry, TreeListing } from "../ipc/RepoClient";
 import { CommitTreeBrowser, FILTER_DEBOUNCE_MS } from "./CommitTreeBrowser";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 
@@ -40,7 +41,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}) {
     getWorkingTreeCompareDiff: vi.fn(async () => []),
     getBlame: vi.fn(async () => []),
   };
-  return Object.assign(client, overrides) as typeof client & RepoClient;
+  return fakeRepoClient({ ...client, ...overrides }) as typeof client & RepoClient;
 }
 
 function renderBrowser(props: Partial<Parameters<typeof CommitTreeBrowser>[0]> = {}) {

@@ -2026,7 +2026,13 @@ only `error`.
   uses `Worker::spawn_with_pause_on_lock_wait` (test-only) and `PauseControl`, not a fixed
   sleep: the worker stops when it first finds the lock busy, and its wait starts after `go`
   (#274).
-- `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
+- `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam). Tests
+  build the fake with `frontend/src/test/fakeRepoClient.ts` (#499): a `Proxy` that answers the
+  test's overrides and fails every other call with `not used in this test: <method>`, or in
+  `"empty"` mode answers an empty value from its `EMPTY_RESULTS` table. A new `RepoClient`
+  method needs no edit in the tests. `useAppState` tests use `transferClient` in
+  `frontend/src/state/useAppStateTestClient.ts`, which adds an empty repository tracking
+  `origin/main` on top.
 - Transport parity (#306): `frontend/src/ipc/transportParity.test.ts` calls every method of
   both `RepoClient` implementations with a mocked transport and records the backend name each
   sends. It checks those names against four generated lists in `frontend/src/ipc/generated/`:

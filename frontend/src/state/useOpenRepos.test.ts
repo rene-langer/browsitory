@@ -2,15 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { RepoClient } from "../ipc/RepoClient";
 import { useOpenRepos } from "./useOpenRepos";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
-  return {
+  return fakeRepoClient({
     openRepo: vi.fn().mockResolvedValue(undefined),
     closeRepo: vi.fn().mockResolvedValue(undefined),
     listOpenRepos: vi.fn().mockResolvedValue({ entries: [], activePath: null }),
     persistOpenRepos: vi.fn().mockResolvedValue(undefined),
     ...overrides,
-  } as unknown as RepoClient;
+  });
 }
 
 function entry(path: string, workspaceId: string | null = null) {

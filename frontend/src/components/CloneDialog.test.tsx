@@ -2,12 +2,13 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 import { CloneError, type CloneOutcome, type RepoClient, type TransferProgress } from "../ipc/RepoClient";
 import { CloneDialog } from "./CloneDialog";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 type Listener = (progress: TransferProgress) => void;
 
 function fakeClient(overrides: Partial<RepoClient> = {}) {
   const listeners: Listener[] = [];
-  const client = {
+  const client = fakeRepoClient({
     supportsCloneAndInit: true,
     pickRepoFolder: vi.fn(async () => "/home/me/src"),
     cloneRepo: vi.fn(async (): Promise<CloneOutcome> => ({ path: "/home/me/src/repo", submoduleFailures: [], credentialSaveFailed: false })),
@@ -17,7 +18,7 @@ function fakeClient(overrides: Partial<RepoClient> = {}) {
       return () => listeners.splice(listeners.indexOf(listener), 1);
     },
     ...overrides,
-  } as unknown as RepoClient;
+  });
   return { client, emit: (p: TransferProgress) => listeners.forEach((l) => l(p)) };
 }
 

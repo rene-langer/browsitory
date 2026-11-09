@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { CommitSignature, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import { CommitHeader } from "./CommitHeader";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const FULL_ID = "abc1234567890abcdef1234567890abcdef12345";
 const PARENT_ID = "def4567890abcdef1234567890abcdef12345678";
@@ -24,13 +25,13 @@ function clientWithMessage(
   message: string,
   signature: CommitSignature | Promise<CommitSignature> | Error = UNSIGNED,
 ): RepoClient {
-  return {
+  return fakeRepoClient({
     getCommitMessage: vi.fn(async () => message),
     getCommitSignature: vi.fn(async () => {
       if (signature instanceof Error) throw signature;
       return signature;
     }),
-  } as unknown as RepoClient;
+  });
 }
 
 function renderHeader(overrides: Partial<React.ComponentProps<typeof CommitHeader>> = {}) {

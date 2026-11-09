@@ -1,14 +1,15 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_DIFF_SETTINGS, WHOLE_FILE_CONTEXT_LINES, type DiffSource, type RepoClient } from "../ipc/RepoClient";
+import { DEFAULT_DIFF_SETTINGS, WHOLE_FILE_CONTEXT_LINES, type DiffSource } from "../ipc/RepoClient";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function renderSection(overrides: Partial<Parameters<typeof ReadOnlyFileSection>[0]> = {}) {
   const props: Parameters<typeof ReadOnlyFileSection>[0] = {
     repoPath: "/repo",
-    client: { getBlame: vi.fn(async () => []) } as unknown as RepoClient,
+    client: fakeRepoClient({ getBlame: vi.fn(async () => []) }),
     path: "a.txt",
     diffKey: "k1",
     fetchDiff: vi.fn(async () => []),
@@ -83,7 +84,7 @@ describe("ReadOnlyFileSection", () => {
       <DiffSettingsContext.Provider value={{ settings, update: vi.fn(), error: null, dismissError: vi.fn() }}>
         <ReadOnlyFileSection
           repoPath="/repo"
-          client={{ getBlame: vi.fn(async () => []) } as unknown as RepoClient}
+          client={fakeRepoClient({ getBlame: vi.fn(async () => []) })}
           path="a.txt"
           diffKey="k1"
           fetchDiff={fetchDiff}
@@ -123,7 +124,7 @@ describe("ReadOnlyFileSection", () => {
 
   it("blames at blameAt", async () => {
     const getBlame = vi.fn(async () => []);
-    renderSection({ client: { getBlame } as unknown as RepoClient, blameAt: "HEAD" });
+    renderSection({ client: fakeRepoClient({ getBlame }), blameAt: "HEAD" });
     fireEvent.click(screen.getByRole("button", { name: "Blame" }));
     await waitFor(() => expect(getBlame).toHaveBeenCalledWith("/repo", "HEAD", "a.txt"));
   });
@@ -199,7 +200,7 @@ describe("ReadOnlyFileSection", () => {
         authorName: "A",
         timestamp: 0,
       }));
-      renderSection({ client: { getBlame: vi.fn(async () => blame) } as unknown as RepoClient, onOpenLineHistory });
+      renderSection({ client: fakeRepoClient({ getBlame: vi.fn(async () => blame) }), onOpenLineHistory });
       fireEvent.click(screen.getByRole("button", { name: "Blame" }));
       await screen.findByText("line 3");
 
