@@ -76,7 +76,13 @@ nothing to undo, and the window keeps its focus. It uses the repository's **Prun
 - It never asks for a password or a token. A remote that would need one (no saved HTTPS token,
   a locked credential store, no key in the SSH agent) is skipped, and a short notice names it
   once per session; **Credentials…** in the notice opens that remote's credentials. Other
-  failures, such as an unreachable server, stay quiet; the next fetch tries again.
+  failures stay quiet; the next fetch tries again.
+- It never keeps you waiting for a server that doesn't answer (VPN down, captive portal, server
+  offline). An action you start goes ahead at once, even while the background fetch is still
+  trying to connect, and a remote that hasn't answered within 30 seconds is given up on for that
+  fetch; the other remotes are still fetched. A remote that couldn't be reached is then fetched
+  less often, quietly: after twice the interval, then four times, up to once an hour. Fetching it
+  yourself, or a background fetch that gets through, brings back the normal interval.
 - It never makes your system ask to unlock its credential store (keychain, keyring) either.
   A saved HTTPS token is used in the background only after Browsitory has already read or
   saved a token in this session: a fetch, pull or push you started, or saving a token in a

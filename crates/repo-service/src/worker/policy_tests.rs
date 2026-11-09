@@ -748,7 +748,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
         (
             cmd!(FetchAllRemotes {
                 prune: None,
-                operation: git_core::remote::TransferOperation::FetchAll,
+                background: None,
                 operation_id: op(),
                 events: channel().0
             }),

@@ -189,8 +189,8 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const }],
       [() => vscodeRepoClient.getFetchSettings(), "get_fetch_settings", {}, { autoFetchMinutes: 0 }],
       [() => vscodeRepoClient.setFetchSettings({ autoFetchMinutes: 10 }), "set_fetch_settings", { settings: { autoFetchMinutes: 10 } }, null],
-      [() => vscodeRepoClient.backgroundFetch("/r", null), "background_fetch", { repoPath: "/r", prune: null }, "background-fetch-1"],
-      [() => vscodeRepoClient.backgroundFetch("/r", true), "background_fetch", { repoPath: "/r", prune: true }, null],
+      [() => vscodeRepoClient.backgroundFetch("/r", null, 5), "background_fetch", { repoPath: "/r", prune: null, intervalMinutes: 5 }, "background-fetch-1"],
+      [() => vscodeRepoClient.backgroundFetch("/r", true, 60), "background_fetch", { repoPath: "/r", prune: true, intervalMinutes: 60 }, null],
       [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const } }, null],
     ] as const;
 

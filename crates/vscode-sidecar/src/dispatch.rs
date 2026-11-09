@@ -256,7 +256,7 @@ methods!(|params, repos, stdout| {
     "checkout_commit" => checkout_commit(CommitIdParams, repos, stdout),
     "push_tags" => push_tags(PushTagsParams, repos, stdout),
     "fetch_all_remotes" => fetch_all_remotes(FetchAllRemotesParams, repos, stdout),
-    "background_fetch" => background_fetch(FetchAllRemotesParams, repos, stdout),
+    "background_fetch" => background_fetch(BackgroundFetchParams, repos, stdout),
     "push_branch" => push_branch(PushBranchParams, repos, stdout),
     "delete_remote_branch" => delete_remote_branch(DeleteRemoteBranchParams, repos, stdout),
     "delete_remote_tag" => delete_remote_tag(DeleteRemoteTagParams, repos, stdout),

@@ -1,8 +1,8 @@
 use std::cell::{Cell, RefCell};
 
 use git2::{
-    build::CheckoutBuilder, BranchType, Cred, CredentialType, ErrorCode, FetchOptions, FetchPrune,
-    PushOptions, RemoteCallbacks, Repository, StatusOptions, Tag,
+    build::CheckoutBuilder, BranchType, Cred, CredentialType, Direction, ErrorClass, ErrorCode,
+    FetchOptions, FetchPrune, PushOptions, RemoteCallbacks, Repository, StatusOptions, Tag,
 };
 use thiserror::Error;
 use url::Url;
@@ -356,6 +356,11 @@ pub enum RemoteError {
     StaleLease,
     #[error("the transfer was cancelled")]
     Cancelled,
+    /// Connecting to the remote failed at the network level (the host name did not resolve, the
+    /// connection was refused or timed out) before anything was transferred (#462). Reported
+    /// as `TransferFailed`, like any other transport failure.
+    #[error("could not reach the remote: {0}")]
+    Unreachable(git2::Error),
     /// `push.default` does not settle where `local_branch` goes on `remote` (e.g. `simple` with a
     /// differently named upstream): the caller must ask, e.g. with the "Push to…" dialog.
     #[error(
@@ -437,6 +442,44 @@ pub fn fetch_remote(
         credentials,
         reporter,
         cancel,
+        None,
+    )
+}
+
+/// Told when a fetch has connected to its remote (#462): the remote answered and sent its
+/// references, and nothing has been downloaded or written yet.
+pub trait ConnectWatch {
+    /// `false` stops the fetch there, as `Cancelled`, before it downloads or writes anything.
+    fn connected(&self) -> bool;
+}
+
+/// `fetch_remote`, reporting progress as `operation` and telling `watch` once connected, so a
+/// caller waiting on another thread can tell a fetch still connecting (which no callback
+/// interrupts) from one that is transferring, and give up on the first safely: a fetch whose
+/// `watch` answers `false` writes nothing. A connect that fails at the network level is
+/// `RemoteError::Unreachable`.
+#[allow(clippy::too_many_arguments)]
+pub fn fetch_remote_watched(
+    operation: TransferOperation,
+    repo: &Repository,
+    remote_name: &str,
+    prune: Option<bool>,
+    operation_id: &str,
+    credentials: &mut dyn CredentialProvider,
+    reporter: &mut dyn TransferReporter,
+    cancel: &dyn Fn() -> bool,
+    watch: &dyn ConnectWatch,
+) -> Result<(), RemoteError> {
+    fetch_with(
+        repo,
+        remote_name,
+        prune,
+        operation,
+        operation_id,
+        credentials,
+        reporter,
+        cancel,
+        Some(watch),
     )
 }
 
@@ -496,6 +539,7 @@ pub fn fetch_all_as<'c>(
                 provider.as_mut(),
                 reporter,
                 cancel,
+                None,
             )
         });
         match result {
@@ -517,10 +561,27 @@ fn fetch_with(
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
+    watch: Option<&dyn ConnectWatch>,
 ) -> Result<(), RemoteError> {
     let mut remote = repo.find_remote(remote_name)?;
     let credentials = RefCell::new(credentials);
     let reporter = RefCell::new(reporter);
+
+    // Connect first, on its own: `fetch` below reuses this connection (libgit2's
+    // `connect_or_reset_options`), so the fetch is the same, but the caller learns when the
+    // remote answered (`watch`), and a network-level connect failure is told apart from a
+    // failure later in the transfer (#462).
+    let mut connect_callbacks = RemoteCallbacks::new();
+    connect_callbacks.credentials(|url, username, allowed| {
+        credentials.borrow_mut().credential(url, username, allowed)
+    });
+    let mut connection = remote
+        .connect_auth(Direction::Fetch, Some(connect_callbacks), None)
+        .map_err(|error| connect_error(cancel, error))?;
+    if watch.is_some_and(|watch| !watch.connected()) || cancel() {
+        return Err(RemoteError::Cancelled);
+    }
+
     let mut callbacks = RemoteCallbacks::new();
 
     callbacks.credentials(|url, username, allowed| {
@@ -575,10 +636,38 @@ fn fetch_with(
     let mut options = FetchOptions::new();
     options.remote_callbacks(callbacks);
     options.prune(fetch_prune(prune));
-    match remote.fetch(&[] as &[&str], Some(&mut options), None) {
+    match connection
+        .remote()
+        .fetch(&[] as &[&str], Some(&mut options), None)
+    {
         Ok(()) => Ok(()),
         Err(error) => Err(cancellation_or(cancel, error)),
     }
+}
+
+/// Classifies a failed connect: a cancel, a network-level failure (`Unreachable`), or any other
+/// error (credentials, HTTP status, TLS, a local path that isn't a repository).
+fn connect_error(cancel: &dyn Fn() -> bool, error: git2::Error) -> RemoteError {
+    if cancel() {
+        RemoteError::Cancelled
+    } else if is_network_failure(&error) {
+        RemoteError::Unreachable(error)
+    } else {
+        RemoteError::Git(error)
+    }
+}
+
+/// libgit2's socket stream (HTTP(S) and SSH alike) gives no error code for a host it couldn't
+/// reach, only its messages: the name didn't resolve, or no address accepted the connection
+/// (refused, unreachable, timed out). Other `Net` errors (an unsupported URL, a protocol error)
+/// are not about reaching the host. Pinned by `a_fetch_whose_connection_is_refused_is_unreachable`
+/// and `fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref`.
+fn is_network_failure(error: &git2::Error) -> bool {
+    matches!(error.class(), ErrorClass::Net | ErrorClass::Os)
+        && (error.message().starts_with("failed to connect to ")
+            || error
+                .message()
+                .starts_with("failed to resolve address for "))
 }
 
 /// Classifies a failed transfer: libgit2 reports a callback-initiated abort as an ordinary

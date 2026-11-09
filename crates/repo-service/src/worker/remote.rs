@@ -248,9 +248,11 @@ fn complete(
         hook_output,
     });
 }
+#[allow(clippy::too_many_arguments)]
 pub(super) fn fetch<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
+    background: &super::background_fetch::Memory,
     remote_name: String,
     prune: Option<bool>,
     op: TransferOp,
@@ -279,6 +281,9 @@ pub(super) fn fetch<S: CredentialStore>(
             &cancel,
         )
     });
+    if result.is_ok() {
+        background.reachable(&remote_name);
+    }
     complete(&events, op, TransferOperation::Fetch, result);
 }
 pub(super) fn pull<S: CredentialStore>(
@@ -523,34 +528,19 @@ pub(super) struct PushTarget {
     pub(super) no_verify: bool,
 }
 
-/// Builds the credential provider for one remote of a Fetch all from its auth profile; for a
-/// background fetch, one that never makes the OS credential store prompt.
-fn credential_provider<'a, S: CredentialStore>(
-    repo: &git2::Repository,
-    credentials: &'a CredentialService<S>,
-    remote_name: &str,
-    background: bool,
-) -> Result<git_core::remote::BoxedCredentialProvider<'a>, git_core::remote::RemoteError> {
-    let profile = git_core::remote::remote_auth_profile(repo, remote_name)?;
-    Ok(Box::new(if background {
-        crate::credentials::RemoteCredentialProvider::without_prompt(credentials, profile)
-    } else {
-        crate::credentials::RemoteCredentialProvider::new(credentials, profile)
-    }))
-}
-
 pub(super) fn fetch_all<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
+    background: &super::background_fetch::Memory,
     prune: Option<bool>,
-    operation: TransferOperation,
     op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, String>>,
 ) {
+    const OPERATION: TransferOperation = TransferOperation::FetchAll;
     let _ = events.send(TransferEvent::Started {
         operation_id: op.id.clone(),
-        operation,
+        operation: OPERATION,
     });
     let _ = reply.send(Ok(op.id.clone()));
     let mut reporter = ChannelReporter {
@@ -558,28 +548,29 @@ pub(super) fn fetch_all<S: CredentialStore>(
         operation_id: op.id.clone(),
     };
     let cancel = op.cancel_check();
-    let result = git_core::remote::fetch_all_as(
-        operation,
+    let result = git_core::remote::fetch_all(
         repo,
         prune,
         op.id.clone(),
         &mut |remote_name| {
-            credential_provider(
-                repo,
-                credentials,
-                remote_name,
-                operation == TransferOperation::BackgroundFetch,
-            )
+            let profile = git_core::remote::remote_auth_profile(repo, remote_name)?;
+            let provider: git_core::remote::BoxedCredentialProvider<'_> = Box::new(
+                crate::credentials::RemoteCredentialProvider::new(credentials, profile),
+            );
+            Ok(provider)
         },
         &mut reporter,
         &cancel,
     );
     let error = match &result {
         Ok(outcome) => {
+            for remote_name in &outcome.fetched {
+                background.reachable(remote_name);
+            }
             for (remote_name, kind) in &outcome.failed {
                 let _ = events.send(TransferEvent::RemoteFailed {
                     operation_id: op.id.clone(),
-                    operation,
+                    operation: OPERATION,
                     remote_name: remote_name.clone(),
                     error: *kind,
                 });
@@ -596,7 +587,7 @@ pub(super) fn fetch_all<S: CredentialStore>(
     op.clear();
     let _ = events.send(TransferEvent::Completed {
         operation_id: op.id,
-        operation,
+        operation: OPERATION,
         error,
         hook_output: None,
     });
@@ -742,7 +733,7 @@ impl WorkerHandle {
         self.tx
             .send(Command::FetchAllRemotes {
                 prune,
-                operation: TransferOperation::FetchAll,
+                background: None,
                 operation_id,
                 events,
                 reply,
@@ -751,15 +742,29 @@ impl WorkerHandle {
         rx.recv()
             .map_err(|_| "worker thread stopped before replying".to_string())?
     }
-    /// Starts a quiet Fetch all for the "Fetch automatically" setting, reported as
-    /// `TransferOperation::BackgroundFetch`. Returns `None`, without queueing anything, while
-    /// any cancellable operation of this worker is queued or running (a fetch, pull or push, a
-    /// commit, merge, checkout and the rest that `CancelRegistry` tracks): a background fetch
-    /// never overlaps a manual fetch, another background fetch or a mutation, whichever tab or
-    /// spelling of the repository started it. Like every fetch it records no undo entry.
+    /// Starts a quiet Fetch all for the "Fetch automatically" setting, every `interval_minutes`,
+    /// reported as `TransferOperation::BackgroundFetch`. Returns `None`, without queueing
+    /// anything, while any cancellable operation of this worker is queued or running (a fetch,
+    /// pull or push, a commit, merge, checkout and the rest that `CancelRegistry` tracks): a
+    /// background fetch never overlaps a manual fetch, another background fetch or a mutation,
+    /// whichever tab or spelling of the repository started it. Like every fetch it records no
+    /// undo entry. A remote still connecting never holds the worker past a cancel, and a remote
+    /// that can't be reached backs off (see `background_fetch`).
     pub fn background_fetch(
         &self,
         prune: Option<bool>,
+        interval_minutes: u32,
+        events: Sender<TransferEvent>,
+    ) -> Result<Option<String>, String> {
+        self.background_fetch_with(
+            super::background_fetch::BackgroundFetchOptions::new(prune, interval_minutes),
+            events,
+        )
+    }
+
+    pub(super) fn background_fetch_with(
+        &self,
+        options: super::background_fetch::BackgroundFetchOptions,
         events: Sender<TransferEvent>,
     ) -> Result<Option<String>, String> {
         let Some(operation_id) = self.cancelled.allocate_if_idle("background-fetch") else {
@@ -768,8 +773,8 @@ impl WorkerHandle {
         let (reply, rx) = std::sync::mpsc::channel();
         self.tx
             .send(Command::FetchAllRemotes {
-                prune,
-                operation: TransferOperation::BackgroundFetch,
+                prune: options.prune,
+                background: Some(options),
                 operation_id,
                 events,
                 reply,

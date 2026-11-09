@@ -1931,6 +1931,24 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   touching the store. A remote failing with
   `MissingCredential`, `CredentialStoreFailure` or `SshAgentFailure` is named once per session
   in a toast. Like every fetch it records no undo entry.
+- **A background fetch never holds the worker on a remote that doesn't answer (#462).** A fetch
+  blocked connecting calls no libgit2 callback, so the `CancelRegistry` side channel can't reach
+  it, and libgit2's connect/read timeouts (`git2::opts`) are process-wide, so shortening them
+  would shorten manual fetches too. `worker/background_fetch.rs` therefore fetches each remote
+  on a helper thread with its own `Repository` while the worker polls it. `git-core`'s
+  `fetch_remote_watched` connects first (`connect_auth`; the fetch then reuses the connection)
+  and asks a `ConnectWatch` before downloading or writing anything. While the helper is still
+  connecting, the worker gives up on it on a cancel or after `BACKGROUND_CONNECT_LIMIT` (30 s):
+  under one lock it marks the fetch abandoned, so the watch answers `false` and the helper,
+  when the OS finally lets it go, writes nothing. Once connected the worker waits as for any
+  fetch; the callbacks see a cancel. Helpers report progress through the worker, never through
+  the caller's event channel, so an abandoned one keeps no listener open. A remote whose connect
+  failed at the network level (`RemoteError::Unreachable`: the host didn't resolve or accept
+  the connection) or ran out of time is skipped by later background fetches for twice the
+  interval, doubling up to an hour (`Memory`; `backgroundFetch` passes the interval); a remote
+  whose abandoned helper still waits is skipped too, so at most one per remote lingers. A
+  skipped remote is a quiet `RemoteFailed` (`TransferFailed`). A fetch that connects, manual or
+  background, ends the backoff. Manual fetches keep libgit2's defaults.
 - Push and force push of the current branch go where `git-core::remote::push_target` resolves
   from `push.default` (unset = `simple`): `upstream`/`tracking` push to the upstream's branch,
   `current` to the local name, `simple`/`matching` only when the names match, `nothing` never.

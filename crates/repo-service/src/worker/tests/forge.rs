@@ -2,26 +2,28 @@ use super::*;
 
 /// In-memory `CredentialStore` fake for worker tests — the design doc's "in-memory trait
 /// implementations only at external seams such as the keychain" rule applies here just as
-/// it does to `credentials.rs`'s own tests; the real OS keychain is never touched.
+/// it does to `credentials.rs`'s own tests; the real OS keychain is never touched. `Mutex`, not
+/// `RefCell`: the worker shares its store with background fetch helper threads.
 #[derive(Default)]
 struct FakeCredentialStore {
-    tokens: RefCell<HashMap<CredentialKey, String>>,
+    tokens: Mutex<HashMap<CredentialKey, String>>,
 }
 
 impl CredentialStore for FakeCredentialStore {
     fn get(&self, key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
-        Ok(self.tokens.borrow().get(key).cloned())
+        Ok(self.tokens.lock().unwrap().get(key).cloned())
     }
 
     fn set(&self, key: &CredentialKey, token: &str) -> Result<(), CredentialStoreError> {
         self.tokens
-            .borrow_mut()
+            .lock()
+            .unwrap()
             .insert(key.clone(), token.to_owned());
         Ok(())
     }
 
     fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError> {
-        self.tokens.borrow_mut().remove(key);
+        self.tokens.lock().unwrap().remove(key);
         Ok(())
     }
 }
