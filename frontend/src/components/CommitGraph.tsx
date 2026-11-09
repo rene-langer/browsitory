@@ -23,6 +23,7 @@ import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 import { RefBadges } from "./RefBadges";
 import { tagMenuItems } from "./tagMenuItems";
 import styles from "./CommitGraph.module.css";
@@ -609,10 +610,20 @@ export function CommitGraph({
     {tagToDelete !== null && (
       <ConfirmDialog
         ariaLabel={`Delete local tag ${tagToDelete}`}
-        message={`Delete local tag ${tagToDelete}?`}
+        message={
+          <>
+            <p>Delete local tag {tagToDelete}?</p>
+            {/* #521: the repository can become busy while the confirmation is open. */}
+            {pending && pendingReason !== null && <p className={formStyles.blocked}>{pendingReason}</p>}
+          </>
+        }
         confirmLabel="Delete tag"
         confirmDisabled={pending}
-        onConfirm={() => void onDeleteTag?.(tagToDelete).then(() => setTagToDelete(null))}
+        confirmTitle={busyTitle}
+        onConfirm={() => {
+          if (pending) return;
+          void onDeleteTag?.(tagToDelete).then(() => setTagToDelete(null));
+        }}
         onCancel={() => setTagToDelete(null)}
       />
     )}

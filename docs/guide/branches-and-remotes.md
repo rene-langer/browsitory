@@ -24,6 +24,9 @@ available from that commit's row in the graph.
 ("main tracks origin/main."). **Pull** pulls from it. **Clear upstream** removes the setting
 (after asking); the branches themselves don't change. To set an upstream, use **Set upstream…**
 in the current branch's menu, or **Set as upstream for current branch** on a remote branch.
+While a merge, rebase, cherry-pick or revert is in progress, or another action, a fetch, pull or
+push runs, deleting a branch and setting or clearing the upstream are disabled, and their
+confirmations say why.
 
 **From the keyboard.** Tab to a branch, a remote branch or a remote folder and press the Menu key
 or Shift+F10 (Fn+Shift+F10 on most Mac keyboards), or use its **…** button, to open the same menu.

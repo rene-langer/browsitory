@@ -14,6 +14,7 @@ import { coversEveryBranch } from "../lib/graphSelection";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { FormDialog } from "./primitives/FormDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
@@ -742,6 +743,10 @@ export function BranchTree({
     }
   };
 
+  // Why the force delete and upstream dialogs can't act now, shown in them (#521); `null` when
+  // nothing blocks.
+  const busyReason = operationDisabled ? operationDisabledReason : null;
+
   function branchContextItems(branch: BranchInfo): ContextMenuItem[] {
     const items: ContextMenuItem[] = [
       {
@@ -781,6 +786,9 @@ export function BranchTree({
       }
       items.push({
         label: "Set upstream…",
+        // Like "Set as upstream for current branch" in a remote branch's menu (#521).
+        disabled: operationDisabled,
+        title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
         onSelect: () => {
           setUpstreamRemoteField("");
           setUpstreamBranchField("");
@@ -805,7 +813,9 @@ export function BranchTree({
     });
     items.push({
       label: "Delete",
-      disabled: isRebasing,
+      // The one busy rule (#521): a soft delete that fails asks to force delete.
+      disabled: operationDisabled,
+      title: operationDisabled ? (operationDisabledReason ?? undefined) : undefined,
       destructive: true,
       onSelect: () => void handleDeleteClick(branch.name),
     });
@@ -1093,11 +1103,17 @@ export function BranchTree({
           <ConfirmDialog
             ariaLabel={`Force delete ${pendingForceFor}`}
             message={
-              <p>Force delete "{pendingForceFor}"? This discards any unmerged commits and cannot be undone.</p>
+              <>
+                <p>Force delete "{pendingForceFor}"? This discards any unmerged commits and cannot be undone.</p>
+                {/* #521: the repository can become busy while the confirmation is open. */}
+                {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
+              </>
             }
             confirmLabel="Force delete"
-            confirmDisabled={isRebasing}
+            confirmDisabled={operationDisabled}
+            confirmTitle={busyReason ?? undefined}
             onConfirm={() => {
+              if (operationDisabled) return;
               void onDeleteBranch(pendingForceFor, true);
               setPendingForceFor(null);
             }}
@@ -1196,7 +1212,12 @@ export function BranchTree({
               Pull
             </button>
             {upstream !== null && (
-              <button type="button" onClick={() => setClearUpstreamConfirm(true)}>
+              <button
+                type="button"
+                disabled={operationDisabled}
+                title={busyReason ?? undefined}
+                onClick={() => setClearUpstreamConfirm(true)}
+              >
                 Clear upstream
               </button>
             )}
@@ -1208,12 +1229,18 @@ export function BranchTree({
           <ConfirmDialog
             ariaLabel="Clear upstream confirmation"
             message={
-              <p>
-                Stop {upstream.localBranch} tracking {upstream.remoteName}/{upstream.remoteBranch}?
-              </p>
+              <>
+                <p>
+                  Stop {upstream.localBranch} tracking {upstream.remoteName}/{upstream.remoteBranch}?
+                </p>
+                {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
+              </>
             }
             confirmLabel="Clear upstream"
+            confirmDisabled={operationDisabled}
+            confirmTitle={busyReason ?? undefined}
             onConfirm={() => {
+              if (operationDisabled) return;
               setClearUpstreamConfirm(false);
               void onClearUpstream();
             }}
@@ -1230,7 +1257,7 @@ export function BranchTree({
               onSubmit={async (event) => {
                 event.preventDefault();
                 const branch = upstreamBranchField.trim();
-                if (upstreamRemoteField === "" || branch === "") return;
+                if (upstreamRemoteField === "" || branch === "" || operationDisabled) return;
                 await onSetUpstream(upstreamRemoteField, branch);
                 setUpstreamDialogOpen(false);
               }}
@@ -1269,7 +1296,10 @@ export function BranchTree({
                   <option key={name} value={name} />
                 ))}
               </datalist>
-              <button type="submit">Set upstream</button>
+              {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
+              <button type="submit" disabled={operationDisabled} title={busyReason ?? undefined}>
+                Set upstream
+              </button>
               <button type="button" onClick={() => setUpstreamDialogOpen(false)}>
                 Cancel
               </button>

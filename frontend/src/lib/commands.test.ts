@@ -1464,6 +1464,15 @@ describe("diff option and discard commands", () => {
     expect(commands.some((c) => c.id === "toggle-ignore-whitespace")).toBe(true);
   });
 
+  it("keeps discard commands during a merge, blocking them only while busy (#521)", () => {
+    const status = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }];
+    const merging = build(makeAppState({ mergeMessage: "Merge branch 'x'", status }), { currentFile: "a.txt" }).commands;
+    expect(merging.some((c) => c.id === "discard-current-file")).toBe(true);
+    expect(merging.some((c) => c.id === "discard-all-unstaged")).toBe(true);
+    const busy = build(makeAppState({ pending: true, mergeMessage: "Merge branch 'x'", status }), { currentFile: "a.txt" }).commands;
+    expect(busy.some((c) => c.id === "discard-all-unstaged")).toBe(false);
+  });
+
   it("offers the selected files' actions while two or more are selected (#449)", () => {
     const status = [
       { path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const },

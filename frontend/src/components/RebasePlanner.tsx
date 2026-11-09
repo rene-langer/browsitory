@@ -10,6 +10,7 @@ import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import type { PresetAction } from "../lib/rebaseSelection";
 import styles from "./RebasePlanner.module.css";
+import formStyles from "./primitives/FormDialog.module.css";
 
 type ActionKind = RebaseAction["kind"];
 
@@ -124,7 +125,7 @@ export function RebasePlanner({
   onto,
   onStartRebase,
   onCancel,
-  operationDisabled = false,
+  blockedReason = null,
   presetActions,
 }: {
   repoPath: string;
@@ -132,7 +133,8 @@ export function RebasePlanner({
   onto: string;
   onStartRebase: (onto: string, plan: RebasePlanEntry[]) => void;
   onCancel: () => void;
-  operationDisabled?: boolean;
+  /** Why repository operations are blocked now (`operationBlockers`), or `null` (#521). */
+  blockedReason?: string | null;
   // Per-commit actions to default to instead of "Pick" — set when the plan is opened from a
   // multi-select action in the commit graph, so the selection arrives already marked instead of
   // the user re-marking every row by hand. Every id must appear in the planned span (see
@@ -195,6 +197,7 @@ export function RebasePlanner({
   };
 
   const start = () => {
+    if (blockedReason !== null) return;
     const plan: RebasePlanEntry[] = rows.map((row) => {
       let action: RebaseAction;
       switch (row.actionKind) {
@@ -278,8 +281,9 @@ export function RebasePlanner({
           they can&apos;t be part of this rebase.
         </p>
       )}
+      {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
       <Toolbar>
-        <button onClick={start} disabled={operationDisabled || presetMissing}>
+        <button onClick={start} disabled={blockedReason !== null || presetMissing} title={blockedReason ?? undefined}>
           Start rebase
         </button>
         <button onClick={onCancel}>Cancel</button>
