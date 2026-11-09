@@ -9,7 +9,32 @@ use url::Url;
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_remote_message;
+    use super::{is_local_url, sanitize_remote_message};
+
+    #[test]
+    fn paths_are_local_and_hosts_are_not() {
+        for local in [
+            "/srv/repo.git",
+            "file:///srv/repo.git",
+            "../repo.git",
+            "repo.git",
+            "./a:b",
+        ] {
+            assert!(is_local_url(local), "{local}");
+        }
+        #[cfg(windows)]
+        assert!(is_local_url(r"C:\repos\x"));
+        for remote in [
+            "https://example.com/repo.git",
+            "http://127.0.0.1:9/repo.git",
+            "ssh://git@example.com/repo.git",
+            "git://example.com/repo.git",
+            "git@example.com:owner/repo.git",
+            "example.com:repo.git",
+        ] {
+            assert!(!is_local_url(remote), "{remote}");
+        }
+    }
 
     #[test]
     fn arbitrary_remote_messages_are_dropped_before_progress_records_are_built() {
@@ -575,9 +600,10 @@ fn fetch_with(
     connect_callbacks.credentials(|url, username, allowed| {
         credentials.borrow_mut().credential(url, username, allowed)
     });
+    let local = !remote.url().is_ok_and(|url| !is_local_url(url));
     let mut connection = remote
         .connect_auth(Direction::Fetch, Some(connect_callbacks), None)
-        .map_err(|error| connect_error(cancel, error))?;
+        .map_err(|error| connect_error(cancel, error, local))?;
     if watch.is_some_and(|watch| !watch.connected()) || cancel() {
         return Err(RemoteError::Cancelled);
     }
@@ -645,31 +671,6 @@ fn fetch_with(
     }
 }
 
-/// Classifies a failed connect: a cancel, a network-level failure (`Unreachable`), or any other
-/// error (credentials, HTTP status, TLS, a local path that isn't a repository).
-fn connect_error(cancel: &dyn Fn() -> bool, error: git2::Error) -> RemoteError {
-    if cancel() {
-        RemoteError::Cancelled
-    } else if is_network_failure(&error) {
-        RemoteError::Unreachable(error)
-    } else {
-        RemoteError::Git(error)
-    }
-}
-
-/// libgit2's socket stream (HTTP(S) and SSH alike) gives no error code for a host it couldn't
-/// reach, only its messages: the name didn't resolve, or no address accepted the connection
-/// (refused, unreachable, timed out). Other `Net` errors (an unsupported URL, a protocol error)
-/// are not about reaching the host. Pinned by `a_fetch_whose_connection_is_refused_is_unreachable`
-/// and `fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref`.
-fn is_network_failure(error: &git2::Error) -> bool {
-    matches!(error.class(), ErrorClass::Net | ErrorClass::Os)
-        && (error.message().starts_with("failed to connect to ")
-            || error
-                .message()
-                .starts_with("failed to resolve address for "))
-}
-
 /// Classifies a failed transfer: libgit2 reports a callback-initiated abort as an ordinary
 /// error, so the only way to tell "the user cancelled" from "the transport broke" is to ask the
 /// cancel signal again now that the call has returned.
@@ -678,6 +679,52 @@ fn cancellation_or(cancel: &dyn Fn() -> bool, error: git2::Error) -> RemoteError
         RemoteError::Cancelled
     } else {
         RemoteError::Git(error)
+    }
+}
+
+/// Classifies a failed connect: a cancel, a network-level failure (`Unreachable`), or any other
+/// error (credentials, HTTP status, TLS, a local path that isn't a repository). A remote on the
+/// file system is never unreachable: on Windows libgit2 reads a missing `C:\…` path as an
+/// SSH host `C` and fails to resolve it.
+fn connect_error(cancel: &dyn Fn() -> bool, error: git2::Error, local: bool) -> RemoteError {
+    if cancel() {
+        RemoteError::Cancelled
+    } else if !local && is_network_failure(&error) {
+        RemoteError::Unreachable(error)
+    } else {
+        RemoteError::Git(error)
+    }
+}
+
+/// A remote URL that names a path, not a host: `file://`, or an absolute or relative path.
+fn is_local_url(url: &str) -> bool {
+    if url.starts_with("file://") || std::path::Path::new(url).is_absolute() {
+        return true;
+    }
+    // `scheme://` and scp-like `[user@]host:path` name a host; anything else is a path.
+    !(url.contains("://")
+        || url
+            .split_once(':')
+            .is_some_and(|(host, _)| !host.contains('/')))
+}
+
+/// libgit2 gives no error code for a host it couldn't reach, only its messages. Its socket
+/// stream (HTTP(S) and SSH on Unix, SSH on Windows): the name didn't resolve, or no address
+/// accepted the connection (refused, unreachable, timed out). WinHTTP (HTTP(S) on Windows): the
+/// request could not be sent, with the system's reason (class `Os`). Other errors (an unsupported
+/// URL, a protocol error, an HTTP status) are not about reaching the host. Pinned by
+/// `a_fetch_whose_connection_is_refused_is_unreachable` and
+/// `fetch_from_an_unreachable_remote_fails_without_creating_a_tracking_ref`.
+fn is_network_failure(error: &git2::Error) -> bool {
+    let message = error.message();
+    match error.class() {
+        ErrorClass::Net | ErrorClass::Os => {
+            message.starts_with("failed to connect to ")
+                || message.starts_with("failed to resolve address for ")
+                || (error.class() == ErrorClass::Os
+                    && message.starts_with("failed to send request: "))
+        }
+        _ => false,
     }
 }
 
