@@ -10,8 +10,8 @@ import type {
 
 export interface WorktreeActions {
   // Resolves to `null` on success, or the failure message on failure — the "Create worktree"
-  // form is its own natural trigger point (see `createBranch`'s doc comment in `useAppState`
-  // for the shared rationale behind this shape).
+  // form is its own natural trigger point (see `BranchActions.createBranch`'s comment for
+  // the shared rationale behind this shape).
   createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<string | null>;
   removeWorktree(name: string): Promise<void>;
   pruneWorktrees(): Promise<void>;
