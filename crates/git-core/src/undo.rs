@@ -69,6 +69,10 @@ pub enum UndoError {
     FileInUse(String),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` is on and the checkout includes two paths that differ only in case
+    /// (#403); nothing was changed.
+    #[error(transparent)]
+    CasePair(#[from] crate::CasePair),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
@@ -437,9 +441,32 @@ impl WorktreeChange {
         let index_differs = expected.index_tree != target.index_tree;
         let mut index = repo.index()?;
         index.read(false)?;
+        // A case pair (`A` and `a`) under `core.ignorecase` stays a raw write: libgit2's forced
+        // checkout of one of them can drop the other from its ignore-case index or rename its
+        // entry (#403), and `prepare_forced_checkout` refuses it.
+        let in_pair: BTreeSet<Vec<u8>> = if crate::worktree_guard::core_ignorecase(repo)? {
+            let index_tree = repo.find_tree(Oid::from_str(&target.index_tree)?)?;
+            let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
+            let mut sources = vec![
+                crate::worktree_guard::GuardSource::Tree(&index_tree),
+                crate::worktree_guard::GuardSource::Index(&index),
+            ];
+            sources.extend(
+                head_tree
+                    .as_ref()
+                    .map(crate::worktree_guard::GuardSource::Tree),
+            );
+            crate::worktree_guard::case_pairs(&sources.iter().collect::<Vec<_>>())?
+                .into_iter()
+                .flatten()
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
         let from_index = paths
             .iter()
             .filter(|path| !is_ignore_file(path))
+            .filter(|path| !in_pair.contains(path.as_bytes()))
             .filter(|path| {
                 let wanted = to.get(*path);
                 wanted.is_some()

@@ -1213,6 +1213,18 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   symlink is not a hazard. Call sites: `reset_to(Hard)`, `discard_file`, undo/redo
   `checkout_from_index`, `abort_merge` (merge, cherry-pick, revert, sequences),
   `resolve_whole_file`, `restore_original_branch` (abort rebase and its rollback).
+- With `core.ignorecase` on, `prepare_forced_checkout` first refuses (`worktree_guard::CasePair`,
+  writing nothing) when the checkout's target, HEAD or the index holds a case pair (`A` and `a`,
+  compared as libgit2's ignore-case index does: whole paths, ASCII case only) that the checkout
+  selects: any pair for a whole-tree checkout, a pair one of the literal paths selects otherwise
+  (#403). libgit2 1.9 keeps only one of such a pair in its index, and depending on directory
+  order deletes the other's file, even when both are named as paths
+  (`tests/case_pair_checkout.rs` pins this; the stash's own form of it is `StashError::CasePair`,
+  #392). Seen: `reset_to(Hard)` deleted `d/f` of `D/f`/`d/f`, rebase abort dropped it from the
+  index too, and `discard_file("x/B")` left `x/b` twice in the index. A path-limited checkout of
+  other paths keeps the pair and goes ahead. `start_rebase` runs the same check (onto, HEAD and
+  index) before it writes anything, so a rebase it starts can always be aborted. Undo/redo
+  routes around it: a pair member is never one of `checkout_from_index`'s paths but a raw write.
 - "Stash all" cannot clear links in between libgit2's record and reset, so with a hazard it goes
   through the path-limited stash (batch 4c) with every changed path: a file link is stashed and
   then replaced, a folder link is refused (`BeyondSymlink`).

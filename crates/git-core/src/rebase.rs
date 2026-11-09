@@ -23,6 +23,10 @@ pub enum RebaseError {
     LinkedFolder(#[from] crate::LinkedFolder),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` is on and the checkout includes two paths that differ only in case
+    /// (#403); nothing was changed.
+    #[error(transparent)]
+    CasePair(#[from] crate::CasePair),
     /// libgit2 merged a file and a folder of the same name without a conflict; nothing the
     /// step would write was written (#410).
     #[error(transparent)]
@@ -384,6 +388,17 @@ pub fn start_rebase(
         ));
     }
 
+    // The rollback below and Abort force-check-out the whole branch, which with
+    // `core.ignorecase` drops one of a case pair from the index or deletes its file (#403):
+    // refuse up front, so a started rebase can be aborted (and the pair, which status reports
+    // as changed, isn't refused as local changes).
+    let onto_tree = repo.revparse_single(onto)?.peel_to_commit()?.tree()?;
+    crate::worktree_guard::refuse_case_pair::<RebaseError, &str>(
+        repo,
+        Some(&crate::worktree_guard::GuardSource::Tree(&onto_tree)),
+        None,
+    )?;
+
     // Before anything is written: the rollback below and Abort force-check-out the branch, so
     // they may only ever discard what the rebase itself wrote (#170).
     let changes = local_changes(repo)?;
@@ -400,7 +415,6 @@ pub fn start_rebase(
     // the way) leaves the repo exactly as it was — the same safety ordering
     // `branch::switch_branch` and `merge::start_merge`'s fast-forward path already use.
     // Safe checkouts create files through a symlinked folder (#114).
-    let onto_tree = onto_commit.tree()?;
     crate::worktree_guard::refuse_linked_folders::<RebaseError>(
         repo,
         &[crate::worktree_guard::Incoming::Checkout(&onto_tree)],

@@ -335,6 +335,102 @@ pub struct CaseCollision {
     pub folder: String,
 }
 
+/// Two tracked paths that differ only in ASCII case (`A` and `a`, committed on a case-sensitive
+/// drive) while `core.ignorecase` is on (#403). libgit2's ignore-case index takes them for one
+/// entry: a forced checkout that includes them keeps only one in the index and, depending on
+/// the order the directory lists them in, deletes the other's file (#392).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "'{path}' and '{other}' differ only in case, which this repository's core.ignorecase \
+     setting takes for one name, so the checkout would remove one of them. Rename one of the \
+     two in the repository first."
+)]
+pub struct CasePair {
+    pub path: String,
+    pub other: String,
+}
+
+/// The case pairs (see [`CasePair`]) among the entries of `sources`: groups of whole paths that
+/// libgit2's ignore-case index takes for one (byte by byte, ASCII letters folded), each sorted.
+/// Submodule entries count too: the index holds them like files.
+pub(crate) fn case_pairs(sources: &[&GuardSource]) -> Result<Vec<BTreeSet<Vec<u8>>>, git2::Error> {
+    let mut names = std::collections::BTreeMap::<Vec<u8>, BTreeSet<Vec<u8>>>::new();
+    let mut add = |path: Vec<u8>| {
+        names
+            .entry(path.to_ascii_lowercase())
+            .or_default()
+            .insert(path);
+    };
+    for source in sources {
+        match source {
+            GuardSource::Index(index) => index.iter().for_each(|entry| add(entry.path)),
+            GuardSource::Tree(tree) => {
+                tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+                    if entry.kind() != Some(git2::ObjectType::Tree) {
+                        add([root.as_bytes(), entry.name_bytes()].concat());
+                    }
+                    git2::TreeWalkResult::Ok
+                })?;
+            }
+        }
+    }
+    Ok(names
+        .into_values()
+        .filter(|names| names.len() > 1)
+        .collect())
+}
+
+/// The first of [`case_pairs`], optionally only one a forced checkout limited to the literal
+/// `paths` would select.
+fn find_case_pair<P: AsRef<[u8]>>(
+    sources: &[&GuardSource],
+    paths: Option<&[P]>,
+) -> Result<Option<CasePair>, git2::Error> {
+    let pair = case_pairs(sources)?.into_iter().find(|names| {
+        paths.is_none_or(|paths| names.iter().any(|name| selected(name, paths, true)))
+    });
+    Ok(pair.map(|names| {
+        let mut names = names
+            .into_iter()
+            .map(|name| String::from_utf8_lossy(&name).into_owned());
+        CasePair {
+            path: names.next().unwrap_or_default(),
+            other: names.next().unwrap_or_default(),
+        }
+    }))
+}
+
+/// Refuses a forced checkout of `sources` (optionally limited to `paths`) that would include a
+/// case pair, when `core.ignorecase` is on (#403). HEAD's tree and the index count as well as
+/// the target: the checkout compares against them, and a pair in either was dropped. Writes
+/// nothing.
+pub(crate) fn refuse_case_pair<E, P>(
+    repo: &git2::Repository,
+    target: Option<&GuardSource>,
+    paths: Option<&[P]>,
+) -> Result<(), E>
+where
+    E: From<git2::Error> + From<CasePair> + From<CaseConfigUnreadable>,
+    P: AsRef<[u8]>,
+{
+    if !core_ignorecase(repo)? {
+        return Ok(());
+    }
+    let head_tree = repo.head().and_then(|head| head.peel_to_tree()).ok();
+    let head = head_tree.as_ref().map(GuardSource::Tree);
+    let index = repo.index()?;
+    let index = GuardSource::Index(&index);
+    let sources: Vec<&GuardSource> = target
+        .into_iter()
+        .chain(head.as_ref())
+        .chain(Some(&index))
+        .collect();
+    match find_case_pair(&sources, paths)? {
+        Some(pair) => Err(pair.into()),
+        None => Ok(()),
+    }
+}
+
 /// The code points HFS+ ignores in names (the list git's `is_hfs_dotgit` uses).
 fn hfs_ignorable(c: char) -> bool {
     matches!(
@@ -770,7 +866,11 @@ pub(crate) fn prepare_forced_checkout<E, P>(
     paths: Option<&[P]>,
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<io::Error> + From<CaseCollision> + From<CaseConfigUnreadable>,
+    E: From<git2::Error>
+        + From<io::Error>
+        + From<CaseCollision>
+        + From<CasePair>
+        + From<CaseConfigUnreadable>,
     P: AsRef<[u8]>,
 {
     prepare_forced_checkout_known(repo, target, paths, None)
@@ -785,7 +885,11 @@ pub(crate) fn prepare_forced_checkout_known<E, P>(
     also_known: Option<&git2::Tree>,
 ) -> Result<(), E>
 where
-    E: From<git2::Error> + From<io::Error> + From<CaseCollision> + From<CaseConfigUnreadable>,
+    E: From<git2::Error>
+        + From<io::Error>
+        + From<CaseCollision>
+        + From<CasePair>
+        + From<CaseConfigUnreadable>,
     P: AsRef<[u8]>,
 {
     let Some(workdir) = repo.workdir() else {
@@ -795,6 +899,8 @@ where
     // (#225). libgit2's checkout counts an invalid value as false but its attribute and ignore
     // parsing refuses it, so going on could remove the links below and then stop half-way.
     let ignore_case = core_ignorecase(repo)?;
+    // libgit2's ignore-case index keeps one of a case pair the checkout includes (#403).
+    refuse_case_pair::<E, P>(repo, target, paths)?;
     let folds = cfg!(any(target_os = "macos", windows)) || ignore_case;
     // A collision the target brings in is refused; one HEAD already holds (aborting a merge,
     // `reset --hard` to HEAD, discarding) isn't, so such a repository can still be cleaned up.
