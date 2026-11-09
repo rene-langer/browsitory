@@ -428,9 +428,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # sidecarBridge.real.test.ts spawns the real vscode-sidecar binary and only builds it
-      # itself as a fallback if missing; on a cold CI runner that inline `cargo build` blows
-      # the test's own timeout, so prebuild it here instead.
+      # sidecarBridge.real.test.ts spawns the real vscode-sidecar binary and never builds it
+      # (#552): locally a missing binary skips the test, under CI it fails the run. So this
+      # step must stay before `pnpm test`.
       - name: Build dev sidecar
         working-directory: .
         run: cargo build -p vscode-sidecar

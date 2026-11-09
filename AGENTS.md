@@ -39,11 +39,15 @@ pnpm test -- --run
 ```
 
 ```bash
+cargo build -p vscode-sidecar                      # from repo root, before the extension tests
 cd extension
 pnpm install
 pnpm test -- --run
 pnpm run compile
 ```
+
+`src/sidecarBridge.real.test.ts` spawns the real `target/debug/vscode-sidecar` and never builds
+it: without the binary it is skipped with a note, and under `CI` it fails instead (#552).
 
 ### E2E: Tauri app (tauri-driver + WebdriverIO), from repo root
 
