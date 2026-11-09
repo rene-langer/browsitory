@@ -1,14 +1,10 @@
 import path from "node:path";
 import os from "node:os";
 import { expect } from "@wdio/globals";
-import { sidebarSectionToggle } from "../support/sidebar";
+import { waitForAppReady } from "../support/app";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const E2E_SECOND_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-second-repo");
-
-async function waitForAppReady(): Promise<void> {
-  await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 10000 });
-}
 
 describe("Browsitory multi-repo tabs", () => {
   it("opens a second, independent repo as a new tab, switches, and isolates per-tab state", async () => {
@@ -17,20 +13,20 @@ describe("Browsitory multi-repo tabs", () => {
     await browser.execute((el) => (el as HTMLElement).click(), await $('button[aria-label="Open another repository"]'));
 
     const secondRepoRow = await $(`li*=${E2E_SECOND_REPO_PATH}`);
-    await secondRepoRow.waitForExist({ timeout: 10000 });
+    await secondRepoRow.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), secondRepoRow);
 
     await browser.waitUntil(
       async () => (await (await $$('[role="tab"]')).length) === 2,
-      { timeout: 10000, timeoutMsg: "expected a second tab after opening the second repo" },
+      { timeoutMsg: "expected a second tab after opening the second repo" },
     );
 
     const secondTab = await $(`button[title="${E2E_SECOND_REPO_PATH}"]`);
-    await secondTab.waitForExist({ timeout: 10000 });
+    await secondTab.waitForExist();
     expect(await secondTab.getAttribute("aria-selected")).toBe("true");
 
     const secondRepoCommit = await $("li*=e2e: second repo base commit");
-    await secondRepoCommit.waitForExist({ timeout: 10000 });
+    await secondRepoCommit.waitForExist();
 
     // Switch back to the first tab and confirm the second repo's commit isn't visible there —
     // proves per-tab state isolation, not just that two tabs exist.
@@ -38,7 +34,7 @@ describe("Browsitory multi-repo tabs", () => {
     await browser.execute((el) => (el as HTMLElement).click(), firstTab);
     await browser.waitUntil(
       async () => (await firstTab.getAttribute("aria-selected")) === "true",
-      { timeout: 10000, timeoutMsg: "expected switching back to focus the first tab" },
+      { timeoutMsg: "expected switching back to focus the first tab" },
     );
     // `isExisting()`, the strict check: `App.tsx` mounts only the active tab's `RepoWorkspace`
     // (inactive tabs are unmounted, not hidden with `display: none` — PERF-001), so once the
@@ -56,7 +52,7 @@ describe("Browsitory multi-repo tabs", () => {
     );
     await browser.waitUntil(
       async () => (await (await $$('[role="tab"]')).length) === 1,
-      { timeout: 10000, timeoutMsg: "expected the second tab to close" },
+      { timeoutMsg: "expected the second tab to close" },
     );
   });
 });

@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { waitUntilInPage } from "../support/dom";
 import { expandSidebarSection, sidebarBranchRow, sidebarRemoteFolder, sidebarSectionToggle } from "../support/sidebar";
+import { SLOW_UI_TIMEOUT } from "../support/timeouts";
 import { DEMO_REPO_PATH, startConflict } from "./demoRepo";
 
 // Captures the documentation screenshots into docs/guide/assets/ (see ./README.md). Run it with
@@ -19,13 +20,13 @@ const WINDOW = { width: 1280, height: 800 };
 
 async function click(selector: string): Promise<void> {
   const element = await $(selector);
-  await element.waitForExist({ timeout: 10000 });
+  await element.waitForExist();
   await browser.execute((el) => (el as HTMLElement).click(), element);
 }
 
 async function collapseSidebarSection(title: string): Promise<void> {
   const trigger = await $(sidebarSectionToggle(title));
-  await trigger.waitForExist({ timeout: 10000 });
+  await trigger.waitForExist();
   if ((await trigger.getAttribute("aria-expanded")) === "true") {
     await browser.execute((el) => (el as HTMLElement).click(), trigger);
   }
@@ -54,14 +55,13 @@ describe("Documentation screenshots", () => {
     // Start from default sidebar state; the E2E build has just opened its own fixture repo.
     await browser.execute(() => localStorage.clear());
     await browser.refresh();
-    await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: 15000 });
+    await $(sidebarSectionToggle("Branches")).waitForExist({ timeout: SLOW_UI_TIMEOUT });
     await setTheme("light");
 
     // Open the demo from the picker's recent list, then close the E2E fixture's tab.
     await click('button[aria-label="Open another repository"]');
     await click(`li*=${DEMO_REPO_PATH}`);
     await browser.waitUntil(async () => (await (await $$('[role="tab"]')).length) === 2, {
-      timeout: 10000,
       timeoutMsg: "the demo repository did not open in a second tab",
     });
     const fixtureTabClose = await $(
@@ -69,14 +69,13 @@ describe("Documentation screenshots", () => {
     );
     await browser.execute((el) => (el as HTMLElement).click(), fixtureTabClose);
     await browser.waitUntil(async () => (await (await $$('[role="tab"]')).length) === 1, {
-      timeout: 10000,
       timeoutMsg: "the E2E fixture tab did not close",
     });
-    await $("li*=Add setup steps to the README").waitForExist({ timeout: 10000 });
+    await $("li*=Add setup steps to the README").waitForExist();
   });
 
   it("overview", async () => {
-    await $("li*=Uncommitted changes").waitForExist({ timeout: 10000 });
+    await $("li*=Uncommitted changes").waitForExist();
     await shoot("overview");
   });
 
@@ -103,9 +102,9 @@ describe("Documentation screenshots", () => {
 
   it("branches", async () => {
     await expandSidebarSection("Branches");
-    await $(sidebarBranchRow("feature/offline-tiles")).waitForExist({ timeout: 10000 });
+    await $(sidebarBranchRow("feature/offline-tiles")).waitForExist();
     const origin = await $(sidebarRemoteFolder("origin"));
-    await origin.waitForExist({ timeout: 10000 });
+    await origin.waitForExist();
     if ((await origin.getAttribute("aria-expanded")) !== "true") {
       await browser.execute((el) => (el as HTMLElement).click(), origin);
       await browser.waitUntil(async () => (await origin.getAttribute("aria-expanded")) === "true", {
@@ -119,14 +118,14 @@ describe("Documentation screenshots", () => {
   it("stashes", async () => {
     await collapseSidebarSection("Branches");
     await expandSidebarSection("Stashes");
-    await $("span*=Try a closer default zoom").waitForExist({ timeout: 10000 });
+    await $("span*=Try a closer default zoom").waitForExist();
     await shoot("stashes");
   });
 
   it("tags", async () => {
     await collapseSidebarSection("Stashes");
     await expandSidebarSection("Tags");
-    await $('button[aria-label="Actions for v0.2.0"]').waitForExist({ timeout: 10000 });
+    await $('button[aria-label="Actions for v0.2.0"]').waitForExist();
     await shoot("tags");
     await collapseSidebarSection("Tags");
     await expandSidebarSection("Branches");
@@ -135,13 +134,13 @@ describe("Documentation screenshots", () => {
   it("command-palette", async () => {
     await browser.keys(["Control", "k"]);
     const input = await $('input[aria-label="Command palette"]');
-    await input.waitForDisplayed({ timeout: 10000 });
+    await input.waitForDisplayed();
     await input.setValue("branch");
     // Any matching command will do: the palette lists several.
     await waitUntilInPage("li", "Branch", { contains: true });
     await browser.saveScreenshot(path.join(ASSETS, "command-palette.png"));
     await browser.keys(["Escape"]);
-    await input.waitForDisplayed({ reverse: true, timeout: 10000 });
+    await input.waitForDisplayed({ reverse: true });
   });
 
   it("conflict", async () => {
@@ -149,7 +148,7 @@ describe("Documentation screenshots", () => {
     // Reload status through the palette's "Refresh" command.
     await browser.keys(["Control", "k"]);
     const input = await $('input[aria-label="Command palette"]');
-    await input.waitForDisplayed({ timeout: 10000 });
+    await input.waitForDisplayed();
     await input.setValue("Refresh");
     await browser.keys(["Enter"]);
     // The status strip and the commit box both offer it.
@@ -157,7 +156,7 @@ describe("Documentation screenshots", () => {
     await click("li*=Uncommitted changes");
     // Bring the conflicted file's resolve controls into view.
     const conflicted = await $("span*=src/search.js (Conflicted)");
-    await conflicted.waitForExist({ timeout: 10000 });
+    await conflicted.waitForExist();
     await browser.execute((el) => {
       (el as HTMLElement).scrollIntoView({ block: "start" });
       // scrollIntoView also scrolls ancestors that only clip (overflow: hidden), shifting the whole

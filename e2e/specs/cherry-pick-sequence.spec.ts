@@ -1,16 +1,15 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { gitIn } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
-const git = (...args: string[]) =>
-  execFileSync("git", args, { cwd: E2E_REPO_PATH }).toString().trim();
+const git = gitIn(E2E_REPO_PATH);
 
 async function jsClick(selector: string) {
   const el = await $(selector);
-  await el.waitForExist({ timeout: 10000 });
+  await el.waitForExist();
   await browser.execute((node) => (node as HTMLElement).click(), el);
 }
 
@@ -45,7 +44,7 @@ describe("Browsitory cherry-pick sequence", () => {
   it("cherry-picks three commits, resolves the conflict with whole-file ours, and continues", async () => {
     await browser.refresh();
     const first = await $("li*=e2e: seq one");
-    await first.waitForExist({ timeout: 10000 });
+    await first.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), first);
     // Synthetic ctrl-click: see rebase.spec.ts on why a real held modifier is avoided.
     for (const summary of ["e2e: seq two", "e2e: seq three"]) {
@@ -57,7 +56,7 @@ describe("Browsitory cherry-pick sequence", () => {
     await jsClick("button=Cherry-pick 3 commits");
 
     const strip = await $('[aria-label="Operation status"]');
-    await strip.waitForExist({ timeout: 10000 });
+    await strip.waitForExist();
     await expect(strip).toHaveText(expect.stringContaining("Cherry-picking 2/3"));
     // Paused on step two: one commit landed, the sequence is stored on disk.
     expect(git("log", "--format=%s", `${startTip}..HEAD`)).toBe("e2e: seq one");
@@ -65,19 +64,18 @@ describe("Browsitory cherry-pick sequence", () => {
 
     await jsClick("li*=Uncommitted changes");
     const conflicted = await $("span*=seq-shared.txt (Conflicted)");
-    await conflicted.waitForExist({ timeout: 10000 });
+    await conflicted.waitForExist();
     await conflicted.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflicted);
     const ours = await $("button=Use ours (whole file)");
-    await ours.waitForEnabled({ timeout: 10000 });
+    await ours.waitForEnabled();
     await browser.execute((el) => (el as HTMLElement).click(), ours);
 
     const cont = await strip.$("button=Continue");
-    await cont.waitForEnabled({ timeout: 10000 });
+    await cont.waitForEnabled();
     await browser.execute((el) => (el as HTMLElement).click(), cont);
 
     await browser.waitUntil(() => git("log", "-1", "--format=%s") === "e2e: seq three", {
-      timeout: 10000,
       timeoutMsg: "the sequence did not finish",
     });
     expect(git("log", "--format=%s", `${startTip}..HEAD`).split("\n")).toEqual([
@@ -91,13 +89,13 @@ describe("Browsitory cherry-pick sequence", () => {
     // `git log` wait above can return while the file is still there (#182).
     await browser.waitUntil(
       () => !fs.existsSync(path.join(E2E_REPO_PATH, ".git", "browsitory", "sequence.json")),
-      { timeout: 10000, timeoutMsg: "the stored sequence (sequence.json) was not cleared" },
+      { timeoutMsg: "the stored sequence (sequence.json) was not cleared" },
     );
     // Polled in the page rather than through an element handle: the strip is removed while
     // the app refreshes, and a handle to it can go stale mid-wait (a tauri-driver flake).
     await browser.waitUntil(
       () => browser.execute(() => document.querySelector('[aria-label="Operation status"]') === null),
-      { timeout: 10000, timeoutMsg: "the operation status strip did not go away" },
+      { timeoutMsg: "the operation status strip did not go away" },
     );
   });
 });

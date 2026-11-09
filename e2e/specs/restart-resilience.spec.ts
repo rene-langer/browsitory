@@ -1,15 +1,14 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { reloadSessionWithRetry } from "../support/session";
+import { gitIn } from "../support/git";
+import { RESTART_TIMEOUT } from "../support/timeouts";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 
-function git(...args: string[]): string {
-  return execFileSync("git", args, { cwd: E2E_REPO_PATH }).toString().trim();
-}
+const git = gitIn(E2E_REPO_PATH);
 
 function commitFile(fileName: string, content: string, message: string) {
   fs.writeFileSync(path.join(E2E_REPO_PATH, fileName), content);
@@ -65,7 +64,7 @@ async function clickContinueRebaseWhenSettled(): Promise<void> {
         button.click();
         return true;
       }),
-    { timeout: 20000, interval: 200, timeoutMsg: "Continue rebase never stayed clickable in the restarted app" },
+    { timeout: RESTART_TIMEOUT, interval: 200, timeoutMsg: "Continue rebase never stayed clickable in the restarted app" },
   );
 }
 
@@ -90,22 +89,21 @@ describe("Browsitory restart resilience", () => {
     this.timeout(120000);
     await browser.refresh();
     const onto = await $("li*=e2e: restart onto-point commit");
-    await onto.waitForExist({ timeout: 10000 });
+    await onto.waitForExist();
     // A synthetic contextmenu event, as rebase.spec.ts does (a real right-click leaves WebKitGTK's
     // modifier state stuck).
     await browser.execute((el) => {
       el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 50, clientY: 50 }));
     }, onto);
     const rebaseButton = await $("button*=Rebase onto here");
-    await rebaseButton.waitForExist({ timeout: 10000 });
+    await rebaseButton.waitForExist();
     await rebaseButton.click();
     const editRow = await $("//li[contains(., 'e2e: restart commit a')]//select[@aria-label='Action']");
-    await editRow.waitForExist({ timeout: 10000 });
+    await editRow.waitForExist();
     await editRow.selectByVisibleText("Edit");
     await (await $("button=Start rebase")).click();
 
     await browser.waitUntil(async () => (await stripText()).includes("Rebasing, step 1 of 2"), {
-      timeout: 10000,
       timeoutMsg: "the rebase did not pause at the edit step",
     });
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git/browsitory/rebase.json"))).toBe(true);
@@ -113,7 +111,7 @@ describe("Browsitory restart resilience", () => {
     await reloadSessionWithRetry();
 
     await browser.waitUntil(async () => (await stripText()).includes("Rebasing, step 1 of 2"), {
-      timeout: 20000,
+      timeout: RESTART_TIMEOUT,
       timeoutMsg: "the restarted app did not show the paused rebase",
     });
     await clickContinueRebaseWhenSettled();
@@ -128,7 +126,7 @@ describe("Browsitory restart resilience", () => {
           lastStrip = await stripText();
           return lastStrip === "";
         },
-        { timeout: 20000 },
+        { timeout: RESTART_TIMEOUT },
       );
     } catch (err) {
       const alerts = await alertTexts().catch(() => "(could not read the alerts)");
@@ -139,6 +137,6 @@ describe("Browsitory restart resilience", () => {
     expect(git("log", "-2", "--format=%s").split("\n")).toEqual(["e2e: restart commit b", "e2e: restart commit a"]);
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git/browsitory/rebase.json"))).toBe(false);
     expect(git("symbolic-ref", "-q", "HEAD")).toMatch(/^refs\/heads\//);
-    await $("button[aria-label^='Undo Rebase onto']").waitForExist({ timeout: 10000 });
+    await $("button[aria-label^='Undo Rebase onto']").waitForExist();
   });
 });

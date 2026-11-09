@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { clickInPage, waitUntilInPage } from "../support/dom";
+import { gitIn } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "wrap-fixture.rs";
@@ -13,7 +13,8 @@ const LONG = `let long = ${"x".repeat(200)};`;
 const lines = (changed: Record<number, string>) =>
   Array.from({ length: 60 }, (_, i) => changed[i + 1] ?? `l${i + 1}`).join("\n") + "\n";
 
-const git = (...args: string[]) => execFileSync("git", args, { cwd: E2E_REPO_PATH, encoding: "utf8" });
+// Untrimmed: the index blob is compared with the whole file, trailing newline included.
+const git = gitIn(E2E_REPO_PATH, { trim: false });
 
 describe("Browsitory diff word wrap and whole file", () => {
   before(() => {
@@ -30,7 +31,7 @@ describe("Browsitory diff word wrap and whole file", () => {
 
   it("wraps long lines on demand and keeps their line numbers", async () => {
     const row = await $(`span=${FILE} (Modified)`);
-    await row.waitForExist({ timeout: 10000 });
+    await row.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), row);
     await waitUntilInPage(".diff-line-add");
 
@@ -85,7 +86,7 @@ describe("Browsitory diff word wrap and whole file", () => {
     });
     await clickInPage("button", "Stage lines (2)");
     await browser
-      .waitUntil(() => git("show", `:${FILE}`) === lines({ 45: "changed 45" }), { timeout: 10000 })
+      .waitUntil(() => git("show", `:${FILE}`) === lines({ 45: "changed 45" }))
       .catch(() => {});
     expect(git("show", `:${FILE}`)).toBe(lines({ 45: "changed 45" }));
   });

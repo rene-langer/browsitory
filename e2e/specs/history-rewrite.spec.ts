@@ -1,13 +1,13 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { clickInPage, waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
+import { gitIn } from "../support/git";
+import { SLOW_UI_TIMEOUT } from "../support/timeouts";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
-const git = (...args: string[]) =>
-  execFileSync("git", args, { cwd: E2E_REPO_PATH }).toString().trim();
+const git = gitIn(E2E_REPO_PATH);
 
 /**
  * Picks `label` from the context menu of `commitId`'s row in the commit graph.
@@ -38,13 +38,13 @@ async function chooseFromCommitMenu(commitId: string, label: string) {
         commitId,
         label,
       ),
-    { timeout: 10000, timeoutMsg: `could not pick "${label}" from the menu of commit ${commitId}` },
+    { timeoutMsg: `could not pick "${label}" from the menu of commit ${commitId}` },
   );
 }
 
 async function clickButton(label: string) {
   const item = await $(`button*=${label}`);
-  await item.waitForExist({ timeout: 10000 });
+  await item.waitForExist();
   await browser.execute((el) => (el as HTMLElement).click(), item);
 }
 
@@ -67,9 +67,7 @@ describe("Browsitory history rewrite", () => {
   it("cherry-picks a commit, reverts it, then resets hard back", async () => {
     await chooseFromCommitMenu(sourceCommit, "Cherry-pick");
     // Wait on the commit, not the file: checkout writes picked.txt before the commit lands.
-    await browser.waitUntil(() => git("log", "-1", "--format=%s") === "e2e: commit to cherry-pick", {
-      timeout: 10000,
-    });
+    await browser.waitUntil(() => git("log", "-1", "--format=%s") === "e2e: commit to cherry-pick");
     expect(fs.existsSync(path.join(E2E_REPO_PATH, "picked.txt"))).toBe(true);
 
     // The picked copy is HEAD now. (Picked in the same second as the original, it has the same
@@ -77,17 +75,16 @@ describe("Browsitory history rewrite", () => {
     await chooseFromCommitMenu(git("rev-parse", "HEAD"), "Revert");
     await browser.waitUntil(
       () => git("log", "-1", "--format=%s") === 'Revert "e2e: commit to cherry-pick"',
-      { timeout: 10000 },
     );
     expect(fs.existsSync(path.join(E2E_REPO_PATH, "picked.txt"))).toBe(false);
 
     await chooseFromCommitMenu(startTip, `Reset ${baseBranch} to here…`);
     const hard = await $("input[type=radio][value=hard]");
-    await hard.waitForExist({ timeout: 10000 });
+    await hard.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), hard);
     await clickButton("Reset");
     await clickButton("Reset hard");
-    await browser.waitUntil(() => git("rev-parse", "HEAD") === startTip, { timeout: 10000 });
+    await browser.waitUntil(() => git("rev-parse", "HEAD") === startTip);
   });
 });
 
@@ -107,7 +104,7 @@ describe("Browsitory one-click history edits", () => {
   const subjects = (count: number) => git("log", "--format=%s", `-${count}`).split("\n");
   const waitForSubjects = (expected: string[]) =>
     browser.waitUntil(() => JSON.stringify(subjects(expected.length)) === JSON.stringify(expected), {
-      timeout: 15000,
+      timeout: SLOW_UI_TIMEOUT,
       timeoutMsg: `history never became ${JSON.stringify(expected)}; it is ${JSON.stringify(subjects(expected.length))}`,
     });
 
@@ -123,8 +120,8 @@ describe("Browsitory one-click history edits", () => {
 
     await chooseFromCommitMenu(idOf("e2e: edit two"), "Reword…");
     const field = await $("dialog[aria-label^='Reword commit'] textarea");
-    await field.waitForExist({ timeout: 10000 });
-    await browser.waitUntil(async () => (await field.getValue()).startsWith("e2e: edit two"), { timeout: 10000 });
+    await field.waitForExist();
+    await browser.waitUntil(async () => (await field.getValue()).startsWith("e2e: edit two"));
     await field.setValue("e2e: edit two reworded");
     await clickInPage("dialog[aria-label^='Reword commit'] button", "Reword");
     await waitForSubjects(["e2e: edit four", "e2e: edit three", "e2e: edit two reworded", "e2e: edit one"]);
@@ -155,12 +152,12 @@ describe("Browsitory one-click history edits", () => {
     // "second" changes the line "first" wrote: replayed before it, it conflicts.
     await chooseFromCommitMenu(idOf("e2e: move second"), "Move down");
     const panel = await $("section[aria-label='Rebase in progress']");
-    await panel.waitForExist({ timeout: 15000 });
+    await panel.waitForExist({ timeout: SLOW_UI_TIMEOUT });
     await waitUntilInPage("span", "edit-move.txt (Conflicted)", { contains: true });
 
     await clickInPage("section[aria-label='Rebase in progress'] button", "Abort rebase");
     await waitUntilGoneInPage("section[aria-label='Rebase in progress']");
-    await browser.waitUntil(() => git("rev-parse", "HEAD") === tipBefore, { timeout: 10000 });
+    await browser.waitUntil(() => git("rev-parse", "HEAD") === tipBefore);
     expect(git("rev-parse", "--abbrev-ref", "HEAD")).not.toBe("HEAD");
     expect(fs.readFileSync(path.join(E2E_REPO_PATH, "edit-move.txt"), "utf8")).toBe("three\n");
   });

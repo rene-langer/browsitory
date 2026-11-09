@@ -1,8 +1,9 @@
-import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { expandSidebarSection } from "../support/sidebar";
+import { git } from "../support/git";
+import { UI_TIMEOUT } from "../support/timeouts";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const WORKTREE_NAME = "feature-tree";
@@ -21,7 +22,7 @@ const WORKTREE_PATH = path.join(os.tmpdir(), `browsitory-e2e-${Date.now()}`);
 // repository, not the tab — see `WorktreePanel.tsx`), so the text alone can't tell the old
 // workspace's (about-to-unmount) copy from the new one's, and a reference captured before the
 // switch goes stale. This polls until a displayed match exists after the switch, and returns it.
-async function activeElement(selector: string, timeout = 10000) {
+async function activeElement(selector: string, timeout = UI_TIMEOUT) {
   // Keep the match found *inside* the poll: re-querying afterwards raced a remount (the element
   // seen displayed could be gone by the second `$$`), which surfaced as a spurious failure.
   let found: WebdriverIO.Element | null = null;
@@ -54,11 +55,7 @@ function activeCurrentBranchButton() {
 
 describe("Browsitory worktrees", () => {
   before(() => {
-    execFileSync(
-      "git",
-      ["commit", "--allow-empty", "-m", "e2e: seed commit for worktree"],
-      { cwd: E2E_REPO_PATH, stdio: "inherit" },
-    );
+    git(E2E_REPO_PATH, "commit", "--allow-empty", "-m", "e2e: seed commit for worktree");
   });
 
   it("creates, opens, returns from, and removes a linked worktree", async () => {
@@ -68,9 +65,9 @@ describe("Browsitory worktrees", () => {
     await expandSidebarSection("Branches");
 
     const createForm = await $("form[aria-label='Create worktree']");
-    await createForm.waitForExist({ timeout: 10000 });
+    await createForm.waitForExist();
     const currentBranchButton = await $('//li[@role="button" and contains(., \' (current)\')]');
-    await currentBranchButton.waitForExist({ timeout: 10000 });
+    await currentBranchButton.waitForExist();
     // The row reads "<name> (current)" optionally followed by ahead/behind counts (↑n ↓m).
     const mainBranch = (await currentBranchButton.getText()).replace(/ \(current\).*$/s, "");
     const nameInput = await $("aria/Worktree name");
@@ -79,10 +76,10 @@ describe("Browsitory worktrees", () => {
     await (await $("aria/Branch")).setValue(WORKTREE_BRANCH);
     await (await $("aria/Start point")).setValue("HEAD");
     await (await createForm.$("button=Create worktree")).click();
-    await browser.waitUntil(async () => (await nameInput.getValue()) === "", { timeout: 10000, timeoutMsg: "expected worktree creation to complete" });
+    await browser.waitUntil(async () => (await nameInput.getValue()) === "", { timeoutMsg: "expected worktree creation to complete" });
 
     const openLinkedWorktree = await $(`button=Open ${WORKTREE_PATH}`);
-    await openLinkedWorktree.waitForExist({ timeout: 10000 });
+    await openLinkedWorktree.waitForExist();
     await expect(openLinkedWorktree).toBeExisting();
 
     await openLinkedWorktree.click();
@@ -96,7 +93,7 @@ describe("Browsitory worktrees", () => {
 
     await removeLinkedWorktree.click();
     const removalDialog = await $("aria/Remove worktree " + WORKTREE_PATH);
-    await removalDialog.waitForExist({ timeout: 10000 });
+    await removalDialog.waitForExist();
     await (await removalDialog.$("button=Remove worktree")).click();
     // Not a whole-DOM `aria/${WORKTREE_PATH}` absence check: the linked worktree's own tab
     // (opened earlier, never closed by this test — removing a worktree doesn't close a tab that
@@ -112,7 +109,7 @@ describe("Browsitory worktrees", () => {
         }
         return true;
       },
-      { timeout: 10000, timeoutMsg: "expected the linked worktree to no longer be listed in the active tab" },
+      { timeoutMsg: "expected the linked worktree to no longer be listed in the active tab" },
     );
   });
 });

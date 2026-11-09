@@ -2,14 +2,13 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { gitIn } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "signing-e2e.txt";
 const SUMMARY = "e2e: signed commit";
 
-function git(...args: string[]): string {
-  return execFileSync("git", args, { cwd: E2E_REPO_PATH }).toString().trim();
-}
+const git = gitIn(E2E_REPO_PATH);
 
 describe("Browsitory commit signing", () => {
   let keyDir = "";
@@ -47,9 +46,9 @@ describe("Browsitory commit signing", () => {
 
   it("commits a signed commit and shows a good signature", async () => {
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
-    await commitMessageInput.waitForExist({ timeout: 10000 });
+    await commitMessageInput.waitForExist();
     const stageButton = await $(`button[aria-label="Stage ${FILE}"]`);
-    await stageButton.waitForExist({ timeout: 10000 });
+    await stageButton.waitForExist();
     // Same opacity-0 workaround as first-flow.spec.ts.
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
@@ -65,7 +64,6 @@ describe("Browsitory commit signing", () => {
     await browser.execute((el) => (el as HTMLElement).click(), await $("button=Commit"));
 
     await browser.waitUntil(() => git("log", "-1", "--format=%s") === SUMMARY, {
-      timeout: 10000,
       timeoutMsg: "commit did not land",
     });
     if (!git("cat-file", "commit", "HEAD").includes("-----BEGIN SSH SIGNATURE-----")) {
@@ -73,11 +71,11 @@ describe("Browsitory commit signing", () => {
     }
 
     const row = await $(`li*=${SUMMARY}`);
-    await row.waitForExist({ timeout: 10000 });
+    await row.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), row);
     await browser.waitUntil(
       async () => (await browser.execute(() => document.body.textContent ?? "")).includes("Good signature"),
-      { timeout: 10000, timeoutMsg: "expected 'Good signature' in the commit header" },
+      { timeoutMsg: "expected 'Good signature' in the commit header" },
     );
   });
 });

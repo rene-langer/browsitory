@@ -25,14 +25,14 @@ describe("Browsitory first flow", () => {
 
   it("opens a repo, stages a file, commits, and sees it in history", async () => {
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
-    await commitMessageInput.waitForExist({ timeout: 10000 });
+    await commitMessageInput.waitForExist();
 
     // Stage the uncommitted file this spec's own `before` hook created. The per-row stage
     // control is icon-only now (no "Stage" text) and is identified by its aria-label — which
     // also makes this target *this* spec's file rather than whichever row happened to come
     // first, unlike the old `button=Stage` text match.
     const stageButton = await $('button[aria-label="Stage first-flow-fixture.txt"]');
-    await stageButton.waitForExist({ timeout: 10000 });
+    await stageButton.waitForExist();
     // The control is `opacity: 0` until its row is hovered/focused (`DiffPane.module.css`'s
     // `.stageToggle`), so every interaction with it has to go through `browser.execute` —
     // WebDriver's own element-displayed check (which `scrollIntoView()` and `.click()` both
@@ -45,7 +45,7 @@ describe("Browsitory first flow", () => {
 
     // The new commit should now appear in the history list.
     const historyEntry = await $("li*=e2e: first commit");
-    await historyEntry.waitForExist({ timeout: 10000 });
+    await historyEntry.waitForExist();
     await expect(historyEntry).toBeExisting();
   });
 });

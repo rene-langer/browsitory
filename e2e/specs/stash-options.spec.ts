@@ -1,21 +1,19 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expandSidebarSection } from "../support/sidebar";
+import { gitIn } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const FILE = "stash-options-e2e.txt";
 const MESSAGE = "e2e stash options";
 
-function git(...args: string[]): string {
-  return execFileSync("git", args, { cwd: E2E_REPO_PATH }).toString();
-}
+const git = gitIn(E2E_REPO_PATH);
 const contents = () => fs.readFileSync(path.join(E2E_REPO_PATH, FILE), "utf8");
 
 async function click(selector: string) {
   const el = await $(selector);
-  await el.waitForExist({ timeout: 10000 });
+  await el.waitForExist();
   await browser.execute((e) => (e as HTMLElement).click(), el);
 }
 
@@ -46,7 +44,7 @@ describe("Browsitory stash options", () => {
     await click("button=Stash file…");
 
     const input = await $(`dialog[aria-label="Stash changes"] input[aria-label="Stash message"]`);
-    await input.waitForExist({ timeout: 10000 });
+    await input.waitForExist();
     // React tracks the input's value through its own setter; set it the same way a keystroke
     // would and fire `input` so the controlled component sees the change.
     await browser.execute(
@@ -62,25 +60,22 @@ describe("Browsitory stash options", () => {
     const confirm = await $(`dialog[aria-label="Stash changes"]`).$("button=Stash");
     await browser.execute((el) => (el as HTMLElement).click(), confirm);
     await browser.waitUntil(() => contents() === "committed\n", {
-      timeout: 10000,
       timeoutMsg: "file was not stashed",
     });
 
     await expandSidebarSection("Stashes");
     await click(`li*=${MESSAGE}`);
     const details = await $(`section[aria-label="Stash details"]`);
-    await details.waitForExist({ timeout: 10000 });
-    await details.$(`span*=${FILE}`).waitForExist({ timeout: 10000 });
+    await details.waitForExist();
+    await details.$(`span*=${FILE}`).waitForExist();
 
     const pop = await details.$("button=Pop");
-    await pop.waitForEnabled({ timeout: 10000 });
+    await pop.waitForEnabled();
     await browser.execute((el) => (el as HTMLElement).click(), pop);
     await browser.waitUntil(() => contents() === "stash me\n", {
-      timeout: 10000,
       timeoutMsg: "pop did not restore the file",
     });
     await browser.waitUntil(() => !git("stash", "list", "--format=%gs").includes(MESSAGE), {
-      timeout: 10000,
       timeoutMsg: "the popped stash is still listed",
     });
   });
