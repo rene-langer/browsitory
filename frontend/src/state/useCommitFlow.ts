@@ -55,11 +55,15 @@ export function useCommitFlow(
     else openDialog({ kind: "push", localBranch: branch });
   }, [branch, upstream, pushCurrentBranch, openDialog]);
 
+  // The last commit that didn't land, for "Save and commit" in the identity dialog (#689).
+  const lastAttempt = useRef<{ message: string; trailers: Trailer[]; thenPush: boolean } | null>(null);
   const commit = useCallback(
     async (message: string, trailers: Trailer[], thenPush: boolean) => {
       // Set by the callback: a `let` the compiler can't see change, hence the cast.
       let committed = null as string | null;
+      lastAttempt.current = { message, trailers, thenPush };
       const ok = await commitWith(message, skipHooks, trailers, (id) => (committed = id));
+      if (ok) lastAttempt.current = null;
       if (!ok || committed === null) return ok;
       const id = committed;
       const text = `Committed ${id.slice(0, 7)}${branch === null ? "" : ` to ${branch}`}`;
@@ -90,5 +94,25 @@ export function useCommitFlow(
     (message: string, trailers: Trailer[]) => commit(message, trailers, true),
     [commit],
   );
-  return { onCommit, commitFlow: { branch, onCommitAndPush, commitAndPushReason } };
+  const { identityRequired } = appState.state;
+  const { setIdentity, dismissIdentity } = appState;
+  const retrying = identityRequired === "commit";
+  const onSaveIdentity = useCallback(
+    async (name: string, email: string, global: boolean) => {
+      const failure = await setIdentity(name, email, global);
+      if (failure !== null) return failure;
+      const attempt = identityRequired === "commit" ? lastAttempt.current : null;
+      if (attempt === null) pushToast("Git identity saved. Commit again.", { tone: "success" });
+      else void commit(attempt.message, attempt.trailers, attempt.thenPush);
+      return null;
+    },
+    [setIdentity, identityRequired, commit, pushToast],
+  );
+  const identity = {
+    required: identityRequired !== null,
+    retrying,
+    onSave: onSaveIdentity,
+    onCancel: dismissIdentity,
+  };
+  return { onCommit, commitFlow: { branch, onCommitAndPush, commitAndPushReason, identity } };
 }

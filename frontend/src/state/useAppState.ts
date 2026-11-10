@@ -162,7 +162,7 @@ export interface AppState {
   // The last Stash and switch, for its toast (#653).
   stashSwitchOutcome: { branchName: string; outcome: StashSwitchOutcome } | null;
   // A commit or amend refused for lack of a git identity: the identity dialog shows (#689).
-  identityRequired: boolean;
+  identityRequired: "commit" | "amend" | null;
   // The last "Merge into current branch" result, for its toast.
   mergeOutcome: { branchName: string; outcome: MergeOutcome } | null;
   // "Restore staged changes" for stash Apply/Pop; session-only, default on.
@@ -311,7 +311,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     pullOutcome: null,
     switchConflict: null,
     stashSwitchOutcome: null,
-    identityRequired: false,
+    identityRequired: null,
     mergeOutcome: null,
     stashRestoreIndex: true,
     stashOutcome: null,

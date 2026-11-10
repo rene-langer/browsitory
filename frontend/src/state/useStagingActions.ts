@@ -195,7 +195,7 @@ export function useStagingActions(
       const ok = await runMutationWithOutcome(async () => {
         const outcome = await client.commit(repoPath, message, noVerify, trailers).catch((error: unknown) => {
           // No `user.name`/`user.email`: the identity dialog offers to set them (#689).
-          if (errorKind(error) === "MissingIdentity") setState((prev) => ({ ...prev, identityRequired: true }));
+          if (errorKind(error) === "MissingIdentity") setState((prev) => ({ ...prev, identityRequired: "commit" }));
           throw error;
         });
         if (outcome.kind === "HookFailed") {
@@ -226,12 +226,12 @@ export function useStagingActions(
       } catch (error) {
         return failureError(error).error;
       }
-      setState((prev) => ({ ...prev, identityRequired: false }));
+      setState((prev) => ({ ...prev, identityRequired: null }));
       return null;
     },
     [client, repoPath, setState],
   );
-  const dismissIdentity = useCallback(() => setState((prev) => ({ ...prev, identityRequired: false })), [setState]);
+  const dismissIdentity = useCallback(() => setState((prev) => ({ ...prev, identityRequired: null })), [setState]);
 
   return {
     setIdentity,

@@ -86,6 +86,14 @@ export interface WorkspaceActions {
     branch: string | null;
     onCommitAndPush: (message: string, trailers: Trailer[]) => Promise<boolean>;
     commitAndPushReason: string | null;
+    // A commit or amend refused for lack of a git identity (#689): the dialog that sets it, then
+    // commits again (`retrying`; an amend is retried by hand).
+    identity: {
+      required: boolean;
+      retrying: boolean;
+      onSave: (name: string, email: string, global: boolean) => Promise<string | null>;
+      onCancel: () => void;
+    };
   };
   onAbortMerge: () => void;
   onSaveStash: () => void;

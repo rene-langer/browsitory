@@ -153,7 +153,7 @@ export function useHistoryActions(
       const ok = await runMutationWithOutcome(async () => {
         const outcome = await client.amendCommit(repoPath, message, noVerify, options).catch((error: unknown) => {
           // No `user.name`/`user.email`: the identity dialog offers to set them (#689).
-          if (errorKind(error) === "MissingIdentity") setState((prev) => ({ ...prev, identityRequired: true }));
+          if (errorKind(error) === "MissingIdentity") setState((prev) => ({ ...prev, identityRequired: "amend" }));
           throw error;
         });
         if (outcome.kind === "HookFailed") {

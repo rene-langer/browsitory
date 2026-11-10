@@ -80,7 +80,8 @@ export function BranchTree({
   onSwitchBranch: (name: string) => void;
   // `null` = created; a string = the failure message to show inline next to the draft form. See
   // `useAppState.ts`'s `createBranch` (issue #30/UX-002).
-  onCreateBranch: (name: string, startPoint: string) => Promise<string | null>;
+  // `checkout` (default true): switch to the new branch too (#656).
+  onCreateBranch: (name: string, startPoint: string, checkout?: boolean) => Promise<string | null>;
   onDeleteBranch: (name: string, force: boolean) => Promise<void>;
   onRenameBranch: (oldName: string, newName: string) => void;
   onOpenCreateBranchDraft: (startPoint: string) => void;
@@ -305,7 +306,6 @@ export function BranchTree({
           operationDisabled={operationDisabled}
           busyReason={busyReason}
           onCreateBranch={onCreateBranch}
-          onSwitchBranch={onSwitchBranch}
           onClose={onCloseCreateBranchDraft}
         />
 

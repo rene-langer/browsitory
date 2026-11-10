@@ -9,6 +9,7 @@ import { ParentPickerDialog } from "./components/ParentPickerDialog";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { Overlay } from "./components/primitives/Overlay";
 import { PendingPullPrompt } from "./components/PendingPullPrompt";
+import { SwitchConflictDialog } from "./components/SwitchConflictDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { RemoteDialogs } from "./components/RemoteDialogs";
@@ -266,6 +267,21 @@ export function WorkspaceDialogs({
             void announce("Push complete", appState.pushBranch)(remoteName, pushDialogBranch, remoteBranch, setUpstream);
           }}
           onCancel={() => closeDialog("push")}
+        />
+      )}
+      {active && appState.state.switchConflict !== null && (
+        <SwitchConflictDialog
+          branchName={appState.state.switchConflict.branchName}
+          currentBranch={currentLocalBranch}
+          files={appState.state.switchConflict.files}
+          operationDisabled={repositoryOperationDisabled}
+          operationDisabledReason={operationDisabledReason}
+          onStashAndSwitch={(reapply) => {
+            if (repositoryOperationDisabled || appState.state.switchConflict === null) return;
+            dismissError();
+            void appState.stashAndSwitch(appState.state.switchConflict.branchName, reapply);
+          }}
+          onCancel={appState.closeSwitchConflict}
         />
       )}
       {active && appState.state.pendingPull !== null && (
