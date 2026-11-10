@@ -11,6 +11,11 @@
 //! The guards are those of discarding a hunk: no path outside the repository or in `.git`,
 //! nothing written through a symbolic link, no folder recreated over a file, and on a file system
 //! that ignores case no file created next to one whose name differs only in case.
+//!
+//! libgit2 reads a symbolic link in the working tree through it, so it would compare a link's
+//! patch with the file the link points to (#563). Changes to links are left out of its apply and
+//! made here instead, as `git apply` makes them: each link the patch changes or removes must
+//! point where the patch says it did, checked with the rest before anything is written.
 
 use std::path::{Component, Path};
 
@@ -439,13 +444,209 @@ fn apply_one(
             }
         }
     }
+    // libgit2 reads a link in the working tree through it (#563): the links are this code's,
+    // the rest libgit2's. Both are checked before either writes.
+    let links = check_links(repo, workdir, &diff, target)?;
     let location = target.location();
+    // The options are set up where they stay: git2 keeps a pointer to them for the callback.
     let mut check = git2::ApplyOptions::new();
+    skip_links(&mut check);
     check.check(true);
     repo.apply(&diff, location, Some(&mut check))
         .map_err(does_not_apply)?;
-    crate::hardlink::before_apply(repo, &diff, location);
-    repo.apply(&diff, location, None).map_err(does_not_apply)
+    let mut before = git2::ApplyOptions::new();
+    skip_links(&mut before);
+    crate::hardlink::before_apply(repo, &diff, location, &mut before);
+    let mut apply = git2::ApplyOptions::new();
+    skip_links(&mut apply);
+    repo.apply(&diff, location, Some(&mut apply))
+        .map_err(does_not_apply)?;
+    write_links(repo, workdir, &links, target)
+}
+
+/// Whether `delta` changes, adds or removes a symbolic link.
+fn is_link(delta: &git2::DiffDelta) -> bool {
+    delta.old_file().mode() == git2::FileMode::Link
+        || delta.new_file().mode() == git2::FileMode::Link
+}
+
+/// Has libgit2 leave the links to [`write_links`]. `options` must not move afterwards.
+fn skip_links(options: &mut git2::ApplyOptions<'_>) {
+    options.delta_callback(|delta| !delta.is_some_and(|d| is_link(&d)));
+}
+
+/// A symbolic link a patch changes, as `git apply` writes it.
+struct LinkChange {
+    /// The link removed (or replaced).
+    remove: Option<String>,
+    /// The link written, and its target.
+    write: Option<(String, Vec<u8>)>,
+}
+
+/// The link changes of `diff`, once each link it changes or removes is there and points where
+/// the patch says it did, and (`WorkTreeAndIndex`) the index holds the same.
+fn check_links(
+    repo: &git2::Repository,
+    workdir: &Path,
+    diff: &git2::Diff,
+    target: ApplyTarget,
+) -> Result<Vec<LinkChange>, PatchError> {
+    let index = match target {
+        ApplyTarget::WorkTree => None,
+        ApplyTarget::WorkTreeAndIndex => Some(repo.index()?),
+    };
+    let mut changes = Vec::new();
+    for at in 0..diff.deltas().len() {
+        let Some(patch) = git2::Patch::from_diff(diff, at)? else {
+            continue;
+        };
+        let delta = patch.delta();
+        if !is_link(&delta) {
+            continue;
+        }
+        let path_of = |file: git2::DiffFile| {
+            file.path()
+                .and_then(Path::to_str)
+                .map(str::to_string)
+                .ok_or_else(|| PatchError::Unreadable("a path that isn't UTF-8".to_string()))
+        };
+        let old_path = path_of(delta.old_file())?;
+        let new_path = path_of(delta.new_file())?;
+        let status = delta.status();
+        let had = !matches!(status, git2::Delta::Added);
+        let keeps = !matches!(status, git2::Delta::Deleted);
+        let old_link = delta.old_file().mode() == git2::FileMode::Link;
+        let new_link = delta.new_file().mode() == git2::FileMode::Link;
+        if (had && !old_link) || (keeps && !new_link) {
+            return Err(PatchError::DoesNotApply(format!(
+                "{new_path} changes between a symbolic link and a file"
+            )));
+        }
+        let (old_target, new_target) = link_targets(&patch)?;
+        let mut current = None;
+        if had {
+            let now = read_link(&workdir.join(&old_path)).ok_or_else(|| {
+                PatchError::DoesNotApply(format!(
+                    "{old_path} is not a symbolic link in the working tree"
+                ))
+            })?;
+            if old_target.as_ref().is_some_and(|old| *old != now) {
+                return Err(PatchError::DoesNotApply(format!(
+                    "{old_path} points elsewhere in the working tree"
+                )));
+            }
+            if let Some(index) = &index {
+                let staged = index
+                    .get_path(Path::new(&old_path), 0)
+                    .filter(|entry| entry.mode == 0o120000)
+                    .and_then(|entry| repo.find_blob(entry.id).ok())
+                    .is_some_and(|blob| blob.content() == now.as_slice());
+                if !staged {
+                    return Err(PatchError::DoesNotApply(format!(
+                        "{old_path} differs between the index and the working tree"
+                    )));
+                }
+            }
+            current = Some(now);
+        }
+        let creates = !had || (status != git2::Delta::Deleted && old_path != new_path);
+        if let (Some(index), true) = (&index, creates && keeps) {
+            if index.get_path(Path::new(&new_path), 0).is_some() {
+                return Err(PatchError::DoesNotApply(format!(
+                    "{new_path} already exists in the index"
+                )));
+            }
+        }
+        let write = match (keeps, new_target.or(current)) {
+            (false, _) => None,
+            (true, Some(target)) => Some((new_path.clone(), target)),
+            (true, None) => {
+                return Err(PatchError::DoesNotApply(format!(
+                    "the patch gives {new_path} no target"
+                )))
+            }
+        };
+        let remove = match status {
+            git2::Delta::Added | git2::Delta::Copied => None,
+            _ => Some(old_path),
+        };
+        changes.push(LinkChange { remove, write });
+    }
+    Ok(changes)
+}
+
+/// The old and new target a link's patch names (`None` for a side without hunks, such as a
+/// rename that keeps the target).
+type Targets = (Option<Vec<u8>>, Option<Vec<u8>>);
+
+fn link_targets(patch: &git2::Patch) -> Result<Targets, PatchError> {
+    if patch.num_hunks() == 0 {
+        return Ok((None, None));
+    }
+    let mut old = Vec::new();
+    let mut new = Vec::new();
+    for hunk in 0..patch.num_hunks() {
+        let lines = hunk_lines(patch, hunk)?;
+        old.extend(lines.old.concat());
+        new.extend(lines.new.concat());
+    }
+    Ok((Some(old), Some(new)))
+}
+
+/// Removes and writes the links of `changes` (all removals first: a rename's new name may be
+/// another's old one), and stages them for `WorkTreeAndIndex`.
+fn write_links(
+    repo: &git2::Repository,
+    workdir: &Path,
+    changes: &[LinkChange],
+    target: ApplyTarget,
+) -> Result<(), PatchError> {
+    if changes.is_empty() {
+        return Ok(());
+    }
+    let mut index = match target {
+        ApplyTarget::WorkTree => None,
+        ApplyTarget::WorkTreeAndIndex => Some(repo.index()?),
+    };
+    for path in changes.iter().filter_map(|c| c.remove.as_deref()) {
+        std::fs::remove_file(workdir.join(path))?;
+        if let Some(index) = &mut index {
+            index.remove_path(Path::new(path))?;
+        }
+    }
+    for (path, link_target) in changes.iter().filter_map(|c| c.write.as_ref()) {
+        let full = workdir.join(path);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        make_link(&target_path(link_target), &full)?;
+        if let Some(index) = &mut index {
+            index.add_frombuffer(&link_entry(path, link_target), link_target)?;
+        }
+    }
+    if let Some(index) = &mut index {
+        index.write()?;
+    }
+    Ok(())
+}
+
+/// An index entry for the link `path` to `target` (the stat data left empty, so the next status
+/// reads the link again).
+fn link_entry(path: &str, target: &[u8]) -> git2::IndexEntry {
+    git2::IndexEntry {
+        ctime: git2::IndexTime::new(0, 0),
+        mtime: git2::IndexTime::new(0, 0),
+        dev: 0,
+        ino: 0,
+        mode: 0o120000,
+        uid: 0,
+        gid: 0,
+        file_size: target.len() as u32,
+        id: git2::Oid::ZERO_SHA1,
+        flags: 0,
+        flags_extended: 0,
+        path: path.as_bytes().to_vec(),
+    }
 }
 
 /// A refusal of the patch itself is "doesn't apply"; anything else (I/O, a locked index) is
@@ -650,6 +851,7 @@ fn relocate(
         let hunks = patch.num_hunks();
         let delta = patch.delta();
         let movable = !delta.flags().is_binary()
+            && !is_link(&delta)
             && matches!(
                 delta.status(),
                 git2::Delta::Modified | git2::Delta::Renamed | git2::Delta::Copied
@@ -885,7 +1087,9 @@ impl Saved {
                         set_executable(&full, *executable);
                     }
                 }
-                Before::Link(target) => make_link(target, &full),
+                Before::Link(target) => {
+                    let _ = make_link(target, &full);
+                }
                 Before::Missing { .. } => {}
             }
         }
@@ -935,14 +1139,51 @@ fn set_executable(path: &Path, executable: bool) {
 fn set_executable(_path: &Path, _executable: bool) {}
 
 #[cfg(unix)]
-fn make_link(target: &Path, at: &Path) {
-    let _ = std::os::unix::fs::symlink(target, at);
+fn make_link(target: &Path, at: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, at)
 }
 
 #[cfg(not(unix))]
-fn make_link(target: &Path, at: &Path) {
+fn make_link(target: &Path, at: &Path) -> std::io::Result<()> {
     // Without symbolic links git writes the link's target as a plain file.
-    let _ = std::fs::write(at, target.to_string_lossy().as_bytes());
+    std::fs::write(at, target.to_string_lossy().as_bytes())
+}
+
+/// The target of the link at `full` as git stores it, or `None` when no link is there.
+#[cfg(unix)]
+fn read_link(full: &Path) -> Option<Vec<u8>> {
+    use std::os::unix::ffi::OsStringExt;
+    let meta = full.symlink_metadata().ok()?;
+    if !meta.file_type().is_symlink() {
+        return None;
+    }
+    Some(std::fs::read_link(full).ok()?.into_os_string().into_vec())
+}
+
+/// The target of the link at `full` as git stores it: a link, or the plain file git writes
+/// in its place without symbolic links (see [`make_link`]).
+#[cfg(not(unix))]
+fn read_link(full: &Path) -> Option<Vec<u8>> {
+    let meta = full.symlink_metadata().ok()?;
+    if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(full).ok()?;
+        Some(target.to_string_lossy().replace('\\', "/").into_bytes())
+    } else if meta.is_file() {
+        std::fs::read(full).ok()
+    } else {
+        None
+    }
+}
+
+#[cfg(unix)]
+fn target_path(target: &[u8]) -> std::path::PathBuf {
+    use std::os::unix::ffi::OsStringExt;
+    std::ffi::OsString::from_vec(target.to_vec()).into()
+}
+
+#[cfg(not(unix))]
+fn target_path(target: &[u8]) -> std::path::PathBuf {
+    String::from_utf8_lossy(target).into_owned().into()
 }
 
 #[cfg(test)]
