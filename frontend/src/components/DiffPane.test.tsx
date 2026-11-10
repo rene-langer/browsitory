@@ -6,11 +6,24 @@ import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { CommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
-import { DiffPane, type DiscardRequest, type StashActions } from "./DiffPane";
+import { DiffPane as WorkspaceDiffPane, type DiscardRequest, type StashActions } from "./DiffPane";
+import { WorkspaceActionsContext, type WorkspaceActions } from "../state/useWorkspaceActions";
+import { splitWorkspaceActions, testWorkspaceActions } from "../test/workspaceActions";
 import styles from "./DiffPane.module.css";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const TEST_REPO_PATH = "/repo";
+
+// `DiffPane` reads its actions from `WorkspaceActionsContext` (#491). The tests pass them as props
+// alongside the data, as before: this wrapper provides them and passes the rest on.
+function DiffPane(props: React.ComponentProps<typeof WorkspaceDiffPane> & Partial<WorkspaceActions>) {
+  const [actions, paneProps] = splitWorkspaceActions(props);
+  return (
+    <WorkspaceActionsContext.Provider value={testWorkspaceActions(actions)}>
+      <WorkspaceDiffPane {...paneProps} />
+    </WorkspaceActionsContext.Provider>
+  );
+}
 
 function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
   return fakeRepoClient(overrides, "empty");
