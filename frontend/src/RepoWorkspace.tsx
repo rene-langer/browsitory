@@ -10,6 +10,8 @@ import { SplitView } from "./components/primitives/SplitView";
 import type { RepoClient, StatusEntry } from "./ipc/RepoClient";
 import { buildCommands, type AppCommands, type CommitCommands } from "./lib/commands";
 import { useExternalTools } from "./state/useExternalTools";
+import { useRootFiles } from "./state/useRootFiles";
+import { rootFileItems } from "./lib/rootFiles";
 import {
   effectiveAutoFetchMinutes,
   lastFetchAt,
@@ -116,6 +118,7 @@ export function RepoWorkspace({
     [appState.state.status],
   );
   const externalTools = useExternalTools(client, repoPath, conflictedPaths, appState.refresh);
+  const rootFiles = useRootFiles(client, repoPath, appState.state.refreshGeneration);
   // A click on a row closes an open compare even when it is the row already selected (the
   // compare otherwise only closes when `selectedRow` changes), so clicking a stash or commit
   // always shows it.
@@ -391,6 +394,8 @@ export function RepoWorkspace({
         onOpenCurrentFileInDiffTool: () => {
           if (currentFile !== null) externalTools.openDiffTool(currentFile, { kind: "Unstaged" });
         },
+        rootFiles: rootFileItems(rootFiles),
+        onOpenRootFile: externalTools.openRootFile,
       },
       goTo: {
         onGoToCommit: (revision) => void goTo.goToRevision(revision),

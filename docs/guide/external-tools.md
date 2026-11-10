@@ -51,6 +51,15 @@ in the repository's root folder. Without a terminal setting Browsitory uses:
 A terminal command in Preferences can use `{dir}`, for example `kitty --directory {dir}` or
 `wezterm start --cwd {dir}`.
 
+## .gitignore and .gitattributes
+
+The same tab menu has **Open .gitignore** and **Open .gitattributes**, which open the file at
+the repository's root folder in your editor; both are also in the palette. When the file doesn't
+exist yet, the item reads **Create .gitignore** (or **Create .gitattributes**): Browsitory
+creates an empty file at the root and opens it; it never overwrites an existing file. A bare
+repository has no work tree, so neither item is offered there. In VSCode the file opens in
+VSCode.
+
 ## Diff and merge tools
 
 Browsitory uses the diff and merge tools from your git config, like `git difftool` and `git

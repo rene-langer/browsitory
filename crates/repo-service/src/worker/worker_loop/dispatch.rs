@@ -220,6 +220,9 @@ where
             Command::IgnorePath { pattern, reply } => {
                 status::ignore_path(&self.repo, pattern, reply)
             }
+            Command::CreateRootFile { name, reply } => {
+                tools::create_root_file(&self.repo, name, reply)
+            }
             Command::Commit {
                 message,
                 no_verify,

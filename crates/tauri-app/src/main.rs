@@ -41,6 +41,8 @@ use commands::{
 };
 // The repository tab names (#625).
 use commands::{list_repo_aliases, set_repo_alias};
+// Open or create .gitignore and .gitattributes (#624).
+use commands::{create_root_file, get_root_files};
 
 /// Declares the desktop app's Tauri commands once: `invoke_handler` registers them, and
 /// `COMMAND_NAMES` lists the same names for the transport parity check (#306), which compares it
@@ -199,6 +201,8 @@ commands![
     create_pull_request,
     open_external_url,
     open_in_editor,
+    get_root_files,
+    create_root_file,
     reveal_in_file_manager,
     open_terminal,
     open_diff_tool,

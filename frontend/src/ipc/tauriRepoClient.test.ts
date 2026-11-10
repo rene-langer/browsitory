@@ -650,6 +650,10 @@ describe("tauriRepoClient diff pane commands", () => {
     expect(invoke).toHaveBeenLastCalledWith("discard_all_unstaged", { repoPath: "/repo", paths: ["a.txt", "nested/"] });
     await tauriRepoClient.ignorePath("/repo", "*.log");
     expect(invoke).toHaveBeenLastCalledWith("ignore_path", { repoPath: "/repo", pattern: "*.log" });
+    await tauriRepoClient.getRootFiles("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("get_root_files", { repoPath: "/repo" });
+    await tauriRepoClient.createRootFile("/repo", ".gitignore");
+    expect(invoke).toHaveBeenLastCalledWith("create_root_file", { repoPath: "/repo", name: ".gitignore" });
     await tauriRepoClient.getDiffSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_diff_settings", undefined);
     const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Minimal" as const };

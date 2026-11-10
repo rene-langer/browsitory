@@ -74,8 +74,9 @@ pub use status::{
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
 pub use tools::{
-    get_external_tool_settings, get_file_sides, get_git_tools, open_diff_tool, open_in_editor,
-    open_merge_tool, open_terminal, reveal_in_file_manager, set_external_tool_settings,
+    create_root_file, get_external_tool_settings, get_file_sides, get_git_tools, get_root_files,
+    open_diff_tool, open_in_editor, open_merge_tool, open_terminal, reveal_in_file_manager,
+    set_external_tool_settings,
 };
 pub use tree::{get_commit_tree, get_file_at_commit, restore_file_version, save_file_version};
 pub use undo::{get_undo_state, redo_last, undo_last};

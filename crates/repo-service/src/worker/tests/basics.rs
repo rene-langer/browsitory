@@ -203,3 +203,40 @@ fn whole_file_resolution_round_trips_through_the_worker() {
     );
     assert!(!repo.index().unwrap().has_conflicts());
 }
+
+#[test]
+fn root_files_are_listed_and_created_through_the_worker() {
+    let (dir, _repo) = init_repo();
+    write_file(dir.path(), ".gitattributes", "* text=auto\n");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    assert_eq!(handle.root_files(), Some(vec![".gitattributes".into()]));
+
+    handle.create_root_file(".gitignore".into()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+        ""
+    );
+    handle.create_root_file(".gitattributes".into()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitattributes")).unwrap(),
+        "* text=auto\n",
+        "an existing file is left as it is"
+    );
+    assert_eq!(
+        handle.create_root_file("notes.txt".into()).unwrap_err(),
+        crate::wire::ErrorDto::from("Only .gitignore and .gitattributes can be created.")
+    );
+    assert!(!dir.path().join("notes.txt").exists());
+}
+
+#[test]
+fn a_bare_repository_has_no_root_files() {
+    let dir = TempDir::new().unwrap();
+    Repository::init_bare(dir.path()).unwrap();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    assert_eq!(handle.root_files(), None);
+    assert!(handle.create_root_file(".gitignore".into()).is_err());
+    assert!(!dir.path().join(".gitignore").exists());
+}
