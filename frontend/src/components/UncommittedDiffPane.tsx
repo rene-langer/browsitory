@@ -26,6 +26,7 @@ import {
 } from "../lib/fileSelection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { isMenuKey } from "../lib/menuKeys";
+import { stageAllPaths, stageModifiedPaths } from "../lib/stagePaths";
 
 // The change lists' keys (#449): arrows/j/k move, Shift extends, Ctrl/Cmd+A selects the group,
 // Escape keeps only the current file, `s` stages or unstages, the Menu key opens the menu.
@@ -164,14 +165,13 @@ export function UncommittedDiffPane({
   const unstagedEntries = status.filter((entry) => !entry.staged);
   const stagedCount = stagedEntries.length;
   const conflictCount = status.filter((entry) => entry.kind === "Conflicted").length;
-  // `git-core::status` reports conflicted entries with `staged: false`, so they sit in the
-  // "Changes" group — but staging a conflicted path is what *marks the conflict resolved*, with
-  // whatever happens to be in the working tree. One "Stage all" click would silently resolve
-  // every outstanding conflict, so the bulk action skips them. The per-row Stage control on a
-  // conflicted file is left alone: that's a deliberate, one-file-at-a-time action.
-  const stageAllPaths = unstagedEntries
-    .filter((entry) => entry.kind !== "Conflicted")
-    .map((entry) => entry.path);
+  // Both bulk actions skip conflicts (see `lib/stagePaths`). "Stage modified" (#621) also skips
+  // untracked files; it is shown only when the group holds both kinds, as otherwise it would do
+  // what "Stage all" does.
+  const allStagePaths = stageAllPaths(status);
+  const modifiedStagePaths = stageModifiedPaths(status);
+  const untrackedCount = unstagedEntries.filter(isUntracked).length;
+  const showStageModified = untrackedCount > 0 && unstagedEntries.some((entry) => entry.kind !== "New");
 
   const allEntries = [...unstagedEntries, ...stagedEntries];
   const allKeys = allEntries.map(entryKey);
@@ -420,7 +420,11 @@ export function UncommittedDiffPane({
   useEffect(() => () => onCurrentFileChange?.(null), [onCurrentFileChange]);
 
   const handleStageAll = () => {
-    onStageAllFiles(stageAllPaths);
+    onStageAllFiles(allStagePaths);
+  };
+
+  const handleStageModified = () => {
+    onStageAllFiles(modifiedStagePaths);
   };
 
   const handleUnstageAll = () => {
@@ -548,9 +552,28 @@ export function UncommittedDiffPane({
             )}
             {/* Disabled when every unstaged entry is a conflict — the action would be a no-op
                 that still costs a full refresh. */}
-            <button type="button" onClick={handleStageAll} disabled={stageAllPaths.length === 0}>
+            <button
+              type="button"
+              onClick={handleStageAll}
+              disabled={allStagePaths.length === 0}
+              title={showStageModified ? "Stage every change, untracked files included (conflicts are left out)" : undefined}
+            >
               Stage all
             </button>
+            {showStageModified && (
+              <button
+                type="button"
+                onClick={handleStageModified}
+                disabled={modifiedStagePaths.length === 0}
+                title={
+                  modifiedStagePaths.length === 0
+                    ? "No tracked file has changes to stage; conflicts are left out"
+                    : `Stage the changes to tracked files only; "Stage all" also stages the ${untrackedCount} untracked file${untrackedCount === 1 ? "" : "s"}`
+                }
+              >
+                Stage modified
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setDiscardRequest({ kind: "all" })}

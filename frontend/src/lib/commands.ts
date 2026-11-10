@@ -7,6 +7,7 @@ import { addRemoteAction, remoteActions } from "./actions/remoteActions";
 import { stashActions, stashBlockers } from "./actions/stashActions";
 import { pruneWorktreesAction, worktreeActions } from "./actions/worktreeActions";
 import { busyReason, operationBlockers, stashBlockReason } from "./operationStatus";
+import { stageModifiedPaths } from "./stagePaths";
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
@@ -907,6 +908,17 @@ export function buildCommands(
             },
       );
     }
+    // The Changes heading's "Stage modified" (#621): tracked files' changes only, no untracked
+    // files and no conflicts; one undo step, like "Stage all".
+    const modifiedPaths = stageModifiedPaths(state.status);
+    if (modifiedPaths.length > 0 && !state.pending) {
+      commands.push({
+        id: "stage-modified-files",
+        label: "Stage modified files (tracked only)",
+        keywords: ["stage", "add", "modified", "tracked", "update", "changes"],
+        run: () => void appState.stageAllFiles(modifiedPaths),
+      });
+    }
     // Both only open the confirm dialogs; staged and conflicted entries have no discard action.
     // Like the diff pane's discard, allowed while resolving a merge or a paused step: only an
     // action in flight or a transfer blocks it (`busyReason`, #521).
@@ -1161,6 +1173,7 @@ export function commandGroup(id: string): CommandGroup {
     id === "discard-current-file" ||
     id === "discard-all-unstaged" ||
     id === "stage-selected-files" ||
+    id === "stage-modified-files" ||
     id === "unstage-selected-files" ||
     id === "discard-selected-files" ||
     id === "open-current-file-in-editor" ||
