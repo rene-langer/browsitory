@@ -2076,6 +2076,30 @@ fn cherry_pick_adding_a_folder_where_head_added_a_link_is_a_directory_file_confl
     e_link_moved_aside(&f);
 }
 
+/// A branch that replaces the committed link with a real folder does not keep HEAD's link, so
+/// the link on disk still blocks the merge: its files would be written through it.
+#[test]
+fn merge_replacing_a_committed_folder_link_with_a_folder_is_refused() {
+    let f = fx();
+    commit_folder_link(&f, f.out.path());
+    git_core::branch::create_branch(&f.repo, "topic", "HEAD").unwrap();
+    std::fs::remove_file(f.path().join("d")).unwrap();
+    common::write_file(f.path(), "d/new.txt", "NEW\n");
+    let mut index = f.repo.index().unwrap();
+    index.remove_path(std::path::Path::new("d")).unwrap();
+    index.write().unwrap();
+    common::commit_all(&f.repo, "d is a folder again");
+    git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
+    f.commit(&[("a.txt", "main\n")], "main");
+    let result = git_core::merge::start_merge(&f.repo, "topic", MergeOptions::default());
+    assert!(
+        matches!(result, Err(MergeError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.untouched();
+    assert!(!f.out.path().join("new.txt").exists());
+}
+
 /// Under `core.ignorecase` (the default on macOS and Windows) the merge result's link and folder
 /// of the identical spelling are the directory/file conflict, not a case collision.
 #[test]
