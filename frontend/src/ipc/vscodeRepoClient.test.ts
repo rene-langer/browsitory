@@ -189,14 +189,14 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.setCommitMessageSettings({ summaryLimit: 60, bodyRuler: 80, showRuler: false }), "set_commit_message_settings", { settings: { summaryLimit: 60, bodyRuler: 80, showRuler: false } }, null],
       [() => vscodeRepoClient.commit("/r", "m", false, [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]), "commit", { repoPath: "/r", message: "m", noVerify: false, trailers: [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }] }, { kind: "Committed", commitId: "c" }],
       [() => vscodeRepoClient.amendCommit("/r", "m", true, { author: { name: "Ada", email: "ada@x.org" }, trailers: [] }), "amend_commit", { repoPath: "/r", message: "m", noVerify: true, author: { name: "Ada", email: "ada@x.org" }, trailers: [] }, { kind: "Committed", commitId: "c" }],
-      [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const }],
+      [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const, showWhitespace: false }],
       [() => vscodeRepoClient.getFetchSettings(), "get_fetch_settings", {}, { autoFetchMinutes: 0 }],
       [() => vscodeRepoClient.setFetchSettings({ autoFetchMinutes: 10 }), "set_fetch_settings", { settings: { autoFetchMinutes: 10 } }, null],
       [() => vscodeRepoClient.getAppearanceSettings(), "get_appearance_settings", {}, { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4 }],
       [() => vscodeRepoClient.setAppearanceSettings({ codeFont: "Mono", codeFontSize: 14, uiSize: "Small" as const, tabSize: 8 }), "set_appearance_settings", { settings: { codeFont: "Mono", codeFontSize: 14, uiSize: "Small" as const, tabSize: 8 } }, null],
       [() => vscodeRepoClient.backgroundFetch("/r", null, 5), "background_fetch", { repoPath: "/r", prune: null, intervalMinutes: 5 }, "background-fetch-1"],
       [() => vscodeRepoClient.backgroundFetch("/r", true, 60), "background_fetch", { repoPath: "/r", prune: true, intervalMinutes: 60 }, null],
-      [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const } }, null],
+      [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const, showWhitespace: false }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const, showWhitespace: false } }, null],
     ] as const;
 
     for (const [index, [call, method, params, result]] of methods.entries()) {

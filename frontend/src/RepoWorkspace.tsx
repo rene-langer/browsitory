@@ -37,6 +37,7 @@ import { useSidebarPanelVisibility } from "./state/useSidebarPanelVisibility";
 import { useSidebarReveal } from "./state/useSidebarReveal";
 import styles from "./App.module.css";
 import { useAnnounce } from "./state/useAnnounce";
+import { CopyToClipboardContext, useClipboardFeedback } from "./state/useCopyToClipboard";
 import { useCommitDraftActions } from "./state/useCommitDraftActions";
 import { useNarrowLayout } from "./state/useNarrowLayout";
 import { useOutcomeToasts } from "./state/useOutcomeToasts";
@@ -246,6 +247,8 @@ export function RepoWorkspace({
   const storedStashBlockers = stashBlockers(appState.state);
 
   const announce = useAnnounce(appState, pushToast);
+  // The context menus' "Copy …" items (#614).
+  const clipboard = useClipboardFeedback(pushToast);
 
   // "Fetch automatically" (#440): the repository's override, else the app setting.
   const fetchSettings = useFetchSettingsContext();
@@ -510,6 +513,7 @@ export function RepoWorkspace({
     // real boolean rather than an assumption that they're always mounted-implies-active.
     <CurrentDiffContext.Provider value={currentDiff}>
     <WorkspaceActionsContext.Provider value={workspaceActions}>
+    <CopyToClipboardContext.Provider value={clipboard.copy}>
     <div
       ref={setWorkspaceElement}
       style={{ display: active ? "contents" : "none" }}
@@ -540,6 +544,11 @@ export function RepoWorkspace({
       {externalTools.error !== null && (
         <div className={styles.errorLayer}>
           <InlineError message={externalTools.error} onDismiss={externalTools.dismissError} />
+        </div>
+      )}
+      {clipboard.error !== null && (
+        <div className={styles.errorLayer}>
+          <InlineError message={clipboard.error} onDismiss={clipboard.dismissError} />
         </div>
       )}
       {appState.state.error !== null && (
@@ -655,6 +664,7 @@ export function RepoWorkspace({
         }
       />
     </div>
+    </CopyToClipboardContext.Provider>
     </WorkspaceActionsContext.Provider>
     </CurrentDiffContext.Provider>
   );

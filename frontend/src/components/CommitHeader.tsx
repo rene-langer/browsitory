@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, type KeyboardEvent } from "react";
 import type { CommitSignature, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
+import { copyText } from "../lib/clipboard";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
 import { parseMessageLinks } from "../lib/messageLinks";
@@ -126,13 +127,16 @@ export function CommitHeader({
   };
 
   const copySha = () => {
-    void navigator.clipboard
-      ?.writeText(commitId)
+    setOpenError(null);
+    copyText(commitId)
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        const described = describeError(error);
+        setOpenError({ ...described, message: `Couldn't copy the SHA: ${described.message}` });
+      });
   };
 
   return (

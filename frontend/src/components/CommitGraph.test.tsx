@@ -1689,3 +1689,57 @@ describe("CommitGraph — parent and child keys (#618)", () => {
     expect(onGoToCommit).not.toHaveBeenCalled();
   });
 });
+
+describe("CommitGraph — copy items (#614)", () => {
+  function renderBusyGraph() {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(
+      <CommitGraph
+        {...historyProps}
+        status={[]}
+        commits={[{ ...commits[0], timestamp: 1_700_000_000, tags: ["v2.0"] }, ...commits.slice(1)]}
+        selectedRow="uncommitted"
+        operationsBlocked
+        operationsBlockedReason="A transfer is in progress."
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        onPushTag={vi.fn()}
+        onDeleteTag={vi.fn(async () => {})}
+      />,
+    );
+    return writeText;
+  }
+
+  it("ends the commit menu with enabled copy items that write the expected text", () => {
+    const writeText = renderBusyGraph();
+    const expected: [string, string][] = [
+      ["Copy SHA", "aaa111..."],
+      ["Copy short SHA", "aaa1111"],
+      ["Copy subject", "second commit"],
+      ["Copy author", "Rene <rene@example.com>"],
+      ["Copy date", "2023-11-14T22:13:20.000Z"],
+    ];
+    for (const [label, text] of expected) {
+      fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
+      const names = screen.getAllByRole("menuitem").map((item) => item.textContent);
+      expect(names.slice(-expected.length)).toEqual(expected.map(([name]) => name));
+      const item = screen.getByRole("menuitem", { name: label });
+      expect(item).toBeEnabled();
+      fireEvent.click(item);
+      expect(writeText).toHaveBeenLastCalledWith(text);
+    }
+  });
+
+  it("offers Copy tag name in the tag badge menu, before the delete item", () => {
+    const writeText = renderBusyGraph();
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    const names = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(names.slice(-2)).toEqual(["Copy tag name", "Delete tag…"]);
+    const item = screen.getByRole("menuitem", { name: "Copy tag name" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+    expect(writeText).toHaveBeenCalledWith("v2.0");
+  });
+});

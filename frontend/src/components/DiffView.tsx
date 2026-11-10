@@ -257,6 +257,13 @@ export function DiffView({
       >
         Ignore whitespace
       </button>
+      <button
+        type="button"
+        aria-pressed={settings.showWhitespace}
+        onClick={() => update({ showWhitespace: !settings.showWhitespace })}
+      >
+        Show whitespace
+      </button>
       <span className={styles.contextStepper}>
         <button
           type="button"
@@ -570,7 +577,7 @@ export function DiffView({
                           <span className={styles.marker} aria-hidden="true">
                             {originPrefix("Context")}
                           </span>
-                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} /></span>
+                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} showWhitespace={settings.showWhitespace} /></span>
                         </div>
                       );
                     }
@@ -592,7 +599,7 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Remove")}
                             </span>
-                            <span className={styles.content}><DiffLineContent line={row.oldLine} tokens={tokens?.get(row.oldLine)} segments={wordSegments.get(row.oldLine)} /></span>
+                            <span className={styles.content}><DiffLineContent line={row.oldLine} tokens={tokens?.get(row.oldLine)} segments={wordSegments.get(row.oldLine)} showWhitespace={settings.showWhitespace} /></span>
                           </div>
                           <div
                             data-diff-column="new"
@@ -606,7 +613,7 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Add")}
                             </span>
-                            <span className={styles.content}><DiffLineContent line={row.newLine} tokens={tokens?.get(row.newLine)} segments={wordSegments.get(row.newLine)} /></span>
+                            <span className={styles.content}><DiffLineContent line={row.newLine} tokens={tokens?.get(row.newLine)} segments={wordSegments.get(row.newLine)} showWhitespace={settings.showWhitespace} /></span>
                           </div>
                         </div>
                       );
@@ -627,7 +634,7 @@ export function DiffView({
                             <span className={styles.marker} aria-hidden="true">
                               {originPrefix("Remove")}
                             </span>
-                            <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} /></span>
+                            <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} showWhitespace={settings.showWhitespace} /></span>
                           </div>
                           <div className={styles.splitColumn} aria-hidden="true" />
                         </div>
@@ -650,7 +657,7 @@ export function DiffView({
                           <span className={styles.marker} aria-hidden="true">
                             {originPrefix("Add")}
                           </span>
-                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} /></span>
+                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} showWhitespace={settings.showWhitespace} /></span>
                         </div>
                       </div>
                     );
@@ -678,7 +685,7 @@ export function DiffView({
                         <span className={styles.marker} aria-hidden="true">
                           {originPrefix(line.origin)}
                         </span>
-                        <span className={styles.content}><DiffLineContent line={line} tokens={tokens?.get(line)} segments={wordSegments.get(line)} /></span>
+                        <span className={styles.content}><DiffLineContent line={line} tokens={tokens?.get(line)} segments={wordSegments.get(line)} showWhitespace={settings.showWhitespace} /></span>
                       </div>
                     );
                   })}

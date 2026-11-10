@@ -144,6 +144,8 @@ pub struct DiffSettings {
     pub syntax_highlight: bool,
     pub word_wrap: WordWrap,
     pub algorithm: DiffAlgorithm,
+    /// Render spaces, tabs and carriage returns as faint markers in diff lines (#616).
+    pub show_whitespace: bool,
 }
 
 /// The diff algorithm every diff and hunk/line action uses (#469). Stored as `"default"`,
@@ -179,6 +181,7 @@ impl Default for DiffSettings {
             syntax_highlight: true,
             word_wrap: WordWrap::Auto,
             algorithm: DiffAlgorithm::Default,
+            show_whitespace: false,
         }
     }
 }

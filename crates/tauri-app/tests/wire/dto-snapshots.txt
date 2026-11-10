@@ -30,11 +30,11 @@ OpenRepoEntry/in-workspace {"path":"/repos/lib","workspaceId":"ws-1"}
 Workspace/members {"id":"ws-1","name":"Work","rootPath":"/repos","memberPaths":["/repos/app","/repos/lib"]}
 Workspace/empty {"id":"ws-2","name":"Empty","rootPath":"/empty","memberPaths":[]}
 RepoAlias/plain {"repoPath":"/repos/app","alias":"app (review)"}
-DiffSettings/plain {"ignoreWhitespace":true,"contextLines":5,"syntaxHighlight":false,"wordWrap":"Auto","algorithm":"Patience"}
-DiffSettings/wrap-On {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"On","algorithm":"Default"}
-DiffSettings/wrap-Off {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Off","algorithm":"Default"}
-DiffSettings/algorithm-Default {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Default"}
-DiffSettings/algorithm-Minimal {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Minimal"}
+DiffSettings/plain {"ignoreWhitespace":true,"contextLines":5,"syntaxHighlight":false,"wordWrap":"Auto","algorithm":"Patience","showWhitespace":true}
+DiffSettings/wrap-On {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"On","algorithm":"Default","showWhitespace":false}
+DiffSettings/wrap-Off {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Off","algorithm":"Default","showWhitespace":false}
+DiffSettings/algorithm-Default {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Default","showWhitespace":false}
+DiffSettings/algorithm-Minimal {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Minimal","showWhitespace":false}
 ExternalToolSettings/unset {"editor":null,"terminal":null}
 ExternalToolSettings/set {"editor":"code -w","terminal":"wt"}
 CommitMessageSettings/plain {"summaryLimit":50,"bodyRuler":72,"showRuler":true}

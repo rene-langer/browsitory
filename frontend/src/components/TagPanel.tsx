@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent } from "react";
 import { MoreHorizontal, Tag } from "lucide-react";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { isMenuKey, rectAnchor } from "../lib/menuKeys";
+import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import formStyles from "./primitives/FormDialog.module.css";
@@ -65,6 +66,7 @@ export function TagPanel({
   const [previousTags, setPreviousTags] = useState(tags);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
   const [menu, setMenu] = useState<TagMenu | null>(null);
+  const copyToClipboard = useCopyToClipboard();
 
   if (previousRemotes !== remotes) {
     setPreviousRemotes(remotes);
@@ -237,6 +239,7 @@ export function TagPanel({
             onBranchFromCommit,
             onCheckoutCommit,
             onDeleteFromRemote,
+            onCopy: copyToClipboard,
             onDelete: setDeleteConfirmation,
           })}
         />
