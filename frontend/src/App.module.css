@@ -90,7 +90,7 @@
   pointer-events: none;
   border: 2px dashed var(--color-accent);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  background: var(--color-scrim);
 }
 
 .dropHint p {
