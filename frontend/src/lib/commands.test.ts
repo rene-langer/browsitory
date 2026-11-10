@@ -1502,6 +1502,34 @@ describe("diff option and discard commands", () => {
     expect(commands.some((c) => c.id === "discard-selected-files")).toBe(false);
   });
 
+  it("offers staging the tracked files' changes only (#621)", () => {
+    const status = [
+      { path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const },
+      { path: "gone.txt", oldPath: null, staged: false, kind: "Deleted" as const },
+      { path: "new.txt", oldPath: null, staged: false, kind: "New" as const },
+      { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" as const },
+      { path: "b.txt", oldPath: null, staged: true, kind: "Modified" as const },
+    ];
+    const state = makeAppState({ status });
+    const command = build(state).commands.find((c) => c.id === "stage-modified-files");
+    expect(command?.label).toBe("Stage modified files (tracked only)");
+    command!.run();
+    expect(state.stageAllFiles).toHaveBeenCalledWith(["a.txt", "gone.txt"]);
+    expect(commandGroup("stage-modified-files")).toBe("Diff");
+  });
+
+  it("omits staging the tracked files' changes when there are none, or while busy (#621)", () => {
+    const untrackedAndConflict = [
+      { path: "new.txt", oldPath: null, staged: false, kind: "New" as const },
+      { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" as const },
+    ];
+    const none = build(makeAppState({ status: untrackedAndConflict })).commands;
+    expect(none.some((c) => c.id === "stage-modified-files")).toBe(false);
+    const modified = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }];
+    const busy = build(makeAppState({ pending: true, status: modified })).commands;
+    expect(busy.some((c) => c.id === "stage-modified-files")).toBe(false);
+  });
+
   it("groups the new commands", () => {
     expect(commandGroup("toggle-ignore-whitespace")).toBe("Diff");
     expect(commandGroup("discard-all-unstaged")).toBe("Diff");

@@ -45,3 +45,37 @@ describe("Browsitory multi-select in the change lists", () => {
     expect(git(E2E_REPO_PATH, "diff", "--cached", "--name-only").split("\n")).not.toContain(FILES[1]);
   });
 });
+
+const TRACKED = "stage-modified-tracked.txt";
+const UNTRACKED = "stage-modified-new.txt";
+
+// "Stage modified" stages the tracked files' changes and leaves untracked files alone (#621).
+describe("Browsitory Stage modified in the Changes heading", () => {
+  before(() => {
+    fs.writeFileSync(path.join(E2E_REPO_PATH, TRACKED), "committed\n");
+    git(E2E_REPO_PATH, "add", TRACKED);
+    git(E2E_REPO_PATH, "commit", "-q", "-m", "e2e: stage modified fixture");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, TRACKED), "edited\n");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, UNTRACKED), "new\n");
+  });
+
+  after(() => {
+    git(E2E_REPO_PATH, "reset", "-q", "--", TRACKED, UNTRACKED);
+    git(E2E_REPO_PATH, "checkout", "--", TRACKED);
+    fs.rmSync(path.join(E2E_REPO_PATH, UNTRACKED), { force: true });
+  });
+
+  it("stages the modified tracked file and not the untracked one", async () => {
+    await $(`span=${UNTRACKED} (New)`).waitForExist({ timeout: UI_TIMEOUT });
+    const stageModified = await $("button=Stage modified");
+    await stageModified.waitForExist({ timeout: UI_TIMEOUT });
+    await browser.execute((el) => (el as HTMLElement).click(), stageModified);
+
+    await browser.waitUntil(
+      () => git(E2E_REPO_PATH, "diff", "--cached", "--name-only").split("\n").includes(TRACKED),
+      { timeout: UI_TIMEOUT, timeoutMsg: "the modified tracked file was not staged" },
+    );
+    expect(git(E2E_REPO_PATH, "diff", "--cached", "--name-only").split("\n")).not.toContain(UNTRACKED);
+    expect(git(E2E_REPO_PATH, "status", "--porcelain", "--", UNTRACKED).trim()).toBe(`?? ${UNTRACKED}`);
+  });
+});
