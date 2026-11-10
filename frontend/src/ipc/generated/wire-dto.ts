@@ -305,6 +305,8 @@ export type UndoOutcome = { "kind": "Done", label: string, } | { "kind": "Nothin
 
 export type UndoState = { undo: string | null, redo: string | null, };
 
+export type UpdateSettings = { checkAutomatically: boolean, };
+
 export type UpstreamInfo = { localBranch: string, remoteName: string, remoteBranch: string, ahead: number | null, behind: number | null, 
 /**
  * Where Push lands under `push.default`; null = ask with the Push to… dialog.

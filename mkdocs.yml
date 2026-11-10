@@ -34,6 +34,10 @@ theme:
   name: material
   # Zensical's Material-compatible look (fonts, layout); its default is "modern".
   variant: classic
+  # Template overrides. partials/source.html keeps the repository link in the header but drops
+  # the theme's star-count widget, which asks api.github.com from every visitor's browser
+  # (#627, docs/guide/privacy.md).
+  custom_dir: docs/overrides
   language: en
   # No web fonts: the theme's default loads Roboto from Google Fonts, which hands every
   # visitor's IP address to Google. System fonts instead (#627, docs/guide/privacy.md).

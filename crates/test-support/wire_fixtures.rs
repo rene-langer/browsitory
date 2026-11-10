@@ -694,6 +694,23 @@ pub fn appearance_settings() -> Cases<config::AppearanceSettings> {
     ]
 }
 
+pub fn update_settings() -> Cases<config::UpdateSettings> {
+    vec![
+        case(
+            "on",
+            config::UpdateSettings {
+                check_automatically: true,
+            },
+        ),
+        case(
+            "off",
+            config::UpdateSettings {
+                check_automatically: false,
+            },
+        ),
+    ]
+}
+
 fn git_tool(source: ConfigSource) -> git_core::tools::GitToolInfo {
     git_core::tools::GitToolInfo {
         name: "meld".to_string(),

@@ -10,7 +10,7 @@ use tauri_plugin_dialog::DialogExt;
 use repo_service::wire::{
     hook_progress_dto, transfer_progress_dto, AppearanceSettingsDto, CommitMessageSettingsDto,
     DiffSettingsDto, ErrorDto, FetchSettingsDto, OpenRepoEntryDto, OpenRepoEntryInput,
-    TransferProgressDto, WorkspaceDto,
+    TransferProgressDto, UpdateSettingsDto, WorkspaceDto,
 };
 use repo_service::worker::{HookEvent, TransferEvent, WorkerHandle, WorkerRegistry};
 
@@ -376,6 +376,18 @@ pub fn get_appearance_settings() -> Result<AppearanceSettingsDto, ErrorDto> {
 #[tauri::command]
 pub fn set_appearance_settings(settings: AppearanceSettingsDto) -> Result<(), ErrorDto> {
     config::set_appearance_settings(&settings.into()).map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
+pub fn get_update_settings() -> Result<UpdateSettingsDto, ErrorDto> {
+    config::get_update_settings()
+        .map(UpdateSettingsDto::from)
+        .map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
+pub fn set_update_settings(settings: UpdateSettingsDto) -> Result<(), ErrorDto> {
+    config::set_update_settings(&settings.into()).map_err(ErrorDto::from_error)
 }
 
 #[tauri::command]

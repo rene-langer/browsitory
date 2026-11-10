@@ -1,25 +1,34 @@
 #!/usr/bin/env python3
 """Keeps the privacy notice (docs/guide/privacy.md) in step with the code (#627).
 
-Lists every host named in an `http://`, `https://`, `ws://` or `wss://` URL in the app's
-non-test sources and the desktop app's Tauri config (the updater endpoints), and fails when:
+Lists every host named in an `http://`, `https://`, `ws://` or `wss://` URL (scheme in any
+case) or a protocol-relative `//host.name` URL in the app's non-test sources, and fails when:
 
-- a host is neither on ALLOWED_HOSTS nor a local or reserved example name (IGNORED_HOSTS,
-  `*.test`, `*.example`, `*.invalid`, `*.localhost`), so a new outbound host can't slip in
-  without the notice saying so;
+- a host is neither on ALLOWED_HOSTS, nor on NON_NETWORK_HOSTS, nor a local or reserved example
+  name (IGNORED_HOSTS, `*.test`, `*.example`, `*.invalid`, `*.localhost`), so a new outbound
+  host can't slip in without the notice saying so;
+- a URL's host isn't written out after the scheme (`format!("https://{HOST}")`,
+  `concat!("https://", …)`, `` `https://${host}` ``, `"https://" + host`) and the line isn't on
+  DYNAMIC_URLS, so a host kept in a constant elsewhere can't slip in either;
 - a host on ALLOWED_HOSTS is not named, in backticks, in docs/guide/privacy.md;
-- a host on ALLOWED_HOSTS no longer appears in the sources (a stale entry).
+- a host on ALLOWED_HOSTS, or a DYNAMIC_URLS entry, no longer appears in the sources (stale).
+
+The scan is deliberately simple (#706): it reads the whole text, comments included, and
+doesn't parse strings or comments. A URL in a comment is a cheap false positive: add it to
+NON_NETWORK_HOSTS with the reason.
 
 Scanned: `crates/*/src/**/*.rs` (except the test-support crate), `frontend/src` and
-`extension/src` (`.ts`, `.tsx`, `.js`, `.mjs`, `.css`, `.html`), and
-`crates/tauri-app/tauri.conf.json`. Skipped: comments, test files (`*.test.*`, `*.spec.*`,
-`tests.rs`, `tests/`, `__tests__/`, `fixtures/`) and Rust `#[cfg(test)] mod … { … }` blocks.
+`extension/src` (`.ts`, `.tsx`, `.js`, `.mjs`, `.css`, `.html`, `.json`, `.svg`),
+`frontend/index.html`, `frontend/public/`, `frontend/vite*.ts`, `extension/package.json`,
+`crates/tauri-app/tauri.conf.json` and `crates/tauri-app/capabilities/`. Skipped: test files
+(`*.test.*`, `*.spec.*`, `tests.rs`, `tests/`, `__tests__/`, `fixtures/`), Rust
+`#[cfg(test)] mod … { … }` blocks and the files of `#[cfg(test)] mod name;` modules.
 
 It only finds hosts written into the code. Hosts that come from the user (Git remotes,
 self-hosted forge URLs) are documented in the notice by hand.
 
 Usage: python3 scripts/check-privacy-hosts.py [--root DIR]
-CI: the `audit` job in .github/workflows/ci.yml.
+CI: the `audit` job in .github/workflows/ci.yml (it runs even when an audit step fails, #707).
 """
 
 from __future__ import annotations
@@ -37,16 +46,44 @@ ALLOWED_HOSTS = {
     "api.bitbucket.org": "pull requests for Bitbucket remotes",
 }
 
+# Hosts the sources name that the app never contacts, and why.
+NON_NETWORK_HOSTS = {
+    "www.w3.org": "XML namespace in SVG files",
+    "vite.dev": "documentation link in a comment (frontend/vite.config.ts)",
+    "vitest.dev": "documentation link in a comment (frontend/src/jest-dom-vitest.d.ts)",
+}
+
+# Lines whose URL has no literal host, by file: each entry is a snippet of the line, and why the
+# host isn't a contact the app makes on its own.
+DYNAMIC_URLS = {
+    "crates/repo-service/src/clone.rs": {
+        "over `https://` with": "comment naming the scheme",
+        'eq_ignore_ascii_case("https://")': "compares a remote URL's scheme",
+    },
+    "crates/repo-service/src/credentials.rs": {
+        'format!("https://{host}{port}/{username}")': "credential key for the user's remote host",
+        'url.starts_with("https://") || url.starts_with("http://")': "checks a remote URL's scheme",
+    },
+    "frontend/src/lib/messageLinks.ts": {
+        "return `https://${forge.host}/": "issue link on the remote's host, opened on click (#612)",
+        "`http://`/`https://` URLs": "comment naming the schemes",
+    },
+}
+
 # Local addresses and documentation names: never a contact with a third party.
 IGNORED_HOSTS = {"localhost", "127.0.0.1", "[::1]", "example.com", "example.net", "example.org"}
 IGNORED_SUFFIXES = (".test", ".example", ".invalid", ".localhost", ".example.com", ".example.net",
                     ".example.org")
 
-URL_RE = re.compile(r"\b(?:https?|wss?)://(\[[0-9A-Fa-f:]+\]|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*)")
-# `//` that starts a comment, not the one in `scheme://`.
-LINE_COMMENT_RE = re.compile(r"(?<![:/])//.*$")
-SOURCE_SUFFIXES = {".rs", ".ts", ".tsx", ".js", ".mjs", ".css", ".html"}
+HOST = r"(\[[0-9a-f:]+\]|[a-z0-9-]+(?:\.[a-z0-9-]+)*)"
+URL_RE = re.compile(r"\b(?:https?|wss?)://" + HOST, re.IGNORECASE)
+# `//cdn.host/x.js`: a `//` not after a word character, `:` or `/`, then a dotted name.
+PROTOCOL_RELATIVE_RE = re.compile(r"(?<![\w:/])//([a-z0-9-]+(?:\.[a-z0-9-]+)+)", re.IGNORECASE)
+# A scheme followed by something that starts no host: interpolation, a closing quote, `+`.
+DYNAMIC_URL_RE = re.compile(r"\b(?:https?|wss?)://(?=[{$\"'`+(])", re.IGNORECASE)
+SOURCE_SUFFIXES = {".rs", ".ts", ".tsx", ".js", ".mjs", ".css", ".html", ".json", ".svg"}
 TEST_DIRS = {"tests", "__tests__", "fixtures", "test-support"}
+TEST_MOD_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;\s*$")
 
 
 def is_test_file(path: Path) -> bool:
@@ -81,33 +118,19 @@ def strip_rust_test_modules(lines: list[str]) -> list[str]:
     return kept
 
 
-def code_lines(path: Path, text: str) -> list[str]:
-    """The lines of `text` without comments (and, for Rust, without test modules)."""
-    lines = text.splitlines()
-    if path.suffix == ".rs":
-        lines = strip_rust_test_modules(lines)
-    out: list[str] = []
-    in_block = False
-    for line in lines:
-        if in_block:
-            if "*/" in line:
-                in_block = False
-                line = line.split("*/", 1)[1]
-            else:
-                continue
-        stripped = line.lstrip()
-        if stripped.startswith("/*"):
-            if "*/" not in stripped:
-                in_block = True
-            continue
-        if stripped.startswith("*") or stripped.startswith("<!--"):
-            continue
-        out.append(LINE_COMMENT_RE.sub("", line))
-    return out
+def rust_test_module_files(path: Path, lines: list[str]) -> set[Path]:
+    """The files of the `#[cfg(test)] mod name;` modules `path` declares."""
+    folder = path.parent if path.name in ("lib.rs", "main.rs", "mod.rs") else path.with_suffix("")
+    files: set[Path] = set()
+    for attr, decl in zip(lines, lines[1:]):
+        match = TEST_MOD_RE.match(decl)
+        if attr.strip() == "#[cfg(test)]" and match:
+            files |= {folder / f"{match.group(1)}.rs", folder / match.group(1)}
+    return files
 
 
 def is_ignored(host: str) -> bool:
-    return host in IGNORED_HOSTS or host.endswith(IGNORED_SUFFIXES)
+    return host in IGNORED_HOSTS or host.endswith(IGNORED_SUFFIXES) or host in NON_NETWORK_HOSTS
 
 
 def source_files(root: Path) -> list[Path]:
@@ -118,30 +141,65 @@ def source_files(root: Path) -> list[Path]:
         base = root / folder
         if base.is_dir():
             files.extend(p for p in base.rglob("*") if p.suffix in SOURCE_SUFFIXES)
-    rel = [p for p in files if not is_test_file(p.relative_to(root))]
-    conf = root / "crates/tauri-app/tauri.conf.json"
-    if conf.is_file():
-        rel.append(conf)
-    return sorted(rel)
+    public = root / "frontend/public"
+    if public.is_dir():
+        files.extend(public.rglob("*"))
+    files.extend((root / "frontend").glob("vite*.ts"))
+    files.extend((root / "crates/tauri-app/capabilities").glob("*.json"))
+    for name in ("frontend/index.html", "extension/package.json", "crates/tauri-app/tauri.conf.json"):
+        files.append(root / name)
+    files = [p for p in files if p.is_file() and not is_test_file(p.relative_to(root))]
+    test_modules: set[Path] = set()
+    for path in files:
+        if path.suffix == ".rs":
+            test_modules |= rust_test_module_files(path, read(path).splitlines())
+    return sorted(
+        {p for p in files if not any(p == m or m in p.parents for m in test_modules)}
+    )
+
+
+def read(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def scan(root: Path) -> tuple[dict[str, list[str]], list[str]]:
+    """Host -> the files that name it, and the errors for unlisted dynamic URLs."""
+    found: dict[str, list[str]] = {}
+    errors: list[str] = []
+    used_snippets: set[tuple[str, str]] = set()
+    for path in source_files(root):
+        rel = path.relative_to(root).as_posix()
+        lines = read(path).splitlines()
+        if path.suffix == ".rs":
+            lines = strip_rust_test_modules(lines)
+        allowed = DYNAMIC_URLS.get(rel, {})
+        for number, line in enumerate(lines, 1):
+            for match in [*URL_RE.finditer(line), *PROTOCOL_RELATIVE_RE.finditer(line)]:
+                host = match.group(1).lower()
+                if not is_ignored(host):
+                    found.setdefault(host, []).append(rel)
+            if DYNAMIC_URL_RE.search(line):
+                snippets = [s for s in allowed if s in line]
+                used_snippets.update((rel, s) for s in snippets)
+                if not snippets:
+                    errors.append(
+                        f"{rel}: a URL without a literal host: {line.strip()!r}. Write the host "
+                        "into the URL, or add the line to DYNAMIC_URLS in "
+                        "scripts/check-privacy-hosts.py with the reason"
+                    )
+    for rel, snippets in sorted(DYNAMIC_URLS.items()):
+        for snippet in snippets:
+            if (rel, snippet) not in used_snippets:
+                errors.append(f"DYNAMIC_URLS entry {snippet!r} for {rel} matches no line: remove it")
+    return found, errors
 
 
 def find_hosts(root: Path) -> dict[str, list[str]]:
-    """Host -> the files that name it."""
-    found: dict[str, list[str]] = {}
-    for path in source_files(root):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        lines = text.splitlines() if path.suffix == ".json" else code_lines(path, text)
-        for line in lines:
-            for match in URL_RE.finditer(line):
-                host = match.group(1).lower()
-                if not is_ignored(host):
-                    found.setdefault(host, []).append(path.relative_to(root).as_posix())
-    return found
+    return scan(root)[0]
 
 
 def check(root: Path) -> list[str]:
-    errors: list[str] = []
-    found = find_hosts(root)
+    found, errors = scan(root)
     notice_path = root / "docs/guide/privacy.md"
     notice = notice_path.read_text(encoding="utf-8") if notice_path.is_file() else ""
     for host, places in sorted(found.items()):
@@ -149,6 +207,7 @@ def check(root: Path) -> list[str]:
             errors.append(
                 f"{host} (in {', '.join(sorted(set(places)))}) is not on ALLOWED_HOSTS: document "
                 "the contact in docs/guide/privacy.md and add it to scripts/check-privacy-hosts.py"
+                " (or, if the app never contacts it, to NON_NETWORK_HOSTS)"
             )
     for host in sorted(ALLOWED_HOSTS):
         if f"`{host}`" not in notice:

@@ -7,6 +7,15 @@ import { credentialRemediation } from "./lib/errorMessages";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
 import { fakeRepoClient } from "./test/fakeRepoClient";
+import { useContext, useEffect } from "react";
+import { UpdateCheckContext, type UpdateCheck } from "./state/updateCheck";
+
+// Stands in for the desktop app's UpdateBanner: registers `check` as "Check for updates" (#630).
+function FakeUpdater({ check }: { check: UpdateCheck }) {
+  const registry = useContext(UpdateCheckContext);
+  useEffect(() => registry?.register(check), [registry, check]);
+  return null;
+}
 
 // The generated release notes, which App reads once at import. Tests swap the contents of this
 // array in place; by default it holds the real notes.
@@ -2601,6 +2610,57 @@ describe("App external tools", () => {
     fireEvent.change(input, { target: { value: "Preferences" } });
     fireEvent.click(await screen.findByRole("option", { name: "Preferences…" }));
     expect(await screen.findByRole("dialog", { name: "Preferences" })).toBeInTheDocument();
+  });
+
+  async function openPalette(container: HTMLElement) {
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    return screen.findByRole("combobox", { name: "Command palette" });
+  }
+
+  it("the palette's Check for updates runs the updater's check and reports it (#630)", async () => {
+    const check = vi.fn<UpdateCheck>().mockResolvedValueOnce({ kind: "none" }).mockResolvedValueOnce({ kind: "failed", message: "offline" });
+    const { container } = render(<App client={toolsClient()} updateBanner={<FakeUpdater check={check} />} />);
+    let input = await openPalette(container);
+    fireEvent.change(input, { target: { value: "Check for updates" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Check for updates" }));
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Browsitory is up to date")).toBeInTheDocument();
+
+    input = await openPalette(container);
+    fireEvent.change(input, { target: { value: "Check for updates" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Check for updates" }));
+    expect(await screen.findByText("Couldn't check for updates: offline")).toBeInTheDocument();
+  });
+
+  it("Preferences has an Updates section with the updater only (#630)", async () => {
+    const check = vi.fn<UpdateCheck>().mockResolvedValue({ kind: "none" });
+    const getUpdateSettings = vi.fn(async () => ({ checkAutomatically: false }));
+    const view = render(<App client={toolsClient({ getUpdateSettings })} />);
+    await screen.findByRole("tab", { name: "a" });
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+    expect(screen.queryByRole("group", { name: "Updates" })).toBeNull();
+    expect(getUpdateSettings).not.toHaveBeenCalled();
+    view.unmount();
+
+    render(<App client={toolsClient({ getUpdateSettings })} updateBanner={<FakeUpdater check={check} />} />);
+    await screen.findByRole("tab", { name: "a" });
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+    const group = screen.getByRole("group", { name: "Updates" });
+    await waitFor(() =>
+      expect(within(group).getByRole("checkbox", { name: "Check for updates automatically" })).not.toBeChecked(),
+    );
+    fireEvent.click(within(group).getByRole("button", { name: "Check for updates" }));
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(await within(group).findByText("Browsitory is up to date.")).toBeInTheDocument();
+  });
+
+  it("offers no Check for updates without the updater (VS Code)", async () => {
+    const { container } = render(<App client={toolsClient()} />);
+    const input = await openPalette(container);
+    fireEvent.change(input, { target: { value: "Check for updates" } });
+    await waitFor(() => expect(screen.queryByRole("option", { name: "Check for updates" })).toBeNull());
   });
 
   it("the palette and the release notes open the third-party licences", async () => {

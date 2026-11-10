@@ -1,6 +1,6 @@
 // Generated from the backend's limits and defaults (crates/repo-service/src/wire.rs).
 // Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current
-import type { AppearanceSettings, CommitMessageSettings, DiffSettings, FetchSettings } from "./wire-dto";
+import type { AppearanceSettings, CommitMessageSettings, DiffSettings, FetchSettings, UpdateSettings } from "./wire-dto";
 
 /** `git_core::diff::MAX_CONTEXT_LINES`: more context is clamped to it. */
 export const MAX_CONTEXT_LINES = 20;
@@ -20,5 +20,7 @@ export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {"codeFont":null,
 export const CODE_FONT_SIZES = { min: 10, max: 24 } as const;
 /** `config::TAB_SIZES`: the range the tab size is clamped to, in columns. */
 export const TAB_SIZES = { min: 1, max: 16 } as const;
+/** `config::UpdateSettings::default()`. */
+export const DEFAULT_UPDATE_SETTINGS: UpdateSettings = {"checkAutomatically":true};
 /** `git_core::search::KEYS`: the keys a commit search `key:value` term can use. */
 export const SEARCH_KEYS = ["author","committer","message","commit","path","contents","after","before","branch","line","merges"] as const;

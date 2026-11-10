@@ -31,8 +31,8 @@ The palette has almost every action in Browsitory, grouped like this:
 - **General:** **Refresh**, undo and redo, search commits, the selected commit's actions
   (cherry-pick, revert, reset, check out, reword, squash, fixup, move, drop; for a search
   result or file history commit older than the loaded history, all but the history edits),
-  worktree and submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Third-party licences** and
-  **Open user guide**.
+  worktree and submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Check for
+  updates** (desktop app), **Third-party licences** and **Open user guide**.
 
 Commands that can't run right now are left out. For example, while a rebase is paused, the
 palette offers only the commands that are safe until it is finished.

@@ -188,6 +188,8 @@ methods!(|params, repos, stdout| {
     "set_fetch_settings" => set_fetch_settings(SetFetchSettingsParams),
     "get_appearance_settings" => get_appearance_settings(),
     "set_appearance_settings" => set_appearance_settings(SetAppearanceSettingsParams),
+    "get_update_settings" => get_update_settings(),
+    "set_update_settings" => set_update_settings(SetUpdateSettingsParams),
     "mark_resolved" => mark_resolved(MarkResolvedParams, repos),
     "resolve_whole_file" => resolve_whole_file(ResolveWholeFileParams, repos),
     "read_file_version" => read_file_version(ReadFileVersionParams, repos),
