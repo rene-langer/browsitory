@@ -220,6 +220,24 @@ pub struct FetchSettings {
 /// The longest "Fetch automatically" interval `set_fetch_settings_at` keeps (a day).
 pub const MAX_AUTO_FETCH_MINUTES: u32 = 24 * 60;
 
+/// Desktop app update preferences, persisted as the `[updates]` TOML table (#630).
+/// `check_automatically` (on by default) checks for a new version when the app starts and every
+/// few hours; off, the app checks only when asked ("Check for updates"). The VS Code extension
+/// updates through its marketplace and ignores this table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateSettings {
+    pub check_automatically: bool,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            check_automatically: true,
+        }
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ConfigFile {
     #[serde(default)]
@@ -228,8 +246,8 @@ struct ConfigFile {
     active_repo: Option<PathBuf>,
     #[serde(default)]
     last_seen_version: Option<String>,
-    // `diff`, `tools` and `commit_message` serialize as TOML tables (`[diff]`, `[tools]`,
-    // `[commit_message]`). Tables must follow
+    // `diff`, `tools`, `commit_message`, `fetch` and `updates` serialize as TOML tables
+    // (`[diff]`, `[tools]`, `[commit_message]`, `[fetch]`, `[updates]`). Tables must follow
     // plain `key = value` lines, so they sit after the plain keys.
     // The fields after it serialize as TOML array-of-tables because their element type is a
     // struct. TOML requires plain `key = value` lines and tables to precede an array-of-tables
@@ -242,6 +260,8 @@ struct ConfigFile {
     commit_message: CommitMessageSettings,
     #[serde(default)]
     fetch: FetchSettings,
+    #[serde(default)]
+    updates: UpdateSettings,
     #[serde(default, deserialize_with = "deserialize_open_repos")]
     open_repos: Vec<OpenRepoEntry>,
     #[serde(default)]
@@ -407,6 +427,27 @@ pub fn set_fetch_settings_at(
     config.fetch = FetchSettings {
         auto_fetch_minutes: settings.auto_fetch_minutes.min(MAX_AUTO_FETCH_MINUTES),
     };
+    write_config(config_file, &config)
+}
+
+pub fn get_update_settings() -> Result<UpdateSettings, ConfigError> {
+    get_update_settings_at(&config_file_path()?)
+}
+
+pub fn set_update_settings(settings: &UpdateSettings) -> Result<(), ConfigError> {
+    set_update_settings_at(&config_file_path()?, settings)
+}
+
+pub fn get_update_settings_at(config_file: &Path) -> Result<UpdateSettings, ConfigError> {
+    Ok(read_config(config_file)?.updates)
+}
+
+pub fn set_update_settings_at(
+    config_file: &Path,
+    settings: &UpdateSettings,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.updates = *settings;
     write_config(config_file, &config)
 }
 

@@ -1519,6 +1519,18 @@ describe("preferences and external tool commands", () => {
     expect(onOpenThirdPartyLicences).toHaveBeenCalled();
   });
 
+  it("adds Check for updates with the app commands, only where the host has an updater (#630)", () => {
+    const onCheckForUpdates = vi.fn();
+    expect(commandsFor(makeAppState(), { app: {} }).map((c) => c.id)).not.toContain("check-for-updates");
+    const commands = commandsFor(makeAppState(), { app: { onCheckForUpdates } });
+    const check = commands.find((c) => c.label === "Check for updates");
+    expect(check?.id).toBe("check-for-updates");
+    expect(check?.keywords).toEqual(expect.arrayContaining(["update", "new version"]));
+    expect(groupOf("check-for-updates")).toBe("General");
+    check!.run();
+    expect(onCheckForUpdates).toHaveBeenCalled();
+  });
+
   it("adds Open user guide with the app commands (#320)", () => {
     const onOpenUserGuide = vi.fn();
     const commands = commandsFor(makeAppState(), { app: {
@@ -1951,7 +1963,7 @@ const allFamilies = (appState: UseAppStateResult) =>
   buildCommands({
     appState,
     onShowShortcuts: noop,
-    app: { onCloneRepository: noop, onNewRepository: noop, onOpenPreferences: noop, onOpenThirdPartyLicences: noop, onOpenUserGuide: noop },
+    app: { onCloneRepository: noop, onNewRepository: noop, onOpenPreferences: noop, onOpenThirdPartyLicences: noop, onOpenUserGuide: noop, onCheckForUpdates: noop },
     tabs: tabs({ otherOpenRepos: [{ path: "/other", displayName: "other" } as OpenRepo] }),
     sidebar: sidebar(),
     diff: {
@@ -2033,6 +2045,7 @@ describe("command ids and groups", () => {
       ["open-submodule:libs/b", "General"],
       ["open-terminal", "Repositories"],
       ["open-user-guide", "General"],
+      ["check-for-updates", "General"],
       ["open-worktree:/repo", "General"],
       ["open-worktree:/repo-wt1", "General"],
       ["preferences", "General"],
@@ -2096,6 +2109,7 @@ describe("command ids and groups", () => {
       ["open-current-file-in-editor", "Diff"],
       ["open-terminal", "Repositories"],
       ["open-user-guide", "General"],
+      ["check-for-updates", "General"],
       ["preferences", "General"],
       ["rebase-abort", "General"],
       ["rebase-continue", "General"],
@@ -2144,6 +2158,7 @@ describe("command ids and groups", () => {
       ["open-current-file-in-editor", "Diff"],
       ["open-terminal", "Repositories"],
       ["open-user-guide", "General"],
+      ["check-for-updates", "General"],
       ["preferences", "General"],
       ["refresh", "General"],
       ["reveal-repository", "Repositories"],
@@ -2189,6 +2204,7 @@ describe("command ids and groups", () => {
       ["open-current-file-in-editor", "Diff"],
       ["open-terminal", "Repositories"],
       ["open-user-guide", "General"],
+      ["check-for-updates", "General"],
       ["preferences", "General"],
       ["refresh", "General"],
       ["reveal-repository", "Repositories"],
@@ -2252,6 +2268,7 @@ describe("command ids and groups", () => {
       ["open-submodule:libs/b", "General"],
       ["open-terminal", "Repositories"],
       ["open-user-guide", "General"],
+      ["check-for-updates", "General"],
       ["open-worktree:/repo", "General"],
       ["open-worktree:/repo-wt1", "General"],
       ["pop-stash:0", "Stash"],

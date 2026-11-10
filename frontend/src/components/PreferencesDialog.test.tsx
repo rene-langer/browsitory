@@ -4,7 +4,16 @@ import { COMMIT_MESSAGE_COLUMNS, type RepoClient } from "../ipc/RepoClient";
 import { CommitMessageSettingsProvider } from "../state/CommitMessageSettingsProvider";
 import { __resetAutoFetchForTests, readAutoFetchOverride } from "../lib/autoFetch";
 import { FetchSettingsProvider } from "../state/FetchSettingsProvider";
-import { CommitMessageSection, DiffSection, ExternalToolsSection, FetchSection, PreferencesDialog } from "./PreferencesDialog";
+import {
+  CommitMessageSection,
+  DiffSection,
+  ExternalToolsSection,
+  FetchSection,
+  PreferencesDialog,
+  UpdatesSection,
+} from "./PreferencesDialog";
+import { UpdateSettingsProvider } from "../state/UpdateSettingsProvider";
+import type { UpdateCheckOutcome } from "../state/updateCheck";
 import { DiffSettingsProvider } from "../state/DiffSettingsProvider";
 import { within } from "@testing-library/react";
 import { fakeRepoClient } from "../test/fakeRepoClient";
@@ -343,5 +352,77 @@ describe("Fetch preferences", () => {
     fireEvent.change(app, { target: { value: "5" } });
     expect(await screen.findByRole("alert")).toHaveTextContent("read-only config");
     expect(app).toHaveValue("0");
+  });
+});
+
+describe("Updates preferences (#630)", () => {
+  function renderUpdates(
+    client: Partial<RepoClient>,
+    onCheckNow: () => Promise<UpdateCheckOutcome> = async () => ({ kind: "none" }),
+  ) {
+    render(
+      <UpdateSettingsProvider client={fakeRepoClient(client)}>
+        <PreferencesDialog onClose={() => {}}>
+          <UpdatesSection onCheckNow={onCheckNow} />
+        </PreferencesDialog>
+      </UpdateSettingsProvider>,
+    );
+    return screen.getByRole("group", { name: "Updates" });
+  }
+
+  it("shows the saved setting and saves a change", async () => {
+    const setUpdateSettings = vi.fn(async () => {});
+    const group = renderUpdates({ getUpdateSettings: async () => ({ checkAutomatically: false }), setUpdateSettings });
+    const box = within(group).getByRole("checkbox", { name: "Check for updates automatically" });
+    await waitFor(() => expect(box).not.toBeChecked());
+
+    fireEvent.click(box);
+    expect(box).toBeChecked();
+    await waitFor(() => expect(setUpdateSettings).toHaveBeenLastCalledWith({ checkAutomatically: true }));
+
+    fireEvent.click(box);
+    await waitFor(() => expect(setUpdateSettings).toHaveBeenLastCalledWith({ checkAutomatically: false }));
+  });
+
+  it("is on by default", async () => {
+    renderUpdates({ getUpdateSettings: async () => ({ checkAutomatically: true }) });
+    expect(await screen.findByRole("checkbox", { name: "Check for updates automatically" })).toBeChecked();
+  });
+
+  it("shows a failed save and goes back to the saved setting", async () => {
+    renderUpdates({
+      getUpdateSettings: async () => ({ checkAutomatically: true }),
+      setUpdateSettings: async () => {
+        throw new Error("read-only config");
+      },
+    });
+    const box = screen.getByRole("checkbox", { name: "Check for updates automatically" });
+    fireEvent.click(box);
+    expect(await screen.findByRole("alert")).toHaveTextContent("read-only config");
+    expect(box).toBeChecked();
+  });
+
+  it("checks for updates on demand and shows what it found", async () => {
+    let answer: (outcome: UpdateCheckOutcome) => void = () => {};
+    const onCheckNow = vi.fn(() => new Promise<UpdateCheckOutcome>((resolve) => (answer = resolve)));
+    renderUpdates({ getUpdateSettings: async () => ({ checkAutomatically: false }) }, onCheckNow);
+    const button = screen.getByRole("button", { name: "Check for updates" });
+
+    fireEvent.click(button);
+    expect(onCheckNow).toHaveBeenCalledTimes(1);
+    expect(button).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Checking for updates…");
+
+    answer({ kind: "none" });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Browsitory is up to date."));
+    expect(button).toBeEnabled();
+
+    fireEvent.click(button);
+    answer({ kind: "ready", version: "1.2.3" });
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Update v1.2.3 is ready."));
+
+    fireEvent.click(button);
+    answer({ kind: "failed", message: "no endpoint answered" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't check for updates: no endpoint answered");
   });
 });

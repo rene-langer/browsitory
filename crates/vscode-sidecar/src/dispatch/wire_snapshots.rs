@@ -25,7 +25,8 @@ use repo_service::wire::{
     ReflogEntryDto, RemoteInfoDto, SearchPageDto, SequenceAbortDto, SequenceOutcomeDto,
     SequenceProgressDto, StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StatusEntryDto,
     SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto, TerminalSequenceDto, TreeListingDto,
-    UndoOutcomeDto, UndoStateDto, UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
+    UndoOutcomeDto, UndoStateDto, UpdateSettingsDto, UpstreamInfoDto, WorkspaceDto,
+    WorktreeInfoDto,
 };
 
 #[path = "../../../test-support/wire_fixtures.rs"]
@@ -121,6 +122,11 @@ fn snapshots() -> Vec<(String, String)> {
         "FetchSettings",
         fixtures::fetch_settings(),
         FetchSettingsDto::from,
+    );
+    s.add(
+        "UpdateSettings",
+        fixtures::update_settings(),
+        UpdateSettingsDto::from,
     );
     s.add("GitTools", fixtures::git_tools(), GitToolsDto::from);
     s.add(

@@ -22,6 +22,8 @@ export interface AppCommands {
   onOpenThirdPartyLicences?: () => void;
   /** Opens the user guide site in the browser ("Open user guide"). */
   onOpenUserGuide?: () => void;
+  /** Checks for a new version now ("Check for updates", #630); desktop app only. */
+  onCheckForUpdates?: () => void;
 }
 
 /**
@@ -314,6 +316,14 @@ function appCommands({ onShowShortcuts, app, search }: FamilyContext): Command[]
       label: "Open user guide",
       keywords: ["help", "user guide", "documentation", "docs", "manual"],
       run: app.onOpenUserGuide,
+    });
+  }
+  if (app?.onCheckForUpdates !== undefined) {
+    add({
+      id: "check-for-updates",
+      label: "Check for updates",
+      keywords: ["update", "upgrade", "new version", "release", "download"],
+      run: app.onCheckForUpdates,
     });
   }
   if (app?.onOpenThirdPartyLicences !== undefined) {

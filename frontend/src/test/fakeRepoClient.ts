@@ -92,6 +92,8 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   setCommitMessageSettings: async () => {},
   getFetchSettings: async () => ({ autoFetchMinutes: 0 }),
   setFetchSettings: async () => {},
+  getUpdateSettings: async () => ({ checkAutomatically: true }),
+  setUpdateSettings: async () => {},
 };
 
 // The `RepoClient` methods that return synchronously; every other method returns a promise.
