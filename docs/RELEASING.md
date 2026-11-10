@@ -204,12 +204,25 @@ it builds the site.
   `redeploy-on-release` job of `docs.yml` then starts the workflow on `main`
   (`workflow_dispatch`), which rebuilds and publishes the site with the new `latest.json`. Every
   other publish of the site (a docs change on `main`) fetches it again too.
+- **Bundle URLs on the copy (#519).** The copy is not the release's file byte for byte: the
+  `--pages-copy` option of `check-updater-manifest.py` rewrites each `url` to
+  `https://github.com/rene-langer/browsitory/releases/download/release%2FX.Y.Z/<file>` (the v0
+  form). An app that reached the second endpoint because `api.github.com` failed can then still
+  download the bundle. The signatures cover the bundle, so they stay valid; the release's own
+  `latest.json` keeps the API URLs. (If `github.com` is the host that fails, both endpoints are
+  down anyway.)
 - **A failure doesn't break the docs.** If the release can't be read or the check fails, the
   build warns ("Updater manifest") and publishes the site without `latest.json`. The second
-  endpoint then answers `404` until the next publish; installed apps still use the first.
-  Pull requests run the same step but publish nothing.
-- **If it is missing or old** (the warning, or step 4 above shows an older version): fix the
-  cause, then `gh workflow run docs.yml --ref main`, or re-run the latest `Docs` run on `main`.
+  endpoint then answers `404`; installed apps still use the first. The run also ends red
+  (job `manifest-missing`; the site is still published), and the daily scheduled run of
+  `docs.yml` on `main` tries again. Pull requests run the same step but publish nothing.
+- **If it is missing or old** (the red run, the warning, or step 4 above shows an older
+  version): fix the cause, then `gh workflow run docs.yml --ref main`, or re-run the latest
+  `Docs` run on `main`.
+- **Plugin limit.** The updater moves to the second endpoint only after a non-2xx status or a
+  request error. A first endpoint that answers `200` with a body it can't parse or use is an
+  error of the check and does not fall through (`tauri-plugin-updater` 2.14.1). Not fixed here;
+  `check-updater-manifest.py` on the draft is what keeps such a body from being published.
 - A pre-release, or a release published with `--latest=false`, doesn't change either endpoint.
 - Installed apps keep this URL like the first one: moving the user guide site (another Pages
   address, a custom domain without a redirect) or dropping `latest.json` from it takes the

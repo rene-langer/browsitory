@@ -4,8 +4,9 @@
 //! whether it aborts a paused operation.
 //!
 //! [`of`] names every `Command` variant (no catch-all), so a new command doesn't compile until it
-//! is given a policy. The worker loop, `undo` and `gate` only read the result; the typed reply
-//! each of them answers or holds is reached through [`reply_of`], which also names every variant.
+//! is given a policy, nor until `policy_tests.rs` pins that policy in a table row (#518). The
+//! worker loop, `undo` and `gate` only read the result; the typed reply each of them answers or
+//! holds is reached through [`reply_of`], which also names every variant.
 use crate::wire::ErrorDto;
 use std::sync::mpsc::Sender;
 
@@ -160,9 +161,11 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         Command::GetStatus { .. }
         | Command::GetCommitGraph { .. }
         | Command::LocateCommit { .. }
+        | Command::GetMergedCommits { .. }
         | Command::GetWorkingDiff { .. }
         | Command::GetCommitDiff { .. }
         | Command::GetCommitFiles { .. }
+        | Command::GetCommitStats { .. }
         | Command::GetPatch { .. }
         | Command::GetCommitMessage { .. }
         | Command::GetCommitSignature { .. }
@@ -241,7 +244,9 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::DeleteRemoteTag { .. }
         | Command::SaveForgeToken { .. }
         | Command::ForgetForgeToken { .. }
-        | Command::CreatePullRequest { .. } => P::free(),
+        | Command::CreatePullRequest { .. }
+        // An empty new file the user then edits; there is nothing in it to undo (#624).
+        | Command::CreateRootFile { .. } => P::free(),
 
         // Staging: recorded, and allowed during a paused operation.
         Command::StageFile { path, .. } => P::recorded(with_path("Stage ", path, ""), RefsAndIndex),
@@ -437,9 +442,11 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetStatus,
         GetCommitGraph,
         LocateCommit,
+        GetMergedCommits,
         GetWorkingDiff,
         GetCommitDiff,
         GetCommitFiles,
+        GetCommitStats,
         GetCommitMessage,
         GetCommitSignature,
         GetBlame,
@@ -466,6 +473,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetPatch,
         ApplyPatch,
         IgnorePath,
+        CreateRootFile,
         Commit,
         ListBranches,
         CreateBranch,

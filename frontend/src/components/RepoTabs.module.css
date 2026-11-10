@@ -16,6 +16,10 @@
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
+  /* Reach over the header's bottom border with a 1px padding, so this scroll box doesn't clip
+     the active tab's overlap below (`.tab`'s `margin-bottom: -1px`). */
+  margin-bottom: -1px;
+  padding-bottom: 1px;
 }
 
 .tab {
@@ -110,6 +114,15 @@
 
 .tabLabel:hover:not(:disabled) {
   background: none;
+}
+
+/* A repository with uncommitted changes (#613); the tab's description says it in words. */
+.changeMarker {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .closeButton,

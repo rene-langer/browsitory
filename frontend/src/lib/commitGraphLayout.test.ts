@@ -123,6 +123,21 @@ describe("assignLanes", () => {
     expect(layouts[0].parentConnections).toHaveLength(2);
   });
 
+  it("stubs the first parent of an expanded merge's commit that is not in the list (#617)", () => {
+    // M expanded in place: F1 forks from X, which another collapsed merge holds.
+    const commits = [commit("M", ["A", "F1"]), commit("F1", ["X"]), commit("A", [])];
+
+    const plain = assignLanes(commits);
+    const expanded = assignLanes(commits, new Set(["F1"]));
+
+    // Without the hint F1's lane would wait for X past every later row.
+    expect(plain[2].passThroughLanes.map((entry) => entry.lane)).toEqual([0, 1]);
+    expect(expanded[1].hiddenParentIds).toEqual(["X"]);
+    expect(expanded[1].parentConnections).toEqual([]);
+    expect(expanded[2].passThroughLanes.map((entry) => entry.lane)).toEqual([0]);
+    expect(expanded.map((l) => l.lane)).toEqual([0, 1, 0]);
+  });
+
   it("still runs a first parent past the end of the list down as a lane", () => {
     // The page cut off below B: its first parent A isn't loaded yet, but B's line continues.
     const layouts = assignLanes([commit("C", ["B"]), commit("B", ["A"])]);

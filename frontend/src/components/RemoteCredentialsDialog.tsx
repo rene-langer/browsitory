@@ -7,7 +7,7 @@ import styles from "./BranchTree.module.css";
 /**
  * Choose how a remote authenticates (HTTPS token or SSH agent) and save or forget its HTTPS
  * credential. Opened from a remote folder's menu in `BranchTree` or the palette's "Manage
- * credentials for <name>…" (via `AppState.remoteDialog`). The fields start from `remote` when the
+ * credentials for <name>…" (via `AppState.dialog`). The fields start from `remote` when the
  * dialog mounts; the token is never held in React state and is cleared after every attempt.
  * `blockedReason` (`operationBlockers`) disables saving and forgetting while it applies: the
  * repository can become busy after the dialog opened (#561).

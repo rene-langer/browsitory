@@ -6,6 +6,18 @@ right-hand pane. It has two groups, **Changes** and **Staged**, each with **Stag
 use **Blame** to see who last changed each line. Type a commit message and click **Commit**.
 **Stash** sets the current changes aside; see [Stashes](stashes.md).
 
+When **Changes** holds both changes to tracked files and untracked (new) files, **Stage
+modified** sits next to **Stage all**: it stages the tracked files' changes (edits, deletions,
+type changes) and leaves the untracked files where they are, like `git add -u`. **Stage all**
+stages the untracked files too. Both leave conflicted files alone, and each is one undo step. The
+command palette has the same action as **Stage modified files (tracked only)**.
+
+Each file's arrow collapses its diff to the header row (path, status and actions); **Collapse
+all** above the groups closes every file at once. To keep large new or generated files out of the
+way, turn off **Preferences → Diff → Expand untracked files**: untracked files then start
+collapsed in **Changes** and load nothing until you expand them, while changes to tracked files
+still start expanded. A file you expand or collapse stays that way when the list refreshes.
+
 Each hunk header has **Stage hunk** (or **Unstage hunk**) and **Discard hunk**. Discard asks once
 more: the button turns into **Confirm discard**, and a second click discards the hunk.
 
@@ -87,7 +99,16 @@ is paused, to resolve it; while another action or a fetch, pull or push is runni
 confirmation's button is disabled and the dialog says why. **Discard all…** next to **Stage all** discards
 the unstaged changes of exactly the files its confirmation lists. It deletes untracked files
 and skips conflicted ones. Folders, such as an untracked nested repository, are never deleted;
-any file that couldn't be discarded is named in an error after the rest are done. Discarding
+any file that couldn't be discarded is named in an error after the rest are done.
+
+When **Changes** has untracked (new) files, **Delete untracked…** sits next to **Discard all…**:
+it deletes only the untracked files and keeps every change to tracked files, conflicts and
+ignored files. Its confirmation names how many files go and lists the first five; like **Discard
+all…**, its button is disabled while another action or a fetch, pull or push is running. Folders
+such as a nested repository are left alone here too. The command palette has it as **Delete untracked files…**, and **Discard
+all…**'s confirmation points to it when untracked files would be deleted along with the rest.
+
+Discarding
 never writes or deletes outside the repository, including through a symlinked folder. If a
 tracked file was replaced by a symbolic link, discarding removes the link and restores the file
 (the link's target is never touched), like git; reset, undo/redo, aborting a merge or rebase and

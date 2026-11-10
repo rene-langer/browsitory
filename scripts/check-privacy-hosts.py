@@ -64,6 +64,10 @@ DYNAMIC_URLS = {
         'format!("https://{host}{port}/{username}")': "credential key for the user's remote host",
         'url.starts_with("https://") || url.starts_with("http://")': "checks a remote URL's scheme",
     },
+    "frontend/src/lib/messageLinks.ts": {
+        "return `https://${forge.host}/": "issue link on the remote's host, opened on click (#612)",
+        "`http://`/`https://` URLs": "comment naming the schemes",
+    },
 }
 
 # Local addresses and documentation names: never a contact with a third party.

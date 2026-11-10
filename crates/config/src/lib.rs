@@ -62,6 +62,14 @@ pub struct MergePreference {
     pub squash: bool,
 }
 
+/// A custom tab name for one repository (#625). Kept by path, apart from the open tabs, so it
+/// survives closing the tab and a restart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoAlias {
+    pub repo_path: PathBuf,
+    pub alias: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenRepoEntry {
     pub path: PathBuf,
@@ -136,6 +144,11 @@ pub struct DiffSettings {
     pub syntax_highlight: bool,
     pub word_wrap: WordWrap,
     pub algorithm: DiffAlgorithm,
+    /// Render spaces, tabs and carriage returns as faint markers in diff lines (#616).
+    pub show_whitespace: bool,
+    /// Untracked files start expanded in the uncommitted changes (#623); off, they start
+    /// collapsed and load nothing until expanded.
+    pub expand_untracked: bool,
 }
 
 /// The diff algorithm every diff and hunk/line action uses (#469). Stored as `"default"`,
@@ -171,6 +184,8 @@ impl Default for DiffSettings {
             syntax_highlight: true,
             word_wrap: WordWrap::Auto,
             algorithm: DiffAlgorithm::Default,
+            show_whitespace: false,
+            expand_untracked: true,
         }
     }
 }
@@ -220,6 +235,67 @@ pub struct FetchSettings {
 /// The longest "Fetch automatically" interval `set_fetch_settings_at` keeps (a day).
 pub const MAX_AUTO_FETCH_MINUTES: u32 = 24 * 60;
 
+/// Appearance preferences, persisted as the `[appearance]` TOML table (#615). `code_font` is a
+/// font family tried before the default monospace stack, and `code_font_size` the pixel size of
+/// file content; `None` keeps the built-in look for both. `tab_size` is the width of a tab in
+/// columns. Out-of-range values are clamped both on read and on write
+/// (`AppearanceSettings::clamped`), so a hand-edited file can't break the views.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppearanceSettings {
+    pub code_font: Option<String>,
+    pub code_font_size: Option<u32>,
+    pub ui_size: UiSize,
+    pub tab_size: u32,
+}
+
+/// The interface text scale: each maps the `--text-*` sizes. Stored as `"small"`, `"normal"`
+/// or `"large"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UiSize {
+    Small,
+    #[default]
+    Normal,
+    Large,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            code_font: None,
+            code_font_size: None,
+            ui_size: UiSize::Normal,
+            tab_size: 4,
+        }
+    }
+}
+
+/// The range `code_font_size` is clamped to, in pixels.
+pub const CODE_FONT_SIZES: std::ops::RangeInclusive<u32> = 10..=24;
+/// The range `tab_size` is clamped to, in columns.
+pub const TAB_SIZES: std::ops::RangeInclusive<u32> = 1..=16;
+
+impl AppearanceSettings {
+    /// The settings with the font family trimmed (blank is unset) and both sizes clamped to
+    /// `CODE_FONT_SIZES` and `TAB_SIZES`.
+    pub fn clamped(&self) -> Self {
+        let clamp =
+            |n: u32, range: &std::ops::RangeInclusive<u32>| n.clamp(*range.start(), *range.end());
+        Self {
+            code_font: self
+                .code_font
+                .as_deref()
+                .map(str::trim)
+                .filter(|f| !f.is_empty())
+                .map(str::to_string),
+            code_font_size: self.code_font_size.map(|n| clamp(n, &CODE_FONT_SIZES)),
+            ui_size: self.ui_size,
+            tab_size: clamp(self.tab_size, &TAB_SIZES),
+        }
+    }
+}
+
 /// Desktop app update preferences, persisted as the `[updates]` TOML table (#630).
 /// `check_automatically` (on by default) checks for a new version when the app starts and every
 /// few hours; off, the app checks only when asked ("Check for updates"). The VS Code extension
@@ -246,9 +322,13 @@ struct ConfigFile {
     active_repo: Option<PathBuf>,
     #[serde(default)]
     last_seen_version: Option<String>,
-    // `diff`, `tools`, `commit_message`, `fetch` and `updates` serialize as TOML tables
-    // (`[diff]`, `[tools]`, `[commit_message]`, `[fetch]`, `[updates]`). Tables must follow
-    // plain `key = value` lines, so they sit after the plain keys.
+    // The repositories whose commit graph collapses merges (#617). A list of paths, so a plain
+    // `key = [...]` line that must stay ahead of the tables below.
+    #[serde(default)]
+    graph_collapse_merges: Vec<PathBuf>,
+    // `diff`, `tools`, `commit_message`, `fetch`, `appearance` and `updates` serialize as TOML
+    // tables (`[diff]`, `[tools]`, `[commit_message]`, `[fetch]`, `[appearance]`, `[updates]`).
+    // Tables must follow plain `key = value` lines, so they sit after the plain keys.
     // The fields after it serialize as TOML array-of-tables because their element type is a
     // struct. TOML requires plain `key = value` lines and tables to precede an array-of-tables
     // section, so they must remain last.
@@ -261,6 +341,8 @@ struct ConfigFile {
     #[serde(default)]
     fetch: FetchSettings,
     #[serde(default)]
+    appearance: AppearanceSettings,
+    #[serde(default)]
     updates: UpdateSettings,
     #[serde(default, deserialize_with = "deserialize_open_repos")]
     open_repos: Vec<OpenRepoEntry>,
@@ -272,6 +354,8 @@ struct ConfigFile {
     graph_remote_branch_selections: Vec<GraphRemoteBranchSelection>,
     #[serde(default)]
     merge_preferences: Vec<MergePreference>,
+    #[serde(default)]
+    repo_aliases: Vec<RepoAlias>,
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
@@ -430,6 +514,29 @@ pub fn set_fetch_settings_at(
     write_config(config_file, &config)
 }
 
+pub fn get_appearance_settings() -> Result<AppearanceSettings, ConfigError> {
+    get_appearance_settings_at(&config_file_path()?)
+}
+
+pub fn set_appearance_settings(settings: &AppearanceSettings) -> Result<(), ConfigError> {
+    set_appearance_settings_at(&config_file_path()?, settings)
+}
+
+/// The stored settings, clamped (see `AppearanceSettings::clamped`).
+pub fn get_appearance_settings_at(config_file: &Path) -> Result<AppearanceSettings, ConfigError> {
+    Ok(read_config(config_file)?.appearance.clamped())
+}
+
+/// Persists `settings`, clamped (see `AppearanceSettings::clamped`).
+pub fn set_appearance_settings_at(
+    config_file: &Path,
+    settings: &AppearanceSettings,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.appearance = settings.clamped();
+    write_config(config_file, &config)
+}
+
 pub fn get_update_settings() -> Result<UpdateSettings, ConfigError> {
     get_update_settings_at(&config_file_path()?)
 }
@@ -575,11 +682,8 @@ pub fn get_graph_branch_selection(repo_path: &Path) -> Result<Option<Vec<String>
     get_graph_branch_selection_at(&config_file_path()?, repo_path)
 }
 
-pub fn set_graph_branch_selection(
-    repo_path: &Path,
-    selected_branches: &[String],
-) -> Result<(), ConfigError> {
-    set_graph_branch_selection_at(&config_file_path()?, repo_path, selected_branches)
+pub fn set_graph_branch_selection(repo_path: &Path, local: &[String]) -> Result<(), ConfigError> {
+    set_graph_branch_selection_at(&config_file_path()?, repo_path, local)
 }
 
 pub fn get_graph_branch_selection_at(
@@ -597,7 +701,7 @@ pub fn get_graph_branch_selection_at(
 pub fn set_graph_branch_selection_at(
     config_file: &Path,
     repo_path: &Path,
-    selected_branches: &[String],
+    local: &[String],
 ) -> Result<(), ConfigError> {
     let mut config = read_config(config_file)?;
     config
@@ -605,7 +709,7 @@ pub fn set_graph_branch_selection_at(
         .retain(|s| s.repo_path != repo_path);
     config.graph_branch_selections.push(GraphBranchSelection {
         repo_path: repo_path.to_path_buf(),
-        selected_branches: selected_branches.to_vec(),
+        selected_branches: local.to_vec(),
     });
     write_config(config_file, &config)
 }
@@ -636,9 +740,9 @@ pub fn get_graph_remote_branch_selection(
 
 pub fn set_graph_remote_branch_selection(
     repo_path: &Path,
-    selected_branches: &[String],
+    remote: &[String],
 ) -> Result<(), ConfigError> {
-    set_graph_remote_branch_selection_at(&config_file_path()?, repo_path, selected_branches)
+    set_graph_remote_branch_selection_at(&config_file_path()?, repo_path, remote)
 }
 
 pub fn get_graph_remote_branch_selection_at(
@@ -656,7 +760,7 @@ pub fn get_graph_remote_branch_selection_at(
 pub fn set_graph_remote_branch_selection_at(
     config_file: &Path,
     repo_path: &Path,
-    selected_branches: &[String],
+    remote: &[String],
 ) -> Result<(), ConfigError> {
     let mut config = read_config(config_file)?;
     config
@@ -666,7 +770,7 @@ pub fn set_graph_remote_branch_selection_at(
         .graph_remote_branch_selections
         .push(GraphRemoteBranchSelection {
             repo_path: repo_path.to_path_buf(),
-            selected_branches: selected_branches.to_vec(),
+            selected_branches: remote.to_vec(),
         });
     write_config(config_file, &config)
 }
@@ -685,6 +789,37 @@ pub fn clear_graph_remote_branch_selection_at(
     config
         .graph_remote_branch_selections
         .retain(|s| s.repo_path != repo_path);
+    write_config(config_file, &config)
+}
+
+/// Whether the commit graph of `repo_path` collapses merges ("Collapse merges", #617). Off until
+/// turned on.
+pub fn get_graph_collapse_merges(repo_path: &Path) -> Result<bool, ConfigError> {
+    get_graph_collapse_merges_at(&config_file_path()?, repo_path)
+}
+
+pub fn set_graph_collapse_merges(repo_path: &Path, collapse: bool) -> Result<(), ConfigError> {
+    set_graph_collapse_merges_at(&config_file_path()?, repo_path, collapse)
+}
+
+pub fn get_graph_collapse_merges_at(
+    config_file: &Path,
+    repo_path: &Path,
+) -> Result<bool, ConfigError> {
+    let config = read_config(config_file)?;
+    Ok(config.graph_collapse_merges.iter().any(|p| p == repo_path))
+}
+
+pub fn set_graph_collapse_merges_at(
+    config_file: &Path,
+    repo_path: &Path,
+    collapse: bool,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.graph_collapse_merges.retain(|p| p != repo_path);
+    if collapse {
+        config.graph_collapse_merges.push(repo_path.to_path_buf());
+    }
     write_config(config_file, &config)
 }
 
@@ -743,5 +878,35 @@ pub fn set_merge_preference_at(
         fast_forward,
         squash,
     });
+    write_config(config_file, &config)
+}
+
+pub fn list_repo_aliases() -> Result<Vec<RepoAlias>, ConfigError> {
+    list_repo_aliases_at(&config_file_path()?)
+}
+
+pub fn set_repo_alias(repo_path: &Path, alias: Option<&str>) -> Result<(), ConfigError> {
+    set_repo_alias_at(&config_file_path()?, repo_path, alias)
+}
+
+pub fn list_repo_aliases_at(config_file: &Path) -> Result<Vec<RepoAlias>, ConfigError> {
+    Ok(read_config(config_file)?.repo_aliases)
+}
+
+/// Stores `alias`, trimmed, as the tab name of `repo_path`. `None` or a blank alias removes it,
+/// so the tab shows the folder name again.
+pub fn set_repo_alias_at(
+    config_file: &Path,
+    repo_path: &Path,
+    alias: Option<&str>,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.repo_aliases.retain(|a| a.repo_path != repo_path);
+    if let Some(alias) = alias.map(str::trim).filter(|a| !a.is_empty()) {
+        config.repo_aliases.push(RepoAlias {
+            repo_path: repo_path.to_path_buf(),
+            alias: alias.to_string(),
+        });
+    }
     write_config(config_file, &config)
 }

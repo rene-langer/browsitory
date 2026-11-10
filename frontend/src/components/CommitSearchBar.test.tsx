@@ -168,3 +168,25 @@ describe("recent searches (#540)", () => {
     expect(screen.queryByRole("button", { name: /from recent searches/ })).toBeNull();
   });
 });
+
+it("toggles the commit list's lines-changed badges (#620)", () => {
+  const onToggleLineStats = vi.fn();
+  const props = renderBar({ showLineStats: true, onToggleLineStats });
+  const toggle = screen.getByRole("button", { name: "Show lines changed" });
+  expect(toggle).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(toggle);
+  expect(onToggleLineStats).toHaveBeenCalledTimes(1);
+  props.rerender({ showLineStats: false });
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+});
+
+it("toggles Collapse merges (#617)", () => {
+  const onToggleCollapseMerges = vi.fn();
+  const props = renderBar({ collapseMerges: false, onToggleCollapseMerges });
+  const toggle = screen.getByRole("button", { name: "Collapse merges" });
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(toggle);
+  expect(onToggleCollapseMerges).toHaveBeenCalledTimes(1);
+  props.rerender({ collapseMerges: true });
+  expect(toggle).toHaveAttribute("aria-pressed", "true");
+});

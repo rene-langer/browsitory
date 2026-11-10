@@ -6,7 +6,8 @@ import { upstreamPushBranch } from "../lib/pushTarget";
 import { failureError, type MutationRunner } from "./useMutationRunner";
 import type { RemoteInfo, TagInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { refNameClash, takenNameMessage } from "../lib/takenNames";
-import type { AppState, RemoteDialog } from "./useAppState";
+import type { AppState } from "./useAppState";
+import { withoutDialog } from "./workspaceDialog";
 import {
   IDLE_TRANSFER,
   finishCompletedTransfer,
@@ -66,9 +67,6 @@ export interface RemoteTransferActions {
   // `Promise<string | null>` for the same reason as `addRemote` above. `target` is the commit to
   // tag (a full id), `null` for HEAD's commit.
   createTag(name: string, message: string | null, target: string | null): Promise<string | null>;
-  // Opens the create-tag dialog with its target fixed to `commitId`; no client call.
-  openCreateTagDialog(commitId: string): void;
-  closeCreateTagDialog(): void;
   deleteTag(name: string): Promise<void>;
   // `noVerify` skips the `pre-push` hook (the hook-failure dialog's retry); default `false`.
   pushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
@@ -77,27 +75,17 @@ export interface RemoteTransferActions {
   clearPendingPull(): void;
   openAddRemoteDraft(): void;
   closeAddRemoteDraft(): void;
-  // Opens a remote's Edit / Credentials / Remove dialog (BranchTree renders it); no client call.
-  openRemoteDialog(kind: RemoteDialog["kind"], remoteName: string): void;
-  closeRemoteDialog(): void;
-  requestForcePush(remoteName: string): void;
+  // Closes the force-push confirmation (`dialog` kind "forcePush") and drops the offer.
   cancelForcePush(): void;
   forcePushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
   fetchAllRemotes(): Promise<void>;
   // Persists the Prune choice for this repo; every later fetch passes it explicitly.
   setFetchPrune(prune: boolean): void;
   pushBranch(remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify?: boolean): Promise<void>;
-  openPushDialog(localBranch: string): void;
-  closePushDialog(): void;
   deleteRemoteBranch(remoteName: string, branchName: string, noVerify?: boolean): Promise<void>;
-  // Both null opens the palette's picker mode; both set is a plain confirmation.
-  openDeleteRemoteBranchDialog(remoteName: string | null, branchName: string | null): void;
-  closeDeleteRemoteBranchDialog(): void;
   // Deletes `tagName` on `remoteName`. With `deleteLocal`, the local tag is deleted (an undoable
   // step of its own) once the remote delete has landed; a failed remote delete keeps it.
   deleteRemoteTag(remoteName: string, tagName: string, deleteLocal: boolean, noVerify?: boolean): Promise<void>;
-  openDeleteRemoteTagDialog(tagName: string): void;
-  closeDeleteRemoteTagDialog(): void;
 }
 
 // Owns everything transfer-progress-shaped (fetch/push/pull), plus the rest of remote/upstream/tag
@@ -332,11 +320,6 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
     },
     [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],
   );
-  const openCreateTagDialog = useCallback(
-    (commitId: string) => setState((prev) => ({ ...prev, createTagDialog: { commitId } })),
-    [setState],
-  );
-  const closeCreateTagDialog = useCallback(() => setState((prev) => ({ ...prev, createTagDialog: null })), [setState]);
   const pushCurrentBranch = useCallback(
     async (remoteName: string, noVerify = false) => {
       // push.default does not choose where the current branch goes on its upstream's remote
@@ -345,7 +328,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       const { upstream, currentBranch } = latest.current;
       if (upstream !== null && upstream.remoteName === remoteName && upstreamPushBranch(upstream) === null) {
         const localBranch = currentBranch ?? upstream.localBranch;
-        setState((prev) => ({ ...prev, pushDialog: { localBranch } }));
+        setState((prev) => ({ ...prev, dialog: { kind: "push", localBranch } }));
         return;
       }
       const request = transferRequest("PushBranch", {
@@ -356,12 +339,8 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
     },
     [client, startTransfer, repoPath, setState],
   );
-  const requestForcePush = useCallback(
-    (remoteName: string) => setState((prev) => ({ ...prev, forcePushConfirm: { remoteName } })),
-    [setState],
-  );
   const cancelForcePush = useCallback(
-    () => setState((prev) => ({ ...prev, forcePushOffer: null, forcePushConfirm: null })),
+    () => setState((prev) => ({ ...prev, forcePushOffer: null, dialog: withoutDialog(prev.dialog, "forcePush") })),
     [setState],
   );
   const forcePushCurrentBranch = useCallback(
@@ -371,7 +350,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       // A stale-lease failure names the leased branch, else the current one.
       const { upstream, currentBranch } = latest.current;
       const leased = upstream !== null && upstream.remoteName === remoteName ? upstreamPushBranch(upstream) : null;
-      setState((prev) => ({ ...prev, forcePushOffer: null, forcePushConfirm: null }));
+      setState((prev) => ({ ...prev, forcePushOffer: null, dialog: withoutDialog(prev.dialog, "forcePush") }));
       const request = transferRequest("ForcePushBranch", {
         push: { operation: "ForcePushBranch", remoteName },
         forcePushTarget: { remoteName, branch: leased ?? currentBranch ?? upstream?.localBranch ?? null },
@@ -395,7 +374,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       const forceTarget =
         upstream !== null && upstream.remoteName === remoteName ? upstreamPushBranch(upstream) : localBranch;
       const offersForcePush = forceTarget !== null && localBranch === currentBranch && remoteBranch === forceTarget;
-      setState((prev) => ({ ...prev, pushDialog: null }));
+      setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "push") }));
       const request = transferRequest("PushBranch", {
         push: { operation: "PushBranchTo", remoteName, localBranch, remoteBranch, setUpstream },
         forcePushOfferRemote: offersForcePush ? remoteName : null,
@@ -408,7 +387,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
   );
   const deleteRemoteBranch = useCallback(
     (remoteName: string, branchName: string, noVerify = false) => {
-      setState((prev) => ({ ...prev, deleteRemoteBranchDialog: null }));
+      setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "deleteRemoteBranch") }));
       const request = transferRequest("DeleteRemoteBranch", {
         push: { operation: "DeleteRemoteBranch", remoteName, branchName },
       });
@@ -420,7 +399,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
   );
   const deleteRemoteTag = useCallback(
     (remoteName: string, tagName: string, deleteLocal: boolean, noVerify = false) => {
-      setState((prev) => ({ ...prev, deleteRemoteTagDialog: null }));
+      setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "deleteRemoteTag") }));
       const request = transferRequest("DeleteRemoteTag", {
         push: { operation: "DeleteRemoteTag", remoteName, tagName, deleteLocal },
         deleteLocalTag: deleteLocal ? tagName : null,
@@ -428,28 +407,6 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       return startTransfer(request, () => client.deleteRemoteTag(repoPath, remoteName, tagName, noVerify));
     },
     [client, startTransfer, repoPath, setState],
-  );
-  const openDeleteRemoteTagDialog = useCallback(
-    (tagName: string) => setState((prev) => ({ ...prev, deleteRemoteTagDialog: { tagName } })),
-    [setState],
-  );
-  const closeDeleteRemoteTagDialog = useCallback(
-    () => setState((prev) => ({ ...prev, deleteRemoteTagDialog: null })),
-    [setState],
-  );
-  const openPushDialog = useCallback(
-    (localBranch: string) => setState((prev) => ({ ...prev, pushDialog: { localBranch } })),
-    [setState],
-  );
-  const closePushDialog = useCallback(() => setState((prev) => ({ ...prev, pushDialog: null })), [setState]);
-  const openDeleteRemoteBranchDialog = useCallback(
-    (remoteName: string | null, branchName: string | null) =>
-      setState((prev) => ({ ...prev, deleteRemoteBranchDialog: { remoteName, branchName } })),
-    [setState],
-  );
-  const closeDeleteRemoteBranchDialog = useCallback(
-    () => setState((prev) => ({ ...prev, deleteRemoteBranchDialog: null })),
-    [setState],
   );
 
   const pullCurrentUpstream = useCallback(async () => {
@@ -500,12 +457,6 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
   const closeAddRemoteDraft = useCallback(() => {
     setState((prev) => ({ ...prev, addRemoteDraftOpen: false }));
   }, [setState]);
-  const openRemoteDialog = useCallback(
-    (kind: RemoteDialog["kind"], remoteName: string) =>
-      setState((prev) => ({ ...prev, remoteDialog: { kind, remoteName } })),
-    [setState],
-  );
-  const closeRemoteDialog = useCallback(() => setState((prev) => ({ ...prev, remoteDialog: null })), [setState]);
 
   return {
     addRemote,
@@ -520,8 +471,6 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
     listRemoteBranches,
     fetchRemote,
     createTag,
-    openCreateTagDialog,
-    closeCreateTagDialog,
     deleteTag,
     pushCurrentBranch,
     pushTags,
@@ -529,21 +478,12 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
     clearPendingPull,
     openAddRemoteDraft,
     closeAddRemoteDraft,
-    openRemoteDialog,
-    closeRemoteDialog,
-    requestForcePush,
     cancelForcePush,
     forcePushCurrentBranch,
     fetchAllRemotes,
     setFetchPrune,
     pushBranch,
-    openPushDialog,
-    closePushDialog,
     deleteRemoteBranch,
-    openDeleteRemoteBranchDialog,
-    closeDeleteRemoteBranchDialog,
     deleteRemoteTag,
-    openDeleteRemoteTagDialog,
-    closeDeleteRemoteTagDialog,
   };
 }

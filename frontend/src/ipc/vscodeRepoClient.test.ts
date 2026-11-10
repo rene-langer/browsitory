@@ -160,6 +160,8 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.discardFile("/repo", "f.txt"), "discard_file", { repoPath: "/repo", path: "f.txt" }, null],
       [() => vscodeRepoClient.discardAllUnstaged("/repo", ["a.txt"]), "discard_all_unstaged", { repoPath: "/repo", paths: ["a.txt"] }, null],
       [() => vscodeRepoClient.ignorePath("/repo", "*.log"), "ignore_path", { repoPath: "/repo", pattern: "*.log" }, null],
+      [() => vscodeRepoClient.getRootFiles("/repo"), "get_root_files", { repoPath: "/repo" }, [".gitignore"]],
+      [() => vscodeRepoClient.createRootFile("/repo", ".gitattributes"), "create_root_file", { repoPath: "/repo", name: ".gitattributes" }, null],
       [() => vscodeRepoClient.cherryPick("/r", "m", 2), "cherry_pick", { repoPath: "/r", commitId: "m", mainline: 2 }, { kind: "Committed", commitId: "c" }],
       [() => vscodeRepoClient.revertCommit("/r", "m", 1), "revert_commit", { repoPath: "/r", commitId: "m", mainline: 1 }, { kind: "Committed", commitId: "c" }],
       [() => vscodeRepoClient.cherryPickMany("/r", ["a", "b"]), "cherry_pick_many", { repoPath: "/r", commitIds: ["a", "b"] }, { kind: "Completed", applied: 2, skipped: [] }],
@@ -182,18 +184,23 @@ describe("vscodeRepoClient", () => {
       [() => vscodeRepoClient.saveFileVersion("/r", "c", "a.txt"), "save_file_version", { repoPath: "/r", commitId: "c", path: "a.txt" }, "/home/me/a.txt"],
       [() => vscodeRepoClient.restoreFileVersion("/r", "c", "a.txt"), "restore_file_version", { repoPath: "/r", commitId: "c", path: "a.txt" }, null],
       [() => vscodeRepoClient.listRecentAuthors("/r"), "list_recent_authors", { repoPath: "/r" }, [{ name: "Ada", email: "ada@x.org" }]],
+      [() => vscodeRepoClient.listRepoAliases(), "list_repo_aliases", {}, [{ repoPath: "/r", alias: "app" }]],
+      [() => vscodeRepoClient.setRepoAlias("/r", "app"), "set_repo_alias", { repoPath: "/r", alias: "app" }, null],
+      [() => vscodeRepoClient.setRepoAlias("/r", null), "set_repo_alias", { repoPath: "/r", alias: null }, null],
       [() => vscodeRepoClient.getCommitMessageSettings(), "get_commit_message_settings", {}, { summaryLimit: 50, bodyRuler: 72, showRuler: true }],
       [() => vscodeRepoClient.setCommitMessageSettings({ summaryLimit: 60, bodyRuler: 80, showRuler: false }), "set_commit_message_settings", { settings: { summaryLimit: 60, bodyRuler: 80, showRuler: false } }, null],
       [() => vscodeRepoClient.commit("/r", "m", false, [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]), "commit", { repoPath: "/r", message: "m", noVerify: false, trailers: [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }] }, { kind: "Committed", commitId: "c" }],
       [() => vscodeRepoClient.amendCommit("/r", "m", true, { author: { name: "Ada", email: "ada@x.org" }, trailers: [] }), "amend_commit", { repoPath: "/r", message: "m", noVerify: true, author: { name: "Ada", email: "ada@x.org" }, trailers: [] }, { kind: "Committed", commitId: "c" }],
-      [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const }],
+      [() => vscodeRepoClient.getDiffSettings(), "get_diff_settings", {}, { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const, showWhitespace: false, expandUntracked: true }],
       [() => vscodeRepoClient.getFetchSettings(), "get_fetch_settings", {}, { autoFetchMinutes: 0 }],
       [() => vscodeRepoClient.setFetchSettings({ autoFetchMinutes: 10 }), "set_fetch_settings", { settings: { autoFetchMinutes: 10 } }, null],
+      [() => vscodeRepoClient.getAppearanceSettings(), "get_appearance_settings", {}, { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4 }],
+      [() => vscodeRepoClient.setAppearanceSettings({ codeFont: "Mono", codeFontSize: 14, uiSize: "Small" as const, tabSize: 8 }), "set_appearance_settings", { settings: { codeFont: "Mono", codeFontSize: 14, uiSize: "Small" as const, tabSize: 8 } }, null],
       [() => vscodeRepoClient.getUpdateSettings(), "get_update_settings", {}, { checkAutomatically: true }],
       [() => vscodeRepoClient.setUpdateSettings({ checkAutomatically: false }), "set_update_settings", { settings: { checkAutomatically: false } }, null],
       [() => vscodeRepoClient.backgroundFetch("/r", null, 5), "background_fetch", { repoPath: "/r", prune: null, intervalMinutes: 5 }, "background-fetch-1"],
       [() => vscodeRepoClient.backgroundFetch("/r", true, 60), "background_fetch", { repoPath: "/r", prune: true, intervalMinutes: 60 }, null],
-      [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const } }, null],
+      [() => vscodeRepoClient.setDiffSettings({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const, showWhitespace: false, expandUntracked: true }), "set_diff_settings", { settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Minimal" as const, showWhitespace: false, expandUntracked: true } }, null],
     ] as const;
 
     for (const [index, [call, method, params, result]] of methods.entries()) {
@@ -400,7 +407,7 @@ describe("vscodeRepoClient", () => {
       jsonrpc: "2.0",
       id: 2,
       method: "set_graph_branch_selection",
-      params: { repoPath: "/repo", selectedBranches: ["main", "feature"] },
+      params: { repoPath: "/repo", local: ["main", "feature"] },
     });
     respond(2, null);
     await expect(setPromise).resolves.toBeNull();
@@ -422,7 +429,7 @@ describe("vscodeRepoClient", () => {
       jsonrpc: "2.0",
       id: 2,
       method: "set_graph_remote_branch_selection",
-      params: { repoPath: "/repo", selectedBranches: ["origin/main"] },
+      params: { repoPath: "/repo", remote: ["origin/main"] },
     });
     respond(2, null);
     await expect(setPromise).resolves.toBeNull();
@@ -460,6 +467,19 @@ describe("vscodeRepoClient", () => {
     });
     respond(1, ["a.txt"]);
     await expect(promise).resolves.toEqual(["a.txt"]);
+  });
+
+  it("wires getCommitStats (#620)", async () => {
+    const promise = vscodeRepoClient.getCommitStats("/repo", ["abc123", "def456"], false);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_commit_stats",
+      params: { repoPath: "/repo", commitIds: ["abc123", "def456"], withFiles: false },
+    });
+    const entries = [{ commitId: "abc123", stats: null }];
+    respond(1, entries);
+    await expect(promise).resolves.toEqual(entries);
   });
 
   it("wires the compare methods", async () => {
@@ -507,12 +527,12 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires locateCommit (#441)", async () => {
-    const promise = vscodeRepoClient.locateCommit("/repo", "v1.0", null, []);
+    const promise = vscodeRepoClient.locateCommit("/repo", "v1.0", { local: null, remote: [] });
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "locate_commit",
-      params: { repoPath: "/repo", revision: "v1.0", selectedBranches: null, remoteBranches: [] },
+      params: { repoPath: "/repo", revision: "v1.0", selection: { local: null, remote: [] } },
     });
     respond(1, null);
     await expect(promise).resolves.toBeNull();
@@ -1378,24 +1398,24 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires getCommitGraph with the local and the remote selection", async () => {
-    const promise = vscodeRepoClient.getCommitGraph("/repo", 50, null, ["origin/feature"]);
+    const promise = vscodeRepoClient.getCommitGraph("/repo", 50, { local: null, remote: ["origin/feature"] });
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "get_commit_graph",
-      params: { repoPath: "/repo", limit: 50, selectedBranches: null, remoteBranches: ["origin/feature"] },
+      params: { repoPath: "/repo", limit: 50, selection: { local: null, remote: ["origin/feature"] } },
     });
     respond(1, []);
     await expect(promise).resolves.toEqual([]);
   });
 
   it("wires searchCommits and cancelSearch", async () => {
-    const promise = vscodeRepoClient.searchCommits("/repo", "fix", ["main"], ["origin/x"], null);
+    const promise = vscodeRepoClient.searchCommits("/repo", "fix", { local: ["main"], remote: ["origin/x"] }, null);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "search_commits",
-      params: { repoPath: "/repo", query: "fix", refs: ["main"], remoteBranches: ["origin/x"], cursor: null },
+      params: { repoPath: "/repo", query: "fix", selection: { local: ["main"], remote: ["origin/x"] }, cursor: null },
     });
     const page = { commits: [], nextCursor: null, scanned: 3 };
     respond(1, page);

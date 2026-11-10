@@ -601,9 +601,10 @@ fn step(
             crate::worktree_guard::GuardSource::Index(&merged),
         )],
     )?;
-    // libgit2 can miss a file/folder conflict and would commit without one of them (#410).
-    // After the link check, whose refusal is the more specific one for a link.
-    crate::file_folder::refuse_file_folder_conflict(&merged)?;
+    // libgit2 can miss a file/folder conflict and would commit without one of them (#410): the
+    // step stops at git's conflict instead (#416), after the link check, whose refusal is the
+    // more specific one for a link.
+    let colliding = crate::file_folder::find_file_folder_conflict(&merged).is_some();
     // libgit2's ignore-case index would keep one name of a case pair the step brings in, and the
     // step would be committed without the other (#522).
     crate::worktree_guard::refuse_case_pair_brought_in::<PickError>(
@@ -611,6 +612,9 @@ fn step(
         &crate::worktree_guard::GuardSource::Index(&merged),
         Some(&head.tree()?),
     )?;
+    if colliding {
+        return stop_at_file_folder_conflict(repo, merged, target, kind, mainline);
+    }
     // A checkout that stops part-way (a file another program holds open, a read-only file) is
     // rolled back, so the step can be tried again (#321). libgit2's own default strategy for a
     // pick is safe with conflicts allowed; a builder of our own must say so.
@@ -709,6 +713,45 @@ fn step(
     crate::commit::run_post_commit(repo, hooks);
     crate::commit::cleanup_after_commit(repo);
     Ok(StepResult::Committed(oid))
+}
+
+/// The step's merge holds a file and a folder of the same name that libgit2 didn't see as a
+/// conflict (#410). Writes git's outcome and pauses the step like a conflict libgit2 finds:
+/// `file_folder::check_out_as_conflicts` (HEAD's file becomes the conflict `c~HEAD`), then
+/// `CHERRY_PICK_HEAD`/`REVERT_HEAD` and `MERGE_MSG` as libgit2's pick leaves them.
+fn stop_at_file_folder_conflict(
+    repo: &Repository,
+    merged: git2::Index,
+    target: &Commit<'_>,
+    kind: Kind,
+    mainline: Option<u32>,
+) -> Result<StepResult, PickError> {
+    // git's labels: `<short id> (<subject>)` for a pick, `parent of ` that for a revert.
+    let label = crate::file_folder::commit_label(target)?;
+    let (head_file, message, label) = match kind {
+        Kind::CherryPick => (
+            "CHERRY_PICK_HEAD",
+            String::from_utf8_lossy(target.message_bytes()).into_owned(),
+            label,
+        ),
+        Kind::Revert => (
+            "REVERT_HEAD",
+            revert_message(target, mainline),
+            format!("parent of {label}"),
+        ),
+    };
+    // As libgit2's pick checks out: safe, with conflicts allowed.
+    let how = crate::file_folder::ConflictCheckout {
+        our_label: "HEAD",
+        their_label: &label,
+        untracked: None,
+        skip_local_changes: true,
+    };
+    let index = crate::file_folder::check_out_as_conflicts::<PickError>(repo, merged, how)?;
+    let files = crate::file_folder::conflicted_files(&index)?;
+    crate::file_folder::write_step_state(repo, head_file, target.id(), &message, &files)
+        .map_err(|error| PickError::Commit(crate::commit::CommitError::Io(error)))?;
+    Ok(StepResult::Conflicted(files))
 }
 
 /// git's revert message; a mainline revert names the parent it keeps, like `git revert -m`.

@@ -70,6 +70,10 @@
   color: var(--color-text);
 }
 
+.iconButton[aria-pressed="true"] {
+  color: var(--color-accent);
+}
+
 .help {
   position: absolute;
   top: 100%;

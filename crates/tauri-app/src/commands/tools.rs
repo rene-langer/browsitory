@@ -45,6 +45,28 @@ pub async fn open_in_editor(
     }
 }
 
+/// Which of `.gitignore` and `.gitattributes` exist at the work tree root; `None` for a bare
+/// repository (#624). Like `workdir_of`, answers at once without the repository's gate.
+#[tauri::command]
+pub async fn get_root_files(
+    repo_path: String,
+    state: State<'_, AppState>,
+) -> Result<Option<Vec<String>>, ErrorDto> {
+    Ok(repo_worker(&state, &repo_path)?.signal().root_files())
+}
+
+/// Creates a missing `.gitignore` or `.gitattributes` at the work tree root, empty (#624).
+#[tauri::command]
+pub async fn create_root_file(
+    repo_path: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), ErrorDto> {
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.create_root_file(name))
+        .await
+}
+
 /// Shows a file (or the work tree root for `null`) in the system file manager. A deleted file
 /// reveals its nearest existing parent folder.
 #[tauri::command]

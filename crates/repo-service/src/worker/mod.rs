@@ -119,6 +119,11 @@ pub(crate) enum Command {
         selection: GraphSelection,
         reply: Sender<Result<Option<git_core::locate::CommitLocation>, ErrorDto>>,
     },
+    GetMergedCommits {
+        merge_id: String,
+        limit: usize,
+        reply: Sender<Result<Vec<GraphCommit>, ErrorDto>>,
+    },
     GetWorkingDiff {
         path: String,
         staged: bool,
@@ -135,6 +140,11 @@ pub(crate) enum Command {
     GetCommitFiles {
         commit_id: String,
         reply: Sender<Result<Vec<String>, ErrorDto>>,
+    },
+    GetCommitStats {
+        commit_ids: Vec<String>,
+        with_files: bool,
+        reply: Sender<Result<Vec<git_core::commit_stats::CommitStatsEntry>, ErrorDto>>,
     },
     GetCommitMessage {
         commit_id: String,
@@ -288,6 +298,11 @@ pub(crate) enum Command {
     },
     IgnorePath {
         pattern: String,
+        reply: Sender<Result<(), ErrorDto>>,
+    },
+    /// Creates a missing `.gitignore` or `.gitattributes` at the work tree root, empty (#624).
+    CreateRootFile {
+        name: String,
         reply: Sender<Result<(), ErrorDto>>,
     },
     Commit {

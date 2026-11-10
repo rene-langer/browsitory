@@ -1,8 +1,11 @@
 import { useState, type ComponentProps } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
+import { assignLanes } from "../lib/commitGraphLayout";
+import { type MergeExpansion, withExpandedMerges } from "../lib/mergeExpansion";
+import type { VisitKind } from "../lib/navigationHistory";
 import { CommitGraph } from "./CommitGraph";
 import styles from "./CommitGraph.module.css";
 
@@ -177,7 +180,7 @@ describe("CommitGraph", () => {
     const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowDown" });
 
-    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "aaa111..." });
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "aaa111..." }, "step");
   });
 
   it("ArrowUp from the first row does nothing (clamped, not wrapped)", () => {
@@ -198,7 +201,7 @@ describe("CommitGraph", () => {
     const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowUp" });
 
-    expect(onSelectRow).toHaveBeenCalledWith("uncommitted");
+    expect(onSelectRow).toHaveBeenCalledWith("uncommitted", "step");
   });
 
   it("ArrowDown from the last commit does nothing (clamped)", () => {
@@ -219,7 +222,7 @@ describe("CommitGraph", () => {
     const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowDown" });
 
-    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "bbb222..." });
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "bbb222..." }, "step");
   });
 
   it("right-clicking a commit row shows a 'Branch from here' menu entry", () => {
@@ -1103,24 +1106,24 @@ describe("CommitGraph — keyboard access", () => {
   it("Home and End jump to the first and last row", () => {
     const { list, onSelectRow } = setup({ commitId: "B" });
     fireEvent.keyDown(list, { key: "Home" });
-    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted");
+    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted", "step");
     fireEvent.keyDown(list, { key: "End" });
-    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" }, "step");
   });
 
   it("PageDown and PageUp move by a page, clamped to the ends", () => {
     const { list, onSelectRow } = setup({ commitId: "B" });
     fireEvent.keyDown(list, { key: "PageDown" });
-    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" }, "step");
     fireEvent.keyDown(list, { key: "PageUp" });
-    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted");
+    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted", "step");
   });
 
   it("Shift+ArrowDown extends the selection and the menu then offers Squash", () => {
     const { rerender, list, onSelectRow, onRebaseSelection, ...rest } = setup({ commitId: "C" });
     fireEvent.click(screen.getByText(/^C /).closest("li")!);
     fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
-    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "B" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "B" }, "step");
     rerender(
       <CommitGraph
         {...historyProps}
@@ -1589,5 +1592,433 @@ describe("CommitGraph — Create tag…", () => {
     renderGraph();
     fireEvent.keyDown(screen.getByRole("listbox", { name: "Commit history" }), { key: "Enter" });
     expect(screen.queryByRole("menuitem", { name: "Create tag…" })).toBeNull();
+  });
+});
+
+describe("CommitGraph — parent and child keys (#618)", () => {
+  const node = (id: string, parentIds: string[]): GraphCommit => ({
+    ...commits[0],
+    id,
+    shortId: id,
+    summary: `${id} summary`,
+    parentIds,
+  });
+  // T on M; M merges S into B; B and S both start from A, whose parent R is not loaded.
+  const graph = [node("T", ["M"]), node("M", ["B", "S"]), node("S", ["A"]), node("B", ["A"]), node("A", ["R"])];
+
+  function setup(selected: string, graphCommits: GraphCommit[] = graph) {
+    const onSelectRow = vi.fn();
+    const onGoToCommit = vi.fn();
+    render(
+      <CommitGraph
+        {...historyProps}
+        status={status}
+        commits={graphCommits}
+        selectedRow={{ commitId: selected }}
+        operationsBlocked={false}
+        onSelectRow={onSelectRow}
+        onGoToCommit={onGoToCommit}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+      />,
+    );
+    return { onSelectRow, onGoToCommit, list: screen.getByRole("listbox", { name: "Commit history" }) };
+  }
+
+  it("[ selects the first parent", () => {
+    const { list, onSelectRow } = setup("M");
+    fireEvent.keyDown(list, { key: "[" });
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "B" });
+    expect(list.getAttribute("aria-keyshortcuts")).toContain("[ ] Shift+[");
+  });
+
+  it("[ finds a parent outside the loaded history as Go to does", () => {
+    const { list, onSelectRow, onGoToCommit } = setup("A");
+    fireEvent.keyDown(list, { key: "[" });
+    expect(onGoToCommit).toHaveBeenCalledWith("R");
+    expect(onSelectRow).not.toHaveBeenCalled();
+  });
+
+  it("Shift+[ on a merge commit picks among its parents", () => {
+    const { list, onSelectRow } = setup("M");
+    fireEvent.keyDown(list, { key: "{", shiftKey: true });
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Parent 1: B B summary",
+      "Parent 2: S S summary",
+    ]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Parent 2: S S summary" }));
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "S" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("Shift+[ on a commit with one parent goes straight to it", () => {
+    const { list, onSelectRow } = setup("B");
+    fireEvent.keyDown(list, { key: "{", shiftKey: true });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "A" });
+  });
+
+  it("] selects the only child, and of several the one on the same lane", () => {
+    const first = setup("M");
+    fireEvent.keyDown(first.list, { key: "]" });
+    expect(first.onSelectRow).toHaveBeenCalledWith({ commitId: "T" });
+    cleanup();
+    // S, the row above B, reserves A's lane first, so A is drawn on S's lane, not B's.
+    const lanes = assignLanes(graph);
+    expect(lanes[4].lane).toBe(lanes[2].lane);
+    expect(lanes[4].lane).not.toBe(lanes[3].lane);
+    const second = setup("A");
+    fireEvent.keyDown(second.list, { key: "]" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(second.onSelectRow).toHaveBeenCalledWith({ commitId: "S" });
+  });
+
+  it("] offers a picker when no child is on the commit's lane", () => {
+    // Q is the second parent of both merges, so it has a lane of its own.
+    const merges = [node("M1", ["X1", "Q"]), node("M2", ["X2", "Q"]), node("X1", []), node("X2", []), node("Q", [])];
+    const { list, onSelectRow } = setup("Q", merges);
+    fireEvent.keyDown(list, { key: "]" });
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["M1 M1 summary", "M2 M2 summary"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "M2 M2 summary" }));
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "M2" });
+  });
+
+  it("] without a loaded child and Cmd+[ (Back on macOS) do nothing here", () => {
+    const { list, onSelectRow, onGoToCommit } = setup("T");
+    fireEvent.keyDown(list, { key: "]" });
+    fireEvent.keyDown(list, { key: "[", metaKey: true });
+    expect(onSelectRow).not.toHaveBeenCalled();
+    expect(onGoToCommit).not.toHaveBeenCalled();
+  });
+});
+
+describe("CommitGraph — copy items (#614)", () => {
+  function renderBusyGraph() {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(
+      <CommitGraph
+        {...historyProps}
+        status={[]}
+        commits={[{ ...commits[0], timestamp: 1_700_000_000, tags: ["v2.0"] }, ...commits.slice(1)]}
+        selectedRow="uncommitted"
+        operationsBlocked
+        operationsBlockedReason="A transfer is in progress."
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        onPushTag={vi.fn()}
+        onDeleteTag={vi.fn(async () => {})}
+      />,
+    );
+    return writeText;
+  }
+
+  it("ends the commit menu with enabled copy items that write the expected text", () => {
+    const writeText = renderBusyGraph();
+    const expected: [string, string][] = [
+      ["Copy SHA", "aaa111..."],
+      ["Copy short SHA", "aaa1111"],
+      ["Copy subject", "second commit"],
+      ["Copy author", "Rene <rene@example.com>"],
+      ["Copy date", "2023-11-14T22:13:20.000Z"],
+    ];
+    for (const [label, text] of expected) {
+      fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
+      const names = screen.getAllByRole("menuitem").map((item) => item.textContent);
+      expect(names.slice(-expected.length)).toEqual(expected.map(([name]) => name));
+      const item = screen.getByRole("menuitem", { name: label });
+      expect(item).toBeEnabled();
+      fireEvent.click(item);
+      expect(writeText).toHaveBeenLastCalledWith(text);
+    }
+  });
+
+  it("offers Copy tag name in the tag badge menu, before the delete item", () => {
+    const writeText = renderBusyGraph();
+    fireEvent.contextMenu(screen.getByTitle("Tag v2.0"));
+    const names = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(names.slice(-2)).toEqual(["Copy tag name", "Delete tag…"]);
+    const item = screen.getByRole("menuitem", { name: "Copy tag name" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+    expect(writeText).toHaveBeenCalledWith("v2.0");
+  });
+});
+
+describe("CommitGraph lines-changed badges (#620)", () => {
+  const baseProps = {
+    ...historyProps,
+    status,
+    commits,
+    selectedRow: "uncommitted" as const,
+    operationsBlocked: false,
+    onSelectRow: vi.fn(),
+    onBranchFromCommit: vi.fn(),
+    onRebaseFromCommit: vi.fn(),
+  };
+  const counted = { filesChanged: 2, insertions: 12, deletions: 3, files: [] };
+
+  it("shows a counted commit's badge, named for screen readers, and nothing for the others", () => {
+    const lineStats = new Map([
+      ["aaa111...", counted],
+      ["bbb222...", null],
+    ]);
+    render(<CommitGraph {...baseProps} lineStats={lineStats} />);
+
+    const rows = screen.getAllByRole("option").slice(1);
+    expect(within(rows[0]).getByTestId("line-stats")).toHaveTextContent("12 lines added, 3 removed+12−3");
+    expect(rows[0]).toHaveAccessibleName(expect.stringContaining("12 lines added, 3 removed"));
+    // Over the cap: no badge rather than a wrong number.
+    expect(within(rows[1]).queryByTestId("line-stats")).toBeNull();
+  });
+
+  it("looks the same as without badges until the numbers arrive", () => {
+    const { container: without } = render(<CommitGraph {...baseProps} />);
+    const plain = without.innerHTML;
+    cleanup();
+    const { container } = render(<CommitGraph {...baseProps} lineStats={new Map()} />);
+    expect(container.innerHTML).toBe(plain);
+  });
+
+  it("reports the rows on screen, in graph order, as they come into view", () => {
+    const observed: Element[] = [];
+    let report: (records: Partial<IntersectionObserverEntry>[]) => void = () => {};
+    const original = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = class {
+      constructor(callback: (records: Partial<IntersectionObserverEntry>[]) => void) {
+        report = callback;
+      }
+      observe(element: Element) {
+        observed.push(element);
+      }
+      disconnect() {}
+    } as unknown as typeof IntersectionObserver;
+    try {
+      const onCommitsVisible = vi.fn();
+      render(<CommitGraph {...baseProps} onCommitsVisible={onCommitsVisible} />);
+      expect(observed.map((row) => row.getAttribute("data-commit-id"))).toEqual(["aaa111...", "bbb222..."]);
+      expect(onCommitsVisible).not.toHaveBeenCalled();
+
+      report([{ target: observed[1], isIntersecting: true }]);
+      expect(onCommitsVisible).toHaveBeenLastCalledWith(["bbb222..."]);
+      report([
+        { target: observed[0], isIntersecting: true },
+        { target: observed[1], isIntersecting: false },
+      ]);
+      expect(onCommitsVisible).toHaveBeenLastCalledWith(["aaa111..."]);
+    } finally {
+      globalThis.IntersectionObserver = original;
+    }
+  });
+
+  it("counts every loaded row as visible without IntersectionObserver", () => {
+    const onCommitsVisible = vi.fn();
+    render(<CommitGraph {...baseProps} onCommitsVisible={onCommitsVisible} />);
+    expect(onCommitsVisible).toHaveBeenCalledWith(["aaa111...", "bbb222..."]);
+  });
+});
+
+describe("CommitGraph collapsed merges (#617)", () => {
+  const graphCommit = (id: string, parentIds: string[], extra: Partial<GraphCommit> = {}): GraphCommit => ({
+    id,
+    shortId: id.slice(0, 7),
+    summary: `summary ${id}`,
+    authorName: "Rene",
+    authorEmail: "rene@example.com",
+    timestamp: 0,
+    parentIds,
+    branchRefs: [],
+    remoteBranchRefs: [],
+    ...extra,
+  });
+  const graphRows = [
+    graphCommit("after", ["merge"]),
+    graphCommit("merge", ["direct", "f3"], { mergedCount: 3 }),
+    graphCommit("direct", ["base"]),
+    graphCommit("base", []),
+  ];
+  const side = [graphCommit("f3", ["f2"]), graphCommit("f2", ["f1"]), graphCommit("f1", ["base"])];
+
+  function Harness({
+    initialRow = "uncommitted",
+    initialExpanded = {},
+    onSelectRow = vi.fn(),
+    onExpandMerge = vi.fn(),
+    onCollapseMerge = vi.fn(),
+    onCommitsVisible,
+  }: {
+    initialRow?: SelectedRow;
+    initialExpanded?: Record<string, MergeExpansion>;
+    onSelectRow?: (row: SelectedRow, kind?: VisitKind) => void;
+    onExpandMerge?: (mergeId: string, atLeast?: number) => void;
+    onCollapseMerge?: (mergeId: string) => void;
+    onCommitsVisible?: (ids: string[]) => void;
+  }) {
+    const [selectedRow, setSelectedRow] = useState<SelectedRow>(initialRow);
+    const [expanded, setExpanded] = useState<Record<string, MergeExpansion>>(initialExpanded);
+    return (
+      <CommitGraph
+        {...historyProps}
+        status={[]}
+        commits={withExpandedMerges(graphRows, expanded)}
+        selectedRow={selectedRow}
+        operationsBlocked={false}
+        onSelectRow={(...args) => {
+          onSelectRow(...args);
+          setSelectedRow(args[0]);
+        }}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        expandedMerges={expanded}
+        onExpandMerge={(mergeId, atLeast) => {
+          onExpandMerge(mergeId, atLeast);
+          setExpanded((prev) => ({ ...prev, [mergeId]: { commits: side, limit: 100 } }));
+        }}
+        onCollapseMerge={(mergeId) => {
+          onCollapseMerge(mergeId);
+          setExpanded((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => id !== mergeId)));
+        }}
+        onCommitsVisible={onCommitsVisible}
+      />
+    );
+  }
+
+  const rowIds = () =>
+    screen
+      .getAllByRole("option")
+      .slice(1)
+      .map((row) => row.getAttribute("data-commit-id"));
+  const list = () => screen.getByRole("listbox", { name: "Commit history" });
+
+  it("offers +N on a merge row only, and expands and collapses its commits below it", () => {
+    const onExpandMerge = vi.fn();
+    const onCollapseMerge = vi.fn();
+    render(<Harness onExpandMerge={onExpandMerge} onCollapseMerge={onCollapseMerge} />);
+
+    expect(rowIds()).toEqual(["after", "merge", "direct", "base"]);
+    const toggle = screen.getByRole("button", { name: "Show the 3 commits this merge brought in" });
+    expect(toggle).toHaveTextContent("+3");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getAllByRole("button", { name: /this merge brought in/ })).toHaveLength(1);
+
+    fireEvent.click(toggle);
+    expect(onExpandMerge).toHaveBeenCalledWith("merge", undefined);
+    expect(rowIds()).toEqual(["after", "merge", "f3", "f2", "f1", "direct", "base"]);
+    const hide = screen.getByRole("button", { name: "Hide the 3 commits this merge brought in" });
+    expect(hide).toHaveTextContent("−3");
+    expect(hide).toHaveAttribute("aria-expanded", "true");
+    for (const id of ["f3", "f2", "f1"]) {
+      expect(document.querySelector(`[data-commit-id="${id}"]`)).toHaveClass(styles.mergedRow);
+    }
+
+    fireEvent.click(hide);
+    expect(onCollapseMerge).toHaveBeenCalledWith("merge");
+    expect(rowIds()).toEqual(["after", "merge", "direct", "base"]);
+  });
+
+  it("clicking the control does not select the row", () => {
+    const onSelectRow = vi.fn();
+    render(<Harness onSelectRow={onSelectRow} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Show the 3 commits/ }));
+
+    expect(onSelectRow).not.toHaveBeenCalled();
+  });
+
+  it("shows no control without an expand handler", () => {
+    render(
+      <CommitGraph
+        {...historyProps}
+        status={[]}
+        commits={graphRows}
+        selectedRow="uncommitted"
+        operationsBlocked={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /this merge brought in/ })).toBeNull();
+  });
+
+  it("expands with ArrowRight, steps through the merged rows, and goes back with ArrowLeft", () => {
+    const onExpandMerge = vi.fn();
+    const onCollapseMerge = vi.fn();
+    const onSelectRow = vi.fn();
+    render(
+      <Harness
+        initialRow={{ commitId: "merge" }}
+        onSelectRow={onSelectRow}
+        onExpandMerge={onExpandMerge}
+        onCollapseMerge={onCollapseMerge}
+      />,
+    );
+
+    fireEvent.keyDown(list(), { key: "ArrowRight" });
+    expect(onExpandMerge).toHaveBeenCalledWith("merge", undefined);
+    // ArrowRight on an expanded merge does nothing more.
+    fireEvent.keyDown(list(), { key: "ArrowRight" });
+    expect(onExpandMerge).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(list(), { key: "ArrowDown" });
+    fireEvent.keyDown(list(), { key: "ArrowDown" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "f2" }, "step");
+    expect(screen.getAllByRole("option")[4]).toHaveAttribute("aria-selected", "true");
+
+    // From a merged commit, ArrowLeft goes to its merge; on the merge, it collapses.
+    fireEvent.keyDown(list(), { key: "ArrowLeft" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "merge" }, "step");
+    expect(onCollapseMerge).not.toHaveBeenCalled();
+    fireEvent.keyDown(list(), { key: "ArrowLeft" });
+    expect(onCollapseMerge).toHaveBeenCalledWith("merge");
+    expect(rowIds()).toEqual(["after", "merge", "direct", "base"]);
+  });
+
+  it("opens the commit menu on a merged commit like on any row", () => {
+    render(<Harness initialRow={{ commitId: "f2" }} initialExpanded={{ merge: { commits: side, limit: 100 } }} />);
+
+    fireEvent.keyDown(list(), { key: "Enter" });
+
+    expect(screen.getByRole("menuitem", { name: "Branch from here" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Copy SHA" })).toBeInTheDocument();
+  });
+
+  it("selects the merge when it collapses with the selection inside it", () => {
+    const onSelectRow = vi.fn();
+    render(
+      <Harness
+        initialRow={{ commitId: "f1" }}
+        initialExpanded={{ merge: { commits: side, limit: 100 } }}
+        onSelectRow={onSelectRow}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Hide the 3 commits/ }));
+
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "merge" });
+    expect(screen.getAllByRole("option")[2]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("offers More while a long side branch has more commits than it loaded", () => {
+    const onExpandMerge = vi.fn();
+    render(
+      <Harness initialExpanded={{ merge: { commits: side.slice(0, 2), limit: 2 } }} onExpandMerge={onExpandMerge} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show more merged commits (2 of 3 shown)" }));
+
+    expect(onExpandMerge).toHaveBeenCalledWith("merge", 102);
+  });
+
+  it("reports only the rows shown for the lines-changed badges, never a collapsed merge's commits", () => {
+    const onCommitsVisible = vi.fn();
+    render(<Harness onCommitsVisible={onCommitsVisible} />);
+    expect(onCommitsVisible).toHaveBeenLastCalledWith(["after", "merge", "direct", "base"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Show the 3 commits/ }));
+
+    expect(onCommitsVisible).toHaveBeenLastCalledWith(["after", "merge", "f3", "f2", "f1", "direct", "base"]);
   });
 });

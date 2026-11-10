@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
-import type { RemoteDialog } from "../state/useAppState";
+import type { RemoteDialog } from "../state/workspaceDialog";
 import { RemoteDialogs } from "./RemoteDialogs";
 
 type Props = Parameters<typeof RemoteDialogs>[0];
@@ -34,7 +34,7 @@ function props(overrides: Partial<Props> = {}): Props {
 }
 
 /**
- * Owns `remotes` and the open dialog like `App` does, and lists the remote names so a test can
+ * Owns `remotes` and the open dialog like `RepoWorkspace` does, and lists the remote names so a test can
  * wait for a rollback. `remove`/`rename` behave like the optimistic app-state actions: `remotes`
  * changes before the request settles, and a failure rolls it back.
  */
@@ -96,19 +96,19 @@ describe("RemoteDialogs", () => {
     ["credentials", "Credentials for origin"],
     ["remove", "Remove remote confirmation"],
   ] as const)("renders the %s dialog for the open remote dialog", async (kind, name) => {
-    render(<RemoteDialogs {...props({ remoteDialog: { kind, remoteName: "origin" } })} />);
+    render(<RemoteDialogs {...props({ remoteDialog: { kind: "remote", action: kind, remoteName: "origin" } })} />);
     expect(await screen.findByRole("dialog", { name, hidden: true })).toBeInTheDocument();
   });
 
   it("closing the dialog reports onClose", () => {
     const onClose = vi.fn();
-    render(<RemoteDialogs {...props({ remoteDialog: { kind: "edit", remoteName: "origin" }, onClose })} />);
+    render(<RemoteDialogs {...props({ remoteDialog: { kind: "remote", action: "edit", remoteName: "origin" }, onClose })} />);
     fireEvent.click(screen.getByRole("button", { name: "Cancel", hidden: true }));
     expect(onClose).toHaveBeenCalled();
   });
 
   it("asks to clear upstreams based on the upstreams when the confirmation renders", () => {
-    const base = props({ remoteDialog: { kind: "remove", remoteName: "origin" } });
+    const base = props({ remoteDialog: { kind: "remote", action: "remove", remoteName: "origin" } });
     const { rerender } = render(<RemoteDialogs {...base} />);
     expect(screen.getByText("Remove remote origin?")).toBeInTheDocument();
     rerender(
@@ -124,7 +124,7 @@ describe("RemoteDialogs", () => {
 
   // #561: the repository can become busy while a dialog is open.
   it("disables Remove with the reason, in the confirmation too", () => {
-    const base = props({ remoteDialog: { kind: "remove", remoteName: "origin" } });
+    const base = props({ remoteDialog: { kind: "remote", action: "remove", remoteName: "origin" } });
     const { rerender } = render(<RemoteDialogs {...base} />);
     rerender(<RemoteDialogs {...base} blockedReason="A merge is in progress." />);
     const confirm = screen.getByRole("button", { name: "Confirm remove", hidden: true });
@@ -136,7 +136,7 @@ describe("RemoteDialogs", () => {
   });
 
   it("does not save an edit once the repository became busy", () => {
-    const base = props({ remoteDialog: { kind: "edit", remoteName: "origin" } });
+    const base = props({ remoteDialog: { kind: "remote", action: "edit", remoteName: "origin" } });
     const { rerender } = render(<RemoteDialogs {...base} />);
     const dialog = screen.getByRole("dialog", { name: "Edit origin", hidden: true });
     fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: "upstream" } });
@@ -153,7 +153,7 @@ describe("RemoteDialogs", () => {
   });
 
   it("does not change credentials once the repository became busy", () => {
-    const base = props({ remoteDialog: { kind: "credentials", remoteName: "origin" } });
+    const base = props({ remoteDialog: { kind: "remote", action: "credentials", remoteName: "origin" } });
     const { rerender } = render(<RemoteDialogs {...base} />);
     const dialog = screen.getByRole("dialog", { name: "Credentials for origin", hidden: true });
     fireEvent.change(within(dialog).getByLabelText("HTTPS username"), { target: { value: "me" } });
@@ -176,7 +176,7 @@ describe("RemoteDialogs", () => {
     const onClose = vi.fn();
     const onRemoteGone = vi.fn();
     render(
-      <RemoteDialogs {...props({ remotes: [], remoteDialog: { kind: "edit", remoteName: "origin" }, onClose, onRemoteGone })} />,
+      <RemoteDialogs {...props({ remotes: [], remoteDialog: { kind: "remote", action: "edit", remoteName: "origin" }, onClose, onRemoteGone })} />,
     );
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -193,7 +193,7 @@ describe("RemoteDialogs", () => {
     const onRemoteGone = vi.fn();
     render(
       <Harness
-        initial={{ kind, remoteName: "origin" }}
+        initial={{ kind: "remote", action: kind, remoteName: "origin" }}
         result
         onRemoteGone={onRemoteGone}
         externalChange={(setRemotes) => setRemotes(change === "removed" ? [] : [{ ...origin, name: "upstream" }])}
@@ -214,7 +214,7 @@ describe("RemoteDialogs", () => {
     const onRemoteGone = vi.fn();
     render(
       <Harness
-        initial={{ kind: "edit", remoteName: "origin" }}
+        initial={{ kind: "remote", action: "edit", remoteName: "origin" }}
         result={result}
         onRemoteGone={onRemoteGone}
         onUpdateRemoteUrls={updateUrls}
@@ -247,7 +247,7 @@ describe("RemoteDialogs", () => {
     const onRemoteGone = vi.fn();
     render(
       <Harness
-        initial={{ kind: "edit", remoteName: "origin" }}
+        initial={{ kind: "remote", action: "edit", remoteName: "origin" }}
         result={false}
         onRemoteGone={onRemoteGone}
         externalChange={(setRemotes) => setRemotes([])}
@@ -268,7 +268,7 @@ describe("RemoteDialogs", () => {
 
   it.each([true, false])("confirming Remove closes without a notice (succeeds: %s)", async (result) => {
     const onRemoteGone = vi.fn();
-    render(<Harness initial={{ kind: "remove", remoteName: "origin" }} result={result} onRemoteGone={onRemoteGone} />);
+    render(<Harness initial={{ kind: "remote", action: "remove", remoteName: "origin" }} result={result} onRemoteGone={onRemoteGone} />);
     fireEvent.click(screen.getByRole("button", { name: "Confirm remove", hidden: true }));
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: "Remove remote confirmation", hidden: true })).toBeNull(),

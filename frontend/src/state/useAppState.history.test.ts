@@ -4,6 +4,62 @@ import type { CommitOutcome, TransferProgress } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 
+describe("back and forward through the selected rows (#618)", () => {
+  const always = () => true;
+  const selected = (result: { current: ReturnType<typeof useAppState> }) => result.current.state.selectedRow;
+
+  it("goes back and forward through the selections, merging keyboard moves", () => {
+    const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
+    act(() => result.current.selectRow({ commitId: "a" }));
+    act(() => result.current.selectRow({ commitId: "b" }, "step"));
+    act(() => result.current.selectRow({ commitId: "c" }, "step"));
+    act(() => result.current.selectRow({ commitId: "d" }));
+
+    let row: unknown;
+    act(() => {
+      row = result.current.stepNavigation(-1, always);
+    });
+    expect(row).toEqual({ commitId: "c" });
+    expect(selected(result)).toEqual({ commitId: "c" });
+    act(() => {
+      result.current.stepNavigation(-1, always);
+    });
+    expect(selected(result)).toEqual({ commitId: "a" });
+    act(() => {
+      result.current.stepNavigation(-1, always);
+    });
+    expect(selected(result)).toBe("uncommitted");
+    act(() => {
+      row = result.current.stepNavigation(-1, always);
+    });
+    expect(row).toBeNull();
+    act(() => {
+      result.current.stepNavigation(1, always);
+    });
+    act(() => {
+      result.current.stepNavigation(1, always);
+    });
+    expect(selected(result)).toEqual({ commitId: "c" });
+    // Selecting the row Back landed on is no new entry: Forward still leads to d.
+    act(() => result.current.selectRow({ commitId: "c" }));
+    act(() => {
+      result.current.stepNavigation(1, always);
+    });
+    expect(selected(result)).toEqual({ commitId: "d" });
+  });
+
+  it("skips a commit that is no longer available", () => {
+    const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
+    act(() => result.current.selectRow({ commitId: "a" }));
+    act(() => result.current.selectRow({ commitId: "gone" }));
+    act(() => result.current.selectRow({ commitId: "c" }));
+    act(() => {
+      result.current.stepNavigation(-1, (row) => row === "uncommitted" || row.commitId !== "gone");
+    });
+    expect(selected(result)).toEqual({ commitId: "a" });
+  });
+});
+
 describe("history actions", () => {
   it("loads headInfo on refresh", async () => {
     const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
@@ -89,10 +145,10 @@ describe("history actions", () => {
 
     it("opens and closes the Reword dialog", () => {
       const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
-      act(() => result.current.openRewordDialog("c", "p"));
-      expect(result.current.state.rewordDialog).toEqual({ commitId: "c", onto: "p" });
-      act(() => result.current.closeRewordDialog());
-      expect(result.current.state.rewordDialog).toBeNull();
+      act(() => result.current.openDialog({ kind: "reword", commitId: "c", onto: "p" }));
+      expect(result.current.state.dialog).toEqual({ kind: "reword", commitId: "c", onto: "p" });
+      act(() => result.current.closeDialog("reword"));
+      expect(result.current.state.dialog).toBeNull();
     });
   });
 
@@ -202,20 +258,20 @@ describe("history actions", () => {
     act(() => listener!({ operationId: "push-1", operation: "PushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
     expect(result.current.state.forcePushOffer).toEqual({ remoteName: "origin" });
 
-    act(() => result.current.requestForcePush("origin"));
-    expect(result.current.state.forcePushConfirm).toEqual({ remoteName: "origin" });
+    act(() => result.current.openDialog({ kind: "forcePush", remoteName: "origin" }));
+    expect(result.current.state.dialog).toEqual({ kind: "forcePush", remoteName: "origin" });
 
     await act(() => result.current.forcePushCurrentBranch("origin"));
     expect(forcePushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin", false);
     expect(result.current.state.forcePushOffer).toBeNull();
-    expect(result.current.state.forcePushConfirm).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
   });
 
   it("cancelForcePush clears both the offer and the confirm", () => {
     const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
-    act(() => result.current.requestForcePush("origin"));
+    act(() => result.current.openDialog({ kind: "forcePush", remoteName: "origin" }));
     act(() => result.current.cancelForcePush());
-    expect(result.current.state.forcePushConfirm).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
     expect(result.current.state.forcePushOffer).toBeNull();
   });
 

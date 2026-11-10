@@ -17,6 +17,8 @@ import type { UpdateCheckOutcome } from "../state/updateCheck";
 import { DiffSettingsProvider } from "../state/DiffSettingsProvider";
 import { within } from "@testing-library/react";
 import { fakeRepoClient } from "../test/fakeRepoClient";
+import { AppearanceSettingsProvider } from "../state/AppearanceSettingsProvider";
+import { AppearanceSection } from "./PreferencesDialog";
 
 function renderTools(client: Partial<RepoClient>, toolHost: "desktop" | "vscode" = "desktop", repoPath: string | null = "/r") {
   const onClose = vi.fn();
@@ -214,7 +216,7 @@ describe("DiffSection", () => {
   it("loads and saves the word wrap setting with the other diff settings", async () => {
     const setDiffSettings = vi.fn(async () => {});
     const client = fakeRepoClient({
-      getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const, algorithm: "Default" as const }),
+      getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true }),
       setDiffSettings,
     });
     render(
@@ -236,6 +238,8 @@ describe("DiffSection", () => {
         syntaxHighlight: true,
         wordWrap: "Auto",
         algorithm: "Default",
+        showWhitespace: false,
+        expandUntracked: true,
       }),
     );
   });
@@ -243,7 +247,7 @@ describe("DiffSection", () => {
   it("loads and saves the diff algorithm (#469)", async () => {
     const setDiffSettings = vi.fn(async () => {});
     const client = fakeRepoClient({
-      getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Patience" as const }),
+      getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Patience" as const, showWhitespace: false, expandUntracked: true }),
       setDiffSettings,
     });
     render(
@@ -268,8 +272,39 @@ describe("DiffSection", () => {
         syntaxHighlight: true,
         wordWrap: "Auto",
         algorithm: "Minimal",
+        showWhitespace: false,
+        expandUntracked: true,
       }),
     );
+  });
+  it("loads and saves Expand untracked files (#623)", async () => {
+    const setDiffSettings = vi.fn(async () => {});
+    const client = fakeRepoClient({
+      getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true }),
+      setDiffSettings,
+    });
+    render(
+      <DiffSettingsProvider client={client}>
+        <PreferencesDialog onClose={vi.fn()}>
+          <DiffSection />
+        </PreferencesDialog>
+      </DiffSettingsProvider>,
+    );
+    const expand = within(screen.getByRole("group", { name: "Diff" })).getByRole("checkbox", { name: "Expand untracked files" });
+    await waitFor(() => expect(expand).toBeChecked());
+    fireEvent.click(expand);
+    await waitFor(() =>
+      expect(setDiffSettings).toHaveBeenCalledWith({
+        ignoreWhitespace: false,
+        contextLines: 3,
+        syntaxHighlight: true,
+        wordWrap: "Auto",
+        algorithm: "Default",
+        showWhitespace: false,
+        expandUntracked: false,
+      }),
+    );
+    expect(expand).not.toBeChecked();
   });
 });
 
@@ -352,6 +387,131 @@ describe("Fetch preferences", () => {
     fireEvent.change(app, { target: { value: "5" } });
     expect(await screen.findByRole("alert")).toHaveTextContent("read-only config");
     expect(app).toHaveValue("0");
+  });
+});
+
+describe("AppearanceSection (#615)", () => {
+  const defaults = { codeFont: null, codeFontSize: null, uiSize: "Normal" as const, tabSize: 4 };
+  const root = document.documentElement;
+
+  afterEach(() => {
+    root.removeAttribute("style");
+    delete root.dataset.uiSize;
+  });
+
+  function renderAppearance(client: Partial<RepoClient>) {
+    render(
+      <AppearanceSettingsProvider client={fakeRepoClient(client)}>
+        <PreferencesDialog onClose={() => {}}>
+          <AppearanceSection />
+        </PreferencesDialog>
+      </AppearanceSettingsProvider>,
+    );
+    return screen.getByRole("group", { name: "Appearance" });
+  }
+
+  it("keeps the built-in look by default", async () => {
+    const group = renderAppearance({ getAppearanceSettings: async () => defaults });
+    expect(within(group).getByRole("textbox", { name: "Code font" })).toHaveValue("");
+    expect(within(group).getByRole("spinbutton", { name: "Code font size (px)" })).toHaveValue(null);
+    expect(within(group).getByRole("combobox", { name: "Interface size" })).toHaveValue("Normal");
+    expect(within(group).getByRole("spinbutton", { name: "Tab size" })).toHaveValue(4);
+    await waitFor(() => expect(root.style.getPropertyValue("--tab-size")).toBe("4"));
+    await waitFor(() => expect(root.style.getPropertyValue("--font-mono")).toBe(""));
+    await waitFor(() => expect(root.style.getPropertyValue("--code-font-size")).toBe(""));
+    await waitFor(() => expect(root.dataset.uiSize).toBeUndefined());
+  });
+
+  it("shows and applies the stored settings, clamped", async () => {
+    const group = renderAppearance({
+      getAppearanceSettings: async () => ({ codeFont: "Example Mono", codeFontSize: 99, uiSize: "Small" as const, tabSize: 2 }),
+    });
+    const size = within(group).getByRole("spinbutton", { name: "Code font size (px)" });
+    await waitFor(() => expect(size).toHaveValue(24));
+    expect(within(group).getByRole("textbox", { name: "Code font" })).toHaveValue("Example Mono");
+    await waitFor(() => expect(root.style.getPropertyValue("--font-mono")).toBe('"Example Mono", var(--font-mono-default)'));
+    await waitFor(() => expect(root.style.getPropertyValue("--code-font-size")).toBe("24px"));
+    await waitFor(() => expect(root.style.getPropertyValue("--tab-size")).toBe("2"));
+    await waitFor(() => expect(root.dataset.uiSize).toBe("small"));
+  });
+
+  it("saves and applies the code font on blur, and clears it", async () => {
+    const setAppearanceSettings = vi.fn(async () => {});
+    const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings });
+    const font = within(group).getByRole("textbox", { name: "Code font" });
+    fireEvent.change(font, { target: { value: " Example Mono, monospace " } });
+    expect(setAppearanceSettings).not.toHaveBeenCalled();
+    fireEvent.blur(font);
+    await waitFor(() =>
+      expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, codeFont: "Example Mono, monospace" }),
+    );
+    await waitFor(() => expect(root.style.getPropertyValue("--font-mono")).toBe('"Example Mono", monospace, var(--font-mono-default)'));
+
+    fireEvent.change(font, { target: { value: "" } });
+    fireEvent.keyDown(font, { key: "Enter" });
+    await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith(defaults));
+    await waitFor(() => expect(root.style.getPropertyValue("--font-mono")).toBe(""));
+  });
+
+  it("saves and applies the code font size, clamped, and an empty one as the default", async () => {
+    const setAppearanceSettings = vi.fn(async () => {});
+    const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings });
+    const size = within(group).getByRole("spinbutton", { name: "Code font size (px)" });
+    fireEvent.change(size, { target: { value: "16" } });
+    fireEvent.blur(size);
+    await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, codeFontSize: 16 }));
+    await waitFor(() => expect(root.style.getPropertyValue("--code-font-size")).toBe("16px"));
+
+    fireEvent.change(size, { target: { value: "3" } });
+    fireEvent.blur(size);
+    await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, codeFontSize: 10 }));
+    expect(size).toHaveValue(10);
+
+    fireEvent.change(size, { target: { value: "" } });
+    fireEvent.blur(size);
+    await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith(defaults));
+    await waitFor(() => expect(root.style.getPropertyValue("--code-font-size")).toBe(""));
+  });
+
+  it("saves and applies the interface size", async () => {
+    const setAppearanceSettings = vi.fn(async () => {});
+    const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings });
+    const uiSize = within(group).getByRole("combobox", { name: "Interface size" });
+    expect(within(uiSize).getAllByRole("option").map((o) => o.textContent)).toEqual(["Small", "Normal", "Large"]);
+    fireEvent.change(uiSize, { target: { value: "Large" } });
+    await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, uiSize: "Large" }));
+    await waitFor(() => expect(root.dataset.uiSize).toBe("large"));
+    fireEvent.change(uiSize, { target: { value: "Normal" } });
+    await waitFor(() => expect(root.dataset.uiSize).toBeUndefined());
+  });
+
+  it("saves and applies the tab size, clamped, and ignores an empty one", async () => {
+    const setAppearanceSettings = vi.fn(async () => {});
+    const group = renderAppearance({ getAppearanceSettings: async () => defaults, setAppearanceSettings });
+    const tab = within(group).getByRole("spinbutton", { name: "Tab size" });
+    fireEvent.change(tab, { target: { value: "40" } });
+    fireEvent.keyDown(tab, { key: "Enter" });
+    await waitFor(() => expect(setAppearanceSettings).toHaveBeenLastCalledWith({ ...defaults, tabSize: 16 }));
+    await waitFor(() => expect(root.style.getPropertyValue("--tab-size")).toBe("16"));
+
+    setAppearanceSettings.mockClear();
+    fireEvent.change(tab, { target: { value: "" } });
+    fireEvent.blur(tab);
+    expect(tab).toHaveValue(16);
+    expect(setAppearanceSettings).not.toHaveBeenCalled();
+  });
+
+  it("shows a failed save and goes back to the saved look", async () => {
+    const group = renderAppearance({
+      getAppearanceSettings: async () => defaults,
+      setAppearanceSettings: async () => {
+        throw new Error("read-only config");
+      },
+    });
+    fireEvent.change(within(group).getByRole("combobox", { name: "Interface size" }), { target: { value: "Small" } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("read-only config");
+    expect(within(group).getByRole("combobox", { name: "Interface size" })).toHaveValue("Normal");
+    await waitFor(() => expect(root.dataset.uiSize).toBeUndefined());
   });
 });
 

@@ -1,6 +1,6 @@
 mod common;
 
-use common::{commit_all, commit_tree, init_repo, write_file};
+use common::{commit_all, commit_at, commit_tree, init_repo, write_file};
 use git_core::graph::GraphSelection;
 
 #[test]
@@ -379,6 +379,15 @@ fn selection(local: Option<&[&str]>, remote: &[&str]) -> GraphSelection {
     GraphSelection {
         local: local.map(|names| names.iter().map(|n| n.to_string()).collect()),
         remote: remote.iter().map(|n| n.to_string()).collect(),
+        first_parent: false,
+    }
+}
+
+/// [`selection`] with "Collapse merges" on (#617).
+fn collapsed(local: Option<&[&str]>) -> GraphSelection {
+    GraphSelection {
+        first_parent: true,
+        ..selection(local, &[])
     }
 }
 
@@ -531,4 +540,185 @@ fn a_detached_head_at_a_branch_tip_adds_no_duplicate_row() {
     let commits = git_core::graph::graph_log(&repo, 50, &GraphSelection::default()).unwrap();
 
     assert_eq!(summaries(&commits), ["tip", "base"]);
+}
+
+/// [`merged_feature_history`] plus `side`: base → side work (never merged). Returns its ids
+/// followed by `side work`'s.
+fn merged_feature_and_side(repo: &git2::Repository) -> Vec<git2::Oid> {
+    const FILE: u32 = 0o100644;
+    let mut ids = merged_feature_history(repo);
+    let side = commit_tree(repo, &[("s.txt", "s", FILE)], &[ids[0]], "side work");
+    repo.reference("refs/heads/side", side, true, "test")
+        .unwrap();
+    ids.push(side);
+    ids
+}
+
+fn sorted(mut names: Vec<&str>) -> Vec<&str> {
+    names.sort_unstable();
+    names
+}
+
+#[test]
+fn collapse_merges_follows_first_parents_from_every_selected_branch() {
+    let (_dir, repo) = init_repo();
+    merged_feature_and_side(&repo);
+
+    for selection in [collapsed(None), collapsed(Some(&["trunk", "side"]))] {
+        let commits = git_core::graph::graph_log(&repo, 50, &selection).unwrap();
+
+        // `feature` is walked too when every branch is: its tip is `feature 3`, the first
+        // parents of which are `feature 2`, `feature 1`.
+        let expected: Vec<&str> = if selection.local.is_none() {
+            vec![
+                "after merge",
+                "merge feature",
+                "direct on trunk",
+                "feature 3",
+                "feature 2",
+                "feature 1",
+                "side work",
+                "base",
+            ]
+        } else {
+            vec![
+                "after merge",
+                "merge feature",
+                "direct on trunk",
+                "side work",
+                "base",
+            ]
+        };
+        assert_eq!(
+            sorted(summaries(&commits)),
+            sorted(expected),
+            "{selection:?}"
+        );
+        assert_eq!(commits.last().unwrap().summary, "base");
+    }
+}
+
+#[test]
+fn a_merge_row_of_a_first_parent_walk_counts_the_commits_it_brought_in() {
+    let (_dir, repo) = init_repo();
+    merged_feature_and_side(&repo);
+
+    let both = collapsed(Some(&["trunk", "side"]));
+    let collapsed_rows = git_core::graph::graph_log(&repo, 50, &both).unwrap();
+    let isolated = git_core::graph::graph_log(&repo, 50, &local(&["trunk"])).unwrap();
+    let expanded = git_core::graph::graph_log(&repo, 50, &GraphSelection::default()).unwrap();
+
+    for commits in [&collapsed_rows, &isolated] {
+        let merge = commits
+            .iter()
+            .find(|c| c.summary == "merge feature")
+            .unwrap();
+        assert_eq!(merge.merged_count, Some(3));
+        // Only merges carry a count.
+        let others_uncounted = commits
+            .iter()
+            .filter(|c| c.summary != "merge feature")
+            .all(|c| c.merged_count.is_none());
+        assert!(others_uncounted);
+    }
+    // A graph that walks every ancestor already shows them.
+    assert!(expanded.iter().all(|c| c.merged_count.is_none()));
+}
+
+#[test]
+fn merged_commits_lists_first_to_other_parent_children_first() {
+    let (_dir, repo) = init_repo();
+    let ids = merged_feature_history(&repo);
+
+    let merged = git_core::graph::merged_commits(&repo, &ids[5].to_string(), 50).unwrap();
+    let limited = git_core::graph::merged_commits(&repo, &ids[5].to_string(), 2).unwrap();
+
+    assert_eq!(summaries(&merged), ["feature 3", "feature 2", "feature 1"]);
+    assert_eq!(summaries(&limited), ["feature 3", "feature 2"]);
+    // Decorated like graph rows: `feature` points at its tip.
+    assert_eq!(merged[0].branch_refs, vec!["feature".to_string()]);
+    assert_eq!(merged[0].merged_count, None);
+}
+
+#[test]
+fn merged_commits_of_an_octopus_merge_lists_every_other_parent() {
+    const FILE: u32 = 0o100644;
+    let (_dir, repo) = init_repo();
+    let base = commit_tree(&repo, &[("a.txt", "a", FILE)], &[], "base");
+    let main = commit_tree(&repo, &[("a.txt", "m", FILE)], &[base], "on main");
+    let one = commit_tree(&repo, &[("b.txt", "1", FILE)], &[base], "topic one");
+    let two_a = commit_tree(&repo, &[("c.txt", "2", FILE)], &[base], "topic two a");
+    let two_b = commit_tree(&repo, &[("c.txt", "3", FILE)], &[two_a], "topic two b");
+    let octopus = commit_tree(
+        &repo,
+        &[("a.txt", "o", FILE)],
+        &[main, one, two_b],
+        "octopus",
+    );
+    repo.reference("refs/heads/main", octopus, true, "test")
+        .unwrap();
+
+    let merged = git_core::graph::merged_commits(&repo, &octopus.to_string(), 50).unwrap();
+    let rows = git_core::graph::graph_log(&repo, 50, &collapsed(None)).unwrap();
+
+    assert_eq!(
+        sorted(summaries(&merged)),
+        ["topic one", "topic two a", "topic two b"]
+    );
+    let b = merged.iter().position(|c| c.summary == "topic two b");
+    let a = merged.iter().position(|c| c.summary == "topic two a");
+    assert!(b < a, "children before parents: {:?}", summaries(&merged));
+    assert_eq!(summaries(&rows), ["octopus", "on main", "base"]);
+    assert_eq!(rows[0].merged_count, Some(3));
+}
+
+#[test]
+fn merged_commits_include_a_side_branch_merged_into_the_side_branch() {
+    const FILE: u32 = 0o100644;
+    let (_dir, repo) = init_repo();
+    let base = commit_tree(&repo, &[("a.txt", "a", FILE)], &[], "base");
+    let main = commit_tree(&repo, &[("a.txt", "m", FILE)], &[base], "on main");
+    let topic = commit_tree(&repo, &[("b.txt", "t", FILE)], &[base], "topic");
+    let sub = commit_tree(&repo, &[("c.txt", "s", FILE)], &[base], "sub topic");
+    let inner = commit_tree(&repo, &[], &[topic, sub], "merge sub");
+    let outer = commit_tree(&repo, &[], &[main, inner], "merge topic");
+    repo.reference("refs/heads/main", outer, true, "test")
+        .unwrap();
+
+    let merged = git_core::graph::merged_commits(&repo, &outer.to_string(), 50).unwrap();
+
+    assert_eq!(summaries(&merged)[0], "merge sub");
+    assert_eq!(
+        sorted(summaries(&merged)),
+        ["merge sub", "sub topic", "topic"]
+    );
+}
+
+#[test]
+fn merged_commits_of_a_commit_that_is_no_merge_is_empty() {
+    let (_dir, repo) = init_repo();
+    let ids = merged_feature_history(&repo);
+
+    let merged = git_core::graph::merged_commits(&repo, &ids[6].to_string(), 50).unwrap();
+
+    assert!(merged.is_empty());
+    let malformed = git_core::graph::merged_commits(&repo, "not a sha", 50);
+    assert!(malformed.is_err());
+}
+
+#[test]
+fn merged_commits_list_unrelated_commits_newest_first() {
+    // The octopus brings in three tips; their order is neither the order of the merge's parents
+    // nor its reverse, only their commit time.
+    let (_dir, repo) = init_repo();
+    let base = commit_at(&repo, &[], "base", 100);
+    let main = commit_at(&repo, &[base], "on main", 150);
+    let middle = commit_at(&repo, &[base], "middle", 300);
+    let newest = commit_at(&repo, &[base], "newest", 400);
+    let oldest = commit_at(&repo, &[base], "oldest", 200);
+    let octopus = commit_at(&repo, &[main, middle, newest, oldest], "octopus", 500);
+
+    let merged = git_core::graph::merged_commits(&repo, &octopus.to_string(), 50).unwrap();
+
+    assert_eq!(summaries(&merged), ["newest", "middle", "oldest"]);
 }

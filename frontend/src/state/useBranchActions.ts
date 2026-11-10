@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { coversEveryBranch, withRenamedBranch, withoutBranch } from "../lib/graphSelection";
 import type { RepoClient } from "../ipc/RepoClient";
 import { refNameClash, takenNameMessage } from "../lib/takenNames";
+import type { SavedGraphSelection } from "./graphSelection";
 import type { AppState } from "./useAppState";
 import type {
   RunMutation,
@@ -20,8 +21,8 @@ export interface BranchActions {
   renameBranch(oldName: string, newName: string): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
   closeCreateBranchDraft(): void;
-  setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
-  setGraphRemoteBranchSelection(selectedBranches: string[]): Promise<void>;
+  setGraphBranchSelection(local: string[]): Promise<void>;
+  setGraphRemoteBranchSelection(remote: string[]): Promise<void>;
   // Forgets the saved local selection: the graph walks every local branch again, also ones
   // created later, and never just one branch's first parents (#402). The remote one stays.
   clearGraphBranchSelection(): Promise<void>;
@@ -41,19 +42,18 @@ export function useBranchActions(
   runOptimisticMutation: RunOptimisticMutation,
   runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
   setState: (updater: (prev: AppState) => AppState) => void,
-  graphBranchSelection: string[] | null,
-  graphRemoteBranchSelection: string[] | null,
+  graphSelection: SavedGraphSelection,
   branchNames: string[],
 ): BranchActions {
   // Read at mutation time, after the backend call succeeded (see deleteBranch/renameBranch).
-  const selectionRef = useRef(graphBranchSelection);
-  const remoteSelectionRef = useRef(graphRemoteBranchSelection);
+  const selectionRef = useRef(graphSelection.local);
+  const remoteSelectionRef = useRef(graphSelection.remote);
   const branchNamesRef = useRef(branchNames);
   useEffect(() => {
-    selectionRef.current = graphBranchSelection;
-    remoteSelectionRef.current = graphRemoteBranchSelection;
+    selectionRef.current = graphSelection.local;
+    remoteSelectionRef.current = graphSelection.remote;
     branchNamesRef.current = branchNames;
-  }, [graphBranchSelection, graphRemoteBranchSelection, branchNames]);
+  }, [graphSelection, branchNames]);
 
   // The branch operation already succeeded; a failure to rewrite the saved selection must not
   // report it as failed (the graph skips missing names anyway, #97), so it is only logged.
@@ -162,14 +162,12 @@ export function useBranchActions(
   }, [setState]);
 
   const setGraphBranchSelection = useCallback(
-    (selectedBranches: string[]) =>
-      runMutation(() => client.setGraphBranchSelection(repoPath, selectedBranches)),
+    (local: string[]) => runMutation(() => client.setGraphBranchSelection(repoPath, local)),
     [client, runMutation, repoPath],
   );
 
   const setGraphRemoteBranchSelection = useCallback(
-    (selectedBranches: string[]) =>
-      runMutation(() => client.setGraphRemoteBranchSelection(repoPath, selectedBranches)),
+    (remote: string[]) => runMutation(() => client.setGraphRemoteBranchSelection(repoPath, remote)),
     [client, runMutation, repoPath],
   );
 

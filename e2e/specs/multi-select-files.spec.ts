@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { clickInPage } from "../support/dom";
 import { git } from "../support/git";
 import { UI_TIMEOUT } from "../support/timeouts";
 
@@ -43,5 +44,77 @@ describe("Browsitory multi-select in the change lists", () => {
       { timeout: UI_TIMEOUT, timeoutMsg: "the two selected files were not staged" },
     );
     expect(git(E2E_REPO_PATH, "diff", "--cached", "--name-only").split("\n")).not.toContain(FILES[1]);
+  });
+});
+
+const TRACKED = "stage-modified-tracked.txt";
+const UNTRACKED = "stage-modified-new.txt";
+
+// "Stage modified" stages the tracked files' changes and leaves untracked files alone (#621).
+describe("Browsitory Stage modified in the Changes heading", () => {
+  before(() => {
+    fs.writeFileSync(path.join(E2E_REPO_PATH, TRACKED), "committed\n");
+    git(E2E_REPO_PATH, "add", TRACKED);
+    git(E2E_REPO_PATH, "commit", "-q", "-m", "e2e: stage modified fixture");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, TRACKED), "edited\n");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, UNTRACKED), "new\n");
+  });
+
+  after(() => {
+    git(E2E_REPO_PATH, "reset", "-q", "--", TRACKED, UNTRACKED);
+    git(E2E_REPO_PATH, "checkout", "--", TRACKED);
+    fs.rmSync(path.join(E2E_REPO_PATH, UNTRACKED), { force: true });
+  });
+
+  it("stages the modified tracked file and not the untracked one", async () => {
+    await $(`span=${UNTRACKED} (New)`).waitForExist({ timeout: UI_TIMEOUT });
+    const stageModified = await $("button=Stage modified");
+    await stageModified.waitForExist({ timeout: UI_TIMEOUT });
+    await browser.execute((el) => (el as HTMLElement).click(), stageModified);
+
+    await browser.waitUntil(
+      () => git(E2E_REPO_PATH, "diff", "--cached", "--name-only").split("\n").includes(TRACKED),
+      { timeout: UI_TIMEOUT, timeoutMsg: "the modified tracked file was not staged" },
+    );
+    expect(git(E2E_REPO_PATH, "diff", "--cached", "--name-only").split("\n")).not.toContain(UNTRACKED);
+    expect(git(E2E_REPO_PATH, "status", "--porcelain", "--", UNTRACKED).trim()).toBe(`?? ${UNTRACKED}`);
+  });
+});
+
+const KEPT = "delete-untracked-tracked.txt";
+const NEW_FILES = ["delete-untracked-a.txt", "delete-untracked-b.txt"];
+
+// "Delete untracked…" deletes the untracked files and keeps the tracked file's change (#622).
+describe("Browsitory Delete untracked in the Changes heading", () => {
+  before(() => {
+    fs.writeFileSync(path.join(E2E_REPO_PATH, KEPT), "committed\n");
+    git(E2E_REPO_PATH, "add", KEPT);
+    git(E2E_REPO_PATH, "commit", "-q", "-m", "e2e: delete untracked fixture");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, KEPT), "edited\n");
+    for (const file of NEW_FILES) fs.writeFileSync(path.join(E2E_REPO_PATH, file), `${file}\n`);
+  });
+
+  after(() => {
+    git(E2E_REPO_PATH, "checkout", "--", KEPT);
+    for (const file of NEW_FILES) fs.rmSync(path.join(E2E_REPO_PATH, file), { force: true });
+  });
+
+  it("deletes the two untracked files and leaves the modified one changed", async () => {
+    await $(`span=${NEW_FILES[1]} (New)`).waitForExist({ timeout: UI_TIMEOUT });
+    await clickInPage("button", "Delete untracked…");
+
+    const dialog = await $('dialog[aria-label="Delete untracked files"]');
+    await dialog.waitForExist({ timeout: UI_TIMEOUT });
+    // Exactly this spec's two files, so nothing else untracked in the shared fixture is deleted.
+    await expect(dialog).toHaveText(expect.stringContaining("Delete 2 untracked files? This can't be undone."));
+    await expect(dialog).toHaveText(expect.stringContaining(NEW_FILES[0]));
+    await clickInPage('dialog[aria-label="Delete untracked files"] button', "Delete 2 files");
+
+    await browser.waitUntil(() => NEW_FILES.every((file) => !fs.existsSync(path.join(E2E_REPO_PATH, file))), {
+      timeout: UI_TIMEOUT,
+      timeoutMsg: "the untracked files were not deleted",
+    });
+    expect(git(E2E_REPO_PATH, "status", "--porcelain", "--", KEPT)).toBe(`M ${KEPT}`);
+    expect(fs.readFileSync(path.join(E2E_REPO_PATH, KEPT), "utf8")).toBe("edited\n");
   });
 });

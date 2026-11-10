@@ -7,8 +7,11 @@ import { addRemoteAction, remoteActions } from "./actions/remoteActions";
 import { stashActions, stashBlockers } from "./actions/stashActions";
 import { pruneWorktreesAction, worktreeActions } from "./actions/worktreeActions";
 import { busyReason, operationBlockers, stashBlockReason, type OperationBlockers } from "./operationStatus";
+import { stageModifiedPaths, untrackedPaths } from "./stagePaths";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
+import { repoNameOf } from "./repoName";
+import type { RootFileItem } from "./rootFiles";
 import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
 import type { SidebarSectionId } from "../state/useSidebarReveal";
 
@@ -22,6 +25,10 @@ export interface AppCommands {
   onOpenThirdPartyLicences?: () => void;
   /** Opens the user guide site in the browser ("Open user guide"). */
   onOpenUserGuide?: () => void;
+  /** Reopens the most recently closed tab ("Reopen closed tab"); absent when none was closed. */
+  onReopenClosedTab?: () => void;
+  /** Opens the active tab's rename dialog ("Rename tab…", #625). */
+  onRenameTab?: () => void;
   /** Checks for a new version now ("Check for updates", #630); desktop app only. */
   onCheckForUpdates?: () => void;
 }
@@ -36,6 +43,9 @@ export interface ToolCommands {
   /** Only offered while `DiffCommands.currentFile` is set. */
   onOpenCurrentFileInEditor(): void;
   onOpenCurrentFileInDiffTool(): void;
+  /** "Open .gitignore" / "Create .gitignore" and the same for `.gitattributes` (#624); none when bare. */
+  rootFiles?: RootFileItem[];
+  onOpenRootFile?(item: RootFileItem): void;
 }
 
 export interface SearchCommands {
@@ -121,6 +131,9 @@ export interface GoToCommands {
   onGoToBranch(kind: "local" | "remote", name: string): void;
   onGoToTag(name: string, commitId: string | null): void;
   onGoToStash(commitId: string): void;
+  /** Back/Forward through the visited commits (#618); absent at that end. */
+  onGoBack?(): void;
+  onGoForward?(): void;
 }
 
 export interface DiffCommands {
@@ -132,6 +145,8 @@ export interface DiffCommands {
   requestDiscardCurrentFile(): void;
   /** Opens the discard-all confirm dialog; never discards directly. */
   requestDiscardAllUnstaged(): void;
+  /** Opens the "Delete untracked…" confirm dialog (#622); never deletes directly. */
+  requestDeleteUntracked?(): void;
   /** Opens the current file's history in place of the commit graph. */
   openCurrentFileHistory(): void;
   /** DiffPane's selection of two or more changed files (#449), if any. */
@@ -157,6 +172,11 @@ export interface DiffCommands {
  * history). Without these, the palette leaves the three out.
  */
 export interface CommitCommands {
+  /**
+   * The commits the open search results or file history list (#515). A selected commit there
+   * that the loaded graph lacks still gets the commit menu's actions, from its own data.
+   */
+  listedCommits?: readonly GraphCommit[];
   onCherryPick(commitId: string): void;
   onRevert(commitId: string): void;
   /** A merge commit's pick or revert: opens the parent picker. */
@@ -276,7 +296,7 @@ export function buildCommands(context: CommandContext): Command[] {
 }
 
 /** App-wide commands: help, dialogs and the commit search. */
-function appCommands({ onShowShortcuts, app, search }: FamilyContext): Command[] {
+function appCommands({ onShowShortcuts, app, search, appState, state }: FamilyContext): Command[] {
   const { commands, add } = family("General");
   if (onShowShortcuts !== undefined) {
     add({
@@ -343,6 +363,13 @@ function appCommands({ onShowShortcuts, app, search }: FamilyContext): Command[]
       run: search.onSearchCommits,
     });
   }
+  // The graph's "Collapse merges" toggle (#617); a view setting, so never blocked.
+  add({
+    id: "toggle-collapse-merges",
+    label: state.collapseMerges ? "Show every commit of merged branches" : "Collapse merges",
+    keywords: ["collapse", "expand", "merges", "first parent", "graph", "history", "side branches"],
+    run: () => void appState.setCollapseMerges(!state.collapseMerges),
+  });
   return commands;
 }
 
@@ -450,7 +477,11 @@ function operationCommands({ appState, state }: FamilyContext): Command[] {
 function historyCommands({ appState, state, blockers, blocked, commit }: FamilyContext): Command[] {
   const { commands, add, offer } = family("General");
   const selected = state.selectedRow === "uncommitted" ? null : state.selectedRow.commitId;
-  const selectedCommit = selected === null ? undefined : state.commits.find((c) => c.id === selected);
+  const graphCommit = selected === null ? undefined : state.commits.find((c) => c.id === selected);
+  // A search result or file history commit outside the loaded graph (#515) gets the commit menu's
+  // actions too; the history edits below need its ancestry in the graph, so they stay graph-only.
+  const selectedCommit =
+    graphCommit ?? (selected === null ? undefined : commit?.listedCommits?.find((c) => c.id === selected));
   const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
   if (selectedCommit !== undefined) {
     // The commit menu's actions, with the same availability (`commitActions`, #495): the palette
@@ -476,7 +507,7 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
       "create-tag-selected",
       actions.createTag,
       ["tag", "create", "new", "release", "commit"],
-      () => appState.openCreateTagDialog(commitId),
+      () => appState.openDialog({ kind: "createTag", commitId }),
       "Branches",
     );
     // Reset asks for the mode in its dialog.
@@ -491,18 +522,18 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
         id: "create-tag-head",
         label: "Create tag at HEAD…",
         keywords: ["tag", "create", "new", "release", "head"],
-        run: () => appState.openCreateTagDialog(headId),
+        run: () => appState.openDialog({ kind: "createTag", commitId: headId }),
       },
       "Branches",
     );
   }
 
-  if (!blocked && selectedCommit !== undefined) {
-    const isHead = headId === selectedCommit.id;
+  if (!blocked && graphCommit !== undefined) {
+    const isHead = headId === graphCommit.id;
     // The commit menu's one-click history edits (#442), only where the menu enables them.
     // HEAD's Reword… is "Amend last commit" below.
-    const commitId = selectedCommit.id;
-    const short = selectedCommit.shortId;
+    const commitId = graphCommit.id;
+    const short = graphCommit.shortId;
     const checks = historyEditChecks(
       { commits: state.commits, headInfo: state.headInfo, currentBranch, status: state.status },
       commitId,
@@ -510,7 +541,7 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
     const edit = (request: HistoryEditRequest) => (onto: string) => void appState.editHistory(commitId, onto, request);
     const edits: [string, string, HistoryEditCheck, string[], (onto: string) => void][] = [
       ["reword-selected", `Reword ${short}…`, isHead ? { ok: false, reason: "" } : checks.Reword, ["reword", "message"],
-        (onto) => appState.openRewordDialog(commitId, onto)],
+        (onto) => appState.openDialog({ kind: "reword", commitId, onto })],
       ["squash-selected", `Squash ${short} with parent`, checks.Squash, ["squash", "combine", "parent"], edit({ kind: "Squash" })],
       ["fixup-selected", `Fixup ${short} into parent`, checks.Fixup, ["fixup", "squash", "parent"], edit({ kind: "Fixup" })],
       ["move-up-selected", `Move ${short} up`, checks.MoveUp, ["move", "up", "reorder"], edit({ kind: "MoveUp" })],
@@ -562,7 +593,7 @@ function branchCommands({ appState, state, blockers, blocked }: FamilyContext): 
       void appState.switchBranch(branch.name),
     );
     offer(`merge-branch:${branch.name}`, actions.merge, ["branch", "merge", "squash", branch.name], () =>
-      appState.openMergeDialog(branch.name),
+      appState.openDialog({ kind: "merge", branchName: branch.name }),
     );
   }
   // The keyboard path for the tag badge menu's "Checkout (detached)".
@@ -591,7 +622,7 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
         id: `delete-remote-tag:${tag.name}`,
         label: `Delete tag ${tag.name} from remote…`,
         keywords: ["tag", "delete", "remove", "remote", tag.name],
-        run: () => appState.openDeleteRemoteTagDialog(tag.name),
+        run: () => appState.openDialog({ kind: "deleteRemoteTag", tagName: tag.name }),
       });
     }
   }
@@ -601,7 +632,7 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
       id: "force-push",
       label: "Force push current branch…",
       keywords: ["force", "push", "lease"],
-      run: () => appState.requestForcePush(remoteName),
+      run: () => appState.openDialog({ kind: "forcePush", remoteName }),
     });
   }
 
@@ -620,7 +651,7 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
         "push-branch-to",
         branchActions({ blockers, remoteCount: state.remotes.length, upstream: state.upstream }, current).pushTo,
         ["push", "publish", "upstream", "remote", "branch"],
-        () => appState.openPushDialog(current.name),
+        () => appState.openDialog({ kind: "push", localBranch: current.name }),
       );
     }
     if (!blocked) {
@@ -628,7 +659,7 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
         id: "delete-remote-branch",
         label: "Delete remote branch…",
         keywords: ["delete", "remove", "remote", "branch"],
-        run: () => appState.openDeleteRemoteBranchDialog(null, null),
+        run: () => appState.openDialog({ kind: "deleteRemoteBranch", remoteName: null, branchName: null }),
       });
     }
   }
@@ -663,17 +694,17 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
       });
     }
     offer(`edit-remote:${remote.name}`, actions.edit, ["remote", "edit", "url", "rename", remote.name], () =>
-      appState.openRemoteDialog("edit", remote.name),
+      appState.openDialog({ kind: "remote", action: "edit", remoteName: remote.name }),
     );
     offer(
       `manage-credentials:${remote.name}`,
       actions.credentials,
       ["remote", "credentials", "token", "ssh", "https", "auth", "password", remote.name],
-      () => appState.openRemoteDialog("credentials", remote.name),
+      () => appState.openDialog({ kind: "remote", action: "credentials", remoteName: remote.name }),
     );
     // Opens the same confirmation as the remote's menu; never removes directly.
     offer(`remove-remote:${remote.name}`, actions.remove, ["remote", "remove", "delete", remote.name], () =>
-      appState.openRemoteDialog("remove", remote.name),
+      appState.openDialog({ kind: "remote", action: "remove", remoteName: remote.name }),
     );
   }
 
@@ -719,7 +750,7 @@ function stashCommands({ appState, state, diff, sidebar, panelVisible }: FamilyC
       id: "stash-with-options",
       label: "Stash…",
       keywords: ["stash", "save", "message", "untracked", "keep", "index", "options"],
-      run: () => appState.openStashDialog([]),
+      run: () => appState.openDialog({ kind: "stash", paths: [] }),
     });
     const stashFile = diff?.currentFile ?? null;
     if (stashFile !== null) {
@@ -727,7 +758,7 @@ function stashCommands({ appState, state, diff, sidebar, panelVisible }: FamilyC
         id: "stash-current-file",
         label: `Stash ${stashFile}…`,
         keywords: ["stash", "file", "save", stashFile],
-        run: () => appState.openStashDialog([stashFile]),
+        run: () => appState.openDialog({ kind: "stash", paths: [stashFile] }),
       });
     }
     const fileSelection = diff?.selection ?? null;
@@ -736,7 +767,7 @@ function stashCommands({ appState, state, diff, sidebar, panelVisible }: FamilyC
         id: "stash-selected-files",
         label: `Stash ${selectedFiles(fileSelection.paths.length)}…`,
         keywords: ["stash", "selected", "files", "save"],
-        run: () => appState.openStashDialog(fileSelection.paths),
+        run: () => appState.openDialog({ kind: "stash", paths: fileSelection.paths }),
       });
     }
   }
@@ -857,6 +888,12 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
     run: () => update({ ignoreWhitespace: !settings.ignoreWhitespace }),
   });
   add({
+    id: "toggle-show-whitespace",
+    label: "Toggle whitespace",
+    keywords: ["diff", "whitespace", "show", "spaces", "tabs", "markers", "trailing"],
+    run: () => update({ showWhitespace: !settings.showWhitespace }),
+  });
+  add({
     id: "increase-context-lines",
     label: "Increase context lines",
     keywords: ["diff", "context", "lines", "more"],
@@ -923,7 +960,18 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
           },
     );
   }
-  // Both only open the confirm dialogs; staged and conflicted entries have no discard action.
+  // The Changes heading's "Stage modified" (#621): tracked files' changes only, no untracked
+  // files and no conflicts; one undo step, like "Stage all".
+  const modifiedPaths = stageModifiedPaths(state.status);
+  if (modifiedPaths.length > 0 && !state.pending) {
+    add({
+      id: "stage-modified-files",
+      label: "Stage modified files (tracked only)",
+      keywords: ["stage", "add", "modified", "tracked", "update", "changes"],
+      run: () => void appState.stageAllFiles(modifiedPaths),
+    });
+  }
+  // These only open the confirm dialogs; staged and conflicted entries have no discard action.
   // Like the diff pane's discard, allowed while resolving a merge or a paused step: only an
   // action in flight or a transfer blocks it (`busyReason`, #521).
   if (busyReason(state) === null) {
@@ -951,6 +999,14 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
         run: diff.requestDiscardAllUnstaged,
       });
     }
+    if (untrackedPaths(state.status).length > 0 && diff.requestDeleteUntracked !== undefined) {
+      add({
+        id: "delete-untracked-files",
+        label: "Delete untracked files…",
+        keywords: ["delete", "remove", "clean", "untracked", "new", "files"],
+        run: diff.requestDeleteUntracked,
+      });
+    }
   }
   return commands;
 }
@@ -973,7 +1029,7 @@ function goToCommands({ appState, goTo, sidebar, panelVisible }: FamilyContext):
 }
 
 /** The repository's tab and folder: external tools, closing and switching tabs. */
-function repositoryCommands({ tools, tabs, blocked }: FamilyContext): Command[] {
+function repositoryCommands({ app, tools, tabs, blocked }: FamilyContext): Command[] {
   const { commands, add } = family("Repositories");
   if (tools !== undefined) {
     add({
@@ -988,11 +1044,19 @@ function repositoryCommands({ tools, tabs, blocked }: FamilyContext): Command[] 
       keywords: ["reveal", "finder", "explorer", "file manager", "folder"],
       run: tools.onRevealRepository,
     });
+    for (const item of tools.rootFiles ?? []) {
+      // One id for both labels, so the recent list keeps it once the file exists.
+      add({
+        id: `open-root-file:${item.name}`,
+        label: item.label,
+        keywords: ["open", "create", "edit", "editor", "file", item.name, item.name.slice(1)],
+        run: () => tools.onOpenRootFile?.(item),
+      });
+    }
   }
-  if (tabs === undefined) return commands;
   // Omitted (not disabled) while an operation is in flight, the same rule the tab's own close
   // button and Ctrl/Cmd+W follow — closing would orphan the operation mid-way.
-  if (!blocked) {
+  if (tabs !== undefined && !blocked) {
     add({
       id: "close-tab",
       label: "Close tab",
@@ -1000,12 +1064,47 @@ function repositoryCommands({ tools, tabs, blocked }: FamilyContext): Command[] 
       run: tabs.onCloseActiveRepoTab,
     });
   }
-  for (const repo of tabs.otherOpenRepos) {
+  if (app?.onReopenClosedTab !== undefined) {
     add({
-      id: `switch-repo:${repo.path}`,
-      label: `Switch to ${repo.displayName}`,
-      keywords: ["repo", "switch", "tab", repo.displayName],
-      run: () => tabs.onSwitchRepoTab(repo.path),
+      id: "reopen-closed-tab",
+      label: "Reopen closed tab",
+      keywords: ["reopen", "restore", "closed", "tab", "repo", "repository", "undo close"],
+      run: app.onReopenClosedTab,
+    });
+  }
+  if (app?.onRenameTab !== undefined) {
+    add({
+      id: "rename-tab",
+      label: "Rename tab…",
+      keywords: ["rename", "name", "alias", "label", "tab", "repo", "repository"],
+      run: app.onRenameTab,
+    });
+  }
+  if (tabs === undefined) return commands;
+  const tabItems = tabs.otherOpenRepos.map((repo) => ({
+    id: `switch-repo:${repo.path}`,
+    label: `Switch to ${repo.displayName}`,
+    keywords: ["repo", "switch", "tab", ...tabKeywords(repo)],
+    run: () => tabs.onSwitchRepoTab(repo.path),
+  }));
+  tabItems.forEach((item) => add(item));
+  // The same tabs as one picker (#625): their names, folder names and paths are searchable.
+  if (tabItems.length > 0) {
+    const pickerItems = tabs.otherOpenRepos.map((repo, index) => ({
+      ...tabItems[index],
+      label: repo.displayName,
+      keywords: tabKeywords(repo),
+    }));
+    add({
+      id: "switch-to-tab",
+      label: "Switch to tab…",
+      keywords: ["switch", "tab", "tabs", "repo", "repository", "open", "list", "go to"],
+      run: () => {},
+      picker: {
+        placeholder: "Tab name or path…",
+        emptyText: "No other open tab matches",
+        items: (query) => filterPickerItems(pickerItems, query),
+      },
     });
   }
   return commands;
@@ -1013,11 +1112,32 @@ function repositoryCommands({ tools, tabs, blocked }: FamilyContext): Command[] 
 
 const PICKER_KEYWORDS = ["go", "go to", "jump", "find", "show", "reveal", "select", "navigate"];
 
+/** What finds a tab in the palette: its name, its folder name and its path (#625). */
+function tabKeywords(repo: OpenRepo): string[] {
+  return [repo.displayName, repoNameOf(repo.path), repo.path];
+}
+
 function goToPickers(appState: UseAppStateResult, goTo: GoToCommands): Command[] {
   const { state } = appState;
   const { commands: pickers, add } = family("Go to");
   const noop = () => {};
 
+  if (goTo.onGoBack !== undefined) {
+    add({
+      id: "go-back",
+      label: "Back to previous commit",
+      keywords: ["back", "previous", "history", "navigate", "go back"],
+      run: goTo.onGoBack,
+    });
+  }
+  if (goTo.onGoForward !== undefined) {
+    add({
+      id: "go-forward",
+      label: "Forward to next commit",
+      keywords: ["forward", "next", "history", "navigate", "go forward"],
+      run: goTo.onGoForward,
+    });
+  }
   add({
     id: "go-to-commit",
     label: "Go to commit…",
@@ -1032,7 +1152,7 @@ function goToPickers(appState: UseAppStateResult, goTo: GoToCommands): Command[]
 
   const remoteNames = new Set<string>();
   for (const branch of state.branches) if (branch.upstream != null) remoteNames.add(branch.upstream);
-  for (const name of state.graphRemoteBranchSelection ?? []) remoteNames.add(name);
+  for (const name of state.graphSelection.remote ?? []) remoteNames.add(name);
   for (const commit of state.commits) for (const name of commit.remoteBranchRefs) remoteNames.add(name);
   const branchItems: PickerItem[] = [
     ...state.branches.map((branch) => ({

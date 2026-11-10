@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { DiffSource, RepoClient } from "../ipc/RepoClient";
+import { openRootFile, type RootFileItem } from "../lib/rootFiles";
 
 export type MergeToolResult = "Resolved" | "Unresolved";
 
@@ -7,6 +8,8 @@ export interface ExternalToolsApi {
   openInEditor(path: string, line: number | null): void;
   reveal(path: string | null): void;
   openTerminal(): void;
+  /** Opens `.gitignore`/`.gitattributes` in the editor, creating it first when missing (#624). */
+  openRootFile(item: Pick<RootFileItem, "name" | "exists">): void;
   openDiffTool(path: string, source: DiffSource): void;
   openMergeTool(path: string): void;
   /** Paths whose merge tool is open right now. */
@@ -88,6 +91,16 @@ export function useExternalTools(
       openInEditor: (path: string, line: number | null) => launch(() => client.openInEditor(repoPath, path, line)),
       reveal: (path: string | null) => launch(() => client.revealInFileManager(repoPath, path)),
       openTerminal: () => launch(() => client.openTerminal(repoPath)),
+      // A created file is a new untracked file: refreshed so the Changes list shows it, and the
+      // palette then offers "Open" instead of "Create".
+      openRootFile: (item: Pick<RootFileItem, "name" | "exists">) =>
+        launch(async () => {
+          try {
+            await openRootFile(client, repoPath, item);
+          } finally {
+            if (!item.exists) void refresh();
+          }
+        }),
       openDiffTool: (path: string, source: DiffSource) => launch(() => client.openDiffTool(repoPath, path, source)),
       openMergeTool,
       mergeToolRunning: running,
@@ -96,6 +109,6 @@ export function useExternalTools(
       error,
       dismissError: () => setError(null),
     }),
-    [client, repoPath, launch, openMergeTool, running, results, error],
+    [client, repoPath, launch, openMergeTool, refresh, running, results, error],
   );
 }

@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CommitLocation, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import type { CommitLocation, GraphCommit, GraphSelection, RepoClient } from "../ipc/RepoClient";
 import { useAppState, type SelectedRow } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 import { useGoTo } from "./useGoTo";
@@ -75,10 +75,34 @@ describe("useGoTo", () => {
 
     await act(() => result.current.goTo.goToRevision("bbbbbbb"));
 
-    expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "bbbbbbb", null, []);
+    expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "bbbbbbb", { local: null, remote: [] });
     expect(reveal).toHaveBeenCalledWith({ commitId: target });
     expect(limits).toEqual([300, 600]);
     expect(result.current.appState.state.selectedRow).toEqual({ commitId: target });
+  });
+
+  it("expands the collapsed merge that holds the commit (#617)", async () => {
+    const merge = "m".repeat(40);
+    const target = "c".repeat(40);
+    const getMergedCommits = vi.fn(async () => [commit("d".repeat(40)), commit(target)]);
+    const locateCommit = vi.fn(async () =>
+      hidden({ commitId: target, merge: { mergeId: merge, mergePosition: 0, offset: 1 } }),
+    );
+    const { result, reveal } = setup({
+      getGraphCollapseMerges: async () => true,
+      getCommitGraph: async () => [commit(merge, { parentIds: ["a".repeat(40), "d".repeat(40)], mergedCount: 2 })],
+      getMergedCommits,
+      locateCommit,
+    });
+    await act(() => result.current.appState.refresh());
+
+    await act(() => result.current.goTo.goToRevision(target));
+
+    expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, target, { local: null, remote: [], firstParent: true });
+    expect(getMergedCommits).toHaveBeenCalledWith(TEST_REPO_PATH, merge, 100);
+    expect(reveal).toHaveBeenCalledWith({ commitId: target });
+    expect(result.current.appState.state.commits.map((c) => c.id)).toEqual([merge, "d".repeat(40), target]);
+    expect(result.current.goTo.notice).toBeNull();
   });
 
   it("says when nothing matches", async () => {
@@ -105,7 +129,7 @@ describe("useGoTo", () => {
   it("explains a commit only on a hidden branch and offers to show that branch", async () => {
     const target = "f".repeat(40);
     let selection: string[] | null = ["main"];
-    const locateCommit = vi.fn(async (_repoPath: string, _revision: string, local: string[] | null) =>
+    const locateCommit = vi.fn(async (_repoPath: string, _revision: string, { local }: GraphSelection) =>
       local !== null && local.includes("feature")
         ? { commitId: target, position: 1, branches: [], remoteBranches: [] }
         : hidden({ branches: ["feature"] }),
@@ -138,7 +162,7 @@ describe("useGoTo", () => {
     await act(async () => {});
 
     expect(setGraphBranchSelection).toHaveBeenCalledWith(TEST_REPO_PATH, ["main", "feature"]);
-    expect(locateCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, target, ["main", "feature"], []);
+    expect(locateCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, target, { local: ["main", "feature"], remote: [] });
     expect(result.current.goTo.notice).toBeNull();
     expect(result.current.appState.state.commits.map((c) => c.id)).toContain(target);
   });
@@ -200,7 +224,7 @@ describe("useGoTo", () => {
     await act(() => result.current.goTo.goToBranch("local", "gone"));
 
     expect(reveal).toHaveBeenCalledWith({ commitId: "a".repeat(40) });
-    expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "refs/heads/gone", null, []);
+    expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "refs/heads/gone", { local: null, remote: [] });
     expect(result.current.goTo.notice?.message).toBe("No commit matches “gone”.");
   });
 

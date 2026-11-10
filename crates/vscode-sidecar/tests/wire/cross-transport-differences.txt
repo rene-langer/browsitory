@@ -2,6 +2,9 @@
 # VSCode sidecar (#306). `key-order`: same JSON value, fields in another order.
 # `value`: a different JSON value.
 # Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar wire_snapshots
+AppearanceSettings/default key-order
+AppearanceSettings/set key-order
+AppearanceSettings/small key-order
 BlameLine/plain key-order
 BranchInfo/local-only key-order
 BranchInfo/tracking key-order
@@ -9,6 +12,7 @@ ChangedFile/plain key-order
 ChangedFile/renamed key-order
 CommitLocation/hidden key-order
 CommitLocation/in-graph key-order
+CommitLocation/in-merge key-order
 CommitMessageSettings/plain key-order
 CommitOutcome/Committed key-order
 CommitOutcome/HookFailed key-order
@@ -23,6 +27,7 @@ CommitSignature/status-GoodUntrusted key-order
 CommitSignature/status-RevokedKey key-order
 CommitSignature/status-UnknownKey key-order
 CommitSignature/status-Unsigned key-order
+CommitStatsEntry/counted key-order
 ConflictSegment/Clean key-order
 DiffHunk/empty key-order
 DiffHunk/every-origin key-order
@@ -51,6 +56,7 @@ GitTools/diff-tool-System key-order
 GitTools/diff-tool-Worktree key-order
 GitTools/diff-tool-Xdg key-order
 GitTools/merge-tool-minimal key-order
+GraphCommit/collapsed-merge key-order
 GraphCommit/escapes key-order
 GraphCommit/plain key-order
 GraphCommit/root-commit key-order
@@ -83,6 +89,7 @@ ReflogEntry/with-summary key-order
 RemoteInfo/HttpsToken key-order
 RemoteInfo/SshAgent key-order
 RemoteInfo/no-auth key-order
+RepoAlias/plain key-order
 SearchPage/more key-order
 SequenceOutcome/Completed key-order
 SequenceOutcome/Conflicted key-order

@@ -273,6 +273,7 @@ fn graph_commit(summary: &str) -> git_core::graph::GraphCommit {
         branch_refs: strings(&["main"]),
         remote_branch_refs: strings(&["origin/main"]),
         tags: strings(&["v1.0.0"]),
+        merged_count: None,
     }
 }
 
@@ -293,6 +294,18 @@ pub fn graph_commits() -> Cases<git_core::graph::GraphCommit> {
                 tags: Vec::new(),
                 timestamp: -1,
                 ..graph_commit("Initial commit")
+            },
+        ),
+        // A merge row of a first-parent graph (#617).
+        case(
+            "collapsed-merge",
+            git_core::graph::GraphCommit {
+                parent_ids: strings(&[
+                    "89abcdef0123456789abcdef0123456789abcdef",
+                    "fedcba9876543210fedcba9876543210fedcba98",
+                ]),
+                merged_count: Some(3),
+                ..graph_commit("Merge branch 'feature'")
             },
         ),
     ]
@@ -441,6 +454,7 @@ pub fn commit_locations() -> Cases<git_core::locate::CommitLocation> {
                 position: Some(42),
                 branches: Vec::new(),
                 remote_branches: Vec::new(),
+                merge: None,
             },
         ),
         case(
@@ -450,6 +464,61 @@ pub fn commit_locations() -> Cases<git_core::locate::CommitLocation> {
                 position: None,
                 branches: vec!["feature".to_string()],
                 remote_branches: vec!["origin/feature".to_string()],
+                merge: None,
+            },
+        ),
+        // Held by a collapsed merge (#617).
+        case(
+            "in-merge",
+            git_core::locate::CommitLocation {
+                commit_id: "3333333333333333333333333333333333333333".to_string(),
+                position: None,
+                branches: vec!["main".to_string()],
+                remote_branches: Vec::new(),
+                merge: Some(git_core::locate::CollapsedMerge {
+                    merge_id: "4444444444444444444444444444444444444444".to_string(),
+                    merge_position: 7,
+                    offset: 2,
+                }),
+            },
+        ),
+    ]
+}
+
+/// `getCommitStats` answers (#620): counted with its files, and over the cap.
+pub fn commit_stats_entries() -> Cases<git_core::commit_stats::CommitStatsEntry> {
+    use git_core::commit_stats::{CommitStats, CommitStatsEntry, FileStats};
+    vec![
+        case(
+            "counted",
+            CommitStatsEntry {
+                commit_id: "1111111111111111111111111111111111111111".to_string(),
+                stats: Some(CommitStats {
+                    files_changed: 2,
+                    insertions: 12,
+                    deletions: 3,
+                    files: vec![
+                        FileStats {
+                            path: "src/main.rs".to_string(),
+                            insertions: 12,
+                            deletions: 3,
+                            binary: false,
+                        },
+                        FileStats {
+                            path: "logo.png".to_string(),
+                            insertions: 0,
+                            deletions: 0,
+                            binary: true,
+                        },
+                    ],
+                }),
+            },
+        ),
+        case(
+            "capped",
+            CommitStatsEntry {
+                commit_id: "2222222222222222222222222222222222222222".to_string(),
+                stats: None,
             },
         ),
     ]
@@ -505,6 +574,16 @@ pub fn workspaces() -> Cases<config::Workspace> {
     ]
 }
 
+pub fn repo_aliases() -> Cases<config::RepoAlias> {
+    vec![case(
+        "plain",
+        config::RepoAlias {
+            repo_path: "/repos/app".into(),
+            alias: "app (review)".to_string(),
+        },
+    )]
+}
+
 pub fn diff_settings() -> Cases<config::DiffSettings> {
     let mut cases = vec![case(
         "plain",
@@ -514,6 +593,8 @@ pub fn diff_settings() -> Cases<config::DiffSettings> {
             syntax_highlight: false,
             word_wrap: config::WordWrap::Auto,
             algorithm: config::DiffAlgorithm::Patience,
+            show_whitespace: true,
+            expand_untracked: false,
         },
     )];
     use config::{DiffAlgorithm, WordWrap};
@@ -586,6 +667,28 @@ pub fn fetch_settings() -> Cases<config::FetchSettings> {
             "every-10",
             config::FetchSettings {
                 auto_fetch_minutes: 10,
+            },
+        ),
+    ]
+}
+
+pub fn appearance_settings() -> Cases<config::AppearanceSettings> {
+    vec![
+        case("default", config::AppearanceSettings::default()),
+        case(
+            "set",
+            config::AppearanceSettings {
+                code_font: some("Example Mono"),
+                code_font_size: Some(15),
+                ui_size: config::UiSize::Large,
+                tab_size: 8,
+            },
+        ),
+        case(
+            "small",
+            config::AppearanceSettings {
+                ui_size: config::UiSize::Small,
+                ..config::AppearanceSettings::default()
             },
         ),
     ]

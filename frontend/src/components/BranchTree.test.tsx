@@ -2,72 +2,16 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { BranchTree } from "./BranchTree";
+import { baseBranches, renderTree, treeProps } from "../test/branchTreeProps";
+import { BranchTreeWithDialogs } from "../test/BranchTreeWithDialogs";
+import type { RemoteDialogs } from "./RemoteDialogs";
+
+// The tree, its menus, inline rename and the remote dialogs. The forms, the upstream dialog and
+// the lazy remote branch lists have their own test files, like their components (#492).
 
 type IsOptional<T, K extends keyof T> = Pick<T, K> extends Required<Pick<T, K>> ? false : true;
 
-const baseBranches = [
-  { name: "main", isCurrent: true },
-  { name: "feat/foo", isCurrent: false },
-];
-
-type BranchTreeProps = Parameters<typeof BranchTree>[0];
-
-function renderTree(overrides: Partial<BranchTreeProps> = {}) {
-  const props = treeProps(overrides);
-  return { ...render(<BranchTree {...props} />), props };
-}
-
-function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps {
-  return {
-    branches: baseBranches,
-    createBranchDraft: null,
-    onSwitchBranch: vi.fn(),
-    onCreateBranch: vi.fn().mockResolvedValue(null),
-    onDeleteBranch: vi.fn().mockResolvedValue(undefined),
-    onRenameBranch: vi.fn(),
-    onOpenCreateBranchDraft: vi.fn(),
-    onCloseCreateBranchDraft: vi.fn(),
-    onMergeBranch: vi.fn(),
-    operationDisabled: false,
-    operationDisabledReason: null,
-    graphBranchSelection: null,
-    onSetGraphBranchSelection: vi.fn(),
-    onClearGraphBranchSelection: vi.fn(),
-    onShowAllGraphBranches: vi.fn(),
-    graphRemoteBranchSelection: null,
-    onSetGraphRemoteBranchSelection: vi.fn(),
-    onIsolateGraphBranch: vi.fn(),
-    remoteBranchesInGraph: [],
-    remotes: [],
-    upstream: null,
-    remoteUpstreams: {},
-    onAddRemote: vi.fn().mockResolvedValue(null),
-    onRenameRemote: vi.fn().mockResolvedValue(true),
-    onUpdateRemoteUrls: vi.fn().mockResolvedValue(undefined),
-    onRemoveRemote: vi.fn().mockResolvedValue(undefined),
-    onSaveHttpsCredential: vi.fn().mockResolvedValue(undefined),
-    onForgetHttpsCredential: vi.fn().mockResolvedValue(undefined),
-    onSetRemoteAuthMode: vi.fn().mockResolvedValue(true),
-    onSetUpstream: vi.fn().mockResolvedValue(undefined),
-    onClearUpstream: vi.fn().mockResolvedValue(undefined),
-    onListRemoteBranches: vi.fn().mockResolvedValue([]),
-    onFetchRemote: vi.fn().mockResolvedValue(undefined),
-    onPushCurrentBranch: vi.fn().mockResolvedValue(undefined),
-    onPull: vi.fn().mockResolvedValue(undefined),
-    pendingPull: null,
-    pullOutcome: null,
-    onMergePull: vi.fn().mockResolvedValue(undefined),
-    onRebasePull: vi.fn(),
-    onCancelPull: vi.fn(),
-    addRemoteDraftOpen: false,
-    onOpenAddRemoteDraft: vi.fn(),
-    onCloseAddRemoteDraft: vi.fn(),
-    onOpenPushDialog: vi.fn(),
-    onOpenDeleteRemoteBranch: vi.fn(),
-    refreshGeneration: 0,
-    ...overrides,
-  };
-}
+const originOnly = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
 
 describe("BranchTree — local branches", () => {
   beforeEach(() => {
@@ -146,7 +90,7 @@ describe("BranchTree — local branches", () => {
     await Promise.resolve();
 
     // Simulate the optimistic removal: re-render with the deleted branch gone from `branches`.
-    rerender(<BranchTree {...props} branches={baseBranches.filter((b) => b.name !== "feat/foo")} />);
+    rerender(<BranchTreeWithDialogs {...props} branches={baseBranches.filter((b) => b.name !== "feat/foo")} />);
 
     expect(screen.queryByRole("dialog", { name: "Force delete feat/foo" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Force delete" })).not.toBeInTheDocument();
@@ -205,7 +149,7 @@ describe("BranchTree — local branches", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     await screen.findByRole("dialog", { name: "Force delete feat/foo" });
 
-    rerender(<BranchTree {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
+    rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
     const dialog = screen.getByRole("dialog", { name: "Force delete feat/foo" });
     expect(dialog).toHaveTextContent("A transfer is in progress.");
     const confirm = within(dialog).getByRole("button", { name: "Force delete" });
@@ -286,7 +230,7 @@ describe("BranchTree — local branches", () => {
     expect(screen.getByRole("menuitem", { name: "Show all branches" })).toBeDisabled();
 
     // The open menu follows the new props.
-    rerender(<BranchTree {...props} graphBranchSelection={["feat/foo"]} />);
+    rerender(<BranchTreeWithDialogs {...props} graphBranchSelection={["feat/foo"]} />);
     fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
     // #402: forgets the selection rather than saving today's branch names.
     expect(props.onShowAllGraphBranches).toHaveBeenCalledTimes(1);
@@ -327,69 +271,6 @@ describe("BranchTree — local branches", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("a non-null createBranchDraft shows the create form; submitting calls onCreateBranch with its startPoint", async () => {
-    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
-    fireEvent.change(screen.getByPlaceholderText("New branch name"), { target: { value: "feat/new" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    expect(props.onCreateBranch).toHaveBeenCalledWith("feat/new", "HEAD");
-  });
-
-  // Ported from BranchSwitcher.test.tsx — the create-form failure/dismiss flow doesn't involve
-  // the popover at all, so it transfers unchanged (createBranchDraft renders the form directly).
-  it("shows a failed create-branch's message next to the draft form and keeps the entered name", async () => {
-    const onCreateBranch = vi.fn().mockResolvedValue("branch already exists");
-    renderTree({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
-
-    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
-      target: { value: "feature" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent("branch already exists");
-    expect(screen.getByPlaceholderText("New branch name")).toHaveValue("feature");
-  });
-
-  it("clears the create-branch failure message once the name is edited again", async () => {
-    const onCreateBranch = vi.fn().mockResolvedValue("branch already exists");
-    renderTree({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
-
-    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
-      target: { value: "feature" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    await screen.findByRole("alert");
-
-    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
-      target: { value: "feature-2" },
-    });
-
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("dismissing the create-branch failure message clears it", async () => {
-    const onCreateBranch = vi.fn().mockResolvedValue("branch already exists");
-    renderTree({ createBranchDraft: { startPoint: "abc123" }, onCreateBranch });
-
-    fireEvent.change(screen.getByPlaceholderText("New branch name"), {
-      target: { value: "feature" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    await screen.findByRole("alert");
-
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
-
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("Cancel in the create form calls onCloseCreateBranchDraft", () => {
-    const onCloseCreateBranchDraft = vi.fn();
-    renderTree({ createBranchDraft: { startPoint: "HEAD" }, onCloseCreateBranchDraft });
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-    expect(onCloseCreateBranchDraft).toHaveBeenCalled();
-  });
-
   // The graph checkboxes stay visible inline regardless of the popover/menu, so this transfers
   // unchanged too.
   it("a branch absent from an explicit selection renders its swatch unpressed; toggling it adds it back", () => {
@@ -428,7 +309,7 @@ describe("BranchTree — local branches", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show main in graph" }));
     expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith([]);
 
-    rerender(<BranchTree {...props} graphBranchSelection={[]} />);
+    rerender(<BranchTreeWithDialogs {...props} graphBranchSelection={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Show main in graph" }));
     expect(props.onClearGraphBranchSelection).toHaveBeenCalledTimes(1);
     expect(props.onSetGraphBranchSelection).toHaveBeenCalledTimes(1);
@@ -511,33 +392,6 @@ describe("BranchTree — local branches", () => {
 
     fireEvent.change(input, { target: { value: "feat/bar" } });
     expect(screen.queryByText("Branch names can't contain spaces.")).not.toBeInTheDocument();
-  });
-
-  it("Add remote shows a remote-name problem inline and keeps Add remote disabled", () => {
-    const onAddRemote = vi.fn().mockResolvedValue(null);
-    renderTree({ addRemoteDraftOpen: true, onAddRemote });
-    fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "my fork" } });
-    fireEvent.change(screen.getByTestId("add-remote-fetch-url"), { target: { value: "../fork.git" } });
-
-    expect(screen.getByText("Remote names can't contain spaces.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add remote" })).toBeDisabled();
-    expect(onAddRemote).not.toHaveBeenCalled();
-  });
-
-  it("Add remote refuses an invalid name derived from the URL with the same message", async () => {
-    const onAddRemote = vi.fn().mockResolvedValue(null);
-    // "origin" is taken, so the name comes from the URL's last part.
-    renderTree({
-      addRemoteDraftOpen: true,
-      onAddRemote,
-      remotes: [{ name: "origin", fetchUrl: "u", pushUrl: null, authMode: null, authUsername: null }],
-    });
-    fireEvent.change(screen.getByTestId("add-remote-fetch-url"), { target: { value: "../my fork.git" } });
-    fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
-
-    expect(await screen.findByText("Remote names can't contain spaces.")).toBeInTheDocument();
-    expect(onAddRemote).not.toHaveBeenCalled();
   });
 
   it("disables the merge action while a merge is already in progress", () => {
@@ -648,18 +502,6 @@ describe("BranchTree — remotes", () => {
     });
   });
 
-  it("lists remote folders and lazily loads their branches on first expand", async () => {
-    const onListRemoteBranches = vi.fn().mockResolvedValue(["main", "feat/foo"]);
-    renderTree({ remotes: oneRemote, onListRemoteBranches });
-    expect(onListRemoteBranches).not.toHaveBeenCalled();
-    const remoteFolder = screen.getByRole("button", { name: "origin" }).closest("li")!;
-    fireEvent.click(screen.getByRole("button", { name: "origin" }));
-    expect(onListRemoteBranches).toHaveBeenCalledWith("origin");
-    // Scoped to the remote's own <li>, not `screen`: `baseBranches` (the default local branches)
-    // already has a "feat/foo" branch, so an unscoped query would ambiguously match either row.
-    expect(await within(remoteFolder).findByText("foo")).toBeInTheDocument();
-  });
-
   // With no saved remote selection, every remote branch present in the commit graph
   // (`remoteBranchesInGraph`, NOT the lazy per-remote-folder fetch cache) has its swatch pressed
   // (shown) by default — mirroring the local-branch swatch's default (see "with no saved graph
@@ -731,48 +573,6 @@ describe("BranchTree — remotes", () => {
     // upstream/feature would silently vanish here even though its folder was never expanded.
     fireEvent.click(screen.getByRole("button", { name: "Show origin/main in graph" }));
     expect(onSetGraphRemoteBranchSelection).toHaveBeenCalledWith(["upstream/feature"]);
-  });
-
-  it("does not re-fetch remote branches on a second expand", async () => {
-    const onListRemoteBranches = vi.fn().mockResolvedValue(["main"]);
-    renderTree({ remotes: oneRemote, onListRemoteBranches });
-    fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand
-    await screen.findByText("main");
-    fireEvent.click(screen.getByRole("button", { name: "origin" })); // collapse
-    fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand again
-    expect(onListRemoteBranches).toHaveBeenCalledOnce();
-  });
-
-  // The lazily-fetched `remoteBranches[remoteName]` cache was never invalidated after Fetch, so
-  // the tree kept showing pre-fetch branches for the rest of the session (folder open state is
-  // localStorage-persisted, so not even a restart mid-session helped). Fetch must drop the cache
-  // entry and, if the folder is currently open, re-fetch immediately.
-  it("Fetch drops the cached remote branch list and re-fetches when the folder is open", async () => {
-    const onListRemoteBranches = vi
-      .fn()
-      .mockResolvedValueOnce(["main"])
-      .mockResolvedValueOnce(["main", "feat/new-on-remote"]);
-    const onFetchRemote = vi.fn().mockResolvedValue(undefined);
-    renderTree({ remotes: oneRemote, onListRemoteBranches, onFetchRemote });
-
-    const remoteFolder = screen.getByRole("button", { name: "origin" }).closest("li")!;
-    fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand, first fetch
-    await within(remoteFolder).findByText("main");
-    expect(onListRemoteBranches).toHaveBeenCalledTimes(1);
-
-    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Fetch" }));
-    expect(onFetchRemote).toHaveBeenCalledWith("origin");
-
-    expect(await within(remoteFolder).findByText("new-on-remote")).toBeInTheDocument();
-    expect(onListRemoteBranches).toHaveBeenCalledTimes(2);
-  });
-
-  it("shows an inline error, without an unhandled rejection, when the lazy remote-branch fetch fails", async () => {
-    const onListRemoteBranches = vi.fn().mockRejectedValue(new Error("network unreachable"));
-    renderTree({ remotes: oneRemote, onListRemoteBranches });
-    fireEvent.click(screen.getByRole("button", { name: "origin" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Could not list branches for origin.");
   });
 
   it("right-clicking a remote branch offers Checkout and Set as upstream", async () => {
@@ -965,11 +765,6 @@ describe("BranchTree — remotes", () => {
     expect(await screen.findByText(/clear upstreams for main/)).toBeInTheDocument();
   });
 
-  it("keeps the add-remote form hidden until addRemoteDraftOpen is true", () => {
-    renderTree({ addRemoteDraftOpen: false });
-    expect(screen.queryByLabelText("Fetch URL")).not.toBeInTheDocument();
-  });
-
   it("the header '+' menu's Add Remote opens the add-remote draft", () => {
     const onOpenAddRemoteDraft = vi.fn();
     renderTree({ onOpenAddRemoteDraft });
@@ -978,32 +773,10 @@ describe("BranchTree — remotes", () => {
     expect(onOpenAddRemoteDraft).toHaveBeenCalledOnce();
   });
 
-  it("addRemoteDraftOpen shows the add-remote form; submitting calls onAddRemote", async () => {
-    const onAddRemote = vi.fn().mockResolvedValue(null);
-    renderTree({ addRemoteDraftOpen: true, onAddRemote });
-    fireEvent.change(screen.getByTestId("add-remote-fetch-url"), {
-      target: { value: "git@github.com:user/repo.git" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
-    expect(onAddRemote).toHaveBeenCalledWith("origin", "git@github.com:user/repo.git", null);
-  });
-
   it("shows the current branch's upstream status and a Pull button", () => {
     renderTree({ upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" } });
     expect(screen.getByText(/main tracks origin\/main/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pull" })).toBeEnabled();
-  });
-
-  it("Set upstream… on the current branch's context menu opens a dialog; submitting calls onSetUpstream", async () => {
-    const onSetUpstream = vi.fn().mockResolvedValue(undefined);
-    renderTree({ remotes: oneRemote, onSetUpstream });
-    fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Set upstream…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Set upstream for main" });
-    fireEvent.change(within(dialog).getByLabelText("Upstream remote"), { target: { value: "origin" } });
-    fireEvent.change(within(dialog).getByLabelText("Upstream branch"), { target: { value: "main" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Set upstream" }));
-    expect(onSetUpstream).toHaveBeenCalledWith("origin", "main");
   });
 
   it("does not offer Set upstream… or Push to <upstream remote> on a non-current branch's context menu", () => {
@@ -1111,107 +884,9 @@ describe("BranchTree — remotes", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Already up to date.");
   });
 
-  it("requires upstream discovery in both the client and BranchTree contracts", () => {
+  it("requires upstream discovery in both the client and RemoteDialogs contracts", () => {
     expectTypeOf<IsOptional<RepoClient, "getRemoteUpstreams">>().toEqualTypeOf<false>();
-    expectTypeOf<IsOptional<BranchTreeProps, "remoteUpstreams">>().toEqualTypeOf<false>();
-  });
-
-  it("adds a remote with a custom name and push URL via the add-remote form", () => {
-    const onAddRemote = vi.fn().mockResolvedValue(null);
-    renderTree({ addRemoteDraftOpen: true, onAddRemote });
-    fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "backup" } });
-    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
-    fireEvent.click(screen.getByText("Push URL (optional)"));
-    fireEvent.change(screen.getByLabelText("Push URL"), { target: { value: "../push-backup.git" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
-    expect(onAddRemote).toHaveBeenCalledWith("backup", "../backup.git", "../push-backup.git");
-  });
-
-  it("shows example placeholder text on the add-remote fetch URL field", () => {
-    renderTree({ addRemoteDraftOpen: true });
-    expect(screen.getByLabelText("Fetch URL")).toHaveAttribute("placeholder", "git@github.com:user/repo.git");
-  });
-
-  it("auto-derives the remote name as origin when no remote is named origin yet", () => {
-    renderTree({ addRemoteDraftOpen: true, remotes: [] });
-    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "git@github.com:user/repo.git" } });
-    expect(screen.getByLabelText("Remote name")).toHaveValue("origin");
-  });
-
-  it("auto-derives the remote name from the URL slug when origin already exists", () => {
-    renderTree({ addRemoteDraftOpen: true, remotes: oneRemote });
-    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "git@github.com:user/repo.git" } });
-    expect(screen.getByLabelText("Remote name")).toHaveValue("repo");
-  });
-
-  // Real typing fires one `change` per keystroke, which is what broke the original
-  // `newName === ""` guard: the first keystroke derived a one-character name, and every keystroke
-  // after that saw a non-empty name and stopped deriving.
-  it("keeps deriving the remote name while the URL is typed character by character", () => {
-    renderTree({ addRemoteDraftOpen: true, remotes: oneRemote });
-    const fetchUrl = screen.getByLabelText("Fetch URL");
-    const url = "git@github.com:user/repo.git";
-    for (let length = 1; length <= url.length; length += 1) {
-      fireEvent.change(fetchUrl, { target: { value: url.slice(0, length) } });
-    }
-    expect(screen.getByLabelText("Remote name")).toHaveValue("repo");
-  });
-
-  it("does not overwrite a manually entered remote name when the URL changes", () => {
-    renderTree({ addRemoteDraftOpen: true, remotes: oneRemote });
-    fireEvent.change(screen.getByLabelText("Remote name"), { target: { value: "custom" } });
-    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "git@github.com:user/repo.git" } });
-    expect(screen.getByLabelText("Remote name")).toHaveValue("custom");
-  });
-
-  it("keeps the Push URL field collapsed behind a disclosure by default", () => {
-    renderTree({ addRemoteDraftOpen: true });
-    expect(screen.queryByLabelText("Push URL")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Push URL (optional)"));
-    expect(screen.getByLabelText("Push URL")).toBeInTheDocument();
-  });
-
-  // `useAppState`'s `addRemote` never rejects — it reports failure by *resolving* to the message.
-  it("shows a failed add-remote's message and keeps the entered values", async () => {
-    const onAddRemote = vi.fn().mockResolvedValue("invalid fetch URL");
-    renderTree({ addRemoteDraftOpen: true, remotes: oneRemote, onAddRemote });
-    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "not-a-url" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("invalid fetch URL");
-    expect(screen.getByLabelText("Fetch URL")).toHaveValue("not-a-url");
-    expect(screen.getByLabelText("Remote name")).toHaveValue("not-a-url");
-  });
-
-  it("clears the add-remote failure message once the Fetch URL is edited again", async () => {
-    const onAddRemote = vi.fn().mockResolvedValue("invalid fetch URL");
-    renderTree({ addRemoteDraftOpen: true, remotes: oneRemote, onAddRemote });
-    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "not-a-url" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
-    await screen.findByRole("alert");
-    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("clears the form and re-collapses the Push URL disclosure after a successful add", async () => {
-    const onAddRemote = vi.fn().mockResolvedValue(null);
-    renderTree({ addRemoteDraftOpen: true, onAddRemote });
-    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
-    fireEvent.click(screen.getByText("Push URL (optional)"));
-    fireEvent.change(screen.getByLabelText("Push URL"), { target: { value: "../push-backup.git" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add remote" }));
-    await waitFor(() => expect(screen.getByLabelText("Fetch URL")).toHaveValue(""));
-    expect(screen.getByLabelText("Remote name")).toHaveValue("");
-    expect(screen.queryByLabelText("Push URL")).not.toBeInTheDocument();
-  });
-
-  it("Cancel in the add-remote form calls onCloseAddRemoteDraft without adding a remote", () => {
-    const onAddRemote = vi.fn().mockResolvedValue(null);
-    const onCloseAddRemoteDraft = vi.fn();
-    renderTree({ addRemoteDraftOpen: true, onAddRemote, onCloseAddRemoteDraft });
-    fireEvent.change(screen.getByLabelText("Fetch URL"), { target: { value: "../backup.git" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(onCloseAddRemoteDraft).toHaveBeenCalledOnce();
-    expect(onAddRemote).not.toHaveBeenCalled();
+    expectTypeOf<IsOptional<Parameters<typeof RemoteDialogs>[0], "remoteUpstreams">>().toEqualTypeOf<false>();
   });
 
   it("shows all affected branches when clearing upstreams for a remote with multiple, and removes with clearUpstreams=true", async () => {
@@ -1247,25 +922,6 @@ describe("BranchTree — remotes", () => {
     renderTree({ remotes: oneRemote });
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
     expect(screen.getByRole("menuitem", { name: "Remove remote" })).toHaveAttribute("data-destructive", "true");
-  });
-
-  it("offers branch suggestions from the selected remote for the upstream-branch field", async () => {
-    const onListRemoteBranches = vi.fn().mockResolvedValue(["main", "develop"]);
-    renderTree({ remotes: oneRemote, onListRemoteBranches });
-    fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Set upstream…" }));
-    const dialog = await screen.findByRole("dialog", { name: "Set upstream for main" });
-    fireEvent.change(within(dialog).getByLabelText("Upstream remote"), { target: { value: "origin" } });
-    await waitFor(() => expect(onListRemoteBranches).toHaveBeenCalledWith("origin"));
-    const branchInput = within(dialog).getByLabelText("Upstream branch");
-    const datalistId = branchInput.getAttribute("list");
-    expect(datalistId).not.toBeNull();
-    const datalist = document.getElementById(datalistId!);
-    expect(datalist).not.toBeNull();
-    const optionValues = Array.from(datalist!.querySelectorAll("option")).map((option) =>
-      option.getAttribute("value"),
-    );
-    expect(optionValues).toEqual(["main", "develop"]);
   });
 });
 
@@ -1360,22 +1016,6 @@ describe("BranchTree — inline forms focus and Escape", () => {
     return utils;
   }
 
-  it("focuses the new-branch input on open and Escape cancels", () => {
-    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
-    const input = screen.getByPlaceholderText("New branch name");
-    expect(input).toHaveFocus();
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(props.onCloseCreateBranchDraft).toHaveBeenCalled();
-  });
-
-  it("focuses the add-remote name field on open and Escape cancels", () => {
-    const { props } = renderTree({ addRemoteDraftOpen: true });
-    const input = screen.getByPlaceholderText("origin");
-    expect(input).toHaveFocus();
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(props.onCloseAddRemoteDraft).toHaveBeenCalled();
-  });
-
   it("the rename input is labelled, focused, and Escape cancels", () => {
     startRename();
     const input = screen.getByRole("textbox", { name: "Rename feat/foo" });
@@ -1400,21 +1040,7 @@ describe("BranchTree — remote list states and upstream block", () => {
   beforeEach(() => {
     localStorage.clear();
   });
-  const remote = [{ name: "origin", fetchUrl: "u", pushUrl: null, authMode: null, authUsername: null }];
   const up = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
-
-  it("shows a non-interactive Loading row while a remote's branches load", async () => {
-    renderTree({ remotes: remote, onListRemoteBranches: vi.fn().mockReturnValue(new Promise(() => {})) });
-    fireEvent.click(screen.getByRole("button", { name: "origin" }));
-    const row = await screen.findByText("Loading…");
-    expect(row.closest("[role=button]")).toBeNull();
-  });
-
-  it("shows 'No branches' for an empty remote", async () => {
-    renderTree({ remotes: remote, onListRemoteBranches: vi.fn().mockResolvedValue([]) });
-    fireEvent.click(screen.getByRole("button", { name: "origin" }));
-    expect(await screen.findByText("No branches")).toBeInTheDocument();
-  });
 
   it("explains the disabled Pull button when there is no upstream", () => {
     renderTree();
@@ -1432,86 +1058,7 @@ describe("BranchTree — remote list states and upstream block", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Clear upstream", hidden: true }));
     expect(props.onClearUpstream).toHaveBeenCalledOnce();
   });
-
-  it("blocks clearing and setting the upstream, saying why, while the repository is busy (#521)", async () => {
-    const reason = "A transfer is in progress.";
-    const { props, rerender } = renderTree({ upstream: up });
-    fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
-    await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
-
-    rerender(<BranchTree {...props} operationDisabled operationDisabledReason={reason} />);
-    const dialog = screen.getByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
-    expect(dialog).toHaveTextContent(reason);
-    const confirm = within(dialog).getByRole("button", { name: "Clear upstream", hidden: true });
-    expect(confirm).toBeDisabled();
-    fireEvent.click(confirm);
-    expect(props.onClearUpstream).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
-
-    expect(screen.getByRole("button", { name: "Clear upstream" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Clear upstream" })).toHaveAttribute("title", reason);
-    fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
-    const setItem = screen.getByRole("menuitem", { name: "Set upstream…" });
-    expect(setItem).toBeDisabled();
-    expect(setItem).toHaveAttribute("title", reason);
-  });
 });
-
-describe("BranchTree — new branch form", () => {
-  it("shows the base branch for HEAD and a short id for a commit", () => {
-    const { unmount } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
-    expect(screen.getByText(/New branch from/)).toHaveTextContent("New branch from main");
-    unmount();
-    renderTree({ createBranchDraft: { startPoint: "abcdef1234567890abcdef1234567890abcdef12" } });
-    expect(screen.getByText(/New branch from/)).toHaveTextContent("New branch from abcdef1");
-  });
-
-  it("validates the name inline and blocks Create, tied to the field", () => {
-    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
-    const input = screen.getByRole("textbox", { name: "Branch name" });
-    fireEvent.change(input, { target: { value: "bad name" } });
-    expect(input).toHaveAccessibleDescription("Branch names can't contain spaces.");
-    expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
-    expect(props.onCreateBranch).not.toHaveBeenCalled();
-  });
-
-  it("checks out the new branch when the option is ticked", async () => {
-    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "feat/x" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Check out after creating" }));
-    fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    await waitFor(() => expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/x"));
-  });
-
-  // #561: Create follows `operationBlockers`, not only a rebase run here.
-  it("disables Create with the reason whenever the repository is busy", () => {
-    const { props } = renderTree({
-      createBranchDraft: { startPoint: "HEAD" },
-      operationDisabled: true,
-      operationDisabledReason: "A merge is in progress.",
-    });
-    fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "feat/x" } });
-    const create = screen.getByRole("button", { name: "Create" });
-    expect(create).toBeDisabled();
-    expect(create).toHaveAttribute("title", "A merge is in progress.");
-    expect(within(screen.getByRole("form", { name: "New branch" })).getByText("A merge is in progress.")).toBeInTheDocument();
-    fireEvent.submit(screen.getByRole("form", { name: "New branch" }));
-    expect(props.onCreateBranch).not.toHaveBeenCalled();
-  });
-
-  it("re-checks the busy rule when the repository becomes busy while the form is open", () => {
-    const props = treeProps({ createBranchDraft: { startPoint: "HEAD" } });
-    const { rerender } = render(<BranchTree {...props} />);
-    fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "feat/x" } });
-    rerender(<BranchTree {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
-    expect(screen.getByRole("button", { name: "Create" })).toHaveAttribute("title", "A transfer is in progress.");
-    fireEvent.submit(screen.getByRole("form", { name: "New branch" }));
-    expect(props.onCreateBranch).not.toHaveBeenCalled();
-    expect(props.onSwitchBranch).not.toHaveBeenCalled();
-  });
-});
-
-const originOnly = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
 
 describe("BranchTree — refs and remotes (4b)", () => {
   beforeEach(() => {
@@ -1599,35 +1146,6 @@ describe("BranchTree — refs and remotes (4b)", () => {
     const row = (await screen.findByRole("button", { name: "Show origin/topic in graph" })).closest("li")!;
     fireEvent.contextMenu(row);
     expect(screen.getByRole("menuitem", { name: "Delete origin/topic…" })).toBeDisabled();
-  });
-
-  it("reloads open remote folders when refreshGeneration changes", async () => {
-    const onListRemoteBranches = vi.fn().mockResolvedValueOnce(["main", "topic"]).mockResolvedValueOnce(["main"]);
-    const { props, rerender } = renderTree({ remotes: originOnly, onListRemoteBranches });
-    fireEvent.click(screen.getByRole("button", { name: "origin" }));
-    expect(await screen.findByRole("button", { name: "Show origin/topic in graph" })).toBeInTheDocument();
-
-    rerender(<BranchTree {...props} refreshGeneration={1} />);
-
-    // No "Loading…" flash: the old list stays until the new one lands.
-    expect(screen.queryByText("Loading…")).toBeNull();
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Show origin/topic in graph" })).toBeNull());
-    expect(screen.getByRole("button", { name: "Show origin/main in graph" })).toBeInTheDocument();
-    expect(onListRemoteBranches).toHaveBeenCalledTimes(2);
-  });
-
-  it("forgets a closed folder's list on refresh so the next expand reloads it", async () => {
-    const onListRemoteBranches = vi.fn().mockResolvedValue(["main"]);
-    const { props, rerender } = renderTree({ remotes: originOnly, onListRemoteBranches });
-    fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand
-    await screen.findByRole("button", { name: "Show origin/main in graph" });
-    fireEvent.click(screen.getByRole("button", { name: "origin" })); // collapse
-
-    rerender(<BranchTree {...props} refreshGeneration={1} />);
-    expect(onListRemoteBranches).toHaveBeenCalledOnce(); // closed folders are not reloaded eagerly
-    fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand again
-
-    await waitFor(() => expect(onListRemoteBranches).toHaveBeenCalledTimes(2));
   });
 });
 
@@ -1782,22 +1300,86 @@ describe("BranchTree — keyboard menus", () => {
   });
 });
 
-describe("BranchTree — controlled remote dialogs", () => {
+// #493: the tree holds no remote dialog state; it asks its owner to open one, and the owner
+// (`WorkspaceDialogs`) renders it outside the sidebar, which is `hidden` while collapsed.
+describe("BranchTree — remote dialogs belong to the owner", () => {
   const origin = { name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null };
   beforeEach(() => localStorage.clear());
 
-  it("menu items report the dialog through onRemoteDialogChange when controlled", () => {
-    const onRemoteDialogChange = vi.fn();
-    renderTree({ remotes: [origin], remoteDialog: null, onRemoteDialogChange });
+  it.each([
+    ["Edit remote", "edit"],
+    ["Manage credentials", "credentials"],
+    ["Remove remote", "remove"],
+  ] as const)("%s asks onOpenRemoteDialog for the %s dialog and renders none itself", (item, action) => {
+    const onOpenRemoteDialog = vi.fn();
+    render(<BranchTree {...treeProps({ remotes: [origin], onOpenRemoteDialog })} />);
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    expect(onRemoteDialogChange).toHaveBeenCalledWith({ kind: "credentials", remoteName: "origin" });
-    expect(screen.queryByRole("dialog", { name: "Credentials for origin", hidden: true })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: item }));
+    expect(onOpenRemoteDialog).toHaveBeenCalledWith({ kind: "remote", action, remoteName: "origin" });
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+  });
+});
+
+// #614: always enabled, last before the destructive item, writing plain text.
+describe("BranchTree — copy items (#614)", () => {
+  let writeText: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    localStorage.clear();
+    writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
   });
 
-  // The owner (`App`) renders them outside the sidebar, which is `hidden` while collapsed.
-  it.each(["edit", "credentials", "remove"] as const)("leaves the controlled %s dialog to its owner", (kind) => {
-    renderTree({ remotes: [origin], remoteDialog: { kind, remoteName: "origin" }, onRemoteDialogChange: vi.fn() });
-    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+  const busy = { operationDisabled: true, operationDisabledReason: "A transfer is in progress." };
+  const menuNames = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
+
+  it("copies a local branch's full name, even while an operation runs", () => {
+    renderTree(busy);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    expect(menuNames().slice(-2)).toEqual(["Copy branch name", "Delete"]);
+    const item = screen.getByRole("menuitem", { name: "Copy branch name" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+    expect(writeText).toHaveBeenCalledWith("feat/foo");
+  });
+
+  it("copies a remote branch's name as remote/branch", async () => {
+    renderTree({ ...busy, remotes: originOnly, onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const row = (await screen.findByRole("button", { name: "Show origin/topic in graph" })).closest("li")!;
+    fireEvent.contextMenu(row);
+    expect(menuNames().slice(-2)).toEqual(["Copy branch name", "Delete origin/topic…"]);
+    const item = screen.getByRole("menuitem", { name: "Copy branch name" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+    expect(writeText).toHaveBeenCalledWith("origin/topic");
+  });
+
+  it.each([
+    ["no push URL", null],
+    ["the same push URL", "https://example.com/r.git"],
+  ])("copies a remote's fetch URL and offers no push URL with %s", (_label, pushUrl) => {
+    const remote = { name: "origin", fetchUrl: "https://example.com/r.git", pushUrl, authMode: null, authUsername: null };
+    renderTree({ ...busy, remotes: [remote] });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
+    expect(screen.queryByRole("menuitem", { name: "Copy push URL" })).toBeNull();
+    const item = screen.getByRole("menuitem", { name: "Copy fetch URL" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+    expect(writeText).toHaveBeenCalledWith("https://example.com/r.git");
+  });
+
+  it("offers Copy push URL when the push URL differs", () => {
+    const remote = {
+      name: "origin",
+      fetchUrl: "https://example.com/r.git",
+      pushUrl: "git@example.com:r.git",
+      authMode: null,
+      authUsername: null,
+    };
+    renderTree({ remotes: [remote] });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
+    expect(menuNames().slice(-3)).toEqual(["Copy fetch URL", "Copy push URL", "Remove remote"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy push URL" }));
+    expect(writeText).toHaveBeenCalledWith("git@example.com:r.git");
   });
 });

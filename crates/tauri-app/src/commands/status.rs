@@ -1,10 +1,10 @@
 use super::{emit_hook_events, repo_worker, AppState};
-use git_core::graph::GraphSelection;
+use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, LineHistoryDto,
-    StatusEntryDto, TrailerDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, GraphSelectionDto,
+    LineHistoryDto, StatusEntryDto, TrailerDto,
 };
 use std::path::Path;
 use tauri::{AppHandle, State};
@@ -26,14 +26,10 @@ pub async fn get_status(
 pub async fn get_commit_graph(
     repo_path: String,
     limit: usize,
-    selected_branches: Option<Vec<String>>,
-    remote_branches: Vec<String>,
+    selection: GraphSelectionDto,
     state: State<'_, AppState>,
 ) -> Result<Vec<GraphCommitDto>, ErrorDto> {
-    let selection = GraphSelection {
-        local: selected_branches,
-        remote: remote_branches,
-    };
+    let selection = git_core::graph::GraphSelection::from(selection);
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.get_commit_graph(limit, selection))
         .await?
@@ -47,14 +43,10 @@ pub async fn get_commit_graph(
 pub async fn locate_commit(
     repo_path: String,
     revision: String,
-    selected_branches: Option<Vec<String>>,
-    remote_branches: Vec<String>,
+    selection: GraphSelectionDto,
     state: State<'_, AppState>,
 ) -> Result<Option<CommitLocationDto>, ErrorDto> {
-    let selection = GraphSelection {
-        local: selected_branches,
-        remote: remote_branches,
-    };
+    let selection = git_core::graph::GraphSelection::from(selection);
     Ok(repo_worker(&state, &repo_path)?
         .call(move |w| w.locate_commit(revision, selection))
         .await?
@@ -67,12 +59,8 @@ pub fn get_graph_branch_selection(repo_path: String) -> Result<Option<Vec<String
 }
 
 #[tauri::command]
-pub fn set_graph_branch_selection(
-    repo_path: String,
-    selected_branches: Vec<String>,
-) -> Result<(), ErrorDto> {
-    config::set_graph_branch_selection(Path::new(&repo_path), &selected_branches)
-        .map_err(ErrorDto::from_error)
+pub fn set_graph_branch_selection(repo_path: String, local: Vec<String>) -> Result<(), ErrorDto> {
+    config::set_graph_branch_selection(Path::new(&repo_path), &local).map_err(ErrorDto::from_error)
 }
 
 /// Forgets the saved selection, back to every local branch (#402).
@@ -91,9 +79,9 @@ pub fn get_graph_remote_branch_selection(
 #[tauri::command]
 pub fn set_graph_remote_branch_selection(
     repo_path: String,
-    selected_branches: Vec<String>,
+    remote: Vec<String>,
 ) -> Result<(), ErrorDto> {
-    config::set_graph_remote_branch_selection(Path::new(&repo_path), &selected_branches)
+    config::set_graph_remote_branch_selection(Path::new(&repo_path), &remote)
         .map_err(ErrorDto::from_error)
 }
 
@@ -145,6 +133,23 @@ pub async fn get_commit_files(
     repo_worker(&state, &repo_path)?
         .call(move |w| w.get_commit_files(commit_id))
         .await
+}
+
+/// Line counts of `commit_ids` (#620). The commits the worker's time budget didn't reach are
+/// left out; the caller asks for them again.
+#[tauri::command]
+pub async fn get_commit_stats(
+    repo_path: String,
+    commit_ids: Vec<String>,
+    with_files: bool,
+    state: State<'_, AppState>,
+) -> Result<Vec<CommitStatsEntryDto>, ErrorDto> {
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_commit_stats(commit_ids, with_files))
+        .await?
+        .into_iter()
+        .map(CommitStatsEntryDto::from)
+        .collect())
 }
 
 #[tauri::command]

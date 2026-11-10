@@ -66,6 +66,57 @@ fn locate_commit_finds_a_commit_through_the_worker() {
 }
 
 #[test]
+fn merged_commits_list_what_a_merge_brought_in_through_the_worker() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    let tree = base.tree().unwrap();
+    let sig = repo.signature().unwrap();
+    let side_id = repo
+        .commit(None, &sig, &sig, "side work", &tree, &[&base])
+        .unwrap();
+    let side = repo.find_commit(side_id).unwrap();
+    let merge = repo
+        .commit(Some("HEAD"), &sig, &sig, "merge", &tree, &[&base, &side])
+        .unwrap();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let merged = handle.get_merged_commits(merge.to_string(), 10).unwrap();
+    let collapsed = git_core::graph::GraphSelection {
+        first_parent: true,
+        ..Default::default()
+    };
+    let rows = handle.get_commit_graph(10, collapsed).unwrap();
+
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].id, side_id.to_string());
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].merged_count, Some(1));
+}
+
+#[test]
+fn commit_stats_count_a_commit_through_the_worker() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "one\ntwo\n");
+    commit_all(&repo, "initial commit");
+    let id = repo.head().unwrap().target().unwrap().to_string();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let entries = handle.get_commit_stats(vec![id.clone()], true).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].commit_id, id);
+    let stats = entries[0].stats.as_ref().unwrap();
+    assert_eq!(stats.files_changed, 1);
+    assert_eq!(stats.insertions, 2);
+    assert_eq!(stats.deletions, 0);
+    assert_eq!(stats.files[0].path, "file.txt");
+}
+
+#[test]
 fn stage_then_commit_round_trips_through_the_worker() {
     let (dir, _repo) = init_repo();
     write_file(dir.path(), "new.txt", "hello");
@@ -202,4 +253,41 @@ fn whole_file_resolution_round_trips_through_the_worker() {
         "theirs\n"
     );
     assert!(!repo.index().unwrap().has_conflicts());
+}
+
+#[test]
+fn root_files_are_listed_and_created_through_the_worker() {
+    let (dir, _repo) = init_repo();
+    write_file(dir.path(), ".gitattributes", "* text=auto\n");
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    assert_eq!(handle.root_files(), Some(vec![".gitattributes".into()]));
+
+    handle.create_root_file(".gitignore".into()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+        ""
+    );
+    handle.create_root_file(".gitattributes".into()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitattributes")).unwrap(),
+        "* text=auto\n",
+        "an existing file is left as it is"
+    );
+    assert_eq!(
+        handle.create_root_file("notes.txt".into()).unwrap_err(),
+        crate::wire::ErrorDto::from("Only .gitignore and .gitattributes can be created.")
+    );
+    assert!(!dir.path().join("notes.txt").exists());
+}
+
+#[test]
+fn a_bare_repository_has_no_root_files() {
+    let dir = TempDir::new().unwrap();
+    Repository::init_bare(dir.path()).unwrap();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    assert_eq!(handle.root_files(), None);
+    assert!(handle.create_root_file(".gitignore".into()).is_err());
+    assert!(!dir.path().join(".gitignore").exists());
 }

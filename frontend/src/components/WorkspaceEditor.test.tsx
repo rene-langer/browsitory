@@ -13,6 +13,18 @@ function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
 }
 
 describe("WorkspaceEditor", () => {
+  it("lists a member repository by its tab name when it has one (#625)", async () => {
+    const client = fakeClient({
+      pickRepoFolder: vi.fn().mockResolvedValue("/work"),
+      scanReposInRoot: vi.fn().mockResolvedValue(["/work/api", "/work/web"]),
+    });
+    const aliases = new Map([["/work/web", "storefront"]]);
+    render(<WorkspaceEditor client={client} aliases={aliases} onSave={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByText("Choose root folder"));
+    expect(await screen.findByText("storefront")).toHaveAttribute("title", "/work/web");
+    expect(screen.getByText("api")).toBeInTheDocument();
+  });
+
   describe("create mode", () => {
     it("shows a root-picker button before any root is chosen", () => {
       render(<WorkspaceEditor client={fakeClient()} onSave={vi.fn()} onCancel={vi.fn()} />);

@@ -14,6 +14,7 @@ use serde_json::Value;
 mod branch;
 mod compare;
 mod forge;
+mod graph;
 mod history;
 mod merge;
 mod patch;
@@ -35,6 +36,7 @@ mod worktree;
 use branch::*;
 use compare::*;
 use forge::*;
+use graph::*;
 use history::*;
 use merge::*;
 use patch::*;
@@ -139,6 +141,9 @@ methods!(|params, repos, stdout| {
     "get_status" => get_status(RepoPathParams, repos),
     "get_commit_graph" => get_commit_graph(GetCommitGraphParams, repos),
     "locate_commit" => locate_commit(LocateCommitParams, repos),
+    "get_merged_commits" => get_merged_commits(GetMergedCommitsParams, repos),
+    "get_graph_collapse_merges" => get_graph_collapse_merges(RepoPathParams),
+    "set_graph_collapse_merges" => set_graph_collapse_merges(SetGraphCollapseMergesParams),
     "get_working_diff" => get_working_diff(GetWorkingDiffParams, repos),
     "get_commit_diff" => get_commit_diff(GetCommitDiffParams, repos),
     "get_file_history" => get_file_history(GetFileHistoryParams, repos),
@@ -156,6 +161,8 @@ methods!(|params, repos, stdout| {
     "list_recent_repos" => list_recent_repos(),
     "list_open_repos" => list_open_repos_handler(),
     "persist_open_repos" => persist_open_repos(PersistOpenReposParams),
+    "list_repo_aliases" => list_repo_aliases(),
+    "set_repo_alias" => set_repo_alias(SetRepoAliasParams),
     "scan_repos_in_root" => scan_repos_in_root(ScanReposInRootParams),
     "list_workspaces" => list_workspaces_handler(),
     "save_workspace" => save_workspace(SaveWorkspaceParams),
@@ -179,6 +186,8 @@ methods!(|params, repos, stdout| {
     "set_commit_message_settings" => set_commit_message_settings(SetCommitMessageSettingsParams),
     "get_fetch_settings" => get_fetch_settings(),
     "set_fetch_settings" => set_fetch_settings(SetFetchSettingsParams),
+    "get_appearance_settings" => get_appearance_settings(),
+    "set_appearance_settings" => set_appearance_settings(SetAppearanceSettingsParams),
     "get_update_settings" => get_update_settings(),
     "set_update_settings" => set_update_settings(SetUpdateSettingsParams),
     "mark_resolved" => mark_resolved(MarkResolvedParams, repos),
@@ -186,12 +195,15 @@ methods!(|params, repos, stdout| {
     "read_file_version" => read_file_version(ReadFileVersionParams, repos),
     "repo_workdir" => repo_workdir(RepoPathParams, repos),
     "check_merge_target" => check_merge_target(RepoFileParams, repos),
+    "get_root_files" => get_root_files(RepoPathParams, repos),
+    "create_root_file" => create_root_file(CreateRootFileParams, repos),
     "get_graph_remote_branch_selection" => get_graph_remote_branch_selection(RepoPathParams),
     "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(
         SetGraphRemoteBranchSelectionParams
     ),
     "clear_graph_remote_branch_selection" => clear_graph_remote_branch_selection(RepoPathParams),
     "get_commit_files" => get_commit_files(GetCommitFilesParams, repos),
+    "get_commit_stats" => get_commit_stats(GetCommitStatsParams, repos),
     "get_commit_message" => get_commit_message(GetCommitFilesParams, repos),
     "get_commit_signature" => get_commit_signature(GetCommitFilesParams, repos),
     "stage_file" => stage_file(RepoFilePathParams, repos),

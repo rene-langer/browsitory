@@ -125,6 +125,51 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
 `frontend/src/components/**` and `frontend/src/state/**`, so a violation fails `pnpm lint`
 (and CI).
 
+## Frontend state
+
+Each open repository tab is one `RepoWorkspace` (`frontend/src/RepoWorkspace.tsx`). Its
+repository data and the actions on it come from `useAppState` (`frontend/src/state/useAppState.ts`,
+built from one action slice per domain); the views read the actions they need from
+`WorkspaceActionsContext` (`frontend/src/state/useWorkspaceActions.ts`, #491) and get their data
+as props. The workspace renders its dialogs in `WorkspaceDialogs`, outside the sidebar: a
+collapsed sidebar stays mounted but `hidden`, and a modal opened inside it would be invisible yet
+leave the page inert.
+
+### Who owns a dialog's open state
+
+Every dialog has exactly one owner, chosen by who opens and closes it (#493):
+
+- **`AppState.dialog`**, when more than one place opens it (a menu and the command palette) or a
+  `useAppState` action opens or closes it itself (a push that needs a target opens "Push to…", a
+  stash that landed closes the stash dialog). It is one `WorkspaceDialog | null` union
+  (`frontend/src/state/workspaceDialog.ts`): push, force push, delete remote branch, create tag,
+  delete remote tag, a remote's edit / credentials / remove, merge, reword and stash. There is one
+  `openDialog(dialog)` and one `closeDialog(kind?)`. Only one is open at a time: opening one
+  replaces the open one, which is what lets a single field hold them all. An action that finishes
+  closes only its own kind (`withoutDialog`), never a dialog opened meanwhile. Being in
+  `AppState`, the dialog survives a `refresh()` (the same object, so identity-keyed state such as
+  `RemoteDialogs`' snapshot keeps working).
+- **`RepoWorkspace` (or one of its hooks)**, when the palette and a view open it but nothing in
+  `useAppState` does: the discard confirmations (`discardRequest`), the cherry-pick/revert parent
+  picker and reset dialog (`commitDialog`, which carries the element to return focus to), the
+  terminal-abort confirmation, the palette and the shortcut sheet.
+- **The component itself**, when only that component opens it: `BranchTree`'s force delete, Set
+  upstream dialog, clear-upstream confirmation and inline rename, for example.
+
+A component whose dialog is owned higher up is always controlled: it takes the state and its
+setter (or just an open callback) as required props and keeps no local copy. There is no "local
+state unless a callback is passed" mode, so a test exercises the same state flow production uses;
+tests that render such a component alone hold the state in a small wrapper
+(`frontend/src/test/BranchTreeWithDialogs.tsx` for `BranchTree` and its remote dialogs, the
+`DiffPane` wrapper in `DiffPane.test.tsx` for the discard confirmations).
+
+Two kinds of UI state stay out of `dialog` on purpose. The sidebar's inline New branch and Add
+remote forms (`createBranchDraft`, `addRemoteDraftOpen`) are not modal: they can be open together
+and next to a dialog, so each keeps its own `AppState` field (the palette opens them too). And a
+prompt that an operation's state raises (the hook failure dialog, a diverged pull's choice, the
+transfer panel) stays with that state. The rebase planner (`rebaseOnto`/`rebasePreset`) predates
+the rule and still has its own fields.
+
 ## git2 API gotchas
 
 - `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return
@@ -404,16 +449,54 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   and leaves HEAD's file as the conflict `c~HEAD`. With libgit2 a cherry-pick, revert or rebase
   step committed a tree without the file `c` while the work tree kept `c` and never got `c/g`;
   a merge (squash, a diverged pull's merge) and a stash apply stopped part-way with "failed to
-  make directory 'c': directory exists". Every operation that writes a libgit2 merge (merge,
-  squash, cherry-pick, revert, each rebase step, stash apply and pop) runs
-  `file_folder::refuse_file_folder_conflict` on its in-memory merge (`merge_commits`,
-  `cherrypick_commit`, `revert_commit`; for a stash `merge_trees` redoing `git_stash_apply`'s
-  merges against HEAD's tree) before anything is written, and refuses with
-  `FileFolderConflict` (a stage-0 entry `p` while another entry lives below `p/`; libgit2's own
-  conflict entry `p` next to `p/…` is left alone). Producing git's outcome instead would mean
-  rewriting the index into git's `c~HEAD` conflict and doing the checkout and the operation's
-  state files ourselves for five operations, where libgit2's checkout of such an index fails; a
-  refusal keeps the user's work safe and points them to git. The test
+  make directory 'c': directory exists". Every operation that writes a libgit2 merge checks its
+  in-memory merge (`merge_commits`, `cherrypick_commit`, `revert_commit`; for a stash
+  `merge_trees` redoing `git_stash_apply`'s merges against HEAD's tree) before anything is
+  written. `file_folder::find_file_folder_conflict` finds an entry `p` while another entry lives
+  below `p/`, where `p` is a stage-0 entry or a conflict entry without a stage 2 (see the file
+  coming in over a folder, below); libgit2's own conflict entry `p` with HEAD's side (stage 2)
+  next to `p/…` is left alone.
+  Each operation then produces git's outcome itself (#416), without libgit2's
+  `merge`/`cherrypick`/`revert`/`stash_apply`, whose checkout of such an index fails.
+  `file_folder::check_out_as_conflicts` rewrites the merged index (`record_as_conflicts`: the
+  stage-0 `c` becomes `c~<our label>` at stage 2, "added by us", or `c~<their label>` at stage 3
+  when the file comes from the other side; a `/` in a label becomes `_` and a taken name gets
+  `_0`..., as git does), makes it the repository's index and checks it out safely (`c/g` is
+  written, HEAD's file moves to `c~HEAD`), rolled back by `partial_checkout` when it stops
+  part-way (#321/#329). The conflict is a stage-2-only (or stage-3-only) entry, "added by
+  us/them" like git's own. git's labels: `HEAD` for ours; the branch for a merge,
+  `<short id> (<subject>)` for a cherry-pick or rebase step, `parent of <short id> (<subject>)`
+  for a revert; `Updated upstream`/`Stashed changes` for a stash.
+  - **A file coming in over HEAD's folder (#607)**: here libgit2 does find the conflict, but
+    records the incoming file only as a conflict entry at `c` (stage 3, "added by them"; stages 1
+    and 3, "deleted by us", when HEAD deleted a file the other side changed) next to the folder's
+    entries at stage 0. With a name sorting between them (`c.txt`), its checkout then writes the
+    file over the folder and fails on Linux ("could not open 'c' for writing: Is a directory",
+    while on macOS libgit2's own checkout got through in CI); without
+    one it writes the file as `c~<its own label>` but leaves the conflict at `c`. git moves the
+    conflict stages to `c~<their label>`. `record_as_conflicts` does the same: the entry keeps
+    its stages and moves to `c~<their label>`, checked out as above.
+    `libgit2_still_writes_a_file_coming_in_over_a_folder_onto_the_folder` pins the libgit2 side.
+  - **Merge, squash, cherry-pick and revert**: the caller writes the operation's state files as
+    libgit2 would (`MERGE_HEAD`/`MERGE_MODE`/`MERGE_MSG`, or `CHERRY_PICK_HEAD`/`REVERT_HEAD`/
+    `MERGE_MSG`; a squash only `SQUASH_MSG`), so Abort (`reset --merge` semantics, via the index
+    diff) works as for any other conflict. A pick's checkout allows conflicts (skips a file with
+    local changes in the way) as libgit2's pick does; a merge's refuses, as libgit2's merge does.
+  - **Rebase steps**: the rebase is Browsitory's own (`advance` picks each step with libgit2's
+    `cherrypick`, no `rebase-merge/`), so `rebase::stop_at_file_folder_conflict` writes
+    `CHERRY_PICK_HEAD` and `MERGE_MSG` like the pick and stops the step at a conflict
+    (`RebaseStop::Conflict`): Continue lands the resolved index, Abort goes back to the branch.
+  - **Stash apply/pop**: `stash::file_folder_merge` redoes libgit2's merge of the stash's
+    worktree tree against HEAD's; `apply_with_file_folder_conflict` checks it out with the
+    stash's untracked files (written and rolled back with it, then dropped from the index; an
+    untracked file at a path the merge holds is still refused with `FileFolderConflict`). As
+    git, a conflicted apply leaves the merged changes staged, and a pop keeps the stash. A
+    local change or an untracked file in the way refuses (`WouldOverwrite`), as libgit2's apply
+    does. With "Restore staged changes" (`--index`) a collision in the index tree's merge is
+    refused as `IndexConflict`, as `git stash apply --index` refuses it ("Conflicts in index.
+    Try without --index."); one only in the worktree tree's merge gives the conflict without
+    the index, as git's "Index was not unstashed."
+  The test
   `libgit2_still_merges_a_file_and_a_folder_without_a_conflict` (`tests/file_folder_conflict.rs`)
   pins the libgit2 behaviour: when a libgit2 update fixes it, that test fails and the guard can
   give way to libgit2's conflict.
@@ -514,7 +597,8 @@ resort.
 Two tabs of one repository share its worker, so they share one undo history, and a new search
 in one cancels a search still running in the other (one search generation per worker).
 Everything else keeps the caller's spelling: hook and transfer events, recent repositories, open
-tabs and per-repository settings, so two spellings still make two tabs. A repository renamed
+tabs and per-repository settings (also a tab's custom name, `config`'s `repo_aliases`, #625), so
+two spellings still make two tabs. A repository renamed
 while open keeps its alias until it is closed. The registry is per process: two VSCode windows
 run two sidecars, so one repository still gets one worker per window (only the undo lock works
 across processes).
@@ -709,9 +793,10 @@ certificate.
   branch is walked when selected). The search cursor's fingerprint covers it, as it covers every
   start oid. The frontend marks the row with a HEAD badge from `HeadInfo` (`headId` +
   `detachedAt`); `GraphCommit` carries no HEAD flag. File history already walks from HEAD.
-  Both selections are required parameters of `get_commit_graph` and
-  `search_commits` on both transports (`remoteBranches` has no default), so a caller can't drop
-  the remote one by leaving it out.
+  The selection is one `selection` parameter (`GraphSelectionDto`, `{ local, remote }`, #498) of
+  `get_commit_graph`, `locate_commit` and `search_commits` on both transports; `remote` has no
+  default, so a caller can't drop it by leaving it out. The saved-selection setters name their
+  list `local` / `remote` the same way.
 - Exactly one branch in the graph selection, local and remote together (what "Isolate branch"
   sets), makes both `graph::graph_log` and `search_commits` (without a `branch:` term) walk
   first parents only (`GraphSelection::walks_first_parent`, #380): the branch's own commits and
@@ -722,6 +807,24 @@ certificate.
   (`isolateGraphBranch`): on a remote branch, local `[]` and remote `[name]`; on a local branch,
   local `[name]`, and remote `[]` only when a non-empty remote selection was saved (a
   never-saved one walks nothing and keeps every remote badge).
+- "Collapse merges" (#617) is the optional `firstParent` of `GraphSelectionDto` (absent is
+  `false`, sent only when on), saved per repository in `config.toml`'s `graph_collapse_merges`
+  path list (`get/set_graph_collapse_merges`). With it, `graph_log` and `locate_commit` walk
+  first parents from every start point; `search_commits` ignores it (it still narrows only for
+  one isolated branch, `isolates_one_branch`), so a search finds commits inside collapsed merges.
+  In any first-parent walk each merge row carries `mergedCount`, the size of `first..other`
+  (every other parent of an octopus merge together), counted with one hide/push revwalk per
+  merge row of the page; `get_merged_commits(mergeId, limit)` lists that range
+  `TOPOLOGICAL | TIME` (a worker read). `CommitLocation.merge` (`{ mergeId, mergePosition,
+  offset }`) names the merge row that holds a target the walk doesn't reach: along a tip's
+  first-parent line the commits reaching the target come first, so a binary search with
+  `graph_descendant_of` finds the last one, the merge. The frontend keeps the walk's rows
+  (`graphRows`) and the expanded merges (`expandedMerges`, reloaded by `refresh()` while the
+  merge is still a merge row) apart and lists `withExpandedMerges(rows, expansions)` as
+  `commits`, so selection, keys, menus, history entries and the lines-changed badges see expanded
+  commits as ordinary rows and never a collapsed one. `assignLanes(commits, merged)` gives a
+  spliced commit whose first parent isn't listed a stub instead of a lane to the bottom. "Go to"
+  loads the graph through `mergePosition`, then expands the merge to at least `offset + 1`.
 - Going back to the default clears a saved selection (`clear_graph_branch_selection`,
   `clear_graph_remote_branch_selection`, #402) instead of saving today's branch names, which
   would hide branches created later and, with one local branch, walk first parents only. The
@@ -1263,7 +1366,7 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   a result that holds a pair HEAD's tree doesn't. libgit2's in-memory merge holds both names,
   but its ignore-case index takes `a` for `A`'s entry: the commit made from it kept one name
   (`a` without `A`, or `A` not recorded) and left the other's file untracked. It runs next to
-  `refuse_file_folder_conflict` on each in-memory result: a rebase step (`advance`; the step
+  `find_file_folder_conflict` on each in-memory result: a rebase step (`advance`; the step
   stops as an error, so Continue retries and Abort works, or `start_rebase` rolls back), a
   cherry-pick or revert step (`pick::step`, single or in a sequence), a merge or squash
   (`merge_commits`), a stash apply's `merge_trees` (with `--index` both), and the tree a
@@ -2129,8 +2232,9 @@ only `error`.
   name is generated in two files.
   - Limits and defaults (#497): `wire_bindings_are_current` also writes
     `frontend/src/ipc/generated/wire-constants.ts`: `MAX_CONTEXT_LINES`,
-    `WHOLE_FILE_CONTEXT_LINES`, `COMMIT_MESSAGE_COLUMNS`, the `Default` of `config`'s
-    `DiffSettings`, `CommitMessageSettings`, `FetchSettings` and `UpdateSettings` serialized as their DTOs, and the
+    `WHOLE_FILE_CONTEXT_LINES`, `COMMIT_MESSAGE_COLUMNS`, `CODE_FONT_SIZES`, `TAB_SIZES`, the
+    `Default` of `config`'s `DiffSettings`, `CommitMessageSettings`, `FetchSettings`,
+    `AppearanceSettings` (#615) and `UpdateSettings` (#630) serialized as their DTOs, and the
     commit search keys (`git_core::search::KEYS`). `RepoClient.ts` re-exports them; the frontend
     declares none of these values itself. `searchSyntax.test.ts` checks the search help's keys
     against `SEARCH_KEYS`.

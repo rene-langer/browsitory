@@ -56,17 +56,33 @@ macro_rules! cmd {
     };
 }
 
+/// `vec![…]` of `(cmd!(…), expected)` rows, plus a match with one arm per row's variant and no
+/// catch-all, so a `Command` variant without a row doesn't compile (#518). A variant with several
+/// rows repeats its arm. `PanicNow` is a unit variant `cmd!` can't build; its arm is here and its
+/// row is added by `table`.
+macro_rules! rows {
+    ($((cmd!($variant:ident $($fields:tt)?), $expected:expr $(,)?)),* $(,)?) => {{
+        #[allow(dead_code, unreachable_patterns)]
+        fn every_variant_has_a_row(command: &Command) {
+            match command {
+                Command::PanicNow => {}
+                $(Command::$variant { .. } => {})*
+            }
+        }
+        vec![$((cmd!($variant $($fields)?), $expected)),*]
+    }};
+}
+
 /// One sample of every `Command` variant (two or three where the policy depends on a field),
-/// with its policy. A new command gets a row here; `policy::of` already refuses to compile
-/// without one.
+/// with its policy. A new command gets a row here: `rows!` doesn't compile without one, nor does
+/// `policy::of` without its policy.
 fn table() -> Vec<((&'static str, Command), &'static str)> {
     let s = |text: &str| text.to_string();
     let op = || "op-1".into();
     let diff = git_core::diff::DiffOptions::default;
     let graph = git_core::graph::GraphSelection::default;
-    vec![
-        (("Ping", Command::Ping { reply: channel().0 }), "-"),
-        (("PanicNow", Command::PanicNow), "-"),
+    let mut rows = rows![
+        (cmd!(Ping), "-"),
         (cmd!(GetStatus), "-"),
         (
             cmd!(GetCommitGraph {
@@ -79,6 +95,13 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             cmd!(LocateCommit {
                 revision: s("HEAD"),
                 selection: graph()
+            }),
+            "-",
+        ),
+        (
+            cmd!(GetMergedCommits {
+                merge_id: s(ONTO),
+                limit: 1
             }),
             "-",
         ),
@@ -100,6 +123,13 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "-",
         ),
         (cmd!(GetCommitFiles { commit_id: s(ONTO) }), "-"),
+        (
+            cmd!(GetCommitStats {
+                commit_ids: vec![s(ONTO)],
+                with_files: false
+            }),
+            "-",
+        ),
         (cmd!(GetCommitMessage { commit_id: s(ONTO) }), "-"),
         (cmd!(GetCommitSignature { commit_id: s(ONTO) }), "-"),
         (
@@ -298,6 +328,12 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 pattern: s("*.log")
             }),
             "undo(Full, Ignore *.log) lock hold",
+        ),
+        (
+            cmd!(CreateRootFile {
+                name: s(".gitignore")
+            }),
+            "-",
         ),
         (
             cmd!(Commit {
@@ -825,7 +861,9 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
         (cmd!(GetUndoState), "-"),
         (cmd!(Undo), "lock busy=Undo"),
         (cmd!(Redo), "lock busy=Undo"),
-    ]
+    ];
+    rows.push((("PanicNow", Command::PanicNow), "-"));
+    rows
 }
 
 /// The whole policy, one row per command: what it records (and under which label), whether it

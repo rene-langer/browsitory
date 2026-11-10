@@ -8,9 +8,9 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
 use repo_service::wire::{
-    hook_progress_dto, transfer_progress_dto, CommitMessageSettingsDto, DiffSettingsDto, ErrorDto,
-    FetchSettingsDto, OpenRepoEntryDto, OpenRepoEntryInput, TransferProgressDto, UpdateSettingsDto,
-    WorkspaceDto,
+    hook_progress_dto, transfer_progress_dto, AppearanceSettingsDto, CommitMessageSettingsDto,
+    DiffSettingsDto, ErrorDto, FetchSettingsDto, OpenRepoEntryDto, OpenRepoEntryInput,
+    TransferProgressDto, UpdateSettingsDto, WorkspaceDto,
 };
 use repo_service::worker::{HookEvent, TransferEvent, WorkerHandle, WorkerRegistry};
 
@@ -18,6 +18,7 @@ mod branch;
 mod clone;
 mod compare;
 mod forge;
+mod graph;
 mod history;
 mod merge;
 mod patch;
@@ -46,6 +47,7 @@ pub use forge::{
     create_pull_request, detect_forge_repository, forget_forge_token, list_pull_requests,
     save_forge_token,
 };
+pub use graph::{get_graph_collapse_merges, get_merged_commits, set_graph_collapse_merges};
 pub use history::{
     abort_sequence, amend_commit, checkout_commit, cherry_pick, cherry_pick_many,
     continue_sequence, get_head_info, list_recent_authors, reset_to_commit, revert_commit,
@@ -66,7 +68,7 @@ pub use status::{
     clear_graph_branch_selection, clear_graph_remote_branch_selection, commit,
     discard_all_unstaged, discard_file, discard_hunk, discard_lines, get_blame, get_commit_diff,
     get_commit_files, get_commit_graph, get_commit_message, get_commit_rename_diff,
-    get_commit_signature, get_file_history, get_graph_branch_selection,
+    get_commit_signature, get_commit_stats, get_file_history, get_graph_branch_selection,
     get_graph_remote_branch_selection, get_line_history, get_status, get_working_diff, ignore_path,
     locate_commit, set_graph_branch_selection, set_graph_remote_branch_selection, stage_file,
     stage_hunk, stage_lines, unstage_file, unstage_hunk, unstage_lines,
@@ -74,8 +76,9 @@ pub use status::{
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
 pub use tools::{
-    get_external_tool_settings, get_file_sides, get_git_tools, open_diff_tool, open_in_editor,
-    open_merge_tool, open_terminal, reveal_in_file_manager, set_external_tool_settings,
+    create_root_file, get_external_tool_settings, get_file_sides, get_git_tools, get_root_files,
+    open_diff_tool, open_in_editor, open_merge_tool, open_terminal, reveal_in_file_manager,
+    set_external_tool_settings,
 };
 pub use tree::{get_commit_tree, get_file_at_commit, restore_file_version, save_file_version};
 pub use undo::{get_undo_state, redo_last, undo_last};
@@ -224,6 +227,18 @@ pub fn persist_open_repos(
 }
 
 #[tauri::command]
+pub fn list_repo_aliases() -> Result<Vec<repo_service::wire::RepoAliasDto>, ErrorDto> {
+    let aliases = config::list_repo_aliases().map_err(ErrorDto::from_error)?;
+    Ok(aliases.into_iter().map(Into::into).collect())
+}
+
+/// `None` or a blank `alias` removes the repository's tab name (#625).
+#[tauri::command]
+pub fn set_repo_alias(repo_path: String, alias: Option<String>) -> Result<(), ErrorDto> {
+    config::set_repo_alias(Path::new(&repo_path), alias.as_deref()).map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
 pub async fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
     app.dialog()
         .file()
@@ -352,6 +367,18 @@ pub fn set_fetch_settings(settings: FetchSettingsDto) -> Result<(), ErrorDto> {
 }
 
 #[tauri::command]
+pub fn get_appearance_settings() -> Result<AppearanceSettingsDto, ErrorDto> {
+    config::get_appearance_settings()
+        .map(AppearanceSettingsDto::from)
+        .map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
+pub fn set_appearance_settings(settings: AppearanceSettingsDto) -> Result<(), ErrorDto> {
+    config::set_appearance_settings(&settings.into()).map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
 pub fn get_update_settings() -> Result<UpdateSettingsDto, ErrorDto> {
     config::get_update_settings()
         .map(UpdateSettingsDto::from)
@@ -471,13 +498,23 @@ pub(crate) async fn off_runtime<T: Send + 'static>(
 }
 
 /// Opens `url` in the user's default external browser/handler, never inside this app's own
-/// webview. Used for a pull request's provider URL (github.com/bitbucket.org) — the only place
-/// this crate ever needed to open an external link — so a click can't navigate the whole app
-/// window away with no way back short of restarting it. Does not touch `AppState`/the worker:
-/// this is a plain OS-level operation, not a git one.
+/// webview, so a click can't navigate the whole app window away with no way back short of
+/// restarting it. Used for a pull request's URL, the user guide and links in commit messages.
+/// Does not touch `AppState`/the worker: this is a plain OS-level operation, not a git one.
 #[tauri::command]
 pub async fn open_external_url(url: String) -> Result<(), ErrorDto> {
+    let url = web_url(&url)?;
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(ErrorDto::from_error)
+}
+
+/// `url`, parsed and normalized, when its scheme is `http` or `https`; anything else is refused
+/// (#612). A link can come from a commit message, which is untrusted input: another scheme could
+/// start a local program or open a local file through the OS handler.
+pub(crate) fn web_url(url: &str) -> Result<String, ErrorDto> {
+    match tauri::Url::parse(url) {
+        Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => Ok(parsed.into()),
+        _ => Err(format!("Only http and https links can be opened: {url}").into()),
+    }
 }
 
 #[cfg(test)]

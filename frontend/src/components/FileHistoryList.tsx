@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
 import { formatShortDate } from "../lib/formatDate";
 import { lineRangeLabel } from "../lib/selectedLines";
+import type { VisitKind } from "../lib/navigationHistory";
 import type { SelectedRow } from "../state/useAppState";
 import type { FileHistoryState } from "../state/useFileHistory";
 import { InlineError } from "./primitives/InlineError";
@@ -22,7 +23,8 @@ export function FileHistoryList({
 }: {
   history: FileHistoryState;
   selectedRow: SelectedRow;
-  onSelectRow: (row: SelectedRow) => void;
+  /** `kind` `"step"` for a keyboard move by row (#618). */
+  onSelectRow: (row: SelectedRow, kind?: VisitKind) => void;
   onClose: () => void;
   onLoadMore: () => void;
   onRetry: () => void;
@@ -53,7 +55,7 @@ export function FileHistoryList({
     event.preventDefault();
     const next =
       selectedIndex === -1 ? 0 : Math.min(Math.max(selectedIndex + step, 0), history.entries.length - 1);
-    onSelectRow({ commitId: history.entries[next].commit.id });
+    onSelectRow({ commitId: history.entries[next].commit.id }, "step");
   };
 
   return (

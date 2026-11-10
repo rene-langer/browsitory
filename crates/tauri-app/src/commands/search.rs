@@ -6,24 +6,25 @@ use git_core::search::SearchPage;
 use tauri::State;
 
 use super::{repo_worker, AppState};
-use repo_service::wire::SearchPageDto;
+use repo_service::wire::{GraphSelectionDto, SearchPageDto};
 
 #[tauri::command]
 pub async fn search_commits(
     repo_path: String,
     query: String,
-    refs: Option<Vec<String>>,
-    remote_branches: Vec<String>,
+    selection: GraphSelectionDto,
     cursor: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<SearchPageDto, ErrorDto> {
-    let selection = GraphSelection {
-        local: refs,
-        remote: remote_branches,
-    };
-    Ok(queue_search(&state, &repo_path, query, selection, cursor)?
-        .await?
-        .into())
+    Ok(queue_search(
+        &state,
+        &repo_path,
+        query,
+        GraphSelection::from(selection),
+        cursor,
+    )?
+    .await?
+    .into())
 }
 
 /// Claims the search's generation at once, before the call waits for the repository's gate, so

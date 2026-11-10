@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import { RepoError, type CommitOutcome, type HookProgress, type OperationKind, type RepoClient, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
+import { RepoError, type CommitOutcome, type HookProgress, type OperationKind, type RepoClient, type RootFileName, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
 import { credentialRemediation } from "./lib/errorMessages";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
@@ -202,6 +202,63 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
   });
 
+  it("reopens a closed tab at its old position on Ctrl/Cmd+Shift+T (#613)", async () => {
+    const openRepo = vi.fn().mockResolvedValue(undefined);
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo,
+      closeRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+    const { container } = render(<App client={client} />);
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    await waitFor(() => expect(screen.getAllByTitle("Close (Delete)")).toHaveLength(2));
+
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true });
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "a" })).not.toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+
+    fireEvent.keyDown(window, { key: "T", ctrlKey: true, shiftKey: true });
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: "a", selected: true })).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["a", "b"]);
+    expect(openRepo).toHaveBeenLastCalledWith("/repos/a");
+  });
+
+  it("marks an inactive tab with uncommitted changes, checked through getStatus (#613)", async () => {
+    const change = { path: "file.txt", oldPath: null, staged: false, kind: "Modified" as const };
+    const getStatus = vi.fn(async (path: string) => (path === "/repos/b" ? [change] : []));
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus,
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+    render(<App client={client} />);
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAccessibleDescription("Uncommitted changes"));
+    expect(screen.getByRole("tab", { name: "a" })).not.toHaveAccessibleDescription("Uncommitted changes");
+  });
+
   it("opens the user guide site from the palette through the client (#320)", async () => {
     const openExternalUrl = vi.fn().mockResolvedValue(undefined);
     const client = fakeClient({
@@ -312,7 +369,7 @@ describe("App", () => {
         getCommitGraph: async () => [],
         listBranches: async () => [],
         listStashes: async () => [],
-        getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" }),
+        getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true }),
         discardFile: vi.fn().mockResolvedValue(undefined),
         discardAllUnstaged: vi.fn().mockResolvedValue(undefined),
         ...overrides,
@@ -1453,6 +1510,61 @@ describe("App", () => {
       }
     });
 
+    // #515: a search result beyond the loaded history gets the commit actions from its own data.
+    it("the palette offers and runs a search result's commit actions when the loaded graph lacks it (#515)", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        const old = { ...graph[1], id: "c0", shortId: "c0", summary: "one older", timestamp: 0 };
+        const cherryPick = vi.fn<RepoClient["cherryPick"]>().mockResolvedValue({ kind: "Committed", commitId: "c5" });
+        const revertCommit = vi.fn<RepoClient["revertCommit"]>().mockResolvedValue({ kind: "Committed", commitId: "c6" });
+        const resetToCommit = vi.fn<RepoClient["resetToCommit"]>().mockResolvedValue(undefined);
+        const searchCommits = vi.fn(async () => ({ commits: [old], nextCursor: null, scanned: 3 }));
+        render(
+          <App client={pickClient({ cherryPick, revertCommit, resetToCommit, searchCommits, cancelSearch: async () => {} })} />,
+        );
+        const results = await showSearchResults();
+        expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("one older");
+
+        await runPaletteCommand("Cherry-pick c0", "Cherry-pick c0");
+        await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "c0", null));
+        expect(await screen.findByText("Cherry-picked")).toBeInTheDocument();
+
+        await runPaletteCommand("Revert c0", "Revert c0");
+        await waitFor(() => expect(revertCommit).toHaveBeenCalledWith("/repos/a", "c0", null));
+
+        await runPaletteCommand("Reset to c0", "Reset to c0…");
+        const dialog = await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Reset", hidden: true }));
+        await waitFor(() => expect(resetToCommit).toHaveBeenCalledWith("/repos/a", "c0", "mixed"));
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    // #515: the same for a file history commit, a merge asking for its parent.
+    it("the palette's Revert of a file history merge outside the loaded graph asks for the parent (#515)", async () => {
+      const merge = { ...graph[1], id: "m0", shortId: "m0", summary: "merge older", timestamp: 0, parentIds: ["p1", "p2"] };
+      const revertCommit = vi.fn<RepoClient["revertCommit"]>().mockResolvedValue({ kind: "Committed", commitId: "c6" });
+      render(
+        <App
+          client={pickClient({
+            getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
+            getFileHistory: async () => [{ commit: merge, path: "a.txt", oldPath: null }],
+            revertCommit,
+          })}
+        />,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "History of a.txt" }));
+      expect(await screen.findByRole("option", { selected: true })).toHaveTextContent("merge older");
+
+      await runPaletteCommand("Revert m0", "Revert m0…");
+      const dialog = await screen.findByRole("dialog", { name: "Choose parent", hidden: true });
+      fireEvent.click(within(dialog).getByRole("radio", { name: /Parent 2/, hidden: true }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Revert", hidden: true }));
+      await waitFor(() => expect(revertCommit).toHaveBeenCalledWith("/repos/a", "m0", 2));
+    });
+
     // #508: a dialog opened before a sequence starts (e.g. in a terminal, picked up by a refresh)
     // must not stash the paused step's working tree away.
     it("disables the stash dialog's Stash once a cherry-pick sequence starts (#508)", async () => {
@@ -2157,7 +2269,7 @@ describe("App", () => {
 
     fireEvent.change(input, { target: { value: "author:searchy" } });
     const results = await screen.findByRole("listbox", { name: "Search results" }, { timeout: 2000 });
-    await waitFor(() => expect(searchCommits).toHaveBeenCalledWith("/repos/a", "author:searchy", ["main"], [], null));
+    await waitFor(() => expect(searchCommits).toHaveBeenCalledWith("/repos/a", "author:searchy", { local: ["main"], remote: [] }, null));
     expect(screen.queryByRole("listbox", { name: "Commit history" })).toBeNull();
     expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("search hit");
 
@@ -2677,6 +2789,62 @@ describe("App external tools", () => {
     expect(revealInFileManager).toHaveBeenCalledWith("/repos/a", null);
   });
 
+  it("the repo tab menu opens .gitattributes and creates a missing .gitignore before opening it (#624)", async () => {
+    let existing: RootFileName[] = [".gitattributes"];
+    const getRootFiles = vi.fn(async () => existing);
+    const createRootFile = vi.fn(async () => {
+      existing = [".gitignore", ".gitattributes"];
+    });
+    const openInEditor = vi.fn(async () => {});
+    render(<App client={toolsClient({ getRootFiles, createRootFile, openInEditor })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open .gitattributes" }));
+    await waitFor(() => expect(openInEditor).toHaveBeenCalledWith("/repos/a", ".gitattributes", null));
+    expect(createRootFile).not.toHaveBeenCalled();
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Create .gitignore" }));
+    await waitFor(() => expect(openInEditor).toHaveBeenLastCalledWith("/repos/a", ".gitignore", null));
+    expect(createRootFile).toHaveBeenCalledWith("/repos/a", ".gitignore");
+    expect(createRootFile.mock.invocationCallOrder[0]).toBeLessThan(openInEditor.mock.invocationCallOrder[1]);
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a" }));
+    expect(await screen.findByRole("menuitem", { name: "Open .gitignore" })).toBeInTheDocument();
+  });
+
+  it("the tab menu shows an editor failure inline and offers no root files for a bare repository (#624)", async () => {
+    const openInEditor = vi.fn(async () => {
+      throw new Error("No editor is configured.");
+    });
+    const { unmount } = render(<App client={toolsClient({ getRootFiles: async () => [".gitignore"], openInEditor })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open .gitignore" }));
+    expect(await screen.findByText("No editor is configured.")).toBeInTheDocument();
+    unmount();
+
+    render(<App client={toolsClient({ getRootFiles: async () => null })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    await screen.findByRole("menuitem", { name: "Open terminal here" });
+    expect(screen.queryByRole("menuitem", { name: /\.git(ignore|attributes)/ })).toBeNull();
+  });
+
+  it("the palette creates a missing .gitattributes and opens it (#624)", async () => {
+    const createRootFile = vi.fn(async () => {});
+    const openInEditor = vi.fn(async () => {});
+    const { container } = render(
+      <App client={toolsClient({ getRootFiles: async () => [".gitignore"], createRootFile, openInEditor })} />,
+    );
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
+      target: { value: "gitattributes" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Create .gitattributes" }));
+    await waitFor(() => expect(openInEditor).toHaveBeenCalledWith("/repos/a", ".gitattributes", null));
+    expect(createRootFile).toHaveBeenCalledWith("/repos/a", ".gitattributes");
+  });
+
   it("a failed tab action shows its error", async () => {
     const openTerminal = vi.fn(async () => {
       throw new Error("No terminal found. Set a terminal command in Preferences.");
@@ -2701,6 +2869,57 @@ describe("App external tools", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Open terminal here" }));
     expect(await screen.findByText("Couldn't find the program 'kitty'.")).toBeInTheDocument();
     expect(openTerminal).toHaveBeenCalledWith("/repos/a");
+  });
+
+  it("the tab menu renames a tab, an empty name restores the folder name, and a failure shows (#625)", async () => {
+    const setRepoAlias = vi.fn(async () => {});
+    render(<App client={toolsClient({ setRepoAlias })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename tab…" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename tab" });
+    const field = within(dialog).getByLabelText("Tab name");
+    expect(field).toHaveValue("");
+    expect(field).toHaveAttribute("placeholder", "a");
+    fireEvent.change(field, { target: { value: "alpha" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+
+    const renamed = await screen.findByRole("tab", { name: "alpha" });
+    expect(setRepoAlias).toHaveBeenCalledWith("/repos/a", "alpha");
+    expect(renamed).toHaveAttribute("title", "/repos/a");
+    expect(screen.queryByRole("dialog", { name: "Rename tab" })).toBeNull();
+
+    // F2 on the tab opens the dialog with the current name.
+    fireEvent.keyDown(renamed, { key: "F2" });
+    const again = within(screen.getByRole("dialog", { name: "Rename tab" })).getByLabelText("Tab name");
+    expect(again).toHaveValue("alpha");
+    fireEvent.change(again, { target: { value: "" } });
+    fireEvent.submit(again);
+    expect(await screen.findByRole("tab", { name: "a" })).toBeInTheDocument();
+    expect(setRepoAlias).toHaveBeenLastCalledWith("/repos/a", null);
+
+    setRepoAlias.mockRejectedValueOnce(new Error("config.toml is read-only"));
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename tab…" }));
+    const failing = within(screen.getByRole("dialog", { name: "Rename tab" })).getByLabelText("Tab name");
+    fireEvent.change(failing, { target: { value: "beta" } });
+    fireEvent.submit(failing);
+    expect(await screen.findByText("Couldn't save the tab name: config.toml is read-only")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "a" })).toBeInTheDocument();
+  });
+
+  it("the palette's Rename tab… renames the active tab (#625)", async () => {
+    const setRepoAlias = vi.fn(async () => {});
+    const { container } = render(<App client={toolsClient({ setRepoAlias })} />);
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "Rename tab" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Rename tab…" }));
+    const field = within(await screen.findByRole("dialog", { name: "Rename tab" })).getByLabelText("Tab name");
+    fireEvent.change(field, { target: { value: "alpha" } });
+    fireEvent.submit(field);
+    expect(await screen.findByRole("tab", { name: "alpha" })).toBeInTheDocument();
+    expect(setRepoAlias).toHaveBeenCalledWith("/repos/a", "alpha");
   });
 });
 
@@ -2768,5 +2987,92 @@ describe("App release notes on a new version", () => {
       await waitFor(() => expect(setLastSeenVersion).toHaveBeenCalledWith("0.3.5"));
       expect(screen.queryByRole("dialog", { name: "Release notes" })).toBeNull();
     });
+  });
+});
+
+describe("App back and forward through the selected commits (#618)", () => {
+  const graph = [
+    { id: "c3", shortId: "c3", summary: "three", authorName: "A", authorEmail: "a@x", timestamp: 3, parentIds: ["c2"], branchRefs: ["main"], remoteBranchRefs: [] },
+    { id: "c2", shortId: "c2", summary: "two", authorName: "A", authorEmail: "a@x", timestamp: 2, parentIds: ["c1"], branchRefs: [], remoteBranchRefs: [] },
+    { id: "c1", shortId: "c1", summary: "one", authorName: "A", authorEmail: "a@x", timestamp: 1, parentIds: [], branchRefs: [], remoteBranchRefs: [] },
+  ];
+  function navClient() {
+    return fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => graph,
+      listBranches: async () => [{ name: "main", isCurrent: true }],
+      listStashes: async () => [],
+      getGraphBranchSelection: async () => null,
+      getCommitFiles: async () => [],
+      getCommitMessage: async () => "message",
+      getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
+    });
+  }
+  const row = (summary: RegExp) => screen.getByText(summary).closest("li")!;
+  const isSelected = (summary: RegExp) => row(summary).getAttribute("aria-selected") === "true";
+
+  it("goes back and forward with Alt+Left/Right, the mouse buttons and the toolbar", async () => {
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = () => {};
+    try {
+      render(<App client={navClient()} />);
+      fireEvent.click((await screen.findByText(/c3 three/)).closest("li")!);
+      const list = screen.getByRole("listbox", { name: "Commit history" });
+      list.focus();
+      // `[` twice: two jumps to the parents, each its own entry.
+      fireEvent.keyDown(list, { key: "[" });
+      fireEvent.keyDown(list, { key: "[" });
+      await waitFor(() => expect(isSelected(/c1 one/)).toBe(true));
+      expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled();
+
+      fireEvent.keyDown(list, { key: "ArrowLeft", altKey: true });
+      await waitFor(() => expect(isSelected(/c2 two/)).toBe(true));
+      fireEvent.mouseUp(window, { button: 3 });
+      await waitFor(() => expect(isSelected(/c3 three/)).toBe(true));
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      await waitFor(() => expect(screen.getByText(/Uncommitted changes/).closest("li")).toHaveAttribute("aria-selected", "true"));
+      expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
+
+      fireEvent.mouseUp(window, { button: 4 });
+      await waitFor(() => expect(isSelected(/c3 three/)).toBe(true));
+      fireEvent.keyDown(window, { key: "ArrowRight", altKey: true });
+      await waitFor(() => expect(isSelected(/c2 two/)).toBe(true));
+      fireEvent.click(screen.getByRole("button", { name: "Forward" }));
+      await waitFor(() => expect(isSelected(/c1 one/)).toBe(true));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("merges keyboard moves into one step, and the palette offers Back", async () => {
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = () => {};
+    try {
+      render(<App client={navClient()} />);
+      fireEvent.click((await screen.findByText(/c3 three/)).closest("li")!);
+      const list = screen.getByRole("listbox", { name: "Commit history" });
+      fireEvent.keyDown(list, { key: "ArrowDown" });
+      fireEvent.keyDown(list, { key: "ArrowDown" });
+      await waitFor(() => expect(isSelected(/c1 one/)).toBe(true));
+
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "Back to" } });
+      fireEvent.click(await screen.findByRole("option", { name: "Back to previous commit" }));
+      await waitFor(() => expect(isSelected(/c3 three/)).toBe(true));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("leaves Alt+Left to a text field", async () => {
+    render(<App client={navClient()} />);
+    fireEvent.click((await screen.findByText(/c3 three/)).closest("li")!);
+    fireEvent.click(screen.getByText(/c2 two/).closest("li")!);
+    const search = screen.getByRole("combobox", { name: "Search commits" });
+    fireEvent.keyDown(search, { key: "ArrowLeft", altKey: true });
+    expect(isSelected(/c2 two/)).toBe(true);
   });
 });

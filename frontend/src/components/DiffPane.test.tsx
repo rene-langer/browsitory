@@ -6,11 +6,41 @@ import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { CommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
-import { DiffPane, type DiscardRequest, type StashActions } from "./DiffPane";
+import { DiffPane as WorkspaceDiffPane, type DiscardRequest, type StashActions } from "./DiffPane";
+import { WorkspaceActionsContext, type WorkspaceActions } from "../state/useWorkspaceActions";
+import { splitWorkspaceActions, testWorkspaceActions } from "../test/workspaceActions";
 import styles from "./DiffPane.module.css";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const TEST_REPO_PATH = "/repo";
+
+type PaneProps = React.ComponentProps<typeof WorkspaceDiffPane>;
+
+// `DiffPane` reads its actions from `WorkspaceActionsContext` (#491). The tests pass them as props
+// alongside the data, as before: this wrapper provides them and passes the rest on. It also owns
+// the discard confirmation as `RepoWorkspace` does (#493): `discardRequest` is the one open at
+// first, and `onDiscardRequestChange` sees every change.
+function DiffPane(
+  props: Omit<PaneProps, "discardRequest" | "onDiscardRequestChange"> &
+    Partial<Pick<PaneProps, "discardRequest" | "onDiscardRequestChange">> &
+    Partial<WorkspaceActions>,
+) {
+  const [actions, { discardRequest: initialDiscardRequest = null, onDiscardRequestChange, ...paneProps }] =
+    splitWorkspaceActions(props);
+  const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(initialDiscardRequest);
+  return (
+    <WorkspaceActionsContext.Provider value={testWorkspaceActions(actions)}>
+      <WorkspaceDiffPane
+        {...paneProps}
+        discardRequest={discardRequest}
+        onDiscardRequestChange={(request) => {
+          onDiscardRequestChange?.(request);
+          setDiscardRequest(request);
+        }}
+      />
+    </WorkspaceActionsContext.Provider>
+  );
+}
 
 function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
   return fakeRepoClient(overrides, "empty");
@@ -466,7 +496,10 @@ describe("DiffPane", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "Discard all…" }));
         expect(
-          screen.getByText("Discard changes to 2 files (1 untracked will be deleted)? This can't be undone."),
+          screen.getByText(
+            "Discard changes to 2 files (1 untracked will be deleted)? This can't be undone. To delete only " +
+              'the untracked files and keep the other changes, use "Delete untracked…".',
+          ),
         ).toBeInTheDocument();
         expect(onDiscardAllUnstaged).not.toHaveBeenCalled();
         fireEvent.click(screen.getByText("Discard all"));
@@ -522,8 +555,8 @@ describe("DiffPane", () => {
       });
 
       it("clears a file request whose path disappears, and does not reopen when it returns", () => {
+        // The wrapper `DiffPane` holds the request, as `RepoWorkspace` does.
         function Harness({ status }: { status: StatusEntry[] }) {
-          const [req, setReq] = useState<DiscardRequest | null>({ kind: "file", path: "src/a.ts" });
           return (
             <DiffPane
               repoPath={TEST_REPO_PATH}
@@ -533,8 +566,7 @@ describe("DiffPane", () => {
               mergeMessage={null}
               rebaseProgress={null}
               {...noopHandlers}
-              discardRequest={req}
-              onDiscardRequestChange={setReq}
+              discardRequest={{ kind: "file", path: "src/a.ts" }}
             />
           );
         }
@@ -560,6 +592,94 @@ describe("DiffPane", () => {
         renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), [fileStatus[2]]);
 
         expect(screen.getByRole("button", { name: "Discard all…" })).toBeDisabled();
+      });
+
+      describe("Delete untracked (#622)", () => {
+        const mixed: StatusEntry[] = [
+          { path: "src/a.ts", oldPath: null, staged: false, kind: "Modified" },
+          { path: "gone.txt", oldPath: null, staged: false, kind: "Deleted" },
+          { path: "logs/run.log", oldPath: null, staged: false, kind: "New" },
+          { path: "notes/todo.md", oldPath: null, staged: false, kind: "New" },
+          { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+          { path: "staged-new.txt", oldPath: null, staged: true, kind: "New" },
+        ];
+
+        it("opens its confirmation through the lifted request, as the palette does", () => {
+          const onDiscardRequestChange = vi.fn();
+          renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixed, { onDiscardRequestChange });
+
+          fireEvent.click(screen.getByRole("button", { name: "Delete untracked…" }));
+          expect(onDiscardRequestChange).toHaveBeenCalledWith({ kind: "untracked" });
+        });
+
+        it("deletes exactly the untracked files the dialog listed, keeping tracked changes", () => {
+          const onDiscardAllUnstaged = vi.fn();
+          const onDeleteUntracked = vi.fn();
+          renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixed, {
+            onDiscardAllUnstaged,
+            onDeleteUntracked,
+          });
+
+          fireEvent.click(screen.getByRole("button", { name: "Delete untracked…" }));
+          const dialog = screen.getByRole("dialog", { name: "Delete untracked files", hidden: true });
+          expect(within(dialog).getByText("Delete 2 untracked files? This can't be undone.")).toBeInTheDocument();
+          const list = within(dialog).getByRole("list", { name: "Untracked files to delete", hidden: true });
+          expect(within(list).getAllByRole("listitem", { hidden: true }).map((item) => item.textContent)).toEqual([
+            "logs/run.log",
+            "notes/todo.md",
+          ]);
+          expect(onDeleteUntracked).not.toHaveBeenCalled();
+          fireEvent.click(within(dialog).getByRole("button", { name: "Delete 2 files", hidden: true }));
+
+          expect(onDeleteUntracked).toHaveBeenCalledTimes(1);
+          expect(onDeleteUntracked).toHaveBeenCalledWith(["logs/run.log", "notes/todo.md"]);
+          expect(onDiscardAllUnstaged).not.toHaveBeenCalled();
+        });
+
+        it("lists the first five paths and counts the rest", () => {
+          const many: StatusEntry[] = Array.from({ length: 7 }, (_, i) => ({
+            path: `new-${i}.txt`,
+            oldPath: null,
+            staged: false,
+            kind: "New" as const,
+          }));
+          renderUncommitted(fakeClient({}), many, { discardRequest: { kind: "untracked" } });
+
+          const list = screen.getByRole("list", { name: "Untracked files to delete", hidden: true });
+          const items = within(list).getAllByRole("listitem", { hidden: true }).map((item) => item.textContent);
+          expect(items).toEqual(["new-0.txt", "new-1.txt", "new-2.txt", "new-3.txt", "new-4.txt", "and 2 more"]);
+        });
+
+        it("blocks the confirmation, saying why, while an action is in progress", () => {
+          const onDeleteUntracked = vi.fn();
+          const reason = "Another action is in progress.";
+          renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixed, {
+            onDeleteUntracked,
+            discardBlockedReason: reason,
+          });
+
+          fireEvent.click(screen.getByRole("button", { name: "Delete untracked…" }));
+          const dialog = screen.getByRole("dialog", { name: "Delete untracked files", hidden: true });
+          expect(dialog).toHaveTextContent(reason);
+          const confirm = within(dialog).getByRole("button", { name: "Delete 2 files", hidden: true });
+          expect(confirm).toBeDisabled();
+          expect(confirm).toHaveAttribute("title", reason);
+          fireEvent.click(confirm);
+
+          expect(onDeleteUntracked).not.toHaveBeenCalled();
+        });
+
+        it("is not shown, and clears a request, when the group holds no untracked file", () => {
+          const onDiscardRequestChange = vi.fn();
+          renderUncommitted(fakeClient({}), [mixed[0]], {
+            discardRequest: { kind: "untracked" },
+            onDiscardRequestChange,
+          });
+
+          expect(screen.queryByRole("button", { name: "Delete untracked…" })).not.toBeInTheDocument();
+          expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
+          expect(screen.queryByRole("dialog", { name: "Delete untracked files", hidden: true })).not.toBeInTheDocument();
+        });
       });
     });
 
@@ -605,6 +725,59 @@ describe("DiffPane", () => {
       renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), conflictsOnly);
 
       expect(screen.getByRole("button", { name: "Stage all" })).toBeDisabled();
+    });
+
+    describe("Stage modified (#621)", () => {
+      it("stages only the tracked files' changes, leaving untracked files and conflicts alone", () => {
+        const mixed: StatusEntry[] = [
+          { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+          { path: "gone.txt", oldPath: null, staged: false, kind: "Deleted" },
+          { path: "new.txt", oldPath: null, staged: false, kind: "New" },
+          { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+          { path: "b.txt", oldPath: null, staged: true, kind: "Modified" },
+        ];
+        const onStageAllFiles = vi.fn();
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixed, { onStageAllFiles });
+
+        const button = screen.getByRole("button", { name: "Stage modified" });
+        expect(button).toBeEnabled();
+        expect(button).toHaveAttribute("title", expect.stringContaining("1 untracked file"));
+        expect(screen.getByRole("button", { name: "Stage all" })).toHaveAttribute(
+          "title",
+          expect.stringContaining("untracked files included"),
+        );
+        fireEvent.click(button);
+
+        expect(onStageAllFiles).toHaveBeenCalledTimes(1);
+        expect(onStageAllFiles).toHaveBeenCalledWith(["a.txt", "gone.txt"]);
+      });
+
+      it("is not shown when the group holds no untracked file", () => {
+        const trackedOnly: StatusEntry[] = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }];
+        renderUncommitted(fakeClient({}), trackedOnly);
+
+        expect(screen.queryByRole("button", { name: "Stage modified" })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Stage all" })).not.toHaveAttribute("title");
+      });
+
+      it("is not shown when the group holds only untracked files", () => {
+        const untrackedOnly: StatusEntry[] = [{ path: "new.txt", oldPath: null, staged: false, kind: "New" }];
+        renderUncommitted(fakeClient({}), untrackedOnly);
+
+        expect(screen.queryByRole("button", { name: "Stage modified" })).not.toBeInTheDocument();
+      });
+
+      it("is disabled, with a reason, when the only tracked changes are conflicts", () => {
+        const conflictAndUntracked: StatusEntry[] = [
+          { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+          { path: "new.txt", oldPath: null, staged: false, kind: "New" },
+        ];
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), conflictAndUntracked);
+
+        const button = screen.getByRole("button", { name: "Stage modified" });
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute("title", expect.stringContaining("No tracked file has changes to stage"));
+      });
     });
 
     it("Unstage all makes a single bulk call with every staged path", () => {
@@ -1268,6 +1441,79 @@ describe("DiffPane", () => {
         expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Collapse b.txt" })).toBeInTheDocument();
       });
+
+      describe("with Expand untracked files off (#623)", () => {
+        const withUntracked: StatusEntry[] = [
+          { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+          { path: "new.txt", oldPath: null, staged: false, kind: "New" },
+          { path: "added.txt", oldPath: null, staged: true, kind: "New" },
+        ];
+        const settings = {
+          ignoreWhitespace: false,
+          contextLines: 3,
+          syntaxHighlight: false,
+          wordWrap: "Auto" as const,
+          algorithm: "Default" as const,
+          showWhitespace: false,
+          expandUntracked: false,
+        };
+        const pane = (client: RepoClient, entries: StatusEntry[], refreshGeneration = 0) => (
+          <DiffSettingsContext.Provider value={{ settings, update: () => {}, error: null, dismissError: () => {} }}>
+            <DiffPane
+              repoPath={TEST_REPO_PATH}
+              client={client}
+              selectedRow="uncommitted"
+              status={entries}
+              mergeMessage={null}
+              rebaseProgress={null}
+              refreshGeneration={refreshGeneration}
+              {...noopHandlers}
+            />
+          </DiffSettingsContext.Provider>
+        );
+        const fetchedPaths = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls.map((call) => call[1]);
+
+        it("starts an untracked file collapsed, fetching nothing, and tracked and staged files expanded", async () => {
+          const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
+          render(pane(fakeClient({ getWorkingDiff }), withUntracked));
+
+          await waitFor(() => expect(fetchedPaths(getWorkingDiff)).toContain("a.txt"));
+          expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
+          expect(screen.getByRole("button", { name: "Collapse added.txt" })).toBeInTheDocument();
+          // The collapsed row keeps its path and status.
+          expect(screen.getByRole("button", { name: "Expand new.txt" })).toBeInTheDocument();
+          expect(screen.getByText("new.txt (New)")).toBeInTheDocument();
+          expect(fetchedPaths(getWorkingDiff)).not.toContain("new.txt");
+        });
+
+        it("keeps an expanded untracked file expanded across refreshes; a new one starts collapsed", async () => {
+          const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
+          const client = fakeClient({ getWorkingDiff });
+          const { rerender } = render(pane(client, withUntracked));
+          fireEvent.click(await screen.findByRole("button", { name: "Expand new.txt" }));
+          await waitFor(() => expect(fetchedPaths(getWorkingDiff)).toContain("new.txt"));
+
+          const later: StatusEntry[] = [...withUntracked, { path: "later.txt", oldPath: null, staged: false, kind: "New" }];
+          rerender(pane(client, later.map((entry) => ({ ...entry })), 1));
+
+          expect(screen.getByRole("button", { name: "Collapse new.txt" })).toBeInTheDocument();
+          expect(screen.getByRole("button", { name: "Expand later.txt" })).toBeInTheDocument();
+          expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
+          await waitFor(() =>
+            expect(fetchedPaths(getWorkingDiff).filter((path) => path === "new.txt").length).toBeGreaterThan(1),
+          );
+          expect(fetchedPaths(getWorkingDiff)).not.toContain("later.txt");
+        });
+
+        it("Expand all opens the collapsed untracked files too", async () => {
+          render(pane(fakeClient({ getWorkingDiff: async () => [] }), withUntracked));
+          await screen.findByRole("button", { name: "Expand new.txt" });
+          fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+          fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+          expect(screen.getByRole("button", { name: "Collapse new.txt" })).toBeInTheDocument();
+          expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
+        });
+      });
     });
   });
 
@@ -1284,6 +1530,33 @@ describe("DiffPane", () => {
       expect(await screen.findByText("src/main.rs")).toBeInTheDocument();
       expect(await screen.findByText(/fn main/)).toBeInTheDocument();
       expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs", DEFAULT_DIFF_OPTIONS);
+    });
+
+    it("shows the commit's totals and each file's lines added and removed (#620)", async () => {
+      const getCommitStats = vi.fn(async () => [
+        {
+          commitId: "abc123",
+          stats: {
+            filesChanged: 2,
+            insertions: 5,
+            deletions: 2,
+            files: [
+              { path: "src/main.rs", insertions: 5, deletions: 2, binary: false },
+              { path: "logo.png", insertions: 0, deletions: 0, binary: true },
+            ],
+          },
+        },
+      ]);
+      const getTwoFiles = vi.fn(async () => ["src/main.rs", "logo.png"]);
+      renderCommit(fakeClient({ getCommitFiles: getTwoFiles, getCommitDiff, getCommitStats }), "abc123");
+
+      const totals = (await screen.findByText("Size")).nextElementSibling as HTMLElement;
+      expect(totals).toHaveTextContent("2 files changed, 5 lines added, 2 removed");
+      expect(getCommitStats).toHaveBeenCalledWith(TEST_REPO_PATH, ["abc123"], true);
+      const mainHeader = screen.getByText("src/main.rs").parentElement as HTMLElement;
+      expect(within(mainHeader).getByTestId("line-stats")).toHaveTextContent("+5−2");
+      const imageHeader = screen.getByText("logo.png").parentElement as HTMLElement;
+      expect(within(imageHeader).getByText("Binary")).toBeInTheDocument();
     });
 
     it("switches to All files, which lists the commit's tree and stays on for the next commit (#446)", async () => {
@@ -1449,7 +1722,7 @@ describe("DiffPane line staging", () => {
   const TestDiffSettings = ({ ignoreWhitespace, children }: { ignoreWhitespace: boolean; children: ReactNode }) => (
     <DiffSettingsContext.Provider
       value={{
-        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
+        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
         update: () => {},
         error: null,
         dismissError: () => {},
@@ -1607,7 +1880,7 @@ describe("DiffPane diff options contract", () => {
   ) {
     return (
       <DiffSettingsContext.Provider
-        value={{ settings: { algorithm: "Default", ...settings, syntaxHighlight: false, wordWrap: "Auto" }, update: () => {}, error: null, dismissError: () => {} }}
+        value={{ settings: { algorithm: "Default", ...settings, syntaxHighlight: false, wordWrap: "Auto", showWhitespace: false, expandUntracked: true }, update: () => {}, error: null, dismissError: () => {} }}
       >
         <DiffPane
           repoPath={TEST_REPO_PATH}
@@ -2115,6 +2388,7 @@ describe("DiffPane external tools", () => {
       openInEditor: vi.fn(),
       reveal: vi.fn(),
       openTerminal: vi.fn(),
+      openRootFile: vi.fn(),
       openDiffTool: vi.fn(),
       openMergeTool: vi.fn(),
       mergeToolRunning: new Set(),

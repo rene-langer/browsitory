@@ -1,5 +1,6 @@
 import type {
   AmendOptions,
+  AppearanceSettings,
   CommitChangeRequest,
   HunkOptions,
   PatchContent,
@@ -31,6 +32,8 @@ import type {
   LineHistory,
   ChangedFile,
   CommitLocation,
+  CommitStatsEntry,
+  GraphSelection,
   CompareRange,
   SearchPage,
   ForgeProvider,
@@ -48,6 +51,7 @@ import type {
   RebaseStepResult,
   ReflogEntry,
   RemoteAuthMode,
+  RepoAlias,
   RemoteInfo,
   RepoClient,
   StashApplyOutcome,
@@ -70,6 +74,7 @@ import type {
   UndoOutcome,
   UndoState,
   ResetMode,
+  RootFileName,
 } from "./RepoClient";
 import { validateRemoteUrls } from "./validateRemoteUrls";
 
@@ -113,10 +118,15 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     openRepo: (path: string) => call<void>("open_repo", { path }),
     closeRepo: (repoPath: string) => call<void>("close_repo", { repoPath }),
     getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
-    getCommitGraph: (repoPath: string, limit: number, selectedBranches: string[] | null, remoteBranches: string[]) =>
-      call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selectedBranches, remoteBranches }),
-    locateCommit: (repoPath: string, revision: string, selectedBranches: string[] | null, remoteBranches: string[]) =>
-      call<CommitLocation | null>("locate_commit", { repoPath, revision, selectedBranches, remoteBranches }),
+    getCommitGraph: (repoPath: string, limit: number, selection: GraphSelection) =>
+      call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selection }),
+    locateCommit: (repoPath: string, revision: string, selection: GraphSelection) =>
+      call<CommitLocation | null>("locate_commit", { repoPath, revision, selection }),
+    getMergedCommits: (repoPath: string, mergeId: string, limit: number) =>
+      call<GraphCommit[]>("get_merged_commits", { repoPath, mergeId, limit }),
+    getGraphCollapseMerges: (repoPath: string) => call<boolean>("get_graph_collapse_merges", { repoPath }),
+    setGraphCollapseMerges: (repoPath: string, collapse: boolean) =>
+      call<void>("set_graph_collapse_merges", { repoPath, collapse }),
     getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath: string | null = null) =>
       call<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts, oldPath }),
     getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>
@@ -125,8 +135,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<FileHistoryEntry[]>("get_file_history", { repoPath, path, limit }),
     getLineHistory: (repoPath: string, revision: string, path: string, startLine: number, endLine: number, limit: number) =>
       call<LineHistory>("get_line_history", { repoPath, revision, path, startLine, endLine, limit }),
-    searchCommits: (repoPath: string, query: string, refs: string[] | null, remoteBranches: string[], cursor: string | null) =>
-      call<SearchPage>("search_commits", { repoPath, query, refs, remoteBranches, cursor }),
+    searchCommits: (repoPath: string, query: string, selection: GraphSelection, cursor: string | null) =>
+      call<SearchPage>("search_commits", { repoPath, query, selection, cursor }),
     cancelSearch: (repoPath: string) => call<void>("cancel_search", { repoPath }),
     getCommitRenameDiff: (repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions) =>
       call<DiffHunk[]>("get_commit_rename_diff", { repoPath, commitId, oldPath, newPath, opts }),
@@ -139,6 +149,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<void>("set_last_seen_version", { version }),
     persistOpenRepos: (entries: OpenRepoEntry[], activePath: string | null) =>
       call<void>("persist_open_repos", { entries, activePath }),
+    listRepoAliases: () => call<RepoAlias[]>("list_repo_aliases"),
+    setRepoAlias: (repoPath: string, alias: string | null) => call<void>("set_repo_alias", { repoPath, alias }),
     scanReposInRoot: (root: string) => call<string[]>("scan_repos_in_root", { root }),
     listWorkspaces: () => call<Workspace[]>("list_workspaces"),
     saveWorkspace: (name: string, root: string, members: string[]) =>
@@ -148,17 +160,19 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     deleteWorkspace: (id: string) => call<void>("delete_workspace", { id }),
     getGraphBranchSelection: (repoPath: string) =>
       call<string[] | null>("get_graph_branch_selection", { repoPath }),
-    setGraphBranchSelection: (repoPath: string, selectedBranches: string[]) =>
-      call<void>("set_graph_branch_selection", { repoPath, selectedBranches }),
+    setGraphBranchSelection: (repoPath: string, local: string[]) =>
+      call<void>("set_graph_branch_selection", { repoPath, local }),
     clearGraphBranchSelection: (repoPath: string) => call<void>("clear_graph_branch_selection", { repoPath }),
     getGraphRemoteBranchSelection: (repoPath: string) =>
       call<string[] | null>("get_graph_remote_branch_selection", { repoPath }),
-    setGraphRemoteBranchSelection: (repoPath: string, selectedBranches: string[]) =>
-      call<void>("set_graph_remote_branch_selection", { repoPath, selectedBranches }),
+    setGraphRemoteBranchSelection: (repoPath: string, remote: string[]) =>
+      call<void>("set_graph_remote_branch_selection", { repoPath, remote }),
     clearGraphRemoteBranchSelection: (repoPath: string) =>
       call<void>("clear_graph_remote_branch_selection", { repoPath }),
     getCommitFiles: (repoPath: string, commitId: string) =>
       call<string[]>("get_commit_files", { repoPath, commitId }),
+    getCommitStats: (repoPath: string, commitIds: string[], withFiles: boolean) =>
+      call<CommitStatsEntry[]>("get_commit_stats", { repoPath, commitIds, withFiles }),
     getRangeFiles: (repoPath: string, fromId: string, toId: string) =>
       call<ChangedFile[]>("get_range_files", { repoPath, fromId, toId }),
     getRangeDiff: (repoPath: string, fromId: string, toId: string, path: string, oldPath: string | null, opts: DiffOptions) =>
@@ -335,6 +349,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<void>("set_commit_message_settings", { settings }),
     getFetchSettings: () => call<FetchSettings>("get_fetch_settings"),
     setFetchSettings: (settings: FetchSettings) => call<void>("set_fetch_settings", { settings }),
+    getAppearanceSettings: () => call<AppearanceSettings>("get_appearance_settings"),
+    setAppearanceSettings: (settings: AppearanceSettings) => call<void>("set_appearance_settings", { settings }),
     getUpdateSettings: () => call<UpdateSettings>("get_update_settings"),
     setUpdateSettings: (settings: UpdateSettings) => call<void>("set_update_settings", { settings }),
     getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
@@ -385,6 +401,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     revealInFileManager: (repoPath: string, path: string | null) =>
       call<void>("reveal_in_file_manager", { repoPath, path }),
     openTerminal: (repoPath: string) => call<void>("open_terminal", { repoPath }),
+    getRootFiles: (repoPath: string) => call<RootFileName[] | null>("get_root_files", { repoPath }),
+    createRootFile: (repoPath: string, name: RootFileName) => call<void>("create_root_file", { repoPath, name }),
     openDiffTool: (repoPath: string, path: string, source: DiffSource) =>
       call<void>("open_diff_tool", { repoPath, path, source }),
     openMergeTool: (repoPath: string, path: string) =>

@@ -1,6 +1,7 @@
 use super::{Command, WorkerHandle};
 use crate::wire::ErrorDto;
 use git_core::blame::BlameLine;
+use git_core::commit_stats::{commit_stats_batch, CommitStatsEntry, StatsBudget};
 use git_core::diff::DiffHunk;
 use git_core::graph::{GraphCommit, GraphSelection};
 use git_core::status::StatusEntry;
@@ -31,6 +32,18 @@ pub(super) fn locate_commit(
 ) {
     let _ = reply.send(
         git_core::locate::locate_commit(repo, &revision, &selection).map_err(ErrorDto::from_error),
+    );
+}
+
+/// The commits merge `merge_id` brought in, at most `limit` (#617): a collapsed merge expanded.
+pub(super) fn get_merged_commits(
+    repo: &git2::Repository,
+    merge_id: String,
+    limit: usize,
+    reply: Sender<Result<Vec<GraphCommit>, ErrorDto>>,
+) {
+    let _ = reply.send(
+        git_core::graph::merged_commits(repo, &merge_id, limit).map_err(ErrorDto::from_error),
     );
 }
 
@@ -70,6 +83,18 @@ pub(super) fn get_commit_files(
 ) {
     let _ =
         reply.send(git_core::diff::commit_files(repo, &commit_id).map_err(ErrorDto::from_error));
+}
+
+/// The line counts of `commit_ids` (#620), within the default budget so a batch can't hold the
+/// worker long: the commits it didn't reach are left out, and the caller asks again.
+pub(super) fn get_commit_stats(
+    repo: &git2::Repository,
+    commit_ids: Vec<String>,
+    with_files: bool,
+    reply: Sender<Result<Vec<CommitStatsEntry>, ErrorDto>>,
+) {
+    let entries = commit_stats_batch(repo, &commit_ids, with_files, StatsBudget::default());
+    let _ = reply.send(Ok(entries));
 }
 
 pub(super) fn get_commit_signature(
@@ -409,6 +434,19 @@ impl WorkerHandle {
         })
     }
 
+    /// The commits merge `merge_id` brought in, at most `limit` (#617).
+    pub fn get_merged_commits(
+        &self,
+        merge_id: String,
+        limit: usize,
+    ) -> Result<Vec<GraphCommit>, ErrorDto> {
+        self.request(|tx| Command::GetMergedCommits {
+            merge_id,
+            limit,
+            reply: tx,
+        })
+    }
+
     /// `old_path`: a staged rename's old path (see `status::get_working_diff`).
     pub fn get_working_diff(
         &self,
@@ -443,6 +481,19 @@ impl WorkerHandle {
     pub fn get_commit_files(&self, commit_id: String) -> Result<Vec<String>, ErrorDto> {
         self.request(|tx| Command::GetCommitFiles {
             commit_id,
+            reply: tx,
+        })
+    }
+
+    /// Line counts of `commit_ids` (#620); see `status::get_commit_stats`.
+    pub fn get_commit_stats(
+        &self,
+        commit_ids: Vec<String>,
+        with_files: bool,
+    ) -> Result<Vec<CommitStatsEntry>, ErrorDto> {
+        self.request(|tx| Command::GetCommitStats {
+            commit_ids,
+            with_files,
             reply: tx,
         })
     }

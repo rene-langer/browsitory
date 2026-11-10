@@ -1,6 +1,20 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RepoTabs } from "./RepoTabs";
+import styles from "./RepoTabs.module.css";
+import repoTabsCss from "./RepoTabs.module.css?raw";
+import appCss from "../App.module.css?raw";
+
+// The declarations of the plain `.name { ... }` rules in a stylesheet (no compound selectors).
+function declarationsOf(css: string, className: string): string[] {
+  const rule = new RegExp(`^\\.${className}\\s*\\{([^}]*)\\}`, "gm");
+  return [...css.matchAll(rule)].map((match) => match[1]);
+}
+
+// A fixed `height`/`max-height` (not `min-height`) on a box around the tabs.
+function fixesHeight(declarations: string[]): boolean {
+  return declarations.some((block) => /(^|[;{\s])(max-)?height\s*:/.test(block));
+}
 
 // The per-tab/group close buttons are `aria-hidden` (kept mouse-only; see the "keeps the per-tab
 // close button out of the tablist's accessible children" test below), so role queries need
@@ -24,8 +38,8 @@ function groupCloseButtonFor(groupLabel: string) {
 }
 
 const repos = [
-  { path: "/repos/widget", displayName: "widget", workspaceId: null },
-  { path: "/repos/gadget", displayName: "gadget", workspaceId: null },
+  { path: "/repos/widget", displayName: "widget", alias: null, workspaceId: null },
+  { path: "/repos/gadget", displayName: "gadget", alias: null, workspaceId: null },
 ];
 
 const noneBusy = new Set<string>();
@@ -60,8 +74,8 @@ describe("RepoTabs", () => {
     render(
       <RepoTabs
         openRepos={[
-          { path: "/a", displayName: "a", workspaceId: null },
-          { path: "/b", displayName: "b", workspaceId: null },
+          { path: "/a", displayName: "a", alias: null, workspaceId: null },
+          { path: "/b", displayName: "b", alias: null, workspaceId: null },
         ]}
         activePath="/a"
         busyPaths={new Set()}
@@ -129,11 +143,35 @@ describe("RepoTabs", () => {
   });
 });
 
+describe("RepoTabs change marker", () => {
+  it("marks a tab whose repository has uncommitted changes, in words as well as a dot (#613)", () => {
+    render(
+      <RepoTabs
+        openRepos={repos}
+        activePath="/repos/gadget"
+        busyPaths={noneBusy}
+        workspaceNames={{}}
+        onSwitchTo={vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onAddTab={vi.fn()}
+        changedPaths={new Set(["/repos/widget"])}
+      />,
+    );
+    const dirty = screen.getByRole("tab", { name: "widget" });
+    expect(dirty).toHaveAccessibleDescription("Uncommitted changes");
+    expect(dirty.closest(`.${styles.tab}`)?.querySelector(`.${styles.changeMarker}`)).not.toBeNull();
+    const clean = screen.getByRole("tab", { name: "gadget" });
+    expect(clean).toHaveAccessibleDescription("/repos/gadget");
+    expect(clean.closest(`.${styles.tab}`)?.querySelector(`.${styles.changeMarker}`)).toBeNull();
+  });
+});
+
 describe("RepoTabs grouping", () => {
   const grouped = [
-    { path: "/repos/widget", displayName: "widget", workspaceId: "ws-1" },
-    { path: "/repos/gadget", displayName: "gadget", workspaceId: "ws-1" },
-    { path: "/repos/solo", displayName: "solo", workspaceId: null },
+    { path: "/repos/widget", displayName: "widget", alias: null, workspaceId: "ws-1" },
+    { path: "/repos/gadget", displayName: "gadget", alias: null, workspaceId: "ws-1" },
+    { path: "/repos/solo", displayName: "solo", alias: null, workspaceId: null },
   ];
 
   it("wraps a contiguous run of same-workspace tabs in a chip labeled with the workspace name", () => {
@@ -217,7 +255,7 @@ describe("RepoTabs grouping", () => {
   it("a tab whose workspaceId has no matching name in workspaceNames renders standalone", () => {
     render(
       <RepoTabs
-        openRepos={[{ path: "/repos/orphan", displayName: "orphan", workspaceId: "deleted-ws" }]}
+        openRepos={[{ path: "/repos/orphan", displayName: "orphan", alias: null, workspaceId: "deleted-ws" }]}
         activePath="/repos/orphan"
         busyPaths={noneBusy}
         workspaceNames={{}}
@@ -275,5 +313,210 @@ describe("RepoTabs tab menu", () => {
     fireEvent.keyDown(screen.getByRole("tab", { name: "widget" }), { key: "F10", shiftKey: true });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(screen.getByRole("tab", { name: "widget" })).not.toHaveAttribute("aria-haspopup");
+  });
+});
+
+describe("RepoTabs header height (#606)", () => {
+  it("leaves every box around a grouped tab free to grow to the group label plus its tabs", () => {
+    render(
+      <RepoTabs
+        openRepos={[
+          { path: "/repos/widget", displayName: "widget", alias: null, workspaceId: "ws-1" },
+          { path: "/repos/gadget", displayName: "gadget", alias: null, workspaceId: "ws-1" },
+        ]}
+        activePath="/repos/widget"
+        busyPaths={noneBusy}
+        workspaceNames={{ "ws-1": "Services" }}
+        onSwitchTo={vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onAddTab={vi.fn()}
+      />,
+    );
+
+    // jsdom can't lay out, so check the rules behind each ancestor of the grouped tab instead:
+    // the group stacks its label row above its tabs, and none of them may cap that height.
+    const tab = screen.getByRole("tab", { name: "widget" });
+    for (const name of ["tab", "groupTabs", "group", "tabs", "strip"] as const) {
+      expect(tab.closest(`.${styles[name]}`)).not.toBeNull();
+      const rules = declarationsOf(repoTabsCss, name);
+      expect(rules.length).toBeGreaterThan(0);
+      expect({ name, fixed: fixesHeight(rules) }).toEqual({ name, fixed: false });
+    }
+    expect(screen.getByText("Services").closest(`.${styles.groupHeader}`)).not.toBeNull();
+  });
+
+  it("gives the app header row a minimum height, not a fixed one", () => {
+    const headerRow = declarationsOf(appCss, "headerRow");
+    expect(headerRow).toHaveLength(1);
+    expect(fixesHeight(headerRow)).toBe(false);
+    expect(headerRow[0]).toMatch(/min-height\s*:/);
+  });
+});
+
+describe("RepoTabs alias (#625)", () => {
+  it("shows the alias as the tab's name and keeps the full path as its title", () => {
+    render(
+      <RepoTabs
+        openRepos={[
+          { path: "/work/one/app", displayName: "app (main)", alias: "app (main)", workspaceId: null },
+          { path: "/work/two/app", displayName: "app", alias: null, workspaceId: null },
+        ]}
+        activePath="/work/one/app"
+        busyPaths={noneBusy}
+        workspaceNames={{}}
+        onSwitchTo={vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onAddTab={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "app (main)" })).toHaveAttribute("title", "/work/one/app");
+    expect(screen.getByRole("tab", { name: "app" })).toHaveAttribute("title", "/work/two/app");
+  });
+
+  it("F2 on a focused tab asks to rename that tab", () => {
+    const onRenameTab = vi.fn();
+    render(
+      <RepoTabs
+        openRepos={repos}
+        activePath="/repos/gadget"
+        busyPaths={noneBusy}
+        workspaceNames={{}}
+        onSwitchTo={vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onAddTab={vi.fn()}
+        onRenameTab={onRenameTab}
+      />,
+    );
+    const tab = screen.getByRole("tab", { name: "widget" });
+    expect(tab).toHaveAttribute("aria-keyshortcuts", "Delete F2");
+    fireEvent.keyDown(tab, { key: "F2" });
+    expect(onRenameTab).toHaveBeenCalledWith("/repos/widget");
+  });
+});
+
+describe("RepoTabs tab list (#625)", () => {
+  const many = [
+    { path: "/work/api", displayName: "api", alias: null, workspaceId: "ws-1" },
+    { path: "/work/web", displayName: "storefront", alias: "storefront", workspaceId: "ws-1" },
+    { path: "/other/tools", displayName: "tools", alias: null, workspaceId: null },
+  ];
+
+  function renderMany(overrides: { onSwitchTo?: (path: string) => void; changedPaths?: ReadonlySet<string> } = {}) {
+    render(
+      <RepoTabs
+        openRepos={many}
+        activePath="/work/api"
+        busyPaths={noneBusy}
+        workspaceNames={{ "ws-1": "Shop" }}
+        onSwitchTo={overrides.onSwitchTo ?? vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onAddTab={vi.fn()}
+        changedPaths={overrides.changedPaths}
+      />,
+    );
+  }
+
+  const optionPaths = () => screen.queryAllByRole("option").map((option) => option.getAttribute("title"));
+
+  it("opens a list of every open tab, grouped by workspace, with the filter focused", () => {
+    renderMany({ changedPaths: new Set(["/other/tools"]) });
+    const button = screen.getByRole("button", { name: "List open tabs" });
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(button);
+
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    const filter = screen.getByRole("combobox", { name: "Filter open tabs" });
+    expect(filter).toHaveFocus();
+    const shop = screen.getByRole("group", { name: "Shop" });
+    expect(within(shop).getAllByRole("option").map((option) => option.getAttribute("title"))).toEqual(["/work/api", "/work/web"]);
+    const loose = screen.getByRole("group", { name: "Not in a workspace" });
+    const tools = within(loose).getByRole("option");
+    expect(tools).toHaveTextContent("tools, uncommitted changes");
+    expect(tools).toHaveTextContent("/other/tools");
+    // The current tab is highlighted first and marked.
+    const api = within(shop).getAllByRole("option")[0];
+    expect(api).toHaveAttribute("aria-selected", "true");
+    expect(api).toHaveAttribute("aria-current", "page");
+    expect(filter).toHaveAttribute("aria-activedescendant", api.id);
+  });
+
+  it("filters by name, folder name and path", () => {
+    renderMany();
+    fireEvent.click(screen.getByRole("button", { name: "List open tabs" }));
+    const filter = screen.getByRole("combobox", { name: "Filter open tabs" });
+
+    fireEvent.change(filter, { target: { value: "STORE" } });
+    expect(optionPaths()).toEqual(["/work/web"]);
+    // The renamed tab's folder name still finds it.
+    fireEvent.change(filter, { target: { value: "web" } });
+    expect(optionPaths()).toEqual(["/work/web"]);
+    fireEvent.change(filter, { target: { value: "/other" } });
+    expect(optionPaths()).toEqual(["/other/tools"]);
+    fireEvent.change(filter, { target: { value: "nothing like it" } });
+    expect(optionPaths()).toEqual([]);
+    expect(screen.getByText("No tab matches")).toBeInTheDocument();
+  });
+
+  it("Enter switches to the highlighted tab, moved with the arrow keys, and closes the list", () => {
+    const onSwitchTo = vi.fn();
+    renderMany({ onSwitchTo });
+    fireEvent.click(screen.getByRole("button", { name: "List open tabs" }));
+    const filter = screen.getByRole("combobox", { name: "Filter open tabs" });
+
+    fireEvent.keyDown(filter, { key: "ArrowDown" });
+    fireEvent.keyDown(filter, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { selected: true })).toHaveAttribute("title", "/other/tools");
+    fireEvent.keyDown(filter, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { selected: true })).toHaveAttribute("title", "/work/api");
+    fireEvent.keyDown(filter, { key: "ArrowUp" });
+    fireEvent.keyDown(filter, { key: "Enter" });
+
+    expect(onSwitchTo).toHaveBeenCalledWith("/other/tools");
+    expect(screen.queryByRole("combobox", { name: "Filter open tabs" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "tools" })).toHaveFocus();
+  });
+
+  it("Enter takes the first match of the filter", () => {
+    const onSwitchTo = vi.fn();
+    renderMany({ onSwitchTo });
+    fireEvent.click(screen.getByRole("button", { name: "List open tabs" }));
+    const filter = screen.getByRole("combobox", { name: "Filter open tabs" });
+    fireEvent.change(filter, { target: { value: "storefront" } });
+    fireEvent.keyDown(filter, { key: "Enter" });
+    expect(onSwitchTo).toHaveBeenCalledWith("/work/web");
+  });
+
+  it("a click on a tab in the list switches to it", () => {
+    const onSwitchTo = vi.fn();
+    renderMany({ onSwitchTo });
+    fireEvent.click(screen.getByRole("button", { name: "List open tabs" }));
+    fireEvent.click(screen.getByRole("option", { name: /storefront/ }));
+    expect(onSwitchTo).toHaveBeenCalledWith("/work/web");
+    expect(screen.queryByRole("listbox", { name: "Open tabs" })).not.toBeInTheDocument();
+  });
+
+  it("Escape, a press outside and the button itself close the list without switching", () => {
+    const onSwitchTo = vi.fn();
+    renderMany({ onSwitchTo });
+    const button = screen.getByRole("button", { name: "List open tabs" });
+
+    fireEvent.click(button);
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Filter open tabs" }), { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Open tabs" })).not.toBeInTheDocument();
+    expect(button).toHaveFocus();
+
+    fireEvent.click(button);
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("listbox", { name: "Open tabs" })).not.toBeInTheDocument();
+
+    fireEvent.click(button);
+    fireEvent.mouseDown(button);
+    fireEvent.click(button);
+    expect(screen.queryByRole("listbox", { name: "Open tabs" })).not.toBeInTheDocument();
+    expect(onSwitchTo).not.toHaveBeenCalled();
   });
 });

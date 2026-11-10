@@ -1,15 +1,20 @@
 import { useEffect, useState } from "react";
+import { navigationKeyDirection } from "../lib/navigationKeys";
 import type { AppState } from "./useAppState";
 
 /**
  * `RepoWorkspace`'s window-level keyboard shortcuts: the command palette (Ctrl/Cmd+K), the
- * shortcut sheet (?), Undo/Redo and closing the tab. Owns the palette's and the sheet's open
- * state.
+ * shortcut sheet (?), Undo/Redo, closing and reopening the tab, and Back/Forward through the
+ * visited commits (keys and the mouse's back/forward buttons). Owns the palette's and the
+ * sheet's open state.
  */
 export function useWorkspaceShortcuts({
   active,
   repositoryOperationDisabled,
   onCloseRepoTab,
+  onReopenClosedTab,
+  onNavigateBack,
+  onNavigateForward,
   repoPath,
   handleUndo,
   handleRedo,
@@ -19,6 +24,11 @@ export function useWorkspaceShortcuts({
   active: boolean;
   repositoryOperationDisabled: boolean;
   onCloseRepoTab: (path: string) => void;
+  /** Ctrl/Cmd+Shift+T; absent when no tab was closed. */
+  onReopenClosedTab?: () => void;
+  /** Back/Forward through the visited commits (#618); no-ops at the ends. */
+  onNavigateBack?: () => void;
+  onNavigateForward?: () => void;
   repoPath: string;
   handleUndo: () => void;
   handleRedo: () => void;
@@ -72,10 +82,43 @@ export function useWorkspaceShortcuts({
         event.preventDefault();
         onCloseRepoTab(repoPath);
       }
+      // Reopen closed tab (#613), best-effort like Ctrl/Cmd+W: a host may claim the key first;
+      // the palette and the tab menu offer the same command.
+      if (event.key.toLowerCase() === "t" && (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey) {
+        if (onReopenClosedTab === undefined) return;
+        event.preventDefault();
+        onReopenClosedTab();
+      }
+      // Back/Forward (#618): Alt+Left/Right, Cmd+[ / Cmd+] on macOS. Best-effort too: a host may
+      // claim the keys first (a webview may hand Alt+Left to the workbench's own Back); the
+      // toolbar buttons and the palette offer the same. Not in text fields, and not where a
+      // control already used the arrow (a tab strip, a divider).
+      const direction = navigationKeyDirection(event);
+      if (direction !== null) {
+        const target = event.target as HTMLElement | null;
+        const tag = target?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+        if (event.defaultPrevented || (target instanceof Element && target.getAttribute("role") === "separator")) return;
+        event.preventDefault();
+        if (direction === -1) onNavigateBack?.();
+        else onNavigateForward?.();
+      }
+    }
+    // The mouse's back (3) and forward (4) buttons; preventing the default keeps a webview from
+    // navigating the page itself.
+    function handleMouseUp(event: MouseEvent) {
+      if (!active || (event.button !== 3 && event.button !== 4)) return;
+      event.preventDefault();
+      if (event.button === 3) onNavigateBack?.();
+      else onNavigateForward?.();
     }
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [active, repositoryOperationDisabled, onCloseRepoTab, repoPath, handleUndo, handleRedo, pending, transfer]);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [active, repositoryOperationDisabled, onCloseRepoTab, onReopenClosedTab, onNavigateBack, onNavigateForward, repoPath, handleUndo, handleRedo, pending, transfer]);
 
   return { paletteOpen, setPaletteOpen, shortcutsOpen, setShortcutsOpen };
 }

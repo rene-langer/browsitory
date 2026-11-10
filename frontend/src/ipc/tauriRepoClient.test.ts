@@ -359,12 +359,22 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("restore_file_version", { repoPath: "/r", commitId: "c", path: "a.txt" });
     await tauriRepoClient.listRecentAuthors("/r");
     expect(invoke).toHaveBeenLastCalledWith("list_recent_authors", { repoPath: "/r" });
+    await tauriRepoClient.listRepoAliases();
+    expect(invoke).toHaveBeenLastCalledWith("list_repo_aliases", undefined);
+    await tauriRepoClient.setRepoAlias("/r", null);
+    expect(invoke).toHaveBeenLastCalledWith("set_repo_alias", { repoPath: "/r", alias: null });
     await tauriRepoClient.getCommitMessageSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_commit_message_settings", undefined);
     await tauriRepoClient.getFetchSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_fetch_settings", undefined);
     await tauriRepoClient.setFetchSettings({ autoFetchMinutes: 30 });
     expect(invoke).toHaveBeenLastCalledWith("set_fetch_settings", { settings: { autoFetchMinutes: 30 } });
+    await tauriRepoClient.getAppearanceSettings();
+    expect(invoke).toHaveBeenLastCalledWith("get_appearance_settings", undefined);
+    await tauriRepoClient.setAppearanceSettings({ codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2 });
+    expect(invoke).toHaveBeenLastCalledWith("set_appearance_settings", {
+      settings: { codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2 },
+    });
     await tauriRepoClient.getUpdateSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_update_settings", undefined);
     await tauriRepoClient.setUpdateSettings({ checkAutomatically: false });
@@ -644,9 +654,13 @@ describe("tauriRepoClient diff pane commands", () => {
     expect(invoke).toHaveBeenLastCalledWith("discard_all_unstaged", { repoPath: "/repo", paths: ["a.txt", "nested/"] });
     await tauriRepoClient.ignorePath("/repo", "*.log");
     expect(invoke).toHaveBeenLastCalledWith("ignore_path", { repoPath: "/repo", pattern: "*.log" });
+    await tauriRepoClient.getRootFiles("/repo");
+    expect(invoke).toHaveBeenLastCalledWith("get_root_files", { repoPath: "/repo" });
+    await tauriRepoClient.createRootFile("/repo", ".gitignore");
+    expect(invoke).toHaveBeenLastCalledWith("create_root_file", { repoPath: "/repo", name: ".gitignore" });
     await tauriRepoClient.getDiffSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_diff_settings", undefined);
-    const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Minimal" as const };
+    const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Minimal" as const, showWhitespace: false, expandUntracked: true };
     await tauriRepoClient.setDiffSettings(settings);
     expect(invoke).toHaveBeenLastCalledWith("set_diff_settings", { settings });
   });
@@ -660,25 +674,23 @@ describe("tauriRepoClient commit search", () => {
 
   it("invokes get_commit_graph with the local and the remote selection", async () => {
     vi.mocked(invoke).mockResolvedValueOnce([]);
-    await tauriRepoClient.getCommitGraph("/repo", 50, [], ["origin/feature"]);
+    await tauriRepoClient.getCommitGraph("/repo", 50, { local: [], remote: ["origin/feature"] });
     expect(invoke).toHaveBeenLastCalledWith("get_commit_graph", {
       repoPath: "/repo",
       limit: 50,
-      selectedBranches: [],
-      remoteBranches: ["origin/feature"],
+      selection: { local: [], remote: ["origin/feature"] },
     });
   });
 
   it("invokes search_commits without logging its errors, and cancel_search", async () => {
     vi.mocked(invoke).mockRejectedValueOnce({ kind: "Other", message: "Search cancelled." });
-    await expect(tauriRepoClient.searchCommits("/repo", "author:ada", null, ["origin/x"], "100:abc")).rejects.toEqual(
+    await expect(tauriRepoClient.searchCommits("/repo", "author:ada", { local: null, remote: ["origin/x"] }, "100:abc")).rejects.toEqual(
       new RepoError("Other", "Search cancelled."),
     );
     expect(invoke).toHaveBeenLastCalledWith("search_commits", {
       repoPath: "/repo",
       query: "author:ada",
-      refs: null,
-      remoteBranches: ["origin/x"],
+      selection: { local: null, remote: ["origin/x"] },
       cursor: "100:abc",
     });
     expect(logError).not.toHaveBeenCalled();
@@ -723,12 +735,11 @@ describe("tauriRepoClient commit search", () => {
   it("wires locateCommit (#441)", async () => {
     const location = { commitId: "c", position: null, branches: ["feature"], remoteBranches: [] };
     vi.mocked(invoke).mockResolvedValue(location);
-    await expect(tauriRepoClient.locateCommit("/repo", "abc1234", ["main"], ["origin/main"])).resolves.toEqual(location);
+    await expect(tauriRepoClient.locateCommit("/repo", "abc1234", { local: ["main"], remote: ["origin/main"] })).resolves.toEqual(location);
     expect(invoke).toHaveBeenLastCalledWith("locate_commit", {
       repoPath: "/repo",
       revision: "abc1234",
-      selectedBranches: ["main"],
-      remoteBranches: ["origin/main"],
+      selection: { local: ["main"], remote: ["origin/main"] },
     });
   });
 });

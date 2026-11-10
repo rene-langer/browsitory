@@ -49,6 +49,10 @@ export const WORD_WRAP_VALUES: readonly WordWrap[] = ["Auto", "On", "Off"];
 export interface DiffSettings extends DiffOptions {
   syntaxHighlight: boolean;
   wordWrap: WordWrap;
+  /** Faint markers for spaces, tabs and carriage returns in diff lines (#616); display only. */
+  showWhitespace: boolean;
+  /** Untracked files start expanded in the uncommitted changes (#623); off, they start collapsed. */
+  expandUntracked: boolean;
 }
 
 // The backend's limits and defaults (#497), generated from the Rust constants:
@@ -57,13 +61,16 @@ export interface DiffSettings extends DiffOptions {
 // the file in one hunk. Any other value above `MAX_CONTEXT_LINES` is clamped to it. Hunk and line
 // actions on such a diff pass the same value, as they do for any other context.
 export {
+  CODE_FONT_SIZES,
   COMMIT_MESSAGE_COLUMNS,
+  DEFAULT_APPEARANCE_SETTINGS,
   DEFAULT_COMMIT_MESSAGE_SETTINGS,
   DEFAULT_DIFF_SETTINGS,
   DEFAULT_FETCH_SETTINGS,
   DEFAULT_UPDATE_SETTINGS,
   MAX_CONTEXT_LINES,
   SEARCH_KEYS,
+  TAB_SIZES,
   WHOLE_FILE_CONTEXT_LINES,
 } from "./generated/wire-constants";
 export const DEFAULT_DIFF_OPTIONS: DiffOptions = {
@@ -84,6 +91,22 @@ export interface CommitMessageSettings {
 /** Fetch settings (`[fetch]`): the app-wide "Fetch automatically" interval, 0 for off. */
 export interface FetchSettings {
   autoFetchMinutes: number;
+}
+
+/** The interface text scale (`--text-*`, see `styles/tokens.css`). */
+export type UiSize = "Small" | "Normal" | "Large";
+export const UI_SIZE_VALUES: readonly UiSize[] = ["Small", "Normal", "Large"];
+
+/**
+ * Appearance settings (`[appearance]`, #615): `codeFont` and `codeFontSize` are `null` for the
+ * built-in look; sizes are clamped to `CODE_FONT_SIZES` and `TAB_SIZES`. Applied by
+ * `lib/appearance.ts`.
+ */
+export interface AppearanceSettings {
+  codeFont: string | null;
+  codeFontSize: number | null;
+  uiSize: UiSize;
+  tabSize: number;
 }
 
 /**
@@ -582,6 +605,11 @@ export interface GraphCommit {
   remoteBranchRefs: string[];
   /** Tag names pointing (peeled) at this commit, sorted. Always sent by the backend. */
   tags?: string[];
+  /**
+   * Only on a merge row of a graph that follows first parents ("Collapse merges" or one selected
+   * branch, #617): how many commits its other parents brought in, which `getMergedCommits` lists.
+   */
+  mergedCount?: number;
 }
 
 /** One commit in a file's history. `path` is the file's name in that commit; `oldPath` is set
@@ -615,6 +643,30 @@ export interface ChangedFile {
   oldPath: string | null;
 }
 
+/**
+ * The branches the commit graph walks, passed as one `selection` to `getCommitGraph`,
+ * `locateCommit` and `searchCommits` (#498). `local`: `null` = every local branch, `[]` = none.
+ * `remote`: `<remote>/<branch>` names walked on top; `[]` = none (the default graph).
+ */
+export interface GraphSelection {
+  local: string[] | null;
+  remote: string[];
+  /**
+   * "Collapse merges" (#617): the graph and `locateCommit` follow first parents from every
+   * selected tip. `searchCommits` ignores it. Absent is `false`.
+   */
+  firstParent?: boolean;
+}
+
+/** The collapsed merge that holds a "Go to" target (#617). */
+export interface CollapsedMerge {
+  mergeId: string;
+  /** The merge's row in the graph, as `CommitLocation.position`. */
+  mergePosition: number;
+  /** The target's index in `getMergedCommits` of that merge: a limit above it lists it. */
+  offset: number;
+}
+
 /** Where a revision's commit sits in the graph ("Go to commit", #441). */
 export interface CommitLocation {
   commitId: string;
@@ -626,6 +678,38 @@ export interface CommitLocation {
   branches: string[];
   /** Like `branches`, remote-tracking branches as `<remote>/<branch>`. */
   remoteBranches: string[];
+  /** Only when `position` is `null` in a graph that follows first parents: the merge row that
+   *  holds the commit, which expanding shows it (#617). */
+  merge?: CollapsedMerge;
+}
+
+/** One file's line counts in a commit (#620). */
+export interface FileStats {
+  path: string;
+  insertions: number;
+  deletions: number;
+  /** Binary content: counted as a changed file, with no lines. */
+  binary: boolean;
+}
+
+/**
+ * A commit's line counts against its first parent (a root commit against the empty tree), with
+ * the diff the commit's file list uses: no rename detection, so a rename is a removed and an
+ * added file (#620).
+ */
+export interface CommitStats {
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+  /** Each changed file, in diff order; empty unless `withFiles` asked for them. */
+  files: FileStats[];
+}
+
+/** One answered commit of `getCommitStats`. */
+export interface CommitStatsEntry {
+  commitId: string;
+  /** `null`: the commit is over the size or time cap (or couldn't be read); it gets no numbers. */
+  stats: CommitStats | null;
 }
 
 /** Resolved ends of a branch compare: the merge base with HEAD, and the branch tip. */
@@ -856,12 +940,22 @@ export interface OpenRepoEntry {
   workspaceId: string | null;
 }
 
+/** A repository's custom tab name (#625), kept by path in the app config. */
+export interface RepoAlias {
+  repoPath: string;
+  alias: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
   rootPath: string;
   memberPaths: string[];
 }
+
+/** The work tree root files the tab menu and palette open in the editor (#624), in menu order. */
+export const ROOT_FILE_NAMES = [".gitignore", ".gitattributes"] as const;
+export type RootFileName = (typeof ROOT_FILE_NAMES)[number];
 
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
@@ -873,6 +967,10 @@ export interface RepoClient {
   closeRepo(repoPath: string): Promise<void>;
   listOpenRepos(): Promise<{ entries: OpenRepoEntry[]; activePath: string | null }>;
   persistOpenRepos(entries: OpenRepoEntry[], activePath: string | null): Promise<void>;
+  /** Every stored tab name (#625), also of repositories that aren't open. */
+  listRepoAliases(): Promise<RepoAlias[]>;
+  /** Stores `alias` (trimmed) as the tab name of `repoPath`; `null` or a blank one removes it. */
+  setRepoAlias(repoPath: string, alias: string | null): Promise<void>;
   scanReposInRoot(root: string): Promise<string[]>;
   /** False in the VSCode extension, where VSCode's own Git: Clone / Initialize cover this. */
   readonly supportsCloneAndInit: boolean;
@@ -891,33 +989,31 @@ export interface RepoClient {
   deleteWorkspace(id: string): Promise<void>;
   getStatus(repoPath: string): Promise<StatusEntry[]>;
   /**
-   * The commits of `selectedBranches` (`null` = every local branch, `[]` = none) plus those of
-   * `remoteBranches` (`<remote>/<branch>`; `[]` = none, the default graph). Exactly one branch
-   * in total walks first parents only. Missing branches are skipped.
+   * The commits of `selection.local` plus those of `selection.remote`. Exactly one branch in
+   * total, or `selection.firstParent`, walks first parents only; its merge rows then carry
+   * `mergedCount`. Missing branches are skipped.
    */
-  getCommitGraph(
-    repoPath: string,
-    limit: number,
-    selectedBranches: string[] | null,
-    remoteBranches: string[],
-  ): Promise<GraphCommit[]>;
+  getCommitGraph(repoPath: string, limit: number, selection: GraphSelection): Promise<GraphCommit[]>;
+  /**
+   * The commits merge `mergeId` brought in (reachable from its other parents, not from its first
+   * parent), children first, at most `limit` (#617): what expanding a collapsed merge shows.
+   */
+  getMergedCommits(repoPath: string, mergeId: string, limit: number): Promise<GraphCommit[]>;
+  /** Whether this repository's graph collapses merges (#617); `false` until set. */
+  getGraphCollapseMerges(repoPath: string): Promise<boolean>;
+  setGraphCollapseMerges(repoPath: string, collapse: boolean): Promise<void>;
   /**
    * Resolves `revision` (SHA or prefix, branch, tag, any git revision) and finds its commit in
    * the graph `getCommitGraph` returns for the same selection. `null` when it names no commit;
    * rejects for an ambiguous SHA prefix.
    */
-  locateCommit(
-    repoPath: string,
-    revision: string,
-    selectedBranches: string[] | null,
-    remoteBranches: string[],
-  ): Promise<CommitLocation | null>;
+  locateCommit(repoPath: string, revision: string, selection: GraphSelection): Promise<CommitLocation | null>;
   getGraphBranchSelection(repoPath: string): Promise<string[] | null>;
-  setGraphBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
+  setGraphBranchSelection(repoPath: string, local: string[]): Promise<void>;
   /** Forgets the saved selection: back to every local branch, also ones created later (#402). */
   clearGraphBranchSelection(repoPath: string): Promise<void>;
   getGraphRemoteBranchSelection(repoPath: string): Promise<string[] | null>;
-  setGraphRemoteBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
+  setGraphRemoteBranchSelection(repoPath: string, remote: string[]): Promise<void>;
   /** Forgets the saved remote selection: no remote commits, every remote badge (#402). */
   clearGraphRemoteBranchSelection(repoPath: string): Promise<void>;
   /** `oldPath` (with `staged`): a staged rename's old path, so only its edits show. */
@@ -938,24 +1034,26 @@ export interface RepoClient {
     limit: number,
   ): Promise<LineHistory>;
   /**
-   * One page of commits matching `query` (see the search syntax help). `refs` and
-   * `remoteBranches` mean what `getCommitGraph`'s `selectedBranches` and `remoteBranches` mean,
-   * so search walks the graph's commits; a `branch:` term overrides both. `cursor` is a
-   * previous page's `nextCursor`, or `null` for the
-   * first page. Rejects with the query error text, or "Search cancelled." when a newer search
+   * One page of commits matching `query` (see the search syntax help). `selection` is the one
+   * `getCommitGraph` takes, so search walks the graph's commits; a `branch:` term overrides it.
+   * `cursor` is a previous page's `nextCursor`, or `null` for the first page. Rejects with the query error text, or "Search cancelled." when a newer search
    * (or `cancelSearch`) superseded this one.
    */
   searchCommits(
     repoPath: string,
     query: string,
-    refs: string[] | null,
-    remoteBranches: string[],
+    selection: GraphSelection,
     cursor: string | null,
   ): Promise<SearchPage>;
   /** Stops the repo's in-flight search, if any. */
   cancelSearch(repoPath: string): Promise<void>;
   getCommitRenameDiff(repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
+  /**
+   * Line counts of `commitIds` (#620), in order. The backend stops starting commits after a short
+   * time budget, so the answer can leave out the commits at the end: ask for those again.
+   */
+  getCommitStats(repoPath: string, commitIds: string[], withFiles: boolean): Promise<CommitStatsEntry[]>;
   /** Files that differ between two commits' trees (`git diff from to`), renames detected. */
   getRangeFiles(repoPath: string, fromId: string, toId: string): Promise<ChangedFile[]>;
   /** One file's diff between two commits; pass `oldPath` from `getRangeFiles` for a rename. */
@@ -1123,6 +1221,8 @@ export interface RepoClient {
   setCommitMessageSettings(settings: CommitMessageSettings): Promise<void>;
   getFetchSettings(): Promise<FetchSettings>;
   setFetchSettings(settings: FetchSettings): Promise<void>;
+  getAppearanceSettings(): Promise<AppearanceSettings>;
+  setAppearanceSettings(settings: AppearanceSettings): Promise<void>;
   /** Only the desktop app uses these; the VS Code extension updates through its marketplace. */
   getUpdateSettings(): Promise<UpdateSettings>;
   setUpdateSettings(settings: UpdateSettings): Promise<void>;
@@ -1177,8 +1277,9 @@ export interface RepoClient {
   listPullRequests(repoPath: string, remoteName: string, account: string): Promise<PullRequestList>;
   createPullRequest(repoPath: string, remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<PullRequest>;
   // Opens `url` in the user's default external browser/handler rather than navigating this
-  // app's own window away from the app entirely (see `tauriRepoClient.ts` and
-  // `PullRequestPanel.tsx`, the only caller).
+  // app's own window away from the app entirely (see `tauriRepoClient.ts`). Callers: the pull
+  // request panel, the user guide command and commit message links (#612). Both transports
+  // refuse anything but an `http`/`https` URL.
   openExternalUrl(url: string): Promise<void>;
   // External tools. The five launch methods (`openInEditor` … `openMergeTool`) are answered by
   // the VSCode extension host itself (see `sidecarBridge.ts`'s `NATIVE_METHODS`); the desktop
@@ -1187,6 +1288,13 @@ export interface RepoClient {
   // `path === null` reveals the work tree root.
   revealInFileManager(repoPath: string, path: string | null): Promise<void>;
   openTerminal(repoPath: string): Promise<void>;
+  // Which of `.gitignore` and `.gitattributes` exist at the work tree root, in that order;
+  // `null` for a bare repository (#624). A symbolic link counts as existing.
+  getRootFiles(repoPath: string): Promise<RootFileName[] | null>;
+  // Creates a missing `.gitignore` or `.gitattributes` at the work tree root, empty, so
+  // `openInEditor` can open it; an existing file is left as it is. No other name or path, and
+  // never through a symbolic link (#624).
+  createRootFile(repoPath: string, name: RootFileName): Promise<void>;
   openDiffTool(repoPath: string, path: string, source: DiffSource): Promise<void>;
   // Resolves when the tool exits on desktop, and at once with "HandedOff" in VSCode.
   openMergeTool(repoPath: string, path: string): Promise<MergeToolOutcome>;

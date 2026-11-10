@@ -197,6 +197,25 @@ pub struct OpenRepoEntryInput {
     pub workspace_id: Option<String>,
 }
 
+/// A repository's custom tab name (#625), from `config::RepoAlias`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "RepoAlias"))]
+#[serde(rename_all = "camelCase")]
+pub struct RepoAliasDto {
+    pub repo_path: String,
+    pub alias: String,
+}
+
+impl From<config::RepoAlias> for RepoAliasDto {
+    fn from(alias: config::RepoAlias) -> Self {
+        Self {
+            repo_path: alias.repo_path.to_string_lossy().into_owned(),
+            alias: alias.alias,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "SubmoduleInfo"))]
@@ -461,6 +480,11 @@ pub struct GraphCommitDto {
     pub branch_refs: Vec<String>,
     pub remote_branch_refs: Vec<String>,
     pub tags: Vec<String>,
+    /// Only on a merge row of a first-parent graph (#617): the commits its other parents brought
+    /// in, which `getMergedCommits` lists. Left out everywhere else.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub merged_count: Option<usize>,
 }
 
 impl From<git_core::graph::GraphCommit> for GraphCommitDto {
@@ -476,6 +500,7 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
             branch_refs: c.branch_refs,
             remote_branch_refs: c.remote_branch_refs,
             tags: c.tags,
+            merged_count: c.merged_count,
         }
     }
 }
@@ -605,6 +630,33 @@ impl From<git_core::diff::CompareRange> for CompareRangeDto {
     }
 }
 
+/// The branches the commit graph walks, passed as one `selection` argument to `getCommitGraph`,
+/// `locateCommit` and `searchCommits` (#498): see `git_core::graph::GraphSelection`.
+#[derive(Deserialize, Clone)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "GraphSelection"))]
+pub struct GraphSelectionDto {
+    /// Local branch names: `null` walks every local branch, `[]` none of them.
+    pub local: Option<Vec<String>>,
+    /// Remote-tracking branches as `<remote>/<branch>`; required, `[]` walks no remote branch.
+    pub remote: Vec<String>,
+    /// "Collapse merges" (#617): the graph and `locateCommit` follow first parents from every
+    /// selected tip; `searchCommits` ignores it. Absent is `false`.
+    #[serde(default, rename = "firstParent")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub first_parent: Option<bool>,
+}
+
+impl From<GraphSelectionDto> for git_core::graph::GraphSelection {
+    fn from(dto: GraphSelectionDto) -> Self {
+        git_core::graph::GraphSelection {
+            local: dto.local,
+            remote: dto.remote,
+            first_parent: dto.first_parent.unwrap_or(false),
+        }
+    }
+}
+
 /// "Go to commit" (#441): see `git_core::locate::CommitLocation`.
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
@@ -615,6 +667,10 @@ pub struct CommitLocationDto {
     pub position: Option<usize>,
     pub branches: Vec<String>,
     pub remote_branches: Vec<String>,
+    /// The collapsed merge that holds the commit (#617); left out when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub merge: Option<CollapsedMergeDto>,
 }
 
 impl From<git_core::locate::CommitLocation> for CommitLocationDto {
@@ -624,6 +680,95 @@ impl From<git_core::locate::CommitLocation> for CommitLocationDto {
             position: l.position,
             branches: l.branches,
             remote_branches: l.remote_branches,
+            merge: l.merge.map(CollapsedMergeDto::from),
+        }
+    }
+}
+
+/// See `git_core::locate::CollapsedMerge` (#617).
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CollapsedMerge"))]
+#[serde(rename_all = "camelCase")]
+pub struct CollapsedMergeDto {
+    pub merge_id: String,
+    pub merge_position: usize,
+    pub offset: usize,
+}
+
+impl From<git_core::locate::CollapsedMerge> for CollapsedMergeDto {
+    fn from(m: git_core::locate::CollapsedMerge) -> Self {
+        CollapsedMergeDto {
+            merge_id: m.merge_id,
+            merge_position: m.merge_position,
+            offset: m.offset,
+        }
+    }
+}
+
+/// One file's line counts in a commit (#620): see `git_core::commit_stats::FileStats`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "FileStats"))]
+#[serde(rename_all = "camelCase")]
+pub struct FileStatsDto {
+    pub path: String,
+    pub insertions: usize,
+    pub deletions: usize,
+    pub binary: bool,
+}
+
+impl From<git_core::commit_stats::FileStats> for FileStatsDto {
+    fn from(f: git_core::commit_stats::FileStats) -> Self {
+        FileStatsDto {
+            path: f.path,
+            insertions: f.insertions,
+            deletions: f.deletions,
+            binary: f.binary,
+        }
+    }
+}
+
+/// A commit's line counts (#620): see `git_core::commit_stats::CommitStats`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitStats"))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitStatsDto {
+    pub files_changed: usize,
+    pub insertions: usize,
+    pub deletions: usize,
+    /// Empty unless `withFiles` asked for them.
+    pub files: Vec<FileStatsDto>,
+}
+
+impl From<git_core::commit_stats::CommitStats> for CommitStatsDto {
+    fn from(s: git_core::commit_stats::CommitStats) -> Self {
+        CommitStatsDto {
+            files_changed: s.files_changed,
+            insertions: s.insertions,
+            deletions: s.deletions,
+            files: s.files.into_iter().map(FileStatsDto::from).collect(),
+        }
+    }
+}
+
+/// One answered commit of `getCommitStats` (#620): `stats` is `null` for a commit over the cap
+/// or one that couldn't be read.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitStatsEntry"))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitStatsEntryDto {
+    pub commit_id: String,
+    pub stats: Option<CommitStatsDto>,
+}
+
+impl From<git_core::commit_stats::CommitStatsEntry> for CommitStatsEntryDto {
+    fn from(e: git_core::commit_stats::CommitStatsEntry) -> Self {
+        CommitStatsEntryDto {
+            commit_id: e.commit_id,
+            stats: e.stats.map(CommitStatsDto::from),
         }
     }
 }
@@ -2199,6 +2344,8 @@ pub struct DiffSettingsDto {
     pub syntax_highlight: bool,
     pub word_wrap: WordWrapDto,
     pub algorithm: DiffAlgorithmDto,
+    pub show_whitespace: bool,
+    pub expand_untracked: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2238,6 +2385,8 @@ impl From<config::DiffSettings> for DiffSettingsDto {
             syntax_highlight: s.syntax_highlight,
             word_wrap: s.word_wrap.into(),
             algorithm: s.algorithm.into(),
+            show_whitespace: s.show_whitespace,
+            expand_untracked: s.expand_untracked,
         }
     }
 }
@@ -2250,6 +2399,8 @@ impl From<DiffSettingsDto> for config::DiffSettings {
             syntax_highlight: d.syntax_highlight,
             word_wrap: d.word_wrap.into(),
             algorithm: d.algorithm.into(),
+            show_whitespace: d.show_whitespace,
+            expand_untracked: d.expand_untracked,
         }
     }
 }
@@ -2306,6 +2457,70 @@ impl From<FetchSettingsDto> for config::FetchSettings {
     fn from(d: FetchSettingsDto) -> Self {
         Self {
             auto_fetch_minutes: d.auto_fetch_minutes,
+        }
+    }
+}
+
+/// The `[appearance]` preferences (#615): `codeFont` and `codeFontSize` are `null` for the
+/// built-in look; `codeFontSize` and `tabSize` are clamped to `CODE_FONT_SIZES` and `TAB_SIZES`.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "AppearanceSettings"))]
+#[serde(rename_all = "camelCase")]
+pub struct AppearanceSettingsDto {
+    pub code_font: Option<String>,
+    pub code_font_size: Option<u32>,
+    pub ui_size: UiSizeDto,
+    pub tab_size: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UiSize"))]
+pub enum UiSizeDto {
+    Small,
+    Normal,
+    Large,
+}
+
+impl From<config::UiSize> for UiSizeDto {
+    fn from(s: config::UiSize) -> Self {
+        match s {
+            config::UiSize::Small => UiSizeDto::Small,
+            config::UiSize::Normal => UiSizeDto::Normal,
+            config::UiSize::Large => UiSizeDto::Large,
+        }
+    }
+}
+
+impl From<UiSizeDto> for config::UiSize {
+    fn from(s: UiSizeDto) -> Self {
+        match s {
+            UiSizeDto::Small => config::UiSize::Small,
+            UiSizeDto::Normal => config::UiSize::Normal,
+            UiSizeDto::Large => config::UiSize::Large,
+        }
+    }
+}
+
+impl From<config::AppearanceSettings> for AppearanceSettingsDto {
+    fn from(s: config::AppearanceSettings) -> Self {
+        Self {
+            code_font: s.code_font,
+            code_font_size: s.code_font_size,
+            ui_size: s.ui_size.into(),
+            tab_size: s.tab_size,
+        }
+    }
+}
+
+impl From<AppearanceSettingsDto> for config::AppearanceSettings {
+    fn from(d: AppearanceSettingsDto) -> Self {
+        Self {
+            code_font: d.code_font,
+            code_font_size: d.code_font_size,
+            ui_size: d.ui_size.into(),
+            tab_size: d.tab_size,
         }
     }
 }
@@ -2600,6 +2815,7 @@ mod ts_bindings {
             WorkspaceDto,
             OpenRepoEntryDto,
             OpenRepoEntryInput,
+            RepoAliasDto,
             SubmoduleInfoDto,
             ReflogEntryDto,
             RemoteInfoDto,
@@ -2617,6 +2833,10 @@ mod ts_bindings {
             ChangedFileDto,
             CompareRangeDto,
             CommitLocationDto,
+            CollapsedMergeDto,
+            FileStatsDto,
+            CommitStatsDto,
+            CommitStatsEntryDto,
             HeadInfoDto,
             TerminalRebaseDto,
             ConfirmedAbortDto,
@@ -2674,6 +2894,7 @@ mod ts_bindings {
             PullRequestListDto,
             CreatePullRequestDto,
             DiffOptionsDto,
+            GraphSelectionDto,
             DiffAlgorithmDto,
             CommitHunkDto,
             CommitChangeRequestDto,
@@ -2683,6 +2904,8 @@ mod ts_bindings {
             WordWrapDto,
             CommitMessageSettingsDto,
             FetchSettingsDto,
+            AppearanceSettingsDto,
+            UiSizeDto,
             UpdateSettingsDto,
         );
         test_support::assert_generated_file(
@@ -2703,10 +2926,12 @@ mod ts_bindings {
             serde_json::to_string(&value).unwrap()
         }
         let columns = config::COMMIT_MESSAGE_COLUMNS;
+        let font_sizes = config::CODE_FONT_SIZES;
+        let tab_sizes = config::TAB_SIZES;
         let lines = [
             "// Generated from the backend's limits and defaults (crates/repo-service/src/wire.rs).".to_string(),
             "// Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current".to_string(),
-            "import type { CommitMessageSettings, DiffSettings, FetchSettings, UpdateSettings } from \"./wire-dto\";".to_string(),
+            "import type { AppearanceSettings, CommitMessageSettings, DiffSettings, FetchSettings, UpdateSettings } from \"./wire-dto\";".to_string(),
             String::new(),
             "/** `git_core::diff::MAX_CONTEXT_LINES`: more context is clamped to it. */".to_string(),
             format!(
@@ -2740,6 +2965,25 @@ mod ts_bindings {
             format!(
                 "export const DEFAULT_FETCH_SETTINGS: FetchSettings = {};",
                 json(FetchSettingsDto::from(config::FetchSettings::default()))
+            ),
+            "/** `config::AppearanceSettings::default()`. */".to_string(),
+            format!(
+                "export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {};",
+                json(AppearanceSettingsDto::from(
+                    config::AppearanceSettings::default()
+                ))
+            ),
+            "/** `config::CODE_FONT_SIZES`: the range the code font size is clamped to, in px. */".to_string(),
+            format!(
+                "export const CODE_FONT_SIZES = {{ min: {}, max: {} }} as const;",
+                font_sizes.start(),
+                font_sizes.end()
+            ),
+            "/** `config::TAB_SIZES`: the range the tab size is clamped to, in columns. */".to_string(),
+            format!(
+                "export const TAB_SIZES = {{ min: {}, max: {} }} as const;",
+                tab_sizes.start(),
+                tab_sizes.end()
             ),
             "/** `config::UpdateSettings::default()`. */".to_string(),
             format!(

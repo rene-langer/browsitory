@@ -1,6 +1,8 @@
 //! "Go to commit" (#441): where a revision's commit sits in the graph, or why the graph does not
 //! show it.
 
+use std::collections::HashMap;
+
 use git2::{BranchType, ErrorCode, Oid, ReferenceType, Repository, Sort};
 use thiserror::Error;
 
@@ -27,6 +29,21 @@ pub struct CommitLocation {
     pub branches: Vec<String>,
     /// Like `branches`, the remote-tracking branches as `<remote>/<branch>`.
     pub remote_branches: Vec<String>,
+    /// Only when `position` is `None` and the graph follows first parents ("Collapse merges" or
+    /// one selected branch): the merge row that holds the commit, so expanding it shows it
+    /// (#617). `None` when no merge of the graph brought it in.
+    pub merge: Option<CollapsedMerge>,
+}
+
+/// Where a commit hidden in a collapsed merge sits (#617).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollapsedMerge {
+    pub merge_id: String,
+    /// The merge's row in the graph (as [`CommitLocation::position`]).
+    pub merge_position: usize,
+    /// The commit's index in [`crate::graph::merged_commits`] of that merge: expanding it with
+    /// a limit above `offset` lists the commit.
+    pub offset: usize,
 }
 
 /// Resolves `revision` (a SHA or SHA prefix, a branch or tag name, or any other revision git
@@ -51,11 +68,14 @@ pub fn locate_commit(
         revwalk.push(oid)?;
     }
     let mut position = None;
+    let mut rows = HashMap::new();
     for (index, oid) in revwalk.enumerate() {
-        if oid? == target {
+        let oid = oid?;
+        if oid == target {
             position = Some(index);
             break;
         }
+        rows.insert(oid, index);
     }
 
     let (branches, remote_branches) = if position.is_some() {
@@ -66,12 +86,73 @@ pub fn locate_commit(
             containing_branches(repo, BranchType::Remote, target)?,
         )
     };
+    let merge = if position.is_none() && selection.walks_first_parent() {
+        collapsed_merge(repo, target, &selection.start_oids(repo)?, &rows)?
+    } else {
+        None
+    };
     Ok(Some(CommitLocation {
         commit_id: target.to_string(),
         position,
         branches,
         remote_branches,
+        merge,
     }))
+}
+
+/// The merge row of a first-parent graph that brought `target` in, if any (#617). Along one
+/// tip's first-parent line the commits that reach `target` come first, then none do: the last
+/// one that does is a merge whose other parents hold it. Found by a binary search over the line,
+/// so a long history costs a few reachability checks, not one per merge.
+fn collapsed_merge(
+    repo: &Repository,
+    target: Oid,
+    tips: &[Oid],
+    rows: &HashMap<Oid, usize>,
+) -> Result<Option<CollapsedMerge>, git2::Error> {
+    let reaches = |oid: Oid| -> Result<bool, git2::Error> {
+        Ok(oid == target || repo.graph_descendant_of(oid, target)?)
+    };
+    for &tip in tips {
+        if !reaches(tip)? {
+            continue;
+        }
+        let mut line = vec![tip];
+        let mut commit = repo.find_commit(tip)?;
+        while let Ok(parent) = commit.parent(0) {
+            line.push(parent.id());
+            commit = parent;
+        }
+        // `line[low]` reaches the target, `line[high]` (past the end) does not.
+        let (mut low, mut high) = (0, line.len());
+        while high - low > 1 {
+            let middle = low + (high - low) / 2;
+            if reaches(line[middle])? {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        let merge = repo.find_commit(line[low])?;
+        let Some(&merge_position) = rows.get(&merge.id()) else {
+            continue;
+        };
+        if merge.parent_count() < 2 {
+            continue;
+        }
+        let mut walk = crate::graph::merged_walk(repo, &merge)?;
+        walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
+        for (offset, oid) in walk.enumerate() {
+            if oid? == target {
+                return Ok(Some(CollapsedMerge {
+                    merge_id: merge.id().to_string(),
+                    merge_position,
+                    offset,
+                }));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn resolve(repo: &Repository, revision: &str) -> Result<Option<Oid>, LocateError> {

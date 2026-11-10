@@ -62,6 +62,67 @@ describe("Browsitory commit graph", () => {
     expect(featureCommitEntryText).toContain("e2e-graph-feature");
   });
 
+  // #620: a commit's row shows the lines it added and removed; its details show the totals.
+  it("shows a commit's lines added and removed in its row and details", async () => {
+    fs.writeFileSync(path.join(E2E_REPO_PATH, "graph-fixture.txt"), "base\nmore\nmore\nmore\n");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, "graph-stats.txt"), "one\ntwo\n");
+    git(E2E_REPO_PATH, "add", "graph-fixture.txt", "graph-stats.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: commit graph line stats");
+    await browser.refresh();
+
+    const row = await $("li.commit-row*=e2e: commit graph line stats");
+    await row.waitForExist();
+    const badge = await row.$('[data-testid="line-stats"]');
+    await badge.waitForExist({ timeoutMsg: "the commit's row got no lines-changed badge" });
+    // `getText` reads what is shown; the screen-reader text is clipped away.
+    expect(await badge.getAttribute("title")).toBe("5 lines added, 0 removed");
+    expect(await badge.getText()).toContain("+5");
+
+    await browser.execute((el) => (el as HTMLElement).click(), row);
+    const details = await $('section[aria-label="Commit details"]');
+    await details.waitForExist();
+    await browser.waitUntil(async () => (await details.getText()).includes("2 files changed"), {
+      timeoutMsg: "the commit details show no totals",
+    });
+  });
+
+  // #617: with "Collapse merges" the graph follows first parents; a merge row expands what it
+  // brought in, and hides it again.
+  it("collapses a merge and expands it on demand", async () => {
+    const baseBranch = git(E2E_REPO_PATH, "rev-parse", "--abbrev-ref", "HEAD");
+    git(E2E_REPO_PATH, "checkout", "-b", "e2e-graph-merge-topic");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, "graph-merge-topic.txt"), "topic\n");
+    git(E2E_REPO_PATH, "add", "graph-merge-topic.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: commit graph merged topic");
+    git(E2E_REPO_PATH, "checkout", baseBranch);
+    git(E2E_REPO_PATH, "merge", "--no-ff", "-m", "e2e: commit graph merge topic", "e2e-graph-merge-topic");
+    // Gone once merged: otherwise the graph walks the topic branch's own line too.
+    git(E2E_REPO_PATH, "branch", "-d", "e2e-graph-merge-topic");
+    await browser.refresh();
+
+    const topicRow = "li.commit-row*=e2e: commit graph merged topic";
+    await $(topicRow).waitForExist({ timeoutMsg: "the merged commit is not in the full graph" });
+    const collapse = await $('button[aria-label="Collapse merges"]');
+    await collapse.waitForExist();
+    await browser.execute((el) => (el as HTMLElement).click(), collapse);
+    await $(topicRow).waitForExist({ reverse: true, timeoutMsg: "Collapse merges left the merged commit in" });
+
+    const mergeRow = await $("li.commit-row*=e2e: commit graph merge topic");
+    const expand = await mergeRow.$('button[aria-label="Show the 1 commit this merge brought in"]');
+    await expand.waitForExist({ timeoutMsg: "the merge row has no +N control" });
+    expect(await expand.getText()).toBe("+1");
+    await browser.execute((el) => (el as HTMLElement).click(), expand);
+    await $(topicRow).waitForExist({ timeoutMsg: "expanding the merge did not show its commit" });
+
+    const hide = await mergeRow.$('button[aria-label="Hide the 1 commit this merge brought in"]');
+    await browser.execute((el) => (el as HTMLElement).click(), hide);
+    await $(topicRow).waitForExist({ reverse: true, timeoutMsg: "collapsing the merge left its commit in" });
+
+    // Back to the full graph for the cases after this one.
+    await browser.execute((el) => (el as HTMLElement).click(), collapse);
+    await $(topicRow).waitForExist({ timeoutMsg: "turning Collapse merges off did not bring it back" });
+  });
+
   // #467: a commit on a detached HEAD that no branch contains used to be missing from the graph.
   it("shows a commit made on a detached HEAD, marked HEAD", async () => {
     git(E2E_REPO_PATH, "checkout", "--detach");

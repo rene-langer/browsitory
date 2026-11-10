@@ -256,17 +256,21 @@ fn diff_settings_dto_round_trips_camel_case() {
         syntax_highlight: true,
         word_wrap: config::WordWrap::Off,
         algorithm: config::DiffAlgorithm::Minimal,
+        show_whitespace: true,
+        expand_untracked: false,
     });
     let json = serde_json::to_value(&dto).unwrap();
     assert_eq!(
         json,
-        serde_json::json!({"ignoreWhitespace": false, "contextLines": 3, "syntaxHighlight": true, "wordWrap": "Off", "algorithm": "Minimal"})
+        serde_json::json!({"ignoreWhitespace": false, "contextLines": 3, "syntaxHighlight": true, "wordWrap": "Off", "algorithm": "Minimal", "showWhitespace": true, "expandUntracked": false})
     );
     let back: DiffSettingsDto = serde_json::from_value(json).unwrap();
     let back = config::DiffSettings::from(back);
     assert_eq!(back.context_lines, 3);
     assert_eq!(back.word_wrap, config::WordWrap::Off);
     assert_eq!(back.algorithm, config::DiffAlgorithm::Minimal);
+    assert!(back.show_whitespace);
+    assert!(!back.expand_untracked);
 }
 
 #[test]

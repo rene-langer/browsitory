@@ -4,6 +4,7 @@ import { Moon, Settings, Sparkles, Sun } from "lucide-react";
 import { ShortcutHint } from "./components/ShortcutHint";
 import { RepoPicker } from "./components/RepoPicker";
 import { RepoTabs } from "./components/RepoTabs";
+import { RenameTabDialog } from "./components/RenameTabDialog";
 import { ReleaseNotesModal } from "./components/ReleaseNotesModal";
 import { ThirdPartyLicencesDialog } from "./components/ThirdPartyLicencesDialog";
 import { ToastRegion } from "./components/primitives/ToastRegion";
@@ -12,10 +13,12 @@ import { InlineError } from "./components/primitives/InlineError";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { CloneDialog } from "./components/CloneDialog";
 import { Overlay } from "./components/primitives/Overlay";
-import type { RepoClient } from "./ipc/RepoClient";
+import type { RepoClient, RootFileName } from "./ipc/RepoClient";
+import { openRootFile, rootFileItems } from "./lib/rootFiles";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import type { AppCommands } from "./lib/commands";
 import {
+  AppearanceSection,
   CommitMessageSection,
   DiffSection,
   ExternalToolsSection,
@@ -26,6 +29,7 @@ import {
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
 import { repoNameOf } from "./lib/repoName";
 import { persistTheme } from "./lib/theme";
+import { AppearanceSettingsProvider } from "./state/AppearanceSettingsProvider";
 import { CommitMessageSettingsProvider } from "./state/CommitMessageSettingsProvider";
 import { FetchSettingsProvider } from "./state/FetchSettingsProvider";
 import { UpdateSettingsProvider } from "./state/UpdateSettingsProvider";
@@ -37,6 +41,7 @@ import {
 } from "./state/updateCheck";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useOpenRepos } from "./state/useOpenRepos";
+import { useTabChangeMarkers } from "./state/useTabChangeMarkers";
 import { useWorkspaces } from "./state/useWorkspaces";
 import styles from "./App.module.css";
 import { RepoWorkspace } from "./RepoWorkspace";
@@ -62,9 +67,11 @@ export default function App(props: {
     <DiffSettingsProvider client={props.client}>
       <CommitMessageSettingsProvider client={props.client}>
         <FetchSettingsProvider client={props.client}>
-          <UpdateSettingsProvider client={props.client} enabled={hasUpdater(props.updateBanner)}>
-            <AppContent {...props} />
-          </UpdateSettingsProvider>
+          <AppearanceSettingsProvider client={props.client}>
+            <UpdateSettingsProvider client={props.client} enabled={hasUpdater(props.updateBanner)}>
+              <AppContent {...props} />
+            </UpdateSettingsProvider>
+          </AppearanceSettingsProvider>
         </FetchSettingsProvider>
       </CommitMessageSettingsProvider>
     </DiffSettingsProvider>
@@ -90,6 +97,7 @@ function AppContent({
   // that workspace.
   const [tabToolError, setTabToolError] = useState<string | null>(null);
   const openRepos = useOpenRepos(client);
+  const tabChangeMarkers = useTabChangeMarkers(client, openRepos.openRepos, openRepos.activePath);
   const workspaces = useWorkspaces(client);
   const workspaceNames = useMemo(
     () => Object.fromEntries(workspaces.workspaces.map((workspace) => [workspace.id, workspace.name])),
@@ -100,6 +108,10 @@ function AppContent({
   const { getCommitDraft, onCommitDraftChange } = useCommitDrafts();
 
   const [pickingRepo, setPickingRepo] = useState(false);
+  // The tab whose "Rename tab…" dialog is open (#625).
+  const [renamingTab, setRenamingTab] = useState<string | null>(null);
+  const { activePath } = openRepos;
+  const renameActiveTab = useCallback(() => setRenamingTab(activePath), [activePath]);
 
   // `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos` calls, and
   // `useOpenRepos.openRepo` deliberately rejects rather than opening a tab for a repo that failed
@@ -196,12 +208,26 @@ function AppContent({
         setTabToolError(`Couldn't open the user guide: ${error instanceof Error ? error.message : String(error)}`),
       );
   }, [client]);
+  // "Reopen closed tab" (#613): a closed repository that no longer opens is skipped and reported
+  // in the open-error banner, like a failed restore.
+  const { reopenClosedRepo, canReopenClosedRepo } = openRepos;
+  const reopenClosedTab = useCallback(() => {
+    void reopenClosedRepo().then((failures) => {
+      if (failures.length === 0) return;
+      setOpenError({
+        message: failures.map((failure) => `Couldn't reopen ${repoNameOf(failure.path)}: ${failure.message}`).join("\n"),
+        path: "",
+      });
+    });
+  }, [reopenClosedRepo]);
   const appCommands = useMemo<AppCommands>(
     () => ({
       ...(client.supportsCloneAndInit ? { onCloneRepository: startClone, onNewRepository: startNewRepository } : {}),
       onOpenPreferences: openPreferences,
       onOpenThirdPartyLicences: openLicences,
       onOpenUserGuide: openUserGuide,
+      ...(canReopenClosedRepo ? { onReopenClosedTab: reopenClosedTab } : {}),
+      onRenameTab: renameActiveTab,
       onCheckForUpdates: checkForUpdates,
     }),
     [
@@ -211,9 +237,30 @@ function AppContent({
       openPreferences,
       openLicences,
       openUserGuide,
+      canReopenClosedRepo,
+      reopenClosedTab,
+      renameActiveTab,
       checkForUpdates,
     ],
   );
+  // Which of `.gitignore`/`.gitattributes` each open tab's work tree has (#624), for the tab
+  // menu's "Open …"/"Create …" items: read as tabs open and again whenever a tab menu opens.
+  // `null`: bare, no items.
+  const [rootFiles, setRootFiles] = useState<Record<string, RootFileName[] | null>>({});
+  const loadRootFiles = useCallback(
+    (path: string) => {
+      client.getRootFiles(path).then(
+        (files) => setRootFiles((prev) => ({ ...prev, [path]: files })),
+        // Unknown: the items stay as last read (absent if never read).
+        () => {},
+      );
+    },
+    [client],
+  );
+  const openPathsKey = openRepos.openRepos.map((repo) => repo.path).join("\0");
+  useEffect(() => {
+    if (openPathsKey !== "") openPathsKey.split("\0").forEach((path) => loadRootFiles(path));
+  }, [openPathsKey, loadRootFiles]);
   const tabMenuItems = useCallback(
     (path: string) => {
       const run = (action: () => Promise<void>) => {
@@ -221,11 +268,29 @@ function AppContent({
         action().catch((error: unknown) => setTabToolError(error instanceof Error ? error.message : String(error)));
       };
       return [
+        { label: "Rename tab…", onSelect: () => setRenamingTab(path) },
         { label: "Open terminal here", onSelect: () => run(() => client.openTerminal(path)) },
         { label: "Reveal repository", onSelect: () => run(() => client.revealInFileManager(path, null)) },
+        ...rootFileItems(rootFiles[path]).map((item) => ({
+          label: item.label,
+          onSelect: () =>
+            run(async () => {
+              try {
+                await openRootFile(client, path, item);
+              } finally {
+                if (!item.exists) loadRootFiles(path);
+              }
+            }),
+        })),
+        {
+          label: "Reopen closed tab",
+          onSelect: reopenClosedTab,
+          disabled: !canReopenClosedRepo,
+          title: canReopenClosedRepo ? undefined : "No closed tab to reopen",
+        },
       ];
     },
-    [client],
+    [client, reopenClosedTab, canReopenClosedRepo, rootFiles, loadRootFiles],
   );
 
   const { releaseNotesView, setReleaseNotesView, closeReleaseNotes } = useReleaseNotes(client);
@@ -277,6 +342,9 @@ function AppContent({
           onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
           onAddTab={() => setPickingRepo(true)}
           tabMenuItems={tabMenuItems}
+          onTabMenuOpen={loadRootFiles}
+          changedPaths={tabChangeMarkers.changedPaths}
+          onRenameTab={setRenamingTab}
         />
         {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}
         {openRepos.openRepos.length > 0 && <ShortcutHint />}
@@ -316,6 +384,7 @@ function AppContent({
           <CommitMessageSection />
           <FetchSection repoPath={openRepos.activePath} />
           <DiffSection />
+          <AppearanceSection />
           {updaterAvailable && <UpdatesSection onCheckNow={runUpdateCheck} />}
         </PreferencesDialog>
       )}
@@ -361,6 +430,15 @@ function AppContent({
       {licencesOpen && loadThirdPartyNotices !== undefined && (
         <ThirdPartyLicencesDialog load={loadThirdPartyNotices} onClose={() => setLicencesOpen(false)} />
       )}
+      {renamingTab !== null && (
+        <RenameTabDialog
+          key={renamingTab}
+          path={renamingTab}
+          alias={openRepos.aliases.get(renamingTab) ?? null}
+          onRename={(alias) => openRepos.renameRepo(renamingTab, alias).then(() => setRenamingTab(null))}
+          onCancel={() => setRenamingTab(null)}
+        />
+      )}
       {pickingRepo && (
         <Overlay onClose={() => setPickingRepo(false)}>
           <RepoPicker
@@ -374,6 +452,7 @@ function AppContent({
               setPickingRepo(false);
             }}
             workspaces={workspaces.workspaces}
+            aliases={openRepos.aliases}
             workspacesLoading={workspaces.loading}
             workspacesError={workspaces.error}
             onDismissWorkspacesError={workspaces.dismissError}
@@ -424,6 +503,7 @@ function AppContent({
           onOpenRepo={openRepoTab}
           onOpenWorkspace={(workspace) => void openRepos.openWorkspace(workspace)}
           workspaces={workspaces.workspaces}
+          aliases={openRepos.aliases}
           workspacesLoading={workspaces.loading}
           workspacesError={workspaces.error}
           onDismissWorkspacesError={workspaces.dismissError}
@@ -457,6 +537,7 @@ function AppContent({
               onCommitDraftChange={onCommitDraftChange}
               appCommands={appCommands}
               pushToast={pushAppToast}
+              onStatusChange={tabChangeMarkers.onLiveStatus}
             />
           ))
       )}

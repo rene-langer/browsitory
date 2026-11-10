@@ -24,8 +24,8 @@ function deferred<T>() {
 
 interface SearchProps {
   generation: number;
-  refs: string[] | null;
-  remoteRefs?: string[] | null;
+  local: string[] | null;
+  remote?: string[] | null;
   selected: SelectedRow;
 }
 
@@ -39,11 +39,11 @@ function setup(
   const hook = renderHook(
     ({
       generation,
-      refs,
-      remoteRefs = null,
+      local,
+      remote = null,
       selected,
-    }: SearchProps) => useCommitSearch(client, "/repo", generation, refs, remoteRefs, selected, selectRow, { debounceMs }),
-    { initialProps: { generation: 0, refs: ["main"], selected: row } as SearchProps },
+    }: SearchProps) => useCommitSearch(client, "/repo", generation, { local, remote }, selected, selectRow, { debounceMs }),
+    { initialProps: { generation: 0, local: ["main"], selected: row } as SearchProps },
   );
   return { ...hook, selectRow, cancelSearch };
 }
@@ -64,18 +64,18 @@ describe("useCommitSearch", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
 
     expect(searchCommits).toHaveBeenCalledTimes(1);
-    expect(searchCommits).toHaveBeenCalledWith("/repo", "au", ["main"], [], null);
+    expect(searchCommits).toHaveBeenCalledWith("/repo", "au", { local: ["main"], remote: [] }, null);
   });
 
   it("searches the graph's remote selection too (#385)", async () => {
     const searchCommits = vi.fn(async () => page([], null, 0));
     const { result, rerender } = setup(searchCommits);
-    rerender({ generation: 0, refs: [], remoteRefs: ["origin/feature"], selected: "uncommitted" });
+    rerender({ generation: 0, local: [], remote: ["origin/feature"], selected: "uncommitted" });
 
     act(() => result.current.setQuery("x"));
 
     await waitFor(() => expect(searchCommits).toHaveBeenCalledTimes(1));
-    expect(searchCommits).toHaveBeenCalledWith("/repo", "x", [], ["origin/feature"], null);
+    expect(searchCommits).toHaveBeenCalledWith("/repo", "x", { local: [], remote: ["origin/feature"] }, null);
   });
 
   it("keeps paging until a round is full or the walk ends, reporting scanned progress", async () => {
@@ -89,7 +89,7 @@ describe("useCommitSearch", () => {
     await waitFor(() => expect(result.current.results?.scanned).toBe(20_000));
     expect(result.current.results?.loading).toBe(true);
     expect(result.current.results?.commits.map((c) => c.id)).toEqual(["c1"]);
-    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], [], "20000:fp");
+    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", { local: ["main"], remote: [] }, "20000:fp");
 
     await act(async () => second.resolve(page(["c2"], null, 25_000)));
     expect(result.current.results).toMatchObject({ loading: false, nextCursor: null, scanned: 25_000 });
@@ -109,7 +109,7 @@ describe("useCommitSearch", () => {
 
     act(() => result.current.loadMore());
     await waitFor(() => expect(result.current.results?.nextCursor).toBeNull());
-    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], [], "100:fp");
+    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", { local: ["main"], remote: [] }, "100:fp");
     expect(result.current.results?.commits).toHaveLength(SEARCH_ROUND_SIZE + 1);
   });
 
@@ -164,7 +164,7 @@ describe("useCommitSearch", () => {
 
     act(() => result.current.retry());
     await waitFor(() => expect(result.current.results?.commits.map((c) => c.id)).toEqual(["fresh"]));
-    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], [], null);
+    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", { local: ["main"], remote: [] }, null);
     expect(result.current.results?.error).toBeNull();
   });
 
@@ -191,10 +191,10 @@ describe("useCommitSearch", () => {
     act(() => result.current.setQuery("x"));
     await waitFor(() => expect(result.current.results?.loading).toBe(false));
     selectRow.mockClear();
-    rerender({ generation: 1, refs: ["main"], selected: { commitId: "c1" } });
+    rerender({ generation: 1, local: ["main"], selected: { commitId: "c1" } });
 
     await waitFor(() => expect(searchCommits).toHaveBeenCalledTimes(2));
-    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", ["main"], [], null);
+    expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", { local: ["main"], remote: [] }, null);
     expect(selectRow).not.toHaveBeenCalled();
   });
 
@@ -219,7 +219,7 @@ describe("useCommitSearch", () => {
     act(() => result.current.setQuery("x"));
     await waitFor(() => expect(searchCommits).toHaveBeenCalledTimes(2));
     // The user clicks another row (or opens file history, which selects its first entry).
-    rerender({ generation: 0, refs: ["main"], selected: { commitId: "picked" } });
+    rerender({ generation: 0, local: ["main"], selected: { commitId: "picked" } });
 
     await act(async () => second.resolve(page(["c1"], null, 500)));
     expect(result.current.results?.commits.map((c) => c.id)).toEqual(["c1"]);

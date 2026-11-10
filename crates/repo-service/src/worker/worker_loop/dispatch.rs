@@ -37,6 +37,11 @@ where
                 selection,
                 reply,
             } => status::locate_commit(&self.repo, revision, selection, reply),
+            Command::GetMergedCommits {
+                merge_id,
+                limit,
+                reply,
+            } => status::get_merged_commits(&self.repo, merge_id, limit, reply),
             Command::GetWorkingDiff {
                 path,
                 staged,
@@ -53,6 +58,11 @@ where
             Command::GetCommitFiles { commit_id, reply } => {
                 status::get_commit_files(&self.repo, commit_id, reply)
             }
+            Command::GetCommitStats {
+                commit_ids,
+                with_files,
+                reply,
+            } => status::get_commit_stats(&self.repo, commit_ids, with_files, reply),
             Command::GetCommitMessage { commit_id, reply } => {
                 status::get_commit_message(&self.repo, commit_id, reply)
             }
@@ -219,6 +229,9 @@ where
             }
             Command::IgnorePath { pattern, reply } => {
                 status::ignore_path(&self.repo, pattern, reply)
+            }
+            Command::CreateRootFile { name, reply } => {
+                tools::create_root_file(&self.repo, name, reply)
             }
             Command::Commit {
                 message,

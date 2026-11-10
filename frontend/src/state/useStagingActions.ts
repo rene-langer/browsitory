@@ -3,9 +3,12 @@ import type { HunkOptions, RepoClient, StatusEntry, StatusKind, Trailer } from "
 import type { AppState, SelectedRow } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome, RunOptimisticMutation } from "./useMutationRunner";
 import { hookFailedMessage } from "../lib/hookFailure";
+import { recordVisit, type VisitKind } from "../lib/navigationHistory";
 
 export interface StagingActions {
-  selectRow(row: SelectedRow): void;
+  // Selects a row and records it for Back/Forward (#618); `kind` `"step"` for a keyboard move
+  // through a list, which a following one replaces.
+  selectRow(row: SelectedRow, kind?: VisitKind): void;
   stageFile(path: string): Promise<void>;
   unstageFile(path: string): Promise<void>;
   // Bulk variants for DiffPane's "Stage all"/"Unstage all". There is no bulk backend op (and
@@ -70,8 +73,8 @@ export function useStagingActions(
   setState: (updater: (prev: AppState) => AppState) => void,
 ): StagingActions {
   const selectRow = useCallback(
-    (row: SelectedRow) => {
-      setState((prev) => ({ ...prev, selectedRow: row }));
+    (row: SelectedRow, kind: VisitKind = "jump") => {
+      setState((prev) => ({ ...prev, selectedRow: row, navigation: recordVisit(prev.navigation, row, kind) }));
     },
     [setState],
   );

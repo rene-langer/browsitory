@@ -2,13 +2,14 @@ import { useState } from "react";
 import { Copy } from "lucide-react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { remoteNameProblem } from "../lib/refName";
+import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { FormDialog } from "./primitives/FormDialog";
 import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./BranchTree.module.css";
 
 /**
  * Rename a remote and change its URLs. Opened from a remote folder's menu in `BranchTree` or the
- * palette's "Edit remote <name>…" (via `AppState.remoteDialog`). The fields start from `remote`
+ * palette's "Edit remote <name>…" (via `AppState.dialog`). The fields start from `remote`
  * when the dialog mounts. `blockedReason` (`operationBlockers`) disables Save while it applies:
  * the repository can become busy after the dialog opened (#561).
  */
@@ -30,6 +31,7 @@ export function EditRemoteDialog({
   const [name, setName] = useState(remote.name);
   const [fetchUrl, setFetchUrl] = useState(remote.fetchUrl);
   const [pushUrl, setPushUrl] = useState(remote.pushUrl ?? "");
+  const copyToClipboard = useCopyToClipboard();
   // The same check and message as the Add remote form (#418).
   const nameProblem = remoteNameProblem(name.trim());
 
@@ -75,7 +77,7 @@ export function EditRemoteDialog({
           className={styles.iconButton}
           aria-label={`Copy fetch URL for ${remote.name}`}
           onClick={() => {
-            void navigator.clipboard.writeText(remote.fetchUrl);
+            copyToClipboard(remote.fetchUrl, "fetch URL");
           }}
         >
           <Copy size={12} aria-hidden="true" />
@@ -90,7 +92,7 @@ export function EditRemoteDialog({
             className={styles.iconButton}
             aria-label={`Copy push URL for ${remote.name}`}
             onClick={() => {
-              void navigator.clipboard.writeText(remote.pushUrl!);
+              copyToClipboard(remote.pushUrl!, "push URL");
             }}
           >
             <Copy size={12} aria-hidden="true" />

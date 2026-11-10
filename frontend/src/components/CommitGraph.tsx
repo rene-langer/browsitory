@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import type { GraphCommit, HeadInfo, RemoteInfo, StatusEntry } from "../ipc/RepoClient";
+import type { CommitStats, GraphCommit, HeadInfo, RemoteInfo, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes } from "../lib/commitGraphLayout";
 import {
   EMPTY_SELECTION,
@@ -16,7 +16,9 @@ import {
 } from "../lib/rebaseSelection";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "../lib/historyEdits";
 import { commitActions } from "../lib/actions/commitActions";
+import type { VisitKind } from "../lib/navigationHistory";
 import { rowsEqual, type SelectedRow } from "../state/useAppState";
+import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
 import { ListRow } from "./primitives/ListRow";
@@ -24,11 +26,14 @@ import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import formStyles from "./primitives/FormDialog.module.css";
+import { LineStatsBadge } from "./LineStatsBadge";
+import { expandedFrom, expansionHasMore, MERGE_PAGE_SIZE, type MergeExpansion } from "../lib/mergeExpansion";
 import { RefBadges } from "./RefBadges";
 import { tagMenuItems } from "./tagMenuItems";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
+const NO_EXPANSIONS: Readonly<Record<string, MergeExpansion>> = {};
 
 export function CommitGraph({
   status,
@@ -37,6 +42,7 @@ export function CommitGraph({
   operationsBlocked,
   operationsBlockedReason = null,
   onSelectRow,
+  onGoToCommit,
   onBranchFromCommit,
   onRebaseFromCommit,
   onRebaseSelection,
@@ -65,6 +71,11 @@ export function CommitGraph({
   onCreateTag,
   onDeleteTagFromRemote,
   revealRequest = 0,
+  lineStats,
+  onCommitsVisible,
+  expandedMerges = NO_EXPANSIONS,
+  onExpandMerge,
+  onCollapseMerge,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -74,7 +85,10 @@ export function CommitGraph({
   operationsBlocked: boolean;
   /** `operationBlockers`' reason, the title of the entries `operationsBlocked` disables. */
   operationsBlockedReason?: string | null;
-  onSelectRow: (row: SelectedRow) => void;
+  /** `kind` `"step"` for a keyboard move by row (Back/Forward merge those, #618). */
+  onSelectRow: (row: SelectedRow, kind?: VisitKind) => void;
+  /** Selects a parent outside the loaded history, as Go to does (#618). */
+  onGoToCommit?: (commitId: string) => void;
   onBranchFromCommit: (commitId: string) => void;
   onRebaseFromCommit: (commitId: string) => void;
   // Called when the user acts on a multi-commit selection (Interactive rebase…, Squash, Fixup,
@@ -144,6 +158,22 @@ export function CommitGraph({
   /** Bumped by "Go to" (#441): scrolls the selected row into view even when it was already
    *  selected. */
   revealRequest?: number;
+  /**
+   * Lines-changed badges (#620): the counted commits (`useCommitLineStats`); a row shows its
+   * badge once its numbers are in, and none for a commit over the cap (`null`). Omitted: no
+   * badges.
+   */
+  lineStats?: ReadonlyMap<string, CommitStats | null>;
+  /** The commits whose rows are on screen, in graph order, whenever that changes. */
+  onCommitsVisible?: (commitIds: string[]) => void;
+  /**
+   * Collapsed merges (#617): the expanded ones, whose commits `commits` already lists below them.
+   * A row with `mergedCount` gets a "+N" control (and ArrowRight/ArrowLeft on the selected row)
+   * when `onExpandMerge` is given; `atLeast` is how many of its commits to load.
+   */
+  expandedMerges?: Readonly<Record<string, MergeExpansion>>;
+  onExpandMerge?: (mergeId: string, atLeast?: number) => void;
+  onCollapseMerge?: (mergeId: string) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -152,6 +182,14 @@ export function CommitGraph({
   } | null>(null);
   const [tagMenu, setTagMenu] = useState<{ tag: string; commitId: string; x: number; y: number } | null>(null);
   const [tagToDelete, setTagToDelete] = useState<string | null>(null);
+  const copyToClipboard = useCopyToClipboard();
+  // The parent or child picker of the parent/child keys (#618).
+  const [navigationPicker, setNavigationPicker] = useState<{ items: ContextMenuItem[]; x: number; y: number } | null>(
+    null,
+  );
+  // The commit of an expanded merge each listed commit belongs to (#617).
+  const mergeOwners = useMemo(() => expandedFrom(commits, expandedMerges), [commits, expandedMerges]);
+  const commitLayouts = useMemo(() => assignLanes(commits, new Set(mergeOwners.keys())), [commits, mergeOwners]);
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
   // `focusId` is the last focus the graph itself reported through `onSelectRow`. A focus that
   // differs from it came from outside (search, sidebar, refresh) and drops the multi-selection.
@@ -182,9 +220,10 @@ export function CommitGraph({
     return { ids, anchorId };
   })();
 
-  const setSelection = (next: CommitSelection, row: SelectedRow) => {
+  const setSelection = (next: CommitSelection, row: SelectedRow, kind?: VisitKind) => {
     setGraphSelection({ selection: next, focusId: typeof row === "object" ? row.commitId : null });
-    onSelectRow(row);
+    if (kind === undefined) onSelectRow(row);
+    else onSelectRow(row, kind);
   };
 
   const listRef = useRef<HTMLUListElement>(null);
@@ -240,6 +279,23 @@ export function CommitGraph({
     if (onSavePatch !== undefined) {
       items.push({ label: "Save as patch…", onSelect: () => onSavePatch([commitId]) });
     }
+    items.push(...copyItems(commitId, commit));
+    return items;
+  }
+
+  // "Copy …" (#614): last in the menu and never disabled (copying is not a Git operation). The
+  // date is the instant the commit details show, in ISO 8601.
+  function copyItems(commitId: string, commit: GraphCommit | undefined): ContextMenuItem[] {
+    const items: ContextMenuItem[] = [{ label: "Copy SHA", onSelect: () => copyToClipboard(commitId, "SHA") }];
+    if (commit === undefined) return items;
+    const author = `${commit.authorName} <${commit.authorEmail}>`;
+    const date = new Date(commit.timestamp * 1000).toISOString();
+    items.push(
+      { label: "Copy short SHA", onSelect: () => copyToClipboard(commit.shortId, "short SHA") },
+      { label: "Copy subject", onSelect: () => copyToClipboard(commit.summary, "subject") },
+      { label: "Copy author", onSelect: () => copyToClipboard(author, "author") },
+      { label: "Copy date", onSelect: () => copyToClipboard(date, "date") },
+    );
     return items;
   }
 
@@ -284,9 +340,33 @@ export function CommitGraph({
       onBranchFromCommit,
       onCheckoutCommit,
       onDeleteFromRemote: onDeleteTagFromRemote,
+      onCopy: copyToClipboard,
       onDelete: setTagToDelete,
     });
   }
+
+  // The rows on screen, for the lazily counted badges (#620). Without IntersectionObserver every
+  // loaded row counts as visible.
+  useEffect(() => {
+    const list = listRef.current;
+    if (onCommitsVisible === undefined || list === null) return;
+    if (typeof IntersectionObserver === "undefined") {
+      onCommitsVisible(commits.map((commit) => commit.id));
+      return;
+    }
+    const visible = new Set<string>();
+    const observer = new IntersectionObserver((records) => {
+      for (const record of records) {
+        const id = (record.target as HTMLElement).dataset.commitId;
+        if (id === undefined) continue;
+        if (record.isIntersecting) visible.add(id);
+        else visible.delete(id);
+      }
+      onCommitsVisible(commits.filter((commit) => visible.has(commit.id)).map((commit) => commit.id));
+    });
+    for (const row of list.querySelectorAll<HTMLElement>("[data-commit-id]")) observer.observe(row);
+    return () => observer.disconnect();
+  }, [commits, onCommitsVisible]);
 
   // Keep the keyboard-driven selection visible in a long history, and a "Go to" target too.
   useEffect(() => {
@@ -299,13 +379,97 @@ export function CommitGraph({
     if (nextIndex > rows.length - 1 && hasMore) onLoadMore?.();
     const next = Math.max(0, Math.min(nextIndex, rows.length - 1));
     if (next < 1) {
-      setSelection(EMPTY_SELECTION, rows[next]);
+      setSelection(EMPTY_SELECTION, rows[next], "step");
     } else if (extendRange) {
       // Row 0 is "Uncommitted changes"; commit rows are offset by one.
-      setSelection(extendSelection(effectiveSelection, commits, commits[next - 1].id), rows[next]);
+      setSelection(extendSelection(effectiveSelection, commits, commits[next - 1].id), rows[next], "step");
     } else {
-      setSelection(selectOnly(commits[next - 1].id), rows[next]);
+      setSelection(selectOnly(commits[next - 1].id), rows[next], "step");
     }
+  };
+
+  // Parent and child keys (#618). A loaded commit is selected here; a parent outside the loaded
+  // history is found as Go to does.
+  const goToCommit = (commitId: string) => {
+    if (commits.some((commit) => commit.id === commitId)) setSelection(selectOnly(commitId), { commitId });
+    else onGoToCommit?.(commitId);
+  };
+  const describeCommit = (commitId: string) => {
+    const commit = commits.find((candidate) => candidate.id === commitId);
+    return commit === undefined ? commitId.slice(0, 7) : `${commit.shortId} ${commit.summary}`;
+  };
+  const openPicker = (list: HTMLUListElement, items: ContextMenuItem[]) => {
+    const rect = (list.children[selectedIndex] as HTMLElement | undefined)?.getBoundingClientRect();
+    setNavigationPicker({ items, x: rect?.left ?? 0, y: rect?.bottom ?? 0 });
+  };
+  // `[`: the first parent; Shift+`[` on a merge commit: a picker of its parents.
+  const goToParent = (list: HTMLUListElement, choose: boolean) => {
+    if (selectedIndex < 1) return;
+    const { parentIds } = commits[selectedIndex - 1];
+    if (parentIds.length === 0) return;
+    if (!choose || parentIds.length === 1) {
+      goToCommit(parentIds[0]);
+      return;
+    }
+    openPicker(
+      list,
+      parentIds.map((parentId, index) => ({
+        label: `Parent ${index + 1}: ${describeCommit(parentId)}`,
+        onSelect: () => goToCommit(parentId),
+      })),
+    );
+  };
+  // `]`: the loaded child; of several, the one on the same lane, else a picker.
+  const goToChild = (list: HTMLUListElement) => {
+    if (selectedIndex < 1) return;
+    const commitId = commits[selectedIndex - 1].id;
+    const lane = commitLayouts[selectedIndex - 1].lane;
+    const children = commits.flatMap((commit, index) => (commit.parentIds.includes(commitId) ? [index] : []));
+    if (children.length === 0) return;
+    const sameLane = children.filter((index) => commitLayouts[index].lane === lane);
+    const only = children.length === 1 ? children[0] : sameLane.length === 1 ? sameLane[0] : null;
+    if (only !== null) {
+      goToCommit(commits[only].id);
+      return;
+    }
+    openPicker(
+      list,
+      children.map((index) => ({
+        label: describeCommit(commits[index].id),
+        onSelect: () => goToCommit(commits[index].id),
+      })),
+    );
+  };
+
+  // Collapsed merges (#617). Collapsing a merge whose commits hold the selection selects the merge,
+  // so the selection never sits on a row that is gone.
+  const canExpand = (commit: GraphCommit) =>
+    onExpandMerge !== undefined && commit.mergedCount !== undefined && commit.mergedCount > 0;
+  const expandMerge = (mergeId: string) => onExpandMerge?.(mergeId);
+  const collapseMerge = (mergeId: string) => {
+    const inside = primaryId !== null && primaryId !== mergeId && mergeOwners.get(primaryId) === mergeId;
+    if (inside) setSelection(selectOnly(mergeId), { commitId: mergeId });
+    onCollapseMerge?.(mergeId);
+  };
+  // ArrowRight expands the selected merge; ArrowLeft collapses it, or from one of its commits
+  // goes to the merge. `true` when the key did something.
+  const expandOrCollapseSelected = (expand: boolean): boolean => {
+    if (selectedIndex < 1) return false;
+    const commit = commits[selectedIndex - 1];
+    const expanded = commit.id in expandedMerges;
+    if (expand) {
+      if (!canExpand(commit) || expanded) return false;
+      expandMerge(commit.id);
+      return true;
+    }
+    if (expanded) {
+      collapseMerge(commit.id);
+      return true;
+    }
+    const owner = mergeOwners.get(commit.id);
+    if (owner === undefined) return false;
+    setSelection(selectOnly(owner), { commitId: owner }, "step");
+    return true;
   };
 
   const openMenuForSelected = (list: HTMLUListElement) => {
@@ -325,6 +489,29 @@ export function CommitGraph({
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f" && onRequestSearch) {
       event.preventDefault();
       onRequestSearch();
+      return;
+    }
+    // Cmd+[ / Cmd+] are Back/Forward on macOS (`useWorkspaceShortcuts`); AltGr (Ctrl+Alt) types
+    // the brackets on some layouts.
+    const bracketKey = !event.metaKey && !(event.ctrlKey && !event.altKey);
+    if (bracketKey && (event.key === "[" || event.key === "{")) {
+      event.preventDefault();
+      goToParent(event.currentTarget, event.key === "{" || event.shiftKey);
+      return;
+    }
+    if (bracketKey && event.key === "]") {
+      event.preventDefault();
+      goToChild(event.currentTarget);
+      return;
+    }
+    if (
+      (event.key === "ArrowRight" || event.key === "ArrowLeft") &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      if (expandOrCollapseSelected(event.key === "ArrowRight")) event.preventDefault();
       return;
     }
     const extend = event.shiftKey;
@@ -495,7 +682,6 @@ export function CommitGraph({
     ...(savePatchItem === null ? [] : [savePatchItem]),
   ];
 
-  const commitLayouts = useMemo(() => assignLanes(commits), [commits]);
   // `null` means "show every remote badge" — skip building the membership set entirely in that
   // case rather than deriving one from `commits` just to have every `.includes()` check pass.
   const shownRemoteBranches = graphRemoteBranchSelection === null ? null : new Set(graphRemoteBranchSelection);
@@ -517,7 +703,7 @@ export function CommitGraph({
       role="listbox"
       aria-multiselectable="true"
       aria-label="Commit history"
-      aria-keyshortcuts="ArrowUp ArrowDown Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F"
+      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F [ ] Shift+["
     >
       <ListRow
         className={styles.uncommittedRow}
@@ -536,7 +722,7 @@ export function CommitGraph({
       {commits.map((commit, index) => (
         <ListRow
           key={commit.id}
-          className="commit-row"
+          className={mergeOwners.has(commit.id) ? `commit-row ${styles.mergedRow}` : "commit-row"}
           data-commit-id={commit.id}
           selected={effectiveSelection.ids.has(commit.id)}
           onClick={(event) => handleCommitClick(event, commit.id)}
@@ -564,6 +750,16 @@ export function CommitGraph({
           <span className={styles.commitSummary}>
             {commit.shortId} {commit.summary}
           </span>
+          {canExpand(commit) && (
+            <MergeToggle
+              mergedCount={commit.mergedCount ?? 0}
+              expansion={expandedMerges[commit.id]}
+              onExpand={() => expandMerge(commit.id)}
+              onCollapse={() => collapseMerge(commit.id)}
+              onShowMore={(atLeast) => onExpandMerge?.(commit.id, atLeast)}
+            />
+          )}
+          <CommitRowLineStats stats={lineStats?.get(commit.id)} />
           <span className={styles.author} title={commit.authorEmail}>
             {commit.authorName}
           </span>
@@ -604,6 +800,18 @@ export function CommitGraph({
             listRef.current?.focus();
           }}
           items={tagItems(tagMenu.tag, tagMenu.commitId)}
+        />
+      )}
+      {navigationPicker !== null && (
+        <ContextMenu
+          returnFocusTo={listElement}
+          x={navigationPicker.x}
+          y={navigationPicker.y}
+          onClose={() => {
+            setNavigationPicker(null);
+            listRef.current?.focus();
+          }}
+          items={navigationPicker.items}
         />
       )}
     </ul>
@@ -653,4 +861,64 @@ export function CommitGraph({
     )}
     </>
   );
+}
+
+/**
+ * A collapsed merge's "+N" (#617): expands the N commits it brought in below its row, "−N" hides
+ * them again; "More" loads the next page of a long side branch. A mouse affordance: the list's
+ * ArrowRight/ArrowLeft do the same from the keyboard, so the buttons stay out of the tab order.
+ */
+function MergeToggle({
+  mergedCount,
+  expansion,
+  onExpand,
+  onCollapse,
+  onShowMore,
+}: {
+  mergedCount: number;
+  expansion: MergeExpansion | undefined;
+  onExpand: () => void;
+  onCollapse: () => void;
+  onShowMore: (atLeast: number) => void;
+}) {
+  const commitsWord = mergedCount === 1 ? "commit" : "commits";
+  const expanded = expansion !== undefined;
+  return (
+    <span className={styles.mergeToggle}>
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Hide" : "Show"} the ${mergedCount} ${commitsWord} this merge brought in`}
+        title={`${expanded ? "Hide" : "Show"} the ${mergedCount} merged ${commitsWord}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (expanded) onCollapse();
+          else onExpand();
+        }}
+      >
+        {expanded ? "−" : "+"}
+        {mergedCount}
+      </button>
+      {expansion !== undefined && expansionHasMore(expansion) && (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Show more merged commits (${expansion.commits.length} of ${mergedCount} shown)`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onShowMore(expansion.limit + MERGE_PAGE_SIZE);
+          }}
+        >
+          More
+        </button>
+      )}
+    </span>
+  );
+}
+
+/** A row's `+12 −3` (#620); nothing until the numbers are in, or for a commit over the cap. */
+function CommitRowLineStats({ stats }: { stats: CommitStats | null | undefined }) {
+  if (stats == null) return null;
+  return <LineStatsBadge insertions={stats.insertions} deletions={stats.deletions} className={styles.lineStats} />;
 }

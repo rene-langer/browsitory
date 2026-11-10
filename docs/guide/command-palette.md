@@ -17,20 +17,22 @@ The palette has almost every action in Browsitory, grouped like this:
   manage its credentials, delete a remote branch, and delete a tag on a remote.
 - **Stash:** stash all, **Stash…**, stash the current file or the selected files, and show,
   apply, pop or drop a stash.
-- **Diff:** ignore whitespace, more or fewer context lines, syntax highlighting, wrap lines and
-  show whole file in the current diff (see [Diff options](history.md#diff-options)), file
+- **Diff:** ignore whitespace, show whitespace, more or fewer context lines, syntax
+  highlighting, wrap lines and show whole file in the current diff (see [Diff options](history.md#diff-options)), file
   history of the current file, stage, unstage or discard the selected files, discard the current
   file or all unstaged changes, open the current file in your editor or diff tool, **Apply
   patch…** and **Save staged changes as patch…** (see [Patches and partial
   reverts](patches.md)).
 - **Go to:** **Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** (see
   below), and open a sidebar section and move to it, for example **Go to Tags**.
-- **Repositories:** switch to another tab, close the tab, open a terminal, reveal the repository
-  in the file manager.
+- **Repositories:** switch to another tab (one command per tab, or **Switch to tab…** to pick
+  one by name, folder name or path), **Rename tab…**, close the tab, open a terminal, reveal the
+  repository in the file manager (see [Multiple repositories](tabs.md)).
 - **General:** **Refresh**, undo and redo, search commits, the selected commit's actions
-  (cherry-pick, revert, reset, check out, reword, squash, fixup, move, drop), worktree and
-  submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Check for updates**
-  (desktop app), **Third-party licences** and **Open user guide**.
+  (cherry-pick, revert, reset, check out, reword, squash, fixup, move, drop; for a search
+  result or file history commit older than the loaded history, all but the history edits),
+  worktree and submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Check for
+  updates** (desktop app), **Third-party licences** and **Open user guide**.
 
 Commands that can't run right now are left out. For example, while a rebase is paused, the
 palette offers only the commands that are safe until it is finished.
@@ -55,7 +57,8 @@ When the commit is further down than the loaded history, the graph loads more un
 there. When the graph doesn't show it at all, the commit is still selected (its changes show),
 and a note above the graph says why: it is only on a branch the graph hides (**Show ⟨branch⟩**
 adds that branch to the graph), it is on a side branch of the one branch the graph shows
-(**Show all branches**), or it is on no branch at all.
+(**Show all branches**), or it is on no branch at all. A commit inside a collapsed merge (see
+[Collapse merges](history.md#collapse-merges)) is shown by expanding that merge.
 
 ## Keyboard shortcuts
 
@@ -67,6 +70,7 @@ Press **?** (outside a text field) for the full list of shortcuts. The most usef
 | Ctrl/Cmd+Z | Undo the last Git operation |
 | Ctrl/Cmd+Shift+Z or Ctrl+Y | Redo |
 | Ctrl/Cmd+W | Close the active tab (in VSCode only where VSCode doesn't use it) |
+| Ctrl/Cmd+Shift+T | Reopen the last closed tab (where the host doesn't use it) |
 | Ctrl/Cmd+F | Search commits (with the commit list focused) |
 | Ctrl/Cmd+Enter | Commit (in the commit message) |
 | ↑/↓ or j/k | Move through commits or changed files |
@@ -75,9 +79,13 @@ Press **?** (outside a text field) for the full list of shortcuts. The most usef
 | Home/End, PageUp/PageDown | Jump in the commit list |
 | s | Stage or unstage the selected files, lines or hunk |
 | d d | Discard the selected lines or hunk |
-| [ and ] | Previous and next hunk |
+| [ and ] | Previous and next hunk (in a diff); parent and child commit (in the commit list) |
+| Shift+[ | Choose one of a merge commit's parents (in the commit list) |
+| →/← | Expand or collapse a merge with **Collapse merges** on (in the commit list) |
+| Alt+Left/Right (Cmd+[ / Cmd+] on macOS) | Back and forward through the selected commits (where the host doesn't use them) |
 | Left/Right, Home/End | Switch tabs, with a tab focused |
 | Delete | Close the focused tab |
+| F2 | Rename the focused tab |
 | Menu key or Shift+F10 | Open the focused item's menu |
 | Esc | Close a dialog or menu |
 

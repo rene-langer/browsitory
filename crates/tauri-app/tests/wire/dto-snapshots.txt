@@ -10,6 +10,7 @@ StatusEntry/staged-rename {"path":"src/new.rs","oldPath":"src/old.rs","staged":t
 GraphCommit/plain {"id":"0123456789abcdef0123456789abcdef01234567","shortId":"0123456","summary":"Add the graph","authorName":"Ada Lovelace","authorEmail":"ada@example.com","timestamp":1700000000,"parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"branchRefs":["main"],"remoteBranchRefs":["origin/main"],"tags":["v1.0.0"]}
 GraphCommit/escapes {"id":"0123456789abcdef0123456789abcdef01234567","shortId":"0123456","summary":"Say \"hi\" \\ tab\there, café 😀\u0001","authorName":"Ada Lovelace","authorEmail":"ada@example.com","timestamp":1700000000,"parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"branchRefs":["main"],"remoteBranchRefs":["origin/main"],"tags":["v1.0.0"]}
 GraphCommit/root-commit {"id":"0123456789abcdef0123456789abcdef01234567","shortId":"0123456","summary":"Initial commit","authorName":"Ada Lovelace","authorEmail":"ada@example.com","timestamp":-1,"parentIds":[],"branchRefs":[],"remoteBranchRefs":[],"tags":[]}
+GraphCommit/collapsed-merge {"id":"0123456789abcdef0123456789abcdef01234567","shortId":"0123456","summary":"Merge branch 'feature'","authorName":"Ada Lovelace","authorEmail":"ada@example.com","timestamp":1700000000,"parentIds":["89abcdef0123456789abcdef0123456789abcdef","fedcba9876543210fedcba9876543210fedcba98"],"branchRefs":["main"],"remoteBranchRefs":["origin/main"],"tags":["v1.0.0"],"mergedCount":3}
 DiffHunk/every-origin {"oldStart":1,"oldLines":2,"newStart":1,"newLines":2,"lines":[{"origin":"Add","content":"Add line\n"},{"origin":"Remove","content":"Remove line\n"},{"origin":"Context","content":"Context line\n"}]}
 DiffHunk/empty {"oldStart":0,"oldLines":0,"newStart":0,"newLines":0,"lines":[]}
 FileHistoryEntry/no-old-path {"commit":{"id":"0123456789abcdef0123456789abcdef01234567","shortId":"0123456","summary":"Edit","authorName":"Ada Lovelace","authorEmail":"ada@example.com","timestamp":1700000000,"parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"branchRefs":["main"],"remoteBranchRefs":["origin/main"],"tags":["v1.0.0"]},"path":"a.txt","oldPath":null}
@@ -23,22 +24,29 @@ ChangedFile/renamed {"path":"b.txt","oldPath":"a.txt"}
 CompareRange/plain {"fromId":"1111111111111111111111111111111111111111","toId":"2222222222222222222222222222222222222222"}
 CommitLocation/in-graph {"commitId":"1111111111111111111111111111111111111111","position":42,"branches":[],"remoteBranches":[]}
 CommitLocation/hidden {"commitId":"2222222222222222222222222222222222222222","position":null,"branches":["feature"],"remoteBranches":["origin/feature"]}
+CommitLocation/in-merge {"commitId":"3333333333333333333333333333333333333333","position":null,"branches":["main"],"remoteBranches":[],"merge":{"mergeId":"4444444444444444444444444444444444444444","mergePosition":7,"offset":2}}
+CommitStatsEntry/counted {"commitId":"1111111111111111111111111111111111111111","stats":{"filesChanged":2,"insertions":12,"deletions":3,"files":[{"path":"src/main.rs","insertions":12,"deletions":3,"binary":false},{"path":"logo.png","insertions":0,"deletions":0,"binary":true}]}}
+CommitStatsEntry/capped {"commitId":"2222222222222222222222222222222222222222","stats":null}
 PatchContent/text {"base64":"ZGlmZiAtLWdpdCBhL2YgYi9mCg=="}
 PatchContent/latin-1 {"base64":"K+kK"}
 OpenRepoEntry/loose {"path":"/repos/app","workspaceId":null}
 OpenRepoEntry/in-workspace {"path":"/repos/lib","workspaceId":"ws-1"}
 Workspace/members {"id":"ws-1","name":"Work","rootPath":"/repos","memberPaths":["/repos/app","/repos/lib"]}
 Workspace/empty {"id":"ws-2","name":"Empty","rootPath":"/empty","memberPaths":[]}
-DiffSettings/plain {"ignoreWhitespace":true,"contextLines":5,"syntaxHighlight":false,"wordWrap":"Auto","algorithm":"Patience"}
-DiffSettings/wrap-On {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"On","algorithm":"Default"}
-DiffSettings/wrap-Off {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Off","algorithm":"Default"}
-DiffSettings/algorithm-Default {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Default"}
-DiffSettings/algorithm-Minimal {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Minimal"}
+RepoAlias/plain {"repoPath":"/repos/app","alias":"app (review)"}
+DiffSettings/plain {"ignoreWhitespace":true,"contextLines":5,"syntaxHighlight":false,"wordWrap":"Auto","algorithm":"Patience","showWhitespace":true,"expandUntracked":false}
+DiffSettings/wrap-On {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"On","algorithm":"Default","showWhitespace":false,"expandUntracked":true}
+DiffSettings/wrap-Off {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Off","algorithm":"Default","showWhitespace":false,"expandUntracked":true}
+DiffSettings/algorithm-Default {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Default","showWhitespace":false,"expandUntracked":true}
+DiffSettings/algorithm-Minimal {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Minimal","showWhitespace":false,"expandUntracked":true}
 ExternalToolSettings/unset {"editor":null,"terminal":null}
 ExternalToolSettings/set {"editor":"code -w","terminal":"wt"}
 CommitMessageSettings/plain {"summaryLimit":50,"bodyRuler":72,"showRuler":true}
 FetchSettings/off {"autoFetchMinutes":0}
 FetchSettings/every-10 {"autoFetchMinutes":10}
+AppearanceSettings/default {"codeFont":null,"codeFontSize":null,"uiSize":"Normal","tabSize":4}
+AppearanceSettings/set {"codeFont":"Example Mono","codeFontSize":15,"uiSize":"Large","tabSize":8}
+AppearanceSettings/small {"codeFont":null,"codeFontSize":null,"uiSize":"Small","tabSize":4}
 UpdateSettings/on {"checkAutomatically":true}
 UpdateSettings/off {"checkAutomatically":false}
 GitTools/diff-tool-System {"diffTool":{"name":"meld","command":"meld \"$LOCAL\" \"$REMOTE\"","source":"System","viaMergeTool":true,"problem":"not found on PATH"},"mergeTool":null}

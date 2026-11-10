@@ -1,6 +1,8 @@
 // Generated from the shared wire DTOs (crates/repo-service/src/wire.rs) by ts-rs.
 // Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current
 
+export type AppearanceSettings = { codeFont: string | null, codeFontSize: number | null, uiSize: UiSize, tabSize: number, };
+
 export type BisectInfo = { 
 /**
  * A branch name, or a commit id when the bisect started on a detached HEAD.
@@ -12,6 +14,8 @@ export type BlameLine = { lineNumber: number, content: string, commitId: string,
 export type BranchInfo = { name: string, isCurrent: boolean, upstream: string | null, ahead: number | null, behind: number | null, };
 
 export type ChangedFile = { path: string, oldPath: string | null, };
+
+export type CollapsedMerge = { mergeId: string, mergePosition: number, offset: number, };
 
 export type CommitChangeRequest = { commitId: string, path: string, oldPath: string | null, 
 /**
@@ -29,13 +33,25 @@ stage: boolean, };
 
 export type CommitHunk = { oldStart: number, newStart: number, contextLines: number, algorithm: DiffAlgorithm, };
 
-export type CommitLocation = { commitId: string, position: number | null, branches: Array<string>, remoteBranches: Array<string>, };
+export type CommitLocation = { commitId: string, position: number | null, branches: Array<string>, remoteBranches: Array<string>, 
+/**
+ * The collapsed merge that holds the commit (#617); left out when there is none.
+ */
+merge?: CollapsedMerge, };
 
 export type CommitMessageSettings = { summaryLimit: number, bodyRuler: number, showRuler: boolean, };
 
 export type CommitOutcome = { "kind": "Committed", commitId: string, } | { "kind": "HookFailed", hook: string, output: string, };
 
 export type CommitSignature = { status: SignatureStatus, format: SignatureFormat | null, signer: string | null, key: string | null, detail: string | null, };
+
+export type CommitStats = { filesChanged: number, insertions: number, deletions: number, 
+/**
+ * Empty unless `withFiles` asked for them.
+ */
+files: Array<FileStats>, };
+
+export type CommitStatsEntry = { commitId: string, stats: CommitStats | null, };
 
 export type CompareRange = { fromId: string, toId: string, };
 
@@ -57,7 +73,7 @@ export type DiffLineOrigin = "Add" | "Remove" | "Context";
 
 export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, algorithm: DiffAlgorithm, };
 
-export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, wordWrap: WordWrap, algorithm: DiffAlgorithm, };
+export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, wordWrap: WordWrap, algorithm: DiffAlgorithm, showWhitespace: boolean, expandUntracked: boolean, };
 
 export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 
@@ -79,6 +95,8 @@ export type FileSide = { "kind": "Missing" } | { "kind": "TooLarge", size: numbe
 
 export type FileSides = { old: FileSide, new: FileSide, };
 
+export type FileStats = { path: string, insertions: number, deletions: number, binary: boolean, };
+
 export type ForgeProvider = "GitHub" | "Bitbucket";
 
 export type ForgeRepository = { provider: ForgeProvider, host: string, owner: string, name: string, remoteName: string, };
@@ -89,7 +107,27 @@ export type GitToolInfo = { name: string, command: string | null, source: GitCon
 
 export type GitTools = { diffTool: GitToolInfo | null, mergeTool: GitToolInfo | null, };
 
-export type GraphCommit = { id: string, shortId: string, summary: string, authorName: string, authorEmail: string, timestamp: number, parentIds: Array<string>, branchRefs: Array<string>, remoteBranchRefs: Array<string>, tags: Array<string>, };
+export type GraphCommit = { id: string, shortId: string, summary: string, authorName: string, authorEmail: string, timestamp: number, parentIds: Array<string>, branchRefs: Array<string>, remoteBranchRefs: Array<string>, tags: Array<string>, 
+/**
+ * Only on a merge row of a first-parent graph (#617): the commits its other parents brought
+ * in, which `getMergedCommits` lists. Left out everywhere else.
+ */
+mergedCount?: number, };
+
+export type GraphSelection = { 
+/**
+ * Local branch names: `null` walks every local branch, `[]` none of them.
+ */
+local: Array<string> | null, 
+/**
+ * Remote-tracking branches as `<remote>/<branch>`; required, `[]` walks no remote branch.
+ */
+remote: Array<string>, 
+/**
+ * "Collapse merges" (#617): the graph and `locateCommit` follow first parents from every
+ * selected tip; `searchCommits` ignores it. Absent is `false`.
+ */
+firstParent?: boolean, };
 
 export type HeadInfo = { headId: string | null, detachedAt: string | null, headPushed: boolean, operation: OperationKind | null, 
 /**
@@ -183,6 +221,8 @@ export type RemoteInfo = { name: string, fetchUrl: string, pushUrl: string | nul
  */
 prune: boolean, };
 
+export type RepoAlias = { repoPath: string, alias: string, };
+
 export type RepoErrorPayload = { kind: ErrorKind, message: string, };
 
 export type ResetMode = "soft" | "mixed" | "hard";
@@ -258,6 +298,8 @@ export type TreeEntry = { path: string, name: string, kind: TreeEntryKind, size:
 export type TreeEntryKind = "Folder" | "File" | "Executable" | "Symlink" | "Submodule";
 
 export type TreeListing = { entries: Array<TreeEntry>, truncated: boolean, };
+
+export type UiSize = "Small" | "Normal" | "Large";
 
 export type UndoOutcome = { "kind": "Done", label: string, } | { "kind": "Nothing" } | { "kind": "RepositoryChanged", label: string, } | { "kind": "BranchHeld", label: string, message: string, } | { "kind": "OperationInProgress" };
 

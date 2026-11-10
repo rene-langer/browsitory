@@ -4,9 +4,9 @@ import { RepoTabs } from "./RepoTabs";
 import { repoPanelId } from "./repoTabIds";
 
 const repos = [
-  { path: "/repos/a", displayName: "a", workspaceId: null },
-  { path: "/repos/b", displayName: "b", workspaceId: null },
-  { path: "/repos/c", displayName: "c", workspaceId: null },
+  { path: "/repos/a", displayName: "a", alias: null, workspaceId: null },
+  { path: "/repos/b", displayName: "b", alias: null, workspaceId: null },
+  { path: "/repos/c", displayName: "c", alias: null, workspaceId: null },
 ];
 
 function setup(activePath = "/repos/b", onClose = vi.fn(), busyPaths: ReadonlySet<string> = new Set()) {

@@ -174,8 +174,8 @@ describe("useAppState", () => {
     let receivedSelection: string[] | null | undefined;
     const client = transferClient({
       getGraphBranchSelection: async () => ["main"],
-      getCommitGraph: async (_repoPath, _limit, selectedBranches) => {
-        receivedSelection = selectedBranches;
+      getCommitGraph: async (_repoPath, _limit, selection) => {
+        receivedSelection = selection.local;
         return [];
       },
     });
@@ -184,7 +184,7 @@ describe("useAppState", () => {
     await act(() => result.current.refresh());
 
     expect(receivedSelection).toEqual(["main"]);
-    expect(result.current.state.graphBranchSelection).toEqual(["main"]);
+    expect(result.current.state.graphSelection.local).toEqual(["main"]);
   });
 
   it("loadMoreHistory refetches the graph with a larger limit", async () => {
@@ -256,8 +256,8 @@ describe("useAppState", () => {
         saved = branches;
       },
       getGraphBranchSelection: async () => saved ?? null,
-      getCommitGraph: async (_repoPath, _limit, selectedBranches) => {
-        selectionForGraph = selectedBranches;
+      getCommitGraph: async (_repoPath, _limit, selection) => {
+        selectionForGraph = selection.local;
         return [];
       },
     });
@@ -267,7 +267,7 @@ describe("useAppState", () => {
 
     expect(saved).toEqual(["feature"]);
     expect(selectionForGraph).toEqual(["feature"]);
-    expect(result.current.state.graphBranchSelection).toEqual(["feature"]);
+    expect(result.current.state.graphSelection.local).toEqual(["feature"]);
   });
 
   it("setGraphRemoteBranchSelection persists the selection and reloads it on refresh", async () => {
@@ -283,7 +283,7 @@ describe("useAppState", () => {
     await act(() => result.current.setGraphRemoteBranchSelection(["origin/feature"]));
 
     expect(saved).toEqual(["origin/feature"]);
-    expect(result.current.state.graphRemoteBranchSelection).toEqual(["origin/feature"]);
+    expect(result.current.state.graphSelection.remote).toEqual(["origin/feature"]);
   });
 
   it("setGraphRemoteBranchSelection leaves getCommitGraph's local-selection arg untouched", async () => {
@@ -291,8 +291,8 @@ describe("useAppState", () => {
     const client = transferClient({
       getGraphBranchSelection: async () => ["main"],
       setGraphRemoteBranchSelection: async () => {},
-      getCommitGraph: async (_repoPath, _limit, selectedBranches) => {
-        selectedBranchesSeen.push(selectedBranches);
+      getCommitGraph: async (_repoPath, _limit, selection) => {
+        selectedBranchesSeen.push(selection.local);
         return [];
       },
     });
@@ -301,7 +301,7 @@ describe("useAppState", () => {
     await act(() => result.current.refresh());
     await act(() => result.current.setGraphRemoteBranchSelection(["origin/feature"]));
 
-    // The remote-branch selection is a separate axis from the local `selectedBranches` arg
+    // The remote-branch selection is a separate axis from the local `selection.local`
     // `getCommitGraph` is called with — the two refreshes above must pass the identical local
     // selection regardless of the remote-selection mutation in between.
     expect(selectedBranchesSeen).toEqual([["main"], ["main"]]);
@@ -315,8 +315,8 @@ describe("useAppState", () => {
       setGraphRemoteBranchSelection: async (_repoPath, branches) => {
         savedRemote = branches;
       },
-      getCommitGraph: async (_repoPath, _limit, _selectedBranches, remoteBranches) => {
-        remoteSeen.push(remoteBranches);
+      getCommitGraph: async (_repoPath, _limit, selection) => {
+        remoteSeen.push(selection.remote);
         return [];
       },
     });
@@ -344,8 +344,8 @@ describe("useAppState", () => {
           writes.push(`remote:${branches.join(",")}`);
           saved.remote = branches;
         },
-        getCommitGraph: async (_repoPath, _limit, selectedBranches, remoteBranches) => {
-          graphCalls.push([selectedBranches, remoteBranches]);
+        getCommitGraph: async (_repoPath, _limit, selection) => {
+          graphCalls.push([selection.local, selection.remote]);
           return [];
         },
       });
@@ -383,7 +383,7 @@ describe("useAppState", () => {
 
       expect(writes).toEqual(["local:main"]);
       expect(graphCalls.at(-1)).toEqual([["main"], []]);
-      expect(result.current.state.graphRemoteBranchSelection).toBeNull();
+      expect(result.current.state.graphSelection.remote).toBeNull();
     });
   });
 
@@ -412,8 +412,8 @@ describe("useAppState", () => {
           writes.push("clear remote");
           saved.remote = null;
         },
-        getCommitGraph: async (_repoPath, _limit, selectedBranches, remoteBranches) => {
-          graphCalls.push([selectedBranches, remoteBranches]);
+        getCommitGraph: async (_repoPath, _limit, selection) => {
+          graphCalls.push([selection.local, selection.remote]);
           return [];
         },
       });
@@ -430,8 +430,8 @@ describe("useAppState", () => {
 
       expect(writes).toEqual(["clear local", "clear remote"]);
       expect(graphCalls.slice(callsBefore)).toEqual([[null, []]]);
-      expect(result.current.state.graphBranchSelection).toBeNull();
-      expect(result.current.state.graphRemoteBranchSelection).toBeNull();
+      expect(result.current.state.graphSelection.local).toBeNull();
+      expect(result.current.state.graphSelection.remote).toBeNull();
     });
 
     it("clearGraphBranchSelection forgets only the local selection", async () => {
@@ -443,8 +443,8 @@ describe("useAppState", () => {
 
       expect(writes).toEqual(["clear local"]);
       expect(graphCalls.at(-1)).toEqual([null, ["origin/feature"]]);
-      expect(result.current.state.graphBranchSelection).toBeNull();
-      expect(result.current.state.graphRemoteBranchSelection).toEqual(["origin/feature"]);
+      expect(result.current.state.graphSelection.local).toBeNull();
+      expect(result.current.state.graphSelection.remote).toEqual(["origin/feature"]);
     });
   });
 

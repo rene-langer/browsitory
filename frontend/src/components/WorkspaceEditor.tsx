@@ -13,10 +13,13 @@ function basename(path: string): string {
 export function WorkspaceEditor({
   client,
   existing,
+  aliases,
   onSave,
   onCancel,
 }: {
   client: RepoClient;
+  /** Tab names by repository path (#625): a member with one is listed by it. */
+  aliases?: ReadonlyMap<string, string>;
   existing?: Workspace;
   onSave: (name: string, root: string, members: string[]) => Promise<void>;
   onCancel: () => void;
@@ -98,7 +101,7 @@ export function WorkspaceEditor({
                     onChange={() => toggle(path)}
                   />
                   <label htmlFor={`member-${path}`} title={path}>
-                    {basename(path)}
+                    {aliases?.get(path) ?? basename(path)}
                   </label>
                 </li>
               ))}

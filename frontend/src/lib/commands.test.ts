@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
+  type AppCommands,
   buildCommands,
   commitPickerItems,
   type CommandContext,
@@ -24,18 +25,23 @@ import { stashBlockers } from "./actions/stashActions";
 import { operationBlockers } from "./operationStatus";
 import type { OpenRepo } from "../state/useOpenRepos";
 import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
+import type { RootFileName } from "../ipc/RepoClient";
+import { rootFileItems } from "./rootFiles";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
   return {
     state: {
       repoPath: "/repo",
       selectedRow: "uncommitted",
+      navigation: { entries: ["uncommitted"], index: 0, merging: false },
       status: [],
       commits: [],
+      graphRows: [],
+      collapseMerges: false,
+      expandedMerges: {},
       graphLimit: 300,
       hasMoreHistory: false,
-      graphBranchSelection: null,
-      graphRemoteBranchSelection: null,
+      graphSelection: { local: null, remote: null },
       branches: [
         { name: "main", isCurrent: true },
         { name: "feature", isCurrent: false },
@@ -72,12 +78,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       stashes: [{ index: 0, message: "WIP", commitId: "ccc" }],
       mergeMessage: null,
       forcePushOffer: null,
-      forcePushConfirm: null,
       fetchPrune: null,
-      pushDialog: null,
-      deleteRemoteBranchDialog: null,
-      createTagDialog: null,
-      deleteRemoteTagDialog: null,
       headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
       amendMode: false,
       skipHooks: false,
@@ -87,14 +88,11 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       rebaseProgress: null,
       rebaseOnto: null,
       rebasePreset: null,
-      rewordDialog: null,
       historyEditOutcome: null,
       patchOutcome: null,
       pendingPull: null,
       pullOutcome: null,
-      mergeDialog: null,
       mergeOutcome: null,
-      stashDialog: null,
       stashRestoreIndex: true,
       stashOutcome: null,
       transfer: null,
@@ -102,7 +100,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       errorHint: null,
       pending: false,
       addRemoteDraftOpen: false,
-      remoteDialog: null,
+      dialog: null,
       refreshGeneration: 0,
       undoState: { undo: null, redo: null },
       ...overrides,
@@ -147,8 +145,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     listRemoteBranches: vi.fn(),
     fetchRemote: vi.fn(),
     createTag: vi.fn(),
-    openCreateTagDialog: vi.fn(),
-    closeCreateTagDialog: vi.fn(),
+    openDialog: vi.fn(),
+    closeDialog: vi.fn(),
     deleteTag: vi.fn(),
     pushCurrentBranch: vi.fn(),
     pushTags: vi.fn(),
@@ -157,10 +155,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     openCreateBranchDraft: vi.fn(),
     closeCreateBranchDraft: vi.fn(),
     openAddRemoteDraft: vi.fn(),
-    openRemoteDialog: vi.fn(),
-    closeRemoteDialog: vi.fn(),
     closeAddRemoteDraft: vi.fn(),
-    requestForcePush: vi.fn(),
     cherryPick: vi.fn(),
     revertCommit: vi.fn(),
     cherryPickMany: vi.fn(),
@@ -176,23 +171,13 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     fetchAllRemotes: vi.fn(),
     setFetchPrune: vi.fn(),
     pushBranch: vi.fn(),
-    openPushDialog: vi.fn(),
-    closePushDialog: vi.fn(),
     deleteRemoteBranch: vi.fn(),
-    openDeleteRemoteBranchDialog: vi.fn(),
-    closeDeleteRemoteBranchDialog: vi.fn(),
     deleteRemoteTag: vi.fn(),
-    openDeleteRemoteTagDialog: vi.fn(),
-    closeDeleteRemoteTagDialog: vi.fn(),
     saveStash: vi.fn(),
-    openStashDialog: vi.fn(),
-    closeStashDialog: vi.fn(),
     applyStash: vi.fn(),
     popStash: vi.fn(),
     setStashRestoreIndex: vi.fn(),
     dropStash: vi.fn(),
-    openMergeDialog: vi.fn(),
-    closeMergeDialog: vi.fn(),
     getMergeOptions: vi.fn(),
     mergeBranch: vi.fn(),
     mergePull: vi.fn(),
@@ -206,8 +191,6 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     closeRebasePlanner: vi.fn(),
     startRebase: vi.fn(),
     editHistory: vi.fn(),
-    openRewordDialog: vi.fn(),
-    closeRewordDialog: vi.fn(),
     rebaseContinue: vi.fn(),
     abortRebase: vi.fn(),
     listPullRequests: vi.fn(),
@@ -225,6 +208,9 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     isolateGraphBranch: vi.fn(),
     loadMoreHistory: vi.fn(),
     loadHistoryThrough: vi.fn(),
+    setCollapseMerges: vi.fn(),
+    expandMerge: vi.fn(),
+    collapseMerge: vi.fn(),
     refresh: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -236,6 +222,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     closeHookFailure: vi.fn(),
     clearCommitMessageHandled: vi.fn(),
     retryWithoutHooks: vi.fn(),
+    stepNavigation: vi.fn(() => null),
   };
 }
 
@@ -291,8 +278,8 @@ describe("buildCommands", () => {
     commands.find((command) => command.label === "Push branch to…")!.run();
     commands.find((command) => command.label === "Delete remote branch…")!.run();
     expect(appState.fetchAllRemotes).toHaveBeenCalled();
-    expect(appState.openPushDialog).toHaveBeenCalledWith("main");
-    expect(appState.openDeleteRemoteBranchDialog).toHaveBeenCalledWith(null, null);
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "push", localBranch: "main" });
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "deleteRemoteBranch", remoteName: null, branchName: null });
   });
 
   it("hides the new remote commands without a remote, and Push branch to… on a detached HEAD", () => {
@@ -347,6 +334,20 @@ describe("buildCommands", () => {
     expect(cmd?.label).toBe("Search commits");
     cmd?.run();
     expect(onSearchCommits).toHaveBeenCalled();
+  });
+
+  it("toggles Collapse merges, named for what it does next (#617)", () => {
+    const off = makeAppState({ collapseMerges: false });
+    const on = makeAppState({ collapseMerges: true });
+    const offCmd = commandsFor(off).find((c) => c.id === "toggle-collapse-merges");
+    const onCmd = commandsFor(on).find((c) => c.id === "toggle-collapse-merges");
+
+    expect(offCmd?.label).toBe("Collapse merges");
+    expect(onCmd?.label).toBe("Show every commit of merged branches");
+    offCmd?.run();
+    expect(off.setCollapseMerges).toHaveBeenCalledWith(true);
+    onCmd?.run();
+    expect(on.setCollapseMerges).toHaveBeenCalledWith(false);
   });
 
   it("includes a Close tab command, grouped under Repositories, only with the tab commands", () => {
@@ -573,7 +574,7 @@ describe("buildCommands", () => {
     expect(merge?.label).toBe("Merge feature into current branch…");
     expect(commands.some((c) => c.id === "merge-branch:main")).toBe(false);
     merge?.run();
-    expect(appState.openMergeDialog).toHaveBeenCalledWith("feature");
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "merge", branchName: "feature" });
 
     const merging = commandsFor(makeAppState({ mergeMessage: "Merge branch" }));
     expect(merging.some((c) => c.id.startsWith("merge-branch:"))).toBe(false);
@@ -589,7 +590,7 @@ describe("buildCommands", () => {
     const withOptions = commands.find((c) => c.id === "stash-with-options");
     expect(withOptions?.label).toBe("Stash…");
     withOptions?.run();
-    expect(appState.openStashDialog).toHaveBeenCalledWith([]);
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "stash", paths: [] });
   });
 
   it("offers show and pop per stash", () => {
@@ -642,8 +643,8 @@ describe("buildCommands", () => {
   it("includes a Switch to <repo> command for every other open repo", () => {
     const appState = makeAppState();
     const otherRepos = [
-      { path: "/repos/widget", displayName: "widget", workspaceId: null },
-      { path: "/repos/gadget", displayName: "gadget", workspaceId: null },
+      { path: "/repos/widget", displayName: "widget", alias: null, workspaceId: null },
+      { path: "/repos/gadget", displayName: "gadget", alias: null, workspaceId: null },
     ];
     const onSwitchRepoTab = vi.fn();
     const commands = commandsFor(appState, { tabs: tabs({ onOpenRepoTab: vi.fn(), otherOpenRepos: otherRepos, onSwitchRepoTab: onSwitchRepoTab }) });
@@ -860,7 +861,7 @@ describe("buildCommands", () => {
       ],
     ])("omits the stash commands while %s, like DiffPane's Stash button", (_label, overrides) => {
       const ids = commandsFor(makeAppState(overrides), { diff: {
-        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
+        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
         update: vi.fn(),
         currentFile: "a.txt",
         requestDiscardCurrentFile: vi.fn(),
@@ -1100,6 +1101,68 @@ describe("history commands", () => {
     expect(appState.resetToCommit).not.toHaveBeenCalled();
   });
 
+  // #515: a commit the search results or file history list, beyond the loaded graph.
+  describe("a listed commit outside the loaded graph (#515)", () => {
+    const listed = { ...graphCommit("old", []), shortId: "old1234" };
+    const listedState: Partial<AppState> = { ...historyState, selectedRow: { commitId: "old" } };
+    const withListed = (appState: UseAppStateResult, commitCommands = makeCommitCommands()) =>
+      commandsFor(appState, { commit: { ...commitCommands, listedCommits: [listed] } });
+
+    it("offers the commit menu's actions from the listed commit's own data, and runs them", () => {
+      const commitCommands = makeCommitCommands();
+      const commands = withListed(makeAppState(listedState), commitCommands);
+      const label = (id: string) => commands.find((c) => c.id === id)?.label;
+      expect(label("cherry-pick-selected")).toBe("Cherry-pick old1234");
+      expect(label("revert-selected")).toBe("Revert old1234");
+      expect(label("reset-selected")).toBe("Reset to old1234…");
+      expect(label("checkout-selected")).toBe("Checkout old1234 (detached)");
+      expect(label("create-tag-selected")).toBe("Create tag at old1234…");
+      commands.find((c) => c.id === "cherry-pick-selected")!.run();
+      commands.find((c) => c.id === "revert-selected")!.run();
+      commands.find((c) => c.id === "reset-selected")!.run();
+      expect(commitCommands.onCherryPick).toHaveBeenCalledWith("old");
+      expect(commitCommands.onRevert).toHaveBeenCalledWith("old");
+      expect(commitCommands.onReset).toHaveBeenCalledWith("old");
+    });
+
+    it("asks for the parent of a listed merge commit", () => {
+      const merge = { ...graphCommit("m9", ["p1", "p2"]), shortId: "m9" };
+      const commitCommands = makeCommitCommands();
+      const commands = commandsFor(makeAppState({ ...historyState, selectedRow: { commitId: "m9" } }), {
+        commit: { ...commitCommands, listedCommits: [merge] },
+      });
+      expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m9…");
+      commands.find((c) => c.id === "revert-selected")!.run();
+      expect(commitCommands.onChooseParent).toHaveBeenCalledWith("Revert", "m9");
+    });
+
+    it("follows the commit menu's availability: none while blocked, no reset on a detached HEAD", () => {
+      const blockedIds = withListed(makeAppState({ ...listedState, mergeMessage: "Merge x" })).map((c) => c.id);
+      for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected", "checkout-selected"]) {
+        expect(blockedIds).not.toContain(id);
+      }
+      const detached = withListed(makeAppState({ ...listedState, branches: [] })).map((c) => c.id);
+      expect(detached).toContain("cherry-pick-selected");
+      expect(detached).not.toContain("reset-selected");
+    });
+
+    it("leaves out the history edits, which need the commit's ancestry in the graph", () => {
+      const ids = withListed(makeAppState(listedState)).map((c) => c.id);
+      for (const id of ["reword-selected", "squash-selected", "fixup-selected", "drop-selected", "move-up-selected"]) {
+        expect(ids).not.toContain(id);
+      }
+    });
+
+    it("offers nothing for a selected commit neither the graph nor a list has", () => {
+      const ids = commandsFor(makeAppState({ ...historyState, selectedRow: { commitId: "gone" } }), {
+        commit: { ...makeCommitCommands(), listedCommits: [listed] },
+      }).map((c) => c.id);
+      for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected", "checkout-selected"]) {
+        expect(ids).not.toContain(id);
+      }
+    });
+  });
+
   it("leaves out cherry-pick, revert and reset without the commit actions to run them", () => {
     const ids = commandsFor(makeAppState(historyState)).map((c) => c.id);
     for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected"]) expect(ids).not.toContain(id);
@@ -1200,14 +1263,13 @@ describe("history commands", () => {
   });
 
   it("runs cherry-pick on the selected commit and force push through the confirm", () => {
-    const requestForcePush = vi.fn();
-    const appState = { ...makeAppState(historyState), requestForcePush };
+    const appState = makeAppState(historyState);
     const commitCommands = makeCommitCommands();
     const commands = buildWithCommitCommands(appState, commitCommands);
     commands.find((command) => command.id === "cherry-pick-selected")!.run();
     commands.find((command) => command.id === "force-push")!.run();
     expect(commitCommands.onCherryPick).toHaveBeenCalledWith("c2");
-    expect(requestForcePush).toHaveBeenCalledWith("origin");
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "forcePush", remoteName: "origin" });
   });
 
   it("opens the create-tag dialog at the selected commit or at HEAD", () => {
@@ -1216,11 +1278,11 @@ describe("history commands", () => {
     const selected = commands.find((command) => command.id === "create-tag-selected")!;
     expect(selected.label).toBe("Create tag at c2…");
     selected.run();
-    expect(appState.openCreateTagDialog).toHaveBeenLastCalledWith("c2");
+    expect(appState.openDialog).toHaveBeenLastCalledWith({ kind: "createTag", commitId: "c2" });
     const head = commands.find((command) => command.id === "create-tag-head")!;
     expect(head.label).toBe("Create tag at HEAD…");
     head.run();
-    expect(appState.openCreateTagDialog).toHaveBeenLastCalledWith("c1");
+    expect(appState.openDialog).toHaveBeenLastCalledWith({ kind: "createTag", commitId: "c1" });
   });
 
   it("offers Create tag at HEAD… only once HEAD has a commit", () => {
@@ -1274,7 +1336,7 @@ describe("history commands", () => {
       byId("drop-selected").run();
       expect(appState.editHistory).toHaveBeenLastCalledWith("c2", "c3", { kind: "Drop" });
       byId("reword-selected").run();
-      expect(appState.openRewordDialog).toHaveBeenCalledWith("c2", "c3");
+      expect(appState.openDialog).toHaveBeenCalledWith({ kind: "reword", commitId: "c2", onto: "c3" });
     });
 
     it("leaves out edits the menu disables", () => {
@@ -1292,7 +1354,7 @@ describe("history commands", () => {
 });
 
 describe("diff option and discard commands", () => {
-  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const };
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true };
   const build = (state: ReturnType<typeof makeAppState>, extra: Record<string, unknown> = {}) => {
     const diffCommands = {
       settings,
@@ -1313,7 +1375,7 @@ describe("diff option and discard commands", () => {
     const command = commands.find((c) => c.id === "stash-current-file");
     expect(command?.label).toBe("Stash src/a.ts…");
     command!.run();
-    expect(state.openStashDialog).toHaveBeenCalledWith(["src/a.ts"]);
+    expect(state.openDialog).toHaveBeenCalledWith({ kind: "stash", paths: ["src/a.ts"] });
   });
 
   it("offers file history of the current file, even while an operation is running", () => {
@@ -1336,6 +1398,8 @@ describe("diff option and discard commands", () => {
     const { commands, diffCommands } = build(makeAppState());
     commands.find((c) => c.id === "toggle-ignore-whitespace")!.run();
     expect(diffCommands.update).toHaveBeenCalledWith({ ignoreWhitespace: true });
+    commands.find((c) => c.id === "toggle-show-whitespace")!.run();
+    expect(diffCommands.update).toHaveBeenCalledWith({ showWhitespace: true });
     commands.find((c) => c.id === "increase-context-lines")!.run();
     expect(diffCommands.update).toHaveBeenCalledWith({ contextLines: 4 });
     commands.find((c) => c.id === "decrease-context-lines")!.run();
@@ -1376,6 +1440,37 @@ describe("diff option and discard commands", () => {
     expect(diffCommands.requestDiscardCurrentFile).toHaveBeenCalled();
     commands.find((c) => c.id === "discard-all-unstaged")!.run();
     expect(diffCommands.requestDiscardAllUnstaged).toHaveBeenCalled();
+  });
+
+  it("offers deleting the untracked files, which only requests a confirmation (#622)", () => {
+    const status = [
+      { path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const },
+      { path: "new.txt", oldPath: null, staged: false, kind: "New" as const },
+    ];
+    const requestDeleteUntracked = vi.fn();
+    const { commands } = build(makeAppState({ status }), { requestDeleteUntracked });
+    const command = commands.find((c) => c.id === "delete-untracked-files");
+    expect(command?.label).toBe("Delete untracked files…");
+    command!.run();
+    expect(requestDeleteUntracked).toHaveBeenCalled();
+    expect(command?.group).toBe("Diff");
+    // Next to "Discard all unstaged changes" in the palette's list.
+    const ids = commands.map((c) => c.id);
+    expect(ids.indexOf("delete-untracked-files")).toBe(ids.indexOf("discard-all-unstaged") + 1);
+  });
+
+  it("omits deleting the untracked files without any, or while busy (#622)", () => {
+    const extra = { requestDeleteUntracked: vi.fn() };
+    const tracked = [
+      { path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const },
+      { path: "staged.txt", oldPath: null, staged: true, kind: "New" as const },
+    ];
+    expect(build(makeAppState({ status: tracked }), extra).commands.some((c) => c.id === "delete-untracked-files")).toBe(
+      false,
+    );
+    const untracked = [{ path: "new.txt", oldPath: null, staged: false, kind: "New" as const }];
+    const busy = build(makeAppState({ pending: true, status: untracked }), extra).commands;
+    expect(busy.some((c) => c.id === "delete-untracked-files")).toBe(false);
   });
 
   it("omits discard-all when only conflicted entries are unstaged", () => {
@@ -1419,7 +1514,7 @@ describe("diff option and discard commands", () => {
     commands.find((c) => c.id === "discard-selected-files")!.run();
     expect(requestDiscardSelection).toHaveBeenCalled();
     commands.find((c) => c.id === "stash-selected-files")!.run();
-    expect(state.openStashDialog).toHaveBeenCalledWith(["a.txt", "b.txt"]);
+    expect(state.openDialog).toHaveBeenCalledWith({ kind: "stash", paths: ["a.txt", "b.txt"] });
 
     expect(build(state).commands.some((c) => c.id.endsWith("-selected-files"))).toBe(false);
   });
@@ -1439,6 +1534,34 @@ describe("diff option and discard commands", () => {
 
     expect(commands.some((c) => c.id === "stage-selected-files")).toBe(false);
     expect(commands.some((c) => c.id === "discard-selected-files")).toBe(false);
+  });
+
+  it("offers staging the tracked files' changes only (#621)", () => {
+    const status = [
+      { path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const },
+      { path: "gone.txt", oldPath: null, staged: false, kind: "Deleted" as const },
+      { path: "new.txt", oldPath: null, staged: false, kind: "New" as const },
+      { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" as const },
+      { path: "b.txt", oldPath: null, staged: true, kind: "Modified" as const },
+    ];
+    const state = makeAppState({ status });
+    const command = build(state).commands.find((c) => c.id === "stage-modified-files");
+    expect(command?.label).toBe("Stage modified files (tracked only)");
+    command!.run();
+    expect(state.stageAllFiles).toHaveBeenCalledWith(["a.txt", "gone.txt"]);
+    expect(command?.group).toBe("Diff");
+  });
+
+  it("omits staging the tracked files' changes when there are none, or while busy (#621)", () => {
+    const untrackedAndConflict = [
+      { path: "new.txt", oldPath: null, staged: false, kind: "New" as const },
+      { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" as const },
+    ];
+    const none = build(makeAppState({ status: untrackedAndConflict })).commands;
+    expect(none.some((c) => c.id === "stage-modified-files")).toBe(false);
+    const modified = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }];
+    const busy = build(makeAppState({ pending: true, status: modified })).commands;
+    expect(busy.some((c) => c.id === "stage-modified-files")).toBe(false);
   });
 
   it("groups the new commands", () => {
@@ -1485,7 +1608,7 @@ describe("preferences and external tool commands", () => {
     onOpenCurrentFileInDiffTool: vi.fn(),
   });
   const diffCommands = (currentFile: string | null) => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true },
     update: vi.fn(),
     currentFile,
     requestDiscardCurrentFile: vi.fn(),
@@ -1544,6 +1667,59 @@ describe("preferences and external tool commands", () => {
     expect(onOpenUserGuide).toHaveBeenCalled();
   });
 
+  it("adds Reopen closed tab, grouped under Repositories, only when a closed tab can be reopened (#613)", () => {
+    const onReopenClosedTab = vi.fn();
+    const build = (appCommands: AppCommands) => buildCommands({ appState: makeAppState({ pending: true }), app: appCommands });
+    expect(build({}).some((c) => c.id === "reopen-closed-tab")).toBe(false);
+    // Offered while an operation runs: it opens another tab, it doesn't touch this one.
+    const reopen = build({ onReopenClosedTab }).find((c) => c.id === "reopen-closed-tab");
+    expect(reopen?.label).toBe("Reopen closed tab");
+    expect(reopen?.group).toBe("Repositories");
+    reopen!.run();
+    expect(onReopenClosedTab).toHaveBeenCalledOnce();
+  });
+
+  it("adds Rename tab…, grouped under Repositories, also while an operation runs (#625)", () => {
+    const onRenameTab = vi.fn();
+    const build = (appCommands: AppCommands) => buildCommands({ appState: makeAppState({ pending: true }), app: appCommands });
+    expect(build({}).some((c) => c.id === "rename-tab")).toBe(false);
+    const rename = build({ onRenameTab }).find((c) => c.id === "rename-tab");
+    expect(rename?.label).toBe("Rename tab…");
+    expect(rename?.keywords).toEqual(expect.arrayContaining(["rename", "alias", "tab"]));
+    expect(rename?.group).toBe("Repositories");
+    rename!.run();
+    expect(onRenameTab).toHaveBeenCalledOnce();
+  });
+
+  it("adds Switch to tab…, a picker of the other open tabs by name, folder name and path (#625)", () => {
+    const onSwitchRepoTab = vi.fn();
+    const otherRepos = [
+      { path: "/work/one/app", displayName: "app (main)", alias: "app (main)", workspaceId: null },
+      { path: "/work/two/app", displayName: "app", alias: null, workspaceId: null },
+      { path: "/libs/core", displayName: "core", alias: null, workspaceId: "ws-1" },
+    ];
+    expect(commandsFor(makeAppState(), { tabs: tabs({ onSwitchRepoTab }) }).some((c) => c.id === "switch-to-tab")).toBe(false);
+
+    const commands = commandsFor(makeAppState(), { tabs: tabs({ otherOpenRepos: otherRepos, onSwitchRepoTab }) });
+    const switchTo = commands.find((c) => c.id === "switch-to-tab");
+    expect(switchTo?.label).toBe("Switch to tab…");
+    expect(switchTo?.group).toBe("Repositories");
+    const items = (query: string) => switchTo!.picker!.items(query).map((item) => item.label);
+    expect(items("")).toEqual(["app (main)", "app", "core"]);
+    expect(items("main")).toEqual(["app (main)"]);
+    // The renamed tab's folder name and the path find it too; an exact name comes first.
+    expect(items("app")).toEqual(["app", "app (main)"]);
+    expect(items("/work/two")).toEqual(["app"]);
+    expect(items("libs")).toEqual(["core"]);
+
+    switchTo!.picker!.items("core")[0].run();
+    expect(onSwitchRepoTab).toHaveBeenCalledWith("/libs/core");
+    // The one-step commands find a tab by its folder name and path as well.
+    const renamed = commands.find((c) => c.id === "switch-repo:/work/one/app");
+    expect(renamed?.label).toBe("Switch to app (main)");
+    expect(renamed?.keywords).toEqual(expect.arrayContaining(["app", "/work/one/app"]));
+  });
+
   it("adds tool commands, with current-file ones only when there is a current file", () => {
     const toolCommands = tools();
     const without = build(makeAppState(), null, toolCommands).map((c) => c.label);
@@ -1569,6 +1745,30 @@ describe("preferences and external tool commands", () => {
       expect.arrayContaining(["Open terminal here", "Reveal repository", "Open current file in editor"]),
     );
   });
+
+  it("offers Open or Create for .gitignore and .gitattributes, none when bare (#624)", () => {
+    const onOpenRootFile = vi.fn();
+    const withFiles = (existing: RootFileName[] | null) =>
+      commandsFor(makeAppState({ pending: true }), {
+        diff: diffCommands(null),
+        tools: { ...tools(), rootFiles: rootFileItems(existing), onOpenRootFile },
+      });
+    const commands = withFiles([".gitattributes"]);
+    const gitignore = commands.find((c) => c.id === "open-root-file:.gitignore");
+    const gitattributes = commands.find((c) => c.id === "open-root-file:.gitattributes");
+    expect(gitignore).toMatchObject({ label: "Create .gitignore", group: "Repositories" });
+    expect(gitattributes).toMatchObject({ label: "Open .gitattributes", group: "Repositories" });
+    expect(filterAndSortCommands(commands, "gitignore")[0]).toBe(gitignore);
+    gitignore!.run();
+    expect(onOpenRootFile).toHaveBeenCalledWith({ name: ".gitignore", exists: false, label: "Create .gitignore" });
+    gitattributes!.run();
+    expect(onOpenRootFile).toHaveBeenLastCalledWith({ name: ".gitattributes", exists: true, label: "Open .gitattributes" });
+
+    expect(withFiles([".gitignore", ".gitattributes"]).map((c) => c.label)).toEqual(
+      expect.arrayContaining(["Open .gitignore", "Open .gitattributes"]),
+    );
+    expect(withFiles(null).filter((c) => c.id.startsWith("open-root-file:"))).toEqual([]);
+  });
 });
 
 describe("remote and tag palette entries", () => {
@@ -1587,7 +1787,7 @@ describe("remote and tag palette entries", () => {
     const command = commandsFor(appState).find((c) => c.id === id);
     expect(command?.label).toBe(label);
     command?.run();
-    expect(appState.openRemoteDialog).toHaveBeenCalledWith(kind, "fork");
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "remote", action: kind, remoteName: "fork" });
     expect(command?.group).toBe("Remotes");
   });
 
@@ -1621,7 +1821,7 @@ describe("remote and tag palette entries", () => {
     const command = commandsFor(appState).find((c) => c.id === "delete-remote-tag:v1");
     expect(command?.label).toBe("Delete tag v1 from remote…");
     command?.run();
-    expect(appState.openDeleteRemoteTagDialog).toHaveBeenCalledWith("v1");
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "deleteRemoteTag", tagName: "v1" });
 
     const ids = commandsFor(makeAppState({ tags, remotes: [] })).map((c) => c.id);
     expect(ids).not.toContain("delete-remote-tag:v1");
@@ -1684,7 +1884,7 @@ describe("Go to pickers (#441)", () => {
   });
 
   it("lists local branches, then remote ones the graph knows, and goes to the chosen one", () => {
-    const { picker, handlers } = pickers({ graphRemoteBranchSelection: ["upstream/dev"] });
+    const { picker, handlers } = pickers({ graphSelection: { local: null, remote: ["upstream/dev"] } });
     const items = picker("go-to-branch")!.picker!.items("");
     expect(items.map((i) => i.label)).toEqual(["main (current)", "feature", "origin/main", "upstream/dev"]);
 
@@ -1694,6 +1894,20 @@ describe("Go to pickers (#441)", () => {
     items[1].run();
     expect(handlers.onGoToBranch).toHaveBeenCalledWith("remote", "upstream/dev");
     expect(handlers.onGoToBranch).toHaveBeenCalledWith("local", "feature");
+  });
+
+  it("offers Back and Forward only while there is somewhere to go (#618)", () => {
+    expect(pickers().picker("go-back")).toBeUndefined();
+    expect(pickers().picker("go-forward")).toBeUndefined();
+    const handlers = { ...goTo(), onGoBack: vi.fn(), onGoForward: vi.fn() };
+    const { picker } = pickers({ pending: true }, handlers);
+    expect(picker("go-back")?.label).toBe("Back to previous commit");
+    expect(picker("go-back")?.group).toBe("Go to");
+    expect(picker("go-forward")?.group).toBe("Go to");
+    picker("go-back")!.run();
+    picker("go-forward")!.run();
+    expect(handlers.onGoBack).toHaveBeenCalledOnce();
+    expect(handlers.onGoForward).toHaveBeenCalledOnce();
   });
 
   it("goes to a tag's commit and to a stash", () => {
@@ -1808,14 +2022,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       remoteBranchesInGraph: [],
       remotes: state.remotes,
       upstream: state.upstream,
-      remoteUpstreams: {},
       onAddRemote: vi.fn().mockResolvedValue(null),
-      onRenameRemote: vi.fn().mockResolvedValue(true),
-      onUpdateRemoteUrls: vi.fn().mockResolvedValue(undefined),
-      onRemoveRemote: vi.fn().mockResolvedValue(undefined),
-      onSaveHttpsCredential: vi.fn().mockResolvedValue(undefined),
-      onForgetHttpsCredential: vi.fn().mockResolvedValue(undefined),
-      onSetRemoteAuthMode: vi.fn().mockResolvedValue(true),
       onSetUpstream: vi.fn().mockResolvedValue(undefined),
       onClearUpstream: vi.fn().mockResolvedValue(undefined),
       onListRemoteBranches: vi.fn().mockResolvedValue([]),
@@ -1833,6 +2040,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       onOpenPushDialog: fn(),
       onOpenDeleteRemoteBranch: fn(),
       refreshGeneration: 0,
+      onOpenRemoteDialog: fn(),
     });
   }
 
@@ -1967,11 +2175,12 @@ const allFamilies = (appState: UseAppStateResult) =>
     tabs: tabs({ otherOpenRepos: [{ path: "/other", displayName: "other" } as OpenRepo] }),
     sidebar: sidebar(),
     diff: {
-      settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
+      settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
       update: noop,
       currentFile: "b.txt",
       requestDiscardCurrentFile: noop,
       requestDiscardAllUnstaged: noop,
+      requestDeleteUntracked: noop,
       openCurrentFileHistory: noop,
       selection: { staged: false, paths: ["b.txt", "c.txt"] },
       requestDiscardSelection: noop,
@@ -1996,7 +2205,7 @@ function groupOf(id: string): CommandGroup {
 // #494: the commands, ids and groups before the builders were split by family. Recents are stored
 // by id, so a builder must keep the ids, and each group is now declared by the builder instead of
 // derived from the id. #583 and #592 moved the remote, diff and tag commands that had fallen
-// under "General" into their family's group.
+// under "General" into their family's group. #621 added "stage-modified-files" since.
 describe("command ids and groups", () => {
   const EXPECTED: Record<keyof typeof STATES, [string, CommandGroup][]> = {
     normal: [
@@ -2056,6 +2265,7 @@ describe("command ids and groups", () => {
       ["push-tags:origin", "Remotes"],
       ["redo", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["remove-remote:origin", "Remotes"],
       ["remove-worktree:wt1", "General"],
       ["reset-selected", "General"],
@@ -2066,14 +2276,17 @@ describe("command ids and groups", () => {
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
+      ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["stash-current-file", "Stash"],
       ["stash-selected-files", "Stash"],
       ["stash-with-options", "Stash"],
       ["switch-branch:feature", "Branches"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2114,15 +2327,19 @@ describe("command ids and groups", () => {
       ["rebase-abort", "General"],
       ["rebase-continue", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["reveal-repository", "Repositories"],
       ["save-staged-patch", "Diff"],
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
+      ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2161,15 +2378,19 @@ describe("command ids and groups", () => {
       ["check-for-updates", "General"],
       ["preferences", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["reveal-repository", "Repositories"],
       ["save-staged-patch", "Diff"],
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
+      ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2207,19 +2428,23 @@ describe("command ids and groups", () => {
       ["check-for-updates", "General"],
       ["preferences", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["reveal-repository", "Repositories"],
       ["save-staged-patch", "Diff"],
       ["save-stash", "Stash"],
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
+      ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["stash-current-file", "Stash"],
       ["stash-selected-files", "Stash"],
       ["stash-with-options", "Stash"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2280,6 +2505,7 @@ describe("command ids and groups", () => {
       ["push-tags:origin", "Remotes"],
       ["redo", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["remove-remote:origin", "Remotes"],
       ["remove-worktree:wt1", "General"],
       ["reveal-repository", "Repositories"],
@@ -2289,8 +2515,10 @@ describe("command ids and groups", () => {
       ["stage-selected-files", "Diff"],
       ["switch-branch:feature", "Branches"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],

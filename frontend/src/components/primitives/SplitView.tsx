@@ -1,5 +1,8 @@
 import {
+  createContext,
+  useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -9,6 +12,17 @@ import {
 import styles from "./SplitView.module.css";
 
 const ARROW_KEY_STEP = 16;
+/** Matches `.right`'s `min-width` in SplitView.module.css. */
+const RIGHT_MIN_WIDTH = 320;
+/** Matches `.divider`'s `flex-basis`. */
+const DIVIDER_WIDTH = 1;
+
+/**
+ * Lets a SplitView nested in another one's right pane report the width it needs
+ * (its fixed left pane plus its own right pane's minimum), so the outer one
+ * collapses its collapsible left pane instead of squeezing the nested one (#605).
+ */
+const ReportRequiredWidth = createContext<((width: number) => void) | null>(null);
 
 function loadWidth(
   storageKey: string | undefined,
@@ -28,6 +42,27 @@ function loadWidth(
   return Math.min(max, Math.max(min, parsed));
 }
 
+/** The width a pane persisted as collapsed (0) re-expands to: the last width it had open. */
+function loadExpandedWidth(
+  storageKey: string | undefined,
+  defaultWidth: number,
+  min: number,
+  max: number,
+): number {
+  if (storageKey === undefined) return defaultWidth;
+  const parsed = Number.parseInt(localStorage.getItem(`${storageKey}-expanded`) ?? "", 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return defaultWidth;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+/**
+ * A fixed-width left pane, a draggable divider and a right pane that takes the
+ * rest. Resizing the container never changes the left pane's width: only the
+ * right pane grows and shrinks (#605). When the container is too narrow for the
+ * left pane plus the right pane's minimum (including a nested SplitView's fixed
+ * pane), a collapsible left pane hides; its width is kept and comes back once
+ * there is room again.
+ */
 export function SplitView({
   left,
   right,
@@ -53,11 +88,33 @@ export function SplitView({
   const [width, setWidth] = useState(() =>
     loadWidth(storageKey, defaultWidth, minWidth, maxWidth, collapsible),
   );
+  const expandedWidth = useRef<number | null>(null);
+  if (expandedWidth.current === null) {
+    expandedWidth.current =
+      width > 0 ? width : loadExpandedWidth(storageKey, defaultWidth, minWidth, maxWidth);
+  }
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
+  const [nestedRequiredWidth, setNestedRequiredWidth] = useState(0);
+  const reportRequiredWidth = useContext(ReportRequiredWidth);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (root === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry !== undefined) setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
 
   function persist(next: number) {
+    if (next > 0) expandedWidth.current = next;
     if (storageKey !== undefined) {
       localStorage.setItem(storageKey, String(next));
+      if (next > 0) localStorage.setItem(`${storageKey}-expanded`, String(next));
     }
   }
 
@@ -91,7 +148,7 @@ export function SplitView({
       window.removeEventListener("pointerup", handlePointerUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collapsible, minWidth, maxWidth]);
+  }, [collapsible, minWidth, maxWidth, storageKey]);
 
   function handleKeyDown(event: ReactKeyboardEvent) {
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
@@ -99,8 +156,7 @@ export function SplitView({
     // straight back to 0, so stepping alone can never re-expand the pane.
     // Treat either arrow key as an explicit expand instead.
     if (collapsible && width === 0) {
-      setWidth(defaultWidth);
-      persist(defaultWidth);
+      expand();
       return;
     }
     const delta = event.key === "ArrowRight" ? ARROW_KEY_STEP : -ARROW_KEY_STEP;
@@ -109,20 +165,48 @@ export function SplitView({
     persist(next);
   }
 
-  function handleDoubleClick() {
-    if (!collapsible) return;
-    const next = width === 0 ? defaultWidth : 0;
+  function expand() {
+    const next = expandedWidth.current ?? defaultWidth;
     setWidth(next);
     persist(next);
   }
 
-  const shownWidth = forceCollapsed ? 0 : width;
+  function handleDoubleClick() {
+    if (!collapsible) return;
+    if (width === 0) {
+      expand();
+      return;
+    }
+    setWidth(0);
+    persist(0);
+  }
+
+  const rightRequiredWidth = Math.max(RIGHT_MIN_WIDTH, nestedRequiredWidth);
+  const tooNarrow =
+    collapsible &&
+    containerWidth !== null &&
+    containerWidth < width + DIVIDER_WIDTH + rightRequiredWidth;
+  const shownWidth = forceCollapsed || tooNarrow ? 0 : width;
+  // A collapsible pane gives way when space runs out, so only a fixed one counts.
+  const requiredWidth = (collapsible ? 0 : shownWidth) + DIVIDER_WIDTH + rightRequiredWidth;
+
+  useLayoutEffect(() => {
+    reportRequiredWidth?.(requiredWidth);
+  }, [reportRequiredWidth, requiredWidth]);
+  useLayoutEffect(() => {
+    if (reportRequiredWidth === null) return;
+    return () => reportRequiredWidth(0);
+  }, [reportRequiredWidth]);
 
   return (
-    <div className={styles.splitView}>
+    <div className={styles.splitView} ref={rootRef}>
       {/* `hidden` keeps a collapsed pane mounted (no remount cost when it is
           re-expanded) while removing it from the tab order and a11y tree. */}
-      <div className={styles.left} hidden={shownWidth === 0} style={{ width: `${shownWidth}px` }}>
+      <div
+        className={styles.left}
+        hidden={shownWidth === 0}
+        style={{ width: `${shownWidth}px`, minWidth: `${Math.min(shownWidth, minWidth)}px` }}
+      >
         {left}
       </div>
       <div
@@ -139,7 +223,9 @@ export function SplitView({
         onDoubleClick={handleDoubleClick}
       />
       <div className={styles.right}>
-        <div className={styles.rightInner}>{right}</div>
+        <div className={styles.rightInner}>
+          <ReportRequiredWidth.Provider value={setNestedRequiredWidth}>{right}</ReportRequiredWidth.Provider>
+        </div>
       </div>
     </div>
   );

@@ -209,7 +209,7 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
     let graph = sidecar.call(
         2,
         "get_commit_graph",
-        serde_json::json!({"repoPath": repo_path, "limit": 10, "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path, "limit": 10, "selection": {"local": null, "remote": []}}),
     );
 
     let commits = graph["result"]
@@ -238,12 +238,12 @@ fn locate_commit_finds_a_commit_through_the_sidecar() {
     let found = sidecar.call(
         2,
         "locate_commit",
-        serde_json::json!({"repoPath": repo_path, "revision": &head[..7], "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path, "revision": &head[..7], "selection": {"local": null, "remote": []}}),
     );
     let missing = sidecar.call(
         3,
         "locate_commit",
-        serde_json::json!({"repoPath": repo_path, "revision": "no-such-branch", "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path, "revision": "no-such-branch", "selection": {"local": null, "remote": []}}),
     );
 
     assert_eq!(found["result"]["commitId"], head.as_str());
@@ -294,7 +294,7 @@ fn commit_graph_and_search_walk_the_selected_remote_branches_through_the_sidecar
         sidecar.call(
             id,
             "get_commit_graph",
-            serde_json::json!({"repoPath": repo_path, "limit": 10, "selectedBranches": null, "remoteBranches": remote}),
+            serde_json::json!({"repoPath": repo_path, "limit": 10, "selection": {"local": null, "remote": remote}}),
         )
     };
     assert_eq!(
@@ -312,7 +312,7 @@ fn commit_graph_and_search_walk_the_selected_remote_branches_through_the_sidecar
     let page = sidecar.call(
         4,
         "search_commits",
-        serde_json::json!({"repoPath": repo_path, "query": "remote", "refs": null, "remoteBranches": ["origin/feature"], "cursor": null}),
+        serde_json::json!({"repoPath": repo_path, "query": "remote", "selection": {"local": null, "remote": ["origin/feature"]}, "cursor": null}),
     );
     assert_eq!(summaries(&page, "commits"), ["remote only"]);
 }
@@ -332,7 +332,7 @@ fn search_commits_and_cancel_search_round_trip_through_the_sidecar() {
     let page = sidecar.call(
         2,
         "search_commits",
-        serde_json::json!({"repoPath": repo_path, "query": "beta", "refs": null, "remoteBranches": [], "cursor": null}),
+        serde_json::json!({"repoPath": repo_path, "query": "beta", "selection": {"local": null, "remote": []}, "cursor": null}),
     );
     let result = &page["result"];
     assert_eq!(result["commits"].as_array().unwrap().len(), 1);
@@ -343,7 +343,7 @@ fn search_commits_and_cancel_search_round_trip_through_the_sidecar() {
     let invalid = sidecar.call(
         3,
         "search_commits",
-        serde_json::json!({"repoPath": repo_path, "query": "feat: x", "refs": null, "remoteBranches": [], "cursor": null}),
+        serde_json::json!({"repoPath": repo_path, "query": "feat: x", "selection": {"local": null, "remote": []}, "cursor": null}),
     );
     assert!(invalid["error"]["message"]
         .as_str()
@@ -389,7 +389,7 @@ fn working_and_commit_diff_round_trip_through_the_sidecar() {
     let graph = sidecar.call(
         3,
         "get_commit_graph",
-        serde_json::json!({"repoPath": repo_path, "limit": 1, "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path, "limit": 1, "selection": {"local": null, "remote": []}}),
     );
     let head_id = graph["result"][0]["id"]
         .as_str()
@@ -609,6 +609,35 @@ fn persist_and_list_open_repos_round_trip() {
 }
 
 #[test]
+fn set_and_list_repo_aliases_round_trip() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let empty = sidecar.call(1, "list_repo_aliases", serde_json::json!({}));
+    assert_eq!(empty["result"], serde_json::json!([]));
+    let set = sidecar.call(
+        2,
+        "set_repo_alias",
+        serde_json::json!({"repoPath": "/repos/a", "alias": " app (review) "}),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null, "{set}");
+    let listed = sidecar.call(3, "list_repo_aliases", serde_json::json!({}));
+    assert_eq!(
+        listed["result"],
+        serde_json::json!([{"repoPath": "/repos/a", "alias": "app (review)"}])
+    );
+
+    let cleared = sidecar.call(
+        4,
+        "set_repo_alias",
+        serde_json::json!({"repoPath": "/repos/a", "alias": null}),
+    );
+    assert_eq!(cleared["result"], serde_json::Value::Null, "{cleared}");
+    let after = sidecar.call(5, "list_repo_aliases", serde_json::json!({}));
+    assert_eq!(after["result"], serde_json::json!([]));
+}
+
+#[test]
 fn scan_repos_in_root_finds_a_nested_repo() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let root = tempfile::TempDir::new().expect("create root dir");
@@ -674,7 +703,7 @@ fn graph_branch_selection_round_trips() {
     let set = sidecar.call(
         2,
         "set_graph_branch_selection",
-        serde_json::json!({"repoPath": repo_path, "selectedBranches": ["main", "feature"]}),
+        serde_json::json!({"repoPath": repo_path, "local": ["main", "feature"]}),
     );
     assert_eq!(set["result"], serde_json::Value::Null);
 
@@ -717,7 +746,7 @@ fn graph_remote_branch_selection_round_trips() {
     let set = sidecar.call(
         2,
         "set_graph_remote_branch_selection",
-        serde_json::json!({"repoPath": repo_path, "selectedBranches": ["origin/main"]}),
+        serde_json::json!({"repoPath": repo_path, "remote": ["origin/main"]}),
     );
     assert_eq!(set["result"], serde_json::Value::Null);
 
@@ -741,6 +770,107 @@ fn graph_remote_branch_selection_round_trips() {
         serde_json::json!({"repoPath": repo_path}),
     );
     assert_eq!(after_clear["result"], serde_json::Value::Null);
+}
+
+#[test]
+fn graph_collapse_merges_round_trips() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, _repo) = init_repo();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    let params = serde_json::json!({"repoPath": repo_path});
+
+    let before = sidecar.call(1, "get_graph_collapse_merges", params.clone());
+    let set = sidecar.call(
+        2,
+        "set_graph_collapse_merges",
+        serde_json::json!({"repoPath": repo_path, "collapse": true}),
+    );
+    let after = sidecar.call(3, "get_graph_collapse_merges", params);
+
+    assert_eq!(before["result"], false, "{before}");
+    assert_eq!(set["result"], serde_json::Value::Null);
+    assert_eq!(after["result"], true, "{after}");
+}
+
+#[test]
+fn a_collapsed_merge_expands_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    let tree = base.tree().unwrap();
+    let sig = repo.signature().unwrap();
+    let side_id = repo
+        .commit(None, &sig, &sig, "side work", &tree, &[&base])
+        .unwrap();
+    let side = repo.find_commit(side_id).unwrap();
+    let merge = repo
+        .commit(Some("HEAD"), &sig, &sig, "merge", &tree, &[&base, &side])
+        .unwrap()
+        .to_string();
+    let side_id = side_id.to_string();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    let collapsed = serde_json::json!({"local": null, "remote": [], "firstParent": true});
+
+    let graph = sidecar.call(
+        2,
+        "get_commit_graph",
+        serde_json::json!({"repoPath": repo_path, "limit": 10, "selection": collapsed}),
+    );
+    let merged = sidecar.call(
+        3,
+        "get_merged_commits",
+        serde_json::json!({"repoPath": repo_path, "mergeId": merge, "limit": 10}),
+    );
+    let located = sidecar.call(
+        4,
+        "locate_commit",
+        serde_json::json!({"repoPath": repo_path, "revision": side_id, "selection": collapsed}),
+    );
+
+    assert_eq!(graph["result"][0]["mergedCount"], 1, "{graph}");
+    assert!(graph["result"][1].get("mergedCount").is_none(), "{graph}");
+    assert_eq!(merged["result"][0]["id"], side_id.as_str(), "{merged}");
+    assert_eq!(
+        located["result"]["merge"],
+        serde_json::json!({"mergeId": merge, "mergePosition": 0, "offset": 0}),
+        "{located}"
+    );
+}
+
+#[test]
+fn commit_stats_round_trip_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "one\ntwo\n");
+    commit_all(&repo, "initial commit");
+    let head = repo.head().unwrap().target().unwrap().to_string();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let stats = sidecar.call(
+        2,
+        "get_commit_stats",
+        serde_json::json!({"repoPath": repo_path, "commitIds": [head], "withFiles": true}),
+    );
+
+    assert_eq!(
+        stats["result"],
+        serde_json::json!([{
+            "commitId": head,
+            "stats": {
+                "filesChanged": 1,
+                "insertions": 2,
+                "deletions": 0,
+                "files": [{"path": "file.txt", "insertions": 2, "deletions": 0, "binary": false}],
+            },
+        }]),
+        "{stats}"
+    );
 }
 
 #[test]
@@ -2142,7 +2272,7 @@ fn a_slow_request_on_one_repo_does_not_delay_a_fast_request_on_another() {
     sidecar.send(
         3,
         "get_commit_graph",
-        serde_json::json!({"repoPath": repo_path_a, "limit": 10, "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path_a, "limit": 10, "selection": {"local": null, "remote": []}}),
     );
     // Fast request against the unrelated repo B, sent right behind it on the same stdin pipe.
     sidecar.send(
@@ -2349,14 +2479,38 @@ fn diff_settings_round_trip_through_the_sidecar() {
         1,
         "set_diff_settings",
         serde_json::json!({
-            "settings": {"ignoreWhitespace": true, "contextLines": 6, "algorithm": "Default", "syntaxHighlight": false, "wordWrap": "Off"}
+            "settings": {"ignoreWhitespace": true, "contextLines": 6, "algorithm": "Default", "syntaxHighlight": false, "wordWrap": "Off", "showWhitespace": true, "expandUntracked": false}
         }),
     );
     assert_eq!(set["result"], serde_json::Value::Null, "{set}");
     let got = sidecar.call(2, "get_diff_settings", serde_json::json!({}));
     assert_eq!(
         got["result"],
-        serde_json::json!({"ignoreWhitespace": true, "contextLines": 6, "algorithm": "Default", "syntaxHighlight": false, "wordWrap": "Off"})
+        serde_json::json!({"ignoreWhitespace": true, "contextLines": 6, "algorithm": "Default", "syntaxHighlight": false, "wordWrap": "Off", "showWhitespace": true, "expandUntracked": false})
+    );
+}
+
+#[test]
+fn appearance_settings_round_trip_through_the_sidecar_clamped() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    let unset = sidecar.call(1, "get_appearance_settings", serde_json::json!({}));
+    assert_eq!(
+        unset["result"],
+        serde_json::json!({"codeFont": null, "codeFontSize": null, "uiSize": "Normal", "tabSize": 4})
+    );
+    let set = sidecar.call(
+        2,
+        "set_appearance_settings",
+        serde_json::json!({
+            "settings": {"codeFont": " Example Mono ", "codeFontSize": 99, "uiSize": "Large", "tabSize": 2}
+        }),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null, "{set}");
+    let got = sidecar.call(3, "get_appearance_settings", serde_json::json!({}));
+    assert_eq!(
+        got["result"],
+        serde_json::json!({"codeFont": "Example Mono", "codeFontSize": 24, "uiSize": "Large", "tabSize": 2})
     );
 }
 
@@ -2763,6 +2917,51 @@ fn read_file_version_and_repo_workdir_round_trip_through_the_sidecar() {
             .canonicalize()
             .unwrap(),
         dir.path().canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn root_files_are_listed_and_created_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, _repo) = init_repo();
+    write_file(dir.path(), ".gitattributes", "* text=auto\n");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let files = sidecar.call(
+        2,
+        "get_root_files",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(files["result"], serde_json::json!([".gitattributes"]));
+    let created = sidecar.call(
+        3,
+        "create_root_file",
+        serde_json::json!({"repoPath": repo_path, "name": ".gitignore"}),
+    );
+    assert_eq!(created["result"], serde_json::Value::Null, "{created}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+        ""
+    );
+    let refused = sidecar.call(
+        4,
+        "create_root_file",
+        serde_json::json!({"repoPath": repo_path, "name": "sub/.gitignore"}),
+    );
+    assert_eq!(
+        refused["error"]["message"],
+        "Only .gitignore and .gitattributes can be created."
+    );
+    let files = sidecar.call(
+        5,
+        "get_root_files",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        files["result"],
+        serde_json::json!([".gitignore", ".gitattributes"])
     );
 }
 

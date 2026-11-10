@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SplitView } from "./SplitView";
 
 describe("SplitView", () => {
@@ -195,6 +195,144 @@ describe("SplitView", () => {
 
     fireEvent.keyDown(divider, { key: "ArrowRight" });
     expect(divider).toHaveAttribute("aria-valuenow", "316");
+  });
+
+  describe("container resizing (#605)", () => {
+    // jsdom has no layout, so a fake ResizeObserver hands SplitView its container width.
+    const observed = new Map<Element, ResizeObserverCallback>();
+    class FakeResizeObserver {
+      private readonly callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+      observe(target: Element) {
+        observed.set(target, this.callback);
+      }
+      unobserve(target: Element) {
+        observed.delete(target);
+      }
+      disconnect() {
+        for (const [target, callback] of observed) {
+          if (callback === this.callback) observed.delete(target);
+        }
+      }
+    }
+    function resize(target: Element, width: number) {
+      const callback = observed.get(target);
+      if (callback === undefined) throw new Error("element is not observed");
+      act(() => {
+        callback(
+          [{ target, contentRect: { width } } as unknown as ResizeObserverEntry],
+          {} as ResizeObserver,
+        );
+      });
+    }
+    function splitViewOf(paneText: string): Element {
+      const root = screen.getByText(paneText).parentElement?.parentElement;
+      if (root == null) throw new Error("no split view");
+      return root;
+    }
+
+    beforeEach(() => {
+      observed.clear();
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("keeps the left pane width unchanged when the container shrinks", () => {
+      render(<SplitView left={<div>left</div>} right={<div>right</div>} defaultWidth={420} />);
+      const left = screen.getByText("left").parentElement;
+      resize(splitViewOf("left"), 1600);
+      expect(left).toHaveStyle({ width: "420px" });
+      resize(splitViewOf("left"), 900);
+      expect(left).toHaveStyle({ width: "420px" });
+      // Narrower than the pane plus the right pane's minimum: a fixed pane still keeps its width.
+      resize(splitViewOf("left"), 600);
+      expect(left).toHaveStyle({ width: "420px" });
+      expect(left).not.toHaveAttribute("hidden");
+    });
+
+    it("collapses a collapsible pane when the container is too narrow and restores it after", () => {
+      render(
+        <SplitView
+          left={<div>left</div>}
+          right={<div>right</div>}
+          storageKey="narrow-split"
+          defaultWidth={260}
+          collapsible
+        />,
+      );
+      const left = screen.getByText("left").parentElement;
+      resize(splitViewOf("left"), 581); // 260 + 1px divider + 320 right minimum
+      expect(left).toHaveStyle({ width: "260px" });
+      resize(splitViewOf("left"), 580);
+      expect(left).toHaveAttribute("hidden");
+      expect(localStorage.getItem("narrow-split")).toBeNull();
+      resize(splitViewOf("left"), 1200);
+      expect(left).not.toHaveAttribute("hidden");
+      expect(left).toHaveStyle({ width: "260px" });
+    });
+
+    it("collapses the outer pane when a nested split view's fixed pane would not fit", () => {
+      render(
+        <SplitView
+          left={<div>sidebar</div>}
+          right={
+            <SplitView left={<div>history</div>} right={<div>diff</div>} defaultWidth={420} />
+          }
+          defaultWidth={260}
+          collapsible
+        />,
+      );
+      const sidebar = screen.getByText("sidebar").parentElement;
+      const history = screen.getByText("history").parentElement;
+      // 260 + 1 + (420 + 1 + 320) = 1002
+      resize(splitViewOf("sidebar"), 1002);
+      expect(sidebar).not.toHaveAttribute("hidden");
+      resize(splitViewOf("sidebar"), 1001);
+      expect(sidebar).toHaveAttribute("hidden");
+      expect(history).toHaveStyle({ width: "420px" });
+      resize(splitViewOf("sidebar"), 1400);
+      expect(sidebar).not.toHaveAttribute("hidden");
+      expect(sidebar).toHaveStyle({ width: "260px" });
+    });
+  });
+
+  it("re-expands a collapsed pane to the width it had before collapsing", () => {
+    const { unmount } = render(
+      <SplitView
+        left={<div>left</div>}
+        right={<div>right</div>}
+        storageKey="test-restore"
+        defaultWidth={260}
+        collapsible
+      />,
+    );
+    const divider = screen.getByRole("separator");
+    fireEvent.pointerDown(divider, { clientX: 260 });
+    fireEvent.pointerMove(window, { clientX: 340 });
+    fireEvent.pointerUp(window);
+    fireEvent.doubleClick(divider);
+    expect(screen.getByText("left").parentElement).toHaveStyle({ width: "0px" });
+    fireEvent.doubleClick(divider);
+    expect(screen.getByText("left").parentElement).toHaveStyle({ width: "340px" });
+
+    // Also across a remount while collapsed.
+    fireEvent.doubleClick(divider);
+    unmount();
+    render(
+      <SplitView
+        left={<div>left</div>}
+        right={<div>right</div>}
+        storageKey="test-restore"
+        defaultWidth={260}
+        collapsible
+      />,
+    );
+    fireEvent.keyDown(screen.getByRole("separator"), { key: "ArrowRight" });
+    expect(screen.getByText("left").parentElement).toHaveStyle({ width: "340px" });
   });
 
   it("renders the right pane content inside the scrollable inner wrapper", () => {
