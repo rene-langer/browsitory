@@ -450,14 +450,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     [refresh],
   );
 
-  const {
-    runMutation,
-    runMutationWithOutcome,
-    runMutationWithMessage,
-    runOptimisticMutation,
-    runOptimisticMutationWithMessage,
-    runOptimisticMutationWithOutcome,
-  } = useMutationRunner(refresh, setState);
+  const mutationRunner = useMutationRunner(refresh, setState);
+  const { runMutation, runMutationWithOutcome, runOptimisticMutation, runOptimisticMutationWithMessage } =
+    mutationRunner;
 
   const staging = useStagingActions(client, repoPath, runMutation, runMutationWithOutcome, runOptimisticMutation, setState);
   const patches = usePatchActions(client, repoPath, runMutationWithOutcome, setState);
@@ -498,23 +493,20 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     reflogError,
   );
 
-  const remoteTransfer = useRemoteTransferActions(
+  const remoteTransfer = useRemoteTransferActions({
     client,
     repoPath,
     refresh,
-    runMutation,
-    runMutationWithMessage,
-    runMutationWithOutcome,
-    runOptimisticMutation,
-    runOptimisticMutationWithMessage,
-    runOptimisticMutationWithOutcome,
+    runners: mutationRunner,
     setState,
-    state.upstream,
-    state.fetchPrune,
-    currentBranch,
-    state.remotes,
-    state.tags,
-  );
+    snapshot: {
+      upstream: state.upstream,
+      fetchPrune: state.fetchPrune,
+      currentBranch,
+      remotes: state.remotes,
+      tags: state.tags,
+    },
+  });
 
   const stash = useStashActions(
     client,
