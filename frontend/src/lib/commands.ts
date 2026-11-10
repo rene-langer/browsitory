@@ -7,7 +7,7 @@ import { addRemoteAction, remoteActions } from "./actions/remoteActions";
 import { stashActions, stashBlockers } from "./actions/stashActions";
 import { pruneWorktreesAction, worktreeActions } from "./actions/worktreeActions";
 import { busyReason, operationBlockers, stashBlockReason, type OperationBlockers } from "./operationStatus";
-import { stageModifiedPaths } from "./stagePaths";
+import { stageModifiedPaths, untrackedPaths } from "./stagePaths";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
@@ -133,6 +133,8 @@ export interface DiffCommands {
   requestDiscardCurrentFile(): void;
   /** Opens the discard-all confirm dialog; never discards directly. */
   requestDiscardAllUnstaged(): void;
+  /** Opens the "Delete untracked…" confirm dialog (#622); never deletes directly. */
+  requestDeleteUntracked?(): void;
   /** Opens the current file's history in place of the commit graph. */
   openCurrentFileHistory(): void;
   /** DiffPane's selection of two or more changed files (#449), if any. */
@@ -927,7 +929,7 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
       run: () => void appState.stageAllFiles(modifiedPaths),
     });
   }
-  // Both only open the confirm dialogs; staged and conflicted entries have no discard action.
+  // These only open the confirm dialogs; staged and conflicted entries have no discard action.
   // Like the diff pane's discard, allowed while resolving a merge or a paused step: only an
   // action in flight or a transfer blocks it (`busyReason`, #521).
   if (busyReason(state) === null) {
@@ -953,6 +955,14 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
         label: "Discard all unstaged changes",
         keywords: ["discard", "revert", "all", "unstaged"],
         run: diff.requestDiscardAllUnstaged,
+      });
+    }
+    if (untrackedPaths(state.status).length > 0 && diff.requestDeleteUntracked !== undefined) {
+      add({
+        id: "delete-untracked-files",
+        label: "Delete untracked files…",
+        keywords: ["delete", "remove", "clean", "untracked", "new", "files"],
+        run: diff.requestDeleteUntracked,
       });
     }
   }

@@ -20,3 +20,13 @@ export function stageModifiedPaths(status: StatusEntry[]): string[] {
     .filter((entry) => !entry.staged && entry.kind !== "Conflicted" && entry.kind !== "New")
     .map((entry) => entry.path);
 }
+
+/**
+ * The paths "Delete untracked…" deletes (#622): the untracked entries in the Changes group
+ * (`isUntracked` in `FileActionsMenu`), never tracked changes, conflicts or ignored files. Status
+ * lists the files inside untracked folders one by one; a folder entry (a nested repository) is
+ * refused by `discard_all_unstaged` and named in its error, as the per-file "Delete file" does.
+ */
+export function untrackedPaths(status: StatusEntry[]): string[] {
+  return status.filter((entry) => !entry.staged && entry.kind === "New").map((entry) => entry.path);
+}

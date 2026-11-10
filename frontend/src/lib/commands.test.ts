@@ -1354,6 +1354,37 @@ describe("diff option and discard commands", () => {
     expect(diffCommands.requestDiscardAllUnstaged).toHaveBeenCalled();
   });
 
+  it("offers deleting the untracked files, which only requests a confirmation (#622)", () => {
+    const status = [
+      { path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const },
+      { path: "new.txt", oldPath: null, staged: false, kind: "New" as const },
+    ];
+    const requestDeleteUntracked = vi.fn();
+    const { commands } = build(makeAppState({ status }), { requestDeleteUntracked });
+    const command = commands.find((c) => c.id === "delete-untracked-files");
+    expect(command?.label).toBe("Delete untracked files…");
+    command!.run();
+    expect(requestDeleteUntracked).toHaveBeenCalled();
+    expect(command?.group).toBe("Diff");
+    // Next to "Discard all unstaged changes" in the palette's list.
+    const ids = commands.map((c) => c.id);
+    expect(ids.indexOf("delete-untracked-files")).toBe(ids.indexOf("discard-all-unstaged") + 1);
+  });
+
+  it("omits deleting the untracked files without any, or while busy (#622)", () => {
+    const extra = { requestDeleteUntracked: vi.fn() };
+    const tracked = [
+      { path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const },
+      { path: "staged.txt", oldPath: null, staged: true, kind: "New" as const },
+    ];
+    expect(build(makeAppState({ status: tracked }), extra).commands.some((c) => c.id === "delete-untracked-files")).toBe(
+      false,
+    );
+    const untracked = [{ path: "new.txt", oldPath: null, staged: false, kind: "New" as const }];
+    const busy = build(makeAppState({ pending: true, status: untracked }), extra).commands;
+    expect(busy.some((c) => c.id === "delete-untracked-files")).toBe(false);
+  });
+
   it("omits discard-all when only conflicted entries are unstaged", () => {
     const state = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Conflicted" }] });
     const { commands } = build(state);
@@ -1970,6 +2001,7 @@ const allFamilies = (appState: UseAppStateResult) =>
       currentFile: "b.txt",
       requestDiscardCurrentFile: noop,
       requestDiscardAllUnstaged: noop,
+      requestDeleteUntracked: noop,
       openCurrentFileHistory: noop,
       selection: { staged: false, paths: ["b.txt", "c.txt"] },
       requestDiscardSelection: noop,

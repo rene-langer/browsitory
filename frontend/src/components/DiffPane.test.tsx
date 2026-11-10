@@ -496,7 +496,10 @@ describe("DiffPane", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "Discard all…" }));
         expect(
-          screen.getByText("Discard changes to 2 files (1 untracked will be deleted)? This can't be undone."),
+          screen.getByText(
+            "Discard changes to 2 files (1 untracked will be deleted)? This can't be undone. To delete only " +
+              'the untracked files and keep the other changes, use "Delete untracked…".',
+          ),
         ).toBeInTheDocument();
         expect(onDiscardAllUnstaged).not.toHaveBeenCalled();
         fireEvent.click(screen.getByText("Discard all"));
@@ -589,6 +592,94 @@ describe("DiffPane", () => {
         renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), [fileStatus[2]]);
 
         expect(screen.getByRole("button", { name: "Discard all…" })).toBeDisabled();
+      });
+
+      describe("Delete untracked (#622)", () => {
+        const mixed: StatusEntry[] = [
+          { path: "src/a.ts", oldPath: null, staged: false, kind: "Modified" },
+          { path: "gone.txt", oldPath: null, staged: false, kind: "Deleted" },
+          { path: "logs/run.log", oldPath: null, staged: false, kind: "New" },
+          { path: "notes/todo.md", oldPath: null, staged: false, kind: "New" },
+          { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+          { path: "staged-new.txt", oldPath: null, staged: true, kind: "New" },
+        ];
+
+        it("opens its confirmation through the lifted request, as the palette does", () => {
+          const onDiscardRequestChange = vi.fn();
+          renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixed, { onDiscardRequestChange });
+
+          fireEvent.click(screen.getByRole("button", { name: "Delete untracked…" }));
+          expect(onDiscardRequestChange).toHaveBeenCalledWith({ kind: "untracked" });
+        });
+
+        it("deletes exactly the untracked files the dialog listed, keeping tracked changes", () => {
+          const onDiscardAllUnstaged = vi.fn();
+          const onDeleteUntracked = vi.fn();
+          renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixed, {
+            onDiscardAllUnstaged,
+            onDeleteUntracked,
+          });
+
+          fireEvent.click(screen.getByRole("button", { name: "Delete untracked…" }));
+          const dialog = screen.getByRole("dialog", { name: "Delete untracked files", hidden: true });
+          expect(within(dialog).getByText("Delete 2 untracked files? This can't be undone.")).toBeInTheDocument();
+          const list = within(dialog).getByRole("list", { name: "Untracked files to delete", hidden: true });
+          expect(within(list).getAllByRole("listitem", { hidden: true }).map((item) => item.textContent)).toEqual([
+            "logs/run.log",
+            "notes/todo.md",
+          ]);
+          expect(onDeleteUntracked).not.toHaveBeenCalled();
+          fireEvent.click(within(dialog).getByRole("button", { name: "Delete 2 files", hidden: true }));
+
+          expect(onDeleteUntracked).toHaveBeenCalledTimes(1);
+          expect(onDeleteUntracked).toHaveBeenCalledWith(["logs/run.log", "notes/todo.md"]);
+          expect(onDiscardAllUnstaged).not.toHaveBeenCalled();
+        });
+
+        it("lists the first five paths and counts the rest", () => {
+          const many: StatusEntry[] = Array.from({ length: 7 }, (_, i) => ({
+            path: `new-${i}.txt`,
+            oldPath: null,
+            staged: false,
+            kind: "New" as const,
+          }));
+          renderUncommitted(fakeClient({}), many, { discardRequest: { kind: "untracked" } });
+
+          const list = screen.getByRole("list", { name: "Untracked files to delete", hidden: true });
+          const items = within(list).getAllByRole("listitem", { hidden: true }).map((item) => item.textContent);
+          expect(items).toEqual(["new-0.txt", "new-1.txt", "new-2.txt", "new-3.txt", "new-4.txt", "and 2 more"]);
+        });
+
+        it("blocks the confirmation, saying why, while an action is in progress", () => {
+          const onDeleteUntracked = vi.fn();
+          const reason = "Another action is in progress.";
+          renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixed, {
+            onDeleteUntracked,
+            discardBlockedReason: reason,
+          });
+
+          fireEvent.click(screen.getByRole("button", { name: "Delete untracked…" }));
+          const dialog = screen.getByRole("dialog", { name: "Delete untracked files", hidden: true });
+          expect(dialog).toHaveTextContent(reason);
+          const confirm = within(dialog).getByRole("button", { name: "Delete 2 files", hidden: true });
+          expect(confirm).toBeDisabled();
+          expect(confirm).toHaveAttribute("title", reason);
+          fireEvent.click(confirm);
+
+          expect(onDeleteUntracked).not.toHaveBeenCalled();
+        });
+
+        it("is not shown, and clears a request, when the group holds no untracked file", () => {
+          const onDiscardRequestChange = vi.fn();
+          renderUncommitted(fakeClient({}), [mixed[0]], {
+            discardRequest: { kind: "untracked" },
+            onDiscardRequestChange,
+          });
+
+          expect(screen.queryByRole("button", { name: "Delete untracked…" })).not.toBeInTheDocument();
+          expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
+          expect(screen.queryByRole("dialog", { name: "Delete untracked files", hidden: true })).not.toBeInTheDocument();
+        });
       });
     });
 

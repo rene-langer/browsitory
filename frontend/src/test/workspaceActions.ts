@@ -57,6 +57,7 @@ const ACTION_KEYS: Record<keyof WorkspaceActions, true> = {
   onDiscardFile: true,
   onDiscardAllUnstaged: true,
   onDiscardFiles: true,
+  onDeleteUntracked: true,
   onIgnorePath: true,
   onIgnorePaths: true,
   onResolveConflict: true,
