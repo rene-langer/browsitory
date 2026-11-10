@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { Trailer } from "../ipc/RepoClient";
 import type { UseAppStateResult } from "./useAppState";
-import type { ToastAction } from "./useToasts";
+import type { PushToast, ToastAction } from "./useToasts";
 
 type CommitWith = (
   message: string,
@@ -13,17 +13,17 @@ type CommitWith = (
 /**
  * Where a commit lands, "Commit and push", and the toast after a commit (#651): "Committed
  * 4c5beaf to main" with Push, or with Undo when there is nowhere to push. `commitWith` is
- * `useCommitDraftActions`' `commitAndClearDraft`; `onUndo` is the workspace's Undo.
+ * `useCommitDraftActions`' `commitAndClearDraft`; `undoToastAction` is `useUndoRedoActions`'
+ * (#725), whose Undo runs only while the commit is still the newest undo step.
  *
- * The toast stack is app-level and outlives this workspace (a tab switch unmounts it), so a toast
- * action checks at click time that the workspace is still mounted and idle, and Undo also that
- * HEAD is still the commit it names: Undo undoes whatever came last.
+ * The toast stack is app-level and outlives this workspace (a tab switch unmounts it), so Push
+ * checks at click time that the workspace is still mounted and idle.
  */
 export function useCommitFlow(
   appState: UseAppStateResult,
   commitWith: CommitWith,
-  pushToast: (message: string, action?: ToastAction) => void,
-  onUndo: () => void,
+  pushToast: PushToast,
+  undoToastAction: () => ToastAction,
 ) {
   const { branches, headInfo, upstream, remotes, skipHooks, pending, transfer } = appState.state;
   const branch = headInfo.detachedAt !== null ? null : (branches.find((b) => b.isCurrent)?.name ?? null);
@@ -34,7 +34,7 @@ export function useCommitFlow(
         ? "No remote configured."
         : null;
 
-  const live = useRef({ mounted: true, busy: false, headId: headInfo.headId });
+  const live = useRef({ mounted: true, busy: false });
   useEffect(() => {
     const state = live.current;
     state.mounted = true;
@@ -44,8 +44,7 @@ export function useCommitFlow(
   }, []);
   useEffect(() => {
     live.current.busy = pending || transfer !== null;
-    live.current.headId = headInfo.headId;
-  }, [pending, transfer, headInfo.headId]);
+  }, [pending, transfer]);
   const idle = () => live.current.mounted && !live.current.busy;
 
   const { pushCurrentBranch, openDialog } = appState;
@@ -66,26 +65,24 @@ export function useCommitFlow(
       const text = `Committed ${id.slice(0, 7)}${branch === null ? "" : ` to ${branch}`}`;
       if (thenPush) {
         // The push reports itself; undoing under it would be a surprise.
-        pushToast(text);
+        pushToast(text, { tone: "success" });
         push();
       } else if (commitAndPushReason === null) {
         pushToast(text, {
-          label: "Push",
-          run: () => {
-            if (idle()) push();
+          tone: "success",
+          action: {
+            label: "Push",
+            run: () => {
+              if (idle()) push();
+            },
           },
         });
       } else {
-        pushToast(text, {
-          label: "Undo",
-          run: () => {
-            if (idle() && live.current.headId === id) onUndo();
-          },
-        });
+        pushToast(text, { tone: "success", action: undoToastAction() });
       }
       return ok;
     },
-    [commitWith, skipHooks, branch, pushToast, push, commitAndPushReason, onUndo],
+    [commitWith, skipHooks, branch, pushToast, push, commitAndPushReason, undoToastAction],
   );
 
   const onCommit = useCallback((message: string, trailers: Trailer[]) => commit(message, trailers, false), [commit]);

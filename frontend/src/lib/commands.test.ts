@@ -13,6 +13,7 @@ import {
   recordCommandUsed,
   type Command,
   type PickerItem,
+  SWITCH_BRANCH_PICKER_ID,
 } from "./commands";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import { createElement } from "react";
@@ -1838,6 +1839,68 @@ describe("remote and tag palette entries", () => {
   });
 });
 
+describe("Switch branch… (#638)", () => {
+  const branches = [
+    { name: "main", isCurrent: true },
+    { name: "feature", isCurrent: false },
+    { name: "fix/login", isCurrent: false },
+    { name: "old", isCurrent: false },
+  ];
+  function switcher(state: Parameters<typeof makeAppState>[0] = {}, recentBranches: string[] = []) {
+    const handlers = { recentBranches, onSwitchBranch: vi.fn(), onCreateAndSwitch: vi.fn() };
+    const command = commandsFor(makeAppState({ branches, ...state }), { branchSwitch: handlers }).find(
+      (c) => c.id === SWITCH_BRANCH_PICKER_ID,
+    );
+    return { command: command!, handlers, labels: (query: string) => command!.picker!.items(query).map((i) => i.label) };
+  }
+
+  it("is offered only with the switcher's handlers", () => {
+    expect(commandsFor(makeAppState()).some((c) => c.id === SWITCH_BRANCH_PICKER_ID)).toBe(false);
+    const { command } = switcher();
+    expect(command.label).toBe("Switch branch…");
+    expect(command.group).toBe("Branches");
+  });
+
+  it("lists the recent branches first, then the other local ones, never the current one", () => {
+    const { labels } = switcher({}, ["old", "gone", "main"]);
+    expect(labels("")).toEqual(["old", "feature", "fix/login"]);
+  });
+
+  it("switches to the chosen branch", () => {
+    const { command, handlers } = switcher();
+    command.picker!.items("login")[0].run();
+    expect(handlers.onSwitchBranch).toHaveBeenCalledWith("fix/login");
+  });
+
+  it("offers to create a new, valid name from the current branch", () => {
+    const { command, handlers, labels } = switcher();
+    expect(labels("feat")).toEqual(["feature", "Create branch feat from main"]);
+    expect(labels("feature")).toEqual(["feature"]);
+    expect(labels("bad..name")).toEqual([]);
+    command.picker!.items("topic").at(-1)!.run();
+    expect(handlers.onCreateAndSwitch).toHaveBeenCalledWith("topic");
+  });
+
+  it("lists nothing and says why while the repository is busy", () => {
+    const { command } = switcher({ pending: true });
+    expect(command.picker!.items("")).toEqual([]);
+    expect(command.picker!.emptyText).not.toBe("No other branches");
+  });
+});
+
+describe("Show/Hide sidebar (#635)", () => {
+  it("is named after the sidebar's state and runs the toggle", () => {
+    const run = vi.fn();
+    const shown = commandsFor(makeAppState(), { sidebar: { ...sidebar(), toggle: { shown: true, run } } });
+    const command = shown.find((c) => c.id === "toggle-sidebar")!;
+    expect(command.label).toBe("Hide sidebar");
+    command.run();
+    expect(run).toHaveBeenCalledOnce();
+    const hidden = commandsFor(makeAppState(), { sidebar: { ...sidebar(), toggle: { shown: false, run } } });
+    expect(hidden.find((c) => c.id === "toggle-sidebar")!.label).toBe("Show sidebar");
+  });
+});
+
 describe("Go to pickers (#441)", () => {
   const commit = (id: string, summary: string, extra: Record<string, unknown> = {}) => ({
     id,
@@ -2028,12 +2091,6 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       onListRemoteBranches: vi.fn().mockResolvedValue([]),
       onFetchRemote: vi.fn().mockResolvedValue(undefined),
       onPushCurrentBranch: vi.fn().mockResolvedValue(undefined),
-      onPull: vi.fn().mockResolvedValue(undefined),
-      pendingPull: null,
-      pullOutcome: null,
-      onMergePull: vi.fn().mockResolvedValue(undefined),
-      onRebasePull: fn(),
-      onCancelPull: fn(),
       addRemoteDraftOpen: false,
       onOpenAddRemoteDraft: fn(),
       onCloseAddRemoteDraft: fn(),

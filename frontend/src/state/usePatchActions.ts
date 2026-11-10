@@ -55,7 +55,7 @@ export function usePatchActions(
     async (change: CommitChangeRequest) => {
       setState((prev) => ({ ...prev, patchOutcome: null }));
       const ok = await runMutationWithOutcome(() => client.applyCommitChange(repoPath, change));
-      if (ok) setState((prev) => ({ ...prev, patchOutcome: { message: commitChangeMessage(change) } }));
+      if (ok) setState((prev) => ({ ...prev, patchOutcome: { message: commitChangeMessage(change), undoable: true } }));
     },
     [client, repoPath, runMutationWithOutcome, setState],
   );
@@ -67,7 +67,7 @@ export function usePatchActions(
       try {
         const content = await client.getPatch(repoPath, source);
         const saved = await client.savePatchFile(suggestedName, content);
-        if (saved !== null) setState((prev) => ({ ...prev, patchOutcome: { message: `Saved patch to ${saved}` } }));
+        if (saved !== null) setState((prev) => ({ ...prev, patchOutcome: { message: `Saved patch to ${saved}`, undoable: false } }));
       } catch (err) {
         setState((prev) => ({ ...prev, ...failureError(err) }));
       }
@@ -86,7 +86,7 @@ export function usePatchActions(
     }
     if (content === null) return;
     const ok = await runMutationWithOutcome(() => client.applyPatch(repoPath, content));
-    if (ok) setState((prev) => ({ ...prev, patchOutcome: { message: "Applied the patch to the working tree" } }));
+    if (ok) setState((prev) => ({ ...prev, patchOutcome: { message: "Applied the patch to the working tree", undoable: true } }));
   }, [client, repoPath, runMutationWithOutcome, setState]);
 
   return { applyCommitChange, savePatch, applyPatchFile };

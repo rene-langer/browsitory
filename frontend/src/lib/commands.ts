@@ -10,6 +10,7 @@ import { busyReason, operationBlockers, stashBlockReason, type OperationBlockers
 import { stageModifiedPaths, untrackedPaths } from "./stagePaths";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
+import { branchNameProblem } from "./refName";
 import { repoNameOf } from "./repoName";
 import type { RootFileItem } from "./rootFiles";
 import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
@@ -88,7 +89,21 @@ export interface SidebarCommands {
   revealSection(section: SidebarSectionId): void;
   /** Expands the remote's folder in the Branches section and scrolls it into view. */
   revealRemote(remoteName: string): void;
+  /** Shows or hides the sidebar, as a drawer in a narrow layout (#635); `shown` names the command. */
+  toggle?: { shown: boolean; run(): void };
 }
+
+/** The toolbar's branch switcher (#638), the "Switch branch…" picker. */
+export interface BranchSwitchCommands {
+  /** Local branches switched to lately, most recent first. */
+  recentBranches: readonly string[];
+  onSwitchBranch(name: string): void;
+  /** Creates the branch at HEAD and switches to it. */
+  onCreateAndSwitch(name: string): void;
+}
+
+/** The id of the "Switch branch…" picker, which the toolbar's branch chip opens directly. */
+export const SWITCH_BRANCH_PICKER_ID = "switch-branch";
 
 /** A command's heading in the palette's unfiltered view, in display order. */
 export const COMMAND_GROUPS = ["Branches", "Remotes", "Stash", "Diff", "Go to", "Repositories", "General"] as const;
@@ -201,6 +216,7 @@ export interface CommandContext {
   tools?: ToolCommands;
   goTo?: GoToCommands;
   commit?: CommitCommands;
+  branchSwitch?: BranchSwitchCommands;
 }
 
 /** `CommandContext` plus what several families derive from the repository state. */
@@ -582,9 +598,56 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
   return commands;
 }
 
+/**
+ * "Switch branch…" (#638): the recent branches first, then the other local ones, and "Create
+ * branch <name> from <current>" for a new name. Always listed, so the toolbar's branch chip opens
+ * it; while the repository is busy it lists nothing and says why.
+ */
+function switchBranchPicker({ state, blockers }: FamilyContext, branchSwitch: BranchSwitchCommands): Command {
+  const current = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
+  const others = state.branches.filter((branch) => !branch.isCurrent).map((branch) => branch.name);
+  const recent = branchSwitch.recentBranches.filter((name) => others.includes(name));
+  const ordered = [...recent, ...others.filter((name) => !recent.includes(name))];
+  const items: PickerItem[] = ordered.map((name) => ({
+    id: `switch-to-branch:${name}`,
+    label: name,
+    keywords: [name],
+    run: () => branchSwitch.onSwitchBranch(name),
+  }));
+  return {
+    id: SWITCH_BRANCH_PICKER_ID,
+    group: "Branches",
+    label: "Switch branch…",
+    keywords: ["branch", "switch", "checkout", "change", "create", "new", "recent"],
+    run: () => {},
+    picker: {
+      placeholder: "Branch name, or a new one to create…",
+      emptyText: blockers.blocked ? (blockers.reason ?? "Another operation is in progress.") : "No other branches",
+      items: (query) => {
+        if (blockers.blocked) return [];
+        const matches = filterPickerItems(items, query);
+        const name = query.trim();
+        const taken = state.branches.some((branch) => branch.name === name);
+        if (name === "" || taken || branchNameProblem(name) !== null) return matches;
+        return [
+          ...matches,
+          {
+            id: `create-branch:${name}`,
+            label: `Create branch ${name} from ${current ?? state.headInfo.detachedAt ?? "HEAD"}`,
+            keywords: [name],
+            run: () => branchSwitch.onCreateAndSwitch(name),
+          },
+        ];
+      },
+    },
+  };
+}
+
 /** The branch menu's Checkout and Merge (`branchActions`, #509), and checking out a tag. */
-function branchCommands({ appState, state, blockers, blocked }: FamilyContext): Command[] {
+function branchCommands(ctx: FamilyContext): Command[] {
+  const { appState, state, blockers, blocked } = ctx;
   const { commands, add, offer } = family("Branches");
+  if (ctx.branchSwitch !== undefined) commands.push(switchBranchPicker(ctx, ctx.branchSwitch));
   const branchContext = { blockers, remoteCount: state.remotes.length, upstream: state.upstream };
   // Every branch but the current one.
   for (const branch of state.branches) {
@@ -1016,6 +1079,15 @@ function goToCommands({ appState, goTo, sidebar, panelVisible }: FamilyContext):
   const commands = goTo === undefined ? [] : goToPickers(appState, goTo);
   if (sidebar === undefined) return commands;
   const { commands: sections, add } = family("Go to");
+  const toggle = sidebar.toggle;
+  if (toggle !== undefined) {
+    add({
+      id: "toggle-sidebar",
+      label: toggle.shown ? "Hide sidebar" : "Show sidebar",
+      keywords: ["sidebar", "toggle", "panel", "drawer", "branches", "show", "hide"],
+      run: toggle.run,
+    });
+  }
   for (const { section, title, id } of SIDEBAR_SECTIONS) {
     if (section !== "branches" && !panelVisible(section)) continue;
     add({

@@ -15,6 +15,19 @@ leaves nothing to undo either. A `git bisect` started in a
 terminal doesn't count as an operation in progress: operations are recorded and Undo and Redo
 work during it, and they don't end it.
 
+The notification of an operation Undo covers has an **Undo** button: a commit, a discard,
+staging lines, a reset, a checkout, a fast-forward pull or merge, a cherry-pick or revert, a
+history edit, a restored file and so on. It undoes that operation only: if another operation
+was recorded since, it changes nothing and says "Not undone: newer changes came after this
+one", and the toolbar's Undo steps back through them one by one. Operations Undo can't reverse,
+such as a fetch, push or stash, offer no Undo.
+
+Confirmations follow the same rule. Discarding a file's changes, **Discard all…**, **Delete
+untracked…**, **Reset hard** and force-deleting a branch still ask first, because they drop work
+in one go, and say that Undo can bring it back. Discarding a hunk or lines doesn't ask. What
+Undo can't restore, such as dropping a stash or deleting a branch or tag on a remote, asks and
+says it can't be undone.
+
 Undo refuses, instead of overwriting, when the repository changed since the operation. It also
 refuses when it would delete, move or switch to a branch that a worktree holds, and names it:
 checked out in another worktree, being rebased (in a terminal, or paused in Browsitory in

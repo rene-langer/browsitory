@@ -1,0 +1,201 @@
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import App from "./App";
+import type { RepoClient } from "./ipc/RepoClient";
+import { fakeRepoClient } from "./test/fakeRepoClient";
+
+// Whole-App renders, like App.test.tsx (#217's slow-machine budget).
+vi.setConfig({ testTimeout: 20_000 });
+
+const origin = { name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null, authMode: null, authUsername: null };
+const upstream = { localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 1, behind: 2, pushBranch: "main" };
+
+function layoutClient(overrides: Partial<RepoClient> = {}): RepoClient {
+  return fakeRepoClient(
+    {
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listStashes: async () => [],
+      listBranches: async () => [
+        { name: "main", isCurrent: true, upstream: "origin/main", ahead: 1, behind: 2 },
+        { name: "feature", isCurrent: false },
+        { name: "fix/login", isCurrent: false },
+      ],
+      listRemotes: async () => [origin],
+      getCurrentUpstream: async () => upstream,
+      ...overrides,
+    },
+    "empty",
+  );
+}
+
+function setWindowWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: width });
+  act(() => {
+    fireEvent(window, new Event("resize"));
+  });
+}
+
+async function renderApp(client: RepoClient) {
+  const view = render(<App client={client} />);
+  await screen.findByRole("tab", { name: "a" });
+  await waitFor(() => expect(view.container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+  return view;
+}
+
+const toolbar = () => screen.getByRole("group", { name: "Repository" });
+const sidebarPane = () =>
+  screen.getByRole("separator", { name: "Sidebar width", hidden: true }).previousElementSibling as HTMLElement;
+
+let originalWidth: number;
+beforeEach(() => {
+  originalWidth = window.innerWidth;
+  setWindowWidth(1200);
+});
+afterEach(() => {
+  setWindowWidth(originalWidth);
+  localStorage.clear();
+});
+
+describe("the diverged-pull prompt (#636)", () => {
+  const divergedClient = () => layoutClient({ pullCurrentUpstream: async () => ({ kind: "Diverged", upstreamRef: "origin/main" }) });
+
+  it("appears from the toolbar's Pull while the Branches section is closed, and Pull waits for it", async () => {
+    localStorage.setItem("sidebar-branches", "closed");
+    await renderApp(divergedClient());
+    const pull = within(toolbar()).getByRole("button", { name: "Pull" });
+    await waitFor(() => expect(pull).toBeEnabled());
+    fireEvent.click(pull);
+    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
+    expect(dialog).toHaveTextContent("origin/main");
+    expect(pull).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull());
+    expect(pull).toBeEnabled();
+  });
+
+  it("is not inside the hidden sidebar in a narrow window", async () => {
+    setWindowWidth(800);
+    await renderApp(divergedClient());
+    await waitFor(() => expect(sidebarPane()).toHaveAttribute("hidden"));
+    const pull = within(toolbar()).getByRole("button", { name: "Pull" });
+    await waitFor(() => expect(pull).toBeEnabled());
+    fireEvent.click(pull);
+    const dialog = await screen.findByRole("dialog", { name: "Pull has diverged" });
+    // `showModal()` inside a hidden ancestor is an invisible modal that makes the page inert.
+    expect(dialog.closest("[hidden]")).toBeNull();
+  });
+});
+
+describe("the sidebar in a narrow window (#635)", () => {
+  it("opens as a drawer from the toolbar and closes with Escape", async () => {
+    setWindowWidth(800);
+    await renderApp(layoutClient());
+    await waitFor(() => expect(sidebarPane()).toHaveAttribute("hidden"));
+    const toggle = within(toolbar()).getByRole("button", { name: "Sidebar" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(sidebarPane()).not.toHaveAttribute("hidden");
+    expect(sidebarPane()).toHaveAttribute("data-overlay", "true");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(sidebarPane()).getByText("Branches")).toBeInTheDocument();
+    fireEvent.keyDown(within(sidebarPane()).getByText("Branches"), { key: "Escape" });
+    expect(sidebarPane()).toHaveAttribute("hidden");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveFocus();
+  });
+
+  it("opens the drawer from the divider and the shortcut, and reports the width it shows", async () => {
+    setWindowWidth(800);
+    await renderApp(layoutClient());
+    await waitFor(() => expect(sidebarPane()).toHaveAttribute("hidden"));
+    const divider = screen.getByRole("separator", { name: "Sidebar width" });
+    expect(divider).toHaveAttribute("aria-valuenow", "0");
+    fireEvent.doubleClick(divider);
+    expect(sidebarPane()).toHaveAttribute("data-overlay", "true");
+    fireEvent.keyDown(window, { key: "b", code: "KeyB", ctrlKey: true, altKey: true });
+    expect(sidebarPane()).toHaveAttribute("hidden");
+    fireEvent.keyDown(window, { key: "b", code: "KeyB", ctrlKey: true, altKey: true });
+    expect(sidebarPane()).not.toHaveAttribute("hidden");
+  });
+
+  it("collapses and expands the docked sidebar from the toolbar in a wide window", async () => {
+    await renderApp(layoutClient());
+    const toggle = within(toolbar()).getByRole("button", { name: "Sidebar" });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(sidebarPane()).not.toHaveAttribute("hidden");
+    fireEvent.click(toggle);
+    expect(sidebarPane()).toHaveAttribute("hidden");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(sidebarPane()).not.toHaveAttribute("hidden");
+    expect(sidebarPane()).not.toHaveAttribute("data-overlay");
+  });
+});
+
+describe("the repository toolbar (#637)", () => {
+  it("holds sync, Stash, Undo/Redo and Refresh; the sidebar has no second Pull", async () => {
+    const getStatus = vi.fn(async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }]);
+    const saveStash = vi.fn(async () => {});
+    await renderApp(layoutClient({ getStatus, saveStash }));
+    const bar = toolbar();
+    for (const name of ["Fetch", "Pull", "Push", "Refresh"]) expect(within(bar).getByRole("button", { name })).toBeInTheDocument();
+    expect(within(bar).getByRole("button", { name: "Nothing to undo" })).toBeInTheDocument();
+    const stash = within(bar).getByRole("button", { name: "Stash" });
+    await waitFor(() => expect(stash).toBeEnabled());
+    expect(within(sidebarPane()).queryByRole("button", { name: "Pull" })).toBeNull();
+    const dock = await screen.findByRole("group", { name: "Commit actions" });
+    expect(within(dock).queryByRole("button", { name: "Stash" })).toBeNull();
+
+    const calls = getStatus.mock.calls.length;
+    fireEvent.click(within(bar).getByRole("button", { name: "Refresh" }));
+    await waitFor(() => expect(getStatus.mock.calls.length).toBeGreaterThan(calls));
+    fireEvent.click(stash);
+    await waitFor(() => expect(saveStash).toHaveBeenCalled());
+  });
+});
+
+describe("the current-branch switcher (#638)", () => {
+  it("shows the branch and its upstream, and switches branch from a filtered list", async () => {
+    const switchBranch = vi.fn(async () => {});
+    await renderApp(layoutClient({ switchBranch }));
+    const chip = await within(toolbar()).findByRole("button", { name: /^Current branch main/ });
+    expect(chip).toHaveTextContent("main");
+    expect(chip).toHaveTextContent("origin/main");
+    fireEvent.click(chip);
+    const input = await screen.findByRole("combobox", { name: "Switch branch" });
+    fireEvent.change(input, { target: { value: "feat" } });
+    const options = screen.getAllByRole("option").map((option) => option.textContent);
+    expect(options).toContain("feature");
+    expect(options).not.toContain("fix/login");
+    fireEvent.click(screen.getByRole("option", { name: "feature" }));
+    await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "feature"));
+  });
+
+  it("lists recently switched branches first", async () => {
+    const switchBranch = vi.fn(async () => {});
+    await renderApp(layoutClient({ switchBranch }));
+    fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Switch branch" }), { target: { value: "login" } });
+    fireEvent.click(screen.getByRole("option", { name: "fix/login" }));
+    await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "fix/login"));
+
+    fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
+    await screen.findByRole("combobox", { name: "Switch branch" });
+    const options = screen.getAllByRole("option").map((option) => option.textContent);
+    expect(options[0]).toBe("fix/login");
+  });
+
+  it("creates and switches to a new branch from here", async () => {
+    const createBranch = vi.fn(async () => {});
+    const switchBranch = vi.fn(async () => {});
+    await renderApp(layoutClient({ createBranch, switchBranch }));
+    fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Switch branch" }), { target: { value: "topic" } });
+    fireEvent.click(screen.getByRole("option", { name: "Create branch topic from main" }));
+    await waitFor(() => expect(createBranch).toHaveBeenCalledWith("/repos/a", "topic", "HEAD"));
+    await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "topic"));
+  });
+});

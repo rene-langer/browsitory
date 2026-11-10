@@ -43,7 +43,7 @@ export function ResetDialog({
         ariaLabel="Confirm hard reset"
         message={
           <>
-            <p>Discards all uncommitted changes. Cannot be undone.</p>
+            <p>Discards all uncommitted changes. Undo can bring them back.</p>
             {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
           </>
         }

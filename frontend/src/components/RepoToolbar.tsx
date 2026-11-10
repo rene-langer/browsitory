@@ -1,0 +1,95 @@
+import type { ComponentProps } from "react";
+import { GitBranch, PanelLeft, RefreshCw } from "lucide-react";
+import type { UpstreamInfo } from "../ipc/RepoClient";
+import type { SplitViewLeftState } from "./primitives/SplitView";
+import { NavigationButtons } from "./NavigationButtons";
+import { SyncBar } from "./SyncBar";
+import { UndoRedoButtons } from "./UndoRedoButtons";
+import styles from "./RepoToolbar.module.css";
+
+/** The sidebar toggle's shortcut (`useWorkspaceShortcuts`), for its tooltip. */
+export const SIDEBAR_SHORTCUT_LABEL = "Ctrl/Cmd+Alt+B";
+
+/**
+ * The one repository toolbar above the sidebar, graph and diff (#637): the sidebar toggle (a
+ * drawer in a narrow layout, #635), the current branch, which opens the branch switcher (#638),
+ * Back/Forward, Fetch/Pull/Push with the ahead/behind counts, Stash, Undo/Redo and Refresh.
+ */
+export function RepoToolbar({
+  sidebar,
+  branch,
+  navigation,
+  sync,
+  undo,
+  onRefresh,
+}: {
+  /** `onToggle` gets the button, for the drawer to return focus to. */
+  sidebar: { state: SplitViewLeftState; controls: string; onToggle: (button: HTMLElement) => void };
+  branch: {
+    current: string | null;
+    detachedAt: string | null;
+    upstream: UpstreamInfo | null;
+    onOpenSwitcher: () => void;
+  };
+  navigation: ComponentProps<typeof NavigationButtons>;
+  sync: Omit<ComponentProps<typeof SyncBar>, "leading" | "trailing" | "ariaLabel">;
+  undo: ComponentProps<typeof UndoRedoButtons>;
+  onRefresh: () => void;
+}) {
+  const sidebarShown = sidebar.state !== "collapsed";
+  return (
+    <SyncBar
+      {...sync}
+      ariaLabel="Repository"
+      leading={
+        <>
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Sidebar"
+            aria-expanded={sidebarShown}
+            aria-controls={sidebar.controls}
+            title={`${sidebarShown ? "Hide" : "Show"} the sidebar (${SIDEBAR_SHORTCUT_LABEL})`}
+            onClick={(event) => sidebar.onToggle(event.currentTarget)}
+          >
+            <PanelLeft size={16} aria-hidden="true" />
+          </button>
+          <BranchChip {...branch} />
+          <NavigationButtons {...navigation} />
+        </>
+      }
+      trailing={
+        <>
+          <UndoRedoButtons {...undo} />
+          <button type="button" className={styles.iconButton} aria-label="Refresh" title="Refresh" onClick={onRefresh}>
+            <RefreshCw size={14} aria-hidden="true" />
+          </button>
+        </>
+      }
+    />
+  );
+}
+
+/** "main → origin/main": the current branch and its upstream; a click opens "Switch branch…". */
+function BranchChip({
+  current,
+  detachedAt,
+  upstream,
+  onOpenSwitcher,
+}: {
+  current: string | null;
+  detachedAt: string | null;
+  upstream: UpstreamInfo | null;
+  onOpenSwitcher: () => void;
+}) {
+  const name = current ?? (detachedAt !== null ? `detached at ${detachedAt}` : "no branch");
+  const tracking = current !== null && upstream !== null ? `${upstream.remoteName}/${upstream.remoteBranch}` : null;
+  const label = `Current branch ${name}${tracking === null ? "" : `, tracking ${tracking}`}. Switch branch…`;
+  return (
+    <button type="button" className={styles.branchChip} aria-label={label} title="Switch branch, or create one" onClick={onOpenSwitcher}>
+      <GitBranch size={14} aria-hidden="true" />
+      <span className={styles.branchName}>{name}</span>
+      {tracking !== null && <span className={styles.tracking}>→ {tracking}</span>}
+    </button>
+  );
+}

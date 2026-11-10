@@ -106,7 +106,7 @@ describe("Browsitory Delete untracked in the Changes heading", () => {
     const dialog = await $('dialog[aria-label="Delete untracked files"]');
     await dialog.waitForExist({ timeout: UI_TIMEOUT });
     // Exactly this spec's two files, so nothing else untracked in the shared fixture is deleted.
-    await expect(dialog).toHaveText(expect.stringContaining("Delete 2 untracked files? This can't be undone."));
+    await expect(dialog).toHaveText(expect.stringContaining("Delete 2 untracked files? Undo can bring them back."));
     await expect(dialog).toHaveText(expect.stringContaining(NEW_FILES[0]));
     await clickInPage('dialog[aria-label="Delete untracked files"] button', "Delete 2 files");
 

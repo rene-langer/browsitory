@@ -6,13 +6,12 @@ import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettin
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { CommitBox, type CommitDraft } from "./CommitBox";
 import styles from "./DiffPane.module.css";
-import { SplitButton } from "./primitives/SplitButton";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
 
 /**
- * The working tree's commit dock: Stash, then the commit box, or Continue/Abort while a
- * cherry-pick/revert sequence or a rebase is paused. Its actions come from
- * `WorkspaceActionsContext` (#491).
+ * The working tree's commit dock: the commit box (message, options, then Commit), or
+ * Continue/Abort while a cherry-pick/revert sequence or a rebase is paused. Stash is in the
+ * repository toolbar (#637). Its actions come from `WorkspaceActionsContext` (#491).
  */
 export function CommitDock({
   repoPath,
@@ -26,7 +25,6 @@ export function CommitDock({
   sequencePending,
   stagedCount,
   conflictCount,
-  stashReason,
   initialCommitDraft,
   focusCommitMessage,
   clearCommitMessage,
@@ -45,15 +43,11 @@ export function CommitDock({
   sequencePending: boolean;
   stagedCount: number;
   conflictCount: number;
-  /** `stashBlockReason`: disables Stash. */
-  stashReason: string | null;
   initialCommitDraft?: CommitDraft;
   focusCommitMessage: boolean;
   clearCommitMessage: string | null;
 }) {
   const {
-    onSaveStash,
-    onOpenStashDialog,
     onSequenceContinue,
     onSequenceAbort,
     onRebaseContinue,
@@ -102,21 +96,6 @@ export function CommitDock({
   }, [amendMode, headInfo.headId, client, repoPath]);
   return (
     <div className={styles.commitDock} role="group" aria-label="Commit actions">
-      {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
-          resolved/amended content lives in the working tree, so stashing it away and continuing
-          lands an empty (or wrong) commit. Disabled for the whole pause by the stash rule the
-          file menu and the command palette share (`stashBlockReason`, #495). */}
-      <SplitButton
-        label="Stash"
-        onClick={onSaveStash}
-        disabled={stashReason !== null}
-        title={stashReason ?? undefined}
-        menuLabel="More stash options"
-        items={[
-          { label: "Stash all", onSelect: () => onSaveStash() },
-          { label: "Stash…", onSelect: () => onOpenStashDialog([]) },
-        ]}
-      />
       {headInfo.sequence !== null ? (
         // A stopped cherry-pick/revert sequence: no editable message per step; Continue
         // commits the resolved step with its MERGE_MSG, like rebase continue.
