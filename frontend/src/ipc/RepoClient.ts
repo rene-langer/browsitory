@@ -596,6 +596,11 @@ export interface GraphCommit {
   remoteBranchRefs: string[];
   /** Tag names pointing (peeled) at this commit, sorted. Always sent by the backend. */
   tags?: string[];
+  /**
+   * Only on a merge row of a graph that follows first parents ("Collapse merges" or one selected
+   * branch, #617): how many commits its other parents brought in, which `getMergedCommits` lists.
+   */
+  mergedCount?: number;
 }
 
 /** One commit in a file's history. `path` is the file's name in that commit; `oldPath` is set
@@ -637,6 +642,20 @@ export interface ChangedFile {
 export interface GraphSelection {
   local: string[] | null;
   remote: string[];
+  /**
+   * "Collapse merges" (#617): the graph and `locateCommit` follow first parents from every
+   * selected tip. `searchCommits` ignores it. Absent is `false`.
+   */
+  firstParent?: boolean;
+}
+
+/** The collapsed merge that holds a "Go to" target (#617). */
+export interface CollapsedMerge {
+  mergeId: string;
+  /** The merge's row in the graph, as `CommitLocation.position`. */
+  mergePosition: number;
+  /** The target's index in `getMergedCommits` of that merge: a limit above it lists it. */
+  offset: number;
 }
 
 /** Where a revision's commit sits in the graph ("Go to commit", #441). */
@@ -650,6 +669,9 @@ export interface CommitLocation {
   branches: string[];
   /** Like `branches`, remote-tracking branches as `<remote>/<branch>`. */
   remoteBranches: string[];
+  /** Only when `position` is `null` in a graph that follows first parents: the merge row that
+   *  holds the commit, which expanding shows it (#617). */
+  merge?: CollapsedMerge;
 }
 
 /** One file's line counts in a commit (#620). */
@@ -959,9 +981,18 @@ export interface RepoClient {
   getStatus(repoPath: string): Promise<StatusEntry[]>;
   /**
    * The commits of `selection.local` plus those of `selection.remote`. Exactly one branch in
-   * total walks first parents only. Missing branches are skipped.
+   * total, or `selection.firstParent`, walks first parents only; its merge rows then carry
+   * `mergedCount`. Missing branches are skipped.
    */
   getCommitGraph(repoPath: string, limit: number, selection: GraphSelection): Promise<GraphCommit[]>;
+  /**
+   * The commits merge `mergeId` brought in (reachable from its other parents, not from its first
+   * parent), children first, at most `limit` (#617): what expanding a collapsed merge shows.
+   */
+  getMergedCommits(repoPath: string, mergeId: string, limit: number): Promise<GraphCommit[]>;
+  /** Whether this repository's graph collapses merges (#617); `false` until set. */
+  getGraphCollapseMerges(repoPath: string): Promise<boolean>;
+  setGraphCollapseMerges(repoPath: string, collapse: boolean): Promise<void>;
   /**
    * Resolves `revision` (SHA or prefix, branch, tag, any git revision) and finds its commit in
    * the graph `getCommitGraph` returns for the same selection. `null` when it names no commit;

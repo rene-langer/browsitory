@@ -99,6 +99,13 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "-",
         ),
         (
+            cmd!(GetMergedCommits {
+                merge_id: s(ONTO),
+                limit: 1
+            }),
+            "-",
+        ),
+        (
             cmd!(GetWorkingDiff {
                 path: s("a.txt"),
                 staged: false,

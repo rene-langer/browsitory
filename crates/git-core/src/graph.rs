@@ -22,6 +22,10 @@ pub struct GraphCommit {
     pub remote_branch_refs: Vec<String>,
     /// Tag names (without "refs/tags/") whose target peels to this commit, sorted.
     pub tags: Vec<String>,
+    /// Only on a merge commit of a first-parent walk ([`GraphSelection::walks_first_parent`]):
+    /// how many commits its other parents bring in, the rows [`merged_commits`] lists (#617).
+    /// `None` everywhere else, also on the rows of search, file history and `merged_commits`.
+    pub merged_count: Option<usize>,
 }
 
 /// Local/remote branch names and tag names keyed by the commit they point at — the badges on
@@ -104,6 +108,7 @@ impl RefDecorations {
             branch_refs: self.local.get(&oid).cloned().unwrap_or_default(),
             remote_branch_refs: self.remote.get(&oid).cloned().unwrap_or_default(),
             tags: self.tags.get(&oid).cloned().unwrap_or_default(),
+            merged_count: None,
             id,
         }
     }
@@ -119,15 +124,25 @@ pub struct GraphSelection {
     /// what a never-saved remote selection maps to) walks no remote branch, so remote-only
     /// commits stay out of the default graph.
     pub remote: Vec<String>,
+    /// "Collapse merges" (#617): the graph and "Go to" follow first parents from every selected
+    /// tip, whatever the selection. Commit search ignores it (see [`Self::isolates_one_branch`]).
+    pub first_parent: bool,
 }
 
 impl GraphSelection {
-    /// True when the walk follows first parents only: exactly one branch is selected, local
-    /// and remote together (what "Isolate branch" produces). That branch's line is then its
-    /// merge commits plus the commits made directly on it; the commits of merged side branches
-    /// are left out. `local: None` (every local branch) or several branches walk every
-    /// ancestor (#380).
+    /// True when the graph walk follows first parents only: "Collapse merges" is on, or exactly
+    /// one branch is selected, local and remote together (what "Isolate branch" produces, #380).
+    /// Each selected branch's line is then its merge commits plus the commits made directly on
+    /// it; the commits of merged side branches are left out, and each merge row carries
+    /// [`GraphCommit::merged_count`]. Otherwise every ancestor is walked.
     pub(crate) fn walks_first_parent(&self) -> bool {
+        self.first_parent || self.isolates_one_branch()
+    }
+
+    /// Exactly one branch is selected (local and remote together). Commit search follows first
+    /// parents only then, not for "Collapse merges": a search still finds the commits a
+    /// collapsed merge holds, and "Go to" one of them expands its merge (#617).
+    pub(crate) fn isolates_one_branch(&self) -> bool {
         matches!(&self.local, Some(local) if local.len() + self.remote.len() == 1)
     }
 
@@ -187,9 +202,10 @@ impl GraphSelection {
 }
 
 /// The commits of `selection`, children before parents (`TOPOLOGICAL | TIME`), at most
-/// `limit`. With exactly one selected branch the walk follows first parents only (see
-/// [`GraphSelection::walks_first_parent`]); a merge commit still lists all its `parent_ids`,
-/// so its other parents are usually not in the result.
+/// `limit`. With "Collapse merges" or exactly one selected branch the walk follows first
+/// parents only (see [`GraphSelection::walks_first_parent`]): a merge commit still lists all
+/// its `parent_ids`, so its other parents are usually not in the result, and it carries its
+/// [`GraphCommit::merged_count`].
 pub fn graph_log(
     repo: &Repository,
     limit: usize,
@@ -206,12 +222,58 @@ pub fn graph_log(
         revwalk.push(oid)?;
     }
 
+    let first_parent = selection.walks_first_parent();
+    let mut commits = Vec::new();
+    for oid_result in revwalk.take(limit) {
+        let commit = repo.find_commit(oid_result?)?;
+        let mut row = decorations.graph_commit(&commit);
+        if first_parent && commit.parent_count() > 1 {
+            row.merged_count = Some(merged_walk(repo, &commit)?.count());
+        }
+        commits.push(row);
+    }
+    Ok(commits)
+}
+
+/// The commits a merge brought in, children before parents (`TOPOLOGICAL | TIME`), at most
+/// `limit`: those reachable from its other parents but not from its first parent
+/// (`first..other`, every other parent of an octopus merge together), side branches merged
+/// into the side branch included (#617). What expanding a collapsed merge shows below it; their
+/// number is the merge's [`GraphCommit::merged_count`]. Empty for a commit that is no merge.
+pub fn merged_commits(
+    repo: &Repository,
+    merge_id: &str,
+    limit: usize,
+) -> Result<Vec<GraphCommit>, GraphError> {
+    let merge = repo.find_commit(Oid::from_str(merge_id)?)?;
+    if merge.parent_count() < 2 {
+        return Ok(Vec::new());
+    }
+    let decorations = RefDecorations::load(repo)?;
+    let mut revwalk = merged_walk(repo, &merge)?;
+    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
     let mut commits = Vec::new();
     for oid_result in revwalk.take(limit) {
         let commit = repo.find_commit(oid_result?)?;
         commits.push(decorations.graph_commit(&commit));
     }
     Ok(commits)
+}
+
+/// An unsorted walk of `first..other` for `merge` (see [`merged_commits`]).
+pub(crate) fn merged_walk<'r>(
+    repo: &'r Repository,
+    merge: &git2::Commit,
+) -> Result<git2::Revwalk<'r>, git2::Error> {
+    let mut revwalk = repo.revwalk()?;
+    let mut parents = merge.parent_ids();
+    if let Some(first) = parents.next() {
+        revwalk.hide(first)?;
+    }
+    for parent in parents {
+        revwalk.push(parent)?;
+    }
+    Ok(revwalk)
 }
 
 /// Full raw message (subject plus body) of `commit_id`, for the commit header.

@@ -580,7 +580,9 @@ pub(crate) fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 /// `branch:` term, or else from the graph's `selection` (local and remote branches alike, see
 /// [`GraphSelection`]; missing names are skipped). Without a `branch:` term, a selection of
 /// exactly one branch walks first parents only, like `graph_log` for the same selection, so
-/// search and graph list the same commits (#380, #385).
+/// search and graph list the same commits (#380, #385). "Collapse merges"
+/// (`selection.first_parent`) does not narrow the search: it still finds the commits a collapsed
+/// merge holds (#617).
 ///
 /// A page ends after `limits.matches` matches, `limits.scan` commits scanned in this call, or
 /// once `limits.time` has elapsed (checked after each commit, so at least one is scanned); in
@@ -598,7 +600,7 @@ pub fn search_commits(
     cancel: &dyn Fn() -> bool,
 ) -> Result<SearchPage, SearchError> {
     let starts = start_points(repo, query, selection)?;
-    let first_parent = query.branch().is_none() && selection.walks_first_parent();
+    let first_parent = query.branch().is_none() && selection.isolates_one_branch();
     let fingerprint = fingerprint(&starts, first_parent)?;
     let started = Instant::now();
     let offset = match cursor {

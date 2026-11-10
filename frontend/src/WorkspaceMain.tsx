@@ -204,6 +204,8 @@ export function WorkspaceMain({
               onRemoveRecentSearch={commitSearch.removeRecentSearch}
               showLineStats={showLineStats}
               onToggleLineStats={() => writeShowLineStats(!showLineStats)}
+              collapseMerges={appState.state.collapseMerges}
+              onToggleCollapseMerges={() => void appState.setCollapseMerges(!appState.state.collapseMerges)}
             />
             {commitSearch.results !== null ? (
               <CommitSearchResults
@@ -265,6 +267,9 @@ export function WorkspaceMain({
                 revealRequest={revealRequest}
                 lineStats={showLineStats ? lineStats.stats : undefined}
                 onCommitsVisible={showLineStats ? lineStats.request : undefined}
+                expandedMerges={appState.state.expandedMerges}
+                onExpandMerge={(mergeId, atLeast) => void appState.expandMerge(mergeId, atLeast)}
+                onCollapseMerge={appState.collapseMerge}
               />
             )}
           </>

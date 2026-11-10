@@ -1,5 +1,7 @@
 import type { GraphCommit } from "../ipc/RepoClient";
 
+const NO_COMMITS: ReadonlySet<string> = new Set();
+
 export interface CommitLayout {
   commitId: string;
   lane: number;
@@ -9,17 +11,22 @@ export interface CommitLayout {
   laneSegmentId: number;
   parentConnections: { parentId: string; lane: number; segmentId: number }[];
   passThroughLanes: { lane: number; segmentId: number }[];
-  // Merge parents (never the first parent) that aren't in the list and that no lane is waiting
-  // for: the side branch of a merge on an isolated branch (its first-parent walk leaves side
-  // branches out, #380), or one past the loaded page. They get no lane, which would otherwise
-  // run down past every later row to a commit that never shows; the row draws a short stub
-  // instead.
+  // Merge parents (never the first parent, except of a commit an expanded merge listed, see
+  // `assignLanes`) that aren't in the list and that no lane is waiting for: the side branch of a
+  // merge on an isolated branch or a collapsed merge (a first-parent walk leaves side branches
+  // out, #380, #617), or one past the loaded page. They get no lane, which would otherwise run
+  // down past every later row to a commit that never shows; the row draws a short stub instead.
   hiddenParentIds: string[];
 }
 
 // `commits` must be in reverse-topological order (children before parents), as `graph_log`'s
 // `Sort::TOPOLOGICAL | Sort::TIME` returns; any other order silently produces wrong lanes.
-export function assignLanes(commits: GraphCommit[]): CommitLayout[] {
+//
+// `merged`: the commits an expanded merge spliced in below its row (#617). Their first parent is
+// usually a row of the first-parent line further down, where their lane ends; one that is not in
+// the list (a fork from another merge's side branch, still collapsed) gets a stub like a hidden
+// merge parent, instead of a lane running past every later row.
+export function assignLanes(commits: GraphCommit[], merged: ReadonlySet<string> = NO_COMMITS): CommitLayout[] {
   // `lanes[i]` holds the commit id lane `i` is currently waiting to display next, or `null` if
   // that lane is free and its slot can be reused by an unrelated later commit.
   const lanes: (string | null)[] = [];
@@ -59,9 +66,10 @@ export function assignLanes(commits: GraphCommit[]): CommitLayout[] {
     const hiddenParentIds: string[] = [];
     let laneStillNeeded = false;
 
+    const stubsFirstParent = merged.has(commit.id);
     commit.parentIds.forEach((parentId, parentIndex) => {
       const alreadyWaiting = lanes.indexOf(parentId) !== -1;
-      if (parentIndex > 0 && !alreadyWaiting && !listed.has(parentId)) {
+      if ((parentIndex > 0 || stubsFirstParent) && !alreadyWaiting && !listed.has(parentId)) {
         hiddenParentIds.push(parentId);
       } else if (parentIndex === 0 && !alreadyWaiting) {
         // Straight continuation: this commit's own lane keeps going, now waiting for its

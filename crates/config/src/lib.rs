@@ -304,6 +304,10 @@ struct ConfigFile {
     active_repo: Option<PathBuf>,
     #[serde(default)]
     last_seen_version: Option<String>,
+    // The repositories whose commit graph collapses merges (#617). A list of paths, so a plain
+    // `key = [...]` line that must stay ahead of the tables below.
+    #[serde(default)]
+    graph_collapse_merges: Vec<PathBuf>,
     // `diff`, `tools` and `commit_message` serialize as TOML tables (`[diff]`, `[tools]`,
     // `[commit_message]`). Tables must follow
     // plain `key = value` lines, so they sit after the plain keys.
@@ -744,6 +748,37 @@ pub fn clear_graph_remote_branch_selection_at(
     config
         .graph_remote_branch_selections
         .retain(|s| s.repo_path != repo_path);
+    write_config(config_file, &config)
+}
+
+/// Whether the commit graph of `repo_path` collapses merges ("Collapse merges", #617). Off until
+/// turned on.
+pub fn get_graph_collapse_merges(repo_path: &Path) -> Result<bool, ConfigError> {
+    get_graph_collapse_merges_at(&config_file_path()?, repo_path)
+}
+
+pub fn set_graph_collapse_merges(repo_path: &Path, collapse: bool) -> Result<(), ConfigError> {
+    set_graph_collapse_merges_at(&config_file_path()?, repo_path, collapse)
+}
+
+pub fn get_graph_collapse_merges_at(
+    config_file: &Path,
+    repo_path: &Path,
+) -> Result<bool, ConfigError> {
+    let config = read_config(config_file)?;
+    Ok(config.graph_collapse_merges.iter().any(|p| p == repo_path))
+}
+
+pub fn set_graph_collapse_merges_at(
+    config_file: &Path,
+    repo_path: &Path,
+    collapse: bool,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.graph_collapse_merges.retain(|p| p != repo_path);
+    if collapse {
+        config.graph_collapse_merges.push(repo_path.to_path_buf());
+    }
     write_config(config_file, &config)
 }
 

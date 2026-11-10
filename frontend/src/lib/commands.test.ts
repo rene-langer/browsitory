@@ -36,6 +36,9 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       navigation: { entries: ["uncommitted"], index: 0, merging: false },
       status: [],
       commits: [],
+      graphRows: [],
+      collapseMerges: false,
+      expandedMerges: {},
       graphLimit: 300,
       hasMoreHistory: false,
       graphSelection: { local: null, remote: null },
@@ -205,6 +208,9 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     isolateGraphBranch: vi.fn(),
     loadMoreHistory: vi.fn(),
     loadHistoryThrough: vi.fn(),
+    setCollapseMerges: vi.fn(),
+    expandMerge: vi.fn(),
+    collapseMerge: vi.fn(),
     refresh: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -328,6 +334,20 @@ describe("buildCommands", () => {
     expect(cmd?.label).toBe("Search commits");
     cmd?.run();
     expect(onSearchCommits).toHaveBeenCalled();
+  });
+
+  it("toggles Collapse merges, named for what it does next (#617)", () => {
+    const off = makeAppState({ collapseMerges: false });
+    const on = makeAppState({ collapseMerges: true });
+    const offCmd = commandsFor(off).find((c) => c.id === "toggle-collapse-merges");
+    const onCmd = commandsFor(on).find((c) => c.id === "toggle-collapse-merges");
+
+    expect(offCmd?.label).toBe("Collapse merges");
+    expect(onCmd?.label).toBe("Show every commit of merged branches");
+    offCmd?.run();
+    expect(off.setCollapseMerges).toHaveBeenCalledWith(true);
+    onCmd?.run();
+    expect(on.setCollapseMerges).toHaveBeenCalledWith(false);
   });
 
   it("includes a Close tab command, grouped under Repositories, only with the tab commands", () => {
@@ -2232,6 +2252,7 @@ describe("command ids and groups", () => {
       ["push-tags:origin", "Remotes"],
       ["redo", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["remove-remote:origin", "Remotes"],
       ["remove-worktree:wt1", "General"],
       ["reset-selected", "General"],
@@ -2292,6 +2313,7 @@ describe("command ids and groups", () => {
       ["rebase-abort", "General"],
       ["rebase-continue", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["reveal-repository", "Repositories"],
       ["save-staged-patch", "Diff"],
       ["search-commits", "General"],
@@ -2341,6 +2363,7 @@ describe("command ids and groups", () => {
       ["open-user-guide", "General"],
       ["preferences", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["reveal-repository", "Repositories"],
       ["save-staged-patch", "Diff"],
       ["search-commits", "General"],
@@ -2389,6 +2412,7 @@ describe("command ids and groups", () => {
       ["open-user-guide", "General"],
       ["preferences", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["reveal-repository", "Repositories"],
       ["save-staged-patch", "Diff"],
       ["save-stash", "Stash"],
@@ -2464,6 +2488,7 @@ describe("command ids and groups", () => {
       ["push-tags:origin", "Remotes"],
       ["redo", "General"],
       ["refresh", "General"],
+      ["toggle-collapse-merges", "General"],
       ["remove-remote:origin", "Remotes"],
       ["remove-worktree:wt1", "General"],
       ["reveal-repository", "Repositories"],

@@ -15,6 +15,8 @@ export type BranchInfo = { name: string, isCurrent: boolean, upstream: string | 
 
 export type ChangedFile = { path: string, oldPath: string | null, };
 
+export type CollapsedMerge = { mergeId: string, mergePosition: number, offset: number, };
+
 export type CommitChangeRequest = { commitId: string, path: string, oldPath: string | null, 
 /**
  * `null`: the whole file.
@@ -31,7 +33,11 @@ stage: boolean, };
 
 export type CommitHunk = { oldStart: number, newStart: number, contextLines: number, algorithm: DiffAlgorithm, };
 
-export type CommitLocation = { commitId: string, position: number | null, branches: Array<string>, remoteBranches: Array<string>, };
+export type CommitLocation = { commitId: string, position: number | null, branches: Array<string>, remoteBranches: Array<string>, 
+/**
+ * The collapsed merge that holds the commit (#617); left out when there is none.
+ */
+merge?: CollapsedMerge, };
 
 export type CommitMessageSettings = { summaryLimit: number, bodyRuler: number, showRuler: boolean, };
 
@@ -101,7 +107,12 @@ export type GitToolInfo = { name: string, command: string | null, source: GitCon
 
 export type GitTools = { diffTool: GitToolInfo | null, mergeTool: GitToolInfo | null, };
 
-export type GraphCommit = { id: string, shortId: string, summary: string, authorName: string, authorEmail: string, timestamp: number, parentIds: Array<string>, branchRefs: Array<string>, remoteBranchRefs: Array<string>, tags: Array<string>, };
+export type GraphCommit = { id: string, shortId: string, summary: string, authorName: string, authorEmail: string, timestamp: number, parentIds: Array<string>, branchRefs: Array<string>, remoteBranchRefs: Array<string>, tags: Array<string>, 
+/**
+ * Only on a merge row of a first-parent graph (#617): the commits its other parents brought
+ * in, which `getMergedCommits` lists. Left out everywhere else.
+ */
+mergedCount?: number, };
 
 export type GraphSelection = { 
 /**
@@ -111,7 +122,12 @@ local: Array<string> | null,
 /**
  * Remote-tracking branches as `<remote>/<branch>`; required, `[]` walks no remote branch.
  */
-remote: Array<string>, };
+remote: Array<string>, 
+/**
+ * "Collapse merges" (#617): the graph and `locateCommit` follow first parents from every
+ * selected tip; `searchCommits` ignores it. Absent is `false`.
+ */
+firstParent?: boolean, };
 
 export type HeadInfo = { headId: string | null, detachedAt: string | null, headPushed: boolean, operation: OperationKind | null, 
 /**

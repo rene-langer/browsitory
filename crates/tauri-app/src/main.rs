@@ -43,6 +43,8 @@ use commands::{
 use commands::{list_repo_aliases, set_repo_alias};
 // Open or create .gitignore and .gitattributes (#624).
 use commands::{create_root_file, get_root_files};
+// Collapse merges in the commit graph (#617).
+use commands::{get_graph_collapse_merges, get_merged_commits, set_graph_collapse_merges};
 
 /// Declares the desktop app's Tauri commands once: `invoke_handler` registers them, and
 /// `COMMAND_NAMES` lists the same names for the transport parity check (#306), which compares it
@@ -67,6 +69,9 @@ commands![
     get_status,
     get_commit_graph,
     locate_commit,
+    get_merged_commits,
+    get_graph_collapse_merges,
+    set_graph_collapse_merges,
     get_graph_branch_selection,
     set_graph_branch_selection,
     clear_graph_branch_selection,

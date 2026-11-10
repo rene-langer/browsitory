@@ -10,7 +10,11 @@ export interface SavedGraphSelection {
   remote: string[] | null;
 }
 
-/** What the backend walks for a saved selection: a never-saved remote selection walks none. */
-export function toGraphSelection(saved: SavedGraphSelection): GraphSelection {
-  return { local: saved.local, remote: saved.remote ?? [] };
+/**
+ * What the backend walks for a saved selection: a never-saved remote selection walks none.
+ * `collapseMerges` (#617) adds `firstParent`, sent only when on.
+ */
+export function toGraphSelection(saved: SavedGraphSelection, collapseMerges = false): GraphSelection {
+  const selection: GraphSelection = { local: saved.local, remote: saved.remote ?? [] };
+  return collapseMerges ? { ...selection, firstParent: true } : selection;
 }

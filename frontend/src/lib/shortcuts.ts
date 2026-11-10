@@ -40,6 +40,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "PageUp / PageDown", description: "Move by a page" },
       { keys: "[ / ]", description: "Go to the parent / child commit" },
       { keys: "Shift+[", description: "Choose one of a merge commit's parents" },
+      { keys: "Right / Left", description: "Expand / collapse a collapsed merge (Left on its commits: go to the merge)" },
       { keys: "Enter / Menu / Shift+F10", description: "Open the commit context menu" },
       { keys: "Ctrl/Cmd+F", description: "Search commits" },
     ],

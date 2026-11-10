@@ -179,3 +179,14 @@ it("toggles the commit list's lines-changed badges (#620)", () => {
   props.rerender({ showLineStats: false });
   expect(toggle).toHaveAttribute("aria-pressed", "false");
 });
+
+it("toggles Collapse merges (#617)", () => {
+  const onToggleCollapseMerges = vi.fn();
+  const props = renderBar({ collapseMerges: false, onToggleCollapseMerges });
+  const toggle = screen.getByRole("button", { name: "Collapse merges" });
+  expect(toggle).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(toggle);
+  expect(onToggleCollapseMerges).toHaveBeenCalledTimes(1);
+  props.rerender({ collapseMerges: true });
+  expect(toggle).toHaveAttribute("aria-pressed", "true");
+});

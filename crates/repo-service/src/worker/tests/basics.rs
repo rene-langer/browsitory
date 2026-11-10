@@ -66,6 +66,37 @@ fn locate_commit_finds_a_commit_through_the_worker() {
 }
 
 #[test]
+fn merged_commits_list_what_a_merge_brought_in_through_the_worker() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    let tree = base.tree().unwrap();
+    let sig = repo.signature().unwrap();
+    let side_id = repo
+        .commit(None, &sig, &sig, "side work", &tree, &[&base])
+        .unwrap();
+    let side = repo.find_commit(side_id).unwrap();
+    let merge = repo
+        .commit(Some("HEAD"), &sig, &sig, "merge", &tree, &[&base, &side])
+        .unwrap();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let merged = handle.get_merged_commits(merge.to_string(), 10).unwrap();
+    let collapsed = git_core::graph::GraphSelection {
+        first_parent: true,
+        ..Default::default()
+    };
+    let rows = handle.get_commit_graph(10, collapsed).unwrap();
+
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].id, side_id.to_string());
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].merged_count, Some(1));
+}
+
+#[test]
 fn commit_stats_count_a_commit_through_the_worker() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "one\ntwo\n");

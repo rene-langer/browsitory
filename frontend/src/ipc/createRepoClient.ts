@@ -121,6 +121,11 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selection }),
     locateCommit: (repoPath: string, revision: string, selection: GraphSelection) =>
       call<CommitLocation | null>("locate_commit", { repoPath, revision, selection }),
+    getMergedCommits: (repoPath: string, mergeId: string, limit: number) =>
+      call<GraphCommit[]>("get_merged_commits", { repoPath, mergeId, limit }),
+    getGraphCollapseMerges: (repoPath: string) => call<boolean>("get_graph_collapse_merges", { repoPath }),
+    setGraphCollapseMerges: (repoPath: string, collapse: boolean) =>
+      call<void>("set_graph_collapse_merges", { repoPath, collapse }),
     getWorkingDiff: (repoPath: string, path: string, staged: boolean, opts: DiffOptions, oldPath: string | null = null) =>
       call<DiffHunk[]>("get_working_diff", { repoPath, path, staged, opts, oldPath }),
     getCommitDiff: (repoPath: string, commitId: string, path: string, opts: DiffOptions) =>

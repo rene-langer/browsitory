@@ -83,6 +83,32 @@ the graph it has a short dashed stub ("Merged from a branch not shown in this vi
 the merged branch. With two or more branches, or all of them, the graph shows every commit they
 reach, merged branches included.
 
+## Collapse merges
+
+In a repository that merges feature branches, the graph can show just the line of each branch:
+turn on **Collapse merges** with the fold button in the search bar above the graph, or the
+**Collapse merges** command in the command palette. The graph then follows only the first
+parents of every branch it shows, as for a single branch above, whichever branches you picked.
+Browsitory remembers the choice per repository; turning it off (the same button, or **Show
+every commit of merged branches** in the palette) brings back every commit.
+
+Each merge commit in such a graph (also with a single isolated branch) has a **+N** button after
+its subject: N is how many commits the merge brought in, the commits of the merged branch (and
+of any branch merged into that one) that the branch had not had before. Click it to show those
+commits right below the merge, with their lanes; **−N** hides them again. With the commit list
+focused, → expands the selected merge and ← collapses it; on one of its commits, ← goes back to
+the merge. A merge of a long-lived branch shows its first hundred commits; **More** shows the next
+hundred. The commits shown this way work like any other row: select them, select several, open
+their menu, compare them, see their size.
+
+Going to a commit that a collapsed merge holds, with **Go to commit…** or the parent key `[`
+(a merge's second parent, chosen with Shift+`[`), expands that merge and selects the commit.
+Commit search still searches every commit of the branches the graph shows, so it finds commits
+inside collapsed merges too. Back and Forward skip a commit whose merge you collapsed again.
+
+If a merged branch still exists and the graph shows it, its commits are already rows of their
+own, so expanding its merge adds no rows for them.
+
 When HEAD is detached (you checked out a commit or a tag), the graph also shows the commit you are
 on and the commits before it, whichever branches you picked, and marks that commit with a **HEAD**
 badge. Commits you make there are on no branch until you create one (**Branch from here**), but

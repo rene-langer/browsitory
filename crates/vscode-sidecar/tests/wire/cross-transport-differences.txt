@@ -12,6 +12,7 @@ ChangedFile/plain key-order
 ChangedFile/renamed key-order
 CommitLocation/hidden key-order
 CommitLocation/in-graph key-order
+CommitLocation/in-merge key-order
 CommitMessageSettings/plain key-order
 CommitOutcome/Committed key-order
 CommitOutcome/HookFailed key-order
@@ -55,6 +56,7 @@ GitTools/diff-tool-System key-order
 GitTools/diff-tool-Worktree key-order
 GitTools/diff-tool-Xdg key-order
 GitTools/merge-tool-minimal key-order
+GraphCommit/collapsed-merge key-order
 GraphCommit/escapes key-order
 GraphCommit/plain key-order
 GraphCommit/root-commit key-order

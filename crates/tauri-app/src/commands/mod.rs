@@ -18,6 +18,7 @@ mod branch;
 mod clone;
 mod compare;
 mod forge;
+mod graph;
 mod history;
 mod merge;
 mod patch;
@@ -46,6 +47,7 @@ pub use forge::{
     create_pull_request, detect_forge_repository, forget_forge_token, list_pull_requests,
     save_forge_token,
 };
+pub use graph::{get_graph_collapse_merges, get_merged_commits, set_graph_collapse_merges};
 pub use history::{
     abort_sequence, amend_commit, checkout_commit, cherry_pick, cherry_pick_many,
     continue_sequence, get_head_info, list_recent_authors, reset_to_commit, revert_commit,
