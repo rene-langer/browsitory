@@ -1,6 +1,11 @@
 mod common;
 
-use common::{commit_tree, init_repo};
+use std::io::Write;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
+use std::time::Duration;
+
+use common::{commit_at, commit_tree, init_repo};
 use git_core::graph::{graph_log, GraphSelection};
 use git_core::locate::{locate_commit, CommitLocation};
 
@@ -339,4 +344,99 @@ fn a_commit_of_a_side_branch_merged_into_the_side_branch_names_the_outer_merge()
     assert_eq!(merge.merge_position, 0);
     let listed = git_core::graph::merged_commits(&repo, &outer.to_string(), 50).unwrap();
     assert_eq!(listed[merge.offset].id, sub.to_string());
+}
+
+#[test]
+fn a_commit_already_in_the_collapsed_graph_names_no_merge_although_a_merge_holds_it() {
+    let (_dir, repo) = init_repo();
+    let ids = history(&repo);
+    // `feature` is selected too, so `feature 3` is its row, though `merge feature` brought it in.
+    let selection = collapsed(Some(&["trunk", "feature"]));
+
+    let location = locate_commit(&repo, &ids[4].to_string(), &selection)
+        .unwrap()
+        .unwrap();
+
+    let graph = graph_log(&repo, 50, &selection).unwrap();
+    let row = graph.iter().position(|c| c.id == ids[4].to_string());
+    assert!(row.is_some());
+    assert_eq!(location.position, row);
+    assert_eq!(location.merge, None);
+}
+
+#[test]
+fn a_commit_hidden_behind_a_collapsed_octopus_merge_names_it_with_its_offset() {
+    // The octopus brings in three tips, listed newest first (not in the order of its parents).
+    let (_dir, repo) = init_repo();
+    let base = commit_at(&repo, &[], "base", 100);
+    let main = commit_at(&repo, &[base], "on main", 150);
+    let middle = commit_at(&repo, &[base], "middle", 300);
+    let newest = commit_at(&repo, &[base], "newest", 400);
+    let oldest = commit_at(&repo, &[base], "oldest", 200);
+    let octopus = commit_at(&repo, &[main, middle, newest, oldest], "octopus", 500);
+    repo.reference("refs/heads/main", octopus, true, "test")
+        .unwrap();
+
+    for (target, offset) in [(newest, 0), (middle, 1), (oldest, 2)] {
+        let location = locate_commit(&repo, &target.to_string(), &collapsed(None))
+            .unwrap()
+            .unwrap();
+
+        let merge = location.merge.expect("held by the octopus");
+        assert_eq!(merge.merge_id, octopus.to_string());
+        assert_eq!(merge.merge_position, 0);
+        assert_eq!(merge.offset, offset);
+    }
+}
+
+/// Runs `test` on its own thread and ends this whole test binary when it takes longer than
+/// `limit`: a binary search that stops narrowing loops forever, and one hung test would keep
+/// the binary (and every test in it) running with it.
+fn within(limit: Duration, test: impl FnOnce() + Send + 'static) {
+    let (done, finished) = mpsc::channel();
+    let handle = thread::spawn(move || {
+        test();
+        let _ = done.send(());
+    });
+    if let Err(RecvTimeoutError::Timeout) = finished.recv_timeout(limit) {
+        // Not `eprintln!`, which the test harness captures and `exit` would never print.
+        let message = format!("locate_commit ran past {limit:?}: the search loops\n");
+        let _ = std::io::stderr().write_all(message.as_bytes());
+        std::process::exit(1);
+    }
+    if let Err(panic) = handle.join() {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+#[test]
+fn the_merge_is_found_at_every_position_of_first_parent_lines_of_every_length() {
+    within(Duration::from_secs(20), || {
+        // main: base, then merge 1 of topic 1 .. merge n of topic n, so its first-parent line
+        // has n + 1 commits (2 to 7, even and odd) and merge k is at index n - k: from the tip
+        // (0) to the one next to the root (n - 1).
+        for n in 1..=6 {
+            let (_dir, repo) = init_repo();
+            let mut line = commit_tree(&repo, &[("a.txt", "a", FILE)], &[], "base");
+            let mut merges = Vec::new();
+            for k in 1..=n {
+                let topic = commit_tree(&repo, &[], &[line], &format!("topic {k}"));
+                line = commit_tree(&repo, &[], &[line, topic], &format!("merge {k}"));
+                merges.push((k, topic, line));
+            }
+            repo.reference("refs/heads/main", line, true, "test")
+                .unwrap();
+
+            for (k, topic, merge) in merges {
+                let location = locate_commit(&repo, &topic.to_string(), &collapsed(None))
+                    .unwrap()
+                    .unwrap();
+
+                let found = location.merge.expect("held by a merge");
+                assert_eq!(found.merge_id, merge.to_string(), "line of {n} merges");
+                assert_eq!(found.merge_position, n - k, "line of {n} merges");
+                assert_eq!(found.offset, 0);
+            }
+        }
+    });
 }

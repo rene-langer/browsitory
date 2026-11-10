@@ -1,6 +1,6 @@
 mod common;
 
-use common::{commit_all, commit_tree, init_repo, write_file};
+use common::{commit_all, commit_at, commit_tree, init_repo, write_file};
 use git_core::graph::GraphSelection;
 
 #[test]
@@ -704,4 +704,21 @@ fn merged_commits_of_a_commit_that_is_no_merge_is_empty() {
     assert!(merged.is_empty());
     let malformed = git_core::graph::merged_commits(&repo, "not a sha", 50);
     assert!(malformed.is_err());
+}
+
+#[test]
+fn merged_commits_list_unrelated_commits_newest_first() {
+    // The octopus brings in three tips; their order is neither the order of the merge's parents
+    // nor its reverse, only their commit time.
+    let (_dir, repo) = init_repo();
+    let base = commit_at(&repo, &[], "base", 100);
+    let main = commit_at(&repo, &[base], "on main", 150);
+    let middle = commit_at(&repo, &[base], "middle", 300);
+    let newest = commit_at(&repo, &[base], "newest", 400);
+    let oldest = commit_at(&repo, &[base], "oldest", 200);
+    let octopus = commit_at(&repo, &[main, middle, newest, oldest], "octopus", 500);
+
+    let merged = git_core::graph::merged_commits(&repo, &octopus.to_string(), 50).unwrap();
+
+    assert_eq!(summaries(&merged), ["newest", "middle", "oldest"]);
 }
