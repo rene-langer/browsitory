@@ -99,11 +99,13 @@ pub(crate) fn install(
 
 /// Before `repo.apply(diff, location)`: separates each work-tree file the patch changes, once a
 /// check shows the patch applies (`git apply` changes nothing when it doesn't). Nothing for a
-/// patch to the index alone.
+/// patch to the index alone. `check` holds the options of the apply (its delta callback, if
+/// any); the check is turned on here.
 pub(crate) fn before_apply(
     repo: &Repository,
     diff: &git2::Diff<'_>,
     location: git2::ApplyLocation,
+    check: &mut git2::ApplyOptions<'_>,
 ) {
     if matches!(location, git2::ApplyLocation::Index) {
         return;
@@ -119,9 +121,8 @@ pub(crate) fn before_apply(
     if linked.is_empty() {
         return;
     }
-    let mut check = git2::ApplyOptions::new();
     check.check(true);
-    if repo.apply(diff, location, Some(&mut check)).is_err() {
+    if repo.apply(diff, location, Some(check)).is_err() {
         return;
     }
     for rel in linked {

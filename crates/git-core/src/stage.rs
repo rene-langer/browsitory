@@ -841,7 +841,7 @@ fn apply_selection(
         direction,
     )?;
     let parsed = git2::Diff::from_buffer(&patch).map_err(not_applicable_or_index)?;
-    crate::hardlink::before_apply(repo, &parsed, location);
+    crate::hardlink::before_apply(repo, &parsed, location, &mut git2::ApplyOptions::new());
     repo.apply(&parsed, location, None)
         .map_err(not_applicable_or_index)
 }
