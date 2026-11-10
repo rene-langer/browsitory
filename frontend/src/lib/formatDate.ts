@@ -1,6 +1,11 @@
-/** Absolute local date-time for a Unix-seconds timestamp. */
+/**
+ * Absolute local date-time for a Unix-seconds timestamp: `YYYY-MM-DD HH:MM`, the graph's date
+ * format with the time added (#641).
+ */
 export function formatAbsoluteDate(timestampSeconds: number): string {
-  return new Date(timestampSeconds * 1000).toLocaleString();
+  const date = new Date(timestampSeconds * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${formatShortDate(timestampSeconds)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [

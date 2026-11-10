@@ -874,6 +874,44 @@ fn commit_stats_round_trip_through_the_sidecar() {
 }
 
 #[test]
+fn commit_details_round_trip_through_the_sidecar() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "one\n");
+    commit_all(&repo, "initial commit");
+    let head = repo.head().unwrap();
+    let id = head.target().unwrap().to_string();
+    let branch = head.shorthand().unwrap().to_string();
+    let commit = repo.find_commit(head.target().unwrap()).unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let details = sidecar.call(
+        2,
+        "get_commit_details",
+        serde_json::json!({"repoPath": repo_path, "commitId": id}),
+    );
+
+    let person = serde_json::json!({
+        "name": commit.author().name().unwrap(),
+        "email": commit.author().email().unwrap(),
+        "timestamp": commit.author().when().seconds(),
+    });
+    assert_eq!(
+        details["result"],
+        serde_json::json!({
+            "author": person,
+            "committer": person,
+            "branches": [branch],
+            "remoteBranches": [],
+            "tags": [],
+            "complete": true,
+        }),
+        "{details}"
+    );
+}
+
+#[test]
 fn stage_commit_and_get_commit_files_round_trip_through_the_sidecar() {
     let (dir, _repo) = init_repo();
     write_file(dir.path(), "new.txt", "hello");

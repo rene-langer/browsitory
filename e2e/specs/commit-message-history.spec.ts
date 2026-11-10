@@ -35,7 +35,7 @@ describe("Browsitory commit message history (#443)", () => {
       box,
       MESSAGE,
     );
-    await clickInPage("button", "Commit");
+    await clickInPage('button[data-action="commit"]');
     await $("li*=e2e: remembered message").waitForExist();
     await browser.waitUntil(async () => (await boxValue()) === "", {
       timeoutMsg: "expected the commit to clear the message box",

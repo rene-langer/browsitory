@@ -1,4 +1,5 @@
 use super::{emit_hook_events, repo_worker, AppState};
+use repo_service::wire::CommitDetailsDto;
 use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
@@ -172,6 +173,20 @@ pub async fn get_commit_signature(
     Ok(CommitSignatureDto::from(
         repo_worker(&state, &repo_path)?
             .call(move |w| w.get_commit_signature(commit_id))
+            .await?,
+    ))
+}
+
+/// Author, committer and the branches and tags that contain `commit_id` (#641).
+#[tauri::command]
+pub async fn get_commit_details(
+    repo_path: String,
+    commit_id: String,
+    state: State<'_, AppState>,
+) -> Result<CommitDetailsDto, ErrorDto> {
+    Ok(CommitDetailsDto::from(
+        repo_worker(&state, &repo_path)?
+            .call(move |w| w.get_commit_details(commit_id))
             .await?,
     ))
 }

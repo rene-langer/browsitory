@@ -524,6 +524,45 @@ pub fn commit_stats_entries() -> Cases<git_core::commit_stats::CommitStatsEntry>
     ]
 }
 
+/// `getCommitDetails` answers (#641): a commit applied by someone else and on refs, and one
+/// whose ref scan ran out of time.
+pub fn commit_details() -> Cases<git_core::commit_details::CommitDetails> {
+    use git_core::commit_details::{CommitDetails, Person};
+    let ada = Person {
+        name: "Ada Lovelace".to_string(),
+        email: "ada@example.com".to_string(),
+        timestamp: 1_700_000_000,
+    };
+    vec![
+        case(
+            "on-refs",
+            CommitDetails {
+                author: ada.clone(),
+                committer: Person {
+                    name: "Bob".to_string(),
+                    email: "bob@example.com".to_string(),
+                    timestamp: 1_700_000_600,
+                },
+                branches: vec!["main".to_string()],
+                remote_branches: vec!["origin/main".to_string()],
+                tags: vec!["v1.0".to_string()],
+                complete: true,
+            },
+        ),
+        case(
+            "incomplete",
+            CommitDetails {
+                author: ada.clone(),
+                committer: ada,
+                branches: Vec::new(),
+                remote_branches: Vec::new(),
+                tags: Vec::new(),
+                complete: false,
+            },
+        ),
+    ]
+}
+
 /// A patch's bytes (#448): text, and bytes that aren't UTF-8.
 pub fn patch_contents() -> Cases<Vec<u8>> {
     vec![

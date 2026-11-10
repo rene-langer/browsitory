@@ -117,6 +117,26 @@ fn commit_stats_count_a_commit_through_the_worker() {
 }
 
 #[test]
+fn commit_details_come_through_the_worker() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "one\n");
+    commit_all(&repo, "initial commit");
+    let id = repo.head().unwrap().target().unwrap().to_string();
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let details = handle.get_commit_details(id).unwrap();
+
+    assert_eq!(details.branches, vec![branch]);
+    assert!(details.complete, "one branch fits the budget");
+    assert_eq!(details.committer.name, details.author.name);
+
+    let missing = handle.get_commit_details("1".repeat(40));
+    assert!(missing.is_err());
+}
+
+#[test]
 fn stage_then_commit_round_trips_through_the_worker() {
     let (dir, _repo) = init_repo();
     write_file(dir.path(), "new.txt", "hello");

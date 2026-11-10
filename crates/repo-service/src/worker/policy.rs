@@ -169,6 +169,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetPatch { .. }
         | Command::GetCommitMessage { .. }
         | Command::GetCommitSignature { .. }
+        | Command::GetCommitDetails { .. }
         | Command::GetBlame { .. }
         | Command::GetFileHistory { .. }
         | Command::GetLineHistory { .. }
@@ -449,6 +450,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetCommitStats,
         GetCommitMessage,
         GetCommitSignature,
+        GetCommitDetails,
         GetBlame,
         GetFileHistory,
         GetLineHistory,

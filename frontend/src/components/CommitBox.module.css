@@ -46,6 +46,14 @@
   font-size: var(--text-sm);
 }
 
+/* The one primary action in the workspace. A long branch name is cut, the title has it all. */
+.commitButton {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The one primary action in the workspace. */
 .commitButton:not(:disabled) {
   background: var(--color-accent);
@@ -174,4 +182,11 @@
 
 .historyButton {
   font-size: var(--text-xs);
+}
+
+/* Why Commit is disabled while the message is empty (#651): a quiet hint, not a warning. */
+.hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
 }

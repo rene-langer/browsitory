@@ -47,6 +47,7 @@
   "get_appearance_settings",
   "get_blame",
   "get_branch_compare_range",
+  "get_commit_details",
   "get_commit_diff",
   "get_commit_files",
   "get_commit_graph",

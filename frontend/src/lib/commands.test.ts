@@ -1003,6 +1003,22 @@ describe("filterAndSortCommands", () => {
     const results = filterAndSortCommands(commands, "zzz-no-match");
     expect(results).toHaveLength(0);
   });
+
+  it("matches the words in any order, and letters in order (#644)", () => {
+    expect(filterAndSortCommands(commands, "main sw").map((c) => c.id)).toEqual(["a"]);
+    expect(filterAndSortCommands(commands, "ftch").map((c) => c.id)).toEqual(["c"]);
+  });
+
+  it("caps a filtered list but not the empty query's full list (#644)", () => {
+    const many: PickerItem[] = Array.from({ length: 80 }, (_, i) => ({
+      id: `cmd-${i}`,
+      label: `Command ${i}`,
+      keywords: [],
+      run: vi.fn(),
+    }));
+    expect(filterAndSortCommands(many, "")).toHaveLength(80);
+    expect(filterAndSortCommands(many, "command")).toHaveLength(50);
+  });
 });
 
 describe("recordCommandUsed / loadRecentCommandIds", () => {
@@ -1862,6 +1878,13 @@ describe("Switch branch… (#638)", () => {
     const { command } = switcher();
     expect(command.label).toBe("Switch branch…");
     expect(command.group).toBe("Branches");
+  });
+
+  it("is in the palette's full list and found by fuzzy words (#644)", () => {
+    const handlers = { recentBranches: [], onSwitchBranch: vi.fn(), onCreateAndSwitch: vi.fn() };
+    const commands = commandsFor(makeAppState({ branches }), { branchSwitch: handlers });
+    expect(filterAndSortCommands(commands, "").some((c) => c.id === SWITCH_BRANCH_PICKER_ID)).toBe(true);
+    expect(filterAndSortCommands(commands, "br sw")[0]?.id).toBe(SWITCH_BRANCH_PICKER_ID);
   });
 
   it("lists the recent branches first, then the other local ones, never the current one", () => {

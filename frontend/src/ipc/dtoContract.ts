@@ -50,6 +50,8 @@ export type DtoContract = [
   Expect<Equal<Hand.CollapsedMerge, Wire.CollapsedMerge>>,
   Expect<Equal<Hand.CommitStats, Wire.CommitStats>>,
   Expect<Equal<Hand.CommitStatsEntry, Wire.CommitStatsEntry>>,
+  Expect<Equal<Hand.CommitDetails, Wire.CommitDetails>>,
+  Expect<Equal<Hand.CommitPerson, Wire.CommitPerson>>,
   Expect<Equal<Hand.FileStats, Wire.FileStats>>,
   Expect<Equal<Hand.GraphSelection, Wire.GraphSelection>>,
   Expect<Equal<Hand.ConfirmedAbort, Wire.ConfirmedAbort>>,

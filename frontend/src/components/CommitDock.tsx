@@ -60,6 +60,7 @@ export function CommitDock({
     commitHooks,
     onSetAmendMode,
     onAmendCommit,
+    commitFlow,
   } = useWorkspaceActions();
   const { settings: commitMessageSettings } = useCommitMessageSettingsContext();
   const loadRecentAuthors = useCallback(() => client.listRecentAuthors(repoPath), [client, repoPath]);
@@ -126,6 +127,13 @@ export function CommitDock({
       ) : (
         <CommitBox
           onCommit={onCommit}
+          stagedCount={stagedCount}
+          branchName={commitFlow?.branch}
+          commitAndPush={
+            commitFlow === undefined
+              ? undefined
+              : { onCommitAndPush: commitFlow.onCommitAndPush, disabledReason: commitFlow.commitAndPushReason }
+          }
           disabled={stagedCount === 0 || conflictCount > 0}
           disabledReason={conflictCount > 0 ? conflictReason(conflictCount) : "Stage changes to commit"}
           onAbortMerge={onAbortMerge}

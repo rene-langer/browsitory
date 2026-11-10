@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CommitSignature, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import type { CommitDetails, CommitSignature, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import { formatAbsoluteDate } from "../lib/formatDate";
 import { CommitHeader } from "./CommitHeader";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 
@@ -279,5 +280,111 @@ describe("CommitHeader line totals (#620)", () => {
     cleanup();
     renderHeader({ lineStats: null });
     expect(screen.queryByText("Size")).toBeNull();
+  });
+});
+
+describe("CommitHeader details (#641)", () => {
+  const jane = { name: "Jane Doe", email: "jane@example.com", timestamp: 1_700_000_000 };
+  const details = (overrides: Partial<CommitDetails> = {}): CommitDetails => ({
+    author: jane,
+    committer: jane,
+    branches: [],
+    remoteBranches: [],
+    tags: [],
+    complete: true,
+    ...overrides,
+  });
+  const clientWithDetails = (answer: CommitDetails | Error) =>
+    fakeRepoClient({
+      getCommitMessage: vi.fn(async () => "Fix the thing\n"),
+      getCommitSignature: vi.fn(async () => UNSIGNED),
+      getCommitDetails: vi.fn(async () => {
+        if (answer instanceof Error) throw answer;
+        return answer;
+      }),
+    });
+  const row = (term: string) => screen.getByText(term, { selector: "dt" }).nextElementSibling as HTMLElement;
+
+  it("shows the date as YYYY-MM-DD HH:MM", () => {
+    renderHeader();
+    expect(row("Date")).toHaveTextContent(formatAbsoluteDate(commit.timestamp));
+    expect(row("Date").textContent).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} /);
+  });
+
+  it("shows a committer who isn't the author, with the commit time", async () => {
+    const bob = { name: "Bob", email: "bob@example.com", timestamp: 1_700_000_600 };
+    renderHeader({ client: clientWithDetails(details({ author: { ...jane, timestamp: 1_699_000_000 }, committer: bob })) });
+
+    expect(await screen.findByText("Committer", { selector: "dt" })).toBeInTheDocument();
+    expect(row("Committer")).toHaveTextContent(`Bob <bob@example.com>, ${formatAbsoluteDate(bob.timestamp)}`);
+    // The Date row is the author's time once the details are in, not the graph's commit time.
+    expect(row("Date")).toHaveTextContent(formatAbsoluteDate(1_699_000_000));
+  });
+
+  it("shows the commit time when the author committed it later (a rebase or an amend)", async () => {
+    renderHeader({ client: clientWithDetails(details({ committer: { ...jane, timestamp: 1_700_009_000 } })) });
+
+    expect(await screen.findByText("Committed", { selector: "dt" })).toBeInTheDocument();
+    expect(row("Committed")).toHaveTextContent(formatAbsoluteDate(1_700_009_000));
+    expect(screen.queryByText("Committer", { selector: "dt" })).toBeNull();
+  });
+
+  it("has no committer row when the author committed it at the same time", async () => {
+    renderHeader({ client: clientWithDetails(details({ branches: ["main"] })) });
+
+    expect(await screen.findByText("Contained in", { selector: "dt" })).toBeInTheDocument();
+    expect(screen.queryByText("Committer", { selector: "dt" })).toBeNull();
+    expect(screen.queryByText("Committed", { selector: "dt" })).toBeNull();
+  });
+
+  it("lists the branches, remote branches and tags that contain the commit", async () => {
+    renderHeader({
+      client: clientWithDetails(details({ branches: ["main", "topic"], remoteBranches: ["origin/main"], tags: ["v1.0"] })),
+    });
+
+    await screen.findByText("Contained in", { selector: "dt" });
+    const list = within(row("Contained in"));
+    expect(list.getByText("main")).toHaveAttribute("data-kind", "branch");
+    expect(list.getByText("topic")).toHaveAttribute("data-kind", "branch");
+    expect(list.getByText("origin/main")).toHaveAttribute("data-kind", "remote");
+    expect(list.getByText("v1.0")).toHaveAttribute("data-kind", "tag");
+  });
+
+  it("says when no branch or tag contains the commit", async () => {
+    renderHeader({ client: clientWithDetails(details()) });
+
+    await screen.findByText("Contained in", { selector: "dt" });
+    expect(row("Contained in")).toHaveTextContent("No branch or tag");
+  });
+
+  it("says the list may be short when the backend ran out of time", async () => {
+    renderHeader({ client: clientWithDetails(details({ branches: ["main"], complete: false })) });
+
+    await screen.findByText("Contained in", { selector: "dt" });
+    expect(row("Contained in")).toHaveTextContent("main");
+    expect(row("Contained in")).toHaveTextContent("Not every branch and tag was checked.");
+  });
+
+  it("shows the first refs of a long list and the rest on request", async () => {
+    const tags = Array.from({ length: 12 }, (_, i) => `v${i + 1}`);
+    renderHeader({ client: clientWithDetails(details({ tags })) });
+
+    await screen.findByText("Contained in", { selector: "dt" });
+    const list = within(row("Contained in"));
+    expect(list.getByText("v8")).toBeInTheDocument();
+    expect(list.queryByText("v9")).toBeNull();
+    fireEvent.click(list.getByRole("button", { name: "Show 4 more" }));
+    expect(list.getByText("v12")).toBeInTheDocument();
+    expect(list.queryByRole("button", { name: /more/ })).toBeNull();
+  });
+
+  it("shows no committer or refs rows when the details can't be read", async () => {
+    const client = clientWithDetails(new Error("boom"));
+    renderHeader({ client });
+
+    await waitFor(() => expect(client.getCommitDetails).toHaveBeenCalled());
+    await screen.findByText("SHA", { selector: "dt" });
+    expect(screen.queryByText("Contained in", { selector: "dt" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

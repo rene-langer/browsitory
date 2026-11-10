@@ -31,6 +31,8 @@ reverse: boolean,
  */
 stage: boolean, };
 
+export type CommitDetails = { author: CommitPerson, committer: CommitPerson, branches: Array<string>, remoteBranches: Array<string>, tags: Array<string>, complete: boolean, };
+
 export type CommitHunk = { oldStart: number, newStart: number, contextLines: number, algorithm: DiffAlgorithm, };
 
 export type CommitLocation = { commitId: string, position: number | null, branches: Array<string>, remoteBranches: Array<string>, 
@@ -42,6 +44,8 @@ merge?: CollapsedMerge, };
 export type CommitMessageSettings = { summaryLimit: number, bodyRuler: number, showRuler: boolean, };
 
 export type CommitOutcome = { "kind": "Committed", commitId: string, } | { "kind": "HookFailed", hook: string, output: string, };
+
+export type CommitPerson = { name: string, email: string, timestamp: number, };
 
 export type CommitSignature = { status: SignatureStatus, format: SignatureFormat | null, signer: string | null, key: string | null, detail: string | null, };
 

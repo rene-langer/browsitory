@@ -79,6 +79,14 @@ export interface WorkspaceActions {
   onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
   onAmendCommit: (message: string, options: AmendOptions) => Promise<boolean>;
   onSetAmendMode: (on: boolean) => void;
+  // Where a commit lands and "Commit and push" (#651): `branch` names the current branch in the
+  // commit button (null on a detached HEAD); `onCommitAndPush` resolves like `onCommit`, and
+  // `commitAndPushReason` says why it can't run (null when it can).
+  commitFlow?: {
+    branch: string | null;
+    onCommitAndPush: (message: string, trailers: Trailer[]) => Promise<boolean>;
+    commitAndPushReason: string | null;
+  };
   onAbortMerge: () => void;
   onSaveStash: () => void;
   // "Stash…" (paths empty) and a file's "Stash file…" (that path): open the stash dialog.
