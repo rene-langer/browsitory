@@ -28,7 +28,6 @@ import {
 } from "./components/PreferencesDialog";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
 import { repoNameOf } from "./lib/repoName";
-import { persistTheme } from "./lib/theme";
 import { AppearanceSettingsProvider } from "./state/AppearanceSettingsProvider";
 import { CommitMessageSettingsProvider } from "./state/CommitMessageSettingsProvider";
 import { FetchSettingsProvider } from "./state/FetchSettingsProvider";
@@ -103,7 +102,9 @@ function AppContent({
     () => Object.fromEntries(workspaces.workspaces.map((workspace) => [workspace.id, workspace.name])),
     [workspaces.workspaces],
   );
-  const [theme, setTheme] = useTheme();
+  // In VSCode the editor's theme decides (#676): no toggle, no setting, nothing applied.
+  const themeControls = toolHost !== "vscode";
+  const { preference: themePreference, theme, setPreference: setThemePreference } = useTheme(themeControls);
   const { onBusyChange, busyPaths } = useBusyPaths();
   const { getCommitDraft, onCommitDraftChange } = useCommitDrafts();
 
@@ -295,16 +296,13 @@ function AppContent({
 
   const { releaseNotesView, setReleaseNotesView, closeReleaseNotes } = useReleaseNotes(client);
 
-  const themeToggle = (
+  // Switches to the other theme; Preferences > Appearance > Theme goes back to System (#691).
+  const themeToggle = themeControls && (
     <button
       type="button"
       className={styles.iconButton}
       aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-      onClick={() => {
-        const next = theme === "dark" ? "light" : "dark";
-        setTheme(next);
-        persistTheme(next);
-      }}
+      onClick={() => setThemePreference(theme === "dark" ? "light" : "dark")}
     >
       {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
     </button>
@@ -384,7 +382,9 @@ function AppContent({
           <CommitMessageSection />
           <FetchSection repoPath={openRepos.activePath} />
           <DiffSection />
-          <AppearanceSection />
+          <AppearanceSection
+            theme={themeControls ? { preference: themePreference, onChange: setThemePreference } : undefined}
+          />
           {updaterAvailable && <UpdatesSection onCheckNow={runUpdateCheck} />}
         </PreferencesDialog>
       )}

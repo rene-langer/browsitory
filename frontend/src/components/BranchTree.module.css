@@ -142,6 +142,8 @@
 
 .selectedRow {
   background: var(--color-selected-bg);
+  color: var(--color-selected-text);
+  box-shadow: inset 2px 0 0 var(--color-selected-marker);
 }
 
 .swatch {
@@ -170,7 +172,7 @@
 }
 
 .swatch:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
@@ -229,7 +231,7 @@ li.treeRow.selectedRow .rowInner > .iconButton {
 
 .currentName {
   font-weight: 600;
-  color: var(--color-accent);
+  color: var(--color-accent-fg);
 }
 
 .currentMarker {
@@ -272,4 +274,12 @@ li.treeRow.selectedRow .rowInner > .iconButton {
 .upstreamBlock > [role="status"] {
   margin: var(--space-2) 0 0;
   font-size: var(--text-sm);
+}
+
+/* Forced colours (#671): the selected row's bar is a box shadow, which this mode drops. */
+@media (forced-colors: active) {
+  .selectedRow {
+    outline: 2px solid var(--color-selected-marker);
+    outline-offset: -2px;
+  }
 }

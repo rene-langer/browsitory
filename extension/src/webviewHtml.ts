@@ -34,7 +34,8 @@ export function renderWebviewHtml(webview: Webview, assets: WebviewAssets): stri
 
   return [
     "<!doctype html>",
-    '<html lang="en">',
+    // Turns on the frontend's `styles/vscode-tokens.css` (#676) before the bundle runs.
+    '<html lang="en" data-host="vscode">',
     "<head>",
     '<meta charset="UTF-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1.0">',

@@ -8,7 +8,7 @@
 }
 
 .diff:focus-visible {
-  outline: 2px solid var(--color-focus-ring, currentColor);
+  outline: 2px solid var(--color-focus-ring);
   outline-offset: 1px;
 }
 
@@ -34,7 +34,7 @@
 }
 
 .viewOptions button[aria-pressed="true"] {
-  color: var(--color-accent);
+  color: var(--color-accent-fg);
 }
 
 .activeHunk .hunkHeader {
@@ -43,7 +43,7 @@
 
 /* The keyboard cursor's hunk marker only appears while the diff has focus. */
 .diff:focus-within .activeHunk .hunkHeader {
-  box-shadow: inset 2px 0 0 var(--color-accent, currentColor);
+  box-shadow: inset 2px 0 0 var(--color-accent);
 }
 
 .hunkHeader {
@@ -208,7 +208,7 @@
 }
 
 .wsTrailing {
-  background: color-mix(in srgb, var(--color-danger-text) 30%, transparent);
+  background: var(--color-danger-tint);
 }
 
 .splitRow {
@@ -226,11 +226,11 @@
 }
 
 .lineSelected {
-  background: var(--color-selected-bg, rgba(56, 132, 255, 0.22));
+  background: var(--color-selected-bg);
 }
 
 .lineCursor {
-  box-shadow: inset 2px 0 0 var(--color-accent, currentColor);
+  box-shadow: inset 2px 0 0 var(--color-accent);
 }
 
 .hint {

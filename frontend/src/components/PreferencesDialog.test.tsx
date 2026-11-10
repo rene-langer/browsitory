@@ -513,6 +513,33 @@ describe("AppearanceSection (#615)", () => {
     expect(within(group).getByRole("combobox", { name: "Interface size" })).toHaveValue("Normal");
     await waitFor(() => expect(root.dataset.uiSize).toBeUndefined());
   });
+
+  it("offers no theme when the host has no theme setting (VSCode)", () => {
+    const group = renderAppearance({ getAppearanceSettings: async () => defaults });
+    expect(within(group).queryByRole("combobox", { name: "Theme" })).toBeNull();
+  });
+
+  it("offers System, Light and Dark as the theme and reports a change (#691)", () => {
+    const onChange = vi.fn();
+    render(
+      <AppearanceSettingsProvider client={fakeRepoClient({ getAppearanceSettings: async () => defaults })}>
+        <PreferencesDialog onClose={() => {}}>
+          <AppearanceSection theme={{ preference: "system", onChange }} />
+        </PreferencesDialog>
+      </AppearanceSettingsProvider>,
+    );
+    const theme = within(screen.getByRole("group", { name: "Appearance" })).getByRole("combobox", { name: "Theme" });
+    expect(theme).toHaveValue("system");
+    expect(within(theme).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "System",
+      "Light",
+      "Dark",
+    ]);
+
+    fireEvent.change(theme, { target: { value: "dark" } });
+
+    expect(onChange).toHaveBeenCalledWith("dark");
+  });
 });
 
 describe("Updates preferences (#630)", () => {

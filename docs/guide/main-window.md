@@ -24,16 +24,23 @@ the right:
 - **Ctrl+K** (**⌘K** on macOS) reminds you of the [command palette](command-palette.md) shortcut.
 - The moon or sun button switches between the light and dark theme (**Switch to dark theme** /
   **Switch to light theme**). Browsitory remembers your choice. Until you pick one, it follows
-  your system's setting.
+  your system's setting; **Theme** under **Appearance** in **Preferences** goes back to that. In
+  VSCode the button isn't there: the panel takes the colours and fonts of VSCode's own theme
+  (light, dark or high contrast) and changes with it.
 - The gear button opens **Preferences**: the commit message settings, **Fetch automatically**
   (see [Branches and remotes](branches-and-remotes.md#fetching-automatically)), diff word wrap
   and diff algorithm (see [Diff options](history.md#diff-options)), your editor, terminal and diff tools (see
   [External tools](external-tools.md)), the **Appearance** settings below and, in the desktop
   app, **Updates** (see below).
 
-**Appearance.** The Appearance section of Preferences changes how text looks. Each change shows at
-once, without a restart:
+**Appearance.** The Appearance section of Preferences changes how the window and its text look.
+Each change shows at once, without a restart:
 
+- **Theme** (desktop app): **System** (the default) follows your system's light or dark setting,
+  also when it changes while Browsitory runs; **Light** and **Dark** keep that theme. Both themes
+  meet the WCAG 2.2 AA contrast levels. With a high-contrast or forced-colours setting in your
+  system (such as a Windows contrast theme), Browsitory uses the system's colours, and the focus
+  and the selection stay marked.
 - **Code font**: the font for file content and commit IDs: diffs, blame, the file viewer,
   conflicts, and the commit message field while its ruler is shown. Type a font family name, or
   several separated by commas. A font that isn't installed falls back to the default monospace

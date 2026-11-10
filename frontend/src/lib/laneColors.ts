@@ -1,6 +1,7 @@
-// Used by CommitLaneGraphic.tsx (branch-lane graphic) and BranchTree's swatches. Mid-tone,
-// slightly muted hues so the graph reads on both the light and dark palettes without shouting.
-export const LANE_COLORS = ["#e8833a", "#6aa84f", "#4f86c6", "#a66bb5", "#d9534f", "#3a9e9e"];
+// Used by CommitLaneGraphic.tsx (branch-lane graphic) and BranchTree's swatches. The colours are
+// the `--color-lane-*` tokens (`styles/tokens.css`), one set per theme, each at least 3:1 against
+// the graph's backgrounds (#666).
+export const LANE_COLORS = [1, 2, 3, 4, 5, 6].map((lane) => `var(--color-lane-${lane})`);
 
 // A branch's actual lane in CommitGraph is assigned dynamically by the graph layout algorithm
 // and shifts as history changes, so BranchTree — which has no access to that layout — instead
