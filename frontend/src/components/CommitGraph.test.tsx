@@ -1743,3 +1743,76 @@ describe("CommitGraph — copy items (#614)", () => {
     expect(writeText).toHaveBeenCalledWith("v2.0");
   });
 });
+
+describe("CommitGraph lines-changed badges (#620)", () => {
+  const baseProps = {
+    ...historyProps,
+    status,
+    commits,
+    selectedRow: "uncommitted" as const,
+    operationsBlocked: false,
+    onSelectRow: vi.fn(),
+    onBranchFromCommit: vi.fn(),
+    onRebaseFromCommit: vi.fn(),
+  };
+  const counted = { filesChanged: 2, insertions: 12, deletions: 3, files: [] };
+
+  it("shows a counted commit's badge, named for screen readers, and nothing for the others", () => {
+    const lineStats = new Map([
+      ["aaa111...", counted],
+      ["bbb222...", null],
+    ]);
+    render(<CommitGraph {...baseProps} lineStats={lineStats} />);
+
+    const rows = screen.getAllByRole("option").slice(1);
+    expect(within(rows[0]).getByTestId("line-stats")).toHaveTextContent("12 lines added, 3 removed+12−3");
+    expect(rows[0]).toHaveAccessibleName(expect.stringContaining("12 lines added, 3 removed"));
+    // Over the cap: no badge rather than a wrong number.
+    expect(within(rows[1]).queryByTestId("line-stats")).toBeNull();
+  });
+
+  it("looks the same as without badges until the numbers arrive", () => {
+    const { container: without } = render(<CommitGraph {...baseProps} />);
+    const plain = without.innerHTML;
+    cleanup();
+    const { container } = render(<CommitGraph {...baseProps} lineStats={new Map()} />);
+    expect(container.innerHTML).toBe(plain);
+  });
+
+  it("reports the rows on screen, in graph order, as they come into view", () => {
+    const observed: Element[] = [];
+    let report: (records: Partial<IntersectionObserverEntry>[]) => void = () => {};
+    const original = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = class {
+      constructor(callback: (records: Partial<IntersectionObserverEntry>[]) => void) {
+        report = callback;
+      }
+      observe(element: Element) {
+        observed.push(element);
+      }
+      disconnect() {}
+    } as unknown as typeof IntersectionObserver;
+    try {
+      const onCommitsVisible = vi.fn();
+      render(<CommitGraph {...baseProps} onCommitsVisible={onCommitsVisible} />);
+      expect(observed.map((row) => row.getAttribute("data-commit-id"))).toEqual(["aaa111...", "bbb222..."]);
+      expect(onCommitsVisible).not.toHaveBeenCalled();
+
+      report([{ target: observed[1], isIntersecting: true }]);
+      expect(onCommitsVisible).toHaveBeenLastCalledWith(["bbb222..."]);
+      report([
+        { target: observed[0], isIntersecting: true },
+        { target: observed[1], isIntersecting: false },
+      ]);
+      expect(onCommitsVisible).toHaveBeenLastCalledWith(["aaa111..."]);
+    } finally {
+      globalThis.IntersectionObserver = original;
+    }
+  });
+
+  it("counts every loaded row as visible without IntersectionObserver", () => {
+    const onCommitsVisible = vi.fn();
+    render(<CommitGraph {...baseProps} onCommitsVisible={onCommitsVisible} />);
+    expect(onCommitsVisible).toHaveBeenCalledWith(["aaa111...", "bbb222..."]);
+  });
+});

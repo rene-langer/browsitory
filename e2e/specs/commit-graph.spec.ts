@@ -60,6 +60,30 @@ describe("Browsitory commit graph", () => {
     expect(featureCommitEntryText).toContain("e2e-graph-feature");
   });
 
+  // #620: a commit's row shows the lines it added and removed; its details show the totals.
+  it("shows a commit's lines added and removed in its row and details", async () => {
+    fs.writeFileSync(path.join(E2E_REPO_PATH, "graph-fixture.txt"), "base\nmore\nmore\nmore\n");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, "graph-stats.txt"), "one\ntwo\n");
+    git(E2E_REPO_PATH, "add", "graph-fixture.txt", "graph-stats.txt");
+    git(E2E_REPO_PATH, "commit", "-m", "e2e: commit graph line stats");
+    await browser.refresh();
+
+    const row = await $("li.commit-row*=e2e: commit graph line stats");
+    await row.waitForExist();
+    const badge = await row.$('[data-testid="line-stats"]');
+    await badge.waitForExist({ timeoutMsg: "the commit's row got no lines-changed badge" });
+    // `getText` reads what is shown; the screen-reader text is clipped away.
+    expect(await badge.getAttribute("title")).toBe("5 lines added, 0 removed");
+    expect(await badge.getText()).toContain("+5");
+
+    await browser.execute((el) => (el as HTMLElement).click(), row);
+    const details = await $('section[aria-label="Commit details"]');
+    await details.waitForExist();
+    await browser.waitUntil(async () => (await details.getText()).includes("2 files changed"), {
+      timeoutMsg: "the commit details show no totals",
+    });
+  });
+
   // #467: a commit on a detached HEAD that no branch contains used to be missing from the graph.
   it("shows a commit made on a detached HEAD, marked HEAD", async () => {
     git(E2E_REPO_PATH, "checkout", "--detach");

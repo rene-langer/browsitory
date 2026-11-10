@@ -26,6 +26,17 @@ short notification confirms the copy; if the clipboard refuses, an error says so
 and tag menus have copy items too (see [Branches and remotes](branches-and-remotes.md) and
 [Tags](tags.md)).
 
+**Lines changed.** Each commit row shows how big the commit is, for example `+12 −3`: lines
+added in green, lines removed in red (screen readers read "12 lines added, 3 removed"). The
+numbers are counted as rows scroll into view, a few dozen at a time, so a row first appears
+without them; a very large commit that would take too long to count gets none. The selected
+commit's details show the totals ("4 files changed, +120 −37") under **Size**, and each file's
+header its own `+/−` (or **Binary**: a binary file counts as a changed file, with no lines).
+A commit is counted against its first parent (a merge too, like its file list; the first commit
+against nothing), and a renamed file counts as removed and added, as the file list shows it.
+The ± button in the search bar above the graph hides the row numbers or shows them again; the
+choice applies to every tab and is kept after a restart.
+
 The bar above the graph has **Fetch**, **Pull** and **Push** buttons for the
 current branch's upstream, with ahead/behind counts (for example `↑2 ↓1`)
 based on the last fetch.

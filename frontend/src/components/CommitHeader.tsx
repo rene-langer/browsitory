@@ -200,7 +200,7 @@ export function CommitHeader({
         )}
         {lineStats != null && (
           <>
-            <dt>Changes</dt>
+            <dt>Size</dt>
             <dd>
               {filesChangedLabel(lineStats.filesChanged)},{" "}
               <LineStatsBadge insertions={lineStats.insertions} deletions={lineStats.deletions} />
