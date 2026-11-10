@@ -2076,6 +2076,31 @@ fn cherry_pick_adding_a_folder_where_head_added_a_link_is_a_directory_file_confl
     e_link_moved_aside(&f);
 }
 
+/// Under `core.ignorecase` (the default on macOS and Windows) the merge result's link and folder
+/// of the identical spelling are the directory/file conflict, not a case collision.
+#[test]
+fn under_ignorecase_a_link_and_folder_of_one_spelling_are_still_the_conflict() {
+    let f = fx();
+    fresh_folder_against_a_committed_link(&f);
+    f.repo.config().unwrap().set_bool("core.ignorecase", true).unwrap();
+    let result = git_core::merge::start_merge(&f.repo, "other", MergeOptions::default()).unwrap();
+    assert!(
+        matches!(result, MergeOutcome::Conflicted { .. }),
+        "{result:?}"
+    );
+    e_link_moved_aside(&f);
+
+    let f = fx();
+    adding_below_a_committed_folder_link(&f);
+    f.repo.config().unwrap().set_bool("core.ignorecase", true).unwrap();
+    let result = git_core::merge::start_merge(&f.repo, "old", MergeOptions::default()).unwrap();
+    assert!(
+        matches!(result, MergeOutcome::Conflicted { .. }),
+        "{result:?}"
+    );
+    link_moved_aside_for_the_folder(&f);
+}
+
 /// The committed link, retargeted by the user at the outside folder, is a local change: a pick's
 /// checkout (which leaves local changes in place) would write through it, so adding a file
 /// below it is still refused (#155).

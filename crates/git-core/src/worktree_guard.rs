@@ -1516,7 +1516,19 @@ where
                 Incoming::MergeAsConflict(index) => GuardSource::Index(index),
             })
             .collect();
-        let incoming = find_case_collisions_in(&sources, ALL)?;
+        // In a merge result written as git's conflict, a link and a folder of the identical
+        // spelling are the file/folder collision that checkout writes as git does (the link
+        // moved to `<link>~HEAD`, #155), not a case collision; only differing spellings are.
+        let incoming: Vec<CaseCollision> = find_case_collisions_in(&sources, ALL)?
+            .into_iter()
+            .filter(|collision| {
+                collision.link != collision.folder
+                    || !incoming.iter().any(|source| {
+                        matches!(source, Incoming::MergeAsConflict(index)
+                            if holds_link(index, &collision.link))
+                    })
+            })
+            .collect();
         if !incoming.is_empty() {
             let known = known_collisions(repo, ALL, also_known)?;
             if let Some(collision) = brought_in(incoming, &sources, &known) {
@@ -1525,6 +1537,13 @@ where
         }
     }
     Ok(())
+}
+
+/// `index` has `path` as a symlink entry, at any stage.
+fn holds_link(index: &git2::Index, path: &str) -> bool {
+    index
+        .iter()
+        .any(|entry| entry.mode == MODE_LINK && entry.path == path.as_bytes())
 }
 
 /// True when a directory on the way to `path` (relative to `workdir`) is a symlink. Fails closed:
