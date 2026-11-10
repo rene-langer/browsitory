@@ -439,7 +439,11 @@ export function RepoWorkspace({
       )}
       {appState.state.error !== null && (
         <div className={styles.errorLayer}>
-          <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
+          <InlineError
+            message={appState.state.error}
+            hint={appState.state.errorHint ?? undefined}
+            onDismiss={appState.dismissError}
+          />
           {appState.state.forcePushOffer !== null && appState.state.forcePushConfirm === null && (
             <button type="button" onClick={() => appState.requestForcePush(appState.state.forcePushOffer!.remoteName)}>
               Force push (with lease)…

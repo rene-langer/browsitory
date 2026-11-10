@@ -3,7 +3,7 @@ import { errorKind, type PullOutcome, type RemoteAuthMode, type RepoClient, type
 import { recordFetch } from "../lib/autoFetch";
 import { writeFetchPrune } from "../lib/fetchPrune";
 import { upstreamPushBranch } from "../lib/pushTarget";
-import { credentialFailureMessage, credentialRemediation } from "./useMutationRunner";
+import { credentialRemediation, failureError } from "./useMutationRunner";
 import type {
   RunMutation,
   RunMutationWithMessage,
@@ -424,10 +424,9 @@ export function useRemoteTransferActions(
           }));
         }
       } catch (err) {
-        const message = credentialFailureMessage(err);
         transferRequestPending.current = false;
         activeTransferId.current = null;
-        setState((prev) => ({ ...prev, error: message, pending: false }));
+        setState((prev) => ({ ...prev, ...failureError(err), pending: false }));
       }
     },
     [setState],
@@ -629,7 +628,6 @@ export function useRemoteTransferActions(
       // from there: a credential remediation, or "Pull cancelled.".
       const kind = errorKind(err);
       if (kind === "PullFailed" || kind === "Cancelled") return;
-      const message = credentialFailureMessage(err);
       transferRequestPending.current = false;
       activeTransferId.current = null;
       setState((prev) => ({
@@ -638,7 +636,9 @@ export function useRemoteTransferActions(
         pending: false,
         pendingPull: null,
         pullOutcome: null,
-        error: kind === "DirtyWorktree" ? "Commit or stash your changes before pulling." : message,
+        ...(kind === "DirtyWorktree"
+          ? { error: "Commit or stash your changes before pulling.", errorHint: null }
+          : failureError(err)),
       }));
     }
   }, [client, refresh, repoPath, setState]);

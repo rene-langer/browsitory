@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import type { CommitOutcome, HookProgress, OperationKind, RepoClient, SequenceOutcome, TerminalSequence } from "./ipc/RepoClient";
+import { RepoError, type CommitOutcome, type HookProgress, type OperationKind, type RepoClient, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
+import { credentialRemediation } from "./state/useMutationRunner";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
 import { fakeRepoClient } from "./test/fakeRepoClient";
@@ -2380,6 +2381,64 @@ describe("App external tools", () => {
     await waitFor(() => expect(stageFile).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole("alert")).toBeNull();
     await act(async () => releaseStage());
+  });
+
+  // #573: a failed mutation's banner gets the hint `describeError` gives its kind.
+  describe("the error banner after a failed Stage", () => {
+    const PERMISSION_HINT = "File permissions blocked this. Check that you can read and write the file or folder.";
+
+    async function stageAndFail(stageFile: RepoClient["stageFile"]) {
+      render(
+        <App
+          client={fakeClient({
+            listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+            openRepo: async () => {},
+            persistOpenRepos: async () => {},
+            getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }],
+            getCommitGraph: async () => [],
+            listBranches: async () => [],
+            listStashes: async () => [],
+            stageFile,
+          })}
+        />,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Stage a.txt" }));
+      return screen.findByRole("alert");
+    }
+
+    it("shows the PermissionDenied hint under the backend's message, until dismissed", async () => {
+      const alert = await stageAndFail(
+        vi.fn().mockRejectedValue(new RepoError("PermissionDenied", "failed to open 'a.txt': Permission denied")),
+      );
+      expect(alert).toHaveTextContent("failed to open 'a.txt': Permission denied");
+      expect(alert).toHaveTextContent(PERMISSION_HINT);
+
+      fireEvent.click(within(alert).getByRole("button", { name: "Dismiss error" }));
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("shows the credential store remediation for CredentialStoreFailure", async () => {
+      const alert = await stageAndFail(vi.fn().mockRejectedValue(new RepoError("CredentialStoreFailure", "keyring locked")));
+      expect(alert).toHaveTextContent(credentialRemediation("CredentialStoreFailure"));
+      expect(alert).not.toHaveTextContent("keyring locked");
+    });
+
+    it("shows a plain error's message alone", async () => {
+      const alert = await stageAndFail(vi.fn().mockRejectedValue(new Error("boom")));
+      expect(alert.textContent).toBe("boom");
+    });
+
+    it("drops the hint when the next failure has none", async () => {
+      const stageFile = vi
+        .fn<RepoClient["stageFile"]>()
+        .mockRejectedValueOnce(new RepoError("PermissionDenied", "Permission denied"))
+        .mockRejectedValueOnce(new Error("boom"));
+      expect(await stageAndFail(stageFile)).toHaveTextContent(PERMISSION_HINT);
+
+      fireEvent.click(screen.getByRole("button", { name: "Stage a.txt" }));
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("boom"));
+      expect(screen.getByRole("alert")).not.toHaveTextContent(PERMISSION_HINT);
+    });
   });
 
   it("the palette opens Preferences…", async () => {

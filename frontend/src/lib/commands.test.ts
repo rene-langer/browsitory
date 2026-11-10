@@ -93,6 +93,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       stashOutcome: null,
       transfer: null,
       error: null,
+      errorHint: null,
       pending: false,
       addRemoteDraftOpen: false,
       remoteDialog: null,
