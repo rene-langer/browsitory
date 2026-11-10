@@ -893,6 +893,10 @@ export interface Workspace {
   memberPaths: string[];
 }
 
+/** The work tree root files the tab menu and palette open in the editor (#624), in menu order. */
+export const ROOT_FILE_NAMES = [".gitignore", ".gitattributes"] as const;
+export type RootFileName = (typeof ROOT_FILE_NAMES)[number];
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -1207,6 +1211,13 @@ export interface RepoClient {
   // `path === null` reveals the work tree root.
   revealInFileManager(repoPath: string, path: string | null): Promise<void>;
   openTerminal(repoPath: string): Promise<void>;
+  // Which of `.gitignore` and `.gitattributes` exist at the work tree root, in that order;
+  // `null` for a bare repository (#624). A symbolic link counts as existing.
+  getRootFiles(repoPath: string): Promise<RootFileName[] | null>;
+  // Creates a missing `.gitignore` or `.gitattributes` at the work tree root, empty, so
+  // `openInEditor` can open it; an existing file is left as it is. No other name or path, and
+  // never through a symbolic link (#624).
+  createRootFile(repoPath: string, name: RootFileName): Promise<void>;
   openDiffTool(repoPath: string, path: string, source: DiffSource): Promise<void>;
   // Resolves when the tool exits on desktop, and at once with "HandedOff" in VSCode.
   openMergeTool(repoPath: string, path: string): Promise<MergeToolOutcome>;

@@ -25,6 +25,7 @@ pub mod reflog;
 pub mod remote;
 pub mod repo;
 pub mod reset;
+pub mod root_file;
 pub mod search;
 pub mod sequence_file;
 pub mod signing;

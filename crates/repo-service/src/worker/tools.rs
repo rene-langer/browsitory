@@ -73,6 +73,21 @@ pub(super) fn check_merge_target(
     );
 }
 
+pub(super) fn create_root_file(
+    repo: &git2::Repository,
+    name: String,
+    reply: Sender<Result<(), ErrorDto>>,
+) {
+    let Some(workdir) = repo.workdir() else {
+        let _ = reply.send(Err(NO_WORKDIR.into()));
+        return;
+    };
+    let result = git_core::root_file::create_root_file(workdir, &name);
+    let _ = reply.send(result.map_err(ErrorDto::from_error));
+}
+
+const NO_WORKDIR: &str = "repository has no working directory (bare repository)";
+
 impl WorkerHandle {
     /// The checks a merge tool launch makes, for hosts that open their own merge editor
     /// (VSCode): a text conflict, no symlink or submodule, a work tree file inside the tree.
@@ -83,9 +98,20 @@ impl WorkerHandle {
     /// Work tree root captured at spawn (the repo path may be a subdirectory). No round trip
     /// to the worker.
     pub fn workdir(&self) -> Result<PathBuf, ErrorDto> {
-        self.workdir
-            .clone()
-            .ok_or_else(|| "repository has no working directory (bare repository)".into())
+        self.workdir.clone().ok_or_else(|| NO_WORKDIR.into())
+    }
+
+    /// Which of `.gitignore` and `.gitattributes` exist at the work tree root (#624); `None`
+    /// for a bare repository. A file system check on this thread: no round trip to the worker.
+    pub fn root_files(&self) -> Option<Vec<String>> {
+        let workdir = self.workdir.as_deref()?;
+        Some(git_core::root_file::existing_root_files(workdir))
+    }
+
+    /// Creates a missing `.gitignore` or `.gitattributes` at the work tree root, empty; leaves an
+    /// existing one as it is. No other name or path.
+    pub fn create_root_file(&self, name: String) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::CreateRootFile { name, reply: tx })
     }
 
     /// Both sides of `path` in `source` as bytes, each capped at `MAX_PREVIEW_BYTES`.

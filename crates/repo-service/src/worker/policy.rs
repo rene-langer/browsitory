@@ -242,7 +242,9 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::DeleteRemoteTag { .. }
         | Command::SaveForgeToken { .. }
         | Command::ForgetForgeToken { .. }
-        | Command::CreatePullRequest { .. } => P::free(),
+        | Command::CreatePullRequest { .. }
+        // An empty new file the user then edits; there is nothing in it to undo (#624).
+        | Command::CreateRootFile { .. } => P::free(),
 
         // Staging: recorded, and allowed during a paused operation.
         Command::StageFile { path, .. } => P::recorded(with_path("Stage ", path, ""), RefsAndIndex),
@@ -467,6 +469,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetPatch,
         ApplyPatch,
         IgnorePath,
+        CreateRootFile,
         Commit,
         ListBranches,
         CreateBranch,

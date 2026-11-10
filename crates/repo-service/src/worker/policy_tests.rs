@@ -316,6 +316,12 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "undo(Full, Ignore *.log) lock hold",
         ),
         (
+            cmd!(CreateRootFile {
+                name: s(".gitignore")
+            }),
+            "-",
+        ),
+        (
             cmd!(Commit {
                 message: s("Fix it\n\nBody"),
                 no_verify: false,

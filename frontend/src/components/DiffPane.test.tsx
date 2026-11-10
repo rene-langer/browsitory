@@ -2361,6 +2361,7 @@ describe("DiffPane external tools", () => {
       openInEditor: vi.fn(),
       reveal: vi.fn(),
       openTerminal: vi.fn(),
+      openRootFile: vi.fn(),
       openDiffTool: vi.fn(),
       openMergeTool: vi.fn(),
       mergeToolRunning: new Set(),
