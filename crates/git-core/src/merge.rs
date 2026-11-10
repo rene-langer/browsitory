@@ -140,8 +140,9 @@ impl NotStagedReason {
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
 /// fast-forward checks out `theirs`' tree, any other merge writes the merged index. A merged
 /// index that holds a file and a folder of the same name libgit2 didn't see as a conflict is
-/// returned (#410, #416: `merge_with_file_folder_conflict` writes it), and an outcome (merged index or fast-forward tree) holding a case
-/// pair HEAD doesn't, while `core.ignorecase` is on (#522).
+/// returned (#410, #416: `merge_with_file_folder_conflict` writes it), and an outcome (merged
+/// index or fast-forward tree) holding a case pair HEAD doesn't is refused while
+/// `core.ignorecase` is on (#522).
 fn refuse_unsafe_merge(
     repo: &Repository,
     theirs: &git2::Commit,
@@ -193,7 +194,8 @@ fn merge_with_file_folder_conflict(
     merge_head: Option<(git2::Oid, &str)>,
     their_label: &str,
 ) -> Result<Vec<String>, MergeError> {
-    let index = crate::file_folder::check_out_as_conflicts::<MergeError>(repo, merged, their_label)?;
+    let index =
+        crate::file_folder::check_out_as_conflicts::<MergeError>(repo, merged, their_label)?;
     let files = conflicted_files(&index)?;
     if let Some((their_id, label)) = merge_head {
         let git_dir = repo.path();
@@ -300,7 +302,13 @@ pub fn start_merge(
         analysis.is_fast_forward() && !opts.squash && opts.fast_forward != FastForward::Never,
     )?;
     if opts.squash {
-        return squash_merge(repo, &their_annotated, their_commit.id(), colliding, short_ref_name(target));
+        return squash_merge(
+            repo,
+            &their_annotated,
+            their_commit.id(),
+            colliding,
+            short_ref_name(target),
+        );
     }
 
     if analysis.is_fast_forward() && opts.fast_forward != FastForward::Never {
@@ -328,8 +336,12 @@ pub fn start_merge(
 
     if let Some(merged) = colliding {
         let label = merge_subject(target);
-        let files =
-            merge_with_file_folder_conflict(repo, merged, Some((their_commit.id(), &label)), short_ref_name(target))?;
+        let files = merge_with_file_folder_conflict(
+            repo,
+            merged,
+            Some((their_commit.id(), &label)),
+            short_ref_name(target),
+        )?;
         return Ok(MergeOutcome::Conflicted { files });
     }
 
