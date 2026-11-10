@@ -354,7 +354,10 @@ export function BranchTree({
             ariaLabel={`Force delete ${pendingForceFor}`}
             message={
               <>
-                <p>Force delete "{pendingForceFor}"? This discards any unmerged commits and cannot be undone.</p>
+                <p>
+                  Force delete "{pendingForceFor}"? Its unmerged commits will be on no branch. Undo can bring the
+                  branch back.
+                </p>
                 {/* #521: the repository can become busy while the confirmation is open. */}
                 {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
               </>

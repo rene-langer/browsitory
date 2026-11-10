@@ -76,7 +76,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "↑ / ↓", description: "Move line cursor" },
       { keys: "Shift+↑ / Shift+↓", description: "Extend line selection" },
       { keys: "s", description: "Stage or unstage the selected lines or hunk" },
-      { keys: "d", description: "Discard the selected lines or hunk (press twice to confirm)" },
+      { keys: "d", description: "Discard the selected lines or hunk (Undo brings them back)" },
       { keys: "[ / ]", description: "Previous / next hunk" },
     ],
   },

@@ -190,9 +190,9 @@ describe("useAutoFetch", () => {
     await advance(5 * MINUTE);
     expect(options.notify).toHaveBeenCalledExactlyOnceWith(
       "Fetch automatically skipped origin: no HTTPS token is available without asking you. Fetch once yourself, or save a token.",
-      expect.objectContaining({ label: "Credentials…" }),
+      { tone: "warning", action: expect.objectContaining({ label: "Credentials…" }) },
     );
-    vi.mocked(options.notify).mock.calls[0]![1]!.run();
+    vi.mocked(options.notify).mock.calls[0]![1]!.action!.run();
     expect(options.openCredentials).toHaveBeenCalledWith("origin");
     // Nothing fetched: no refresh, no "last fetch".
     expect(options.refresh).not.toHaveBeenCalled();

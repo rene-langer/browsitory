@@ -151,7 +151,8 @@ export interface AppState {
   historyEditOutcome: { message: string } | null;
   // The last finished revert/apply of a commit's file or hunk, saved patch or applied patch file,
   // for its toast (#448).
-  patchOutcome: { message: string } | null;
+  /** `undoable`: the action changed the working tree (an undo step), so its toast offers Undo. */
+  patchOutcome: { message: string; undoable: boolean } | null;
   pendingPull: { upstreamRef: string } | null;
   pullOutcome: PullOutcome | null;
   // The last "Merge into current branch" result, for its toast.

@@ -9,7 +9,7 @@ import {
   recordFetch,
   subscribeLastFetch,
 } from "../lib/autoFetch";
-import type { ToastAction } from "./useToasts";
+import type { PushToast } from "./useToasts";
 
 export interface AutoFetchOptions {
   client: RepoClient;
@@ -22,7 +22,7 @@ export interface AutoFetchOptions {
   busy: boolean;
   refresh: () => Promise<void>;
   /** A non-blocking notice (a toast); never a dialog, never focus. */
-  notify: (message: string, action?: ToastAction) => void;
+  notify: PushToast;
   /** Opens the remote's Credentials dialog, offered on a "no saved token" notice. */
   openCredentials: (remoteName: string) => void;
 }
@@ -97,12 +97,13 @@ export function useAutoFetch({
       for (const { remoteName, errorKind } of entry.failed) {
         const text = noticeText(remoteName, errorKind);
         if (text === null || !firstNotice(repoPath, remoteName)) continue;
-        notify(
-          text,
-          errorKind === "MissingCredential"
-            ? { label: "Credentials…", run: () => openCredentials(remoteName) }
-            : undefined,
-        );
+        notify(text, {
+          tone: "warning",
+          action:
+            errorKind === "MissingCredential"
+              ? { label: "Credentials…", run: () => openCredentials(remoteName) }
+              : undefined,
+        });
       }
       setSchedule((n) => n + 1);
     },

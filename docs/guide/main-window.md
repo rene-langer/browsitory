@@ -90,6 +90,13 @@ that section, or run **Check for updates** from the command palette. It tells yo
 are up to date; a new version downloads and shows the same banner.
 The VSCode extension updates through VSCode instead and has neither setting nor command.
 
+**Notifications.** A finished action shows a short notification in the bottom-right corner:
+green for done, blue for information, amber for a warning, red for an error, each with its own
+icon. It closes by itself after 5 to 15 seconds, depending on its length; one with a button
+(such as **Undo**) stays at least 10 seconds, and an error stays until you close it. While the
+pointer is over a notification or focus is on one of its buttons, none of them close. They never
+take focus: reach their buttons with Tab. Screen readers announce them without interrupting.
+
 ![The main window: sidebar, commit graph and diff pane](assets/overview.png)
 
 The dark theme:

@@ -308,7 +308,7 @@ describe("DiffPane", () => {
         fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
         fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
         const dialog = screen.getByRole("dialog", { name: "Discard changes", hidden: true });
-        expect(within(dialog).getByText("Discard changes to src/a.ts? This can't be undone.")).toBeInTheDocument();
+        expect(within(dialog).getByText("Discard changes to src/a.ts? Undo can bring them back.")).toBeInTheDocument();
         expect(onDiscardFile).not.toHaveBeenCalled();
         fireEvent.click(within(dialog).getByText("Discard changes"));
 
@@ -470,7 +470,7 @@ describe("DiffPane", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "Actions for logs/run.log" }));
         fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
-        expect(screen.getByText("Delete untracked file logs/run.log? This can't be undone.")).toBeInTheDocument();
+        expect(screen.getByText("Delete untracked file logs/run.log? Undo can bring it back.")).toBeInTheDocument();
         expect(screen.getByText("Delete file")).toBeInTheDocument();
       });
 
@@ -497,7 +497,7 @@ describe("DiffPane", () => {
         fireEvent.click(screen.getByRole("button", { name: "Discard all…" }));
         expect(
           screen.getByText(
-            "Discard changes to 2 files (1 untracked will be deleted)? This can't be undone. To delete only " +
+            "Discard changes to 2 files (1 untracked will be deleted)? Undo can bring them back. To delete only " +
               'the untracked files and keep the other changes, use "Delete untracked…".',
           ),
         ).toBeInTheDocument();
@@ -622,7 +622,7 @@ describe("DiffPane", () => {
 
           fireEvent.click(screen.getByRole("button", { name: "Delete untracked…" }));
           const dialog = screen.getByRole("dialog", { name: "Delete untracked files", hidden: true });
-          expect(within(dialog).getByText("Delete 2 untracked files? This can't be undone.")).toBeInTheDocument();
+          expect(within(dialog).getByText("Delete 2 untracked files? Undo can bring them back.")).toBeInTheDocument();
           const list = within(dialog).getByRole("list", { name: "Untracked files to delete", hidden: true });
           expect(within(list).getAllByRole("listitem", { hidden: true }).map((item) => item.textContent)).toEqual([
             "logs/run.log",
@@ -1980,7 +1980,6 @@ describe("DiffPane diff options contract", () => {
     await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, hunk));
     await settleRefetch(getWorkingDiff, 2);
     fireEvent.click(screen.getByText("Discard hunk"));
-    fireEvent.click(screen.getByText("Confirm discard"));
     await waitFor(() => expect(onDiscardHunk).toHaveBeenCalledWith("f.txt", 1, 1, hunk));
     await settleRefetch(getWorkingDiff, 3);
 
@@ -2855,7 +2854,7 @@ describe("DiffPane multi-select (#449)", () => {
     fireEvent.click(within(selectionBar()).getByRole("button", { name: "Discard 2 files…" }));
     expect(onDiscardFiles).not.toHaveBeenCalled();
     const dialog = screen.getByRole("dialog", { name: "Discard selected changes" });
-    expect(dialog).toHaveTextContent("Discard changes to 2 files (1 untracked will be deleted)? This can't be undone.");
+    expect(dialog).toHaveTextContent("Discard changes to 2 files (1 untracked will be deleted)? Undo can bring them back.");
     fireEvent.click(within(dialog).getByRole("button", { name: "Discard 2 files" }));
 
     expect(onDiscardFiles).toHaveBeenCalledWith(["a.txt", "b.txt"]);

@@ -56,27 +56,27 @@ describe("FileActionsMenu", () => {
   });
 
   it("words the confirm dialogs", () => {
-    expect(discardConfirmMessage(tracked)).toBe("Discard changes to src/a.ts? This can't be undone.");
-    expect(discardConfirmMessage(untracked)).toBe("Delete untracked file logs/run.log? This can't be undone.");
+    expect(discardConfirmMessage(tracked)).toBe("Discard changes to src/a.ts? Undo can bring them back.");
+    expect(discardConfirmMessage(untracked)).toBe("Delete untracked file logs/run.log? Undo can bring it back.");
     expect(discardAllConfirmMessage([tracked, untracked])).toBe(
-      "Discard changes to 2 files (1 untracked will be deleted)? This can't be undone.",
+      "Discard changes to 2 files (1 untracked will be deleted)? Undo can bring them back.",
     );
-    expect(discardAllConfirmMessage([tracked])).toBe("Discard changes to 1 file? This can't be undone.");
+    expect(discardAllConfirmMessage([tracked])).toBe("Discard changes to 1 file? Undo can bring them back.");
   });
 
   it("words the delete-untracked confirmation and points Discard all at it (#622)", () => {
     expect(deleteUntrackedConfirmMessage(["a.txt", "b/", "c.txt", "d.txt", "e.txt"])).toBe(
-      "Delete 5 untracked files? This can't be undone.",
+      "Delete 5 untracked files? Undo can bring them back.",
     );
-    expect(deleteUntrackedConfirmMessage(["a.txt"])).toBe("Delete 1 untracked file? This can't be undone.");
+    expect(deleteUntrackedConfirmMessage(["a.txt"])).toBe("Delete 1 untracked file? Undo can bring it back.");
     expect(discardAllConfirmMessage([tracked, untracked], true)).toBe(
-      "Discard changes to 2 files (1 untracked will be deleted)? This can't be undone. To delete only " +
+      "Discard changes to 2 files (1 untracked will be deleted)? Undo can bring them back. To delete only " +
         'the untracked files and keep the other changes, use "Delete untracked…".',
     );
     // Nothing to point at: no untracked file, or nothing but untracked files.
-    expect(discardAllConfirmMessage([tracked], true)).toBe("Discard changes to 1 file? This can't be undone.");
+    expect(discardAllConfirmMessage([tracked], true)).toBe("Discard changes to 1 file? Undo can bring them back.");
     expect(discardAllConfirmMessage([untracked], true)).toBe(
-      "Discard changes to 1 file (1 untracked will be deleted)? This can't be undone.",
+      "Discard changes to 1 file (1 untracked will be deleted)? Undo can bring them back.",
     );
   });
 

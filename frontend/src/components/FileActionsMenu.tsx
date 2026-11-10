@@ -190,10 +190,12 @@ export function commitFileMenuItems(
   return items;
 }
 
+// Discards and deletes are undo steps (recorded, or refused rather than run unrecorded), so the
+// confirmations say Undo restores them (#662); they still ask because they drop work in one go.
 export function discardConfirmMessage(entry: StatusEntry): string {
   return isUntracked(entry)
-    ? `Delete untracked file ${entry.path}? This can't be undone.`
-    : `Discard changes to ${entry.path}? This can't be undone.`;
+    ? `Delete untracked file ${entry.path}? Undo can bring it back.`
+    : `Discard changes to ${entry.path}? Undo can bring them back.`;
 }
 
 /**
@@ -209,7 +211,7 @@ export function discardAllConfirmMessage(entries: StatusEntry[], pointToDeleteUn
     m > 0 && m < n && pointToDeleteUntracked
       ? ' To delete only the untracked files and keep the other changes, use "Delete untracked…".'
       : "";
-  return `Discard changes to ${files}${untracked}? This can't be undone.${hint}`;
+  return `Discard changes to ${files}${untracked}? Undo can bring them back.${hint}`;
 }
 
 /** How many paths the "Delete untracked…" confirmation lists before "and N more" (#622). */
@@ -218,5 +220,5 @@ export const DELETE_UNTRACKED_PREVIEW = 5;
 /** The "Delete untracked…" confirmation's question (#622); the dialog lists the first paths. */
 export function deleteUntrackedConfirmMessage(paths: string[]): string {
   const n = paths.length;
-  return `Delete ${n} untracked ${n === 1 ? "file" : "files"}? This can't be undone.`;
+  return n === 1 ? "Delete 1 untracked file? Undo can bring it back." : `Delete ${n} untracked files? Undo can bring them back.`;
 }
