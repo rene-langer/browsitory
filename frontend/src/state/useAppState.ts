@@ -28,6 +28,7 @@ import { readFetchPrune } from "../lib/fetchPrune";
 import type { HookFailure, HookRetry } from "../lib/hookFailure";
 import type { PresetAction } from "../lib/rebaseSelection";
 import { type BranchActions, useBranchActions } from "./useBranchActions";
+import { type DialogActions, useDialogActions } from "./useDialogActions";
 import { type ForgeActions, useForgeActions } from "./useForgeActions";
 import { type HistoryActions, useHistoryActions } from "./useHistoryActions";
 import { type HookActions, useHookActions } from "./useHookActions";
@@ -40,14 +41,14 @@ import { type StashActions, useStashActions } from "./useStashActions";
 import { type SubmoduleActions, useSubmoduleActions } from "./useSubmoduleActions";
 import { type UndoActions, useUndoActions } from "./useUndoActions";
 import { type WorktreeActions, useWorktreeActions } from "./useWorktreeActions";
+import { type WorkspaceDialog, withoutDialog } from "./workspaceDialog";
 
 // History is loaded a page at a time; `loadMoreHistory` grows the limit by one page.
 const GRAPH_PAGE_SIZE = 300;
 
 export type SelectedRow = "uncommitted" | { commitId: string };
 
-/** A remote's Edit / Credentials / Remove dialog, opened from its menu or the palette. */
-export type RemoteDialog = { kind: "edit" | "credentials" | "remove"; remoteName: string };
+export type { RemoteDialog, WorkspaceDialog } from "./workspaceDialog";
 
 /** Whether two selections name the same row. */
 export function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
@@ -91,31 +92,23 @@ export interface AppState {
   // from this record simply hasn't been listed yet (or its listing failed — see
   // `listPullRequests` below, which removes the key on failure rather than leaving stale rows).
   pullRequests: Record<string, PullRequestList>;
+  // The one open modal dialog (#493): see `workspaceDialog.ts`, and `docs/ARCHITECTURE.md`'s "Who
+  // owns a dialog's open state" for which dialogs live here.
+  dialog: WorkspaceDialog | null;
+  // The sidebar's inline New branch form, open with that start point. Not a `dialog`: an inline
+  // form, open alongside the Add remote form or a dialog. Here so the palette can open it.
   createBranchDraft: { startPoint: string } | null;
   // Mirrors createBranchDraft: lets both BranchTree's own "+" button and the command palette's
   // "Add remote" entry open the same inline add-remote form.
   addRemoteDraftOpen: boolean;
-  // Non-null while a remote's Edit / Credentials / Remove dialog is open — in app state (not
-  // BranchTree's) so the palette can open it while the Branches section is collapsed.
-  remoteDialog: RemoteDialog | null;
   stashes: StashEntry[];
   mergeMessage: string | null;
   headInfo: HeadInfo;
   // Set when a branch push fails NonFastForward; shows the "Force push (with lease)" button.
   forcePushOffer: { remoteName: string } | null;
-  // Non-null while the force-push confirm dialog is open.
-  forcePushConfirm: { remoteName: string } | null;
   // The Prune choice for every fetch in this repo (localStorage, see `lib/fetchPrune.ts`);
   // `null` = never set, so git config decides per remote.
   fetchPrune: boolean | null;
-  // Non-null while the "Push to…" dialog is open for that local branch.
-  pushDialog: { localBranch: string } | null;
-  // Non-null while the delete-remote-branch dialog is open; both null = palette picker mode.
-  deleteRemoteBranchDialog: { remoteName: string | null; branchName: string | null } | null;
-  // Non-null while the create-tag dialog is open; the tag goes on `commitId`.
-  createTagDialog: { commitId: string } | null;
-  // Non-null while the "Delete from remote" dialog is open for that tag.
-  deleteRemoteTagDialog: { tagName: string } | null;
   // CommitBox amend toggle.
   amendMode: boolean;
   // CommitBox "Skip hooks" (`--no-verify`) for the next commit/amend; reset after one lands.
@@ -135,8 +128,6 @@ export interface AppState {
   // Per-commit actions to default to in the rebase planner, set only when it was opened via a
   // CommitGraph multi-select action (as opposed to "Rebase onto here").
   rebasePreset: ReadonlyMap<string, PresetAction> | null;
-  // Non-null while the Reword dialog of an older commit is open (#442); `onto` is its parent.
-  rewordDialog: { commitId: string; onto: string } | null;
   // The last one-click history edit that finished, for its toast (#442).
   historyEditOutcome: { message: string } | null;
   // The last finished revert/apply of a commit's file or hunk, saved patch or applied patch file,
@@ -144,12 +135,8 @@ export interface AppState {
   patchOutcome: { message: string } | null;
   pendingPull: { upstreamRef: string } | null;
   pullOutcome: PullOutcome | null;
-  // Non-null while the merge options dialog is open for that branch.
-  mergeDialog: { branchName: string } | null;
   // The last "Merge into current branch" result, for its toast.
   mergeOutcome: { branchName: string; outcome: MergeOutcome } | null;
-  // Non-null while the stash options dialog is open; `paths` non-empty for a file stash.
-  stashDialog: { paths: string[] } | null;
   // "Restore staged changes" for stash Apply/Pop; session-only, default on.
   stashRestoreIndex: boolean;
   // The last stash Apply/Pop result, for its toast.
@@ -190,6 +177,7 @@ export interface AppStateOwnMembers {
 // The members are documented on the slice interfaces, the one place each is declared.
 export interface UseAppStateResult
   extends AppStateOwnMembers,
+    DialogActions,
     StagingActions,
     PatchActions,
     BranchActions,
@@ -210,6 +198,7 @@ export interface UseAppStateResult
 // naming the member, when two parts share a member or a part is missing from the list.
 type UseAppStateParts = [
   AppStateOwnMembers,
+  DialogActions,
   StagingActions,
   PatchActions,
   BranchActions,
@@ -254,19 +243,14 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     remoteUpstreams: {},
     forgeRepositories: [],
     pullRequests: {},
+    dialog: null,
     createBranchDraft: null,
     addRemoteDraftOpen: false,
-    remoteDialog: null,
     stashes: [],
     mergeMessage: null,
     headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
     forcePushOffer: null,
-    forcePushConfirm: null,
     fetchPrune: readFetchPrune(repoPath),
-    pushDialog: null,
-    deleteRemoteBranchDialog: null,
-    createTagDialog: null,
-    deleteRemoteTagDialog: null,
     amendMode: false,
     skipHooks: false,
     hookRun: null,
@@ -275,14 +259,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     rebaseProgress: null,
     rebaseOnto: null,
     rebasePreset: null,
-    rewordDialog: null,
     historyEditOutcome: null,
     patchOutcome: null,
     pendingPull: null,
     pullOutcome: null,
-    mergeDialog: null,
     mergeOutcome: null,
-    stashDialog: null,
     stashRestoreIndex: true,
     stashOutcome: null,
     transfer: null,
@@ -454,6 +435,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutationWithOutcome,
   } = useMutationRunner(refresh, setState);
 
+  const dialogs = useDialogActions(setState);
   const staging = useStagingActions(client, repoPath, runMutation, runMutationWithOutcome, runOptimisticMutation, setState);
   const patches = usePatchActions(client, repoPath, runMutationWithOutcome, setState);
 
@@ -564,7 +546,13 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
 
   const forge = useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState, forgeError);
   const dismissError = useCallback(() => {
-    setState((prev) => ({ ...prev, error: null, forcePushOffer: null, forcePushConfirm: null, hookFailure: null }));
+    setState((prev) => ({
+      ...prev,
+      error: null,
+      forcePushOffer: null,
+      dialog: withoutDialog(prev.dialog, "forcePush"),
+      hookFailure: null,
+    }));
   }, [setState]);
 
   return {
@@ -575,6 +563,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     refresh,
     refreshUndoState,
     dismissError,
+    ...dialogs,
     ...staging,
     ...patches,
     ...branches,

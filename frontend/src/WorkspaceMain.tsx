@@ -141,7 +141,7 @@ export function WorkspaceMain({
           autoFetchMinutes={autoFetchMinutes}
           onPublish={() => {
             const current = appState.state.branches.find((branch) => branch.isCurrent);
-            if (current !== undefined) appState.openPushDialog(current.name);
+            if (current !== undefined) appState.openDialog({ kind: "push", localBranch: current.name });
           }}
           leading={
             <UndoRedoButtons
@@ -224,13 +224,13 @@ export function WorkspaceMain({
                 onRequestReset={(commitId, returnFocusTo) => openCommitDialog("Reset", commitId, returnFocusTo)}
                 onEditHeadMessage={onEditHeadMessage}
                 onEditHistory={(commitId, onto, request) => void appState.editHistory(commitId, onto, request)}
-                onRewordCommit={appState.openRewordDialog}
+                onRewordCommit={(commitId, onto) => appState.openDialog({ kind: "reword", commitId, onto })}
                 graphRemoteBranchSelection={appState.state.graphSelection.remote}
                 remotes={appState.state.remotes}
                 onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
                 onDeleteTag={appState.deleteTag}
-                onCreateTag={appState.openCreateTagDialog}
-                onDeleteTagFromRemote={appState.openDeleteRemoteTagDialog}
+                onCreateTag={(commitId) => appState.openDialog({ kind: "createTag", commitId })}
+                onDeleteTagFromRemote={(tagName) => appState.openDialog({ kind: "deleteRemoteTag", tagName })}
                 revealRequest={revealRequest}
               />
             )}

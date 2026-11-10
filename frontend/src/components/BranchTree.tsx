@@ -3,14 +3,13 @@ import { GitBranch, Plus } from "lucide-react";
 import type {
   BranchInfo,
   PullOutcome,
-  RemoteAuthMode,
   RemoteInfo,
   UpstreamInfo,
 } from "../ipc/RepoClient";
 import { rectAnchor } from "../lib/menuKeys";
 import type { OperationBlockers } from "../lib/operationStatus";
 import { branchNameProblem } from "../lib/refName";
-import type { RemoteDialog } from "../state/useAppState";
+import type { RemoteDialog } from "../state/workspaceDialog";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { FormDialog } from "./primitives/FormDialog";
 import formStyles from "./primitives/FormDialog.module.css";
@@ -29,7 +28,6 @@ import {
 } from "./branchMenuItems";
 import { BranchTreeView, type BranchRename } from "./BranchTreeView";
 import { NewBranchForm } from "./NewBranchForm";
-import { RemoteDialogs } from "./RemoteDialogs";
 import { SetUpstreamDialog } from "./SetUpstreamDialog";
 import { useRemoteBranchCache } from "./useRemoteBranchCache";
 import styles from "./BranchTree.module.css";
@@ -37,7 +35,8 @@ import styles from "./BranchTree.module.css";
 /**
  * The sidebar's Branches section: the local and remote branch tree (`BranchTreeView`), its
  * context menus (`branchMenuItems.ts`), the inline New branch and Add remote forms, inline rename,
- * the upstream block and its dialogs, and the remote dialogs when uncontrolled.
+ * and the upstream block and its dialogs. A remote's Edit / Credentials / Remove dialog is opened
+ * through `onOpenRemoteDialog` and rendered by its owner (`WorkspaceDialogs`' `RemoteDialogs`).
  */
 export function BranchTree({
   branches,
@@ -61,14 +60,7 @@ export function BranchTree({
   remoteBranchesInGraph,
   remotes,
   upstream,
-  remoteUpstreams,
   onAddRemote,
-  onRenameRemote,
-  onUpdateRemoteUrls,
-  onRemoveRemote,
-  onSaveHttpsCredential,
-  onForgetHttpsCredential,
-  onSetRemoteAuthMode,
   onSetUpstream,
   onClearUpstream,
   onListRemoteBranches,
@@ -88,8 +80,7 @@ export function BranchTree({
   onCompareBranch,
   onGoToBranch,
   refreshGeneration,
-  remoteDialog: remoteDialogProp,
-  onRemoteDialogChange,
+  onOpenRemoteDialog,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -136,18 +127,9 @@ export function BranchTree({
   // whose folder has been expanded and would silently drop never-expanded remotes' badges on
   // the first toggle).
   remoteBranchesInGraph: string[];
-  // Remote props: accepted from Task 7 onward for the type to match App.tsx's eventual single
-  // call site, rendered starting in Task 8.
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
-  remoteUpstreams: Record<string, UpstreamInfo[]>;
   onAddRemote: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<string | null>;
-  onRenameRemote: (oldName: string, newName: string) => Promise<boolean>;
-  onUpdateRemoteUrls: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<void>;
-  onRemoveRemote: (name: string, clearUpstreams: boolean) => Promise<void>;
-  onSaveHttpsCredential: (remoteName: string, username: string, token: string) => Promise<void>;
-  onForgetHttpsCredential: (remoteName: string) => Promise<void>;
-  onSetRemoteAuthMode: (remoteName: string, mode: RemoteAuthMode, username: string | null) => Promise<boolean>;
   onSetUpstream: (remoteName: string, remoteBranch: string) => Promise<void>;
   onClearUpstream: () => Promise<void>;
   onListRemoteBranches: (remoteName: string) => Promise<string[]>;
@@ -183,21 +165,16 @@ export function BranchTree({
    */
   refreshGeneration: number;
   /**
-   * The open remote dialog (Edit / Credentials / Remove), controlled by app state so the palette
-   * can open it. Controlled when `onRemoteDialogChange` is given, local state otherwise (same
-   * pattern as `DiffPane`'s `discardRequest`). Controlled, the owner renders the dialogs
-   * (`RemoteDialogs`); uncontrolled, this tree does.
+   * A remote folder menu's Edit / Credentials / Remove: opens that dialog in app state (#493), so
+   * the palette opens the same one. The owner renders it outside the sidebar, which stays mounted
+   * but `hidden` while collapsed (a modal there would be invisible).
    */
-  remoteDialog?: RemoteDialog | null;
-  onRemoteDialogChange?: (dialog: RemoteDialog | null) => void;
+  onOpenRemoteDialog: (dialog: RemoteDialog) => void;
 }) {
   const [pendingForceFor, setPendingForceFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [rowMenu, setRowMenu] = useState<RowContextMenu | null>(null);
-  const [localRemoteDialog, setLocalRemoteDialog] = useState<RemoteDialog | null>(null);
-  const remoteDialog = onRemoteDialogChange !== undefined ? (remoteDialogProp ?? null) : localRemoteDialog;
-  const setRemoteDialog = onRemoteDialogChange ?? setLocalRemoteDialog;
   const [upstreamDialogOpen, setUpstreamDialogOpen] = useState(false);
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -438,9 +415,9 @@ export function BranchTree({
                   // any fetch; this explicit drop-and-reload just makes the update immediate here.
                   onFetch: () => void onFetchRemote(remoteName).then(() => remoteCache.reload(remoteName)),
                   onPushCurrentBranch: () => void onPushCurrentBranch(remoteName),
-                  onEdit: () => setRemoteDialog({ kind: "edit", remoteName }),
-                  onCredentials: () => setRemoteDialog({ kind: "credentials", remoteName }),
-                  onRemove: () => setRemoteDialog({ kind: "remove", remoteName }),
+                  onEdit: () => onOpenRemoteDialog({ kind: "remote", action: "edit", remoteName }),
+                  onCredentials: () => onOpenRemoteDialog({ kind: "remote", action: "credentials", remoteName }),
+                  onRemove: () => onOpenRemoteDialog({ kind: "remote", action: "remove", remoteName }),
                 })}
               />
             );
@@ -551,23 +528,6 @@ export function BranchTree({
           </FormDialog>
         )}
       </AccordionSection>
-      {/* Controlled (`App`), the dialogs render at app level: this tree sits in the sidebar, which
-          stays mounted but `hidden` while collapsed, and a modal there would be invisible. */}
-      {onRemoteDialogChange === undefined && (
-        <RemoteDialogs
-          remoteDialog={remoteDialog}
-          remotes={remotes}
-          remoteUpstreams={remoteUpstreams}
-          blockedReason={busyReason}
-          onRenameRemote={onRenameRemote}
-          onUpdateRemoteUrls={onUpdateRemoteUrls}
-          onRemoveRemote={onRemoveRemote}
-          onSaveHttpsCredential={onSaveHttpsCredential}
-          onForgetHttpsCredential={onForgetHttpsCredential}
-          onSetRemoteAuthMode={onSetRemoteAuthMode}
-          onClose={() => setRemoteDialog(null)}
-        />
-      )}
     </>
   );
 }
