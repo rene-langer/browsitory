@@ -437,7 +437,9 @@ export type ErrorKind =
   | "Cancelled"
   | "AddDeleteConflict"
   | "InvalidSearchQuery"
-  | "PermissionDenied";
+  | "PermissionDenied"
+  | "LocalChanges"
+  | "MissingIdentity";
 
 /** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
 export interface RepoErrorPayload {
@@ -482,6 +484,8 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
   "AddDeleteConflict",
   "InvalidSearchQuery",
   "PermissionDenied",
+  "LocalChanges",
+  "MissingIdentity",
 ]);
 
 /**
@@ -791,6 +795,16 @@ export interface StashFiles {
   untracked: string[];
   untrackedCommitId: string | null;
 }
+
+/** How a diverged pull reconciles (#652). */
+export type PullStrategy = "Merge" | "Rebase" | "FastForwardOnly";
+
+/** What "Stash and switch" did with the stashed changes on the new branch (#653). */
+export type StashSwitchOutcome =
+  | { kind: "Stashed" }
+  | { kind: "Reapplied" }
+  | { kind: "Conflicted"; files: string[] }
+  | { kind: "NotReapplied"; reason: string };
 
 export type PullOutcome =
   | { kind: "UpToDate" }
@@ -1128,8 +1142,16 @@ export interface RepoClient {
    */
   commit(repoPath: string, message: string, noVerify: boolean, trailers?: Trailer[]): Promise<CommitOutcome>;
   listBranches(repoPath: string): Promise<BranchInfo[]>;
-  createBranch(repoPath: string, name: string, startPoint: string): Promise<void>;
+  /** Creates `name` at `startPoint`; with `checkout` it switches to it too (#656). */
+  createBranch(repoPath: string, name: string, startPoint: string, checkout: boolean): Promise<void>;
+  /** Rejects with kind `LocalChanges` when local changes are in the way (#653). */
   switchBranch(repoPath: string, name: string): Promise<void>;
+  /** The files whose local changes keep a switch to `name` from running (#653). */
+  getSwitchConflicts(repoPath: string, name: string): Promise<string[]>;
+  /** Stashes every local change, switches to `name`, and with `reapply` pops them there (#653). */
+  stashAndSwitch(repoPath: string, name: string, reapply: boolean): Promise<StashSwitchOutcome>;
+  /** Sets `user.name`/`user.email` for this repository, or with `global` for every one (#689). */
+  setIdentity(repoPath: string, name: string, email: string, global: boolean): Promise<void>;
   deleteBranch(repoPath: string, name: string, force: boolean): Promise<void>;
   renameBranch(repoPath: string, oldName: string, newName: string): Promise<void>;
   listWorktrees(repoPath: string): Promise<WorktreeInfo[]>;
@@ -1187,6 +1209,12 @@ export interface RepoClient {
   /** Deletes the tag on the remote only; the local tag stays (runs `pre-push` unless `noVerify`). */
   deleteRemoteTag(repoPath: string, remoteName: string, tagName: string, noVerify: boolean): Promise<string>;
   pullCurrentUpstream(repoPath: string): Promise<PullOutcome>;
+  /**
+   * How a diverged pull reconciles (#652): the strategy remembered for this repository, else the
+   * one its git config sets (`pull.rebase`, `pull.ff=only`), else `null` (ask).
+   */
+  getPullStrategy(repoPath: string): Promise<PullStrategy | null>;
+  setPullStrategy(repoPath: string, strategy: PullStrategy): Promise<void>;
   /**
    * Asks the backend to abort the in-flight transfer or hook run `operationId` (commit/amend/
    * Continue ids arrive on `subscribeHookProgress`). Resolves as soon as the

@@ -98,6 +98,12 @@ message that git wrote and you committed unchanged is not kept.
 A commit that fails, for example because a hook rejected it, keeps its message in the box, so
 you can fix it and commit again without retyping it.
 
+**Your name and email.** Git records a name and an email address with every commit
+(`user.name` and `user.email`). When none is set, committing (or amending) opens **Set your git
+identity** instead of failing with git's error: enter both, choose **All repositories** (your
+global git config, as `git config --global` does) or **This repository only**, and **Save and
+commit** commits what you were committing. After an amend, the dialog only saves; amend again.
+
 ## Staging individual lines
 
 In a diff, select lines by clicking one, Shift+clicking to extend, Ctrl/Cmd+clicking to add

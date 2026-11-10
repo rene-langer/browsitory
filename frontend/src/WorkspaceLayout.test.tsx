@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { RepoClient } from "./ipc/RepoClient";
+import { RepoError, type RepoClient } from "./ipc/RepoClient";
 import { fakeRepoClient } from "./test/fakeRepoClient";
 
 // Whole-App renders, like App.test.tsx (#217's slow-machine budget).
@@ -188,14 +188,57 @@ describe("the current-branch switcher (#638)", () => {
     expect(options[0]).toBe("fix/login");
   });
 
-  it("creates and switches to a new branch from here", async () => {
+  it("offers Stash and switch when local changes are in the way, then toasts with Undo (#653)", async () => {
+    const switchBranch = vi.fn(async () => {
+      throw new RepoError("LocalChanges", "Your local changes would be overwritten by switching to feature.");
+    });
+    const stashAndSwitch = vi.fn(async () => ({ kind: "Reapplied" as const }));
+    await renderApp(
+      layoutClient({
+        switchBranch,
+        getSwitchConflicts: async () => ["a.txt"],
+        stashAndSwitch,
+        getUndoState: async () => ({ undo: "Switch to feature with local changes", redo: null }),
+      }),
+    );
+    fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "feature" }));
+    const dialog = await screen.findByRole("dialog", { name: "Local changes are in the way" });
+    expect(dialog).toHaveTextContent("a.txt");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stash and switch" }));
+    await waitFor(() => expect(stashAndSwitch).toHaveBeenCalledWith("/repos/a", "feature", true));
+    const notifications = within(screen.getByRole("status", { name: "Notifications" }));
+    expect(await notifications.findByText("Switched to feature with your changes")).toBeInTheDocument();
+    expect(notifications.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Local changes are in the way" })).toBeNull();
+  });
+
+  // One create-and-checkout, so one Undo takes it back (#656).
+  it("creates and switches to a new branch from here in one step", async () => {
     const createBranch = vi.fn(async () => {});
     const switchBranch = vi.fn(async () => {});
     await renderApp(layoutClient({ createBranch, switchBranch }));
     fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
     fireEvent.change(await screen.findByRole("combobox", { name: "Switch branch" }), { target: { value: "topic" } });
     fireEvent.click(screen.getByRole("option", { name: "Create branch topic from main" }));
-    await waitFor(() => expect(createBranch).toHaveBeenCalledWith("/repos/a", "topic", "HEAD"));
-    await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "topic"));
+    await waitFor(() => expect(createBranch).toHaveBeenCalledWith("/repos/a", "topic", "HEAD", true));
+    expect(switchBranch).not.toHaveBeenCalled();
+  });
+
+  it("lists a remote-only branch and checks it out as a tracking branch (#726)", async () => {
+    const createBranch = vi.fn(async () => {});
+    const setCurrentUpstream = vi.fn(async () => {});
+    await renderApp(
+      layoutClient({
+        createBranch,
+        setCurrentUpstream,
+        listRemoteBranches: async () => ["main", "feature", "spike"],
+      }),
+    );
+    fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
+    expect(screen.queryByRole("option", { name: "origin/feature" })).toBeNull();
+    fireEvent.click(await screen.findByRole("option", { name: "origin/spike" }));
+    await waitFor(() => expect(createBranch).toHaveBeenCalledWith("/repos/a", "spike", "origin/spike", true));
+    await waitFor(() => expect(setCurrentUpstream).toHaveBeenCalledWith("/repos/a", "origin", "spike"));
   });
 });

@@ -427,6 +427,51 @@ pub enum PullOutcome {
     Diverged { upstream_ref: String },
 }
 
+/// How a pull reconciles a branch that has diverged from its upstream (#652).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullStrategy {
+    /// Merge the upstream into the branch (`pull.rebase=false`).
+    Merge,
+    /// Rebase the branch's own commits onto the upstream (`pull.rebase=true`).
+    Rebase,
+    /// Only fast-forward; a diverged pull stops (`pull.ff=only`).
+    FastForwardOnly,
+}
+
+/// The pull strategy git config sets for the current branch, like `git pull` reads it:
+/// `branch.<name>.rebase`, else `pull.rebase` (any true value, `merges` or `interactive` is a
+/// rebase, a false one a merge), else `pull.ff=only`. `None` when nothing is configured: git
+/// then refuses a diverged pull until told how, and the app asks.
+pub fn pull_defaults(repo: &Repository) -> Option<PullStrategy> {
+    let config = repo.config().ok()?.snapshot().ok()?;
+    let branch = repo
+        .head()
+        .ok()
+        .filter(git2::Reference::is_branch)
+        .and_then(|head| head.shorthand().ok().map(str::to_string));
+    let rebase = branch
+        .and_then(|branch| config.get_string(&format!("branch.{branch}.rebase")).ok())
+        .or_else(|| config.get_string("pull.rebase").ok());
+    if let Some(strategy) = rebase.as_deref().and_then(strategy_from_pull_rebase) {
+        return Some(strategy);
+    }
+    match config.get_string("pull.ff").ok().as_deref().map(str::trim) {
+        Some(value) if value.eq_ignore_ascii_case("only") => Some(PullStrategy::FastForwardOnly),
+        _ => None,
+    }
+}
+
+/// Maps a `pull.rebase` / `branch.<name>.rebase` value; `None` for one git wouldn't accept.
+pub fn strategy_from_pull_rebase(value: &str) -> Option<PullStrategy> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" | "merges" | "m" | "interactive" | "i" | "preserve" | "p" => {
+            Some(PullStrategy::Rebase)
+        }
+        "false" | "no" | "off" | "0" => Some(PullStrategy::Merge),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum RemoteError {
     #[error("git remote operation failed: {0}")]

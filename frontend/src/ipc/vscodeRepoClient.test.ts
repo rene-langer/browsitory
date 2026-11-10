@@ -631,12 +631,12 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires createBranch, switchBranch, renameBranch, and deleteBranch", async () => {
-    const createPromise = vscodeRepoClient.createBranch("/repo", "feature", "HEAD");
+    const createPromise = vscodeRepoClient.createBranch("/repo", "feature", "HEAD", false);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "create_branch",
-      params: { repoPath: "/repo", name: "feature", startPoint: "HEAD" },
+      params: { repoPath: "/repo", name: "feature", startPoint: "HEAD", checkout: false },
     });
     respond(1, null);
     await expect(createPromise).resolves.toBeNull();

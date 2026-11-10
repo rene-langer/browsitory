@@ -211,6 +211,8 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetHeadInfo { .. }
         | Command::DetectForgeRepository { .. }
         | Command::ListPullRequests { .. }
+        | Command::GetSwitchConflicts { .. }
+        | Command::GetPullDefaults { .. }
         | Command::GetUndoState { .. } => P::free(),
 
         // Changes the undo stack doesn't cover: worktrees and submodules, remotes and their
@@ -224,6 +226,8 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::SaveHttpsCredential { .. }
         | Command::ForgetHttpsCredential { .. }
         | Command::SetRemoteAuthMode { .. }
+        // Git config, like the remotes' settings (#689).
+        | Command::SetIdentity { .. }
         | Command::AddRemote { .. }
         | Command::RenameRemote { .. }
         | Command::UpdateRemoteUrls { .. }
@@ -314,6 +318,15 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         Command::SwitchBranch { name, .. } => {
             P::recorded(fit(format!("Switch to {name}")), Full).gated(Refused)
         }
+        // One step (#653): Undo goes back to the old branch with the changes in the work tree.
+        // The stash entry the switch left (when not re-applied) stays in the stash list: the
+        // undo stack doesn't cover stashes. A re-apply that conflicts isn't recorded at all
+        // (the index then has conflicts), like a stash pop.
+        Command::StashAndSwitch { name, .. } => P::recorded(
+            fit(format!("Switch to {name} with local changes")),
+            Full,
+        )
+        .gated(Refused),
         Command::DeleteBranch { name, .. } => {
             P::recorded(fit(format!("Delete branch {name}")), RefsAndIndex)
                 .gated(Gate::Branch(name.clone()))
@@ -479,6 +492,10 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         Commit,
         ListBranches,
         CreateBranch,
+        GetSwitchConflicts,
+        StashAndSwitch,
+        SetIdentity,
+        GetPullDefaults,
         SwitchBranch,
         DeleteBranch,
         RenameBranch,

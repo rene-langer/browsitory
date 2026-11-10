@@ -62,6 +62,22 @@ pub struct MergePreference {
     pub squash: bool,
 }
 
+/// How a diverged pull reconciles, as remembered per repository (#652).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PullStrategyPreference {
+    Merge,
+    Rebase,
+    FastForwardOnly,
+}
+
+/// The pull strategy last chosen for one repository (the toolbar's Pull menu, or "Remember" in
+/// the diverged-pull dialog). It wins over the repository's `pull.rebase` / `pull.ff`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PullPreference {
+    pub repo_path: PathBuf,
+    pub strategy: PullStrategyPreference,
+}
+
 /// A custom tab name for one repository (#625). Kept by path, apart from the open tabs, so it
 /// survives closing the tab and a restart.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -354,6 +370,8 @@ struct ConfigFile {
     graph_remote_branch_selections: Vec<GraphRemoteBranchSelection>,
     #[serde(default)]
     merge_preferences: Vec<MergePreference>,
+    #[serde(default)]
+    pull_preferences: Vec<PullPreference>,
     #[serde(default)]
     repo_aliases: Vec<RepoAlias>,
 }
@@ -877,6 +895,44 @@ pub fn set_merge_preference_at(
         repo_path: repo_path.to_path_buf(),
         fast_forward,
         squash,
+    });
+    write_config(config_file, &config)
+}
+
+pub fn get_pull_preference(
+    repo_path: &Path,
+) -> Result<Option<PullStrategyPreference>, ConfigError> {
+    get_pull_preference_at(&config_file_path()?, repo_path)
+}
+
+pub fn set_pull_preference(
+    repo_path: &Path,
+    strategy: PullStrategyPreference,
+) -> Result<(), ConfigError> {
+    set_pull_preference_at(&config_file_path()?, repo_path, strategy)
+}
+
+pub fn get_pull_preference_at(
+    config_file: &Path,
+    repo_path: &Path,
+) -> Result<Option<PullStrategyPreference>, ConfigError> {
+    Ok(read_config(config_file)?
+        .pull_preferences
+        .into_iter()
+        .find(|p| p.repo_path == repo_path)
+        .map(|p| p.strategy))
+}
+
+pub fn set_pull_preference_at(
+    config_file: &Path,
+    repo_path: &Path,
+    strategy: PullStrategyPreference,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.pull_preferences.retain(|p| p.repo_path != repo_path);
+    config.pull_preferences.push(PullPreference {
+        repo_path: repo_path.to_path_buf(),
+        strategy,
     });
     write_config(config_file, &config)
 }

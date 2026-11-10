@@ -44,6 +44,8 @@ import type {
   MergeOutcome,
   OpenRepoEntry,
   PullOutcome,
+  PullStrategy,
+  StashSwitchOutcome,
   PullRequest,
   PullRequestList,
   RebasePlanCommit,
@@ -219,9 +221,15 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     commit: (repoPath: string, message: string, noVerify: boolean, trailers: Trailer[] = []) =>
       call<CommitOutcome>("commit", { repoPath, message, noVerify, trailers }),
     listBranches: (repoPath: string) => call<BranchInfo[]>("list_branches", { repoPath }),
-    createBranch: (repoPath: string, name: string, startPoint: string) =>
-      call<void>("create_branch", { repoPath, name, startPoint }),
+    createBranch: (repoPath: string, name: string, startPoint: string, checkout: boolean) =>
+      call<void>("create_branch", { repoPath, name, startPoint, checkout }),
     switchBranch: (repoPath: string, name: string) => call<void>("switch_branch", { repoPath, name }),
+    getSwitchConflicts: (repoPath: string, name: string) =>
+      call<string[]>("get_switch_conflicts", { repoPath, name }),
+    stashAndSwitch: (repoPath: string, name: string, reapply: boolean) =>
+      call<StashSwitchOutcome>("stash_and_switch", { repoPath, name, reapply }),
+    setIdentity: (repoPath: string, name: string, email: string, global: boolean) =>
+      call<void>("set_identity", { repoPath, name, email, global }),
     deleteBranch: (repoPath: string, name: string, force: boolean) =>
       call<void>("delete_branch", { repoPath, name, force }),
     renameBranch: (repoPath: string, oldName: string, newName: string) =>
@@ -298,6 +306,9 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<string>("push_tags", { repoPath, remoteName, names, noVerify }),
     pullCurrentUpstream: (repoPath: string) =>
       call<PullOutcome>("pull_current_upstream", { repoPath }),
+    getPullStrategy: (repoPath: string) => call<PullStrategy | null>("get_pull_strategy", { repoPath }),
+    setPullStrategy: (repoPath: string, strategy: PullStrategy) =>
+      call<void>("set_pull_strategy", { repoPath, strategy }),
     // Starts no transfer, so the desktop's `call` doesn't wait for the transfer listeners: the
     // cancellation shows up on the listeners the cancelled operation already set up.
     cancelTransfer: (repoPath: string, operationId: string) =>

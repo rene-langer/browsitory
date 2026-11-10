@@ -350,10 +350,38 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
         (
             cmd!(CreateBranch {
                 name: s("topic"),
-                start_point: s("HEAD")
+                start_point: s("HEAD"),
+                checkout: true
             }),
             "undo(RefsAndIndex, Create branch topic) lock hold gate",
         ),
+        (
+            cmd!(CreateBranch {
+                name: s("topic"),
+                start_point: s("HEAD"),
+                checkout: false
+            }),
+            "undo(RefsAndIndex, Create branch topic) lock hold gate",
+        ),
+        (cmd!(GetSwitchConflicts { name: s("topic") }), "-"),
+        (
+            cmd!(StashAndSwitch {
+                name: s("topic"),
+                reapply: true,
+                operation_id: op(),
+                events: channel().0
+            }),
+            "undo(Full, Switch to topic with local changes) lock hold gate",
+        ),
+        (
+            cmd!(SetIdentity {
+                name: s("Ada"),
+                email: s("ada@example.com"),
+                global: false
+            }),
+            "-",
+        ),
+        (cmd!(GetPullDefaults), "-"),
         (
             cmd!(SwitchBranch {
                 name: s("topic"),

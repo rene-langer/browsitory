@@ -1,3 +1,4 @@
+import { IdentityDialog } from "./IdentityDialog";
 import { useCallback, useEffect, useState } from "react";
 import type { GraphCommit, HeadInfo, RepoClient } from "../ipc/RepoClient";
 import { messageHistoryEntries, readCommitMessages, recentBranchCommits } from "../lib/commitMessageHistory";
@@ -183,6 +184,13 @@ export function CommitDock({
             onAmend: onAmendCommit,
             headAuthor,
           }}
+        />
+      )}
+      {commitFlow?.identity.required === true && (
+        <IdentityDialog
+          retrying={commitFlow.identity.retrying}
+          onSave={commitFlow.identity.onSave}
+          onCancel={commitFlow.identity.onCancel}
         />
       )}
     </div>

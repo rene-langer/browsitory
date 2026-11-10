@@ -1,4 +1,4 @@
-import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit } from "../ipc/RepoClient";
+import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit, type PullStrategy } from "../ipc/RepoClient";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
 import type { PaletteAction } from "./actions/action";
 import { branchActions } from "./actions/branchActions";
@@ -101,6 +101,13 @@ export interface BranchSwitchCommands {
   onSwitchBranch(name: string): void;
   /** Creates the branch at HEAD and switches to it. */
   onCreateAndSwitch(name: string): void;
+  /**
+   * The remotes' branches (`listRemoteBranches`, loaded while the palette is open, #726); those
+   * without a local branch of the same name are listed after the local ones.
+   */
+  remoteBranches: readonly { remoteName: string; branchName: string }[];
+  /** Creates the local branch from `remoteName/branchName`, tracking it, and switches to it. */
+  onCheckoutRemoteBranch(remoteName: string, branchName: string): void;
 }
 
 /** The id of the "Switch branch…" picker, which the toolbar's branch chip opens directly. */
@@ -413,6 +420,27 @@ function workingTreeCommands({ appState, state, blocked }: FamilyContext): Comma
       { id: "pull", label: "Pull", keywords: ["pull", "sync"], run: () => void appState.pullCurrentUpstream() },
       "Remotes",
     );
+    // The Pull menu's strategies (#652): each is remembered for this repository, then pulls.
+    const strategies: [PullStrategy, string, string[]][] = [
+      ["Merge", "Pull with merge", ["merge"]],
+      ["Rebase", "Pull with rebase", ["rebase"]],
+      ["FastForwardOnly", "Pull, fast-forward only", ["fast-forward", "ff", "only"]],
+    ];
+    for (const [strategy, label, keywords] of strategies) {
+      add(
+        {
+          id: `pull-strategy:${strategy}`,
+          label,
+          keywords: ["pull", "sync", "strategy", ...keywords],
+          run: () =>
+            void (async () => {
+              await appState.setPullStrategy(strategy);
+              await appState.pullCurrentUpstream();
+            })(),
+        },
+        "Remotes",
+      );
+    }
   }
   // #448: a patch file applied to the working tree (recorded, so behind the repository guard);
   // saving the staged changes only reads.
@@ -600,21 +628,33 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
 }
 
 /**
- * "Switch branch…" (#638): the recent branches first, then the other local ones, and "Create
- * branch <name> from <current>" for a new name. Always listed, so the toolbar's branch chip opens
+ * "Switch branch…" (#638): the recent branches first, then the other local ones, then the remote
+ * branches without a local one (#726), and "Create branch <name> from <current>" for a new name. Always listed, so the toolbar's branch chip opens
  * it; while the repository is busy it lists nothing and says why.
  */
-function switchBranchPicker({ state, blockers }: FamilyContext, branchSwitch: BranchSwitchCommands): Command {
+function switchBranchPicker({ appState, state, blockers }: FamilyContext, branchSwitch: BranchSwitchCommands): Command {
   const current = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
   const others = state.branches.filter((branch) => !branch.isCurrent).map((branch) => branch.name);
   const recent = branchSwitch.recentBranches.filter((name) => others.includes(name));
   const ordered = [...recent, ...others.filter((name) => !recent.includes(name))];
-  const items: PickerItem[] = ordered.map((name) => ({
+  const local: PickerItem[] = ordered.map((name) => ({
     id: `switch-to-branch:${name}`,
     label: name,
     keywords: [name],
     run: () => branchSwitch.onSwitchBranch(name),
   }));
+  // A remote branch without a local one (#726): checked out as a new tracking branch, as the
+  // Branches tree's remote Checkout does. `origin/HEAD` names no branch of its own.
+  const localNames = new Set(state.branches.map((branch) => branch.name));
+  const remote: PickerItem[] = branchSwitch.remoteBranches
+    .filter(({ branchName }) => branchName !== "HEAD" && !localNames.has(branchName))
+    .map(({ remoteName, branchName }) => ({
+      id: `checkout-remote-branch:${remoteName}/${branchName}`,
+      label: `${remoteName}/${branchName}`,
+      keywords: [branchName, remoteName, "remote", "track"],
+      run: () => branchSwitch.onCheckoutRemoteBranch(remoteName, branchName),
+    }));
+  const items = [...local, ...remote];
   return {
     id: SWITCH_BRANCH_PICKER_ID,
     group: "Branches",
@@ -628,8 +668,19 @@ function switchBranchPicker({ state, blockers }: FamilyContext, branchSwitch: Br
         if (blockers.blocked) return [];
         const matches = filterPickerItems(items, query);
         const name = query.trim();
+        // The New branch form, for another start point or to stay on this branch (#656).
+        if (name === "")
+          return [
+            ...matches,
+            {
+              id: "create-branch-form",
+              label: "Create branch…",
+              keywords: ["create", "new"],
+              run: () => appState.openCreateBranchDraft("HEAD"),
+            },
+          ];
         const taken = state.branches.some((branch) => branch.name === name);
-        if (name === "" || taken || branchNameProblem(name) !== null) return matches;
+        if (taken || branchNameProblem(name) !== null) return matches;
         return [
           ...matches,
           {
@@ -649,6 +700,14 @@ function branchCommands(ctx: FamilyContext): Command[] {
   const { appState, state, blockers, blocked } = ctx;
   const { commands, add, offer } = family("Branches");
   if (ctx.branchSwitch !== undefined) commands.push(switchBranchPicker(ctx, ctx.branchSwitch));
+  // Opens the sidebar's New branch form (a drawer when narrow, #656); its Create carries the
+  // busy rule.
+  add({
+    id: "create-branch",
+    label: "Create branch…",
+    keywords: ["branch", "create", "new"],
+    run: () => appState.openCreateBranchDraft("HEAD"),
+  });
   const branchContext = { blockers, remoteCount: state.remotes.length, upstream: state.upstream };
   // Every branch but the current one.
   for (const branch of state.branches) {

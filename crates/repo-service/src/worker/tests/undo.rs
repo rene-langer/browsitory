@@ -128,7 +128,9 @@ fn undo_onto_a_branch_held_by_another_worktree_is_a_refusal() {
     let base = repo.head().unwrap().shorthand().unwrap().to_string();
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
-    handle.create_branch("other".into(), "HEAD".into()).unwrap();
+    handle
+        .create_branch("other".into(), "HEAD".into(), true)
+        .unwrap();
     let label = handle.get_undo_state().unwrap().undo.unwrap();
     let parent = TempDir::new().unwrap();
     let linked = parent.path().join("linked");
@@ -190,7 +192,9 @@ fn stage_during_a_conflicted_merge_is_not_recorded_and_abort_drops_pending() {
     );
     assert_eq!(handle.undo().unwrap(), UndoOutcome::Nothing);
     // And the recorder is idle again: the next command records normally.
-    handle.create_branch("after".into(), "HEAD".into()).unwrap();
+    handle
+        .create_branch("after".into(), "HEAD".into(), true)
+        .unwrap();
     assert_eq!(
         handle.get_undo_state().unwrap().undo,
         Some("Create branch after".into())
@@ -248,7 +252,7 @@ fn history_survives_a_worker_restart_and_is_capped() {
         let handle = worker.handle();
         for n in 0..55 {
             handle
-                .create_branch(format!("b{n}"), "HEAD".into())
+                .create_branch(format!("b{n}"), "HEAD".into(), true)
                 .unwrap();
         }
     }

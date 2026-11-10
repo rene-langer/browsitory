@@ -435,6 +435,25 @@ pub(super) fn ignore_path(params: IgnorePathParams, repos: &Repos) -> Result<Val
     Ok(Value::Null)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SetIdentityParams {
+    repo_path: String,
+    name: String,
+    email: String,
+    global: bool,
+}
+
+/// Sets the git identity commits are made with (#689).
+pub(super) fn set_identity(params: SetIdentityParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    worker_handle(repos, &params.repo_path)?.set_identity(
+        params.name,
+        params.email,
+        params.global,
+    )?;
+    Ok(Value::Null)
+}
+
 pub(super) fn commit(
     params: CommitMessageParams,
     repos: &Repos,

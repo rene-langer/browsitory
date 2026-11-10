@@ -58,6 +58,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   getReflog: async () => [],
   listRemotes: async () => [],
   listRemoteBranches: async () => [],
+  getPullStrategy: async () => null,
   getCurrentUpstream: async () => null,
   getRemoteUpstreams: async () => [],
   listTags: async () => [],

@@ -1,5 +1,14 @@
 import { useCallback } from "react";
-import type { AmendOptions, ConfirmedAbort, PickOutcome, RepoClient, ResetMode, SequenceAbort, SequenceOutcome } from "../ipc/RepoClient";
+import {
+  errorKind,
+  type AmendOptions,
+  type ConfirmedAbort,
+  type PickOutcome,
+  type RepoClient,
+  type ResetMode,
+  type SequenceAbort,
+  type SequenceOutcome,
+} from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
 import { hookFailedMessage, type HookRetry } from "../lib/hookFailure";
@@ -142,7 +151,11 @@ export function useHistoryActions(
   const amendCommit = useCallback(
     async (message: string, noVerify: boolean, options: AmendOptions = NO_AMEND_OPTIONS) => {
       const ok = await runMutationWithOutcome(async () => {
-        const outcome = await client.amendCommit(repoPath, message, noVerify, options);
+        const outcome = await client.amendCommit(repoPath, message, noVerify, options).catch((error: unknown) => {
+          // No `user.name`/`user.email`: the identity dialog offers to set them (#689).
+          if (errorKind(error) === "MissingIdentity") setState((prev) => ({ ...prev, identityRequired: "amend" }));
+          throw error;
+        });
         if (outcome.kind === "HookFailed") {
           setState((prev) => ({
             ...prev,
