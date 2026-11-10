@@ -3,6 +3,7 @@ import { CommitDiffPane } from "./CommitDiffPane";
 import { StashDiffPane } from "./StashDiffPane";
 import { NO_HEAD_INFO, type CommitView, type DiscardRequest, type FileHistoryFocus } from "./diffPaneShared";
 import { useState } from "react";
+import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 import type { ForgeRepository, GraphCommit, HeadInfo, RepoClient, StashEntry, StatusEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
@@ -22,7 +23,17 @@ export type {
  * The diff pane: the working tree's changes and the commit dock, a commit's files, or a stash.
  * Its actions come from `WorkspaceActionsContext` (#491); the props are the data it shows.
  */
-export function DiffPane({
+export function DiffPane(props: Parameters<typeof DiffPaneContent>[0]) {
+  // The pane's diffs and its one options toolbar share Split and whole file (#640); under the
+  // app's provider that is the app's.
+  return (
+    <DiffViewOptionsProvider>
+      <DiffPaneContent {...props} />
+    </DiffViewOptionsProvider>
+  );
+}
+
+function DiffPaneContent({
   repoPath,
   client,
   selectedRow,

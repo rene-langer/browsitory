@@ -9,6 +9,8 @@ import styles from "./CompareDiffPane.module.css";
 import diffStyles from "./DiffPane.module.css";
 import { InlineError } from "./primitives/InlineError";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
+import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
+import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 
 /** Above this many files every section starts collapsed: each open section fetches its own diff. */
 export const COMPARE_EXPAND_LIMIT = 50;
@@ -128,6 +130,7 @@ export function CompareDiffPane({
   } else {
     body = (
       <>
+        <DiffOptionsToolbar sticky />
         <div className={diffStyles.groupHeading}>
           <span className={styles.status}>{files.length === 1 ? "1 file changed" : `${files.length} files changed`}</span>
           <CollapseAllToggle
@@ -164,6 +167,7 @@ export function CompareDiffPane({
   }
 
   return (
+    <DiffViewOptionsProvider>
     <div>
       <section className={styles.header} aria-label="Comparison">
         <div className={styles.titleRow}>
@@ -190,5 +194,6 @@ export function CompareDiffPane({
       </section>
       {body}
     </div>
+    </DiffViewOptionsProvider>
   );
 }

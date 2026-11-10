@@ -65,13 +65,30 @@ describe("Browsitory diff word wrap and whole file", () => {
     expect(unwrapped.scrolls).toBe(true);
     expect(unwrapped.lineNumber).toBe("5");
 
-    await clickInPage("button", "Wrap lines");
+    await clickInPage(`button[aria-label="Wrap lines"]`);
     await browser.waitUntil(async () => (await state()).wrap === "true", { timeout: 5000 });
     const wrapped = await state();
     expect(wrapped.whiteSpace).toBe("pre-wrap");
     expect(wrapped.scrolls).toBe(false);
     expect(wrapped.lineNumber).toBe("5");
     expect(wrapped.height).toBeGreaterThan(unwrapped.height);
+
+    // The toolbar's Wrap lines persists as the setting (#640): On, then back to Auto (only
+    // Preferences offers it) for the specs after this one.
+    await browser.waitUntil(() => /word_wrap = "on"/.test(fs.readFileSync(CONFIG_FILE, "utf8")), {
+      timeoutMsg: "Wrap lines did not reach config.toml",
+    });
+    const preferences = await $("header button[aria-label='Preferences']");
+    await preferences.waitForClickable();
+    await preferences.click();
+    const wordWrap = await $("//select[@id=//label[normalize-space(.)='Word wrap']/@for]");
+    await wordWrap.waitForExist();
+    await wordWrap.selectByVisibleText("Auto");
+    await browser.waitUntil(() => /word_wrap = "auto"/.test(fs.readFileSync(CONFIG_FILE, "utf8")), {
+      timeoutMsg: "Word wrap Auto did not reach config.toml",
+    });
+    await (await $("button=Close")).click();
+    await browser.waitUntil(async () => (await state()).wrap === "false", { timeout: 5000 });
   });
 
   it("applies the code font size from Preferences to the diff at once (#615)", async () => {
@@ -123,7 +140,7 @@ describe("Browsitory diff word wrap and whole file", () => {
     const before = await state();
     expect(before.markers).toBe(0);
 
-    await clickInPage("button", "Show whitespace");
+    await clickInPage(`button[aria-label="Show whitespace"]`);
     await browser.waitUntil(async () => (await state()).markers > 0, { timeoutMsg: "no whitespace markers" });
     const shown = await state();
     expect(shown.marker).toBe('"·"');
@@ -134,13 +151,13 @@ describe("Browsitory diff word wrap and whole file", () => {
     });
 
     // Off again, for the specs after this one.
-    await clickInPage("button", "Show whitespace");
+    await clickInPage(`button[aria-label="Show whitespace"]`);
     await browser.waitUntil(async () => (await state()).markers === 0, { timeoutMsg: "markers stayed" });
     await browser.waitUntil(() => /show_whitespace = false/.test(fs.readFileSync(CONFIG_FILE, "utf8")));
   });
 
   it("shows the whole file and stages one selected change of it", async () => {
-    await clickInPage("button", "Show whole file");
+    await clickInPage(`button[aria-label="Show whole file"]`);
     // l20 is 15 lines from either change: only the whole file shows it.
     await waitUntilInPage(".diff-line-context", " l20", { contains: true });
     const hunkHeaders = await browser.execute(
@@ -161,5 +178,9 @@ describe("Browsitory diff word wrap and whole file", () => {
       .waitUntil(() => git("show", `:${FILE}`) === lines({ 45: "changed 45" }))
       .catch(() => {});
     expect(git("show", `:${FILE}`)).toBe(lines({ 45: "changed 45" }));
+
+    // "Show whole file" is the pane's and persists (#640): off again for the specs after this one.
+    await clickInPage(`button[aria-label="Show whole file"]`);
+    await waitUntilInPage('button[aria-label="Show whole file"][aria-pressed="false"]');
   });
 });

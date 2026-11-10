@@ -14,6 +14,7 @@ import diffPaneStyles from "./DiffPane.module.css";
 import { FolderHistoryButton } from "./FolderHistoryButton";
 import { LineHistoryButton } from "./LineHistoryButton";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
+import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
 
@@ -379,6 +380,8 @@ export function CommitFileView({
     body = <p className={styles.note}>A submodule: its files are in another repository.</p>;
   } else if (comparing) {
     body = (
+      <>
+      <DiffOptionsToolbar />
       <ul className={diffPaneStyles.fileList}>
         <ReadOnlyFileSection
           repoPath={repoPath}
@@ -395,6 +398,7 @@ export function CommitFileView({
           previewSource={{ kind: "Range", fromId: commitId, toId: null, oldPath: null }}
         />
       </ul>
+      </>
     );
   } else if (error !== null) {
     body = (
