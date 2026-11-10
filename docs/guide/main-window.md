@@ -33,7 +33,9 @@ the right:
   **User guide** opens this guide in your browser.
 
 **Updates (desktop app).** Browsitory checks for a new version when it starts and every six
-hours, and downloads it in the background. When it is ready, a banner says "Update v… ready".
+hours, and downloads it in the background. If a check or download fails (for example while the
+download server is down), it tries again after 10 minutes, then waits twice as long each time, up
+to 3 hours, until a check succeeds. When it is ready, a banner says "Update v… ready".
 Click **Restart to update** to install it, or keep working: nothing changes until you restart.
 The VSCode extension updates through VSCode instead.
 

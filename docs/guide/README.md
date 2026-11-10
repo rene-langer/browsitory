@@ -27,6 +27,7 @@ it. Open several repositories as tabs, and save groups of them as workspaces.
 - [Resolving conflicts](conflicts.md)
 - [History and diffs](history.md)
 - [File history](file-history.md)
+- [Files at a commit](files-at-a-commit.md)
 - [Searching commits](search.md)
 - [Comparing commits and branches](compare.md)
 - [Patches and partial reverts](patches.md)
