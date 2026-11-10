@@ -62,6 +62,14 @@ remote. The toggle is remembered per repository; until you set it, your git conf
 all (unreachable, missing credentials), the others are still fetched and the error names the
 ones that failed.
 
+**Cancelling a fetch, pull or push.** While one runs, a progress panel shows it, with
+**Cancel**. While it is still connecting (a server that doesn't answer, a VPN that is down),
+Cancel stops it at once and you can go on working: nothing has been fetched or sent, and the
+repository is unchanged. Once data is flowing, a fetch stops at its next progress step; a pull
+cancelled during its fetch doesn't merge. A push can be cancelled until it starts
+sending; after that it finishes and reports how it went, because the remote may already have
+taken it.
+
 ## Fetching automatically
 
 Ahead/behind counts and remote branches are only as fresh as the last fetch. To keep them
