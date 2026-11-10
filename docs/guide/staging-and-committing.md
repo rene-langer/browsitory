@@ -1,18 +1,28 @@
 # Staging and committing
 
 Select **Uncommitted changes** at the top of the commit graph to see your working tree in the
-right-hand pane. It has two groups, **Changes** and **Staged**, each with **Stage all** or
-**Unstage all**. Every file shows its diff. Hover a file to show its stage or unstage button, or
-use **Blame** to see who last changed each line. Type a commit message and click **Commit**.
-The button says what it commits and where, for example **Commit 3 files to main** (without the
-branch on a detached HEAD). Without a message it is disabled, and "Write a commit message to
-commit." says why. After a commit a notification names it, "Committed 4c5beaf to main", with
-**Push** to push the branch (to its upstream, or through the Push dialog when it has none), or
-**Undo** when the repository has no remote. Undo only acts while that commit is still the latest.
-The arrow next to the button has **Commit and push**, which commits and then pushes the same way
-(it needs a branch and a remote; otherwise its tooltip says why), and **Amend last commit**,
-which turns on amend mode (see [Rewriting commits](rewriting-commits.md)).
-**Stash** in the repository toolbar sets the current changes aside; see [Stashes](stashes.md).
+right-hand pane. At the top is a compact list of the changed files in two groups, **Changes** and
+**Staged**, each with **Stage all** or **Unstage all**. Both groups are always on screen: each
+scrolls on its own when it holds many files, and an empty one says so. Each row shows a status
+letter (**M** modified, **A** added, **U** untracked, **D** deleted, **R** renamed, **T** type
+changed, **C** conflicted; hover it for the word), the path, a **⋯** menu and a stage or unstage
+button.
+
+Below the list, one diff viewer shows the current file: the first one when you open the view, or
+the one you click. Its header names the file and has **Blame** (who last changed each line) and
+**History**. When the current file leaves its group, for example because you staged it, the file
+now in its place becomes current.
+
+Type a commit message and click **Commit**. The button says what it commits and where, for
+example **Commit 3 files to main** (without the branch on a detached HEAD). Without a message it
+is disabled, and "Write a commit message to commit." says why. After a commit a notification
+names it, "Committed 4c5beaf to main", with **Push** to push the branch (to its upstream, or
+through the Push dialog when it has none), or **Undo** when the repository has no remote. Undo
+only acts while that commit is still the latest. The arrow next to the button has **Commit and
+push**, which commits and then pushes the same way (it needs a branch and a remote; otherwise its
+tooltip says why), and **Amend last commit**, which turns on amend mode (see [Rewriting
+commits](rewriting-commits.md)). **Stash** in the repository toolbar sets the current changes
+aside; see [Stashes](stashes.md).
 
 When **Changes** holds both changes to tracked files and untracked (new) files, **Stage
 modified** sits next to **Stage all**: it stages the tracked files' changes (edits, deletions,
@@ -20,11 +30,14 @@ type changes) and leaves the untracked files where they are, like `git add -u`. 
 stages the untracked files too. Both leave conflicted files alone, and each is one undo step. The
 command palette has the same action as **Stage modified files (tracked only)**.
 
-Each file's arrow collapses its diff to the header row (path, status and actions); **Collapse
-all** above the groups closes every file at once. To keep large new or generated files out of the
-way, turn off **Preferences → Diff → Expand untracked files**: untracked files then start
-collapsed in **Changes** and load nothing until you expand them, while changes to tracked files
-still start expanded. A file you expand or collapse stays that way when the list refreshes.
+Only the current file's diff is loaded. To keep large new or generated files from loading when
+you move onto them, turn off **Preferences → Diff → Expand untracked files**: an untracked file
+then shows **Show contents** in the viewer and loads only when you press it (it stays shown when
+the list refreshes); changes to tracked files always load at once.
+
+The options above the viewer (**Unified view** / **Split view**, **Wrap lines**, **Show whole
+file**, **Ignore whitespace**, **Show whitespace**, **Syntax highlighting** and the context
+lines) apply to every file and are remembered; see [Diff options](history.md#diff-options).
 
 Each hunk header has **Stage hunk** (or **Unstage hunk**) and **Discard hunk**. Discard doesn't
 ask: the hunk goes at once, and the notification that says so has an **Undo** button
@@ -39,13 +52,15 @@ but not staged yet shows as deleted plus new, like `git status`.
 
 ## Selecting several files
 
-Click a file's header to select it. **Ctrl+click** (**Cmd+click** on macOS) adds a file to the
+Click a file's row to select it. **Ctrl+click** (**Cmd+click** on macOS) adds a file to the
 selection or removes it, and **Shift+click** selects every file from the last one clicked. With
-the **Changes** or **Staged** list focused, `↑`/`↓` move to the next file, `Shift+↑`/`Shift+↓`
-extend the selection, **Ctrl/Cmd+A** selects the whole list and **Esc** keeps only the current
-file. A selection stays within one list: clicking a file in the other list starts a new one.
-Clicks inside a diff select lines there, not files. The current file (marked by a bar on its
-left) is the one the pane scrolls to; screen readers announce how many files are selected.
+the **Changes** or **Staged** list focused, `↑`/`↓` (or `j`/`k`) move to the next file and on into
+the other list past either end, `Shift+↑`/`Shift+↓` extend the selection, **Ctrl/Cmd+A** selects
+the whole list, **Esc** keeps only the current file and **Enter** moves the focus into its diff.
+With the focus in the diff, `j` and `k` go to the next and previous file and keep the focus
+there. A selection stays within one list: clicking a file in the other list starts a new one.
+The current file, marked by a bar on its left, is the one the viewer shows; screen readers
+announce how many files are selected.
 
 With two or more files selected, a bar above the list shows how many and offers **Stage N
 files** (or **Unstage N files**), **Discard N files…**, **Ignore N untracked files** (when the
@@ -100,7 +115,7 @@ doesn't stage or undo a mode change; stage or discard the whole file for that.
 
 ## Discarding and ignoring files
 
-Open a file's **⋯** menu, right-click the file header, or press Shift+F10 (or the Menu key)
+Open a file's **⋯** menu, right-click the file row, or press Shift+F10 (or the Menu key)
 with the file row focused, for **Discard changes…**. Staged files don't offer discard; unstage them first. A confirmation dialog
 appears. A discard can be reverted with **Undo** (see [Undo and redo](undo-redo.md)) unless the
 file is changed again afterwards. You can discard while a merge, rebase, cherry-pick or revert

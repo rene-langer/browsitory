@@ -1,10 +1,25 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DiffHunk } from "../ipc/RepoClient";
 import { wordDiff } from "../lib/wordDiff";
 import type { ReactNode } from "react";
 import { DiffSettingsContext, type DiffSettingsApi } from "../state/useDiffSettings";
-import { DiffView } from "./DiffView";
+import { DiffView as PaneDiffView } from "./DiffView";
+import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
+import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
+
+// A diff as a pane shows it (#640): under the pane's one options toolbar, sharing its options.
+function DiffView(props: React.ComponentProps<typeof PaneDiffView>) {
+  return (
+    <DiffViewOptionsProvider>
+      <DiffOptionsToolbar wholeFile={props.wholeFile !== undefined} />
+      <PaneDiffView {...props} />
+    </DiffViewOptionsProvider>
+  );
+}
+
+// Split view and whole file persist in localStorage: no test may leave them on for the next.
+afterEach(() => localStorage.clear());
 
 // Pass-through spy on the real `wordDiff`, so tests can count how often DiffView recomputes it.
 vi.mock("../lib/wordDiff", async (importOriginal) => {
@@ -624,13 +639,12 @@ describe("DiffView word wrap", () => {
       </TestDiffSettings>,
     );
     expect(lines(container)).toHaveAttribute("data-wrap", "false");
-    expect(wrapButton()).toHaveAttribute("aria-pressed", "false");
+    expect(wrapButton()).toHaveAttribute("aria-pressed", "mixed");
     fireEvent.click(screen.getByRole("button", { name: "Split view" }));
     expect(lines(container)).toHaveAttribute("data-wrap", "true");
-    expect(wrapButton()).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("the per-diff toggle overrides the setting without changing it", () => {
+  it("the toolbar's Wrap lines sets the setting, so it applies to every diff and persists (#640)", () => {
     const value = settingsWith("On");
     const { container } = render(
       <TestDiffSettings value={value}>
@@ -638,13 +652,9 @@ describe("DiffView word wrap", () => {
       </TestDiffSettings>,
     );
     expect(lines(container)).toHaveAttribute("data-wrap", "true");
+    expect(wrapButton()).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(wrapButton());
-    expect(lines(container)).toHaveAttribute("data-wrap", "false");
-    expect(wrapButton()).toHaveAttribute("aria-pressed", "false");
-    // Still off in the split view: the override is this diff's, not the view's.
-    fireEvent.click(screen.getByRole("button", { name: "Split view" }));
-    expect(lines(container)).toHaveAttribute("data-wrap", "false");
-    expect(value.update).not.toHaveBeenCalled();
+    expect(value.update).toHaveBeenCalledWith({ wordWrap: "Off" });
   });
 
   it("keeps line numbers and line selection when unwrapped", () => {
@@ -663,18 +673,11 @@ describe("DiffView word wrap", () => {
 });
 
 describe("DiffView whole file", () => {
-  it("offers Show whole file only when the parent can fetch it, and disables the context stepper while on", () => {
-    const onToggle = vi.fn();
+  it("offers Show whole file only when the pane's diffs can fetch it", () => {
     const { rerender } = render(<DiffView hunks={[lineHunk]} />);
     expect(screen.queryByRole("button", { name: "Show whole file" })).toBeNull();
-    rerender(<DiffView hunks={[lineHunk]} wholeFile={{ on: false, onToggle, tooLongLines: null }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
-    expect(onToggle).toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "More context lines" })).toBeEnabled();
-    rerender(<DiffView hunks={[lineHunk]} wholeFile={{ on: true, onToggle, tooLongLines: null }} />);
-    expect(screen.getByRole("button", { name: "Show whole file" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "More context lines" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Fewer context lines" })).toBeDisabled();
+    rerender(<DiffView hunks={[lineHunk]} wholeFile={{ on: false, onToggle: vi.fn(), tooLongLines: null }} />);
+    expect(screen.getByRole("button", { name: "Show whole file" })).toBeInTheDocument();
   });
 
   it("says when the file is too long to show whole", () => {

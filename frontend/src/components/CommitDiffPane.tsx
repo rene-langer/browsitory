@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CommitHunk, CommitStats, DiffOptions, FileStats, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { CollapseAllToggle } from "./CollapseToggle";
+import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { CommitHeader } from "./CommitHeader";
 import styles from "./DiffPane.module.css";
 import { InlineError } from "./primitives/InlineError";
@@ -179,6 +180,7 @@ export function CommitDiffPane({
           All files
         </button>
       </div>
+      {view !== "tree" && <DiffOptionsToolbar sticky />}
       {view === "tree" ? (
         <CommitTreeBrowser
           repoPath={repoPath}

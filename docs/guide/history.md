@@ -135,10 +135,11 @@ image**). A conflicted image opens the conflict pane, like any conflict.
 
 ## Diff options
 
-The diff toolbar above each file has these controls. **Split view** shows the old and new
-version side by side; **Unified view** goes back to one column. **Ignore whitespace**, **Context
-lines** (− and +, 0 to 20) and **Syntax highlighting** are remembered across sessions and apply
-to every diff. While whitespace is ignored, partial staging (lines and hunks) is unavailable in
+Each pane has one diff toolbar, above its files: the working tree, a commit, a stash and a
+compare. Its buttons are icons; hover one for its name. Everything on it applies to every diff in
+the pane and is remembered across sessions. **Unified view** shows old and new lines in one
+column; **Split view** shows the old and new version side by side. **Ignore whitespace**,
+**Context lines** (− and +, 0 to 20) and **Syntax highlighting** are kept in your settings. While whitespace is ignored, partial staging (lines and hunks) is unavailable in
 the working tree and a hint says so; staging and unstaging whole files still works. Right after
 you change an option, hunk and line actions return once the diff has reloaded with it.
 Highlighting covers common languages and is skipped when a file's diff has more than 2,000 lines
@@ -153,22 +154,23 @@ default, remembered across sessions, and in the command palette as **Toggle whit
 
 **Wrap lines** wraps long lines at the pane's width, or turns wrapping off so each line stays on
 one row and the diff scrolls sideways. Line numbers stay next to their line either way, and
-selecting and staging lines works the same. The button changes only that diff, until you leave
-it. The default comes from **Preferences → Diff → Word wrap**: **On**, **Off** or **Auto**
-(the default). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
+selecting and staging lines works the same. The button sets **Preferences → Diff → Word wrap**
+to **On** or **Off** for every diff; the setting also has **Auto** (the default, shown as a
+half-pressed button). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
 AsciiDoc and the like) and any diff with a line longer than 300 characters, such as minified or
 generated files; code in the unified view scrolls sideways so its indentation stays readable.
 
-**Show whole file** shows every line of that file, with the changes highlighted where they are,
-in the unified and the split view; press it again for the changes with context. It works in the
+**Show whole file** shows every line of each file, with the changes highlighted where they are,
+in the unified and the split view; press it again for the changes with context. Like **Split
+view**, it is remembered on this computer. It works in the
 working tree, commits, stashes and compares. In the working tree the whole file is one hunk:
 **Stage hunk** then stages every change in the file, and selected lines stage just those lines.
 A file longer than 10,000 lines is too long to show whole: a note says so and the diff keeps the
 normal context.
 
-The command palette also has **Toggle wrap lines** and **Toggle show whole file**. They act on
-the current diff: the one you last clicked or moved the focus into, or the working tree's current
-file. Without either, they act on the first diff on screen.
+The command palette also has **Toggle wrap lines** and **Toggle show whole file**, which change
+the same options. **Toggle wrap lines** turns wrapping on or off depending on what the current
+diff shows: the one you last clicked or moved the focus into, or the working tree's current file.
 
 **Preferences → Diff → Diff algorithm** chooses how the old and new lines are lined up, for every
 diff: **Default** (Myers, what `git diff` uses), **Patience** or **Minimal**. Patience lines up

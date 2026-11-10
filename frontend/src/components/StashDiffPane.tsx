@@ -8,6 +8,7 @@ import styles from "./DiffPane.module.css";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
+import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { stashActions as stashActionRules } from "../lib/actions/stashActions";
 
 /**
@@ -120,6 +121,7 @@ export function StashDiffPane({
         <p className={styles.stashEmpty}>This stash has no file changes.</p>
       ) : (
         <>
+          <DiffOptionsToolbar sticky />
           {files.tracked.length > 0 && (
             <>
               <div className={styles.groupHeading}>

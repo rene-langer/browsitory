@@ -63,7 +63,7 @@ describe("Browsitory cherry-pick sequence", () => {
     expect(fs.existsSync(path.join(E2E_REPO_PATH, ".git", "browsitory", "sequence.json"))).toBe(true);
 
     await jsClick("li*=Uncommitted changes");
-    const conflicted = await $("span*=seq-shared.txt (Conflicted)");
+    const conflicted = await $("span=seq-shared.txt (Conflicted)");
     await conflicted.waitForExist();
     await conflicted.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflicted);

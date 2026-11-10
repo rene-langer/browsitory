@@ -1,5 +1,7 @@
 import { CommitDock } from "./CommitDock";
-import { UncommittedFileSection } from "./UncommittedFileSection";
+import { UncommittedFileRow } from "./UncommittedFileRow";
+import { UncommittedFileViewer } from "./UncommittedFileViewer";
+import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
 import { NO_HEAD_INFO, withBlockedReason, type DiscardRequest, type SelectionActionKind } from "./diffPaneShared";
 import { stashBlockReason } from "../lib/operationStatus";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
@@ -7,7 +9,6 @@ import type { GraphCommit, HeadInfo, HunkOptions, RepoClient, StatusEntry } from
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import type { CommitDraft } from "./CommitBox";
-import { CollapseAllToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
 import {
   DELETE_UNTRACKED_PREVIEW,
@@ -31,10 +32,11 @@ import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { isMenuKey } from "../lib/menuKeys";
 import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "../lib/stagePaths";
 
-// The change lists' keys (#449): arrows/j/k move, Shift extends, Ctrl/Cmd+A selects the group,
-// Escape keeps only the current file, `s` stages or unstages, the Menu key opens the menu.
+// The change lists' keys (#449): arrows/j/k move (on to the other group past either end, #639),
+// Shift extends, Ctrl/Cmd+A selects the group, Escape keeps only the current file, `s` stages or
+// unstages, Enter moves into the diff, the Menu key opens the menu.
 const FILE_LIST_SHORTCUTS =
-  "ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown Control+A Meta+A Escape s ContextMenu Shift+F10";
+  "ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown Control+A Meta+A Escape s Enter ContextMenu Shift+F10";
 
 function entryKey(entry: { path: string; staged: boolean }): string {
   return `${entry.staged}:${entry.path}`;
@@ -114,17 +116,19 @@ export function UncommittedDiffPane({
   // always part of it; a plain click or arrow key makes it the only one.
   const [selection, setSelection] = useState<FileSelection>(EMPTY_FILE_SELECTION);
   const rowIdPrefix = useId();
-  // The files the user collapsed (`true`) or expanded (`false`), by `entryKey`, for as long as the
-  // pane is open; a file without an entry takes its default (`startsCollapsed`). Kept across
-  // status refreshes, so an untracked file the user expanded stays expanded (#623).
-  const [collapseOverrides, setCollapseOverrides] = useState<ReadonlyMap<string, boolean>>(new Map());
+  // The untracked files whose contents the user asked for while "Expand untracked files" is off
+  // (#623), by `entryKey`; kept across refreshes while the pane is open.
+  const [revealedUntracked, setRevealedUntracked] = useState<ReadonlySet<string>>(new Set());
   const { expandUntracked } = useDiffSettingsContext().settings;
-  // With "Expand untracked files" off (#623), untracked files start collapsed, so they fetch
-  // nothing until expanded; tracked changes always start expanded.
-  const startsCollapsed = (entry: StatusEntry) => !expandUntracked && isUntracked(entry);
-  const isCollapsed = (entry: StatusEntry) => collapseOverrides.get(entryKey(entry)) ?? startsCollapsed(entry);
-  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  // Per-`entryKey` version counters: the per-path half of each section's staleness signal (the
+  const contentsHidden = (entry: StatusEntry) =>
+    !expandUntracked && isUntracked(entry) && !revealedUntracked.has(entryKey(entry));
+  const rowRefs = useRef<Record<string, HTMLElement | null>>({});
+  // Asks the viewer to take focus once it shows `key` (Enter in a list, j/k in the viewer). Any
+  // other way of changing the current file drops it, so a later visit doesn't steal focus.
+  const [focusRequest, setFocusRequest] = useState<{ key: string; n: number } | null>(null);
+  // The first changed line of the current file's loaded diff, for its row's "Open in editor".
+  const [firstChangedLine, setFirstChangedLine] = useState<{ key: string; line: number | null } | null>(null);
+  // Per-`entryKey` version counters: the per-path half of the viewer's staleness signal (the
   // other half is `refreshGeneration`, see `staleness` below). A hunk stage/unstage/discard bumps
   // *both* sides of the affected path — staging a hunk of a partially-staged file changes its
   // staged diff as much as its unstaged one, and either section may be open — and only once the
@@ -159,19 +163,13 @@ export function UncommittedDiffPane({
     // Same settle-then-bump contract as `wrapHunkAction`.
     void Promise.resolve(action(path)).finally(() => bumpPathVersions(path));
   };
-  // One number per section: the path's own version plus the pane-wide refresh generation. Both
-  // only ever increase, so the sum changes whenever either does — and a hunk action, which bumps
-  // both (its `runMutation` ends in a `refresh()`), still yields one refetch rather than two when
-  // React batches the two updates into one render. Every open section refetches on any refresh:
-  // that is deliberate, it's the only signal an external edit, stash apply or pull leaves behind
-  // (there's no file watcher). PERF-001's savings come from lazy loading instead — collapsed and
-  // off-screen sections never fetch at all.
+  // One number per file: the path's own version plus the pane-wide refresh generation. Both only
+  // ever increase, so the sum changes whenever either does — and a hunk action, which bumps both
+  // (its `runMutation` ends in a `refresh()`), still yields one refetch rather than two when React
+  // batches the two updates into one render. The viewer refetches on any refresh: that is
+  // deliberate, it's the only signal an external edit, stash apply or pull leaves behind (there's
+  // no file watcher). Only the current file's diff is ever fetched (#639).
   const staleness = (key: string) => (diffVersion[key] ?? 0) + refreshGeneration;
-
-  useEffect(() => {
-    if (current === null) return;
-    sectionRefs.current[entryKey(current)]?.scrollIntoView?.({ block: "nearest" });
-  }, [current]);
 
   const stagedEntries = status.filter((entry) => entry.staged);
   const unstagedEntries = status.filter((entry) => !entry.staged);
@@ -187,12 +185,48 @@ export function UncommittedDiffPane({
   const untrackedCount = deletableUntrackedPaths.length;
   const showStageModified = untrackedCount > 0 && unstagedEntries.some((entry) => entry.kind !== "New");
 
+  // List order: Changes, then Staged.
   const allEntries = [...unstagedEntries, ...stagedEntries];
-  const allKeys = allEntries.map(entryKey);
-  const allCollapsed = allEntries.length > 0 && allEntries.every(isCollapsed);
 
-  const isEntryCurrent = (entry: StatusEntry) =>
-    current !== null && current.path === entry.path && current.staged === entry.staged;
+  // The file the viewer shows. When the chosen one is gone (staged, unstaged, discarded,
+  // committed), the file now at its place in the same group takes over, else the other group's
+  // first; with nothing chosen yet, the first file.
+  // Where the current file was in its group at the last render, for the fallback.
+  const [lastPlace, setLastPlace] = useState<{ staged: boolean; index: number } | null>(null);
+  const findEntry = (target: { path: string; staged: boolean } | null) =>
+    target === null ? undefined : allEntries.find((entry) => entry.path === target.path && entry.staged === target.staged);
+  const fallbackEntry = (): StatusEntry | undefined => {
+    const place = lastPlace;
+    if (place === null) return unstagedEntries[0] ?? stagedEntries[0];
+    const same = place.staged ? stagedEntries : unstagedEntries;
+    const other = place.staged ? unstagedEntries : stagedEntries;
+    return same[Math.min(place.index, same.length - 1)] ?? other[0];
+  };
+  const chosenEntry = findEntry(current);
+  const currentEntry = chosenEntry ?? fallbackEntry();
+  // Derived state, updated during render (as `DiffView` resets its selection) rather than in an
+  // effect: the fallback becomes the current file and its selection at once, so keys and the
+  // palette act on what the viewer shows.
+  if (currentEntry !== undefined) {
+    const index = (currentEntry.staged ? stagedEntries : unstagedEntries).indexOf(currentEntry);
+    if (lastPlace?.staged !== currentEntry.staged || lastPlace.index !== index) {
+      setLastPlace({ staged: currentEntry.staged, index });
+    }
+    if (chosenEntry === undefined) {
+      setCurrent({ path: currentEntry.path, staged: currentEntry.staged });
+      if (!(selection.staged === currentEntry.staged && selection.paths.has(currentEntry.path))) {
+        setSelection(selectOnlyFile(currentEntry.staged, currentEntry.path));
+      }
+    }
+  }
+  const currentKey = currentEntry === undefined ? null : entryKey(currentEntry);
+
+  useEffect(() => {
+    if (currentKey === null) return;
+    rowRefs.current[currentKey]?.scrollIntoView?.({ block: "nearest" });
+  }, [currentKey]);
+
+  const isEntryCurrent = (entry: StatusEntry) => currentEntry === entry;
   const isEntrySelected = (entry: StatusEntry) =>
     selection.staged === entry.staged && selection.paths.has(entry.path);
 
@@ -203,19 +237,12 @@ export function UncommittedDiffPane({
   const focusEntry = (entry: StatusEntry, next: FileSelection) => {
     setCurrent({ path: entry.path, staged: entry.staged });
     setSelection(next);
+    setFocusRequest(null);
   };
   const selectEntry = (entry: StatusEntry) => focusEntry(entry, selectOnlyFile(entry.staged, entry.path));
 
-  // Ctrl/Cmd+click toggles a file, Shift+click selects the range from the anchor. Clicks inside a
-  // file's diff keep their own meaning (Shift/Ctrl+click select diff lines there): they only make
-  // the file current, keeping the selection when the file is already part of it.
+  // Ctrl/Cmd+click toggles a file, Shift+click selects the range from the anchor.
   const handleRowClick = (entry: StatusEntry) => (event?: MouseEvent) => {
-    const inBody = event?.target instanceof Element && event.target.closest("[data-file-body]") !== null;
-    if (inBody) {
-      if (isEntrySelected(entry)) setCurrent({ path: entry.path, staged: entry.staged });
-      else selectEntry(entry);
-      return;
-    }
     if (event?.shiftKey) {
       focusEntry(entry, extendFileSelection(selection, entry.staged, groupPaths(entry.staged), entry.path));
     } else if (event?.ctrlKey || event?.metaKey) {
@@ -251,27 +278,25 @@ export function UncommittedDiffPane({
   const unstagedSummary = summaryOf(false);
   const stagedSummary = summaryOf(true);
 
-  const toggleCollapse = (entry: StatusEntry) => {
-    const collapsed = isCollapsed(entry);
-    setCollapseOverrides((prev) => new Map(prev).set(entryKey(entry), !collapsed));
-  };
-
-  // Records every listed file, so a file listed later still takes its own default.
-  const toggleCollapseAll = () => {
-    const collapse = !allCollapsed;
-    setCollapseOverrides((prev) => {
-      const next = new Map(prev);
-      for (const key of allKeys) next.set(key, collapse);
-      return next;
-    });
-  };
+  const listRefs = useRef<{ staged: HTMLUListElement | null; unstaged: HTMLUListElement | null }>({
+    staged: null,
+    unstaged: null,
+  });
 
   // Shift+arrow (`extend`) moves the current file and selects the range from the anchor to it.
+  // A plain move past either end of a group goes on to the other group (#639), and focus with it.
   const navigateGroup = (entries: StatusEntry[], direction: 1 | -1, extend = false) => {
     if (entries.length === 0) return;
-    const currentIndex = entries.findIndex(
-      (entry) => current !== null && entry.path === current.path && entry.staged === current.staged,
-    );
+    const currentIndex = entries.findIndex((entry) => entry === currentEntry);
+    const staged = entries[0].staged;
+    const other = staged ? unstagedEntries : stagedEntries;
+    const pastEnd = currentIndex !== -1 && currentIndex + direction >= entries.length;
+    const pastStart = currentIndex !== -1 && currentIndex + direction < 0;
+    if (!extend && (pastEnd || pastStart) && other.length > 0) {
+      selectEntry(pastEnd ? other[0] : other[other.length - 1]);
+      listRefs.current[staged ? "unstaged" : "staged"]?.focus();
+      return;
+    }
     const nextIndex =
       currentIndex === -1 ? 0 : Math.min(Math.max(currentIndex + direction, 0), entries.length - 1);
     const next = entries[nextIndex];
@@ -335,9 +360,7 @@ export function UncommittedDiffPane({
       runSelectionAction(staged, staged ? "unstageSelection" : "stageSelection");
       return;
     }
-    const entry = entries.find(
-      (candidate) => current !== null && candidate.path === current.path && candidate.staged === current.staged,
-    );
+    const entry = entries.find((candidate) => candidate === currentEntry);
     if (entry === undefined) return;
     if (entry.staged) {
       onUnstageFile(entry.path);
@@ -347,31 +370,30 @@ export function UncommittedDiffPane({
   };
 
   const handleGroupKeyDown = (entries: StatusEntry[]) => (event: KeyboardEvent<HTMLUListElement>) => {
-    // The file menu and discard dialog render inside their row (React events bubble through the
-    // tree), so keys typed in them must not drive the list underneath.
+    // The file menu and dialogs render inside their row (React events bubble through the tree),
+    // so keys typed in them must not drive the list underneath.
     if ((event.target as HTMLElement).closest('[role="menu"], dialog') !== null) return;
-    // Inside a file's diff (or a text field) Ctrl/Cmd+A and Shift+arrows keep their own meaning.
-    const inBody = (event.target as HTMLElement).closest("[data-file-body], input, textarea") !== null;
     const staged = entries[0]?.staged ?? false;
     if (event.key === "ArrowDown" || event.key === "j") {
-      if (event.shiftKey && inBody) return;
       event.preventDefault();
       navigateGroup(entries, 1, event.shiftKey);
     } else if (event.key === "ArrowUp" || event.key === "k") {
-      if (event.shiftKey && inBody) return;
       event.preventDefault();
       navigateGroup(entries, -1, event.shiftKey);
+    } else if (event.key === "Enter" && event.target === event.currentTarget && currentKey !== null) {
+      event.preventDefault();
+      setFocusRequest((prev) => ({ key: currentKey, n: (prev?.n ?? 0) + 1 }));
     } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "a") {
-      if (inBody || entries.length === 0) return;
+      if (entries.length === 0) return;
       event.preventDefault();
       const next = selectAllFiles(selection, staged, entries.map((entry) => entry.path));
-      const keepCurrent = current !== null && current.staged === staged && next.paths.has(current.path);
+      const keepCurrent = currentEntry !== undefined && currentEntry.staged === staged && next.paths.has(currentEntry.path);
       if (keepCurrent) setSelection(next);
       else focusEntry(entries[0], next);
-    } else if (event.key === "Escape" && summaryOf(staged) !== null && current !== null && current.staged === staged) {
+    } else if (event.key === "Escape" && summaryOf(staged) !== null && currentEntry?.staged === staged) {
       // Back to just the current file.
       event.preventDefault();
-      setSelection(selectOnlyFile(staged, current.path));
+      setSelection(selectOnlyFile(staged, currentEntry.path));
     } else if (event.key === "s") {
       event.preventDefault();
       toggleStageSelected(entries);
@@ -426,9 +448,7 @@ export function UncommittedDiffPane({
 
   // Report the current file to the palette; only unstaged, non-conflicted entries can be discarded.
   const currentDiscardablePath =
-    current !== null && !current.staged
-      ? (discardableEntries.find((entry) => entry.path === current.path)?.path ?? null)
-      : null;
+    currentEntry !== undefined && !currentEntry.staged && currentEntry.kind !== "Conflicted" ? currentEntry.path : null;
   useEffect(() => {
     onCurrentFileChange?.(currentDiscardablePath);
   }, [currentDiscardablePath, onCurrentFileChange]);
@@ -500,8 +520,8 @@ export function UncommittedDiffPane({
       <button
         type="button"
         onClick={() =>
-          current !== null && current.staged === summary.staged
-            ? setSelection(selectOnlyFile(summary.staged, current.path))
+          currentEntry !== undefined && currentEntry.staged === summary.staged
+            ? setSelection(selectOnlyFile(summary.staged, currentEntry.path))
             : setSelection(EMPTY_FILE_SELECTION)
         }
       >
@@ -510,54 +530,78 @@ export function UncommittedDiffPane({
     </div>
   );
 
-  const renderSection = (entry: StatusEntry, index: number) => {
+  const renderRow = (entry: StatusEntry, index: number) => {
     const key = entryKey(entry);
     const summary = isEntrySelected(entry) ? (entry.staged ? stagedSummary : unstagedSummary) : null;
     return (
-      <UncommittedFileSection
+      <UncommittedFileRow
         key={key}
-        repoPath={repoPath}
-        client={client}
         entry={entry}
-        status={status}
         isCurrent={isEntryCurrent(entry)}
         selected={isEntrySelected(entry)}
         rowId={`${rowIdPrefix}-${entry.staged ? "staged" : "unstaged"}-${index}`}
-        collapsed={isCollapsed(entry)}
-        diffVersion={staleness(key)}
-        onToggleCollapse={() => toggleCollapse(entry)}
         onSelect={handleRowClick(entry)}
         selectionSummary={summary}
         onSelectionAction={(kind) => runSelectionAction(entry.staged, kind)}
         selectionBusyReason={selectionBusyReason}
-        onStageHunk={wrapHunkAction(onStageHunk)}
-        onUnstageHunk={wrapHunkAction(onUnstageHunk)}
-        onDiscardHunk={wrapHunkAction(onDiscardHunk)}
-        onStageLines={wrapLineAction(onStageLines)}
-        onUnstageLines={wrapLineAction(onUnstageLines)}
-        onDiscardLines={wrapLineAction(onDiscardLines)}
         onRequestDiscardFile={(path) => setDiscardRequest({ kind: "file", path })}
         onStashFile={(path) => onOpenStashDialog([path])}
         stashDisabledReason={stashReason}
-        sectionRef={(el) => {
-          sectionRefs.current[key] = el;
+        editorLine={() => (firstChangedLine?.key === key ? firstChangedLine.line : null)}
+        rowRef={(el) => {
+          rowRefs.current[key] = el;
         }}
       />
     );
   };
 
+  // j/k in the viewer: the next or previous file in list order, focus staying in the diff.
+  const navigateFromViewer = (direction: 1 | -1) => {
+    if (currentEntry === undefined) return;
+    const next = allEntries[allEntries.indexOf(currentEntry) + direction];
+    if (next === undefined) return;
+    selectEntry(next);
+    setFocusRequest((prev) => ({ key: entryKey(next), n: (prev?.n ?? 0) + 1 }));
+  };
+  const reportFirstLine = (line: number | null) => {
+    if (currentKey !== null) setFirstChangedLine({ key: currentKey, line });
+  };
+
+  const renderGroup = (staged: boolean) => {
+    const entries = groupEntries(staged);
+    const summary = staged ? stagedSummary : unstagedSummary;
+    return (
+      <div className={styles.group}>
+        {summary !== null && renderSelectionBar(summary)}
+        {entries.length === 0 ? (
+          <p className={styles.emptyGroup}>{staged ? "Nothing staged yet." : "No unstaged changes."}</p>
+        ) : (
+          <ul
+            ref={(el) => {
+              listRefs.current[staged ? "staged" : "unstaged"] = el;
+            }}
+            className={`${styles.fileList} ${styles.groupList}`}
+            role="listbox"
+            aria-multiselectable="true"
+            aria-label={staged ? "Staged changes" : "Unstaged changes"}
+            aria-keyshortcuts={FILE_LIST_SHORTCUTS}
+            tabIndex={0}
+            onKeyDown={handleGroupKeyDown(entries)}
+          >
+            {entries.map(renderRow)}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div>
+    <div className={styles.workingTree}>
       <span aria-live="polite" aria-atomic="true" className={styles.srOnly} data-testid="file-selection-announcement">
         {selectionAnnouncement}
       </span>
-      {allKeys.length > 0 && (
-        <div className={styles.groupHeading}>
-          <CollapseAllToggle allCollapsed={allCollapsed} onToggle={toggleCollapseAll} />
-        </div>
-      )}
-      {unstagedEntries.length > 0 && (
-        <div>
+      {allEntries.length > 0 && (
+        <div className={styles.fileGroups}>
           <div className={styles.groupHeading}>
             <span>Changes ({unstagedEntries.length})</span>
             {conflictCount > 0 && (
@@ -606,46 +650,48 @@ export function UncommittedDiffPane({
               </button>
             )}
           </div>
-          {unstagedSummary !== null && renderSelectionBar(unstagedSummary)}
-          <ul
-            className={styles.fileList}
-            role="listbox"
-            aria-multiselectable="true"
-            aria-label="Unstaged changes"
-            aria-keyshortcuts={FILE_LIST_SHORTCUTS}
-            tabIndex={0}
-            onKeyDown={handleGroupKeyDown(unstagedEntries)}
-          >
-            {unstagedEntries.map(renderSection)}
-          </ul>
-        </div>
-      )}
-      {stagedEntries.length > 0 && (
-        <div>
+          {renderGroup(false)}
           <div className={styles.groupHeading}>
             <span>Staged ({stagedEntries.length})</span>
-            <button type="button" onClick={handleUnstageAll}>
+            <button type="button" onClick={handleUnstageAll} disabled={stagedEntries.length === 0}>
               Unstage all
             </button>
             {patchActions !== undefined && (
-              <button type="button" onClick={() => patchActions.onSavePatch({ kind: "Staged" }, "staged.patch")}>
+              <button
+                type="button"
+                disabled={stagedEntries.length === 0}
+                onClick={() => patchActions.onSavePatch({ kind: "Staged" }, "staged.patch")}
+              >
                 Save as patch…
               </button>
             )}
           </div>
-          {stagedSummary !== null && renderSelectionBar(stagedSummary)}
-          <ul
-            className={styles.fileList}
-            role="listbox"
-            aria-multiselectable="true"
-            aria-label="Staged changes"
-            aria-keyshortcuts={FILE_LIST_SHORTCUTS}
-            tabIndex={0}
-            onKeyDown={handleGroupKeyDown(stagedEntries)}
-          >
-            {stagedEntries.map(renderSection)}
-          </ul>
+          {renderGroup(true)}
         </div>
+      )}
+      {currentEntry !== undefined && (
+        <>
+          <DiffOptionsToolbar sticky />
+          <UncommittedFileViewer
+            key={currentKey}
+            repoPath={repoPath}
+            client={client}
+            entry={currentEntry}
+            status={status}
+            diffVersion={staleness(currentKey as string)}
+            contentsHidden={contentsHidden(currentEntry)}
+            onShowContents={() => setRevealedUntracked((prev) => new Set(prev).add(currentKey as string))}
+            focusKey={focusRequest !== null && focusRequest.key === currentKey ? focusRequest.n : 0}
+            onNavigate={navigateFromViewer}
+            onFirstChangedLine={reportFirstLine}
+            onStageHunk={wrapHunkAction(onStageHunk)}
+            onUnstageHunk={wrapHunkAction(onUnstageHunk)}
+            onDiscardHunk={wrapHunkAction(onDiscardHunk)}
+            onStageLines={wrapLineAction(onStageLines)}
+            onUnstageLines={wrapLineAction(onUnstageLines)}
+            onDiscardLines={wrapLineAction(onDiscardLines)}
+          />
+        </>
       )}
       {discardRequest?.kind === "all" && discardableEntries.length > 0 && (
         <ConfirmDialog

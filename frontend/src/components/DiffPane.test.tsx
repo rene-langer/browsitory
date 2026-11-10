@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_DIFF_OPTIONS, RepoError, WHOLE_FILE_CONTEXT_LINES, WHOLE_FILE_LINE_LIMIT } from "../ipc/RepoClient";
 import type { BlameLine, ConflictSegment, DiffAlgorithm, DiffHunk, DiffOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useState, type ReactNode } from "react";
@@ -13,6 +13,17 @@ import styles from "./DiffPane.module.css";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const TEST_REPO_PATH = "/repo";
+
+// Split view and whole file persist in localStorage (#640): no test may leave them on.
+afterEach(() => localStorage.clear());
+
+// A working-tree row's "path (Kind)" label (#639): the kind is a visually hidden part of it.
+function rowLabel(label: string): HTMLElement {
+  return screen.getByText(
+    (_, element) =>
+      element?.tagName === "SPAN" && element.textContent === label && element.closest('[role="option"]') !== null,
+  );
+}
 
 type PaneProps = React.ComponentProps<typeof WorkspaceDiffPane>;
 
@@ -135,16 +146,16 @@ describe("DiffPane", () => {
       expect(screen.getByRole("button", { name: "Unstage b.txt" })).toBeInTheDocument();
     });
 
-    it("renders every file's diff expanded by default, with no click needed", async () => {
+    it("renders the first file's diff with no click needed, and fetches no other (#639)", async () => {
       const hunks: DiffHunk[] = [
         { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "changed line" }] },
       ];
       const getWorkingDiff = vi.fn(async () => hunks);
       renderUncommitted(fakeClient({ getWorkingDiff }), status);
 
-      expect(await screen.findAllByText(/changed line/)).toHaveLength(2);
+      expect(await screen.findAllByText(/changed line/)).toHaveLength(1);
       expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
+      expect(getWorkingDiff).not.toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("shows Stage Hunk (not Unstage Hunk) and Discard Hunk for an unstaged file's diff", async () => {
@@ -168,6 +179,7 @@ describe("DiffPane", () => {
       // Only b.txt (staged) gets hunks this time — a.txt stays empty.
       const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "b.txt" ? hunks : []));
       renderUncommitted(fakeClient({ getWorkingDiff }), status);
+      fireEvent.click(screen.getByRole("option", { name: /^b\.txt/ }));
 
       expect(await screen.findByText("Unstage hunk")).toBeInTheDocument();
       expect(screen.queryByText("Stage hunk")).not.toBeInTheDocument();
@@ -185,7 +197,7 @@ describe("DiffPane", () => {
       expect(onStageHunk).toHaveBeenCalledWith("a.txt", 3, 4, { contextLines: 3, algorithm: "Default" });
     });
 
-    it("refetches only the file whose hunk was staged, not every other open section (PERF-001)", async () => {
+    it("refetches the shown file after its hunk was staged, not on a status that is merely new (PERF-001)", async () => {
       const hunks: DiffHunk[] = [
         { oldStart: 3, oldLines: 1, newStart: 4, newLines: 1, lines: [{ origin: "Add", content: "x" }] },
       ];
@@ -195,10 +207,10 @@ describe("DiffPane", () => {
       const client = fakeClient({ getWorkingDiff });
       const { rerender } = renderUncommitted(client, status);
 
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
+      fireEvent.click(await screen.findByText("Stage hunk"));
       await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
       getWorkingDiff.mockClear();
-
-      fireEvent.click(await screen.findByText("Stage hunk"));
 
       // A status array that is new by reference but didn't come from a refresh (same content,
       // different identity, and no `refreshGeneration` change) must not refetch every open
@@ -216,9 +228,8 @@ describe("DiffPane", () => {
         />,
       );
 
-      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
-      expect(getWorkingDiff).not.toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
+      await act(async () => {});
+      expect(getWorkingDiff).not.toHaveBeenCalled();
     });
 
     it("refetches both sides of a partially-staged file, only after the hunk action settles", async () => {
@@ -238,7 +249,7 @@ describe("DiffPane", () => {
       );
       renderUncommitted(fakeClient({ getWorkingDiff }), partial, { onStageHunk });
 
-      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
       getWorkingDiff.mockClear();
 
       fireEvent.click(await screen.findByText("Stage hunk"));
@@ -250,17 +261,19 @@ describe("DiffPane", () => {
 
       await act(async () => settle());
 
-      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
       expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", true, DEFAULT_DIFF_OPTIONS);
+      // The staged side's version moved too, so it shows the new index once opened.
+      fireEvent.click(screen.getByRole("option", { name: /^a\.txt/, selected: false }));
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", true, DEFAULT_DIFF_OPTIONS));
     });
 
-    it("refetches every open diff when refreshGeneration advances, with no hunk action involved", async () => {
+    it("refetches the shown diff when refreshGeneration advances, with no hunk action involved", async () => {
       const getWorkingDiff = vi.fn(async () => []);
       const client = fakeClient({ getWorkingDiff });
       const { rerender } = renderUncommitted(client, status, { refreshGeneration: 0 });
 
-      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
       getWorkingDiff.mockClear();
 
       // What a palette Refresh, stash apply or pull looks like from here: `useAppState.refresh()`
@@ -278,9 +291,8 @@ describe("DiffPane", () => {
         />,
       );
 
-      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
       expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "a.txt", false, DEFAULT_DIFF_OPTIONS);
-      expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "b.txt", true, DEFAULT_DIFF_OPTIONS);
     });
 
     it("clicking the Stage control calls onStageFile with that path", () => {
@@ -329,7 +341,7 @@ describe("DiffPane", () => {
       it("opens the same menu on right-click of the file header", () => {
         render();
 
-        fireEvent.contextMenu(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.contextMenu(rowLabel("src/a.ts (Modified)"));
 
         expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
       });
@@ -340,7 +352,7 @@ describe("DiffPane", () => {
         ["item activation", (item: HTMLElement) => fireEvent.click(item)],
       ])("a file header right-click menu returns focus to its '…' on %s", (label, close) => {
         render();
-        fireEvent.contextMenu(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.contextMenu(rowLabel("src/a.ts (Modified)"));
         close(screen.getByRole("menuitem", { name: label === "item activation" ? "Stash file…" : "Discard changes…" }));
         expect(screen.queryByRole("menu")).toBeNull();
         expect(screen.getByRole("button", { name: "Actions for src/a.ts" })).toHaveFocus();
@@ -348,16 +360,16 @@ describe("DiffPane", () => {
 
       it("a contextmenu from a header control (keyboard) returns focus to '…'", () => {
         render();
-        const blame = screen.getAllByRole("button", { name: "Blame" })[0];
-        blame.focus();
-        fireEvent.contextMenu(blame, { clientX: 0, clientY: 0 });
+        const stage = screen.getByRole("button", { name: "Stage src/a.ts" });
+        stage.focus();
+        fireEvent.contextMenu(stage, { clientX: 0, clientY: 0 });
         fireEvent.keyDown(screen.getByRole("menuitem", { name: "Discard changes…" }), { key: "Escape" });
         expect(screen.getByRole("button", { name: "Actions for src/a.ts" })).toHaveFocus();
       });
 
       it("opens the menu for the selected row with Shift+F10", () => {
         render();
-        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.click(rowLabel("src/a.ts (Modified)"));
 
         fireEvent.keyDown(screen.getByRole("listbox", { name: "Unstaged changes" }), { key: "F10", shiftKey: true });
 
@@ -366,7 +378,7 @@ describe("DiffPane", () => {
 
       it("a mouse click on '…' closes the menu the Menu key opened", () => {
         render();
-        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.click(rowLabel("src/a.ts (Modified)"));
         fireEvent.keyDown(screen.getByRole("listbox", { name: "Unstaged changes" }), { key: "ContextMenu" });
         expect(screen.getByRole("menu")).toBeInTheDocument();
         const actions = screen.getByRole("button", { name: "Actions for src/a.ts" });
@@ -379,7 +391,7 @@ describe("DiffPane", () => {
 
       it("opens the menu of the row holding focus, not the selected row", () => {
         render();
-        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.click(rowLabel("src/a.ts (Modified)"));
         const other = screen.getByRole("button", { name: "Stage logs/run.log" });
         other.focus();
 
@@ -418,7 +430,7 @@ describe("DiffPane", () => {
         const onStageFile = vi.fn();
         const onUnstageFile = vi.fn();
         render({ onStageFile, onUnstageFile });
-        fireEvent.click(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.click(rowLabel("src/a.ts (Modified)"));
         fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
         const item = screen.getByRole("menuitem", { name: "Discard changes…" });
 
@@ -453,7 +465,7 @@ describe("DiffPane", () => {
         fireEvent.contextMenu(await screen.findByText(/body line/));
         expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
 
-        fireEvent.contextMenu(screen.getByText("src/a.ts (Modified)"));
+        fireEvent.contextMenu(rowLabel("src/a.ts (Modified)"));
         expect(screen.getByRole("menuitem", { name: "Discard changes…" })).toBeInTheDocument();
       });
 
@@ -551,7 +563,8 @@ describe("DiffPane", () => {
 
         expect(onDiscardFile).toHaveBeenCalledWith("src/a.ts");
         expect(onDiscardRequestChange).toHaveBeenCalledWith(null);
-        expect(onCurrentFileChange).toHaveBeenCalledWith(null);
+        // The first file is current from the start (#639).
+        expect(onCurrentFileChange).toHaveBeenCalledWith("src/a.ts");
       });
 
       it("clears a file request whose path disappears, and does not reopen when it returns", () => {
@@ -792,11 +805,13 @@ describe("DiffPane", () => {
       expect(onUnstageFile).not.toHaveBeenCalled();
     });
 
-    it("does not render Stage all when there are no unstaged entries", () => {
+    it("keeps the Changes group, empty and with Stage all disabled, when there are no unstaged entries (#639)", () => {
       const stagedOnly: StatusEntry[] = [{ path: "b.txt", oldPath: null, staged: true, kind: "New" }];
       renderUncommitted(fakeClient({}), stagedOnly);
 
-      expect(screen.queryByRole("button", { name: "Stage all" })).not.toBeInTheDocument();
+      expect(screen.getByText("Changes (0)")).toBeInTheDocument();
+      expect(screen.getByText("No unstaged changes.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Stage all" })).toBeDisabled();
     });
 
     it("CommitBox is disabled when nothing is staged", () => {
@@ -991,10 +1006,11 @@ describe("DiffPane", () => {
       expect(within(dock).getByRole("textbox", { name: "Commit message" })).toBeInTheDocument();
     });
 
-    it("renders a Blame button per file", () => {
+    it("renders one Blame button, in the viewer's header (#639)", () => {
       renderUncommitted(fakeClient({}), status);
 
-      expect(screen.getAllByText("Blame")).toHaveLength(2);
+      expect(screen.getAllByText("Blame")).toHaveLength(1);
+      expect(within(screen.getByRole("region", { name: "Changes in a.txt (unstaged)" })).getByText("Blame")).toBeInTheDocument();
     });
 
     it("clicking Blame fetches and renders blame for that file", async () => {
@@ -1143,12 +1159,12 @@ describe("DiffPane", () => {
       renderUncommitted(fakeClient({ getConflictHunks }), twoConflicts);
 
       await waitFor(() => screen.getByText("Keep our version"));
-      await waitFor(() => screen.getByText("Save resolution"));
+      expect(screen.queryByText("Save resolution")).not.toBeInTheDocument();
 
-      // Both sections are mounted simultaneously now — one file's add/delete fallback state
-      // must not appear on the other's section.
-      expect(screen.getAllByText("Keep our version")).toHaveLength(1);
-      expect(screen.getAllByText("Save resolution")).toHaveLength(1);
+      // One file's add/delete fallback state must not carry over to the other file.
+      fireEvent.click(rowLabel("shared.txt (Conflicted)"));
+      await waitFor(() => screen.getByText("Save resolution"));
+      expect(screen.queryByText("Keep our version")).not.toBeInTheDocument();
     });
 
     it("disables Commit while a Conflicted entry exists in status, even with staged files", () => {
@@ -1176,26 +1192,27 @@ describe("DiffPane", () => {
       ];
       renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), statusWithConflict);
 
-      const conflictedRow = screen.getByText("crates/git-core/src/merge.rs (Conflicted)").closest("li");
+      const conflictedRow = rowLabel("crates/git-core/src/merge.rs (Conflicted)").closest("li");
       expect(conflictedRow).toHaveClass(styles.conflicted);
       expect(screen.getByText("Changes (2)")).toBeInTheDocument();
       expect(screen.getByText("1 conflict")).toBeInTheDocument();
     });
 
-    it("marks the current file's row as aria-selected on click, without hiding any other section", async () => {
+    it("selects the first file at first and marks a clicked file's row as aria-selected", async () => {
       renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), status);
 
-      const row = screen.getByText("a.txt (Modified)").closest('[role="option"]');
+      const first = rowLabel("a.txt (Modified)").closest('[role="option"]');
+      const row = rowLabel("b.txt (New)").closest('[role="option"]');
+      await waitFor(() => expect(first).toHaveAttribute("aria-selected", "true"));
       expect(row).toHaveAttribute("aria-selected", "false");
 
-      fireEvent.click(screen.getByText("a.txt (Modified)"));
+      fireEvent.click(rowLabel("b.txt (New)"));
 
       await waitFor(() => expect(row).toHaveAttribute("aria-selected", "true"));
-      // The other file's section stays mounted and visible — clicking never hides it.
-      expect(screen.getByText("b.txt (New)")).toBeInTheDocument();
+      expect(first).toHaveAttribute("aria-selected", "false");
     });
 
-    it("renders a status-kind icon for each file row", () => {
+    it("renders a status letter for each file row", () => {
       const { container } = render(
         <DiffPane
           repoPath={TEST_REPO_PATH}
@@ -1208,12 +1225,12 @@ describe("DiffPane", () => {
         />,
       );
 
-      // One status icon per file row (2 entries in `status`). Scoped to the rows so an
-      // unrelated icon elsewhere in the pane can't satisfy this.
-      expect(container.querySelectorAll('li[role="option"] svg').length).toBeGreaterThanOrEqual(2);
+      // One status letter per file row (#639), its kind spelled out in the row's name.
+      const letters = [...container.querySelectorAll('li[role="option"] [data-kind]')].map((el) => el.textContent);
+      expect(letters).toEqual(["M", "A"]);
     });
 
-    it("navigates the unstaged group with ArrowDown/ArrowUp, highlighting without hiding sections", async () => {
+    it("navigates the unstaged group with ArrowDown/ArrowUp", async () => {
       const twoUnstaged: StatusEntry[] = [
         { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
         { path: "c.txt", oldPath: null, staged: false, kind: "New" },
@@ -1224,12 +1241,12 @@ describe("DiffPane", () => {
       fireEvent.keyDown(group, { key: "ArrowDown" });
 
       await waitFor(() =>
-        expect(screen.getByText("a.txt (Modified)").closest('[role="option"]')).toHaveAttribute(
-          "aria-selected",
-          "true",
-        ),
+        expect(rowLabel("c.txt (New)").closest('[role="option"]')).toHaveAttribute("aria-selected", "true"),
       );
-      expect(screen.getByText("c.txt (New)")).toBeInTheDocument();
+      fireEvent.keyDown(group, { key: "ArrowUp" });
+      await waitFor(() =>
+        expect(rowLabel("a.txt (Modified)").closest('[role="option"]')).toHaveAttribute("aria-selected", "true"),
+      );
     });
 
     // The per-row Stage/Unstage buttons live inside a `role="option"` row, where ARIA's
@@ -1241,10 +1258,10 @@ describe("DiffPane", () => {
       const onStageFile = vi.fn();
       renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), status, { onStageFile });
 
+      // The first file is current from the start.
       const group = screen.getByRole("listbox", { name: "Unstaged changes" });
-      fireEvent.keyDown(group, { key: "ArrowDown" });
       await waitFor(() =>
-        expect(screen.getByText("a.txt (Modified)").closest('[role="option"]')).toHaveAttribute(
+        expect(rowLabel("a.txt (Modified)").closest('[role="option"]')).toHaveAttribute(
           "aria-selected",
           "true",
         ),
@@ -1262,7 +1279,7 @@ describe("DiffPane", () => {
       const group = screen.getByRole("listbox", { name: "Staged changes" });
       fireEvent.keyDown(group, { key: "ArrowDown" });
       await waitFor(() =>
-        expect(screen.getByText("b.txt (New)").closest('[role="option"]')).toHaveAttribute("aria-selected", "true"),
+        expect(rowLabel("b.txt (New)").closest('[role="option"]')).toHaveAttribute("aria-selected", "true"),
       );
 
       fireEvent.keyDown(group, { key: "s" });
@@ -1284,183 +1301,6 @@ describe("DiffPane", () => {
 
         expect((await screen.findAllByText(/Loading diff/)).length).toBeGreaterThan(0);
         expect(screen.queryByText(/No text differences/)).not.toBeInTheDocument();
-      });
-
-      it("does not fetch a collapsed section's diff until it is expanded", async () => {
-        const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
-        renderUncommitted(fakeClient({ getWorkingDiff }), status);
-        await screen.findByRole("button", { name: "Collapse a.txt" });
-        fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
-        await waitFor(() => expect(screen.queryByText(/No text differences/)).not.toBeInTheDocument());
-        getWorkingDiff.mockClear();
-
-        fireEvent.click(screen.getByRole("button", { name: "Expand a.txt" }));
-
-        await waitFor(() => expect(getWorkingDiff).toHaveBeenCalledTimes(1));
-      });
-
-      it("does not fetch an expanded file's diff until it is near the viewport (PERF-001)", () => {
-        const observedCallbacks: IntersectionObserverCallback[] = [];
-        const observe = vi.fn();
-        const disconnect = vi.fn();
-        // A plain `function`, not an arrow function: `new IntersectionObserver(...)` in the
-        // component requires the mock to be constructible, which an arrow-function
-        // implementation (no `[[Construct]]`) is not.
-        const IntersectionObserverMock = vi.fn().mockImplementation(function (
-          callback: IntersectionObserverCallback,
-        ) {
-          observedCallbacks.push(callback);
-          return { observe, unobserve: vi.fn(), disconnect };
-        });
-        vi.stubGlobal("IntersectionObserver", IntersectionObserverMock);
-
-        const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
-        const singleFile: StatusEntry[] = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }];
-        renderUncommitted(fakeClient({ getWorkingDiff }), singleFile);
-
-        expect(observe).toHaveBeenCalledTimes(1);
-        expect(getWorkingDiff).not.toHaveBeenCalled();
-
-        act(() => {
-          observedCallbacks[0](
-            [{ isIntersecting: true } as IntersectionObserverEntry],
-            {} as IntersectionObserver,
-          );
-        });
-
-        expect(getWorkingDiff).toHaveBeenCalled();
-
-        vi.unstubAllGlobals();
-      });
-    });
-
-    describe("collapse", () => {
-      it("collapsing a file's section hides its diff but keeps the header", async () => {
-        const hunks: DiffHunk[] = [
-          { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "changed line" }] },
-        ];
-        // Only a.txt gets this content — b.txt stays empty so it can't keep the text on screen
-        // after a.txt's section collapses.
-        const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "a.txt" ? hunks : []));
-        renderUncommitted(fakeClient({ getWorkingDiff }), status);
-
-        await screen.findByText("changed line");
-        fireEvent.click(screen.getByRole("button", { name: "Collapse a.txt" }));
-
-        expect(screen.queryByText("changed line")).not.toBeInTheDocument();
-        expect(screen.getByText("a.txt (Modified)")).toBeInTheDocument();
-      });
-
-      it("expanding a collapsed section shows its diff again", async () => {
-        const hunks: DiffHunk[] = [
-          { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add", content: "changed line" }] },
-        ];
-        const getWorkingDiff = vi.fn(async (_repoPath: string, path: string) => (path === "a.txt" ? hunks : []));
-        renderUncommitted(fakeClient({ getWorkingDiff }), status);
-
-        await screen.findByText("changed line");
-        fireEvent.click(screen.getByRole("button", { name: "Collapse a.txt" }));
-        fireEvent.click(screen.getByRole("button", { name: "Expand a.txt" }));
-
-        expect(await screen.findByText("changed line")).toBeInTheDocument();
-      });
-
-      it("Collapse all hides every section's body", async () => {
-        renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), status);
-        await screen.findByRole("button", { name: "Collapse a.txt" });
-
-        fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
-
-        expect(screen.queryByRole("button", { name: "Collapse a.txt" })).not.toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Expand a.txt" })).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Expand b.txt" })).toBeInTheDocument();
-        // Headers stay, so the overview is still readable after collapsing everything.
-        expect(screen.getByText("a.txt (Modified)")).toBeInTheDocument();
-        expect(screen.getByText("b.txt (New)")).toBeInTheDocument();
-      });
-
-      it("Expand all (shown once everything is collapsed) reopens every section", async () => {
-        renderUncommitted(fakeClient({ getWorkingDiff: async () => [] }), status);
-        await screen.findByRole("button", { name: "Collapse a.txt" });
-        fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
-
-        fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
-
-        expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Collapse b.txt" })).toBeInTheDocument();
-      });
-
-      describe("with Expand untracked files off (#623)", () => {
-        const withUntracked: StatusEntry[] = [
-          { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
-          { path: "new.txt", oldPath: null, staged: false, kind: "New" },
-          { path: "added.txt", oldPath: null, staged: true, kind: "New" },
-        ];
-        const settings = {
-          ignoreWhitespace: false,
-          contextLines: 3,
-          syntaxHighlight: false,
-          wordWrap: "Auto" as const,
-          algorithm: "Default" as const,
-          showWhitespace: false,
-          expandUntracked: false,
-        };
-        const pane = (client: RepoClient, entries: StatusEntry[], refreshGeneration = 0) => (
-          <DiffSettingsContext.Provider value={{ settings, update: () => {}, error: null, dismissError: () => {} }}>
-            <DiffPane
-              repoPath={TEST_REPO_PATH}
-              client={client}
-              selectedRow="uncommitted"
-              status={entries}
-              mergeMessage={null}
-              rebaseProgress={null}
-              refreshGeneration={refreshGeneration}
-              {...noopHandlers}
-            />
-          </DiffSettingsContext.Provider>
-        );
-        const fetchedPaths = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls.map((call) => call[1]);
-
-        it("starts an untracked file collapsed, fetching nothing, and tracked and staged files expanded", async () => {
-          const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
-          render(pane(fakeClient({ getWorkingDiff }), withUntracked));
-
-          await waitFor(() => expect(fetchedPaths(getWorkingDiff)).toContain("a.txt"));
-          expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
-          expect(screen.getByRole("button", { name: "Collapse added.txt" })).toBeInTheDocument();
-          // The collapsed row keeps its path and status.
-          expect(screen.getByRole("button", { name: "Expand new.txt" })).toBeInTheDocument();
-          expect(screen.getByText("new.txt (New)")).toBeInTheDocument();
-          expect(fetchedPaths(getWorkingDiff)).not.toContain("new.txt");
-        });
-
-        it("keeps an expanded untracked file expanded across refreshes; a new one starts collapsed", async () => {
-          const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
-          const client = fakeClient({ getWorkingDiff });
-          const { rerender } = render(pane(client, withUntracked));
-          fireEvent.click(await screen.findByRole("button", { name: "Expand new.txt" }));
-          await waitFor(() => expect(fetchedPaths(getWorkingDiff)).toContain("new.txt"));
-
-          const later: StatusEntry[] = [...withUntracked, { path: "later.txt", oldPath: null, staged: false, kind: "New" }];
-          rerender(pane(client, later.map((entry) => ({ ...entry })), 1));
-
-          expect(screen.getByRole("button", { name: "Collapse new.txt" })).toBeInTheDocument();
-          expect(screen.getByRole("button", { name: "Expand later.txt" })).toBeInTheDocument();
-          expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
-          await waitFor(() =>
-            expect(fetchedPaths(getWorkingDiff).filter((path) => path === "new.txt").length).toBeGreaterThan(1),
-          );
-          expect(fetchedPaths(getWorkingDiff)).not.toContain("later.txt");
-        });
-
-        it("Expand all opens the collapsed untracked files too", async () => {
-          render(pane(fakeClient({ getWorkingDiff: async () => [] }), withUntracked));
-          await screen.findByRole("button", { name: "Expand new.txt" });
-          fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
-          fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
-          expect(screen.getByRole("button", { name: "Collapse new.txt" })).toBeInTheDocument();
-          expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
-        });
       });
     });
   });
@@ -1714,7 +1554,7 @@ describe("DiffPane line staging", () => {
     expect(onDiscardLines).not.toHaveBeenCalled();
   });
 
-  it("ignore whitespace hides hunk actions in both sections but keeps file-level staging", async () => {
+  it("ignore whitespace hides hunk actions on either side but keeps file-level staging", async () => {
     render(
       <TestDiffSettings ignoreWhitespace>
         <DiffPane
@@ -1731,11 +1571,16 @@ describe("DiffPane line staging", () => {
         />
       </TestDiffSettings>,
     );
-    expect(await screen.findAllByText("Turn off Ignore whitespace to stage partially.")).toHaveLength(2);
-    await waitFor(() => expect(screen.getAllByText("B")).toHaveLength(2));
+    expect(await screen.findAllByText("Turn off Ignore whitespace to stage partially.")).toHaveLength(1);
+    await waitFor(() => expect(screen.getAllByText("B")).toHaveLength(1));
     expect(screen.queryByRole("button", { name: "Stage hunk" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Unstage hunk" })).toBeNull();
     expect(screen.getByRole("button", { name: "Stage f.txt" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("option", { name: /^f\.txt/ })[1]);
+    expect(await screen.findAllByText("Turn off Ignore whitespace to stage partially.")).toHaveLength(1);
+    await waitFor(() => expect(screen.getAllByText("B")).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: "Unstage hunk" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Unstage f.txt" })).toBeInTheDocument();
   });
 
   it("commit diffs show lines and no partial-staging hint", async () => {
@@ -2591,7 +2436,7 @@ describe("DiffPane image preview", () => {
       fakeClient({ getFileSides, getConflictHunks: vi.fn(async () => []), getWorkingDiff: vi.fn(async () => []) }),
       [{ path: "logo.png", oldPath: null, staged: false, kind: "Conflicted" }],
     );
-    await screen.findByText(/logo\.png/);
+    await screen.findByRole("region", { name: "Changes in logo.png (unstaged)" });
     expect(getFileSides).not.toHaveBeenCalled();
   });
 
@@ -2739,8 +2584,15 @@ describe("DiffPane multi-select (#449)", () => {
     { path: "s2.txt", oldPath: null, staged: true, kind: "New" },
   ];
   const client = () => fakeClient({ getWorkingDiff: async () => [], getConflictHunks: async () => [] });
-  const row = (path: string) => screen.getByText(new RegExp(`^${path.replace(".", "\\.")} \\(`)).closest('[role="option"]');
-  const header = (path: string) => screen.getByText(new RegExp(`^${path.replace(".", "\\.")} \\(`));
+  // A file's row label (`path (Kind)`, #639), unique per group; the first match is the unstaged row.
+  const header = (path: string) =>
+    screen.getAllByText(
+      (_, element) =>
+        element?.tagName === "SPAN" &&
+        element.closest('[role="option"]') !== null &&
+        (element.textContent ?? "").startsWith(`${path} (`),
+    )[0];
+  const row = (path: string) => header(path).closest('[role="option"]');
   const selectionBar = (name = "Selected unstaged files") => screen.getByRole("group", { name });
 
   it("marks both lists multi-selectable and Ctrl/Cmd+click adds and removes files", () => {
@@ -2789,7 +2641,7 @@ describe("DiffPane multi-select (#449)", () => {
   it("Shift+arrows extend, Ctrl/Cmd+A selects the group and Escape keeps only the current file", () => {
     renderUncommitted(client(), files);
     const list = screen.getByRole("listbox", { name: "Unstaged changes" });
-    fireEvent.keyDown(list, { key: "ArrowDown" });
+    // a.txt, the first file, is current from the start (#639).
     fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
     fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
 
@@ -2922,13 +2774,15 @@ describe("DiffPane multi-select (#449)", () => {
     renderUncommitted(client(), files);
     fireEvent.click(header("a.txt"));
     fireEvent.click(header("b.txt"), { ctrlKey: true });
-    const body = (row("c.txt") as HTMLElement).querySelector("[data-file-body]") as HTMLElement;
+    // The diff is in the viewer, outside the list (#639): its clicks select lines, never files.
+    const body = (await screen.findByRole("region", { name: /^Changes in b\.txt/ })).querySelector("[data-file-body]") as HTMLElement;
 
     fireEvent.click(body, { shiftKey: true });
+    fireEvent.click(body, { ctrlKey: true });
 
-    expect(row("a.txt")).toHaveAttribute("aria-selected", "false");
-    expect(row("c.txt")).toHaveAttribute("aria-selected", "true");
-    await waitFor(() => expect(row("c.txt")).toHaveClass(styles.current));
+    expect(row("a.txt")).toHaveAttribute("aria-selected", "true");
+    expect(row("b.txt")).toHaveAttribute("aria-selected", "true");
+    expect(row("b.txt")).toHaveClass(styles.current);
   });
 
   it("reports a selection of two or more files, without conflicted ones", async () => {

@@ -4,6 +4,8 @@ import { DEFAULT_DIFF_SETTINGS, WHOLE_FILE_CONTEXT_LINES, type DiffSource } from
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
+import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
+import { DiffViewOptionsProvider } from "../state/DiffViewOptionsProvider";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function renderSection(overrides: Partial<Parameters<typeof ReadOnlyFileSection>[0]> = {}) {
@@ -33,7 +35,25 @@ describe("ReadOnlyFileSection", () => {
 
   it("Show whole file refetches the commit or compare diff with whole-file context", async () => {
     const hunk = { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [{ origin: "Add" as const, content: "x\n" }] };
-    const { props } = renderSection({ fetchDiff: vi.fn(async () => [hunk]) });
+    const fetchDiff = vi.fn(async () => [hunk]);
+    // The toggle is the pane's toolbar's (#640); the section reads it.
+    render(
+      <DiffViewOptionsProvider>
+        <DiffOptionsToolbar />
+        <ReadOnlyFileSection
+          repoPath="/repo"
+          client={fakeRepoClient({ getBlame: vi.fn(async () => []) })}
+          path="a.txt"
+          diffKey="k1"
+          fetchDiff={fetchDiff}
+          blameAt="abc"
+          collapsed={false}
+          onToggleCollapse={vi.fn()}
+          onSelectRow={vi.fn()}
+        />
+      </DiffViewOptionsProvider>,
+    );
+    const props = { fetchDiff };
     fireEvent.click(await screen.findByRole("button", { name: "Show whole file" }));
     await waitFor(() =>
       expect(props.fetchDiff).toHaveBeenLastCalledWith({
@@ -43,6 +63,7 @@ describe("ReadOnlyFileSection", () => {
       }),
     );
     expect(screen.getByRole("button", { name: "Show whole file" })).toHaveAttribute("aria-pressed", "true");
+    localStorage.clear();
   });
 
   it("a commit's hunk header reverts or applies that hunk with the context it was shown with (#448)", async () => {

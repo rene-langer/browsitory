@@ -134,8 +134,8 @@ const DIFF_ALGORITHM_LABEL: Record<DiffAlgorithm, string> = {
 };
 
 /**
- * "Diff": the default for wrapping long lines (#444), each diff's "Wrap lines" overriding it, the
- * diff algorithm every diff uses (#469), and whether untracked files start expanded (#623).
+ * "Diff": wrapping long lines (#444; the diff toolbar's "Wrap lines" sets the same value, #640),
+ * the diff algorithm every diff uses (#469), and whether untracked files load at once (#623).
  */
 export function DiffSection() {
   const { settings, update, error, dismissError } = useDiffSettingsContext();
@@ -158,7 +158,7 @@ export function DiffSection() {
       </Field>
       <p className={styles.hint}>
         Auto wraps the split view, prose files and diffs with very long lines. The Wrap lines button
-        above a diff changes it for that diff only.
+        in the diff toolbar switches between On and Off.
       </p>
       <Field label="Diff algorithm">
         {(props) => (
@@ -188,8 +188,8 @@ export function DiffSection() {
         Expand untracked files
       </label>
       <p className={styles.hint}>
-        Off, untracked files start collapsed in the uncommitted changes and load nothing until you
-        expand them. Changes to tracked files always start expanded.
+        Off, an untracked file's contents load only when you ask for them in its diff. Changes to
+        tracked files always load at once.
       </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>

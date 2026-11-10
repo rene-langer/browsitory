@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { MAX_CONTEXT_LINES, type DiffHunk, type DiffLine, type DiffLineOrigin } from "../ipc/RepoClient";
+import { type DiffHunk, type DiffLine, type DiffLineOrigin } from "../ipc/RepoClient";
 import { EMPTY_SELECTION, reduceSelection, type LineSelection, type SelectionAction } from "../lib/lineSelection";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useRegisterDiffView } from "../state/useCurrentDiff";
 import { Toolbar } from "./primitives/Toolbar";
+import { useDiffViewOptions } from "../state/useDiffViewOptions";
 import { wordDiff, type Segment } from "../lib/wordDiff";
 import { useHunkTokens } from "../lib/highlight";
 import { languageForPath } from "../lib/languageForPath";
@@ -139,9 +140,10 @@ const lineCount = new Intl.NumberFormat("en-US");
  * Undo brings it back and the toast offers Undo, #662).
  * The per-hunk buttons stay clickable but are removed from the tab order.
  *
- * Lines wrap as the `wordWrap` setting says (`lib/wordWrap.ts`) until the "Wrap lines" toggle
- * overrides it for this diff. With `wholeFile`, a "Show whole file" toggle sits next to the
- * context stepper.
+ * The view options (Split, Wrap lines, whitespace, context, whole file, highlighting) are the
+ * pane's: one `DiffOptionsToolbar` per pane sets them for every diff in it (#640). Lines wrap as
+ * the `wordWrap` setting says (`lib/wordWrap.ts`). `wholeFile` is the file's "Show whole file"
+ * state, for the hint shown when the file is too long for it.
  *
  * With line callbacks, Add/Remove lines are selectable (click, shift-click, ctrl/cmd-click, drag,
  * ArrowUp/ArrowDown with optional Shift) within one hunk; `s`/`d` and the hunk header buttons
@@ -169,6 +171,7 @@ export function DiffView({
   wholeFile,
   hunkActions,
   current = false,
+  focusKey,
 }: {
   hunks: DiffHunk[] | null;
   onStageHunk?: (oldStart: number, newStart: number) => void;
@@ -187,15 +190,27 @@ export function DiffView({
    * this diff. Clicking or focusing a diff makes it current too.
    */
   current?: boolean;
+  /**
+   * A change moves focus into the diff (once its hunks are loaded): the working tree's keys
+   * that go to another file from inside the diff, or Enter in its file list.
+   */
+  focusKey?: number;
 }) {
   const [previousHunks, setPreviousHunks] = useState(hunks);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [split, setSplit] = useState(false);
-  // This diff's own choice from the "Wrap lines" toggle; `null` follows the setting.
-  const [wrapOverride, setWrapOverride] = useState<boolean | null>(null);
+  // Split view is the pane's (#640): its one `DiffOptionsToolbar` sets it for every diff.
+  const { split } = useDiffViewOptions();
   const [selection, setSelection] = useState<LineSelection>(EMPTY_SELECTION);
   const dragging = useRef<{ hunkIndex: number; line: number } | null>(null);
   const hunkRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const diffRef = useRef<HTMLDivElement | null>(null);
+  const focusedKey = useRef<number | undefined>(undefined);
+  const loaded = hunks !== null;
+  useEffect(() => {
+    if (focusKey === undefined || focusKey === focusedKey.current || !loaded) return;
+    focusedKey.current = focusKey;
+    diffRef.current?.focus({ preventScroll: true });
+  }, [focusKey, loaded]);
   const wordSegments = useMemo(() => computeWordSegments(hunks), [hunks]);
   const { settings, update } = useDiffSettingsContext();
   const tokens = useHunkTokens(hunks, path ? languageForPath(path) : null, settings.syntaxHighlight, logHighlightError);
@@ -203,11 +218,12 @@ export function DiffView({
     () => wrapLines(settings.wordWrap, { split, path, hunks }),
     [settings.wordWrap, split, path, hunks],
   );
-  const wrap = wrapOverride ?? wrapBySetting;
+  const wrap = wrapBySetting;
   const wholeFileOn = wholeFile?.on === true;
+  // The palette's "Wrap lines" flips what this diff shows, for every diff: it sets the setting.
   const claimCurrent = useRegisterDiffView(
     path ?? null,
-    { toggleWrap: () => setWrapOverride(!wrap), toggleWholeFile: wholeFile?.onToggle ?? null },
+    { toggleWrap: () => update({ wordWrap: wrap ? "Off" : "On" }), toggleWholeFile: wholeFile?.onToggle ?? null },
     current,
   );
   const claimHandlers = { onPointerDownCapture: claimCurrent, onFocusCapture: claimCurrent };
@@ -230,64 +246,6 @@ export function DiffView({
     return () => window.removeEventListener("mouseup", endDrag);
   }, []);
 
-  const toolbar = (
-    <div className={styles.viewOptions} {...claimHandlers}>
-    <Toolbar aria-label="Diff view options">
-      <button type="button" onClick={() => setSplit((prev) => !prev)}>
-        {split ? "Unified view" : "Split view"}
-      </button>
-      <button type="button" aria-pressed={wrap} onClick={() => setWrapOverride(!wrap)}>
-        Wrap lines
-      </button>
-      <button
-        type="button"
-        aria-pressed={settings.ignoreWhitespace}
-        onClick={() => update({ ignoreWhitespace: !settings.ignoreWhitespace })}
-      >
-        Ignore whitespace
-      </button>
-      <button
-        type="button"
-        aria-pressed={settings.showWhitespace}
-        onClick={() => update({ showWhitespace: !settings.showWhitespace })}
-      >
-        Show whitespace
-      </button>
-      <span className={styles.contextStepper}>
-        <button
-          type="button"
-          aria-label="Fewer context lines"
-          disabled={wholeFileOn || settings.contextLines <= 0}
-          onClick={() => update({ contextLines: settings.contextLines - 1 })}
-        >
-          −
-        </button>
-        <span aria-label="Context lines">{settings.contextLines}</span>
-        <button
-          type="button"
-          aria-label="More context lines"
-          disabled={wholeFileOn || settings.contextLines >= MAX_CONTEXT_LINES}
-          onClick={() => update({ contextLines: settings.contextLines + 1 })}
-        >
-          +
-        </button>
-      </span>
-      {wholeFile !== undefined && (
-        <button type="button" aria-pressed={wholeFile.on} onClick={wholeFile.onToggle}>
-          Show whole file
-        </button>
-      )}
-      <button
-        type="button"
-        aria-pressed={settings.syntaxHighlight}
-        onClick={() => update({ syntaxHighlight: !settings.syntaxHighlight })}
-      >
-        Syntax highlighting
-      </button>
-    </Toolbar>
-    </div>
-  );
-
   if (hunks === null) {
     return (
       <p role="status" className={styles.placeholder}>
@@ -308,12 +266,10 @@ export function DiffView({
     </>
   );
 
-  // The toolbar stays even for an empty diff: ignoring whitespace can hide every hunk, and the
-  // toggle must remain reachable to turn it back off.
+  // An empty diff still shows its hints: ignoring whitespace can hide every hunk.
   if (hunks.length === 0) {
     return (
       <>
-        {toolbar}
         {hint}
         <p className={styles.placeholder}>No text differences (binary file or mode-only change)</p>
       </>
@@ -422,9 +378,9 @@ export function DiffView({
 
   return (
     <>
-      {toolbar}
       {hint}
       <div
+        ref={diffRef}
         className={wrap ? styles.diff : `${styles.diff} ${styles.nowrap}`}
         data-wrap={wrap}
         {...claimHandlers}

@@ -71,12 +71,13 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: "Changed files",
     shortcuts: [
-      { keys: "Down / j", description: "Select next file" },
-      { keys: "Up / k", description: "Select previous file" },
+      { keys: "Down / j", description: "Select next file (on into the other group at the end)" },
+      { keys: "Up / k", description: "Select previous file (on into the other group at the start)" },
       { keys: "Shift+Down / Shift+Up", description: "Extend the selection" },
       { keys: "Ctrl/Cmd+A", description: "Select every file in the list" },
       { keys: "Esc", description: "Keep only the current file selected" },
       { keys: "s", description: "Stage or unstage the selected files" },
+      { keys: "Enter", description: "Move into the selected file's diff" },
       { keys: "Menu / Shift+F10", description: "Open the selected file's menu" },
     ],
   },
@@ -88,6 +89,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "s", description: "Stage or unstage the selected lines or hunk" },
       { keys: "d", description: "Discard the selected lines or hunk (Undo brings them back)" },
       { keys: "[ / ]", description: "Previous / next hunk" },
+      { keys: "j / k", description: "Next / previous changed file (working tree)" },
     ],
   },
   {
