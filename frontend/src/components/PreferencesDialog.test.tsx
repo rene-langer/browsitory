@@ -207,7 +207,7 @@ describe("DiffSection", () => {
   it("loads and saves the word wrap setting with the other diff settings", async () => {
     const setDiffSettings = vi.fn(async () => {});
     const client = fakeRepoClient({
-      getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const, algorithm: "Default" as const }),
+      getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const, algorithm: "Default" as const, showWhitespace: false }),
       setDiffSettings,
     });
     render(
@@ -229,6 +229,7 @@ describe("DiffSection", () => {
         syntaxHighlight: true,
         wordWrap: "Auto",
         algorithm: "Default",
+        showWhitespace: false,
       }),
     );
   });
@@ -236,7 +237,7 @@ describe("DiffSection", () => {
   it("loads and saves the diff algorithm (#469)", async () => {
     const setDiffSettings = vi.fn(async () => {});
     const client = fakeRepoClient({
-      getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Patience" as const }),
+      getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Patience" as const, showWhitespace: false }),
       setDiffSettings,
     });
     render(
@@ -261,6 +262,7 @@ describe("DiffSection", () => {
         syntaxHighlight: true,
         wordWrap: "Auto",
         algorithm: "Minimal",
+        showWhitespace: false,
       }),
     );
   });

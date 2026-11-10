@@ -59,7 +59,7 @@ export type DiffLineOrigin = "Add" | "Remove" | "Context";
 
 export type DiffOptions = { ignoreWhitespace: boolean, contextLines: number, algorithm: DiffAlgorithm, };
 
-export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, wordWrap: WordWrap, algorithm: DiffAlgorithm, };
+export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, syntaxHighlight: boolean, wordWrap: WordWrap, algorithm: DiffAlgorithm, showWhitespace: boolean, };
 
 export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 

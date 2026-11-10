@@ -74,6 +74,13 @@ you change an option, hunk and line actions return once the diff has reloaded wi
 Highlighting covers common languages and is skipped when a file's diff has more than 2,000 lines
 in total across its hunks. The command palette has an entry for each of these three.
 
+**Show whitespace** makes whitespace visible: a faint `·` for each space, a faint arrow across
+each tab (as wide as the tab size in **Preferences → Appearance**), and a faint `↵` for a
+carriage return, such as the end of a line with Windows line endings. On added lines, trailing
+spaces and tabs are highlighted. The markers are only drawn over the text: copying from the diff
+copies the original characters, lines wrap as before, and staging is unaffected. It is off by
+default, remembered across sessions, and in the command palette as **Toggle whitespace**.
+
 **Wrap lines** wraps long lines at the pane's width, or turns wrapping off so each line stays on
 one row and the diff scrolls sideways. Line numbers stay next to their line either way, and
 selecting and staging lines works the same. The button changes only that diff, until you leave

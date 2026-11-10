@@ -15,6 +15,7 @@ fn defaults_when_never_set() {
             syntax_highlight: true,
             word_wrap: WordWrap::Auto,
             algorithm: DiffAlgorithm::Default,
+            show_whitespace: false,
         }
     );
 }
@@ -30,6 +31,7 @@ fn round_trips_and_coexists_with_other_keys() {
         syntax_highlight: false,
         word_wrap: WordWrap::Off,
         algorithm: DiffAlgorithm::Patience,
+        show_whitespace: true,
     };
     set_diff_settings_at(&file, &wanted).unwrap();
     assert_eq!(get_diff_settings_at(&file).unwrap(), wanted);
@@ -51,6 +53,7 @@ fn clamps_context_lines_on_write() {
             syntax_highlight: true,
             word_wrap: WordWrap::On,
             algorithm: DiffAlgorithm::Default,
+            show_whitespace: false,
         },
     )
     .unwrap();
@@ -68,6 +71,7 @@ fn a_partial_diff_table_fills_missing_fields_with_defaults() {
     assert!(s.syntax_highlight);
     assert_eq!(s.word_wrap, WordWrap::Auto);
     assert_eq!(s.algorithm, DiffAlgorithm::Default);
+    assert!(!s.show_whitespace);
 }
 
 #[test]
@@ -107,4 +111,23 @@ fn algorithm_is_stored_as_a_lowercase_word() {
         get_diff_settings_at(&file).unwrap().algorithm,
         DiffAlgorithm::Minimal
     );
+}
+
+#[test]
+fn show_whitespace_round_trips_and_an_older_table_loads_it_as_off() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[diff]\nignore_whitespace = true\n").unwrap();
+    assert!(!get_diff_settings_at(&file).unwrap().show_whitespace);
+    set_diff_settings_at(
+        &file,
+        &DiffSettings {
+            show_whitespace: true,
+            ..DiffSettings::default()
+        },
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("show_whitespace = true"), "{text}");
+    assert!(get_diff_settings_at(&file).unwrap().show_whitespace);
 }

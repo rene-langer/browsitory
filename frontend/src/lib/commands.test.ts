@@ -837,7 +837,7 @@ describe("buildCommands", () => {
       ],
     ])("omits the stash commands while %s, like DiffPane's Stash button", (_label, overrides) => {
       const ids = commandsFor(makeAppState(overrides), { diff: {
-        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
+        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false },
         update: vi.fn(),
         currentFile: "a.txt",
         requestDiscardCurrentFile: vi.fn(),
@@ -1268,7 +1268,7 @@ describe("history commands", () => {
 });
 
 describe("diff option and discard commands", () => {
-  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const };
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false };
   const build = (state: ReturnType<typeof makeAppState>, extra: Record<string, unknown> = {}) => {
     const diffCommands = {
       settings,
@@ -1312,6 +1312,8 @@ describe("diff option and discard commands", () => {
     const { commands, diffCommands } = build(makeAppState());
     commands.find((c) => c.id === "toggle-ignore-whitespace")!.run();
     expect(diffCommands.update).toHaveBeenCalledWith({ ignoreWhitespace: true });
+    commands.find((c) => c.id === "toggle-show-whitespace")!.run();
+    expect(diffCommands.update).toHaveBeenCalledWith({ showWhitespace: true });
     commands.find((c) => c.id === "increase-context-lines")!.run();
     expect(diffCommands.update).toHaveBeenCalledWith({ contextLines: 4 });
     commands.find((c) => c.id === "decrease-context-lines")!.run();
@@ -1489,7 +1491,7 @@ describe("preferences and external tool commands", () => {
     onOpenCurrentFileInDiffTool: vi.fn(),
   });
   const diffCommands = (currentFile: string | null) => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false },
     update: vi.fn(),
     currentFile,
     requestDiscardCurrentFile: vi.fn(),
@@ -1965,7 +1967,7 @@ const allFamilies = (appState: UseAppStateResult) =>
     tabs: tabs({ otherOpenRepos: [{ path: "/other", displayName: "other" } as OpenRepo] }),
     sidebar: sidebar(),
     diff: {
-      settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
+      settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false },
       update: noop,
       currentFile: "b.txt",
       requestDiscardCurrentFile: noop,
@@ -2072,6 +2074,7 @@ describe("command ids and groups", () => {
       ["switch-repo:/other", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2121,6 +2124,7 @@ describe("command ids and groups", () => {
       ["switch-repo:/other", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2168,6 +2172,7 @@ describe("command ids and groups", () => {
       ["switch-repo:/other", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2218,6 +2223,7 @@ describe("command ids and groups", () => {
       ["switch-repo:/other", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2288,6 +2294,7 @@ describe("command ids and groups", () => {
       ["switch-repo:/other", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],

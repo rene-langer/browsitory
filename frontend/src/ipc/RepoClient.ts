@@ -49,6 +49,8 @@ export const WORD_WRAP_VALUES: readonly WordWrap[] = ["Auto", "On", "Off"];
 export interface DiffSettings extends DiffOptions {
   syntaxHighlight: boolean;
   wordWrap: WordWrap;
+  /** Faint markers for spaces, tabs and carriage returns in diff lines (#616); display only. */
+  showWhitespace: boolean;
 }
 
 // The backend's limits and defaults (#497), generated from the Rust constants:
