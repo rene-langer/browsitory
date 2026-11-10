@@ -8,6 +8,13 @@ Untracked files are fine. Conflicts, once they happen, are resolved inline in th
 diff pane; a paused rebase shows its progress and lets you continue or
 abort.
 
+**The planner.** It lists the commits oldest first, in the order the rebase replays them. Each
+row has an action (Pick, Reword, Edit, Squash, Fixup, Drop) and **Move up**/**Move down**;
+Alt+Up and Alt+Down move the row you are in. **Reword** fills a message field with the commit's
+whole message, body included, for you to edit. With Squash or Fixup the group's first commit
+gets a combined message field. **Start rebase** waits until the commits (and any message being
+reworded) have loaded; if they can't be listed, the planner says why and offers **Retry**.
+
 **Selecting several commits.** Ctrl/Cmd+click (mouse) toggles individual commits, which is how you
 select non-adjacent ones; Shift+click or Shift+Arrow selects a range. With two or more selected, a
 toolbar under the graph (and the right-click menu) offers **Interactive rebase…**, **Squash N commits**,

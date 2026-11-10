@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type {
   RebaseAction,
   RebasePlanCommit,
@@ -17,7 +17,11 @@ type ActionKind = RebaseAction["kind"];
 interface Row {
   commit: RebasePlanCommit;
   actionKind: ActionKind;
-  rewordMessage: string;
+  /** The full message to reword, body included (#655); `null` until it is loaded. */
+  rewordMessage: string | null;
+  rewordLoading: boolean;
+  /** Why the full message couldn't be read; the summary is then filled in instead. */
+  rewordError: string | null;
   combinedMessage: string | null; // set only when this row is a group leader
 }
 
@@ -145,43 +149,98 @@ export function RebasePlanner({
   // True when a preset commit isn't in `commitsSince(onto)`, e.g. the selection includes a
   // commit from another branch. Starting would silently ignore part of the selection.
   const [presetMissing, setPresetMissing] = useState(false);
+  const [load, setLoad] = useState<{ kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string }>({
+    kind: "loading",
+  });
+  const [attempt, setAttempt] = useState(0);
+  // The control that moved a row: a keyed reorder can take its node out of the document, which
+  // drops focus, so it is focused again after the render.
+  const refocus = useRef<HTMLElement | null>(null);
+
+  useLayoutEffect(() => {
+    const element = refocus.current;
+    refocus.current = null;
+    if (element !== null && document.activeElement !== element && element.isConnected) element.focus();
+  }, [rows]);
 
   useEffect(() => {
     let ignore = false;
-    client.commitsSince(repoPath, onto).then((commits) => {
-      if (!ignore) {
-        const initialRows = commits.map((commit) => ({
-          commit,
-          actionKind: (presetActions?.get(commit.id) ?? "Pick") as ActionKind,
-          rewordMessage: commit.summary,
-          combinedMessage: null,
-        }));
-        const planned = new Set(commits.map((commit) => commit.id));
-        setPresetMissing(
-          presetActions !== undefined && [...presetActions.keys()].some((id) => !planned.has(id)),
-        );
-        setRows(recomputeGroupLeaders(initialRows, initialRows));
-      }
-    });
+    client
+      .commitsSince(repoPath, onto)
+      .then((commits) => {
+        if (!ignore) {
+          const initialRows = commits.map((commit) => ({
+            commit,
+            actionKind: (presetActions?.get(commit.id) ?? "Pick") as ActionKind,
+            rewordMessage: null,
+            rewordLoading: false,
+            rewordError: null,
+            combinedMessage: null,
+          }));
+          const planned = new Set(commits.map((commit) => commit.id));
+          setPresetMissing(
+            presetActions !== undefined && [...presetActions.keys()].some((id) => !planned.has(id)),
+          );
+          setRows(recomputeGroupLeaders(initialRows, initialRows));
+          setLoad({ kind: "ready" });
+        }
+      })
+      .catch((err: unknown) => {
+        if (!ignore) setLoad({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+      });
     return () => {
       ignore = true;
     };
-  }, [repoPath, client, onto, presetActions]);
+  }, [repoPath, client, onto, presetActions, attempt]);
 
-  const moveRow = (index: number, direction: -1 | 1) => {
+  const retry = () => {
+    setLoad({ kind: "loading" });
+    setAttempt((n) => n + 1);
+  };
+
+  const moveRow = (index: number, direction: -1 | 1, control?: HTMLElement) => {
     const target = index + direction;
     if (target < 0 || target >= rows.length) {
       return;
     }
     const next = [...rows];
     [next[index], next[target]] = [next[target], next[index]];
+    refocus.current = control ?? null;
     setRows(recomputeGroupLeaders(rows, next));
+  };
+
+  // Alt+Up/Down moves the row holding the focused control; plain arrows stay with the control.
+  const onRowKeyDown = (index: number, event: KeyboardEvent<HTMLElement>) => {
+    if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    moveRow(index, event.key === "ArrowUp" ? -1 : 1, event.target as HTMLElement);
+  };
+
+  const updateRow = (commitId: string, change: Partial<Row>) => {
+    setRows((prev) => prev.map((row) => (row.commit.id === commitId ? { ...row, ...change } : row)));
+  };
+
+  const loadRewordMessage = (commit: RebasePlanCommit) => {
+    client
+      .getCommitMessage(repoPath, commit.id)
+      .then((message) => updateRow(commit.id, { rewordMessage: message, rewordLoading: false }))
+      .catch((err: unknown) =>
+        updateRow(commit.id, {
+          rewordMessage: commit.summary,
+          rewordLoading: false,
+          rewordError: err instanceof Error ? err.message : String(err),
+        }),
+      );
   };
 
   const setActionKind = (index: number, actionKind: ActionKind) => {
     const next = [...rows];
-    next[index] = { ...next[index], actionKind };
+    const row = next[index];
+    const needsMessage = actionKind === "Reword" && row.rewordMessage === null && !row.rewordLoading;
+    next[index] = { ...row, actionKind, rewordLoading: row.rewordLoading || needsMessage };
     setRows(recomputeGroupLeaders(rows, next));
+    if (needsMessage) loadRewordMessage(row.commit);
   };
 
   const setRewordMessage = (index: number, rewordMessage: string) => {
@@ -196,13 +255,17 @@ export function RebasePlanner({
     setRows(next);
   };
 
+  const messageLoading = rows.some((row) => row.actionKind === "Reword" && row.rewordLoading);
+  const startDisabled =
+    blockedReason !== null || presetMissing || load.kind !== "ready" || rows.length === 0 || messageLoading;
+
   const start = () => {
-    if (blockedReason !== null) return;
+    if (startDisabled) return;
     const plan: RebasePlanEntry[] = rows.map((row) => {
       let action: RebaseAction;
       switch (row.actionKind) {
         case "Reword":
-          action = { kind: "Reword", message: row.rewordMessage };
+          action = { kind: "Reword", message: row.rewordMessage ?? row.commit.summary };
           break;
         case "Pick":
         case "Edit":
@@ -223,57 +286,100 @@ export function RebasePlanner({
 
   return (
     <Panel title="Rebase plan">
+      {load.kind === "loading" && <p className={styles.caption}>Loading commits…</p>}
+      {load.kind === "error" && (
+        <div role="alert">
+          <p>Couldn&apos;t list the commits to rebase: {load.message}</p>
+          <button onClick={retry}>Retry</button>
+        </div>
+      )}
+      {load.kind === "ready" && rows.length === 0 && (
+        <p>No commits to rebase: the current branch has nothing above this base.</p>
+      )}
+      {rows.length > 0 && (
+        <p className={styles.caption}>
+          Oldest commit first: the rebase replays them from top to bottom. Alt+Up and Alt+Down move
+          the row you are in.
+        </p>
+      )}
       <ul className={styles.list}>
-        {rows.map((row, index) => (
-          <ListRow key={row.commit.id}>
-            <span>
-              {row.commit.shortId} {row.commit.summary}
-            </span>
-            <button onClick={() => moveRow(index, -1)} disabled={index === 0}>
-              Move up
-            </button>
-            <button onClick={() => moveRow(index, 1)} disabled={index === rows.length - 1}>
-              Move down
-            </button>
-            <label>
-              Action
-              <select
-                aria-label="Action"
-                className={styles.actionSelect}
-                value={row.actionKind}
-                onChange={(event) => setActionKind(index, event.target.value as ActionKind)}
-              >
-                <option value="Pick">Pick</option>
-                <option value="Reword">Reword</option>
-                <option value="Edit">Edit</option>
-                <option value="Squash" disabled={index === 0}>
-                  Squash
-                </option>
-                <option value="Fixup" disabled={index === 0}>
-                  Fixup
-                </option>
-                <option value="Drop">Drop</option>
-              </select>
-            </label>
-            {row.actionKind === "Reword" && (
-              <input
-                placeholder="New commit message"
-                value={row.rewordMessage}
-                onChange={(event) => setRewordMessage(index, event.target.value)}
-              />
-            )}
-            {row.combinedMessage !== null && (
-              <label>
-                Combined message
-                <textarea
-                  aria-label="Combined message"
-                  value={row.combinedMessage}
-                  onChange={(event) => setCombinedMessage(index, event.target.value)}
-                />
-              </label>
-            )}
-          </ListRow>
-        ))}
+        {rows.map((row, index) => {
+          const name = `${row.commit.shortId} ${row.commit.summary}`;
+          return (
+            <ListRow key={row.commit.id}>
+              <div className={styles.rowKeys} onKeyDown={(event) => onRowKeyDown(index, event)}>
+                <span>{name}</span>
+                <button
+                  aria-label={`Move up: ${name}`}
+                  aria-keyshortcuts="Alt+ArrowUp"
+                  onClick={(event) => moveRow(index, -1, event.currentTarget)}
+                  disabled={index === 0}
+                >
+                  Move up
+                </button>
+                <button
+                  aria-label={`Move down: ${name}`}
+                  aria-keyshortcuts="Alt+ArrowDown"
+                  onClick={(event) => moveRow(index, 1, event.currentTarget)}
+                  disabled={index === rows.length - 1}
+                >
+                  Move down
+                </button>
+                <label>
+                  Action
+                  <select
+                    aria-label={`Action for ${name}`}
+                    className={styles.actionSelect}
+                    value={row.actionKind}
+                    onChange={(event) => setActionKind(index, event.target.value as ActionKind)}
+                  >
+                    <option value="Pick">Pick</option>
+                    <option value="Reword">Reword</option>
+                    <option value="Edit">Edit</option>
+                    <option value="Squash" disabled={index === 0}>
+                      Squash
+                    </option>
+                    <option value="Fixup" disabled={index === 0}>
+                      Fixup
+                    </option>
+                    <option value="Drop">Drop</option>
+                  </select>
+                </label>
+                {row.actionKind === "Reword" &&
+                  (row.rewordMessage === null ? (
+                    <p className={styles.caption}>Loading the message…</p>
+                  ) : (
+                    <>
+                      <textarea
+                        aria-label={`New message for ${row.commit.shortId}`}
+                        placeholder="New commit message"
+                        className={styles.message}
+                        rows={Math.min(10, Math.max(3, row.rewordMessage.split("\n").length))}
+                        value={row.rewordMessage}
+                        onChange={(event) => setRewordMessage(index, event.target.value)}
+                      />
+                      {row.rewordError !== null && (
+                        <p role="alert">
+                          Couldn&apos;t read the full message of {row.commit.shortId} ({row.rewordError}). Only
+                          the summary is filled in; add the body back if it had one.
+                        </p>
+                      )}
+                    </>
+                  ))}
+                {row.combinedMessage !== null && (
+                  <label>
+                    Combined message
+                    <textarea
+                      aria-label="Combined message"
+                      value={row.combinedMessage}
+                      onChange={(event) => setCombinedMessage(index, event.target.value)}
+                    />
+                  </label>
+                )}
+              </div>
+            </ListRow>
+          );
+        })}
       </ul>
       {presetMissing && (
         <p role="alert">
@@ -283,7 +389,7 @@ export function RebasePlanner({
       )}
       {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
       <Toolbar>
-        <button onClick={start} disabled={blockedReason !== null || presetMissing} title={blockedReason ?? undefined}>
+        <button onClick={start} disabled={startDisabled} title={blockedReason ?? undefined}>
           Start rebase
         </button>
         <button onClick={onCancel}>Cancel</button>

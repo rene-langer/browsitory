@@ -13,3 +13,21 @@
   background: var(--color-bg);
   color: var(--color-text);
 }
+
+.caption {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-2);
+}
+
+/* Holds the row's controls so Alt+Up/Down reaches it from any of them; adds no box. */
+.rowKeys {
+  display: contents;
+}
+
+.message {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  width: 100%;
+  box-sizing: border-box;
+}
