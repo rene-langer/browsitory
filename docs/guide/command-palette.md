@@ -75,7 +75,9 @@ Press **?** (outside a text field) for the full list of shortcuts. The most usef
 | Home/End, PageUp/PageDown | Jump in the commit list |
 | s | Stage or unstage the selected files, lines or hunk |
 | d d | Discard the selected lines or hunk |
-| [ and ] | Previous and next hunk |
+| [ and ] | Previous and next hunk (in a diff); parent and child commit (in the commit list) |
+| Shift+[ | Choose one of a merge commit's parents (in the commit list) |
+| Alt+Left/Right (Cmd+[ / Cmd+] on macOS) | Back and forward through the selected commits (where the host doesn't use them) |
 | Left/Right, Home/End | Switch tabs, with a tab focused |
 | Delete | Close the focused tab |
 | Menu key or Shift+F10 | Open the focused item's menu |

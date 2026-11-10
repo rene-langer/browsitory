@@ -156,6 +156,31 @@ describe("Browsitory go to commit, branch or tag", () => {
     expect(git("rev-parse", "HEAD")).toBe(headBefore);
   });
 
+  // #618: Back/Forward through the selected commits, and the parent key.
+  it("Back returns from a Go to to the commit selected before it, and Forward goes again", async () => {
+    await waitForAppReady();
+    await clickInPage(`[data-active-repo="true"] li[data-commit-id="${taggedId}"]`);
+    await waitForSelected(taggedId, "the clicked commit");
+
+    await goToWithPicker("Go to commit…", laterId.slice(0, 8), laterId.slice(0, 7));
+    await waitForSelected(laterId, "the commit typed by SHA");
+
+    await clickInPage('[data-active-repo="true"] button[aria-label="Back"]');
+    await waitForSelected(taggedId, "the commit selected before the Go to");
+
+    // Alt+Right (Cmd+] on macOS) with the commit list focused.
+    await browser.execute(() =>
+      document.querySelector<HTMLElement>('[data-active-repo="true"] ul[aria-label="Commit history"]')?.focus(),
+    );
+    await browser.keys(process.platform === "darwin" ? ["Meta", "]"] : ["Alt", "ArrowRight"]);
+    await waitForSelected(laterId, "the Go to target again");
+
+    // `[`: the later commit's first parent is the tagged one.
+    await browser.keys(["["]);
+    await waitForSelected(taggedId, "the parent of the later commit");
+    expect(git("rev-parse", "HEAD")).toBe(headBefore);
+  });
+
   it("Go to branch… explains a hidden branch and shows it on request", async () => {
     await expandSidebarSection("Branches");
     const swatch = await $(`button[aria-label="Show ${HIDDEN} in graph"]`);
