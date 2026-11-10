@@ -116,6 +116,15 @@
   background: none;
 }
 
+/* A repository with uncommitted changes (#613); the tab's description says it in words. */
+.changeMarker {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .closeButton,
 .addButton {
   display: inline-flex;

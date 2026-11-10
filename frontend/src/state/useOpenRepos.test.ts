@@ -324,4 +324,125 @@ describe("useOpenRepos", () => {
       "/projects/b",
     );
   });
+
+  describe("reopen closed tab (#613)", () => {
+    async function threeTabs() {
+      const client = fakeClient({
+        listOpenRepos: vi.fn().mockResolvedValue({
+          entries: [entry("/repos/a"), entry("/repos/b", "ws-1"), entry("/repos/c", "ws-1")],
+          activePath: "/repos/a",
+        }),
+      });
+      const hook = renderHook(() => useOpenRepos(client));
+      await waitFor(() => expect(hook.result.current.loading).toBe(false));
+      return { client, result: hook.result };
+    }
+
+    it("reopens a closed tab at its old position, in its workspace group, and activates it", async () => {
+      const { client, result } = await threeTabs();
+      expect(result.current.canReopenClosedRepo).toBe(false);
+
+      act(() => result.current.closeRepo("/repos/b"));
+      expect(result.current.canReopenClosedRepo).toBe(true);
+
+      let failures: unknown;
+      await act(async () => {
+        failures = await result.current.reopenClosedRepo();
+      });
+
+      expect(failures).toEqual([]);
+      expect(result.current.openRepos.map((r) => [r.path, r.workspaceId])).toEqual([
+        ["/repos/a", null],
+        ["/repos/b", "ws-1"],
+        ["/repos/c", "ws-1"],
+      ]);
+      expect(result.current.activePath).toBe("/repos/b");
+      expect(client.openRepo).toHaveBeenLastCalledWith("/repos/b");
+      expect(client.persistOpenRepos).toHaveBeenLastCalledWith(
+        [entry("/repos/a"), entry("/repos/b", "ws-1"), entry("/repos/c", "ws-1")],
+        "/repos/b",
+      );
+      expect(result.current.canReopenClosedRepo).toBe(false);
+    });
+
+    it("walks back through closed tabs, newest first, restoring the original order", async () => {
+      const { result } = await threeTabs();
+
+      act(() => result.current.closeRepo("/repos/a"));
+      act(() => result.current.closeRepo("/repos/c"));
+      act(() => result.current.closeRepo("/repos/b"));
+      expect(result.current.openRepos).toEqual([]);
+
+      await act(async () => {
+        await result.current.reopenClosedRepo();
+      });
+      expect(result.current.openRepos.map((r) => r.path)).toEqual(["/repos/b"]);
+      await act(async () => {
+        await result.current.reopenClosedRepo();
+      });
+      expect(result.current.openRepos.map((r) => r.path)).toEqual(["/repos/b", "/repos/c"]);
+      await act(async () => {
+        await result.current.reopenClosedRepo();
+      });
+      expect(result.current.openRepos.map((r) => r.path)).toEqual(["/repos/a", "/repos/b", "/repos/c"]);
+      expect(result.current.activePath).toBe("/repos/a");
+      expect(result.current.canReopenClosedRepo).toBe(false);
+    });
+
+    it("keeps a reopened workspace tab inside its group when its old position is taken", async () => {
+      const { result } = await threeTabs();
+
+      act(() => result.current.closeRepo("/repos/c"));
+      act(() => result.current.closeRepo("/repos/a"));
+      await act(async () => {
+        await result.current.openRepo("/repos/d");
+      });
+      // [b (ws-1), d]: a goes back to index 0; c's old index 2 would land after d, outside ws-1.
+      await act(async () => {
+        await result.current.reopenClosedRepo();
+      });
+      await act(async () => {
+        await result.current.reopenClosedRepo();
+      });
+
+      expect(result.current.openRepos.map((r) => r.path)).toEqual(["/repos/a", "/repos/b", "/repos/c", "/repos/d"]);
+    });
+
+    it("skips a closed repository that no longer opens, reports it, and reopens the one before it", async () => {
+      const { client, result } = await threeTabs();
+      act(() => result.current.closeRepo("/repos/b"));
+      act(() => result.current.closeRepo("/repos/c"));
+      vi.mocked(client.openRepo).mockImplementation((path: string) =>
+        path === "/repos/c" ? Promise.reject(new Error("not a repository")) : Promise.resolve(undefined),
+      );
+
+      let failures: unknown;
+      await act(async () => {
+        failures = await result.current.reopenClosedRepo();
+      });
+
+      expect(failures).toEqual([{ path: "/repos/c", message: "Error: not a repository" }]);
+      expect(result.current.openRepos.map((r) => r.path)).toEqual(["/repos/a", "/repos/b"]);
+      expect(result.current.activePath).toBe("/repos/b");
+      expect(result.current.canReopenClosedRepo).toBe(false);
+    });
+
+    it("remembers at most ten closed tabs", async () => {
+      const paths = Array.from({ length: 12 }, (_, i) => `/repos/r${i}`);
+      const client = fakeClient({
+        listOpenRepos: vi.fn().mockResolvedValue({ entries: paths.map((path) => entry(path)), activePath: paths[0] }),
+      });
+      const { result } = renderHook(() => useOpenRepos(client));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      for (const path of paths) act(() => result.current.closeRepo(path));
+      for (let i = 0; i < 12; i++) {
+        await act(async () => {
+          await result.current.reopenClosedRepo();
+        });
+      }
+
+      expect(result.current.openRepos.map((r) => r.path)).toEqual(paths.slice(2));
+    });
+  });
 });

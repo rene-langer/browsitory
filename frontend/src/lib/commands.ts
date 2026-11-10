@@ -22,6 +22,8 @@ export interface AppCommands {
   onOpenThirdPartyLicences?: () => void;
   /** Opens the user guide site in the browser ("Open user guide"). */
   onOpenUserGuide?: () => void;
+  /** Reopens the most recently closed tab ("Reopen closed tab"); absent when none was closed. */
+  onReopenClosedTab?: () => void;
 }
 
 /**
@@ -974,6 +976,15 @@ export function buildCommands(
     });
   }
 
+  if (appCommands?.onReopenClosedTab !== undefined) {
+    commands.push({
+      id: "reopen-closed-tab",
+      label: "Reopen closed tab",
+      keywords: ["reopen", "restore", "closed", "tab", "repo", "repository", "undo close"],
+      run: appCommands.onReopenClosedTab,
+    });
+  }
+
   for (const repo of otherOpenRepos) {
     commands.push({
       id: `switch-repo:${repo.path}`,
@@ -1182,7 +1193,7 @@ export function commandGroup(id: string): CommandGroup {
     return "Diff";
   }
   if (id.startsWith("go-to:") || id.startsWith("go-to-")) return "Go to";
-  if (id.startsWith("switch-repo:") || id === "close-tab" || id === "open-terminal" || id === "reveal-repository") {
+  if (id.startsWith("switch-repo:") || id === "close-tab" || id === "reopen-closed-tab" || id === "open-terminal" || id === "reveal-repository") {
     return "Repositories";
   }
   return "General";
