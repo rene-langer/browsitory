@@ -864,7 +864,7 @@ where
 }
 
 /// The code points HFS+ ignores in names (the list git's `is_hfs_dotgit` uses).
-fn hfs_ignorable(c: char) -> bool {
+pub(crate) fn hfs_ignorable(c: char) -> bool {
     matches!(
         c,
         '\u{200c}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{206a}'..='\u{206f}' | '\u{feff}'

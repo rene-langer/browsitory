@@ -50,6 +50,9 @@ applied in order, all or nothing: when one of them doesn't apply, the changes of
 it are put back too and the working tree is left as it was. Applying a patch never commits and is
 one step in [Undo](undo-redo.md) ("Apply patch").
 
-A patch that names a file outside the repository or in `.git`, would write through a symbolic
-link, or creates a file whose name differs only in case from one the repository has (on a file
-system that ignores case) is refused before anything is changed.
+A patch that names a file outside the repository or in `.git` (under any name a file system
+reads as `.git`, such as `git~1`), would write through a symbolic link (one already in the
+working tree, or one the patch itself creates), makes a symbolic link that points into `.git`
+or is named `.gitmodules`, `.gitattributes`, `.gitignore` or `.mailmap`, or creates a file whose
+name differs only in case from one the repository has (on a file system that ignores case) is
+refused before anything is changed.

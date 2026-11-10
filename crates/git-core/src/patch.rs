@@ -52,6 +52,11 @@ pub enum PatchError {
     BeyondSymlink(String),
     #[error("'{0}' is a symbolic link in the working tree; the patch changes a file there.")]
     LinkInPlace(String),
+    /// A link the patch writes would point into the repository's git folder.
+    #[error(
+        "The patch makes '{path}' a symbolic link into the repository's .git folder ('{target}')."
+    )]
+    LinkIntoGitDir { path: String, target: String },
     /// A folder on the way to `path` is a file in the working tree (#154).
     #[error("Couldn't apply to '{path}': '{parent}' is now a file, not a folder.")]
     FolderIsNowAFile { path: String, parent: String },
@@ -559,6 +564,12 @@ pub(crate) fn check_links(
         }
         let write = match (keeps, new_target.or(current)) {
             (false, _) => None,
+            (true, Some(target)) if points_into_git_dir(repo, workdir, &new_path, &target) => {
+                return Err(PatchError::LinkIntoGitDir {
+                    path: new_path,
+                    target: String::from_utf8_lossy(&target).into_owned(),
+                })
+            }
             (true, Some(target)) => Some((new_path.clone(), target)),
             (true, None) => {
                 return Err(PatchError::DoesNotApply(format!(
@@ -671,6 +682,16 @@ fn guard(repo: &git2::Repository, diff: &git2::Diff) -> Result<(), PatchError> {
     let workdir = repo.workdir().ok_or(PatchError::NoWorkdir)?;
     let folds = worktree_guard::try_folds_case(repo)?;
     let index = if folds { Some(repo.index()?) } else { None };
+    // The links this patch writes. The checks below look at the working tree as it is before the
+    // patch, so a path below one of these would be written through the new link: `git apply`
+    // refuses that as "beyond a symbolic link", and so does this.
+    let new_links: Vec<Vec<Vec<u8>>> = diff
+        .deltas()
+        .filter(|d| {
+            d.status() != git2::Delta::Deleted && d.new_file().mode() == git2::FileMode::Link
+        })
+        .filter_map(|d| d.new_file().path_bytes().map(|p| name_parts(p, folds)))
+        .collect();
     for delta in diff.deltas() {
         for file in [delta.old_file(), delta.new_file()] {
             let Some(bytes) = file.path_bytes() else {
@@ -679,15 +700,30 @@ fn guard(repo: &git2::Repository, diff: &git2::Diff) -> Result<(), PatchError> {
             let path = std::str::from_utf8(bytes).map_err(|_| {
                 PatchError::InvalidPath(String::from_utf8_lossy(bytes).into_owned())
             })?;
+            let parts = name_parts(bytes, folds);
+            if new_links
+                .iter()
+                .any(|link| link.len() < parts.len() && parts.starts_with(link))
+            {
+                return Err(PatchError::BeyondSymlink(path.to_string()));
+            }
             let rel = Path::new(path);
+            // Every spelling a file system may take for `.git` (`git~1`, `.git.`, `.Git `,
+            // HFS+ ignorables), split at `\` too: libgit2 validates only the files it writes,
+            // and the links are written here.
             if path.is_empty()
                 || rel.is_absolute()
-                || rel.components().any(|c| match c {
-                    Component::Normal(name) => name
-                        .to_str()
-                        .is_some_and(|n| n.eq_ignore_ascii_case(".git")),
-                    _ => true,
-                })
+                || path.split(['/', '\\']).any(is_git_dir_name)
+                || rel.components().any(|c| !matches!(c, Component::Normal(_)))
+            {
+                return Err(PatchError::InvalidPath(path.to_string()));
+            }
+            // A link named like git's own control files is refused, as `git apply` does.
+            if u32::from(file.mode()) == 0o120000
+                && path
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .is_some_and(is_git_control_file_name)
             {
                 return Err(PatchError::InvalidPath(path.to_string()));
             }
@@ -729,6 +765,98 @@ fn guard(repo: &git2::Repository, diff: &git2::Diff) -> Result<(), PatchError> {
         }
     }
     Ok(())
+}
+
+/// `path`'s names, split at `/` and `\` (Windows reads both as separators), folded as this file
+/// system compares names when `folds`.
+fn name_parts(path: &[u8], folds: bool) -> Vec<Vec<u8>> {
+    path.split(|&b| b == b'/' || b == b'\\')
+        .filter(|name| !name.is_empty())
+        .map(|name| {
+            if folds {
+                worktree_guard::fold_name(name)
+            } else {
+                name.to_vec()
+            }
+        })
+        .collect()
+}
+
+/// `name` as a file system may store it, with what git's `is_ntfs_dotgit` and `is_hfs_dotgit`
+/// strip: HFS+'s ignorable code points, and NTFS's trailing dots and spaces and an alternate
+/// data stream (`.git::$INDEX_ALLOCATION`).
+fn file_system_name(name: &str) -> String {
+    let name: String = name
+        .chars()
+        .filter(|&c| !worktree_guard::hfs_ignorable(c))
+        .collect();
+    let name = name.split(':').next().unwrap_or_default();
+    name.trim_end_matches(['.', ' ']).to_string()
+}
+
+/// Whether `name` opens the git folder on some file system: `.git` in any case, its NTFS short
+/// name `git~1`, or either with what NTFS and HFS+ ignore (see [`file_system_name`]).
+fn is_git_dir_name(name: &str) -> bool {
+    let name = file_system_name(name);
+    name.eq_ignore_ascii_case(".git") || name.eq_ignore_ascii_case("git~1")
+}
+
+/// Whether `name` is one of the files git reads from the working tree for its own settings,
+/// which `git apply` won't write as a symbolic link.
+fn is_git_control_file_name(name: &str) -> bool {
+    let name = file_system_name(name);
+    [".gitmodules", ".gitattributes", ".gitignore", ".mailmap"]
+        .iter()
+        .any(|control| name.eq_ignore_ascii_case(control))
+}
+
+/// Whether a link at `link_path` (relative to `workdir`) to `target` would point into the
+/// repository's git folder (or the common one of a linked worktree), read lexically: the
+/// target names it, or climbs out of the work tree and back in through it.
+fn points_into_git_dir(
+    repo: &git2::Repository,
+    workdir: &Path,
+    link_path: &str,
+    target: &[u8],
+) -> bool {
+    let text = String::from_utf8_lossy(target);
+    let target = Path::new(text.as_ref());
+    let full = if target.has_root() || target.is_absolute() {
+        lexical(target)
+    } else {
+        let parent = Path::new(link_path).parent().unwrap_or(Path::new(""));
+        lexical(&workdir.join(parent).join(text.replace('\\', "/")))
+    };
+    let workdir = lexical(workdir);
+    if let Ok(rel) = full.strip_prefix(&workdir) {
+        if rel
+            .components()
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+            .is_some_and(is_git_dir_name)
+        {
+            return true;
+        }
+    }
+    [repo.path(), repo.commondir()]
+        .into_iter()
+        .any(|git_dir| full.starts_with(lexical(git_dir)))
+}
+
+/// `path` with `.` dropped and each `..` taking off the name before it, without reading the
+/// file system.
+fn lexical(path: &Path) -> std::path::PathBuf {
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// One hunk's lines as libgit2 matches them: the content of each line (a line followed by an
