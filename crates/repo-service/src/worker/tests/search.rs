@@ -50,7 +50,10 @@ fn an_invalid_search_query_replies_its_message() {
             .handle()
             .search_commits("author:".into(), GraphSelection::default(), None)
             .unwrap_err(),
-        "Invalid search: author: needs a value."
+        crate::wire::ErrorDto::new(
+            crate::wire::ErrorKind::InvalidSearchQuery,
+            "Invalid search: author: needs a value."
+        )
     );
 }
 
@@ -68,7 +71,7 @@ fn a_search_superseded_before_it_runs_replies_cancelled() {
         handle
             .search_commits_claimed(stale, "alpha".into(), GraphSelection::default(), None)
             .unwrap_err(),
-        "Search cancelled."
+        crate::wire::ErrorDto::from("Search cancelled.")
     );
     // A fresh search after the cancel runs normally.
     assert_eq!(search_all_pages(&handle, "alpha").0, ["alpha commit"]);

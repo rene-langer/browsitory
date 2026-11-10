@@ -2375,34 +2375,33 @@ pub fn transfer_progress_dto(event: TransferEvent) -> TransferProgressDto {
     }
 }
 
-/// What every `WorkerHandle` method answers when the repository's worker thread has stopped
-/// (crashed) before it took the command; [`WORKER_STOPPED_BEFORE_REPLYING`] when it stopped while
-/// the command ran. Both are [`ErrorKind::WorkerStopped`].
+/// The message of [`ErrorDto::worker_stopped`]: the repository's worker thread has stopped
+/// (crashed) before it took the command.
 pub const WORKER_STOPPED: &str = "worker thread stopped";
-/// See [`WORKER_STOPPED`].
+/// The message of [`ErrorDto::worker_stopped_before_replying`]: the worker stopped while the
+/// command ran.
 pub const WORKER_STOPPED_BEFORE_REPLYING: &str = "worker thread stopped before replying";
-/// What a pull answers for a failure its terminal transfer event reports with a
-/// `TransferErrorKind` (a transport error may quote a URL with credentials, so the reply keeps
-/// none of its text). [`ErrorKind::PullFailed`].
+/// The message of [`ErrorDto::pull_failed`].
 pub const PULL_FAILED: &str = "pull failed";
 
 /// The kind of a rejected request, for the failures the frontend tells apart (#496). Every
 /// request that fails answers an [`ErrorDto`]; the frontend switches on its `kind` and never on
-/// the message text, which stays free to change.
+/// the message text, which stays free to change. The kind is decided where the error is made
+/// (#527): by the constructor that builds it, or from the typed error with [`ErrorKind::of_error`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 pub enum ErrorKind {
     /// Anything the frontend shows as it is.
     Other,
     /// The repository's worker thread has stopped; nothing on this repository works until it is
-    /// closed and reopened ([`WORKER_STOPPED`]).
+    /// closed and reopened ([`ErrorDto::worker_stopped`]).
     WorkerStopped,
-    /// The operating-system credential store failed while saving or forgetting an HTTPS token,
-    /// or while changing a remote's authentication.
+    /// The operating-system credential store failed while saving, reading or forgetting a token
+    /// (a remote's HTTPS token or a forge token), or while changing a remote's authentication.
     CredentialStoreFailure,
     /// A pull refused to start over uncommitted changes.
     DirtyWorktree,
-    /// A pull failed and its terminal transfer event says why ([`PULL_FAILED`]).
+    /// A pull failed and its terminal transfer event says why ([`ErrorDto::pull_failed`]).
     PullFailed,
     /// The user cancelled the transfer (a pull's); its terminal transfer event says so too.
     Cancelled,
@@ -2411,65 +2410,58 @@ pub enum ErrorKind {
     /// A commit search whose query doesn't parse or names something that isn't there (#450);
     /// the search field shows its message.
     InvalidSearchQuery,
+    /// The operating system refused a file access for lack of permission (#527).
+    PermissionDenied,
 }
 
 impl ErrorKind {
-    /// The kind of `message`, a request's error text. Each kind is recognised by the constant or
-    /// typed error its producer formats, never by a copy of the text, so rewording one keeps its
-    /// kind. Exact matches only, apart from the parts the producer fills in.
-    pub fn of(message: &str) -> Self {
-        use git_core::remote::RemoteError;
-        if message == WORKER_STOPPED || message == WORKER_STOPPED_BEFORE_REPLYING {
-            Self::WorkerStopped
-        } else if message == PULL_FAILED {
-            Self::PullFailed
-        } else if message == RemoteError::DirtyWorktree.to_string() {
-            Self::DirtyWorktree
-        } else if message == RemoteError::Cancelled.to_string() {
-            Self::Cancelled
-        } else if fills(message, |diagnostic| {
-            credential_store_failure_message(&diagnostic)
-        }) {
-            Self::CredentialStoreFailure
-        } else if fills(message, |path| {
-            git_core::merge::MergeError::NotATextConflict(path).to_string()
-        }) {
-            Self::AddDeleteConflict
-        } else if fills(message, |message| {
-            git_core::search::SearchError::InvalidQuery { message }.to_string()
-        }) {
-            Self::InvalidSearchQuery
+    /// The kind of a typed error: from its type, or from the first error along its `source()`
+    /// chain that has one. Never from its text.
+    pub fn of_error(error: &(dyn std::error::Error + 'static)) -> Self {
+        let mut current = Some(error);
+        while let Some(error) = current {
+            if let Some(kind) = Self::of_one(error) {
+                return kind;
+            }
+            current = error.source();
+        }
+        if git_core::os_error::is_permission_denied(error) {
+            Self::PermissionDenied
         } else {
             Self::Other
         }
     }
+
+    fn of_one(error: &(dyn std::error::Error + 'static)) -> Option<Self> {
+        use crate::credentials::CredentialStoreError;
+        use git_core::merge::MergeError;
+        use git_core::remote::RemoteError;
+        use git_core::search::SearchError;
+        if let Some(error) = error.downcast_ref::<RemoteError>() {
+            match error {
+                RemoteError::DirtyWorktree => Some(Self::DirtyWorktree),
+                RemoteError::Cancelled => Some(Self::Cancelled),
+                _ => None,
+            }
+        } else if let Some(MergeError::NotATextConflict(_)) = error.downcast_ref::<MergeError>() {
+            Some(Self::AddDeleteConflict)
+        } else if let Some(SearchError::InvalidQuery { .. }) = error.downcast_ref::<SearchError>() {
+            Some(Self::InvalidSearchQuery)
+        } else if let Some(CredentialStoreError::Keychain(_)) =
+            error.downcast_ref::<CredentialStoreError>()
+        {
+            Some(Self::CredentialStoreFailure)
+        } else {
+            None
+        }
+    }
 }
 
-/// The error text of a credential store failure while saving or forgetting a token, or while
-/// changing a remote's authentication: [`ErrorKind::CredentialStoreFailure`].
-pub fn credential_store_failure_message(diagnostic: &str) -> String {
-    format!(
-        "{}: {diagnostic}",
-        git_core::remote::CREDENTIAL_STORE_FAILURE_ERROR
-    )
-}
-
-/// Whether `message` is what `render` makes of some value: the text around the value must
-/// match exactly.
-fn fills(message: &str, render: impl Fn(String) -> String) -> bool {
-    const SLOT: char = '\u{0}';
-    let template = render(SLOT.to_string());
-    let Some((before, after)) = template.split_once(SLOT) else {
-        return message == template;
-    };
-    message.len() >= before.len() + after.len()
-        && message.starts_with(before)
-        && message.ends_with(after)
-}
-
-/// A rejected request (#496): the desktop app sends it as the command's error, the sidecar as
-/// the JSON-RPC error's `data` (next to the same `message`). Built from the error text with
-/// [`ErrorKind::of`].
+/// A rejected request (#496): what every `WorkerHandle` method and every transport handler
+/// answers, the desktop app as the command's error, the sidecar as the JSON-RPC error's `data`
+/// (next to the same `message`). Its kind is decided where it is made (#527): the constructors
+/// below for the kinds no typed error carries, [`ErrorDto::from_error`] for a typed error. Text
+/// (`From<String>`, `From<&str>`) is always [`ErrorKind::Other`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "RepoErrorPayload"))]
@@ -2478,18 +2470,74 @@ pub struct ErrorDto {
     pub message: String,
 }
 
+impl ErrorDto {
+    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    /// The worker thread has stopped before it took the command.
+    pub fn worker_stopped() -> Self {
+        Self::new(ErrorKind::WorkerStopped, WORKER_STOPPED)
+    }
+
+    /// The worker thread stopped while the command ran.
+    pub fn worker_stopped_before_replying() -> Self {
+        Self::new(ErrorKind::WorkerStopped, WORKER_STOPPED_BEFORE_REPLYING)
+    }
+
+    /// A pull failure its terminal transfer event reports with a `TransferErrorKind` (a
+    /// transport error may quote a URL with credentials, so the reply keeps none of its text).
+    pub fn pull_failed() -> Self {
+        Self::new(ErrorKind::PullFailed, PULL_FAILED)
+    }
+
+    /// `error`'s text, with the kind [`ErrorKind::of_error`] gives it.
+    pub fn from_error<E: std::error::Error + 'static>(error: E) -> Self {
+        Self::new(ErrorKind::of_error(&error), error.to_string())
+    }
+}
+
+/// A credential store failure (`Keychain`) is [`ErrorKind::CredentialStoreFailure`], whichever
+/// token it was about (a remote's HTTPS token or a forge token), with the same text for both.
+impl From<crate::credentials::CredentialStoreError> for ErrorDto {
+    fn from(error: crate::credentials::CredentialStoreError) -> Self {
+        use crate::credentials::CredentialStoreError;
+        match error {
+            CredentialStoreError::Keychain(diagnostic) => Self::new(
+                ErrorKind::CredentialStoreFailure,
+                credential_store_failure_message(&diagnostic),
+            ),
+            CredentialStoreError::InvalidHttpsUrl => Self::from_error(error),
+        }
+    }
+}
+
+/// The error text of a credential store failure: [`ErrorKind::CredentialStoreFailure`].
+pub fn credential_store_failure_message(diagnostic: &str) -> String {
+    format!(
+        "{}: {diagnostic}",
+        git_core::remote::CREDENTIAL_STORE_FAILURE_ERROR
+    )
+}
+
+impl std::fmt::Display for ErrorDto {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
 impl From<String> for ErrorDto {
     fn from(message: String) -> Self {
-        Self {
-            kind: ErrorKind::of(&message),
-            message,
-        }
+        Self::new(ErrorKind::Other, message)
     }
 }
 
 impl From<&str> for ErrorDto {
     fn from(message: &str) -> Self {
-        message.to_string().into()
+        Self::new(ErrorKind::Other, message)
     }
 }
 
@@ -2676,74 +2724,131 @@ mod ts_bindings {
     }
 }
 
-/// #496: each `ErrorKind` comes from its producer's own text, and nothing else gets one.
+/// #496, #527: each `ErrorKind` comes from its producer's constructor or typed error, and
+/// nothing else gets one.
 #[cfg(test)]
 mod error_kinds {
     use super::*;
+    use crate::credentials::CredentialStoreError;
     use git_core::merge::MergeError;
     use git_core::remote::RemoteError;
+    use git_core::search::SearchError;
 
     #[test]
     fn each_producer_gets_its_kind() {
+        let permission = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
         let cases = [
-            (WORKER_STOPPED.to_string(), ErrorKind::WorkerStopped),
+            (ErrorDto::worker_stopped(), ErrorKind::WorkerStopped),
             (
-                WORKER_STOPPED_BEFORE_REPLYING.to_string(),
+                ErrorDto::worker_stopped_before_replying(),
                 ErrorKind::WorkerStopped,
             ),
-            (PULL_FAILED.to_string(), ErrorKind::PullFailed),
+            (ErrorDto::pull_failed(), ErrorKind::PullFailed),
             (
-                RemoteError::DirtyWorktree.to_string(),
+                ErrorDto::from_error(RemoteError::DirtyWorktree),
                 ErrorKind::DirtyWorktree,
             ),
-            (RemoteError::Cancelled.to_string(), ErrorKind::Cancelled),
             (
-                credential_store_failure_message("CredWrite failed: locked"),
+                ErrorDto::from_error(RemoteError::Cancelled),
+                ErrorKind::Cancelled,
+            ),
+            (
+                ErrorDto::from(CredentialStoreError::Keychain("locked".into())),
                 ErrorKind::CredentialStoreFailure,
             ),
             (
-                MergeError::NotATextConflict("dir/it's: here.bin".into()).to_string(),
+                ErrorDto::from_error(CredentialStoreError::Keychain("locked".into())),
+                ErrorKind::CredentialStoreFailure,
+            ),
+            (
+                ErrorDto::from_error(MergeError::NotATextConflict("dir/it's: here.bin".into())),
                 ErrorKind::AddDeleteConflict,
             ),
             (
-                git_core::search::parse_query("a or")
-                    .unwrap_err()
-                    .to_string(),
+                ErrorDto::from_error(git_core::search::parse_query("a or").unwrap_err()),
                 ErrorKind::InvalidSearchQuery,
             ),
+            (
+                ErrorDto::from_error(MergeError::Io(permission)),
+                ErrorKind::PermissionDenied,
+            ),
         ];
-        for (message, kind) in cases {
-            assert_eq!(ErrorKind::of(&message), kind, "{message}");
+        for (error, kind) in cases {
+            assert_eq!(error.kind, kind, "{}", error.message);
         }
     }
 
-    /// Texts that only contain a recognised one, or only look like it, stay `Other`. The
-    /// frontend's old substring checks matched the first two.
+    /// Text never has a kind, not even a recognised producer's: the kind is decided where the
+    /// error is made. Neither do the producers' other errors.
     #[test]
-    fn near_misses_stay_other() {
-        let messages = [
-            MergeError::NotAnAddDeleteConflict("x".into()).to_string(),
-            format!("hook said: {}", RemoteError::DirtyWorktree),
-            format!("{WORKER_STOPPED}!"),
-            "Pull failed".to_string(),
-            git_core::remote::CREDENTIAL_STORE_FAILURE_ERROR.to_string(),
-            RemoteError::NoUpstream.to_string(),
-            "Invalid search".to_string(),
-            git_core::search::SearchError::StaleCursor.to_string(),
-            String::new(),
+    fn text_and_other_errors_stay_other() {
+        let texts = [
+            WORKER_STOPPED.to_string(),
+            PULL_FAILED.to_string(),
+            RemoteError::DirtyWorktree.to_string(),
+            RemoteError::Cancelled.to_string(),
+            credential_store_failure_message("locked"),
+            MergeError::NotATextConflict("a.bin".into()).to_string(),
+            "Permission denied".to_string(),
         ];
-        for message in messages {
-            assert_eq!(ErrorKind::of(&message), ErrorKind::Other, "{message}");
+        for text in texts {
+            assert_eq!(
+                ErrorDto::from(text.as_str()).kind,
+                ErrorKind::Other,
+                "{text}"
+            );
+            assert_eq!(
+                ErrorDto::from(text.clone()).kind,
+                ErrorKind::Other,
+                "{text}"
+            );
         }
+        let errors = [
+            ErrorDto::from_error(MergeError::NotAnAddDeleteConflict("x".into())),
+            ErrorDto::from_error(RemoteError::NoUpstream),
+            ErrorDto::from_error(SearchError::StaleCursor),
+            ErrorDto::from(CredentialStoreError::InvalidHttpsUrl),
+            ErrorDto::from_error(MergeError::Io(std::io::Error::from(
+                std::io::ErrorKind::NotFound,
+            ))),
+        ];
+        for error in errors {
+            assert_eq!(error.kind, ErrorKind::Other, "{}", error.message);
+        }
+    }
+
+    /// A kind is found along the source chain: a pull's cancel wrapped in another error is still
+    /// `Cancelled`.
+    #[test]
+    fn the_kind_is_found_along_the_source_chain() {
+        #[derive(Debug)]
+        struct Outer(RemoteError);
+        impl std::fmt::Display for Outer {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(formatter, "outer: {}", self.0)
+            }
+        }
+        impl std::error::Error for Outer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        assert_eq!(
+            ErrorDto::from_error(Outer(RemoteError::Cancelled)).kind,
+            ErrorKind::Cancelled
+        );
     }
 
     #[test]
     fn the_envelope_keeps_the_message() {
-        let error = ErrorDto::from(WORKER_STOPPED);
+        let error = ErrorDto::worker_stopped();
 
         assert_eq!(
             serde_json::to_string(&error).unwrap(),
             r#"{"kind":"WorkerStopped","message":"worker thread stopped"}"#
         );
+        // Shown as its message alone, as the old `String` errors were.
+        assert_eq!(error.to_string(), WORKER_STOPPED);
     }
 }

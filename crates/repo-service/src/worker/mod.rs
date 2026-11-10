@@ -1,3 +1,4 @@
+use crate::wire::ErrorDto;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::mpsc::{self, Sender};
@@ -102,52 +103,52 @@ pub(crate) enum Command {
     #[cfg(test)]
     PanicNow,
     GetStatus {
-        reply: Sender<Result<Vec<StatusEntry>, String>>,
+        reply: Sender<Result<Vec<StatusEntry>, ErrorDto>>,
     },
     GetCommitGraph {
         limit: usize,
         selection: GraphSelection,
-        reply: Sender<Result<Vec<GraphCommit>, String>>,
+        reply: Sender<Result<Vec<GraphCommit>, ErrorDto>>,
     },
     LocateCommit {
         revision: String,
         selection: GraphSelection,
-        reply: Sender<Result<Option<git_core::locate::CommitLocation>, String>>,
+        reply: Sender<Result<Option<git_core::locate::CommitLocation>, ErrorDto>>,
     },
     GetWorkingDiff {
         path: String,
         staged: bool,
         opts: git_core::diff::DiffOptions,
         old_path: Option<String>,
-        reply: Sender<Result<Vec<DiffHunk>, String>>,
+        reply: Sender<Result<Vec<DiffHunk>, ErrorDto>>,
     },
     GetCommitDiff {
         commit_id: String,
         path: String,
         opts: git_core::diff::DiffOptions,
-        reply: Sender<Result<Vec<DiffHunk>, String>>,
+        reply: Sender<Result<Vec<DiffHunk>, ErrorDto>>,
     },
     GetCommitFiles {
         commit_id: String,
-        reply: Sender<Result<Vec<String>, String>>,
+        reply: Sender<Result<Vec<String>, ErrorDto>>,
     },
     GetCommitMessage {
         commit_id: String,
-        reply: Sender<Result<String, String>>,
+        reply: Sender<Result<String, ErrorDto>>,
     },
     GetCommitSignature {
         commit_id: String,
-        reply: Sender<Result<git_core::signing::CommitSignature, String>>,
+        reply: Sender<Result<git_core::signing::CommitSignature, ErrorDto>>,
     },
     GetBlame {
         commit_id: String,
         path: String,
-        reply: Sender<Result<Vec<BlameLine>, String>>,
+        reply: Sender<Result<Vec<BlameLine>, ErrorDto>>,
     },
     GetFileHistory {
         path: String,
         limit: usize,
-        reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, String>>,
+        reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, ErrorDto>>,
     },
     /// The commits that changed lines `start_line..=end_line` of `path` as it is in `revision`
     /// (a commit id or "HEAD"), at most `limit` (#447).
@@ -157,7 +158,7 @@ pub(crate) enum Command {
         start_line: usize,
         end_line: usize,
         limit: usize,
-        reply: Sender<Result<git_core::line_history::LineHistory, String>>,
+        reply: Sender<Result<git_core::line_history::LineHistory, ErrorDto>>,
     },
     /// One page of a commit search. `generation` is the `SearchGeneration` value claimed when
     /// the command was queued; once a newer search or `cancel_search` bumps the counter, this
@@ -167,19 +168,19 @@ pub(crate) enum Command {
         selection: GraphSelection,
         cursor: Option<String>,
         generation: u64,
-        reply: Sender<Result<git_core::search::SearchPage, String>>,
+        reply: Sender<Result<git_core::search::SearchPage, ErrorDto>>,
     },
     GetCommitRenameDiff {
         commit_id: String,
         old_path: String,
         new_path: String,
         opts: git_core::diff::DiffOptions,
-        reply: Sender<Result<Vec<DiffHunk>, String>>,
+        reply: Sender<Result<Vec<DiffHunk>, ErrorDto>>,
     },
     GetRangeFiles {
         from_id: String,
         to_id: String,
-        reply: Sender<Result<Vec<git_core::diff::ChangedFile>, String>>,
+        reply: Sender<Result<Vec<git_core::diff::ChangedFile>, ErrorDto>>,
     },
     GetRangeDiff {
         from_id: String,
@@ -187,51 +188,51 @@ pub(crate) enum Command {
         path: String,
         old_path: Option<String>,
         opts: git_core::diff::DiffOptions,
-        reply: Sender<Result<Vec<DiffHunk>, String>>,
+        reply: Sender<Result<Vec<DiffHunk>, ErrorDto>>,
     },
     GetWorkingTreeCompareFiles {
         commit_id: String,
-        reply: Sender<Result<Vec<git_core::diff::ChangedFile>, String>>,
+        reply: Sender<Result<Vec<git_core::diff::ChangedFile>, ErrorDto>>,
     },
     GetWorkingTreeCompareDiff {
         commit_id: String,
         path: String,
         old_path: Option<String>,
         opts: git_core::diff::DiffOptions,
-        reply: Sender<Result<Vec<DiffHunk>, String>>,
+        reply: Sender<Result<Vec<DiffHunk>, ErrorDto>>,
     },
     GetBranchCompareRange {
         ref_name: String,
-        reply: Sender<Result<git_core::diff::CompareRange, String>>,
+        reply: Sender<Result<git_core::diff::CompareRange, ErrorDto>>,
     },
     StageFile {
         path: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     UnstageFile {
         path: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     StageHunk {
         path: String,
         old_start: u32,
         new_start: u32,
         hunk: git_core::diff::HunkOptions,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     UnstageHunk {
         path: String,
         old_start: u32,
         new_start: u32,
         hunk: git_core::diff::HunkOptions,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     DiscardHunk {
         path: String,
         old_start: u32,
         new_start: u32,
         hunk: git_core::diff::HunkOptions,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     StageLines {
         path: String,
@@ -240,7 +241,7 @@ pub(crate) enum Command {
         hunk: git_core::diff::HunkOptions,
         line_indices: Vec<u32>,
         expected_lines: Vec<String>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     UnstageLines {
         path: String,
@@ -249,7 +250,7 @@ pub(crate) enum Command {
         hunk: git_core::diff::HunkOptions,
         line_indices: Vec<u32>,
         expected_lines: Vec<String>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     DiscardLines {
         path: String,
@@ -258,32 +259,32 @@ pub(crate) enum Command {
         hunk: git_core::diff::HunkOptions,
         line_indices: Vec<u32>,
         expected_lines: Vec<String>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     DiscardFile {
         path: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     DiscardAllUnstaged {
         paths: Vec<String>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     /// #448: a commit's file or hunk reverted or applied in the working tree.
     ApplyCommitChange {
         change: CommitChange,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     GetPatch {
         source: PatchSource,
-        reply: Sender<Result<Vec<u8>, String>>,
+        reply: Sender<Result<Vec<u8>, ErrorDto>>,
     },
     ApplyPatch {
         content: Vec<u8>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     IgnorePath {
         pattern: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     Commit {
         message: String,
@@ -292,15 +293,15 @@ pub(crate) enum Command {
         trailers: Vec<git_core::commit::Trailer>,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
+        reply: Sender<Result<git_core::commit::CommitOutcome, ErrorDto>>,
     },
     ListBranches {
-        reply: Sender<Result<Vec<BranchInfo>, String>>,
+        reply: Sender<Result<Vec<BranchInfo>, ErrorDto>>,
     },
     CreateBranch {
         name: String,
         start_point: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     /// `operation_id` (`switch-<n>`) is what `cancel_transfer` stops; `events` reports
     /// `post-checkout` (#185).
@@ -308,162 +309,162 @@ pub(crate) enum Command {
         name: String,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     DeleteBranch {
         name: String,
         force: bool,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     RenameBranch {
         old_name: String,
         new_name: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ListWorktrees {
-        reply: Sender<Result<Vec<WorktreeInfo>, String>>,
+        reply: Sender<Result<Vec<WorktreeInfo>, ErrorDto>>,
     },
     CreateWorktree {
         name: String,
         path: PathBuf,
         branch: String,
         start_point: Option<String>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     RemoveWorktree {
         name: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     PruneWorktrees {
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ListSubmodules {
-        reply: Sender<Result<Vec<SubmoduleInfo>, String>>,
+        reply: Sender<Result<Vec<SubmoduleInfo>, ErrorDto>>,
     },
     InitSubmodule {
         path: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     UpdateSubmodule {
         path: String,
         recursive: bool,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ListReflogRefs {
-        reply: Sender<Result<Vec<String>, String>>,
+        reply: Sender<Result<Vec<String>, ErrorDto>>,
     },
     GetReflog {
         reference: String,
-        reply: Sender<Result<Vec<ReflogEntry>, String>>,
+        reply: Sender<Result<Vec<ReflogEntry>, ErrorDto>>,
     },
     RestoreReflogEntry {
         reference: String,
         new_id: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ListRemotes {
-        reply: Sender<Result<Vec<RemoteInfo>, String>>,
+        reply: Sender<Result<Vec<RemoteInfo>, ErrorDto>>,
     },
     ListRemoteBranches {
         remote_name: String,
-        reply: Sender<Result<Vec<String>, String>>,
+        reply: Sender<Result<Vec<String>, ErrorDto>>,
     },
     GetCurrentUpstream {
-        reply: Sender<Result<Option<UpstreamInfo>, String>>,
+        reply: Sender<Result<Option<UpstreamInfo>, ErrorDto>>,
     },
     GetRemoteUpstreams {
         name: String,
-        reply: Sender<Result<Vec<UpstreamInfo>, String>>,
+        reply: Sender<Result<Vec<UpstreamInfo>, ErrorDto>>,
     },
     GetRemoteAuthMode {
         name: String,
-        reply: Sender<Result<Option<git_core::remote::RemoteAuthMode>, String>>,
+        reply: Sender<Result<Option<git_core::remote::RemoteAuthMode>, ErrorDto>>,
     },
     SaveHttpsCredential {
         remote_name: String,
         username: String,
         token: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ForgetHttpsCredential {
         remote_name: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     SetRemoteAuthMode {
         remote_name: String,
         mode: git_core::remote::RemoteAuthMode,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     AddRemote {
         name: String,
         fetch_url: String,
         push_url: Option<String>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     RenameRemote {
         old_name: String,
         new_name: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     UpdateRemoteUrls {
         name: String,
         fetch_url: String,
         push_url: Option<String>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     RemoveRemote {
         name: String,
         clear_upstreams: bool,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     SetCurrentUpstream {
         remote_name: String,
         remote_branch: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ClearCurrentUpstream {
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ListTags {
-        reply: Sender<Result<Vec<TagInfo>, String>>,
+        reply: Sender<Result<Vec<TagInfo>, ErrorDto>>,
     },
     CreateTag {
         name: String,
         message: Option<String>,
         target: Option<String>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     DeleteTag {
         name: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ListStashes {
-        reply: Sender<Result<Vec<StashEntry>, String>>,
+        reply: Sender<Result<Vec<StashEntry>, ErrorDto>>,
     },
     SaveStash {
         options: git_core::stash::StashOptions,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ApplyStash {
         index: usize,
         commit_id: String,
         restore_index: bool,
-        reply: Sender<Result<git_core::stash::StashApplyOutcome, String>>,
+        reply: Sender<Result<git_core::stash::StashApplyOutcome, ErrorDto>>,
     },
     PopStash {
         index: usize,
         commit_id: String,
         restore_index: bool,
-        reply: Sender<Result<git_core::stash::StashApplyOutcome, String>>,
+        reply: Sender<Result<git_core::stash::StashApplyOutcome, ErrorDto>>,
     },
     GetStashFiles {
         commit_id: String,
-        reply: Sender<Result<git_core::stash::StashFiles, String>>,
+        reply: Sender<Result<git_core::stash::StashFiles, ErrorDto>>,
     },
     DropStash {
         index: usize,
         commit_id: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     /// `operation_id` (`merge-<n>`) and `events`: a fast-forward's or squash's `post-merge`
     /// (#185).
@@ -472,102 +473,102 @@ pub(crate) enum Command {
         options: git_core::merge::MergeOptions,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<MergeOutcome, String>>,
+        reply: Sender<Result<MergeOutcome, ErrorDto>>,
     },
     GetMergeDefaults {
-        reply: Sender<Result<git_core::merge::MergeOptions, String>>,
+        reply: Sender<Result<git_core::merge::MergeOptions, ErrorDto>>,
     },
     #[allow(dead_code)]
     GetConflictHunks {
         path: String,
-        reply: Sender<Result<Vec<ConflictSegment>, String>>,
+        reply: Sender<Result<Vec<ConflictSegment>, ErrorDto>>,
     },
     #[allow(dead_code)]
     ResolveConflict {
         path: String,
         resolved_content: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     #[allow(dead_code)]
     AbortMerge {
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     #[allow(dead_code)]
     GetMergeMessage {
-        reply: Sender<Result<Option<String>, String>>,
+        reply: Sender<Result<Option<String>, ErrorDto>>,
     },
     ResolveAddDeleteConflict {
         path: String,
         choice: FileConflictChoice,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     MarkResolved {
         path: String,
         force: bool,
-        reply: Sender<Result<git_core::merge::MarkResolvedOutcome, String>>,
+        reply: Sender<Result<git_core::merge::MarkResolvedOutcome, ErrorDto>>,
     },
     ResolveWholeFile {
         path: String,
         side: git_core::merge::ConflictSide,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     PrepareDiffTool {
         path: String,
         source: git_core::tools::DiffSource,
-        reply: Sender<Result<git_core::tools::PreparedDiffTool, String>>,
+        reply: Sender<Result<git_core::tools::PreparedDiffTool, ErrorDto>>,
     },
     PrepareMergeTool {
         path: String,
-        reply: Sender<Result<git_core::tools::PreparedMergeTool, String>>,
+        reply: Sender<Result<git_core::tools::PreparedMergeTool, ErrorDto>>,
     },
     GetGitTools {
-        reply: Sender<Result<git_core::tools::GitTools, String>>,
+        reply: Sender<Result<git_core::tools::GitTools, ErrorDto>>,
     },
     /// Both sides of `path` in `source`, for the image preview (`MAX_PREVIEW_BYTES` each).
     GetFileSides {
         path: String,
         source: git_core::tools::DiffSource,
-        reply: Sender<Result<git_core::diff::FileSides, String>>,
+        reply: Sender<Result<git_core::diff::FileSides, ErrorDto>>,
     },
     ListRecentAuthors {
-        reply: Sender<Result<Vec<git_core::commit::SignatureInput>, String>>,
+        reply: Sender<Result<Vec<git_core::commit::SignatureInput>, ErrorDto>>,
     },
     CheckMergeTarget {
         path: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ReadFileVersion {
         path: String,
         version: git_core::tools::FileVersion,
-        reply: Sender<Result<Option<Vec<u8>>, String>>,
+        reply: Sender<Result<Option<Vec<u8>>, ErrorDto>>,
     },
     /// One folder of a commit's tree, or a filter's matches (#446).
     GetCommitTree {
         commit_id: String,
         dir: String,
         filter: Option<String>,
-        reply: Sender<Result<git_core::tree::TreeListing, String>>,
+        reply: Sender<Result<git_core::tree::TreeListing, ErrorDto>>,
     },
     GetFileAtCommit {
         commit_id: String,
         path: String,
-        reply: Sender<Result<git_core::tree::FileContent, String>>,
+        reply: Sender<Result<git_core::tree::FileContent, ErrorDto>>,
     },
     SaveFileVersion {
         commit_id: String,
         path: String,
         destination: std::path::PathBuf,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     RestoreFileVersion {
         commit_id: String,
         path: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     #[allow(dead_code)]
     CommitsSince {
         onto: String,
-        reply: Sender<Result<Vec<RebasePlanCommit>, String>>,
+        reply: Sender<Result<Vec<RebasePlanCommit>, ErrorDto>>,
     },
     #[allow(dead_code)]
     StartRebase {
@@ -575,30 +576,30 @@ pub(crate) enum Command {
         plan: Vec<RebasePlanEntry>,
         /// The one-click history edit this rebase runs, for its undo label (#473).
         edit: Option<HistoryEdit>,
-        reply: Sender<Result<RebaseStepResult, String>>,
+        reply: Sender<Result<RebaseStepResult, ErrorDto>>,
     },
     #[allow(dead_code)]
     RebaseContinue {
-        reply: Sender<Result<RebaseStepResult, String>>,
+        reply: Sender<Result<RebaseStepResult, ErrorDto>>,
     },
     #[allow(dead_code)]
     AbortRebase {
-        reply: Sender<Result<git_core::rebase::RebaseAbort, String>>,
+        reply: Sender<Result<git_core::rebase::RebaseAbort, ErrorDto>>,
     },
     FetchRemote {
         remote_name: String,
         prune: Option<bool>,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
-        reply: Sender<Result<String, String>>,
+        reply: Sender<Result<String, ErrorDto>>,
     },
     PullCurrentUpstream {
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
-        reply: Sender<Result<PullOutcome, String>>,
+        reply: Sender<Result<PullOutcome, ErrorDto>>,
     },
     GetHeadInfo {
-        reply: Sender<Result<git_core::repo::HeadInfo, String>>,
+        reply: Sender<Result<git_core::repo::HeadInfo, ErrorDto>>,
     },
     AmendCommit {
         message: String,
@@ -608,7 +609,7 @@ pub(crate) enum Command {
         trailers: Vec<git_core::commit::Trailer>,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
+        reply: Sender<Result<git_core::commit::CommitOutcome, ErrorDto>>,
     },
     /// The pick commands' `operation_id` (`pick-<n>`) and `events`: each clean step's
     /// `prepare-commit-msg`, signing and `post-commit` (#183).
@@ -617,26 +618,26 @@ pub(crate) enum Command {
         mainline: Option<u32>,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<git_core::pick::PickOutcome, String>>,
+        reply: Sender<Result<git_core::pick::PickOutcome, ErrorDto>>,
     },
     RevertCommit {
         commit_id: String,
         mainline: Option<u32>,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<git_core::pick::PickOutcome, String>>,
+        reply: Sender<Result<git_core::pick::PickOutcome, ErrorDto>>,
     },
     CherryPickMany {
         commit_ids: Vec<String>,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
+        reply: Sender<Result<git_core::pick::SequenceOutcome, ErrorDto>>,
     },
     RevertMany {
         commit_ids: Vec<String>,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
+        reply: Sender<Result<git_core::pick::SequenceOutcome, ErrorDto>>,
     },
     /// Commits the resolved step through the commit hooks (#133): `no_verify` skips the
     /// skippable ones, `operation_id` (`continue-<n>`) is what `cancel_transfer` stops, and
@@ -645,39 +646,39 @@ pub(crate) enum Command {
         no_verify: bool,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<git_core::pick::SequenceOutcome, String>>,
+        reply: Sender<Result<git_core::pick::SequenceOutcome, ErrorDto>>,
     },
     AbortSequence {
         /// For a terminal sequence: what the user confirmed (#281 review); a stored sequence
         /// ignores it.
         confirmed: Option<git_core::pick::ConfirmedAbort>,
-        reply: Sender<Result<git_core::pick::SequenceAbort, String>>,
+        reply: Sender<Result<git_core::pick::SequenceAbort, ErrorDto>>,
     },
     ResetToCommit {
         commit_id: String,
         mode: git_core::reset::ResetMode,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     /// `operation_id` (`checkout-<n>`) and `events`: `post-checkout` (#185).
     CheckoutCommit {
         commit_id: String,
         operation_id: cancel::OperationId,
         events: Sender<HookEvent>,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ForcePushCurrentBranch {
         remote_name: String,
         no_verify: bool,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
-        reply: Sender<Result<String, String>>,
+        reply: Sender<Result<String, ErrorDto>>,
     },
     PushCurrentBranch {
         remote_name: String,
         no_verify: bool,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
-        reply: Sender<Result<String, String>>,
+        reply: Sender<Result<String, ErrorDto>>,
     },
     PushTags {
         remote_name: String,
@@ -685,7 +686,7 @@ pub(crate) enum Command {
         no_verify: bool,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
-        reply: Sender<Result<String, String>>,
+        reply: Sender<Result<String, ErrorDto>>,
     },
     FetchAllRemotes {
         prune: Option<bool>,
@@ -694,7 +695,7 @@ pub(crate) enum Command {
         background: Option<background_fetch::BackgroundFetchOptions>,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
-        reply: Sender<Result<String, String>>,
+        reply: Sender<Result<String, ErrorDto>>,
     },
     PushBranch {
         remote_name: String,
@@ -704,7 +705,7 @@ pub(crate) enum Command {
         no_verify: bool,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
-        reply: Sender<Result<String, String>>,
+        reply: Sender<Result<String, ErrorDto>>,
     },
     DeleteRemoteBranch {
         remote_name: String,
@@ -712,7 +713,7 @@ pub(crate) enum Command {
         no_verify: bool,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
-        reply: Sender<Result<String, String>>,
+        reply: Sender<Result<String, ErrorDto>>,
     },
     DeleteRemoteTag {
         remote_name: String,
@@ -720,41 +721,41 @@ pub(crate) enum Command {
         no_verify: bool,
         operation_id: cancel::OperationId,
         events: Sender<TransferEvent>,
-        reply: Sender<Result<String, String>>,
+        reply: Sender<Result<String, ErrorDto>>,
     },
     DetectForgeRepository {
-        reply: Sender<Result<Vec<ForgeRepository>, String>>,
+        reply: Sender<Result<Vec<ForgeRepository>, ErrorDto>>,
     },
     SaveForgeToken {
         provider: ForgeProvider,
         account: String,
         token: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ForgetForgeToken {
         provider: ForgeProvider,
         account: String,
-        reply: Sender<Result<(), String>>,
+        reply: Sender<Result<(), ErrorDto>>,
     },
     ListPullRequests {
         remote_name: String,
         account: String,
-        reply: Sender<Result<PullRequestList, String>>,
+        reply: Sender<Result<PullRequestList, ErrorDto>>,
     },
     CreatePullRequest {
         remote_name: String,
         account: String,
         create: CreatePullRequest,
-        reply: Sender<Result<PullRequest, String>>,
+        reply: Sender<Result<PullRequest, ErrorDto>>,
     },
     GetUndoState {
-        reply: Sender<Result<UndoState, String>>,
+        reply: Sender<Result<UndoState, ErrorDto>>,
     },
     Undo {
-        reply: Sender<Result<UndoOutcome, String>>,
+        reply: Sender<Result<UndoOutcome, ErrorDto>>,
     },
     Redo {
-        reply: Sender<Result<UndoOutcome, String>>,
+        reply: Sender<Result<UndoOutcome, ErrorDto>>,
     },
 }
 
@@ -863,7 +864,7 @@ impl Worker {
         A: ForgeApi + Send + 'static,
     {
         let repo_path = path;
-        let repo = git_core::repo::open(&repo_path).map_err(|e| e.to_string())?;
+        let repo = git_core::repo::open(&repo_path).map_err(|error| error.to_string())?;
         let workdir = repo.workdir().map(std::path::Path::to_path_buf);
         let (tx, rx) = mpsc::channel::<Command>();
         let cancelled = CancelRegistry::default();
@@ -1418,7 +1419,7 @@ impl Worker {
                             history::abort_sequence_for_merge(&repo, &sequence_store, reply)
                         } else if let Some(refusal) = history::abort_merge_refusal(&repo) {
                             // A terminal sequence: only AbortSequence ends it (#253).
-                            let _ = reply.send(Err(refusal));
+                            let _ = reply.send(Err(refusal.into()));
                         } else {
                             merge::abort(&repo, reply)
                         }
@@ -1961,6 +1962,21 @@ impl PauseControl {
 }
 
 impl WorkerHandle {
+    /// Sends the command `build` makes around a fresh reply channel and waits for its reply.
+    /// Every request goes through here, so a stopped worker always answers the same
+    /// `ErrorKind::WorkerStopped` errors (#527).
+    pub(crate) fn request<T>(
+        &self,
+        build: impl FnOnce(Sender<Result<T, ErrorDto>>) -> Command,
+    ) -> Result<T, ErrorDto> {
+        let (reply, rx) = mpsc::channel();
+        self.tx
+            .send(build(reply))
+            .map_err(|_| ErrorDto::worker_stopped())?;
+        rx.recv()
+            .map_err(|_| ErrorDto::worker_stopped_before_replying())?
+    }
+
     /// True if the worker thread behind this handle is still running.
     ///
     /// `std::sync::mpsc::Sender::send` only ever fails once the paired `Receiver` has been

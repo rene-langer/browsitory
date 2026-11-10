@@ -512,7 +512,7 @@ fn push_and_force_push_refuse_up_front_when_push_default_needs_a_choice() {
 
     for result in [pushed, forced] {
         let message = result.expect_err("must not start a transfer");
-        assert!(message.contains("Push to…"), "{message}");
+        assert!(message.message.contains("Push to…"), "{message}");
     }
     assert_eq!(bare_main(), before);
     let upstream = handle
@@ -627,12 +627,8 @@ fn pull_fetch_failure_returns_only_a_sanitized_error() {
         .pull_current_upstream(event_tx)
         .expect_err("pull should fail while fetching");
 
-    assert_eq!(error, "pull failed");
-    assert!(!error.contains("alice-secret"));
-    assert_eq!(
-        crate::wire::ErrorKind::of(&error),
-        crate::wire::ErrorKind::PullFailed
-    );
+    assert_eq!(error, crate::wire::ErrorDto::pull_failed());
+    assert!(!error.message.contains("alice-secret"));
 }
 
 #[test]
@@ -665,11 +661,8 @@ fn pull_with_untracked_file_reports_dirty_worktree() {
         .pull_current_upstream(event_tx)
         .expect_err("pull should refuse a dirty worktree");
 
-    assert_eq!(error, "cannot pull with a dirty worktree");
-    assert_eq!(
-        crate::wire::ErrorKind::of(&error),
-        crate::wire::ErrorKind::DirtyWorktree
-    );
+    assert_eq!(error.message, "cannot pull with a dirty worktree");
+    assert_eq!(error.kind, crate::wire::ErrorKind::DirtyWorktree);
 }
 
 #[test]
@@ -988,4 +981,105 @@ fn a_remote_that_never_answers_is_given_up_after_the_connect_limit_and_skipped_n
         [("silent".to_string(), TransferErrorKind::TransferFailed)]
     );
     assert!(server.accepted.try_recv().is_err(), "no second connect");
+}
+
+/// A `CredentialStore` fake whose tokens the test can still read after the worker took it.
+#[derive(Clone, Default)]
+struct SharedCredentialStore(Arc<Mutex<HashMap<CredentialKey, String>>>);
+
+impl CredentialStore for SharedCredentialStore {
+    fn get(&self, key: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
+        Ok(self.0.lock().unwrap().get(key).cloned())
+    }
+
+    fn set(&self, key: &CredentialKey, token: &str) -> Result<(), CredentialStoreError> {
+        self.0.lock().unwrap().insert(key.clone(), token.to_owned());
+        Ok(())
+    }
+
+    fn delete(&self, key: &CredentialKey) -> Result<(), CredentialStoreError> {
+        self.0.lock().unwrap().remove(key);
+        Ok(())
+    }
+}
+
+/// Each remote-management command replies, and an HTTPS token is saved for the remote it
+/// names (#527: the mutation run found these replies untested).
+#[test]
+fn remote_management_round_trips_through_the_worker() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    commit_all(&repo, "base");
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let store = SharedCredentialStore::default();
+    let worker = Worker::spawn_with(
+        dir.path().to_path_buf(),
+        store.clone(),
+        super::forge::FakeForgeApi::queue(vec![]),
+    )
+    .unwrap();
+    let handle = worker.handle();
+    let first = "https://first.example.com/repo.git";
+    let second = "https://second.example.com/repo.git";
+
+    handle
+        .add_remote("origin".into(), first.into(), None)
+        .unwrap();
+    handle
+        .add_remote("other".into(), second.into(), None)
+        .unwrap();
+    handle
+        .rename_remote("other".into(), "second".into())
+        .unwrap();
+    let remotes = handle.list_remotes().unwrap();
+    let names: Vec<_> = remotes.iter().map(|remote| remote.name.as_str()).collect();
+    assert_eq!(names, ["origin", "second"]);
+    handle
+        .update_remote_urls("second".into(), second.into(), Some(first.into()))
+        .unwrap();
+    let pushes: Vec<_> = handle
+        .list_remotes()
+        .unwrap()
+        .into_iter()
+        .map(|remote| remote.push_url)
+        .collect();
+    assert_eq!(pushes, [None, Some(first.to_string())]);
+    assert_eq!(handle.get_remote_auth_mode("second".into()).unwrap(), None);
+
+    handle
+        .save_https_credential("second".into(), "rene".into(), "token".into())
+        .unwrap();
+    let key = CredentialKey::for_https(second, "rene").unwrap();
+    assert_eq!(
+        store.0.lock().unwrap().keys().cloned().collect::<Vec<_>>(),
+        [key]
+    );
+    let https = git_core::remote::RemoteAuthMode::HttpsToken {
+        username: "rene".into(),
+    };
+    handle
+        .set_remote_auth_mode("second".into(), https.clone())
+        .unwrap();
+    assert_eq!(
+        handle.get_remote_auth_mode("second".into()).unwrap(),
+        Some(https)
+    );
+    handle.forget_https_credential("second".into()).unwrap();
+    assert!(store.0.lock().unwrap().is_empty());
+
+    {
+        let mut config = repo.config().unwrap();
+        config
+            .set_str(&format!("branch.{branch}.remote"), "origin")
+            .unwrap();
+        config
+            .set_str(
+                &format!("branch.{branch}.merge"),
+                &format!("refs/heads/{branch}"),
+            )
+            .unwrap();
+    }
+    assert!(handle.get_current_upstream().unwrap().is_some());
+    handle.clear_current_upstream().unwrap();
+    assert_eq!(handle.get_current_upstream().unwrap(), None);
 }

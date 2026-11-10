@@ -16,6 +16,7 @@
 //! A remote that could not be reached is skipped by later background fetches for a while: the
 //! interval doubles with each failure in a row, up to an hour (`Memory`). A remote whose
 //! abandoned helper is still connecting is skipped too, so at most one helper per remote lingers.
+use crate::wire::ErrorDto;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -212,7 +213,7 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
     options: BackgroundFetchOptions,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
     const OPERATION: TransferOperation = TransferOperation::BackgroundFetch;
     let _ = events.send(TransferEvent::Started {

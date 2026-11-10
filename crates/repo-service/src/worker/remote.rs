@@ -1,9 +1,10 @@
+use crate::wire::ErrorDto;
 use std::sync::mpsc::Sender;
 
 use git_core::remote::{PullOutcome, RemoteInfo, TransferOperation, UpstreamInfo};
 
 use super::{Command, TransferEvent, WorkerHandle};
-use crate::credentials::{CredentialService, CredentialStore, CredentialStoreError};
+use crate::credentials::{CredentialService, CredentialStore};
 
 struct ChannelReporter {
     events: Sender<TransferEvent>,
@@ -21,26 +22,25 @@ impl git_core::remote::TransferReporter for ChannelReporter {
     }
 }
 
-pub(super) fn list(repo: &git2::Repository, reply: Sender<Result<Vec<RemoteInfo>, String>>) {
-    let _ = reply.send(git_core::remote::list_remotes(repo).map_err(|error| error.to_string()));
+pub(super) fn list(repo: &git2::Repository, reply: Sender<Result<Vec<RemoteInfo>, ErrorDto>>) {
+    let _ = reply.send(git_core::remote::list_remotes(repo).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn list_branches(
     repo: &git2::Repository,
     remote_name: String,
-    reply: Sender<Result<Vec<String>, String>>,
+    reply: Sender<Result<Vec<String>, ErrorDto>>,
 ) {
     let _ = reply.send(
-        git_core::remote::list_remote_branches(repo, &remote_name)
-            .map_err(|error| error.to_string()),
+        git_core::remote::list_remote_branches(repo, &remote_name).map_err(ErrorDto::from_error),
     );
 }
 
 pub(super) fn current_upstream(
     repo: &git2::Repository,
-    reply: Sender<Result<Option<UpstreamInfo>, String>>,
+    reply: Sender<Result<Option<UpstreamInfo>, ErrorDto>>,
 ) {
-    let _ = reply.send(git_core::remote::current_upstream(repo).map_err(|error| error.to_string()));
+    let _ = reply.send(git_core::remote::current_upstream(repo).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn add(
@@ -48,22 +48,21 @@ pub(super) fn add(
     name: String,
     fetch_url: String,
     push_url: Option<String>,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::remote::add_remote(repo, &name, &fetch_url, push_url.as_deref())
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
 pub(super) fn rename(
     repo: &git2::Repository,
     old_name: String,
     new_name: String,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
-        git_core::remote::rename_remote(repo, &old_name, &new_name)
-            .map_err(|error| error.to_string()),
+        git_core::remote::rename_remote(repo, &old_name, &new_name).map_err(ErrorDto::from_error),
     );
 }
 pub(super) fn update_urls(
@@ -71,29 +70,29 @@ pub(super) fn update_urls(
     name: String,
     fetch_url: String,
     push_url: Option<String>,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::remote::update_remote_urls(repo, &name, &fetch_url, push_url.as_deref())
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
 pub(super) fn upstreams(
     repo: &git2::Repository,
     name: String,
-    reply: Sender<Result<Vec<UpstreamInfo>, String>>,
+    reply: Sender<Result<Vec<UpstreamInfo>, ErrorDto>>,
 ) {
-    let _ = reply
-        .send(git_core::remote::remote_upstreams(repo, &name).map_err(|error| error.to_string()));
+    let _ =
+        reply.send(git_core::remote::remote_upstreams(repo, &name).map_err(ErrorDto::from_error));
 }
 pub(super) fn auth_mode(
     repo: &git2::Repository,
     name: String,
-    reply: Sender<Result<Option<git_core::remote::RemoteAuthMode>, String>>,
+    reply: Sender<Result<Option<git_core::remote::RemoteAuthMode>, ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::remote::remote_auth_profile(repo, &name)
-            .map_err(|_| "could not read remote authentication settings".to_string()),
+            .map_err(|_| "could not read remote authentication settings".into()),
     );
 }
 pub(super) fn save_https<S: CredentialStore>(
@@ -102,20 +101,20 @@ pub(super) fn save_https<S: CredentialStore>(
     remote_name: String,
     username: String,
     token: String,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let result = git_core::remote::list_remotes(repo)
-        .map_err(|_| "could not find remote".to_string())
+        .map_err(|_| ErrorDto::from("could not find remote"))
         .and_then(|remotes| {
             remotes
                 .into_iter()
                 .find(|remote| remote.name == remote_name)
-                .ok_or_else(|| "could not find remote".to_string())
+                .ok_or_else(|| "could not find remote".into())
         })
         .and_then(|remote| {
             credentials
                 .save_https(&remote.fetch_url, &username, &token)
-                .map_err(credential_operation_error)
+                .map_err(ErrorDto::from)
         });
     let _ = reply.send(result);
 }
@@ -123,7 +122,7 @@ pub(super) fn forget_https<S: CredentialStore>(
     repo: &git2::Repository,
     credentials: &CredentialService<S>,
     remote_name: String,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let result = (|| {
         let profile = git_core::remote::remote_auth_profile(repo, &remote_name)
@@ -138,28 +137,20 @@ pub(super) fn forget_https<S: CredentialStore>(
             .ok_or_else(|| "could not find remote".to_string())?;
         credentials
             .forget_https(&remote.fetch_url, &username)
-            .map_err(credential_operation_error)
+            .map_err(ErrorDto::from)
     })();
     let _ = reply.send(result);
 }
 
-fn credential_operation_error(error: CredentialStoreError) -> String {
-    match error {
-        CredentialStoreError::Keychain(diagnostic) => {
-            crate::wire::credential_store_failure_message(&diagnostic)
-        }
-        CredentialStoreError::InvalidHttpsUrl => error.to_string(),
-    }
-}
 pub(super) fn set_auth_mode(
     repo: &git2::Repository,
     remote_name: String,
     mode: git_core::remote::RemoteAuthMode,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::remote::set_remote_auth_profile(repo, &remote_name, mode)
-            .map_err(|_| "could not configure remote authentication".to_string()),
+            .map_err(|_| "could not configure remote authentication".into()),
     );
 }
 
@@ -167,14 +158,14 @@ pub(super) fn remove(
     repo: &git2::Repository,
     name: String,
     clear_upstreams: bool,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let result = if clear_upstreams {
         git_core::remote::remove_remote_and_clear_upstreams(repo, &name)
     } else {
         git_core::remote::remove_remote(repo, &name)
     }
-    .map_err(|error| error.to_string());
+    .map_err(ErrorDto::from_error);
     let _ = reply.send(result);
 }
 
@@ -182,16 +173,16 @@ pub(super) fn set_current_upstream(
     repo: &git2::Repository,
     remote_name: String,
     remote_branch: String,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::remote::set_current_upstream(repo, &remote_name, &remote_branch)
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
-pub(super) fn clear_current_upstream(repo: &git2::Repository, reply: Sender<Result<(), String>>) {
-    let _ = reply
-        .send(git_core::remote::clear_current_upstream(repo).map_err(|error| error.to_string()));
+pub(super) fn clear_current_upstream(repo: &git2::Repository, reply: Sender<Result<(), ErrorDto>>) {
+    let _ =
+        reply.send(git_core::remote::clear_current_upstream(repo).map_err(ErrorDto::from_error));
 }
 
 /// The per-operation state every cancellable operation carries: the ID the UI tracks the
@@ -257,7 +248,7 @@ pub(super) fn fetch<S: CredentialStore>(
     prune: Option<bool>,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
     let _ = events.send(TransferEvent::Started {
         operation_id: op.id.clone(),
@@ -291,7 +282,7 @@ pub(super) fn pull<S: CredentialStore>(
     credentials: &CredentialService<S>,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<PullOutcome, String>>,
+    reply: Sender<Result<PullOutcome, ErrorDto>>,
 ) {
     let _ = events.send(TransferEvent::Started {
         operation_id: op.id.clone(),
@@ -357,7 +348,7 @@ pub(super) fn pull<S: CredentialStore>(
         .as_ref()
         .err()
         .map(|error| error.transfer_error_kind());
-    let _ = reply.send(result.map_err(pull_error_message));
+    let _ = reply.send(result.map_err(pull_error));
     op.clear();
     let _ = events.send(TransferEvent::Completed {
         operation_id: op.id,
@@ -368,9 +359,9 @@ pub(super) fn pull<S: CredentialStore>(
 }
 
 /// What a failed pull says: git-core's own text for the refusals and errors whose text is
-/// static or names only a path in the work tree, "pull failed" for anything else (a transport
-/// error may quote a URL with credentials).
-fn pull_error_message(error: git_core::remote::RemoteError) -> String {
+/// static or names only a path in the work tree, [`ErrorDto::pull_failed`] for anything else (a
+/// transport error may quote a URL with credentials).
+fn pull_error(error: git_core::remote::RemoteError) -> ErrorDto {
     match error {
         git_core::remote::RemoteError::DirtyWorktree
         | git_core::remote::RemoteError::NoUpstream
@@ -383,8 +374,8 @@ fn pull_error_message(error: git_core::remote::RemoteError) -> String {
         // A file another program holds open; the pull was rolled back (#321).
         | git_core::remote::RemoteError::HeldOpen(_)
         // Static, secret-free text: the user asked for this by pressing Cancel.
-        | git_core::remote::RemoteError::Cancelled => error.to_string(),
-        _ => crate::wire::PULL_FAILED.to_string(),
+        | git_core::remote::RemoteError::Cancelled => ErrorDto::from_error(error),
+        _ => ErrorDto::pull_failed(),
     }
 }
 
@@ -413,11 +404,11 @@ pub(super) fn push_current<S: CredentialStore>(
     no_verify: bool,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
     if let Some(message) = unresolved_push_target(repo, &remote_name) {
         op.clear();
-        let _ = reply.send(Err(message));
+        let _ = reply.send(Err(message.into()));
         return;
     }
     let _ = events.send(TransferEvent::Started {
@@ -451,11 +442,11 @@ pub(super) fn force_push_branch<S: CredentialStore>(
     no_verify: bool,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
     if let Some(message) = unresolved_push_target(repo, &remote_name) {
         op.clear();
-        let _ = reply.send(Err(message));
+        let _ = reply.send(Err(message.into()));
         return;
     }
     let _ = events.send(TransferEvent::Started {
@@ -491,7 +482,7 @@ pub(super) fn push_tags<S: CredentialStore>(
     no_verify: bool,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
     let _ = events.send(TransferEvent::Started {
         operation_id: op.id.clone(),
@@ -535,7 +526,7 @@ pub(super) fn fetch_all<S: CredentialStore>(
     prune: Option<bool>,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
     const OPERATION: TransferOperation = TransferOperation::FetchAll;
     let _ = events.send(TransferEvent::Started {
@@ -598,7 +589,7 @@ pub(super) fn push_branch<S: CredentialStore>(
     target: PushTarget,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
     let _ = events.send(TransferEvent::Started {
         operation_id: op.id.clone(),
@@ -638,7 +629,7 @@ pub(super) fn delete_remote_branch<S: CredentialStore>(
     no_verify: bool,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
     let _ = events.send(TransferEvent::Started {
         operation_id: op.id.clone(),
@@ -674,7 +665,7 @@ pub(super) fn delete_remote_tag<S: CredentialStore>(
     no_verify: bool,
     op: TransferOp,
     events: Sender<TransferEvent>,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
     let _ = events.send(TransferEvent::Started {
         operation_id: op.id.clone(),
@@ -708,39 +699,29 @@ impl WorkerHandle {
         remote_name: String,
         prune: Option<bool>,
         events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
+    ) -> Result<String, ErrorDto> {
         let operation_id = self.cancelled.allocate("fetch");
-        self.tx
-            .send(Command::FetchRemote {
-                remote_name,
-                prune,
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+        self.request(|reply| Command::FetchRemote {
+            remote_name,
+            prune,
+            operation_id,
+            events,
+            reply,
+        })
     }
     pub fn fetch_all_remotes(
         &self,
         prune: Option<bool>,
         events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
+    ) -> Result<String, ErrorDto> {
         let operation_id = self.cancelled.allocate("fetch-all");
-        self.tx
-            .send(Command::FetchAllRemotes {
-                prune,
-                background: None,
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+        self.request(|reply| Command::FetchAllRemotes {
+            prune,
+            background: None,
+            operation_id,
+            events,
+            reply,
+        })
     }
     /// Starts a quiet Fetch all for the "Fetch automatically" setting, every `interval_minutes`,
     /// reported as `TransferOperation::BackgroundFetch`. Returns `None`, without queueing
@@ -755,7 +736,7 @@ impl WorkerHandle {
         prune: Option<bool>,
         interval_minutes: u32,
         events: Sender<TransferEvent>,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, ErrorDto> {
         self.background_fetch_with(
             super::background_fetch::BackgroundFetchOptions::new(prune, interval_minutes),
             events,
@@ -766,23 +747,18 @@ impl WorkerHandle {
         &self,
         options: super::background_fetch::BackgroundFetchOptions,
         events: Sender<TransferEvent>,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, ErrorDto> {
         let Some(operation_id) = self.cancelled.allocate_if_idle("background-fetch") else {
             return Ok(None);
         };
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::FetchAllRemotes {
-                prune: options.prune,
-                background: Some(options),
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
-            .map(Some)
+        self.request(|reply| Command::FetchAllRemotes {
+            prune: options.prune,
+            background: Some(options),
+            operation_id,
+            events,
+            reply,
+        })
+        .map(Some)
     }
     pub fn push_branch(
         &self,
@@ -792,23 +768,18 @@ impl WorkerHandle {
         set_upstream: bool,
         no_verify: bool,
         events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
+    ) -> Result<String, ErrorDto> {
         let operation_id = self.cancelled.allocate("push");
-        self.tx
-            .send(Command::PushBranch {
-                remote_name,
-                local_branch,
-                remote_branch,
-                set_upstream,
-                no_verify,
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+        self.request(|reply| Command::PushBranch {
+            remote_name,
+            local_branch,
+            remote_branch,
+            set_upstream,
+            no_verify,
+            operation_id,
+            events,
+            reply,
+        })
     }
     pub fn delete_remote_branch(
         &self,
@@ -816,21 +787,16 @@ impl WorkerHandle {
         branch_name: String,
         no_verify: bool,
         events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
+    ) -> Result<String, ErrorDto> {
         let operation_id = self.cancelled.allocate("delete-remote");
-        self.tx
-            .send(Command::DeleteRemoteBranch {
-                remote_name,
-                branch_name,
-                no_verify,
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+        self.request(|reply| Command::DeleteRemoteBranch {
+            remote_name,
+            branch_name,
+            no_verify,
+            operation_id,
+            events,
+            reply,
+        })
     }
     pub fn delete_remote_tag(
         &self,
@@ -838,77 +804,57 @@ impl WorkerHandle {
         tag_name: String,
         no_verify: bool,
         events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
+    ) -> Result<String, ErrorDto> {
         let operation_id = self.cancelled.allocate("delete-remote");
-        self.tx
-            .send(Command::DeleteRemoteTag {
-                remote_name,
-                tag_name,
-                no_verify,
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+        self.request(|reply| Command::DeleteRemoteTag {
+            remote_name,
+            tag_name,
+            no_verify,
+            operation_id,
+            events,
+            reply,
+        })
     }
     pub fn pull_current_upstream(
         &self,
         events: Sender<TransferEvent>,
-    ) -> Result<PullOutcome, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
+    ) -> Result<PullOutcome, ErrorDto> {
         let operation_id = self.cancelled.allocate("pull");
-        self.tx
-            .send(Command::PullCurrentUpstream {
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+        self.request(|reply| Command::PullCurrentUpstream {
+            operation_id,
+            events,
+            reply,
+        })
     }
     pub fn push_current_branch(
         &self,
         remote_name: String,
         no_verify: bool,
         events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
+    ) -> Result<String, ErrorDto> {
         let operation_id = self.cancelled.allocate("push");
-        self.tx
-            .send(Command::PushCurrentBranch {
-                remote_name,
-                no_verify,
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+        self.request(|reply| Command::PushCurrentBranch {
+            remote_name,
+            no_verify,
+            operation_id,
+            events,
+            reply,
+        })
     }
     pub fn force_push_current_branch(
         &self,
         remote_name: String,
         no_verify: bool,
         events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
+    ) -> Result<String, ErrorDto> {
         let operation_id = self.cancelled.allocate("force-push");
-        self.tx
-            .send(Command::ForcePushCurrentBranch {
-                remote_name,
-                no_verify,
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+        self.request(|reply| Command::ForcePushCurrentBranch {
+            remote_name,
+            no_verify,
+            operation_id,
+            events,
+            reply,
+        })
     }
     pub fn push_tags(
         &self,
@@ -916,197 +862,123 @@ impl WorkerHandle {
         names: Vec<String>,
         no_verify: bool,
         events: Sender<TransferEvent>,
-    ) -> Result<String, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
+    ) -> Result<String, ErrorDto> {
         let operation_id = self.cancelled.allocate("push");
-        self.tx
-            .send(Command::PushTags {
-                remote_name,
-                names,
-                no_verify,
-                operation_id,
-                events,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+        self.request(|reply| Command::PushTags {
+            remote_name,
+            names,
+            no_verify,
+            operation_id,
+            events,
+            reply,
+        })
     }
-    pub fn list_remotes(&self) -> Result<Vec<RemoteInfo>, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::ListRemotes { reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn list_remotes(&self) -> Result<Vec<RemoteInfo>, ErrorDto> {
+        self.request(|reply| Command::ListRemotes { reply })
     }
-    pub fn list_remote_branches(&self, remote_name: String) -> Result<Vec<String>, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::ListRemoteBranches { remote_name, reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn list_remote_branches(&self, remote_name: String) -> Result<Vec<String>, ErrorDto> {
+        self.request(|reply| Command::ListRemoteBranches { remote_name, reply })
     }
-    pub fn get_current_upstream(&self) -> Result<Option<UpstreamInfo>, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetCurrentUpstream { reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn get_current_upstream(&self) -> Result<Option<UpstreamInfo>, ErrorDto> {
+        self.request(|reply| Command::GetCurrentUpstream { reply })
     }
-    pub fn get_remote_upstreams(&self, name: String) -> Result<Vec<UpstreamInfo>, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetRemoteUpstreams { name, reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn get_remote_upstreams(&self, name: String) -> Result<Vec<UpstreamInfo>, ErrorDto> {
+        self.request(|reply| Command::GetRemoteUpstreams { name, reply })
     }
     pub fn get_remote_auth_mode(
         &self,
         name: String,
-    ) -> Result<Option<git_core::remote::RemoteAuthMode>, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetRemoteAuthMode { name, reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<Option<git_core::remote::RemoteAuthMode>, ErrorDto> {
+        self.request(|reply| Command::GetRemoteAuthMode { name, reply })
     }
     pub fn save_https_credential(
         &self,
         remote_name: String,
         username: String,
         token: String,
-    ) -> Result<(), String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::SaveHttpsCredential {
-                remote_name,
-                username,
-                token,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::SaveHttpsCredential {
+            remote_name,
+            username,
+            token,
+            reply,
+        })
     }
-    pub fn forget_https_credential(&self, remote_name: String) -> Result<(), String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::ForgetHttpsCredential { remote_name, reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn forget_https_credential(&self, remote_name: String) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::ForgetHttpsCredential { remote_name, reply })
     }
     pub fn set_remote_auth_mode(
         &self,
         remote_name: String,
         mode: git_core::remote::RemoteAuthMode,
-    ) -> Result<(), String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::SetRemoteAuthMode {
-                remote_name,
-                mode,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::SetRemoteAuthMode {
+            remote_name,
+            mode,
+            reply,
+        })
     }
     pub fn add_remote(
         &self,
         name: String,
         fetch_url: String,
         push_url: Option<String>,
-    ) -> Result<(), String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::AddRemote {
-                name,
-                fetch_url,
-                push_url,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::AddRemote {
+            name,
+            fetch_url,
+            push_url,
+            reply,
+        })
     }
-    pub fn rename_remote(&self, old_name: String, new_name: String) -> Result<(), String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::RenameRemote {
-                old_name,
-                new_name,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn rename_remote(&self, old_name: String, new_name: String) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::RenameRemote {
+            old_name,
+            new_name,
+            reply,
+        })
     }
     pub fn update_remote_urls(
         &self,
         name: String,
         fetch_url: String,
         push_url: Option<String>,
-    ) -> Result<(), String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::UpdateRemoteUrls {
-                name,
-                fetch_url,
-                push_url,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::UpdateRemoteUrls {
+            name,
+            fetch_url,
+            push_url,
+            reply,
+        })
     }
-    pub fn remove_remote(&self, name: String, clear_upstreams: bool) -> Result<(), String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::RemoveRemote {
-                name,
-                clear_upstreams,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn remove_remote(&self, name: String, clear_upstreams: bool) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::RemoveRemote {
+            name,
+            clear_upstreams,
+            reply,
+        })
     }
     pub fn set_current_upstream(
         &self,
         remote_name: String,
         remote_branch: String,
-    ) -> Result<(), String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::SetCurrentUpstream {
-                remote_name,
-                remote_branch,
-                reply,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::SetCurrentUpstream {
+            remote_name,
+            remote_branch,
+            reply,
+        })
     }
-    pub fn clear_current_upstream(&self) -> Result<(), String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::ClearCurrentUpstream { reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn clear_current_upstream(&self) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::ClearCurrentUpstream { reply })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{credential_operation_error, pull_error_message};
+    use super::pull_error;
     use crate::credentials::CredentialStoreError;
+    use crate::wire::{ErrorDto, ErrorKind};
 
     /// A pull stopped at a file another program holds open names it (#321), not "pull failed".
     #[test]
@@ -1117,7 +989,7 @@ mod tests {
         });
 
         assert_eq!(
-            pull_error_message(error),
+            pull_error(error).message,
             "'d/f.txt' is open in another program. Close it, then try again."
         );
     }
@@ -1130,38 +1002,44 @@ mod tests {
         ));
 
         assert_eq!(
-            pull_error_message(error),
+            pull_error(error).message,
             "Can't read core.ignorecase from the Git config: failed to parse 'maybe' as a \
              boolean. Set it to true or false (or remove it), then try again."
         );
     }
 
     #[test]
-    fn credential_operation_error_keeps_the_backend_diagnostic() {
+    fn a_credential_store_failure_keeps_the_backend_diagnostic() {
         let error =
             CredentialStoreError::Keychain("CredWrite failed with Windows error 1312".to_owned());
 
-        let message = credential_operation_error(error);
+        let error = ErrorDto::from(error);
 
         assert_eq!(
-            message,
+            error.message,
             "credential keychain failure: CredWrite failed with Windows error 1312"
         );
-        assert_eq!(
-            crate::wire::ErrorKind::of(&message),
-            crate::wire::ErrorKind::CredentialStoreFailure
-        );
+        assert_eq!(error.kind, ErrorKind::CredentialStoreFailure);
     }
 
     /// #496: a cancelled pull answers `Cancelled`, so the frontend leaves it to the pull's
-    /// terminal transfer event ("Pull cancelled.").
+    /// terminal transfer event ("Pull cancelled."); a refused one `DirtyWorktree`; a transport
+    /// failure `PullFailed`, without its text.
     #[test]
-    fn a_cancelled_pull_answers_the_cancelled_kind() {
-        let message = pull_error_message(git_core::remote::RemoteError::Cancelled);
-
+    fn a_pull_error_has_its_kind() {
+        use git_core::remote::RemoteError;
         assert_eq!(
-            crate::wire::ErrorKind::of(&message),
-            crate::wire::ErrorKind::Cancelled
+            pull_error(RemoteError::Cancelled).kind,
+            ErrorKind::Cancelled
         );
+        assert_eq!(
+            pull_error(RemoteError::DirtyWorktree).kind,
+            ErrorKind::DirtyWorktree
+        );
+        assert_eq!(pull_error(RemoteError::NoUpstream).kind, ErrorKind::Other);
+        let failed = pull_error(RemoteError::Git(git2::Error::from_str(
+            "https://user:secret@example.com/repo.git: 403",
+        )));
+        assert_eq!(failed, ErrorDto::pull_failed());
     }
 }

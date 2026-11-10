@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     CreatePullRequestDto, ForgeProviderDto, ForgeRepositoryDto, PullRequestDto, PullRequestListDto,
 };
@@ -9,13 +10,13 @@ use super::{worker_handle, RepoPathParams, Repos};
 pub(super) fn detect_forge_repository(
     params: RepoPathParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let repositories: Vec<ForgeRepositoryDto> = worker_handle(repos, &params.repo_path)?
         .detect_forge_repository()?
         .into_iter()
         .map(ForgeRepositoryDto::from)
         .collect();
-    serde_json::to_value(repositories).map_err(|error| error.to_string())
+    serde_json::to_value(repositories).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -27,7 +28,7 @@ pub(super) struct ForgeTokenParams {
     token: String,
 }
 
-pub(super) fn save_forge_token(params: ForgeTokenParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn save_forge_token(params: ForgeTokenParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.save_forge_token(
         params.provider.into(),
         params.account,
@@ -47,7 +48,7 @@ pub(super) struct ForgetForgeTokenParams {
 pub(super) fn forget_forge_token(
     params: ForgetForgeTokenParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?
         .forget_forge_token(params.provider.into(), params.account)?;
     Ok(Value::Null)
@@ -64,10 +65,10 @@ pub(super) struct ListPullRequestsParams {
 pub(super) fn list_pull_requests(
     params: ListPullRequestsParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let list = worker_handle(repos, &params.repo_path)?
         .list_pull_requests(params.remote_name, params.account)?;
-    serde_json::to_value(PullRequestListDto::from(list)).map_err(|error| error.to_string())
+    serde_json::to_value(PullRequestListDto::from(list)).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -82,11 +83,11 @@ pub(super) struct CreatePullRequestParams {
 pub(super) fn create_pull_request(
     params: CreatePullRequestParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let created = worker_handle(repos, &params.repo_path)?.create_pull_request(
         params.remote_name,
         params.account,
         params.pull_request.into(),
     )?;
-    serde_json::to_value(PullRequestDto::from(created)).map_err(|error| error.to_string())
+    serde_json::to_value(PullRequestDto::from(created)).map_err(ErrorDto::from_error)
 }

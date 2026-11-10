@@ -56,7 +56,10 @@ fn cancel_transfer_stops_a_running_pre_commit() {
     let result = handle.commit("msg".into(), false, Vec::new(), events_tx);
 
     cancel_thread.join().unwrap();
-    assert_eq!(result.unwrap_err(), "The pre-commit hook was cancelled.");
+    assert_eq!(
+        result.unwrap_err(),
+        crate::wire::ErrorDto::from("The pre-commit hook was cancelled.")
+    );
     // Generous bound: only proves the hook's `sleep 30` was not waited out.
     assert!(started.elapsed() < Duration::from_secs(25));
 }

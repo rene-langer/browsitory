@@ -22,6 +22,24 @@ describe("useAppState", () => {
     expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
   });
 
+  // #527: a forge token's keychain failure gets the same remediation as a remote's HTTPS token.
+  it.each([
+    ["saving", (state: ReturnType<typeof useAppState>) => state.saveForgeToken("GitHub", "alice", "secret")],
+    ["forgetting", (state: ReturnType<typeof useAppState>) => state.forgetForgeToken("GitHub", "alice")],
+  ] as const)("shows the credential store remediation when %s a forge token fails", async (_, run) => {
+    const keychain = async () => {
+      throw new RepoError("CredentialStoreFailure", "credential keychain failure: locked");
+    };
+    const client = transferClient({ saveForgeToken: keychain, forgetForgeToken: keychain });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(async () => {
+      await run(result.current);
+    });
+
+    expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
+  });
+
   // AUD-2026-09-05-CONC-002: the per-repo worker thread can die mid-session, and every
   // `WorkerHandle` method in `crates/repo-service/src/worker/*` then rejects every subsequent
   // call on that repo with the `WorkerStopped` kind (#496). Retrying the same action can never

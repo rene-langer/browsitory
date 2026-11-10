@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{DiffSourceDto, ExternalToolSettingsDto, FileSidesDto, GitToolsDto};
 use serde::Deserialize;
 use serde_json::Value;
@@ -9,26 +10,25 @@ pub(super) struct SetExternalToolSettingsParams {
     settings: ExternalToolSettingsDto,
 }
 
-pub(super) fn get_external_tool_settings() -> Result<Value, String> {
-    let settings = config::get_external_tool_settings().map_err(|error| error.to_string())?;
-    serde_json::to_value(ExternalToolSettingsDto::from(settings)).map_err(|error| error.to_string())
+pub(super) fn get_external_tool_settings() -> Result<Value, ErrorDto> {
+    let settings = config::get_external_tool_settings().map_err(ErrorDto::from_error)?;
+    serde_json::to_value(ExternalToolSettingsDto::from(settings)).map_err(ErrorDto::from_error)
 }
 
 pub(super) fn set_external_tool_settings(
     params: SetExternalToolSettingsParams,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     git_core::launch::check_tool_commands(
         params.settings.editor.as_deref(),
         params.settings.terminal.as_deref(),
     )?;
-    config::set_external_tool_settings(&params.settings.into())
-        .map_err(|error| error.to_string())?;
+    config::set_external_tool_settings(&params.settings.into()).map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }
 
-pub(super) fn get_git_tools(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn get_git_tools(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let tools = worker_handle(repos, &params.repo_path)?.get_git_tools()?;
-    serde_json::to_value(GitToolsDto::from(tools)).map_err(|error| error.to_string())
+    serde_json::to_value(GitToolsDto::from(tools)).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -65,7 +65,7 @@ pub(super) struct ReadFileVersionParams {
 pub(super) fn read_file_version(
     params: ReadFileVersionParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     use git_core::tools::FileVersion;
     let version = match params.version {
         FileVersionDto::Head => FileVersion::Head,
@@ -89,14 +89,14 @@ pub(super) struct RepoFileParams {
 /// Internal: not on `RepoClient`. Called by the extension host before it opens VSCode's merge
 /// editor, with the same checks as the desktop merge tool: `null`, or an error saying why the
 /// path can't be merged there.
-pub(super) fn check_merge_target(params: RepoFileParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn check_merge_target(params: RepoFileParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.check_merge_target(params.path)?;
     Ok(Value::Null)
 }
 
 /// Internal: not on `RepoClient`. The work tree root for the extension host's native launch
 /// methods (the repo path may be a subdirectory of it).
-pub(super) fn repo_workdir(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn repo_workdir(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let workdir = worker_handle(repos, &params.repo_path)?.workdir()?;
     Ok(Value::String(workdir.to_string_lossy().into_owned()))
 }
@@ -109,8 +109,8 @@ pub(super) struct FileSidesParams {
     source: DiffSourceDto,
 }
 
-pub(super) fn get_file_sides(params: FileSidesParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn get_file_sides(params: FileSidesParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let sides = worker_handle(repos, &params.repo_path)?
         .get_file_sides(params.path, params.source.into())?;
-    serde_json::to_value(FileSidesDto::from(sides)).map_err(|error| error.to_string())
+    serde_json::to_value(FileSidesDto::from(sides)).map_err(ErrorDto::from_error)
 }

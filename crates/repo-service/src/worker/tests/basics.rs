@@ -128,16 +128,16 @@ fn external_tool_commands_round_trip_through_the_worker() {
         handle
             .prepare_diff_tool("../a.txt".into(), git_core::tools::DiffSource::Unstaged)
             .unwrap_err(),
-        "Invalid path."
+        crate::wire::ErrorDto::from("Invalid path.")
     );
     assert_eq!(
         handle.prepare_merge_tool("a.txt".into()).unwrap_err(),
-        "no conflict found for path 'a.txt'"
+        crate::wire::ErrorDto::from("no conflict found for path 'a.txt'")
     );
     assert!(handle.get_git_tools().is_ok());
     assert_eq!(
         handle.check_merge_target("a.txt".into()).unwrap_err(),
-        "no conflict found for path 'a.txt'"
+        crate::wire::ErrorDto::from("no conflict found for path 'a.txt'")
     );
 }
 

@@ -1,5 +1,6 @@
 //! What the worker knows about a paused operation: the commands it refuses meanwhile, whether
 //! one is in progress, and a marker that names it for the undo recorder.
+use crate::wire::ErrorDto;
 use git2::{Repository, RepositoryState};
 use git_core::rebase::RebaseState;
 
@@ -53,7 +54,9 @@ pub(super) fn gate_during_operation(
         return command;
     }
     if let Some(reply) = reply_of(&mut command) {
-        reply.refuse(&git_core::pick::PickError::OperationInProgress.to_string());
+        reply.refuse(ErrorDto::from_error(
+            git_core::pick::PickError::OperationInProgress,
+        ));
     }
     let (reply, _) = std::sync::mpsc::channel();
     Command::Ping { reply }

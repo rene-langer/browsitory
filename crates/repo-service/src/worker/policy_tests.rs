@@ -867,7 +867,7 @@ fn policies_pair_up() {
 
 /// Assert that `rx` gets nothing until `held` is released, then the reply.
 fn assert_held_until_release<T: std::fmt::Debug>(
-    rx: std::sync::mpsc::Receiver<Result<T, String>>,
+    rx: std::sync::mpsc::Receiver<Result<T, crate::wire::ErrorDto>>,
     held: HeldReplies,
 ) {
     assert_eq!(rx.try_recv().map(|_| ()), Err(TryRecvError::Empty));
@@ -901,7 +901,7 @@ fn a_held_reply_is_forwarded_on_release() {
     let mut held = HeldReplies::default();
     hold_reply(&mut command, &mut held);
     if let Some(reply) = reply_of(&mut command) {
-        reply.refuse("failed");
+        reply.refuse("failed".into());
     }
     drop(command);
     assert_held_until_release(rx, held);
@@ -909,12 +909,16 @@ fn a_held_reply_is_forwarded_on_release() {
 
 #[test]
 fn a_busy_refusal_replies_with_its_text() {
-    let check =
-        |mut command: Command, rx: std::sync::mpsc::Receiver<Result<(), String>>, text: &str| {
-            let busy = policy::of(&command).busy.expect("refuses when busy");
-            reply_busy(&mut command, busy);
-            assert_eq!(rx.try_recv().unwrap(), Err(text.to_string()));
-        };
+    let check = |mut command: Command,
+                 rx: std::sync::mpsc::Receiver<Result<(), crate::wire::ErrorDto>>,
+                 text: &str| {
+        let busy = policy::of(&command).busy.expect("refuses when busy");
+        reply_busy(&mut command, busy);
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            Err(crate::wire::ErrorDto::from(text))
+        );
+    };
     let (reply, rx) = channel();
     check(
         Command::DiscardFile {
@@ -939,16 +943,16 @@ fn a_busy_refusal_replies_with_its_text() {
     reply_busy(&mut command, BusyReply::Undo);
     assert_eq!(
         rx.try_recv().unwrap().map(|_| ()),
-        Err(UNDO_BUSY.to_string())
+        Err(crate::wire::ErrorDto::from(UNDO_BUSY))
     );
 }
 
 /// What a stored operation with `scope` does to `command`: `Some(text)` when it refused it (and
 /// replaced it with a no-op), `None` when it let it through unchanged.
 fn gate(
-    build: impl FnOnce(std::sync::mpsc::Sender<Result<(), String>>) -> Command,
+    build: impl FnOnce(std::sync::mpsc::Sender<Result<(), crate::wire::ErrorDto>>) -> Command,
     scope: &GateScope,
-) -> Option<String> {
+) -> Option<crate::wire::ErrorDto> {
     let (reply, rx) = channel();
     let command = build(reply);
     let policy = policy::of(&command);
@@ -974,7 +978,9 @@ fn gate(
 
 #[test]
 fn a_stored_operation_refuses_by_gate_and_scope() {
-    let in_progress = Some(git_core::pick::PickError::OperationInProgress.to_string());
+    let in_progress = Some(crate::wire::ErrorDto::from_error(
+        git_core::pick::PickError::OperationInProgress,
+    ));
     let rebase = GateScope {
         branch: Some("topic".into()),
         refuse_stash_save: true,

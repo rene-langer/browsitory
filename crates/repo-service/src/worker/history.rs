@@ -1,5 +1,6 @@
 use super::sequence_store::SequenceStore;
 use super::{Command, WorkerHandle};
+use crate::wire::ErrorDto;
 use git_core::pick::{PickOutcome, SequenceAbort, SequenceKind, SequenceOutcome, SequenceRun};
 use git_core::repo::HeadInfo;
 use git_core::reset::ResetMode;
@@ -16,7 +17,7 @@ pub(super) fn head_info(
     repo: &git2::Repository,
     probe: &super::gate::OperationProbe<'_>,
     clean_merge: bool,
-    reply: Sender<Result<HeadInfo, String>>,
+    reply: Sender<Result<HeadInfo, ErrorDto>>,
 ) {
     let result = git_core::repo::head_info(repo)
         .map(|mut info| {
@@ -41,20 +42,20 @@ pub(super) fn head_info(
             });
             info
         })
-        .map_err(|error| error.to_string());
+        .map_err(ErrorDto::from_error);
     let _ = reply.send(result);
 }
 
 /// Keeps or forgets the sequence as `run.state` says and turns the run into the reply. A state
 /// that can't be saved is reported with the outcome, since Continue/Abort would not find it.
-fn persist(sequence_store: &SequenceStore, run: SequenceRun) -> Result<SequenceOutcome, String> {
+fn persist(sequence_store: &SequenceStore, run: SequenceRun) -> Result<SequenceOutcome, ErrorDto> {
     let keep = run.state.is_some();
     let saved = match &run.state {
         Some(state) => sequence_store.save(state),
         None => sequence_store.clear(),
     };
     let Err(store_error) = saved else {
-        return run.outcome.map_err(|error| error.to_string());
+        return run.outcome.map_err(ErrorDto::from_error);
     };
     eprintln!("browsitory: could not update the sequence state: {store_error}");
     match run.outcome {
@@ -62,17 +63,18 @@ fn persist(sequence_store: &SequenceStore, run: SequenceRun) -> Result<SequenceO
         Ok(outcome) if !keep => Ok(outcome),
         Ok(SequenceOutcome::HookFailed { hook, .. }) => Err(format!(
             "The {hook} hook failed, and the cherry-pick or revert's progress could not be saved ({store_error}). Commit the paused step, or abort it."
-        )),
+        ).into()),
         Ok(SequenceOutcome::Stopped { kept, .. }) => Err(format!(
             "Stopped after \"{kept}\" (its commit was kept), but the cherry-pick or revert's progress could not be saved ({store_error})."
-        )),
+        ).into()),
         Ok(_) => Err(format!(
             "The cherry-pick or revert stopped on a conflict, but its progress could not be saved ({store_error}). Resolve the conflict and commit, or abort it."
+        ).into()),
+        Err(error) if keep => Err(ErrorDto::new(
+            crate::wire::ErrorKind::of_error(&error),
+            format!("{error} (its progress could not be saved: {store_error})"),
         )),
-        Err(error) if keep => Err(format!(
-            "{error} (its progress could not be saved: {store_error})"
-        )),
-        Err(error) => Err(error.to_string()),
+        Err(error) => Err(ErrorDto::from_error(error)),
     }
 }
 
@@ -96,7 +98,7 @@ pub(super) fn pick_many(
     commit_ids: Vec<String>,
     op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
-) -> Result<SequenceOutcome, String> {
+) -> Result<SequenceOutcome, ErrorDto> {
     let cancel = op.cancel_check();
     let mut reporter = pick_reporter(&op, events);
     let hooks = git_core::hooks::HookOptions {
@@ -121,10 +123,10 @@ pub(super) fn continue_sequence(
     no_verify: bool,
     op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
-) -> (Option<SequenceKind>, Result<SequenceOutcome, String>) {
+) -> (Option<SequenceKind>, Result<SequenceOutcome, ErrorDto>) {
     let Some(state) = sequence_store.load(repo) else {
         op.clear();
-        return (None, Err(NO_SEQUENCE.to_string()));
+        return (None, Err(NO_SEQUENCE.into()));
     };
     let kind = state.kind;
     let cancel = op.cancel_check();
@@ -150,9 +152,9 @@ pub(super) fn continue_sequence(
 fn abort_stored(
     repo: &git2::Repository,
     sequence_store: &SequenceStore,
-) -> Result<SequenceAbort, String> {
+) -> Result<SequenceAbort, ErrorDto> {
     let state = sequence_store.load(repo).ok_or(NO_SEQUENCE)?;
-    let abort = git_core::pick::abort_sequence(repo, &state).map_err(|error| error.to_string())?;
+    let abort = git_core::pick::abort_sequence(repo, &state).map_err(ErrorDto::from_error)?;
     sequence_store.clear()?;
     Ok(abort)
 }
@@ -167,18 +169,19 @@ pub(super) fn abort_sequence(
     repo: &git2::Repository,
     sequence_store: &SequenceStore,
     confirmed: Option<git_core::pick::ConfirmedAbort>,
-    reply: Sender<Result<SequenceAbort, String>>,
+    reply: Sender<Result<SequenceAbort, ErrorDto>>,
 ) {
     let terminal = match sequence_store.load(repo) {
         Some(_) => None,
         None => git_core::pick::terminal_sequence(repo),
     };
     let result = match (terminal, confirmed) {
-        (Some(_), Some(confirmed)) => git_core::pick::abort_terminal_sequence(repo, &confirmed)
-            .map_err(|error| error.to_string()),
-        (Some(sequence), None) => {
-            Err(git_core::pick::PickError::TerminalSequenceChanged(sequence.kind).to_string())
+        (Some(_), Some(confirmed)) => {
+            git_core::pick::abort_terminal_sequence(repo, &confirmed).map_err(ErrorDto::from_error)
         }
+        (Some(sequence), None) => Err(ErrorDto::from_error(
+            git_core::pick::PickError::TerminalSequenceChanged(sequence.kind),
+        )),
         (None, _) => abort_stored(repo, sequence_store),
     };
     let _ = reply.send(result);
@@ -206,7 +209,7 @@ pub(super) fn abort_merge_refusal(repo: &git2::Repository) -> Option<String> {
 pub(super) fn abort_sequence_for_merge(
     repo: &git2::Repository,
     sequence_store: &SequenceStore,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(abort_stored(repo, sequence_store).map(|_| ()));
 }
@@ -219,7 +222,7 @@ pub(super) fn amend(
     trailers: Vec<git_core::commit::Trailer>,
     op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
-    reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
+    reply: Sender<Result<git_core::commit::CommitOutcome, ErrorDto>>,
 ) {
     let cancel = op.cancel_check();
     let mut reporter = super::hooks::ChannelHookReporter {
@@ -247,10 +250,10 @@ pub(super) fn amend(
 /// The commit box's co-author suggestions.
 pub(super) fn recent_authors(
     repo: &git2::Repository,
-    reply: Sender<Result<Vec<git_core::commit::SignatureInput>, String>>,
+    reply: Sender<Result<Vec<git_core::commit::SignatureInput>, ErrorDto>>,
 ) {
     let _ = reply.send(
-        git_core::commit::recent_authors(repo, RECENT_AUTHORS_LIMIT).map_err(|e| e.to_string()),
+        git_core::commit::recent_authors(repo, RECENT_AUTHORS_LIMIT).map_err(ErrorDto::from_error),
     );
 }
 
@@ -266,7 +269,7 @@ pub(super) fn pick_one(
     mainline: Option<u32>,
     op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
-    reply: Sender<Result<PickOutcome, String>>,
+    reply: Sender<Result<PickOutcome, ErrorDto>>,
 ) {
     let cancel = op.cancel_check();
     let mut reporter = pick_reporter(&op, events);
@@ -280,16 +283,16 @@ pub(super) fn pick_one(
         SequenceKind::Revert => git_core::pick::revert(repo, &commit_id, mainline, hooks),
     };
     op.clear();
-    let _ = reply.send(result.map_err(|error| error.to_string()));
+    let _ = reply.send(result.map_err(ErrorDto::from_error));
 }
 pub(super) fn reset(
     repo: &git2::Repository,
     commit_id: String,
     mode: ResetMode,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
-    let _ = reply
-        .send(git_core::reset::reset_to(repo, &commit_id, mode).map_err(|error| error.to_string()));
+    let _ =
+        reply.send(git_core::reset::reset_to(repo, &commit_id, mode).map_err(ErrorDto::from_error));
 }
 /// Checks out a commit (detached HEAD); `post-checkout` then runs reported and cancellable on
 /// `op`, before the reply (#185).
@@ -298,11 +301,10 @@ pub(super) fn checkout(
     commit_id: String,
     op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let before = super::hooks::head_oid(repo);
-    let result =
-        git_core::branch::checkout_commit(repo, &commit_id).map_err(|error| error.to_string());
+    let result = git_core::branch::checkout_commit(repo, &commit_id).map_err(ErrorDto::from_error);
     if result.is_ok() {
         super::hooks::run_post_checkout(repo, before, &op, events);
     }
@@ -310,22 +312,9 @@ pub(super) fn checkout(
     let _ = reply.send(result);
 }
 
-fn round_trip<T>(
-    handle: &WorkerHandle,
-    build: impl FnOnce(Sender<Result<T, String>>) -> Command,
-) -> Result<T, String> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    handle
-        .tx
-        .send(build(tx))
-        .map_err(|_| "worker thread stopped".to_string())?;
-    rx.recv()
-        .map_err(|_| "worker thread stopped before replying".to_string())?
-}
-
 impl WorkerHandle {
-    pub fn get_head_info(&self) -> Result<HeadInfo, String> {
-        round_trip(self, |reply| Command::GetHeadInfo { reply })
+    pub fn get_head_info(&self) -> Result<HeadInfo, ErrorDto> {
+        self.request(|reply| Command::GetHeadInfo { reply })
     }
     /// Amends HEAD; hooks, events and cancel as for `commit`.
     pub fn amend_commit(
@@ -335,9 +324,9 @@ impl WorkerHandle {
         author: Option<git_core::commit::SignatureInput>,
         trailers: Vec<git_core::commit::Trailer>,
         events: Sender<super::HookEvent>,
-    ) -> Result<git_core::commit::CommitOutcome, String> {
+    ) -> Result<git_core::commit::CommitOutcome, ErrorDto> {
         let operation_id = self.cancelled.allocate("amend");
-        round_trip(self, |reply| Command::AmendCommit {
+        self.request(|reply| Command::AmendCommit {
             message,
             no_verify,
             author,
@@ -348,8 +337,8 @@ impl WorkerHandle {
         })
     }
     /// Up to `RECENT_AUTHORS_LIMIT` recent authors other than the current user, newest first.
-    pub fn list_recent_authors(&self) -> Result<Vec<git_core::commit::SignatureInput>, String> {
-        round_trip(self, |reply| Command::ListRecentAuthors { reply })
+    pub fn list_recent_authors(&self) -> Result<Vec<git_core::commit::SignatureInput>, ErrorDto> {
+        self.request(|reply| Command::ListRecentAuthors { reply })
     }
     /// `mainline` (1-based parent) is required for a merge commit and refused otherwise. A clean
     /// pick runs `prepare-commit-msg` and `post-commit` (#183), reported on `events`
@@ -359,8 +348,8 @@ impl WorkerHandle {
         commit_id: String,
         mainline: Option<u32>,
         events: Sender<super::HookEvent>,
-    ) -> Result<PickOutcome, String> {
-        round_trip(self, |reply| Command::CherryPick {
+    ) -> Result<PickOutcome, ErrorDto> {
+        self.request(|reply| Command::CherryPick {
             commit_id,
             mainline,
             operation_id: self.cancelled.allocate("pick"),
@@ -374,8 +363,8 @@ impl WorkerHandle {
         commit_id: String,
         mainline: Option<u32>,
         events: Sender<super::HookEvent>,
-    ) -> Result<PickOutcome, String> {
-        round_trip(self, |reply| Command::RevertCommit {
+    ) -> Result<PickOutcome, ErrorDto> {
+        self.request(|reply| Command::RevertCommit {
             commit_id,
             mainline,
             operation_id: self.cancelled.allocate("pick"),
@@ -390,8 +379,8 @@ impl WorkerHandle {
         &self,
         commit_ids: Vec<String>,
         events: Sender<super::HookEvent>,
-    ) -> Result<SequenceOutcome, String> {
-        round_trip(self, |reply| Command::CherryPickMany {
+    ) -> Result<SequenceOutcome, ErrorDto> {
+        self.request(|reply| Command::CherryPickMany {
             commit_ids,
             operation_id: self.cancelled.allocate("pick"),
             events,
@@ -403,8 +392,8 @@ impl WorkerHandle {
         &self,
         commit_ids: Vec<String>,
         events: Sender<super::HookEvent>,
-    ) -> Result<SequenceOutcome, String> {
-        round_trip(self, |reply| Command::RevertMany {
+    ) -> Result<SequenceOutcome, ErrorDto> {
+        self.request(|reply| Command::RevertMany {
             commit_ids,
             operation_id: self.cancelled.allocate("pick"),
             events,
@@ -418,8 +407,8 @@ impl WorkerHandle {
         &self,
         no_verify: bool,
         events: Sender<super::HookEvent>,
-    ) -> Result<SequenceOutcome, String> {
-        round_trip(self, |reply| Command::ContinueSequence {
+    ) -> Result<SequenceOutcome, ErrorDto> {
+        self.request(|reply| Command::ContinueSequence {
             no_verify,
             operation_id: self.cancelled.allocate("continue"),
             events,
@@ -431,11 +420,11 @@ impl WorkerHandle {
     pub fn abort_sequence(
         &self,
         confirmed: Option<git_core::pick::ConfirmedAbort>,
-    ) -> Result<SequenceAbort, String> {
-        round_trip(self, |reply| Command::AbortSequence { confirmed, reply })
+    ) -> Result<SequenceAbort, ErrorDto> {
+        self.request(|reply| Command::AbortSequence { confirmed, reply })
     }
-    pub fn reset_to_commit(&self, commit_id: String, mode: ResetMode) -> Result<(), String> {
-        round_trip(self, |reply| Command::ResetToCommit {
+    pub fn reset_to_commit(&self, commit_id: String, mode: ResetMode) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::ResetToCommit {
             commit_id,
             mode,
             reply,
@@ -447,8 +436,8 @@ impl WorkerHandle {
         &self,
         commit_id: String,
         events: Sender<super::HookEvent>,
-    ) -> Result<(), String> {
-        round_trip(self, |reply| Command::CheckoutCommit {
+    ) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::CheckoutCommit {
             commit_id,
             operation_id: self.cancelled.allocate("checkout"),
             events,

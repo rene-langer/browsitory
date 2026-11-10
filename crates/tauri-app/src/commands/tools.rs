@@ -14,12 +14,12 @@ use repo_service::wire::{DiffSourceDto, ExternalToolSettingsDto, FileSidesDto, G
 
 /// The repository's work tree root. A stored path, so it skips the repository's gate: Open in
 /// editor, Reveal and Open terminal answer at once even while a long hook holds it (#181).
-pub(crate) fn workdir_of(state: &AppState, repo_path: &str) -> Result<PathBuf, String> {
+pub(crate) fn workdir_of(state: &AppState, repo_path: &str) -> Result<PathBuf, ErrorDto> {
     repo_worker(state, repo_path)?.signal().workdir()
 }
 
-fn tool_settings() -> Result<config::ExternalToolSettings, String> {
-    config::get_external_tool_settings().map_err(|e| e.to_string())
+fn tool_settings() -> Result<config::ExternalToolSettings, ErrorDto> {
+    config::get_external_tool_settings().map_err(ErrorDto::from_error)
 }
 
 /// Opens a work tree file in the configured editor, or with the OS default app when none is
@@ -34,13 +34,13 @@ pub async fn open_in_editor(
     let workdir = workdir_of(&state, &repo_path)?;
     let editor = tool_settings()?.editor;
     match launch::prepare_editor(&workdir, &path, line, editor.as_deref())
-        .map_err(|e| e.to_string())?
+        .map_err(ErrorDto::from_error)?
     {
         EditorTarget::Command(invocation) => {
-            Ok(launch::run_invocation(&invocation, &workdir).map_err(|e| e.to_string())?)
+            Ok(launch::run_invocation(&invocation, &workdir).map_err(ErrorDto::from_error)?)
         }
         EditorTarget::SystemDefault(file) => {
-            Ok(tauri_plugin_opener::open_path(file, None::<&str>).map_err(|e| e.to_string())?)
+            Ok(tauri_plugin_opener::open_path(file, None::<&str>).map_err(ErrorDto::from_error)?)
         }
     }
 }
@@ -54,8 +54,8 @@ pub async fn reveal_in_file_manager(
     state: State<'_, AppState>,
 ) -> Result<(), ErrorDto> {
     let workdir = workdir_of(&state, &repo_path)?;
-    let target = launch::reveal_target(&workdir, path.as_deref()).map_err(|e| e.to_string())?;
-    Ok(tauri_plugin_opener::reveal_item_in_dir(target).map_err(|e| e.to_string())?)
+    let target = launch::reveal_target(&workdir, path.as_deref()).map_err(ErrorDto::from_error)?;
+    tauri_plugin_opener::reveal_item_in_dir(target).map_err(ErrorDto::from_error)
 }
 
 #[tauri::command]
@@ -63,8 +63,8 @@ pub async fn open_terminal(repo_path: String, state: State<'_, AppState>) -> Res
     let workdir = workdir_of(&state, &repo_path)?;
     let terminal = tool_settings()?.terminal;
     let invocation =
-        launch::prepare_terminal(&workdir, terminal.as_deref()).map_err(|e| e.to_string())?;
-    Ok(launch::run_invocation(&invocation, &workdir).map_err(|e| e.to_string())?)
+        launch::prepare_terminal(&workdir, terminal.as_deref()).map_err(ErrorDto::from_error)?;
+    launch::run_invocation(&invocation, &workdir).map_err(ErrorDto::from_error)
 }
 
 /// Both sides of `path` in `source`, for the image preview (each capped at 20 MB).
@@ -94,11 +94,11 @@ pub async fn open_diff_tool(
     let prepared = repo_worker(&state, &repo_path)?
         .call(move |w| w.prepare_diff_tool(path, source.into()))
         .await?;
-    Ok(off_runtime(move || {
+    off_runtime(move || {
         git_core::tools::launch_diff_tool(prepared, git_core::tools::DIFF_TOOL_GRACE)
     })
     .await?
-    .map_err(|e| e.to_string())?)
+    .map_err(ErrorDto::from_error)
 }
 
 /// Waits for the merge tool on a blocking thread, never on the repo worker, which stays free
@@ -114,19 +114,19 @@ pub async fn open_merge_tool(
         .await?;
     let outcome = off_runtime(move || git_core::tools::run_merge_tool(prepared))
         .await?
-        .map_err(|e| e.to_string())?;
+        .map_err(ErrorDto::from_error)?;
     Ok(outcome.into())
 }
 
 #[tauri::command]
 pub fn get_external_tool_settings() -> Result<ExternalToolSettingsDto, ErrorDto> {
-    Ok(tool_settings().map(Into::into)?)
+    tool_settings().map(Into::into)
 }
 
 #[tauri::command]
 pub fn set_external_tool_settings(settings: ExternalToolSettingsDto) -> Result<(), ErrorDto> {
     launch::check_tool_commands(settings.editor.as_deref(), settings.terminal.as_deref())?;
-    Ok(config::set_external_tool_settings(&settings.into()).map_err(|e| e.to_string())?)
+    config::set_external_tool_settings(&settings.into()).map_err(ErrorDto::from_error)
 }
 
 #[tauri::command]

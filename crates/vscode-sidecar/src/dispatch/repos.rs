@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{OpenRepoEntryDto, OpenRepoEntryInput, WorkspaceDto};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -10,7 +11,7 @@ pub(super) struct OpenRepoParams {
     path: String,
 }
 
-pub(super) fn open_repo(params: OpenRepoParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn open_repo(params: OpenRepoParams, repos: &Repos) -> Result<Value, ErrorDto> {
     // `WorkerRegistry::open` doesn't hold its lock across `Worker::spawn`, and evicts a dead
     // worker (its thread having exited, e.g. from a panic inside a `Command` match arm) before
     // deciding whether to reuse or respawn — a plain `contains_key`/`Entry::Vacant` fast path
@@ -21,19 +22,19 @@ pub(super) fn open_repo(params: OpenRepoParams, repos: &Repos) -> Result<Value, 
     Ok(Value::Null)
 }
 
-pub(super) fn close_repo(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn close_repo(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     // Drops the worker only when no other spelling of the repository is still open.
     repos.close(&params.repo_path);
     Ok(Value::Null)
 }
 
-pub(super) fn list_recent_repos() -> Result<Value, String> {
-    let paths = config::list_recent_repos().map_err(|error| error.to_string())?;
+pub(super) fn list_recent_repos() -> Result<Value, ErrorDto> {
+    let paths = config::list_recent_repos().map_err(ErrorDto::from_error)?;
     let paths: Vec<String> = paths
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    serde_json::to_value(paths).map_err(|error| error.to_string())
+    serde_json::to_value(paths).map_err(ErrorDto::from_error)
 }
 
 /// `list_open_repos`'s answer. (The desktop app's command returns an `(entries, activePath)`
@@ -57,9 +58,9 @@ impl From<(Vec<config::OpenRepoEntry>, Option<PathBuf>)> for OpenReposDto {
     }
 }
 
-pub(super) fn list_open_repos_handler() -> Result<Value, String> {
-    let open = config::list_open_repos().map_err(|error| error.to_string())?;
-    serde_json::to_value(OpenReposDto::from(open)).map_err(|error| error.to_string())
+pub(super) fn list_open_repos_handler() -> Result<Value, ErrorDto> {
+    let open = config::list_open_repos().map_err(ErrorDto::from_error)?;
+    serde_json::to_value(OpenReposDto::from(open)).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -69,7 +70,7 @@ pub(super) struct PersistOpenReposParams {
     active_path: Option<String>,
 }
 
-pub(super) fn persist_open_repos(params: PersistOpenReposParams) -> Result<Value, String> {
+pub(super) fn persist_open_repos(params: PersistOpenReposParams) -> Result<Value, ErrorDto> {
     let entries: Vec<config::OpenRepoEntry> = params
         .entries
         .into_iter()
@@ -79,7 +80,7 @@ pub(super) fn persist_open_repos(params: PersistOpenReposParams) -> Result<Value
         })
         .collect();
     config::set_open_repos(&entries, params.active_path.as_deref().map(Path::new))
-        .map_err(|error| error.to_string())?;
+        .map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }
 
@@ -88,20 +89,20 @@ pub(super) struct ScanReposInRootParams {
     root: String,
 }
 
-pub(super) fn scan_repos_in_root(params: ScanReposInRootParams) -> Result<Value, String> {
+pub(super) fn scan_repos_in_root(params: ScanReposInRootParams) -> Result<Value, ErrorDto> {
     let paths =
-        config::scan_repos_in_root(Path::new(&params.root)).map_err(|error| error.to_string())?;
+        config::scan_repos_in_root(Path::new(&params.root)).map_err(ErrorDto::from_error)?;
     let paths: Vec<String> = paths
         .into_iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    serde_json::to_value(paths).map_err(|error| error.to_string())
+    serde_json::to_value(paths).map_err(ErrorDto::from_error)
 }
 
-pub(super) fn list_workspaces_handler() -> Result<Value, String> {
-    let workspaces = config::list_workspaces().map_err(|error| error.to_string())?;
+pub(super) fn list_workspaces_handler() -> Result<Value, ErrorDto> {
+    let workspaces = config::list_workspaces().map_err(ErrorDto::from_error)?;
     let workspaces: Vec<WorkspaceDto> = workspaces.into_iter().map(WorkspaceDto::from).collect();
-    serde_json::to_value(workspaces).map_err(|error| error.to_string())
+    serde_json::to_value(workspaces).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -111,10 +112,10 @@ pub(super) struct SaveWorkspaceParams {
     members: Vec<String>,
 }
 
-pub(super) fn save_workspace(params: SaveWorkspaceParams) -> Result<Value, String> {
+pub(super) fn save_workspace(params: SaveWorkspaceParams) -> Result<Value, ErrorDto> {
     let members: Vec<PathBuf> = params.members.into_iter().map(PathBuf::from).collect();
     let id = config::save_workspace(&params.name, Path::new(&params.root), &members)
-        .map_err(|error| error.to_string())?;
+        .map_err(ErrorDto::from_error)?;
     Ok(Value::String(id))
 }
 
@@ -125,10 +126,9 @@ pub(super) struct UpdateWorkspaceParams {
     members: Vec<String>,
 }
 
-pub(super) fn update_workspace(params: UpdateWorkspaceParams) -> Result<Value, String> {
+pub(super) fn update_workspace(params: UpdateWorkspaceParams) -> Result<Value, ErrorDto> {
     let members: Vec<PathBuf> = params.members.into_iter().map(PathBuf::from).collect();
-    config::update_workspace(&params.id, &params.name, &members)
-        .map_err(|error| error.to_string())?;
+    config::update_workspace(&params.id, &params.name, &members).map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }
 
@@ -137,7 +137,7 @@ pub(super) struct DeleteWorkspaceParams {
     id: String,
 }
 
-pub(super) fn delete_workspace(params: DeleteWorkspaceParams) -> Result<Value, String> {
-    config::delete_workspace(&params.id).map_err(|error| error.to_string())?;
+pub(super) fn delete_workspace(params: DeleteWorkspaceParams) -> Result<Value, ErrorDto> {
+    config::delete_workspace(&params.id).map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }

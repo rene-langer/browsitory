@@ -72,7 +72,10 @@ fn get_line_history_round_trips_through_the_worker() {
     let error = handle
         .get_line_history("HEAD".into(), "file.txt".into(), 4, 9, 10)
         .unwrap_err();
-    assert_eq!(error, "Lines 4-9 aren't in the file, which has 5 lines.");
+    assert_eq!(
+        error,
+        crate::wire::ErrorDto::from("Lines 4-9 aren't in the file, which has 5 lines.")
+    );
 }
 
 #[test]
@@ -152,7 +155,7 @@ fn branch_compare_range_round_trips_through_the_worker() {
         handle
             .get_branch_compare_range("refs/heads/nope".into())
             .unwrap_err(),
-        "No branch named \"nope\"."
+        crate::wire::ErrorDto::from("No branch named \"nope\".")
     );
 }
 

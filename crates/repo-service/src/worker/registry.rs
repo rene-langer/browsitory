@@ -528,7 +528,7 @@ mod tests {
             .expect_err("a crashed worker must return an error, not a status list");
         // Either text: the call may reach the worker before or after it crashed.
         assert_eq!(
-            crate::wire::ErrorKind::of(&error),
+            error.kind,
             crate::wire::ErrorKind::WorkerStopped,
             "unexpected error message: {error}"
         );

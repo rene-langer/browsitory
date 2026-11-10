@@ -119,7 +119,10 @@ fn stash_save_waits_for_the_lock_and_sees_a_sequence_stored_meanwhile() {
     write_file(dir.path(), "b.txt", "edited\n");
     drop(guard);
     pause.go();
-    assert_eq!(saving.join().unwrap(), Err(in_progress()));
+    assert_eq!(
+        saving.join().unwrap(),
+        Err(crate::wire::ErrorDto::from(in_progress()))
+    );
     assert!(repo.find_reference("refs/stash").is_err());
 }
 
@@ -141,7 +144,10 @@ fn worktree_add_waits_for_the_lock_and_sees_a_sequence_stored_meanwhile() {
     start_sequence_outside(&repo, ids);
     drop(guard);
     pause.go();
-    assert_eq!(adding.join().unwrap(), Err(in_progress()));
+    assert_eq!(
+        adding.join().unwrap(),
+        Err(crate::wire::ErrorDto::from(in_progress()))
+    );
     assert!(!path.exists());
 }
 
@@ -156,7 +162,7 @@ fn stash_save_names_the_operation_when_it_also_has_conflicts() {
 
     assert_eq!(
         worker.handle().save_stash(Default::default()),
-        Err(in_progress())
+        Err(crate::wire::ErrorDto::from(in_progress()))
     );
     assert!(repo.find_reference("refs/stash").is_err());
 }
@@ -455,7 +461,7 @@ fn inside_a_burst_a_refusing_command_still_waits() {
     let start = Instant::now();
     assert_eq!(
         handle.discard_file("d.txt".into()),
-        Err(DISCARD_BUSY.to_string())
+        Err(crate::wire::ErrorDto::from(DISCARD_BUSY))
     );
     let elapsed = start.elapsed();
     assert!(elapsed >= CONTENDED_WAIT, "{elapsed:?}");
@@ -463,7 +469,7 @@ fn inside_a_burst_a_refusing_command_still_waits() {
     let start = Instant::now();
     assert!(matches!(
         handle.undo(),
-        Err(message) if message == UNDO_BUSY
+        Err(error) if error.message == UNDO_BUSY
     ));
     assert!(start.elapsed() >= CONTENDED_WAIT, "{:?}", start.elapsed());
     assert_eq!(
@@ -500,7 +506,7 @@ fn work_tree_destroying_commands_are_refused_while_the_lock_stays_held() {
     let edited = || std::fs::read_to_string(dir.path().join("a.txt")).unwrap();
 
     let guard = hold(&repo);
-    let busy = Err(DISCARD_BUSY.to_string());
+    let busy = Err(crate::wire::ErrorDto::from(DISCARD_BUSY));
     assert_eq!(handle.discard_file("a.txt".into()), busy);
     assert_eq!(handle.discard_all_unstaged(vec!["a.txt".into()]), busy);
     assert_eq!(
@@ -554,8 +560,8 @@ fn undo_replies_busy_while_another_holder_keeps_the_lock() {
     handle.create_branch("x".into(), "HEAD".into()).unwrap();
 
     let guard = hold(&repo);
-    assert_eq!(handle.undo(), Err(UNDO_BUSY.to_string()));
-    assert_eq!(handle.redo(), Err(UNDO_BUSY.to_string()));
+    assert_eq!(handle.undo(), Err(crate::wire::ErrorDto::from(UNDO_BUSY)));
+    assert_eq!(handle.redo(), Err(crate::wire::ErrorDto::from(UNDO_BUSY)));
     assert!(repo.find_branch("x", git2::BranchType::Local).is_ok());
     drop(guard);
     assert_eq!(

@@ -43,15 +43,16 @@ impl JsonRpcResponse {
         }
     }
 
-    pub fn err(id: u64, message: String) -> Self {
+    /// A rejected request: the same `message` on the JSON-RPC error and in its `data`.
+    pub fn err(id: u64, error: ErrorDto) -> Self {
         Self {
             jsonrpc: "2.0",
             id,
             result: None,
             error: Some(JsonRpcError {
                 code: -32000,
-                data: ErrorDto::from(message.clone()),
-                message,
+                message: error.message.clone(),
+                data: error,
             }),
         }
     }
@@ -84,7 +85,7 @@ mod tests {
 
     #[test]
     fn err_response_serializes_without_a_result_field() {
-        let response = JsonRpcResponse::err(4, "boom".to_string());
+        let response = JsonRpcResponse::err(4, ErrorDto::from("boom"));
 
         let serialized = serde_json::to_string(&response).expect("serialize response");
 
@@ -97,7 +98,7 @@ mod tests {
     /// #496: the error's `data` names the kind the frontend switches on.
     #[test]
     fn err_response_carries_the_error_kind() {
-        let response = JsonRpcResponse::err(5, repo_service::wire::WORKER_STOPPED.to_string());
+        let response = JsonRpcResponse::err(5, ErrorDto::worker_stopped());
 
         let serialized = serde_json::to_string(&response).expect("serialize response");
 

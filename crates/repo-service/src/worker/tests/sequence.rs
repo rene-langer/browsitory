@@ -21,11 +21,11 @@ fn a_conflicted_sequence_finished_by_continue_is_one_undo_entry() {
         handle
             .cherry_pick(ids[0].clone(), None, no_events())
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle.revert_many(ids.clone(), no_events()).unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
@@ -35,7 +35,7 @@ fn a_conflicted_sequence_finished_by_continue_is_one_undo_entry() {
                 no_events()
             )
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
 
     handle
@@ -125,7 +125,10 @@ fn cancel_transfer_stops_a_continue_hook() {
     let result = handle.continue_sequence(false, events_tx);
 
     cancel_thread.join().unwrap();
-    assert_eq!(result.unwrap_err(), "The pre-commit hook was cancelled.");
+    assert_eq!(
+        result.unwrap_err(),
+        crate::wire::ErrorDto::from("The pre-commit hook was cancelled.")
+    );
     assert!(started.elapsed() < Duration::from_secs(25));
     assert_eq!(
         handle
@@ -184,37 +187,43 @@ fn a_stored_sequence_refuses_everything_that_moves_head_or_the_index() {
         handle
             .commit("x".into(), false, Vec::new(), mpsc::channel().0)
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
             .reset_to_commit(base.clone(), git_core::reset::ResetMode::Hard)
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
             .checkout_commit(base.clone(), no_events())
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
             .switch_branch("feature".into(), no_events())
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle.pull_current_upstream(mpsc::channel().0).unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
-    assert_eq!(handle.apply_stash(0, "s".into(), false).unwrap_err(), busy);
-    assert_eq!(handle.pop_stash(0, "s".into(), false).unwrap_err(), busy);
+    assert_eq!(
+        handle.apply_stash(0, "s".into(), false).unwrap_err(),
+        crate::wire::ErrorDto::from(busy)
+    );
+    assert_eq!(
+        handle.pop_stash(0, "s".into(), false).unwrap_err(),
+        crate::wire::ErrorDto::from(busy)
+    );
     assert_eq!(
         handle
             .restore_reflog_entry("HEAD".into(), base.clone())
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     // Read-only and resolving commands still work.
     assert!(handle.get_status().is_ok());
@@ -256,7 +265,7 @@ fn an_aborted_sequence_records_nothing() {
     let handle = worker.handle();
     assert_eq!(
         handle.revert_many(vec![], no_events()).unwrap_err(),
-        "Select at least one commit."
+        crate::wire::ErrorDto::from("Select at least one commit.")
     );
     assert!(!sequence_file(&repo).exists());
     handle.cherry_pick_many(ids, no_events()).unwrap();
@@ -279,9 +288,12 @@ fn an_aborted_sequence_records_nothing() {
         handle
             .continue_sequence(false, mpsc::channel().0)
             .unwrap_err(),
-        none
+        crate::wire::ErrorDto::from(none)
     );
-    assert_eq!(handle.abort_sequence(None).unwrap_err(), none);
+    assert_eq!(
+        handle.abort_sequence(None).unwrap_err(),
+        crate::wire::ErrorDto::from(none)
+    );
 }
 
 #[test]
@@ -340,7 +352,7 @@ fn abort_sequence_aborts_a_terminal_sequence_when_none_is_stored() {
     assert_eq!(handle.get_head_info().unwrap().terminal_sequence, None);
     assert_eq!(
         handle.abort_sequence(None).unwrap_err(),
-        "No cherry-pick or revert is in progress."
+        crate::wire::ErrorDto::from("No cherry-pick or revert is in progress.")
     );
 }
 
@@ -355,13 +367,19 @@ fn abort_sequence_refuses_an_unconfirmed_or_outdated_terminal_abort() {
     let changed =
         "The cherry-pick in the terminal changed since you looked. Check it again, then abort.";
 
-    assert_eq!(handle.abort_sequence(None).unwrap_err(), changed);
+    assert_eq!(
+        handle.abort_sequence(None).unwrap_err(),
+        crate::wire::ErrorDto::from(changed)
+    );
     let outdated = git_core::pick::ConfirmedAbort {
         commits_to_remove: 0,
         rewinds: false,
         ..git_core::pick::ConfirmedAbort::now(&repo).unwrap()
     };
-    assert_eq!(handle.abort_sequence(Some(outdated)).unwrap_err(), changed);
+    assert_eq!(
+        handle.abort_sequence(Some(outdated)).unwrap_err(),
+        crate::wire::ErrorDto::from(changed)
+    );
 
     assert_eq!(repo.head().unwrap().target().unwrap(), step);
     assert!(repo.path().join("sequencer").join("todo").exists());
@@ -378,7 +396,9 @@ fn abort_merge_refuses_a_terminal_sequence() {
 
     assert_eq!(
         handle.abort_merge().unwrap_err(),
-        "This cherry-pick was started in a terminal. Try Abort again to see what it will undo."
+        crate::wire::ErrorDto::from(
+            "This cherry-pick was started in a terminal. Try Abort again to see what it will undo."
+        )
     );
 
     assert_eq!(repo.head().unwrap().target().unwrap(), step);
@@ -415,7 +435,10 @@ fn a_terminal_rebase_is_reported_and_refused() {
 
     let refusal = "A rebase started in a terminal isn't finished. Continue it there with git \
                    rebase --continue, or abort it with git rebase --abort.";
-    assert_eq!(handle.abort_merge().unwrap_err(), refusal);
+    assert_eq!(
+        handle.abort_merge().unwrap_err(),
+        crate::wire::ErrorDto::from(refusal)
+    );
     let plan = vec![git_core::rebase::RebasePlanEntry {
         commit_id: ids[0].clone(),
         action: git_core::rebase::RebaseAction::Pick,
@@ -425,13 +448,13 @@ fn a_terminal_rebase_is_reported_and_refused() {
         handle
             .start_rebase(main_tip.to_string(), plan, None)
             .unwrap_err(),
-        refusal
+        crate::wire::ErrorDto::from(refusal)
     );
     assert_eq!(
         handle
             .reset_to_commit(main_tip.to_string(), git_core::reset::ResetMode::Hard)
             .unwrap_err(),
-        refusal
+        crate::wire::ErrorDto::from(refusal)
     );
 
     assert_eq!(repo.head().unwrap().target().unwrap(), stopped_at);
@@ -480,7 +503,7 @@ fn renaming_the_sequence_branch_is_refused_while_a_sequence_is_paused() {
     let (_dir, repo, _worker, handle, branch) = paused_sequence();
     assert_eq!(
         handle.rename_branch(branch.clone(), "other".into()),
-        Err(in_progress())
+        Err(crate::wire::ErrorDto::from(in_progress()))
     );
     assert!(repo.find_branch(&branch, git2::BranchType::Local).is_ok());
     assert_eq!(
@@ -500,7 +523,7 @@ fn deleting_the_sequence_branch_is_refused_while_a_sequence_is_paused() {
         .unwrap();
     assert_eq!(
         handle.delete_branch(branch.clone(), true),
-        Err(in_progress())
+        Err(crate::wire::ErrorDto::from(in_progress()))
     );
     assert!(repo.find_branch(&branch, git2::BranchType::Local).is_ok());
 }
@@ -511,7 +534,7 @@ fn adding_a_worktree_on_the_sequence_branch_is_refused() {
     let path = dir.path().with_extension("wt");
     assert_eq!(
         handle.create_worktree("wt".into(), path.clone(), branch, None),
-        Err(in_progress())
+        Err(crate::wire::ErrorDto::from(in_progress()))
     );
     assert!(!path.exists());
 }
@@ -522,7 +545,7 @@ fn stash_save_is_refused_while_a_sequence_is_paused() {
     write_file(dir.path(), "b.txt", "edited\n");
     assert_eq!(
         handle.save_stash(git_core::stash::StashOptions::default()),
-        Err(in_progress())
+        Err(crate::wire::ErrorDto::from(in_progress()))
     );
     assert!(repo.find_reference("refs/stash").is_err());
     assert_eq!(repo.state(), git2::RepositoryState::CherryPick);

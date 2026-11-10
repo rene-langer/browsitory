@@ -44,6 +44,7 @@ fn get_file_sides_returns_both_sides_of_an_unstaged_edit() {
         .handle()
         .get_file_sides("../x.png".into(), git_core::tools::DiffSource::Unstaged)
         .unwrap_err()
+        .message
         .contains("path must be relative to the repository"));
 }
 
@@ -63,7 +64,7 @@ fn commit_appends_trailers_and_refuses_an_invalid_one() {
         handle
             .commit("Add a".into(), false, vec![bad], mpsc::channel().0)
             .unwrap_err(),
-        "Invalid trailer \"Bad key: x\"."
+        crate::wire::ErrorDto::from("Invalid trailer \"Bad key: x\".")
     );
     assert!(repo.head().is_err(), "nothing was committed");
 
@@ -102,7 +103,7 @@ fn an_empty_message_with_trailers_is_refused_for_commit_and_amend() {
                 mpsc::channel().0,
             )
             .unwrap_err(),
-        "Aborting commit due to empty commit message."
+        crate::wire::ErrorDto::from("Aborting commit due to empty commit message.")
     );
     assert!(repo.head().is_err(), "nothing was committed");
 
@@ -120,7 +121,7 @@ fn an_empty_message_with_trailers_is_refused_for_commit_and_amend() {
                 mpsc::channel().0,
             )
             .unwrap_err(),
-        "Aborting commit due to empty commit message."
+        crate::wire::ErrorDto::from("Aborting commit due to empty commit message.")
     );
     assert_eq!(
         repo.head().unwrap().target(),
@@ -200,7 +201,7 @@ fn amend_commit_overrides_the_author_and_appends_trailers() {
                 mpsc::channel().0,
             )
             .unwrap_err(),
-        "Invalid author. Use a name and an email address."
+        crate::wire::ErrorDto::from("Invalid author. Use a name and an email address.")
     );
     assert_eq!(repo.head().unwrap().target(), before);
 }

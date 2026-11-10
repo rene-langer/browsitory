@@ -2005,15 +2005,29 @@ identifier again without extending this migration.
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,
-`StatusError`, ...). The worker maps these to `Result<T, String>`. At the transport boundary
-each error becomes the shared envelope `repo_service::wire::ErrorDto` (`{ kind, message }`,
-#496): Tauri commands return `Result<T, ErrorDto>` (Tauri sends `Err` as the rejected
-promise's value), and the sidecar puts it in the JSON-RPC error's `data`, next to the same
-`message`. `ErrorKind::of` picks the kind from the error text, by the constant or typed error
-its producer formats (`wire::WORKER_STOPPED`, `wire::PULL_FAILED`,
-`RemoteError::DirtyWorktree`, `MergeError::NotATextConflict`, ...), never by a copy of the text,
-so rewording a message keeps its kind; anything else is `Other`. `ErrorKind` lists only the
-failures the frontend tells apart: a new one needs a kind there, not a text check.
+`StatusError`, ...). The worker answers every request with the shared envelope
+`repo_service::wire::ErrorDto` (`{ kind, message }`, #496), and decides its kind where the error
+is made (#527): the reply channels carry `Result<T, ErrorDto>`, and a handler turns a typed error
+into one with `ErrorDto::from_error`, which reads the kind from the error's type along its
+`source()` chain (`RemoteError::DirtyWorktree`, `MergeError::NotATextConflict`,
+`SearchError::InvalidQuery`, a credential store failure, an OS permission error), or builds it
+with a constructor (`ErrorDto::worker_stopped`, `ErrorDto::pull_failed`). Every `WorkerHandle`
+method goes through `WorkerHandle::request`, so a stopped worker always answers `WorkerStopped`.
+Text (`ErrorDto::from(String)`) is always `Other`: nothing reads the kind from a message.
+Tauri commands return `Result<T, ErrorDto>` (Tauri sends `Err` as the rejected promise's
+value), and the sidecar puts it in the JSON-RPC error's `data`, next to the same `message`.
+`ErrorKind` lists only the failures the frontend tells apart: a new one needs a kind there and a
+typed producer, not a text check.
+
+`PermissionDenied` comes from `git_core::os_error::is_permission_denied`: an `io::Error` of that
+kind, or a libgit2 `Os` error. libgit2 keeps no error number, so the latter is recognised by the
+system's own text for `EACCES`/`EPERM` (`ERROR_ACCESS_DENIED` on Windows) at the end of its
+message, as `io::Error` renders it.
+
+Errors Tauri raises before a command runs (an argument its generated wrapper can't deserialise,
+an unknown command, an ACL refusal) stay bare strings: they go through Tauri's own
+`InvokeResolver`, whose responder an app can't wrap. The frontend reads them as `Other`
+(`toRepoError`).
 
 `RepoClient` methods reject with `RepoError` (`frontend/src/ipc/RepoClient.ts`): the message,
 whose `String()` is the message alone, and the `kind`. Frontend code switches on the kind
