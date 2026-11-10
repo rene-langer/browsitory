@@ -269,11 +269,13 @@ function AppContent({
         setTabToolError(null);
         action().catch((error: unknown) => setTabToolError(error instanceof Error ? error.message : String(error)));
       };
+      // Grouped (#645): the tab, the folder's tools, its root files, then reopening.
       return [
-        { label: "Rename tab…", onSelect: () => setRenamingTab(path) },
-        { label: "Open terminal here", onSelect: () => run(() => client.openTerminal(path)) },
-        { label: "Reveal repository", onSelect: () => run(() => client.revealInFileManager(path, null)) },
+        { label: "Rename tab…", onSelect: () => setRenamingTab(path), shortcut: "F2", ariaKeyShortcuts: "F2" },
+        { label: "Open terminal here", onSelect: () => run(() => client.openTerminal(path)), group: "tools" },
+        { label: "Reveal repository", onSelect: () => run(() => client.revealInFileManager(path, null)), group: "tools" },
         ...rootFileItems(rootFiles[path]).map((item) => ({
+          group: "files",
           label: item.label,
           onSelect: () =>
             run(async () => {
@@ -289,6 +291,9 @@ function AppContent({
           onSelect: reopenClosedTab,
           disabled: !canReopenClosedRepo,
           title: canReopenClosedRepo ? undefined : "No closed tab to reopen",
+          group: "reopen",
+          shortcut: "Ctrl/Cmd+Shift+T",
+          ariaKeyShortcuts: "Control+Shift+T Meta+Shift+T",
         },
       ];
     },
