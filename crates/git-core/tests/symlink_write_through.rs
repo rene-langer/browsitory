@@ -2082,7 +2082,11 @@ fn cherry_pick_adding_a_folder_where_head_added_a_link_is_a_directory_file_confl
 fn under_ignorecase_a_link_and_folder_of_one_spelling_are_still_the_conflict() {
     let f = fx();
     fresh_folder_against_a_committed_link(&f);
-    f.repo.config().unwrap().set_bool("core.ignorecase", true).unwrap();
+    f.repo
+        .config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
     let result = git_core::merge::start_merge(&f.repo, "other", MergeOptions::default()).unwrap();
     assert!(
         matches!(result, MergeOutcome::Conflicted { .. }),
@@ -2092,7 +2096,11 @@ fn under_ignorecase_a_link_and_folder_of_one_spelling_are_still_the_conflict() {
 
     let f = fx();
     adding_below_a_committed_folder_link(&f);
-    f.repo.config().unwrap().set_bool("core.ignorecase", true).unwrap();
+    f.repo
+        .config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
     let result = git_core::merge::start_merge(&f.repo, "old", MergeOptions::default()).unwrap();
     assert!(
         matches!(result, MergeOutcome::Conflicted { .. }),
