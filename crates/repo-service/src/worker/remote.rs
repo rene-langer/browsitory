@@ -225,6 +225,16 @@ impl TransferOp {
     pub(super) fn clear(&self) {
         self.registered.registry().reset(&self.id);
     }
+
+    /// Ends the operation's registration and returns its ID, for its `Completed` event. Called
+    /// before that event is sent, so whoever sees it (the "Fetch automatically" scheduler starting
+    /// its next tick, a test) finds the worker idle (#567); a cancel for the ID is dropped from
+    /// then on, as for any finished operation.
+    pub(super) fn finish(self) -> String {
+        let Self { id, registered } = self;
+        drop(registered);
+        id
+    }
 }
 
 fn complete(
@@ -233,7 +243,6 @@ fn complete(
     operation: TransferOperation,
     result: Result<(), git_core::remote::RemoteError>,
 ) {
-    op.clear();
     let hook_output = match &result {
         Err(git_core::remote::RemoteError::HookFailed { output, .. }) => Some(output.clone()),
         Err(git_core::remote::RemoteError::Hook(
@@ -242,7 +251,7 @@ fn complete(
         _ => None,
     };
     let _ = events.send(TransferEvent::Completed {
-        operation_id: op.id,
+        operation_id: op.finish(),
         operation,
         error: result.err().map(|error| error.transfer_error_kind()),
         hook_output,
@@ -358,9 +367,8 @@ pub(super) fn pull<S: CredentialStore>(
         .err()
         .map(|error| error.transfer_error_kind());
     let _ = reply.send(result.map_err(pull_error_message));
-    op.clear();
     let _ = events.send(TransferEvent::Completed {
-        operation_id: op.id,
+        operation_id: op.finish(),
         operation: TransferOperation::Pull,
         error,
         hook_output: None,
@@ -584,9 +592,8 @@ pub(super) fn fetch_all<S: CredentialStore>(
         }
         Err(error) => Some(error.transfer_error_kind()),
     };
-    op.clear();
     let _ = events.send(TransferEvent::Completed {
-        operation_id: op.id,
+        operation_id: op.finish(),
         operation: OPERATION,
         error,
         hook_output: None,
