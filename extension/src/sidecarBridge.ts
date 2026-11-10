@@ -536,6 +536,12 @@ export class SidecarBridge {
         }
         case "open_external_url": {
           const url = requireStringParam(request, "url");
+          // A link can come from a commit message, which is untrusted: only web links open, never
+          // another scheme an OS or VSCode handler would act on (#612). Same rule as the
+          // desktop app's `open_external_url`.
+          if (!isWebUrl(url)) {
+            throw new Error(`Only http and https links can be opened: ${url}`);
+          }
           // `openExternal` resolves to false when nothing opened the link (for example the user
           // declined VSCode's "open external website" prompt). Report that as a failure, like
           // the desktop app's opener does, so the webview can say so.
@@ -760,6 +766,16 @@ function isJsonRpcMessage(value: unknown): value is JsonRpcMessage {
 function requireEmptyParams(request: JsonRpcRequest): void {
   if (Object.keys(request.params).length !== 0) {
     throw new InvalidParamsError(request.method + " does not accept parameters");
+  }
+}
+
+/** Whether `url` parses as an `http:` or `https:` URL. */
+function isWebUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
   }
 }
 

@@ -3,7 +3,7 @@ import { CommitDiffPane } from "./CommitDiffPane";
 import { StashDiffPane } from "./StashDiffPane";
 import { NO_HEAD_INFO, type CommitView, type DiscardRequest, type FileHistoryFocus } from "./diffPaneShared";
 import { useState } from "react";
-import type { GraphCommit, HeadInfo, RepoClient, StashEntry, StatusEntry } from "../ipc/RepoClient";
+import type { ForgeRepository, GraphCommit, HeadInfo, RepoClient, StashEntry, StatusEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import type { CommitDraft } from "./CommitBox";
@@ -45,7 +45,10 @@ export function DiffPane({
   selectionBusyReason = null,
   discardBlockedReason = null,
   restoreBlockedReason = null,
+  issueForge = null,
 }: {
+  // The forge repository a selected commit's `#123` links to (#612), else `null`.
+  issueForge?: ForgeRepository | null;
   // Why Restore… can't run now (`operationBlockers`), else `null`.
   restoreBlockedReason?: string | null;
   // Why the selection's actions can't run now (another action is in progress), else `null`.
@@ -130,6 +133,7 @@ export function DiffPane({
       view={commitView}
       onViewChange={setCommitView}
       restoreBlockedReason={restoreBlockedReason}
+      issueForge={issueForge}
     />
   );
 }
