@@ -1,6 +1,20 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { RepoTabs } from "./RepoTabs";
+import styles from "./RepoTabs.module.css";
+import repoTabsCss from "./RepoTabs.module.css?raw";
+import appCss from "../App.module.css?raw";
+
+// The declarations of the plain `.name { ... }` rules in a stylesheet (no compound selectors).
+function declarationsOf(css: string, className: string): string[] {
+  const rule = new RegExp(`^\\.${className}\\s*\\{([^}]*)\\}`, "gm");
+  return [...css.matchAll(rule)].map((match) => match[1]);
+}
+
+// A fixed `height`/`max-height` (not `min-height`) on a box around the tabs.
+function fixesHeight(declarations: string[]): boolean {
+  return declarations.some((block) => /(^|[;{\s])(max-)?height\s*:/.test(block));
+}
 
 // The per-tab/group close buttons are `aria-hidden` (kept mouse-only; see the "keeps the per-tab
 // close button out of the tablist's accessible children" test below), so role queries need
@@ -275,5 +289,43 @@ describe("RepoTabs tab menu", () => {
     fireEvent.keyDown(screen.getByRole("tab", { name: "widget" }), { key: "F10", shiftKey: true });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(screen.getByRole("tab", { name: "widget" })).not.toHaveAttribute("aria-haspopup");
+  });
+});
+
+describe("RepoTabs header height (#606)", () => {
+  it("leaves every box around a grouped tab free to grow to the group label plus its tabs", () => {
+    render(
+      <RepoTabs
+        openRepos={[
+          { path: "/repos/widget", displayName: "widget", workspaceId: "ws-1" },
+          { path: "/repos/gadget", displayName: "gadget", workspaceId: "ws-1" },
+        ]}
+        activePath="/repos/widget"
+        busyPaths={noneBusy}
+        workspaceNames={{ "ws-1": "Services" }}
+        onSwitchTo={vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onAddTab={vi.fn()}
+      />,
+    );
+
+    // jsdom can't lay out, so check the rules behind each ancestor of the grouped tab instead:
+    // the group stacks its label row above its tabs, and none of them may cap that height.
+    const tab = screen.getByRole("tab", { name: "widget" });
+    for (const name of ["tab", "groupTabs", "group", "tabs", "strip"] as const) {
+      expect(tab.closest(`.${styles[name]}`)).not.toBeNull();
+      const rules = declarationsOf(repoTabsCss, name);
+      expect(rules.length).toBeGreaterThan(0);
+      expect({ name, fixed: fixesHeight(rules) }).toEqual({ name, fixed: false });
+    }
+    expect(screen.getByText("Services").closest(`.${styles.groupHeader}`)).not.toBeNull();
+  });
+
+  it("gives the app header row a minimum height, not a fixed one", () => {
+    const headerRow = declarationsOf(appCss, "headerRow");
+    expect(headerRow).toHaveLength(1);
+    expect(fixesHeight(headerRow)).toBe(false);
+    expect(headerRow[0]).toMatch(/min-height\s*:/);
   });
 });
