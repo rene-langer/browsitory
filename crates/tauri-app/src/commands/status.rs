@@ -58,12 +58,8 @@ pub fn get_graph_branch_selection(repo_path: String) -> Result<Option<Vec<String
 }
 
 #[tauri::command]
-pub fn set_graph_branch_selection(
-    repo_path: String,
-    local: Vec<String>,
-) -> Result<(), ErrorDto> {
-    config::set_graph_branch_selection(Path::new(&repo_path), &local)
-        .map_err(ErrorDto::from_error)
+pub fn set_graph_branch_selection(repo_path: String, local: Vec<String>) -> Result<(), ErrorDto> {
+    config::set_graph_branch_selection(Path::new(&repo_path), &local).map_err(ErrorDto::from_error)
 }
 
 /// Forgets the saved selection, back to every local branch (#402).

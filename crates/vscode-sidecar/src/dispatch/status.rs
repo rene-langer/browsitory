@@ -2,8 +2,7 @@ use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
     DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, GraphSelectionDto,
-    LineHistoryDto,
-    StatusEntryDto,
+    LineHistoryDto, StatusEntryDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -231,7 +230,7 @@ pub(super) fn set_graph_remote_branch_selection(
     params: SetGraphRemoteBranchSelectionParams,
 ) -> Result<Value, ErrorDto> {
     config::set_graph_remote_branch_selection(Path::new(&params.repo_path), &params.remote)
-    .map_err(ErrorDto::from_error)?;
+        .map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }
 

@@ -534,10 +534,7 @@ pub fn get_graph_branch_selection(repo_path: &Path) -> Result<Option<Vec<String>
     get_graph_branch_selection_at(&config_file_path()?, repo_path)
 }
 
-pub fn set_graph_branch_selection(
-    repo_path: &Path,
-    local: &[String],
-) -> Result<(), ConfigError> {
+pub fn set_graph_branch_selection(repo_path: &Path, local: &[String]) -> Result<(), ConfigError> {
     set_graph_branch_selection_at(&config_file_path()?, repo_path, local)
 }
 

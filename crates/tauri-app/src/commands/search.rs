@@ -16,9 +16,15 @@ pub async fn search_commits(
     cursor: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<SearchPageDto, ErrorDto> {
-    Ok(queue_search(&state, &repo_path, query, GraphSelection::from(selection), cursor)?
-        .await?
-        .into())
+    Ok(queue_search(
+        &state,
+        &repo_path,
+        query,
+        GraphSelection::from(selection),
+        cursor,
+    )?
+    .await?
+    .into())
 }
 
 /// Claims the search's generation at once, before the call waits for the repository's gate, so
