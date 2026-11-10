@@ -621,8 +621,8 @@ describe("buildCommands", () => {
   it("includes a Switch to <repo> command for every other open repo", () => {
     const appState = makeAppState();
     const otherRepos = [
-      { path: "/repos/widget", displayName: "widget", workspaceId: null },
-      { path: "/repos/gadget", displayName: "gadget", workspaceId: null },
+      { path: "/repos/widget", displayName: "widget", alias: null, workspaceId: null },
+      { path: "/repos/gadget", displayName: "gadget", alias: null, workspaceId: null },
     ];
     const onSwitchRepoTab = vi.fn();
     const commands = commandsFor(appState, { tabs: tabs({ onOpenRepoTab: vi.fn(), otherOpenRepos: otherRepos, onSwitchRepoTab: onSwitchRepoTab }) });
@@ -1581,6 +1581,47 @@ describe("preferences and external tool commands", () => {
     expect(onReopenClosedTab).toHaveBeenCalledOnce();
   });
 
+  it("adds Rename tab…, grouped under Repositories, also while an operation runs (#625)", () => {
+    const onRenameTab = vi.fn();
+    const build = (appCommands: AppCommands) => buildCommands({ appState: makeAppState({ pending: true }), app: appCommands });
+    expect(build({}).some((c) => c.id === "rename-tab")).toBe(false);
+    const rename = build({ onRenameTab }).find((c) => c.id === "rename-tab");
+    expect(rename?.label).toBe("Rename tab…");
+    expect(rename?.keywords).toEqual(expect.arrayContaining(["rename", "alias", "tab"]));
+    expect(rename?.group).toBe("Repositories");
+    rename!.run();
+    expect(onRenameTab).toHaveBeenCalledOnce();
+  });
+
+  it("adds Switch to tab…, a picker of the other open tabs by name, folder name and path (#625)", () => {
+    const onSwitchRepoTab = vi.fn();
+    const otherRepos = [
+      { path: "/work/one/app", displayName: "app (main)", alias: "app (main)", workspaceId: null },
+      { path: "/work/two/app", displayName: "app", alias: null, workspaceId: null },
+      { path: "/libs/core", displayName: "core", alias: null, workspaceId: "ws-1" },
+    ];
+    expect(commandsFor(makeAppState(), { tabs: tabs({ onSwitchRepoTab }) }).some((c) => c.id === "switch-to-tab")).toBe(false);
+
+    const commands = commandsFor(makeAppState(), { tabs: tabs({ otherOpenRepos: otherRepos, onSwitchRepoTab }) });
+    const switchTo = commands.find((c) => c.id === "switch-to-tab");
+    expect(switchTo?.label).toBe("Switch to tab…");
+    expect(switchTo?.group).toBe("Repositories");
+    const items = (query: string) => switchTo!.picker!.items(query).map((item) => item.label);
+    expect(items("")).toEqual(["app (main)", "app", "core"]);
+    expect(items("main")).toEqual(["app (main)"]);
+    // The renamed tab's folder name and the path find it too; an exact name comes first.
+    expect(items("app")).toEqual(["app", "app (main)"]);
+    expect(items("/work/two")).toEqual(["app"]);
+    expect(items("libs")).toEqual(["core"]);
+
+    switchTo!.picker!.items("core")[0].run();
+    expect(onSwitchRepoTab).toHaveBeenCalledWith("/libs/core");
+    // The one-step commands find a tab by its folder name and path as well.
+    const renamed = commands.find((c) => c.id === "switch-repo:/work/one/app");
+    expect(renamed?.label).toBe("Switch to app (main)");
+    expect(renamed?.keywords).toEqual(expect.arrayContaining(["app", "/work/one/app"]));
+  });
+
   it("adds tool commands, with current-file ones only when there is a current file", () => {
     const toolCommands = tools();
     const without = build(makeAppState(), null, toolCommands).map((c) => c.label);
@@ -2118,6 +2159,7 @@ describe("command ids and groups", () => {
       ["stash-with-options", "Stash"],
       ["switch-branch:feature", "Branches"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
@@ -2167,6 +2209,7 @@ describe("command ids and groups", () => {
       ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
@@ -2214,6 +2257,7 @@ describe("command ids and groups", () => {
       ["stage-modified-files", "Diff"],
       ["stage-selected-files", "Diff"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
@@ -2264,6 +2308,7 @@ describe("command ids and groups", () => {
       ["stash-selected-files", "Stash"],
       ["stash-with-options", "Stash"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
@@ -2334,6 +2379,7 @@ describe("command ids and groups", () => {
       ["stage-selected-files", "Diff"],
       ["switch-branch:feature", "Branches"],
       ["switch-repo:/other", "Repositories"],
+      ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],

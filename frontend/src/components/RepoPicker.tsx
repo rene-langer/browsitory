@@ -19,6 +19,7 @@ export function RepoPicker({
   onOpenRepo,
   onOpenWorkspace,
   workspaces,
+  aliases,
   workspacesLoading,
   workspacesError,
   onDismissWorkspacesError,
@@ -32,6 +33,8 @@ export function RepoPicker({
   onOpenRepo: (path: string) => void;
   onOpenWorkspace: (workspace: Workspace) => void;
   workspaces: Workspace[];
+  /** Tab names by repository path (#625): shown in place of the folder name. */
+  aliases?: ReadonlyMap<string, string>;
   workspacesLoading: boolean;
   workspacesError: string | null;
   onDismissWorkspacesError: () => void;
@@ -69,6 +72,7 @@ export function RepoPicker({
     return (
       <WorkspaceEditor
         client={client}
+        aliases={aliases}
         onSave={(name, root, members) =>
           onCreateWorkspace(name, root, members).then((id) => {
             onOpenWorkspace({ id, name, rootPath: root, memberPaths: members });
@@ -84,6 +88,7 @@ export function RepoPicker({
     return (
       <WorkspaceEditor
         client={client}
+        aliases={aliases}
         existing={editingWorkspace}
         onSave={(name, _root, members) =>
           onEditWorkspace(editingWorkspace.id, name, members).then(() => setEditingWorkspace(null))
@@ -115,7 +120,7 @@ export function RepoPicker({
           <ul className={styles.list}>
             {recentRepos.map((path) => (
               <ListRow key={path} className={styles.repoRow} onClick={() => onOpenRepo(path)}>
-                <span className={styles.repoName}>{repoNameOf(path)}</span>
+                <span className={styles.repoName}>{aliases?.get(path) ?? repoNameOf(path)}</span>
                 <span className={styles.repoPath}>{path}</span>
               </ListRow>
             ))}

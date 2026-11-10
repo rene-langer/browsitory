@@ -10,6 +10,7 @@ import { busyReason, operationBlockers, stashBlockReason, type OperationBlockers
 import { stageModifiedPaths, untrackedPaths } from "./stagePaths";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
+import { repoNameOf } from "./repoName";
 import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
 import type { SidebarSectionId } from "../state/useSidebarReveal";
 
@@ -25,6 +26,8 @@ export interface AppCommands {
   onOpenUserGuide?: () => void;
   /** Reopens the most recently closed tab ("Reopen closed tab"); absent when none was closed. */
   onReopenClosedTab?: () => void;
+  /** Opens the active tab's rename dialog ("Rename tab…", #625). */
+  onRenameTab?: () => void;
 }
 
 /**
@@ -1024,19 +1027,50 @@ function repositoryCommands({ app, tools, tabs, blocked }: FamilyContext): Comma
       run: app.onReopenClosedTab,
     });
   }
-  if (tabs === undefined) return commands;
-  for (const repo of tabs.otherOpenRepos) {
+  if (app?.onRenameTab !== undefined) {
     add({
-      id: `switch-repo:${repo.path}`,
-      label: `Switch to ${repo.displayName}`,
-      keywords: ["repo", "switch", "tab", repo.displayName],
-      run: () => tabs.onSwitchRepoTab(repo.path),
+      id: "rename-tab",
+      label: "Rename tab…",
+      keywords: ["rename", "name", "alias", "label", "tab", "repo", "repository"],
+      run: app.onRenameTab,
+    });
+  }
+  if (tabs === undefined) return commands;
+  const tabItems = tabs.otherOpenRepos.map((repo) => ({
+    id: `switch-repo:${repo.path}`,
+    label: `Switch to ${repo.displayName}`,
+    keywords: ["repo", "switch", "tab", ...tabKeywords(repo)],
+    run: () => tabs.onSwitchRepoTab(repo.path),
+  }));
+  tabItems.forEach((item) => add(item));
+  // The same tabs as one picker (#625): their names, folder names and paths are searchable.
+  if (tabItems.length > 0) {
+    const pickerItems = tabs.otherOpenRepos.map((repo, index) => ({
+      ...tabItems[index],
+      label: repo.displayName,
+      keywords: tabKeywords(repo),
+    }));
+    add({
+      id: "switch-to-tab",
+      label: "Switch to tab…",
+      keywords: ["switch", "tab", "tabs", "repo", "repository", "open", "list", "go to"],
+      run: () => {},
+      picker: {
+        placeholder: "Tab name or path…",
+        emptyText: "No other open tab matches",
+        items: (query) => filterPickerItems(pickerItems, query),
+      },
     });
   }
   return commands;
 }
 
 const PICKER_KEYWORDS = ["go", "go to", "jump", "find", "show", "reveal", "select", "navigate"];
+
+/** What finds a tab in the palette: its name, its folder name and its path (#625). */
+function tabKeywords(repo: OpenRepo): string[] {
+  return [repo.displayName, repoNameOf(repo.path), repo.path];
+}
 
 function goToPickers(appState: UseAppStateResult, goTo: GoToCommands): Command[] {
   const { state } = appState;

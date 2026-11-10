@@ -30,6 +30,15 @@ describe("RepoPicker", () => {
     expect(screen.getByText(/A workspace is a saved group of repositories/)).toBeInTheDocument();
   });
 
+  it("leads a recent repo with its tab name when it has one (#625)", async () => {
+    const client = fakeClient({ listRecentRepos: async () => ["/work/one/app", "/work/two/app"] });
+    const aliases = new Map([["/work/one/app", "app (main)"]]);
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} aliases={aliases} />);
+    expect(await screen.findByText("app (main)")).toBeInTheDocument();
+    expect(screen.getByText("app")).toBeInTheDocument();
+    expect(screen.getByText("/work/one/app")).toBeInTheDocument();
+  });
+
   it("renders each recent repo and opens it on click", async () => {
     const client = fakeClient({
       listRecentRepos: async () => ["/repo/a", "/repo/b"],

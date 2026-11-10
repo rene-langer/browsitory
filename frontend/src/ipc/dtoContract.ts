@@ -107,6 +107,7 @@ export type DtoContract = [
   Expect<Equal<Hand.RemoteAuthMode, Wire.RemoteAuthMode>>,
   Expect<Equal<Hand.RemoteInfo, Loosen<Wire.RemoteInfo, "prune">>>,
   Expect<Equal<Hand.ResetMode, Wire.ResetMode>>,
+  Expect<Equal<Hand.RepoAlias, Wire.RepoAlias>>,
   Expect<Equal<Hand.SearchPage, Flat<Omit<Wire.SearchPage, "commits"> & { commits: Hand.GraphCommit[] }>>>,
   Expect<Equal<Hand.SequenceAbort, Wire.SequenceAbort>>,
   Expect<Equal<Hand.SequenceKind, Wire.SequenceKind>>,

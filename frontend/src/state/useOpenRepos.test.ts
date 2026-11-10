@@ -143,6 +143,88 @@ describe("useOpenRepos", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.openRepos[0].displayName).toBe("widget");
+    expect(result.current.openRepos[0].alias).toBeNull();
+  });
+
+  describe("tab names (#625)", () => {
+    const twoClones = {
+      entries: [entry("/work/one/app"), entry("/work/two/app")],
+      activePath: "/work/one/app",
+    };
+
+    it("applies the stored aliases on restore, also to a tab opened later", async () => {
+      const client = fakeClient({
+        listOpenRepos: vi.fn().mockResolvedValue(twoClones),
+        listRepoAliases: vi.fn().mockResolvedValue([
+          { repoPath: "/work/one/app", alias: "app (main)" },
+          { repoPath: "/work/three/app", alias: "app (old)" },
+        ]),
+      });
+      const { result } = renderHook(() => useOpenRepos(client));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.openRepos.map((repo) => [repo.displayName, repo.alias])).toEqual([
+        ["app (main)", "app (main)"],
+        ["app", null],
+      ]);
+      expect(result.current.aliases.get("/work/three/app")).toBe("app (old)");
+
+      await act(() => result.current.openRepo("/work/three/app"));
+      expect(result.current.openRepos[2].displayName).toBe("app (old)");
+    });
+
+    it("renames a tab, trimmed, and clearing the name restores the folder name", async () => {
+      const setRepoAlias = vi.fn().mockResolvedValue(undefined);
+      const client = fakeClient({ listOpenRepos: vi.fn().mockResolvedValue(twoClones), setRepoAlias });
+      const { result } = renderHook(() => useOpenRepos(client));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await act(() => result.current.renameRepo("/work/two/app", "  app (review) "));
+      expect(setRepoAlias).toHaveBeenLastCalledWith("/work/two/app", "app (review)");
+      expect(result.current.openRepos[1]).toMatchObject({ displayName: "app (review)", alias: "app (review)" });
+
+      await act(() => result.current.renameRepo("/work/two/app", "   "));
+      expect(setRepoAlias).toHaveBeenLastCalledWith("/work/two/app", null);
+      expect(result.current.openRepos[1]).toMatchObject({ displayName: "app", alias: null });
+      expect(result.current.aliases.has("/work/two/app")).toBe(false);
+    });
+
+    it("keeps the name when the config can't be written, and rejects", async () => {
+      const client = fakeClient({
+        listOpenRepos: vi.fn().mockResolvedValue(twoClones),
+        setRepoAlias: vi.fn().mockRejectedValue(new Error("config.toml is read-only")),
+      });
+      const { result } = renderHook(() => useOpenRepos(client));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await act(() => expect(result.current.renameRepo("/work/one/app", "other")).rejects.toThrow("read-only"));
+      expect(result.current.openRepos[0].displayName).toBe("app");
+    });
+
+    it("keeps the alias through closing and reopening the tab", async () => {
+      const client = fakeClient({
+        listOpenRepos: vi.fn().mockResolvedValue(twoClones),
+        listRepoAliases: vi.fn().mockResolvedValue([{ repoPath: "/work/two/app", alias: "review" }]),
+      });
+      const { result } = renderHook(() => useOpenRepos(client));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      act(() => result.current.closeRepo("/work/two/app"));
+      await act(() => result.current.reopenClosedRepo());
+      expect(result.current.openRepos.map((repo) => repo.displayName)).toEqual(["app", "review"]);
+    });
+
+    it("restores the tabs with folder names when the aliases can't be read", async () => {
+      const client = fakeClient({
+        listOpenRepos: vi.fn().mockResolvedValue(twoClones),
+        listRepoAliases: vi.fn().mockRejectedValue(new Error("unknown method")),
+      });
+      const { result } = renderHook(() => useOpenRepos(client));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.restoreError).toBeNull();
+      expect(result.current.openRepos.map((repo) => repo.displayName)).toEqual(["app", "app"]);
+    });
   });
 
   it("a failed openRepo rejects and does not add a tab or change activePath", async () => {

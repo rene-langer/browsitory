@@ -1,5 +1,5 @@
 use repo_service::wire::ErrorDto;
-use repo_service::wire::{OpenRepoEntryDto, OpenRepoEntryInput, WorkspaceDto};
+use repo_service::wire::{OpenRepoEntryDto, OpenRepoEntryInput, RepoAliasDto, WorkspaceDto};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -80,6 +80,26 @@ pub(super) fn persist_open_repos(params: PersistOpenReposParams) -> Result<Value
         })
         .collect();
     config::set_open_repos(&entries, params.active_path.as_deref().map(Path::new))
+        .map_err(ErrorDto::from_error)?;
+    Ok(Value::Null)
+}
+
+pub(super) fn list_repo_aliases() -> Result<Value, ErrorDto> {
+    let aliases = config::list_repo_aliases().map_err(ErrorDto::from_error)?;
+    let aliases: Vec<RepoAliasDto> = aliases.into_iter().map(RepoAliasDto::from).collect();
+    serde_json::to_value(aliases).map_err(ErrorDto::from_error)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SetRepoAliasParams {
+    repo_path: String,
+    alias: Option<String>,
+}
+
+/// `None` or a blank `alias` removes the repository's tab name (#625).
+pub(super) fn set_repo_alias(params: SetRepoAliasParams) -> Result<Value, ErrorDto> {
+    config::set_repo_alias(Path::new(&params.repo_path), params.alias.as_deref())
         .map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }

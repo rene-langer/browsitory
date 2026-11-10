@@ -104,6 +104,11 @@ fn snapshots() -> Vec<(String, String)> {
     );
     s.add("Workspace", fixtures::workspaces(), WorkspaceDto::from);
     s.add(
+        "RepoAlias",
+        fixtures::repo_aliases(),
+        repo_service::wire::RepoAliasDto::from,
+    );
+    s.add(
         "DiffSettings",
         fixtures::diff_settings(),
         DiffSettingsDto::from,

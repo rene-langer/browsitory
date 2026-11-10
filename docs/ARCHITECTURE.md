@@ -597,7 +597,8 @@ resort.
 Two tabs of one repository share its worker, so they share one undo history, and a new search
 in one cancels a search still running in the other (one search generation per worker).
 Everything else keeps the caller's spelling: hook and transfer events, recent repositories, open
-tabs and per-repository settings, so two spellings still make two tabs. A repository renamed
+tabs and per-repository settings (also a tab's custom name, `config`'s `repo_aliases`, #625), so
+two spellings still make two tabs. A repository renamed
 while open keeps its alias until it is closed. The registry is per process: two VSCode windows
 run two sidecars, so one repository still gets one worker per window (only the undo lock works
 across processes).

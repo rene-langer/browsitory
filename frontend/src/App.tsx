@@ -4,6 +4,7 @@ import { Moon, Settings, Sparkles, Sun } from "lucide-react";
 import { ShortcutHint } from "./components/ShortcutHint";
 import { RepoPicker } from "./components/RepoPicker";
 import { RepoTabs } from "./components/RepoTabs";
+import { RenameTabDialog } from "./components/RenameTabDialog";
 import { ReleaseNotesModal } from "./components/ReleaseNotesModal";
 import { ThirdPartyLicencesDialog } from "./components/ThirdPartyLicencesDialog";
 import { ToastRegion } from "./components/primitives/ToastRegion";
@@ -90,6 +91,10 @@ function AppContent({
   const { getCommitDraft, onCommitDraftChange } = useCommitDrafts();
 
   const [pickingRepo, setPickingRepo] = useState(false);
+  // The tab whose "Rename tab…" dialog is open (#625).
+  const [renamingTab, setRenamingTab] = useState<string | null>(null);
+  const { activePath } = openRepos;
+  const renameActiveTab = useCallback(() => setRenamingTab(activePath), [activePath]);
 
   // `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos` calls, and
   // `useOpenRepos.openRepo` deliberately rejects rather than opening a tab for a repo that failed
@@ -172,8 +177,9 @@ function AppContent({
       onOpenThirdPartyLicences: openLicences,
       onOpenUserGuide: openUserGuide,
       ...(canReopenClosedRepo ? { onReopenClosedTab: reopenClosedTab } : {}),
+      onRenameTab: renameActiveTab,
     }),
-    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences, openLicences, openUserGuide, canReopenClosedRepo, reopenClosedTab],
+    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences, openLicences, openUserGuide, canReopenClosedRepo, reopenClosedTab, renameActiveTab],
   );
   const tabMenuItems = useCallback(
     (path: string) => {
@@ -182,6 +188,7 @@ function AppContent({
         action().catch((error: unknown) => setTabToolError(error instanceof Error ? error.message : String(error)));
       };
       return [
+        { label: "Rename tab…", onSelect: () => setRenamingTab(path) },
         { label: "Open terminal here", onSelect: () => run(() => client.openTerminal(path)) },
         { label: "Reveal repository", onSelect: () => run(() => client.revealInFileManager(path, null)) },
         {
@@ -245,6 +252,7 @@ function AppContent({
           onAddTab={() => setPickingRepo(true)}
           tabMenuItems={tabMenuItems}
           changedPaths={tabChangeMarkers.changedPaths}
+          onRenameTab={setRenamingTab}
         />
         {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}
         {openRepos.openRepos.length > 0 && <ShortcutHint />}
@@ -329,6 +337,15 @@ function AppContent({
       {licencesOpen && loadThirdPartyNotices !== undefined && (
         <ThirdPartyLicencesDialog load={loadThirdPartyNotices} onClose={() => setLicencesOpen(false)} />
       )}
+      {renamingTab !== null && (
+        <RenameTabDialog
+          key={renamingTab}
+          path={renamingTab}
+          alias={openRepos.aliases.get(renamingTab) ?? null}
+          onRename={(alias) => openRepos.renameRepo(renamingTab, alias).then(() => setRenamingTab(null))}
+          onCancel={() => setRenamingTab(null)}
+        />
+      )}
       {pickingRepo && (
         <Overlay onClose={() => setPickingRepo(false)}>
           <RepoPicker
@@ -342,6 +359,7 @@ function AppContent({
               setPickingRepo(false);
             }}
             workspaces={workspaces.workspaces}
+            aliases={openRepos.aliases}
             workspacesLoading={workspaces.loading}
             workspacesError={workspaces.error}
             onDismissWorkspacesError={workspaces.dismissError}
@@ -392,6 +410,7 @@ function AppContent({
           onOpenRepo={openRepoTab}
           onOpenWorkspace={(workspace) => void openRepos.openWorkspace(workspace)}
           workspaces={workspaces.workspaces}
+          aliases={openRepos.aliases}
           workspacesLoading={workspaces.loading}
           workspacesError={workspaces.error}
           onDismissWorkspacesError={workspaces.dismissError}

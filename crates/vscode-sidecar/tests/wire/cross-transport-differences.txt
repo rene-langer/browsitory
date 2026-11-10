@@ -86,6 +86,7 @@ ReflogEntry/with-summary key-order
 RemoteInfo/HttpsToken key-order
 RemoteInfo/SshAgent key-order
 RemoteInfo/no-auth key-order
+RepoAlias/plain key-order
 SearchPage/more key-order
 SequenceOutcome/Completed key-order
 SequenceOutcome/Conflicted key-order
