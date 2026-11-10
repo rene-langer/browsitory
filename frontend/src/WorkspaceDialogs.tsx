@@ -8,6 +8,7 @@ import { MergeDialog } from "./components/MergeDialog";
 import { ParentPickerDialog } from "./components/ParentPickerDialog";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { Overlay } from "./components/primitives/Overlay";
+import { PullDivergedDialog } from "./components/PullDivergedDialog";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { RemoteDialogs } from "./components/RemoteDialogs";
@@ -64,6 +65,7 @@ export function WorkspaceDialogs({
   paletteOpen,
   onPaletteOpenChange: setPaletteOpen,
   paletteCommands,
+  paletteInitialPicker,
   shortcutsOpen,
   onShortcutsOpenChange: setShortcutsOpen,
 }: {
@@ -91,6 +93,8 @@ export function WorkspaceDialogs({
   onPaletteOpenChange: (open: boolean) => void;
   // Built only while the palette is open.
   paletteCommands: () => Command[];
+  // The picker the palette opens into (the toolbar's branch chip), else `null`.
+  paletteInitialPicker: string | null;
   shortcutsOpen: boolean;
   onShortcutsOpenChange: (open: boolean) => void;
 }) {
@@ -259,6 +263,25 @@ export function WorkspaceDialogs({
           onCancel={() => closeDialog("push")}
         />
       )}
+      {active && appState.state.pendingPull !== null && (
+        // Here, not in `BranchTree`, for the same reason as `RemoteDialogs` below (#636).
+        <PullDivergedDialog
+          upstreamRef={appState.state.pendingPull.upstreamRef}
+          operationDisabled={repositoryOperationDisabled}
+          operationDisabledReason={operationDisabledReason}
+          onMerge={(upstreamRef) => {
+            if (repositoryOperationDisabled) return;
+            appState.clearPendingPull();
+            void appState.mergePull(upstreamRef);
+          }}
+          onRebase={(upstreamRef) => {
+            if (repositoryOperationDisabled) return;
+            appState.clearPendingPull();
+            appState.openRebasePlanner(upstreamRef);
+          }}
+          onCancel={appState.clearPendingPull}
+        />
+      )}
       {active && (
         // Here, not in `BranchTree`: the sidebar stays mounted but `hidden` while collapsed.
         <RemoteDialogs
@@ -368,6 +391,7 @@ export function WorkspaceDialogs({
         <Overlay onClose={() => setPaletteOpen(false)}>
           <CommandPalette
             commands={paletteCommands()}
+            initialPickerId={paletteInitialPicker}
             onRun={() => setPaletteOpen(false)}
           />
         </Overlay>

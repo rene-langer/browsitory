@@ -8,12 +8,15 @@ import { Toolbar } from "./primitives/Toolbar";
 import styles from "./SyncBar.module.css";
 
 /**
- * Primary entry point for the three daily sync actions on the history pane, with the current
+ * The repository toolbar's row (#637): `leading` (the sidebar toggle, the branch chip, Back and
+ * Forward), then the three daily sync actions with the current
  * branch's ahead/behind counts against its (last fetched) upstream. Fetch falls back to the
  * only/first remote when the branch has no upstream; its chevron menu adds "Fetch all remotes"
  * and the Prune toggle. Pull needs an upstream; Push without one opens the Push dialog to
  * publish the branch (`onPublish`). Push with an upstream goes where `push.default` resolves;
  * when it resolves nothing, `onPush` opens the Push dialog instead (see `pushCurrentBranch`).
+ * Then Stash (`stash`), `trailing` (Undo/Redo, Refresh) and the last fetch. Pull waits while a
+ * diverged pull's prompt is open (`pullPending`, #636).
  */
 export function SyncBar({
   remotes,
@@ -29,6 +32,10 @@ export function SyncBar({
   onTogglePrune,
   onPublish,
   leading,
+  trailing,
+  stash,
+  pullPending = false,
+  ariaLabel,
   lastFetchedAt = null,
   autoFetchMinutes = 0,
 }: {
@@ -47,6 +54,13 @@ export function SyncBar({
   /** Push on a branch without an upstream: open the Push dialog for the current branch. */
   onPublish: () => void;
   leading?: ReactNode;
+  trailing?: ReactNode;
+  /** Stash, with "Stash all" and "Stash…" in its menu; `reason` (`stashBlockReason`) disables it. */
+  stash?: { reason: string | null; onStash: () => void; onStashWithOptions: () => void };
+  /** A diverged pull waits for Merge, Rebase or Cancel: Pull is disabled meanwhile. */
+  pullPending?: boolean;
+  /** Names the row as a group ("Repository"). */
+  ariaLabel?: string;
   /** When this repository was last fetched in this session (ms since the epoch), if at all. */
   lastFetchedAt?: number | null;
   /** The effective "Fetch automatically" interval, for the last-fetch tooltip; 0 is off. */
@@ -73,7 +87,7 @@ export function SyncBar({
       : (busyTitle ?? (canPublish ? "Push this branch to a remote and set its upstream…" : "No remote configured."));
 
   return (
-    <div className={styles.bar}>
+    <div className={styles.bar} role={ariaLabel === undefined ? undefined : "group"} aria-label={ariaLabel}>
       {leading}
       <Toolbar aria-label="Sync">
         <SplitButton
@@ -96,8 +110,14 @@ export function SyncBar({
         />
         <button
           type="button"
-          disabled={operationDisabled || detached || upstream === null}
-          title={detached ? detachedTitle : upstreamTitle("Pull from")}
+          disabled={operationDisabled || detached || upstream === null || pullPending}
+          title={
+            detached
+              ? detachedTitle
+              : pullPending && !operationDisabled
+                ? "Choose how to finish the diverged pull first."
+                : upstreamTitle("Pull from")
+          }
           onClick={() => void onPull()}
         >
           Pull
@@ -122,6 +142,25 @@ export function SyncBar({
           <span title="Commits to pull">↓{upstream.behind}</span>
         </span>
       )}
+      {stash !== undefined && (
+        // Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
+        // resolved/amended content lives in the working tree, so stashing it away and continuing
+        // lands an empty (or wrong) commit. Disabled for the whole pause by the stash rule the
+        // file menu and the command palette share (`stashBlockReason`, #495).
+        <SplitButton
+          label="Stash"
+          onClick={stash.onStash}
+          disabled={stash.reason !== null}
+          title={stash.reason ?? "Stash all changes"}
+          menuLabel="More stash options"
+          chevronClassName={styles.split}
+          items={[
+            { label: "Stash all", onSelect: () => stash.onStash() },
+            { label: "Stash…", onSelect: () => stash.onStashWithOptions() },
+          ]}
+        />
+      )}
+      {trailing}
       {lastFetchedAt !== null && <LastFetch at={lastFetchedAt} autoFetchMinutes={autoFetchMinutes} />}
     </div>
   );

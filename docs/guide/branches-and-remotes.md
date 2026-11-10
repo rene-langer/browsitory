@@ -25,7 +25,8 @@ branches**. Creating a branch from a specific commit, or starting a rebase onto 
 available from that commit's row in the graph.
 
 **Upstream.** The bottom of the section says which remote branch the current branch tracks
-("main tracks origin/main."). **Pull** pulls from it. **Clear upstream** removes the setting
+("main tracks origin/main."); **Pull** in the repository toolbar pulls from it (see
+[The main window](main-window.md)). **Clear upstream** removes the setting
 (after asking); the branches themselves don't change. To set an upstream, use **Set upstream…**
 in the current branch's menu, or **Set as upstream for current branch** on a remote branch.
 While a merge, rebase, cherry-pick or revert is in progress, or another action, a fetch, pull or
@@ -45,7 +46,7 @@ open the same dialogs (Remove still asks first), even while the Branches section
 **Publishing a branch.** **Push to…** pushes any local branch to a remote under any name.
 The dialog asks for the remote (the branch's upstream remote, else `origin`), the remote
 branch name (the local name by default) and **Set as upstream**, which is on by default for
-a branch that has no upstream yet. The sync bar's **Push** opens the same dialog when the
+a branch that has no upstream yet. The toolbar's **Push** opens the same dialog when the
 current branch has no upstream, so a new branch is published in one step.
 
 **Where Push goes** follows your git `push.default` (unset means `simple`). With `simple`, a
@@ -107,7 +108,7 @@ nothing to undo, and the window keeps its focus. It uses the repository's **Prun
   remote's **Credentials** dialog. Until then an HTTPS remote that uses a saved token is skipped
   as above; fetch once yourself to let the background fetch use it.
 
-The sync bar shows when the repository was last fetched in this session, by you or in the
+The toolbar shows when the repository was last fetched in this session, by you or in the
 background ("Fetched 3 minutes ago"); hover over it for the time and the interval.
 
 **Merge options.** **Merge into current branch…** opens a dialog naming both branches. Choose

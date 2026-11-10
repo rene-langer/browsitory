@@ -4,7 +4,7 @@ Select **Uncommitted changes** at the top of the commit graph to see your workin
 right-hand pane. It has two groups, **Changes** and **Staged**, each with **Stage all** or
 **Unstage all**. Every file shows its diff. Hover a file to show its stage or unstage button, or
 use **Blame** to see who last changed each line. Type a commit message and click **Commit**.
-**Stash** sets the current changes aside; see [Stashes](stashes.md).
+**Stash** in the repository toolbar sets the current changes aside; see [Stashes](stashes.md).
 
 When **Changes** holds both changes to tracked files and untracked (new) files, **Stage
 modified** sits next to **Stage all**: it stages the tracked files' changes (edits, deletions,
