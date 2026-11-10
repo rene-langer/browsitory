@@ -2851,6 +2851,51 @@ fn read_file_version_and_repo_workdir_round_trip_through_the_sidecar() {
 }
 
 #[test]
+fn root_files_are_listed_and_created_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, _repo) = init_repo();
+    write_file(dir.path(), ".gitattributes", "* text=auto\n");
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let files = sidecar.call(
+        2,
+        "get_root_files",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(files["result"], serde_json::json!([".gitattributes"]));
+    let created = sidecar.call(
+        3,
+        "create_root_file",
+        serde_json::json!({"repoPath": repo_path, "name": ".gitignore"}),
+    );
+    assert_eq!(created["result"], serde_json::Value::Null, "{created}");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(".gitignore")).unwrap(),
+        ""
+    );
+    let refused = sidecar.call(
+        4,
+        "create_root_file",
+        serde_json::json!({"repoPath": repo_path, "name": "sub/.gitignore"}),
+    );
+    assert_eq!(
+        refused["error"]["message"],
+        "Only .gitignore and .gitattributes can be created."
+    );
+    let files = sidecar.call(
+        5,
+        "get_root_files",
+        serde_json::json!({"repoPath": repo_path}),
+    );
+    assert_eq!(
+        files["result"],
+        serde_json::json!([".gitignore", ".gitattributes"])
+    );
+}
+
+#[test]
 fn mark_resolved_round_trips_through_the_sidecar() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, repo) = init_repo();

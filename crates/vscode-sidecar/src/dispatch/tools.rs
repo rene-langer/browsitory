@@ -101,6 +101,29 @@ pub(super) fn repo_workdir(params: RepoPathParams, repos: &Repos) -> Result<Valu
     Ok(Value::String(workdir.to_string_lossy().into_owned()))
 }
 
+/// Which of `.gitignore` and `.gitattributes` exist at the work tree root; `null` for a bare
+/// repository (#624).
+pub(super) fn get_root_files(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    let files = worker_handle(repos, &params.repo_path)?.root_files();
+    serde_json::to_value(files).map_err(ErrorDto::from_error)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct CreateRootFileParams {
+    repo_path: String,
+    name: String,
+}
+
+/// Creates a missing `.gitignore` or `.gitattributes` at the work tree root, empty (#624).
+pub(super) fn create_root_file(
+    params: CreateRootFileParams,
+    repos: &Repos,
+) -> Result<Value, ErrorDto> {
+    worker_handle(repos, &params.repo_path)?.create_root_file(params.name)?;
+    Ok(Value::Null)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct FileSidesParams {

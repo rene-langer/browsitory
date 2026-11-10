@@ -188,6 +188,8 @@ methods!(|params, repos, stdout| {
     "read_file_version" => read_file_version(ReadFileVersionParams, repos),
     "repo_workdir" => repo_workdir(RepoPathParams, repos),
     "check_merge_target" => check_merge_target(RepoFileParams, repos),
+    "get_root_files" => get_root_files(RepoPathParams, repos),
+    "create_root_file" => create_root_file(CreateRootFileParams, repos),
     "get_graph_remote_branch_selection" => get_graph_remote_branch_selection(RepoPathParams),
     "set_graph_remote_branch_selection" => set_graph_remote_branch_selection(
         SetGraphRemoteBranchSelectionParams

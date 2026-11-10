@@ -73,6 +73,7 @@ import type {
   UndoOutcome,
   UndoState,
   ResetMode,
+  RootFileName,
 } from "./RepoClient";
 import { validateRemoteUrls } from "./validateRemoteUrls";
 
@@ -392,6 +393,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     revealInFileManager: (repoPath: string, path: string | null) =>
       call<void>("reveal_in_file_manager", { repoPath, path }),
     openTerminal: (repoPath: string) => call<void>("open_terminal", { repoPath }),
+    getRootFiles: (repoPath: string) => call<RootFileName[] | null>("get_root_files", { repoPath }),
+    createRootFile: (repoPath: string, name: RootFileName) => call<void>("create_root_file", { repoPath, name }),
     openDiffTool: (repoPath: string, path: string, source: DiffSource) =>
       call<void>("open_diff_tool", { repoPath, path, source }),
     openMergeTool: (repoPath: string, path: string) =>

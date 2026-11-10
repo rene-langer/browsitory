@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
-import { RepoError, type CommitOutcome, type HookProgress, type OperationKind, type RepoClient, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
+import { RepoError, type CommitOutcome, type HookProgress, type OperationKind, type RepoClient, type RootFileName, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
 import { credentialRemediation } from "./lib/errorMessages";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
@@ -2727,6 +2727,62 @@ describe("App external tools", () => {
     fireEvent.contextMenu(screen.getByRole("tab", { name: "a" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Reveal repository" }));
     expect(revealInFileManager).toHaveBeenCalledWith("/repos/a", null);
+  });
+
+  it("the repo tab menu opens .gitattributes and creates a missing .gitignore before opening it (#624)", async () => {
+    let existing: RootFileName[] = [".gitattributes"];
+    const getRootFiles = vi.fn(async () => existing);
+    const createRootFile = vi.fn(async () => {
+      existing = [".gitignore", ".gitattributes"];
+    });
+    const openInEditor = vi.fn(async () => {});
+    render(<App client={toolsClient({ getRootFiles, createRootFile, openInEditor })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open .gitattributes" }));
+    await waitFor(() => expect(openInEditor).toHaveBeenCalledWith("/repos/a", ".gitattributes", null));
+    expect(createRootFile).not.toHaveBeenCalled();
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Create .gitignore" }));
+    await waitFor(() => expect(openInEditor).toHaveBeenLastCalledWith("/repos/a", ".gitignore", null));
+    expect(createRootFile).toHaveBeenCalledWith("/repos/a", ".gitignore");
+    expect(createRootFile.mock.invocationCallOrder[0]).toBeLessThan(openInEditor.mock.invocationCallOrder[1]);
+
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a" }));
+    expect(await screen.findByRole("menuitem", { name: "Open .gitignore" })).toBeInTheDocument();
+  });
+
+  it("the tab menu shows an editor failure inline and offers no root files for a bare repository (#624)", async () => {
+    const openInEditor = vi.fn(async () => {
+      throw new Error("No editor is configured.");
+    });
+    const { unmount } = render(<App client={toolsClient({ getRootFiles: async () => [".gitignore"], openInEditor })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Open .gitignore" }));
+    expect(await screen.findByText("No editor is configured.")).toBeInTheDocument();
+    unmount();
+
+    render(<App client={toolsClient({ getRootFiles: async () => null })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    await screen.findByRole("menuitem", { name: "Open terminal here" });
+    expect(screen.queryByRole("menuitem", { name: /\.git(ignore|attributes)/ })).toBeNull();
+  });
+
+  it("the palette creates a missing .gitattributes and opens it (#624)", async () => {
+    const createRootFile = vi.fn(async () => {});
+    const openInEditor = vi.fn(async () => {});
+    const { container } = render(
+      <App client={toolsClient({ getRootFiles: async () => [".gitignore"], createRootFile, openInEditor })} />,
+    );
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
+      target: { value: "gitattributes" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Create .gitattributes" }));
+    await waitFor(() => expect(openInEditor).toHaveBeenCalledWith("/repos/a", ".gitattributes", null));
+    expect(createRootFile).toHaveBeenCalledWith("/repos/a", ".gitattributes");
   });
 
   it("a failed tab action shows its error", async () => {

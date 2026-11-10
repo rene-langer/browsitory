@@ -295,6 +295,11 @@ pub(crate) enum Command {
         pattern: String,
         reply: Sender<Result<(), ErrorDto>>,
     },
+    /// Creates a missing `.gitignore` or `.gitattributes` at the work tree root, empty (#624).
+    CreateRootFile {
+        name: String,
+        reply: Sender<Result<(), ErrorDto>>,
+    },
     Commit {
         message: String,
         no_verify: bool,

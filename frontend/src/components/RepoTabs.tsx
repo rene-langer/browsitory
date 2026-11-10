@@ -37,6 +37,7 @@ export function RepoTabs({
   onCloseGroup,
   onAddTab,
   tabMenuItems,
+  onTabMenuOpen,
   changedPaths,
   onRenameTab,
 }: {
@@ -50,6 +51,8 @@ export function RepoTabs({
   onAddTab: () => void;
   /** A tab's context menu (right-click, the ContextMenu key or Shift+F10); omitted, none. */
   tabMenuItems?: (path: string) => ContextMenuItem[];
+  /** Called as a tab's context menu opens, so items that depend on the disk can be read again. */
+  onTabMenuOpen?: (path: string) => void;
   /** Repositories with uncommitted changes: their tabs show a marker (#613). */
   changedPaths?: ReadonlySet<string>;
   /** Opens the rename dialog of a tab (F2 on the focused tab, #625); omitted, F2 does nothing. */
@@ -72,6 +75,7 @@ export function RepoTabs({
     if (tabMenuItems !== undefined && isMenuKey(event)) {
       event.preventDefault();
       setMenu({ path, ...rectAnchor(event.currentTarget) });
+      onTabMenuOpen?.(path);
       return;
     }
     // WAI-ARIA APG tabs pattern: Delete closes the focused tab — any tab, not just the active one.
@@ -128,6 +132,7 @@ export function RepoTabs({
               : (event) => {
                   event.preventDefault();
                   setMenu({ path: repo.path, ...menuAnchor(event, event.currentTarget) });
+                  onTabMenuOpen?.(repo.path);
                 }
           }
           title={repo.path}

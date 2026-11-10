@@ -11,6 +11,7 @@ import { stageModifiedPaths, untrackedPaths } from "./stagePaths";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { repoNameOf } from "./repoName";
+import type { RootFileItem } from "./rootFiles";
 import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
 import type { SidebarSectionId } from "../state/useSidebarReveal";
 
@@ -40,6 +41,9 @@ export interface ToolCommands {
   /** Only offered while `DiffCommands.currentFile` is set. */
   onOpenCurrentFileInEditor(): void;
   onOpenCurrentFileInDiffTool(): void;
+  /** "Open .gitignore" / "Create .gitignore" and the same for `.gitattributes` (#624); none when bare. */
+  rootFiles?: RootFileItem[];
+  onOpenRootFile?(item: RootFileItem): void;
 }
 
 export interface SearchCommands {
@@ -1023,6 +1027,15 @@ function repositoryCommands({ app, tools, tabs, blocked }: FamilyContext): Comma
       keywords: ["reveal", "finder", "explorer", "file manager", "folder"],
       run: tools.onRevealRepository,
     });
+    for (const item of tools.rootFiles ?? []) {
+      // One id for both labels, so the recent list keeps it once the file exists.
+      add({
+        id: `open-root-file:${item.name}`,
+        label: item.label,
+        keywords: ["open", "create", "edit", "editor", "file", item.name, item.name.slice(1)],
+        run: () => tools.onOpenRootFile?.(item),
+      });
+    }
   }
   // Omitted (not disabled) while an operation is in flight, the same rule the tab's own close
   // button and Ctrl/Cmd+W follow — closing would orphan the operation mid-way.

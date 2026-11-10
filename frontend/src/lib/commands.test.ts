@@ -25,6 +25,8 @@ import { stashBlockers } from "./actions/stashActions";
 import { operationBlockers } from "./operationStatus";
 import type { OpenRepo } from "../state/useOpenRepos";
 import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
+import type { RootFileName } from "../ipc/RepoClient";
+import { rootFileItems } from "./rootFiles";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
   return {
@@ -1710,6 +1712,30 @@ describe("preferences and external tool commands", () => {
     expect(labels).toEqual(
       expect.arrayContaining(["Open terminal here", "Reveal repository", "Open current file in editor"]),
     );
+  });
+
+  it("offers Open or Create for .gitignore and .gitattributes, none when bare (#624)", () => {
+    const onOpenRootFile = vi.fn();
+    const withFiles = (existing: RootFileName[] | null) =>
+      commandsFor(makeAppState({ pending: true }), {
+        diff: diffCommands(null),
+        tools: { ...tools(), rootFiles: rootFileItems(existing), onOpenRootFile },
+      });
+    const commands = withFiles([".gitattributes"]);
+    const gitignore = commands.find((c) => c.id === "open-root-file:.gitignore");
+    const gitattributes = commands.find((c) => c.id === "open-root-file:.gitattributes");
+    expect(gitignore).toMatchObject({ label: "Create .gitignore", group: "Repositories" });
+    expect(gitattributes).toMatchObject({ label: "Open .gitattributes", group: "Repositories" });
+    expect(filterAndSortCommands(commands, "gitignore")[0]).toBe(gitignore);
+    gitignore!.run();
+    expect(onOpenRootFile).toHaveBeenCalledWith({ name: ".gitignore", exists: false, label: "Create .gitignore" });
+    gitattributes!.run();
+    expect(onOpenRootFile).toHaveBeenLastCalledWith({ name: ".gitattributes", exists: true, label: "Open .gitattributes" });
+
+    expect(withFiles([".gitignore", ".gitattributes"]).map((c) => c.label)).toEqual(
+      expect.arrayContaining(["Open .gitignore", "Open .gitattributes"]),
+    );
+    expect(withFiles(null).filter((c) => c.id.startsWith("open-root-file:"))).toEqual([]);
   });
 });
 

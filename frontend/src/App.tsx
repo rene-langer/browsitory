@@ -13,7 +13,8 @@ import { InlineError } from "./components/primitives/InlineError";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { CloneDialog } from "./components/CloneDialog";
 import { Overlay } from "./components/primitives/Overlay";
-import type { RepoClient } from "./ipc/RepoClient";
+import type { RepoClient, RootFileName } from "./ipc/RepoClient";
+import { openRootFile, rootFileItems } from "./lib/rootFiles";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import type { AppCommands } from "./lib/commands";
 import {
@@ -181,6 +182,24 @@ function AppContent({
     }),
     [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences, openLicences, openUserGuide, canReopenClosedRepo, reopenClosedTab, renameActiveTab],
   );
+  // Which of `.gitignore`/`.gitattributes` each open tab's work tree has (#624), for the tab
+  // menu's "Open …"/"Create …" items: read as tabs open and again whenever a tab menu opens.
+  // `null`: bare, no items.
+  const [rootFiles, setRootFiles] = useState<Record<string, RootFileName[] | null>>({});
+  const loadRootFiles = useCallback(
+    (path: string) => {
+      client.getRootFiles(path).then(
+        (files) => setRootFiles((prev) => ({ ...prev, [path]: files })),
+        // Unknown: the items stay as last read (absent if never read).
+        () => {},
+      );
+    },
+    [client],
+  );
+  const openPathsKey = openRepos.openRepos.map((repo) => repo.path).join("\0");
+  useEffect(() => {
+    if (openPathsKey !== "") openPathsKey.split("\0").forEach((path) => loadRootFiles(path));
+  }, [openPathsKey, loadRootFiles]);
   const tabMenuItems = useCallback(
     (path: string) => {
       const run = (action: () => Promise<void>) => {
@@ -191,6 +210,17 @@ function AppContent({
         { label: "Rename tab…", onSelect: () => setRenamingTab(path) },
         { label: "Open terminal here", onSelect: () => run(() => client.openTerminal(path)) },
         { label: "Reveal repository", onSelect: () => run(() => client.revealInFileManager(path, null)) },
+        ...rootFileItems(rootFiles[path]).map((item) => ({
+          label: item.label,
+          onSelect: () =>
+            run(async () => {
+              try {
+                await openRootFile(client, path, item);
+              } finally {
+                if (!item.exists) loadRootFiles(path);
+              }
+            }),
+        })),
         {
           label: "Reopen closed tab",
           onSelect: reopenClosedTab,
@@ -199,7 +229,7 @@ function AppContent({
         },
       ];
     },
-    [client, reopenClosedTab, canReopenClosedRepo],
+    [client, reopenClosedTab, canReopenClosedRepo, rootFiles, loadRootFiles],
   );
 
   const { releaseNotesView, setReleaseNotesView, closeReleaseNotes } = useReleaseNotes(client);
@@ -251,6 +281,7 @@ function AppContent({
           onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
           onAddTab={() => setPickingRepo(true)}
           tabMenuItems={tabMenuItems}
+          onTabMenuOpen={loadRootFiles}
           changedPaths={tabChangeMarkers.changedPaths}
           onRenameTab={setRenamingTab}
         />
