@@ -2758,6 +2758,26 @@ mod ts_bindings {
 
 /// #496, #527: each `ErrorKind` comes from its producer's constructor or typed error, and
 /// nothing else gets one.
+/// #630: the settings a client saves reach `config` as sent, both ways.
+#[cfg(test)]
+mod update_settings_conversion {
+    use super::UpdateSettingsDto;
+
+    #[test]
+    fn a_saved_choice_reaches_config_unchanged() {
+        for check_automatically in [false, true] {
+            let settings = config::UpdateSettings::from(UpdateSettingsDto {
+                check_automatically,
+            });
+            assert_eq!(settings.check_automatically, check_automatically);
+            assert_eq!(
+                UpdateSettingsDto::from(settings).check_automatically,
+                check_automatically
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod error_kinds {
     use super::*;
