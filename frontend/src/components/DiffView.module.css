@@ -250,3 +250,22 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* A large or generated diff, collapsed until loaded (#686). */
+.collapsed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+/* Lines past the window of a long diff (#686). */
+.more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}

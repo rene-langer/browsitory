@@ -106,6 +106,8 @@ or remove one, or dragging across several. Then use **Stage lines**, **Unstage l
 active hunk and select that line, `Shift+↑`/`Shift+↓` extend the selection, and `[` / `]` jump
 to the previous or next hunk (which clears the selection). `s` stages or unstages and `d`
 discards the selection, or the whole hunk when nothing is selected.
+A screen reader reads the line under the cursor, whether it is added or removed, its number and
+whether it is selected (see [Diff options](history.md#diff-options)).
 
 If the file changed since its diff was shown (for example you edited it in another editor),
 line actions don't run; the diff refreshes so you can select again. Discarding a whole hunk of
