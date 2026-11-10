@@ -458,13 +458,23 @@ pub(crate) async fn off_runtime<T: Send + 'static>(
 }
 
 /// Opens `url` in the user's default external browser/handler, never inside this app's own
-/// webview. Used for a pull request's provider URL (github.com/bitbucket.org) — the only place
-/// this crate ever needed to open an external link — so a click can't navigate the whole app
-/// window away with no way back short of restarting it. Does not touch `AppState`/the worker:
-/// this is a plain OS-level operation, not a git one.
+/// webview, so a click can't navigate the whole app window away with no way back short of
+/// restarting it. Used for a pull request's URL, the user guide and links in commit messages.
+/// Does not touch `AppState`/the worker: this is a plain OS-level operation, not a git one.
 #[tauri::command]
 pub async fn open_external_url(url: String) -> Result<(), ErrorDto> {
+    let url = web_url(&url)?;
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(ErrorDto::from_error)
+}
+
+/// `url`, parsed and normalized, when its scheme is `http` or `https`; anything else is refused
+/// (#612). A link can come from a commit message, which is untrusted input: another scheme could
+/// start a local program or open a local file through the OS handler.
+pub(crate) fn web_url(url: &str) -> Result<String, ErrorDto> {
+    match tauri::Url::parse(url) {
+        Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => Ok(parsed.into()),
+        _ => Err(format!("Only http and https links can be opened: {url}").into()),
+    }
 }
 
 #[cfg(test)]

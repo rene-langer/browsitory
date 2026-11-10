@@ -12,6 +12,7 @@ import { SyncBar } from "./components/SyncBar";
 import { UndoRedoButtons } from "./components/UndoRedoButtons";
 import type { RepoClient } from "./ipc/RepoClient";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
+import { issueForgeRepository } from "./lib/messageLinks";
 import { sequenceToast } from "./lib/operationStatus";
 import type { useAnnounce } from "./state/useAnnounce";
 import type { SelectedRow, UseAppStateResult } from "./state/useAppState";
@@ -113,6 +114,12 @@ export function WorkspaceMain({
     () => historyEntries?.map((e) => e.commit) ?? searchCommits ?? appState.state.commits,
     [historyEntries, searchCommits, appState.state.commits],
   );
+  // #612: the repository a commit message's `#123` links to.
+  const upstreamRemote = appState.state.upstream?.remoteName ?? null;
+  const issueForge = useMemo(
+    () => issueForgeRepository(appState.state.forgeRepositories, upstreamRemote),
+    [appState.state.forgeRepositories, upstreamRemote],
+  );
   // #448: "Save as patch…" for commits (oldest first).
   const savePatchOfCommits = (commitIds: string[]) =>
     void appState.savePatch({ kind: "Commits", commitIds }, commitsPatchName(commitIds, appState.state.commits));
@@ -174,6 +181,8 @@ export function WorkspaceMain({
               focusRequested={searchFocusRequested}
               onFocusHandled={clearSearchFocusRequest}
               error={commitSearch.results?.queryError ?? null}
+              recentSearches={commitSearch.recentSearches}
+              onRemoveRecentSearch={commitSearch.removeRecentSearch}
             />
             {commitSearch.results !== null ? (
               <CommitSearchResults
@@ -265,6 +274,7 @@ export function WorkspaceMain({
             fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
             stashes={appState.state.stashes}
             restoreBlockedReason={operationDisabledReason}
+            issueForge={issueForge}
             status={appState.state.status}
             refreshGeneration={appState.state.refreshGeneration}
             discardRequest={discardRequest}

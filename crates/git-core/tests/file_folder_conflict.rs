@@ -329,6 +329,11 @@ fn revert_stops_at_a_file_folder_conflict_libgit2_misses_like_git() {
 fn index_entries(repo: &Repository) -> Vec<(String, u16)> {
     let mut index = repo.index().unwrap();
     index.read(true).unwrap();
+    entries(&index)
+}
+
+/// `index`'s entries as (path, stage), in index order.
+fn entries(index: &git2::Index) -> Vec<(String, u16)> {
     index
         .iter()
         .map(|entry| {
@@ -853,4 +858,265 @@ fn libgit2_still_merges_a_file_and_a_folder_without_a_conflict() {
             ("c/g".to_string(), 0)
         ]
     );
+}
+
+/// #607: the file `c` comes in over HEAD's folder `c/`. The base has `a.txt`, `c.txt` and the
+/// file `c`; `dropped` deletes `c`; HEAD (the default branch, after `dropped`) adds `c/g`.
+/// libgit2 finds this conflict, but records the incoming file only as a conflict entry at `c`
+/// (stage 3, "added by them"; stages 1 and 3 when the base had it too) next to `c/g` at stage 0,
+/// and with `c.txt` sorting between them its own checkout writes the file over the folder:
+/// "could not open 'c' for writing: Is a directory".
+///
+/// What plain git does (git 2.53): "CONFLICT (file/directory): directory in the way of c from
+/// <label>; moving it to c~<label> instead", `c/g` and `c.txt` kept, the file as the conflict
+/// `c~<label>` at the same stages.
+struct Incoming {
+    dir: TempDir,
+    repo: Repository,
+    branch: String,
+    base: Oid,
+    dropped: Oid,
+    head: Oid,
+}
+
+fn incoming_fixture(name_between: bool) -> Incoming {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    if name_between {
+        write_file(dir.path(), "c.txt", "c\n");
+    }
+    write_file(dir.path(), "c", "file\n");
+    commit_all(&repo, "base");
+    let base = repo.head().unwrap().target().unwrap();
+    std::fs::remove_file(dir.path().join("c")).unwrap();
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("c")).unwrap();
+    index.write().unwrap();
+    commit_all(&repo, "drop c");
+    let dropped = repo.head().unwrap().target().unwrap();
+    write_file(dir.path(), "c/g", "g\n");
+    commit_all(&repo, "add c/g");
+    let head = repo.head().unwrap().target().unwrap();
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    Incoming {
+        dir,
+        repo,
+        branch,
+        base,
+        dropped,
+        head,
+    }
+}
+
+/// A commit on `parent` with the base's `a.txt` and `c.txt` and the file `c` (`contents`).
+fn with_the_file_c(f: &Incoming, parent: Oid, contents: &str, message: &str) -> Oid {
+    commit_tree(
+        &f.repo,
+        &[
+            ("a.txt", "a\n", FILE),
+            ("c.txt", "c\n", FILE),
+            ("c", contents, FILE),
+        ],
+        &[parent],
+        message,
+    )
+}
+
+fn short(id: Oid) -> String {
+    id.to_string()[..7].to_string()
+}
+
+/// git's outcome: `c/g` and `c.txt` kept, the incoming file (`contents`) moved to `moved` at
+/// `stages`, HEAD where it was.
+fn assert_moved_in(f: &Incoming, moved: &str, contents: &str, stages: &[u16]) {
+    assert_eq!(read(f.dir.path(), moved), contents);
+    assert_eq!(read(f.dir.path(), "c/g"), "g\n");
+    assert_eq!(read(f.dir.path(), "c.txt"), "c\n");
+    let mut expected = vec![
+        ("a.txt".to_string(), 0),
+        ("c.txt".to_string(), 0),
+        ("c/g".to_string(), 0),
+    ];
+    expected.extend(stages.iter().map(|stage| (moved.to_string(), *stage)));
+    assert_eq!(index_entries(&f.repo), expected);
+    assert_eq!(f.repo.head().unwrap().target(), Some(f.head));
+}
+
+/// The issue's reproduction: `git revert <drop c>` moves the file to `c~parent of <short id>
+/// (drop c)`.
+#[test]
+fn revert_moves_the_file_coming_in_over_a_folder_like_git() {
+    let f = incoming_fixture(true);
+    let id = f.dropped.to_string();
+    let outcome = git_core::pick::revert(&f.repo, &id, None, HookOptions::default()).unwrap();
+    let moved = format!("c~parent of {} (drop c)", short(f.dropped));
+    assert_eq!(
+        outcome,
+        git_core::pick::PickOutcome::Conflicted {
+            files: vec![moved.clone()]
+        }
+    );
+    assert_moved_in(&f, &moved, "file\n", &[3]);
+    assert_eq!(f.repo.state(), git2::RepositoryState::Revert);
+    let message = std::fs::read_to_string(f.repo.path().join("MERGE_MSG")).unwrap();
+    assert!(message.starts_with("Revert \"drop c\"\n"), "{message}");
+    assert!(
+        message.ends_with(&format!("\n# Conflicts:\n#\t{moved}\n")),
+        "{message}"
+    );
+}
+
+#[test]
+fn cherry_pick_moves_the_file_coming_in_over_a_folder_like_git() {
+    let f = incoming_fixture(true);
+    let pick = with_the_file_c(&f, f.dropped, "file\n", "add the file c");
+    let id = pick.to_string();
+    let outcome = git_core::pick::cherry_pick(&f.repo, &id, None, HookOptions::default()).unwrap();
+    let moved = format!("c~{} (add the file c)", short(pick));
+    assert_eq!(
+        outcome,
+        git_core::pick::PickOutcome::Conflicted {
+            files: vec![moved.clone()]
+        }
+    );
+    assert_moved_in(&f, &moved, "file\n", &[3]);
+    assert_eq!(f.repo.state(), git2::RepositoryState::CherryPick);
+}
+
+#[test]
+fn a_cherry_pick_moving_the_file_in_can_be_aborted() {
+    let f = incoming_fixture(true);
+    let id = with_the_file_c(&f, f.dropped, "file\n", "add the file c").to_string();
+    git_core::pick::cherry_pick(&f.repo, &id, None, HookOptions::default()).unwrap();
+    git_core::merge::abort_merge(&f.repo).unwrap();
+    assert_untouched(&f.repo, &f.branch, f.head);
+    assert_eq!(read(f.dir.path(), "c/g"), "g\n");
+}
+
+/// HEAD deleted the file the step changes ("deleted by us"): git moves both its stages, the
+/// base's and theirs, to `c~<label>`.
+#[test]
+fn cherry_pick_moves_a_file_changed_where_head_has_a_folder_like_git() {
+    let f = incoming_fixture(true);
+    let pick = with_the_file_c(&f, f.base, "changed\n", "change c");
+    let id = pick.to_string();
+    let outcome = git_core::pick::cherry_pick(&f.repo, &id, None, HookOptions::default()).unwrap();
+    let moved = format!("c~{} (change c)", short(pick));
+    assert_eq!(
+        outcome,
+        git_core::pick::PickOutcome::Conflicted {
+            files: vec![moved.clone()]
+        }
+    );
+    assert_moved_in(&f, &moved, "changed\n", &[1, 3]);
+}
+
+/// git (`git merge incoming`): moves the file to `c~incoming`.
+#[test]
+fn merge_moves_the_file_coming_in_over_a_folder_like_git() {
+    let f = incoming_fixture(true);
+    let pick = with_the_file_c(&f, f.dropped, "file\n", "add the file c");
+    let commit = f.repo.find_commit(pick).unwrap();
+    f.repo.branch("incoming", &commit, false).unwrap();
+    let outcome =
+        git_core::merge::start_merge(&f.repo, "incoming", MergeOptions::default()).unwrap();
+    assert_eq!(
+        outcome,
+        git_core::merge::MergeOutcome::Conflicted {
+            files: vec!["c~incoming".to_string()]
+        }
+    );
+    assert_moved_in(&f, "c~incoming", "file\n", &[3]);
+    assert_eq!(f.repo.state(), git2::RepositoryState::Merge);
+}
+
+/// A rebase step bringing the file back moves it to the step's label, as a cherry-pick does.
+#[test]
+fn a_rebase_step_moves_the_file_coming_in_over_a_folder_like_git() {
+    let f = incoming_fixture(true);
+    let pick = with_the_file_c(&f, f.dropped, "file\n", "add the file c");
+    let commit = f.repo.find_commit(pick).unwrap();
+    f.repo.branch("incoming", &commit, false).unwrap();
+    switch(&f.repo, "incoming");
+    let plan = vec![RebasePlanEntry {
+        commit_id: pick.to_string(),
+        action: RebaseAction::Pick,
+        combined_message: None,
+    }];
+    let (state, result) = git_core::rebase::start_rebase(&f.repo, &f.branch, plan).unwrap();
+    let moved = format!("c~{} (add the file c)", short(pick));
+    assert_eq!(
+        result,
+        RebaseStepResult::Conflicted {
+            files: vec![moved.clone()]
+        }
+    );
+    assert_eq!(state.stop, git_core::rebase::RebaseStop::Conflict);
+    assert_moved_in(&f, &moved, "file\n", &[3]);
+}
+
+/// git (`git stash apply` of a stash adding `c`): moves it to `c~Stashed changes`.
+#[test]
+fn stash_apply_moves_the_file_coming_in_over_a_folder_like_git() {
+    let mut f = incoming_fixture(true);
+    f.repo
+        .branch("stash-base", &f.repo.find_commit(f.dropped).unwrap(), false)
+        .unwrap();
+    switch(&f.repo, "stash-base");
+    write_file(f.dir.path(), "c", "file\n");
+    let mut index = f.repo.index().unwrap();
+    index.add_path(Path::new("c")).unwrap();
+    index.write().unwrap();
+    git_core::stash::save_stash(&mut f.repo, &StashOptions::default()).unwrap();
+    switch(&f.repo, &f.branch.clone());
+    let outcome = git_core::stash::apply_stash(&mut f.repo, 0, None, false).unwrap();
+    assert_eq!(
+        outcome,
+        StashApplyOutcome::Conflicted {
+            files: vec!["c~Stashed changes".to_string()]
+        }
+    );
+    assert_moved_in(&f, "c~Stashed changes", "file\n", &[3]);
+    assert_eq!(stash_count(&mut f.repo), 1);
+}
+
+/// With no name between the file and the folder's entries, libgit2's own checkout writes the
+/// file beside the folder under its own name and leaves the conflict at `c`; the file now moves
+/// to git's name there too.
+#[test]
+fn a_file_coming_in_next_to_a_folder_moves_to_gits_name_too() {
+    let f = incoming_fixture(false);
+    let id = f.dropped.to_string();
+    git_core::pick::revert(&f.repo, &id, None, HookOptions::default()).unwrap();
+    let moved = format!("c~parent of {} (drop c)", short(f.dropped));
+    assert_eq!(read(f.dir.path(), &moved), "file\n");
+    assert_eq!(
+        index_entries(&f.repo),
+        [("a.txt".to_string(), 0), ("c/g".to_string(), 0), (moved, 3)]
+    );
+}
+
+/// Pins the libgit2 behaviour #607 works around. When this fails, libgit2 records or checks out
+/// a file coming in over a folder differently: check whether the conflict-entry case of
+/// `find_file_folder_conflict` (`file_folder.rs`) is still needed.
+#[test]
+fn libgit2_still_writes_a_file_coming_in_over_a_folder_onto_the_folder() {
+    let f = incoming_fixture(true);
+    let head = f.repo.find_commit(f.head).unwrap();
+    let dropped = f.repo.find_commit(f.dropped).unwrap();
+    let merged = f.repo.revert_commit(&dropped, &head, 0, None).unwrap();
+    assert_eq!(
+        entries(&merged),
+        [
+            ("a.txt".to_string(), 0),
+            ("c".to_string(), 3),
+            ("c.txt".to_string(), 0),
+            ("c/g".to_string(), 0)
+        ]
+    );
+    // Seen on Linux; on macOS CI libgit2's own revert got through this checkout.
+    if cfg!(target_os = "linux") {
+        let result = f.repo.revert(&dropped, None);
+        assert!(result.is_err(), "libgit2's revert checked the file out");
+    }
 }

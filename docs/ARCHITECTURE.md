@@ -452,8 +452,10 @@ the rule and still has its own fields.
   make directory 'c': directory exists". Every operation that writes a libgit2 merge checks its
   in-memory merge (`merge_commits`, `cherrypick_commit`, `revert_commit`; for a stash
   `merge_trees` redoing `git_stash_apply`'s merges against HEAD's tree) before anything is
-  written. `file_folder::find_file_folder_conflict` finds a stage-0 entry `p` while another entry
-  lives below `p/` (libgit2's own conflict entry `p` next to `p/…` is left alone).
+  written. `file_folder::find_file_folder_conflict` finds an entry `p` while another entry lives
+  below `p/`, where `p` is a stage-0 entry or a conflict entry without a stage 2 (see the file
+  coming in over a folder, below); libgit2's own conflict entry `p` with HEAD's side (stage 2)
+  next to `p/…` is left alone.
   Each operation then produces git's outcome itself (#416), without libgit2's
   `merge`/`cherrypick`/`revert`/`stash_apply`, whose checkout of such an index fails.
   `file_folder::check_out_as_conflicts` rewrites the merged index (`record_as_conflicts`: the
@@ -465,6 +467,16 @@ the rule and still has its own fields.
   us/them" like git's own. git's labels: `HEAD` for ours; the branch for a merge,
   `<short id> (<subject>)` for a cherry-pick or rebase step, `parent of <short id> (<subject>)`
   for a revert; `Updated upstream`/`Stashed changes` for a stash.
+  - **A file coming in over HEAD's folder (#607)**: here libgit2 does find the conflict, but
+    records the incoming file only as a conflict entry at `c` (stage 3, "added by them"; stages 1
+    and 3, "deleted by us", when HEAD deleted a file the other side changed) next to the folder's
+    entries at stage 0. With a name sorting between them (`c.txt`), its checkout then writes the
+    file over the folder and fails on Linux ("could not open 'c' for writing: Is a directory",
+    while on macOS libgit2's own checkout got through in CI); without
+    one it writes the file as `c~<its own label>` but leaves the conflict at `c`. git moves the
+    conflict stages to `c~<their label>`. `record_as_conflicts` does the same: the entry keeps
+    its stages and moves to `c~<their label>`, checked out as above.
+    `libgit2_still_writes_a_file_coming_in_over_a_folder_onto_the_folder` pins the libgit2 side.
   - **Merge, squash, cherry-pick and revert**: the caller writes the operation's state files as
     libgit2 would (`MERGE_HEAD`/`MERGE_MODE`/`MERGE_MSG`, or `CHERRY_PICK_HEAD`/`REVERT_HEAD`/
     `MERGE_MSG`; a squash only `SQUASH_MSG`), so Abort (`reset --merge` semantics, via the index
@@ -507,7 +519,11 @@ send a `Command` enum value over a `std::sync::mpsc` channel to that thread and 
 result over a per-call reply channel; only owned, `Send` command/reply values cross the boundary.
 Commands clone the channel `Sender` out of the state mutex and drop the guard before blocking
 on a reply, so one slow repository operation can't serialize unrelated commands. One worker
-thread per open repo also means multiple repos never contend on a shared handle.
+thread per open repo also means multiple repos never contend on a shared handle. The thread's
+state and loop are `worker/worker_loop.rs`'s `WorkerLoop`: its `step` takes the state lock
+(`acquire`), does the undo bookkeeping and operation gate (`before`), runs the command
+(`dispatch`, the `match` over `Command` in `worker_loop/dispatch.rs`), then finishes the undo
+entry and releases the lock (`after`) (#486).
 
 **Every Tauri command that blocks must be an `async fn`.** A plain `#[tauri::command] fn` is
 dispatched by `tauri-macros`' `ExecutionContext::Blocking` path, which runs the function body
@@ -894,7 +910,8 @@ certificate.
     `confirmed` (HEAD id and the fields shown), after a confirmation when it `rewinds` and
     removes commits; the worker refuses a terminal abort without one. Not undoable; the commits
     stay in the reflog.
-- `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as
+- `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`, a `StateFile` over the
+  `sequence_file` codec, like `RebaseStore`) persists it as
   `<gitdir>/browsitory/sequence.json` (per worktree, versioned, temp file + `sync_all` + rename,
   like `undo.json`), written only when a sequence stops and deleted when it completes or is
   aborted. On load it must parse, have a known version (2; a version 1 file loads as an error
@@ -1099,7 +1116,7 @@ certificate.
   the repository and a `Reword` message non-empty; anything else is logged once and treated as
   absent. Versioning follows `sequence.json`: an additive change bumps the version and keeps
   reading the older one. When saving fails the worker keeps the state in memory for the session
-  (`rebase_fallback`, preferred over the file until the next successful save or clear) and
+  (`gate::RebaseMemory::fallback`, preferred over the file until the next successful save or clear) and
   reports the failure with the outcome.
 - **Health** (`rebase_health`, reported as `HeadInfo.rebase.health`; the first failing check
   decides): the branch is gone (`BranchMissing`); it isn't at `original_tip` (`BranchMoved`);
@@ -2008,11 +2025,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   repository's override is a `localStorage` preference like Prune (`lib/autoFetch.ts`). The
   frontend schedules it (`state/useAutoFetch.ts`, active tab only) and calls
   `backgroundFetch`, which is `fetch_all` reported as `TransferOperation::BackgroundFetch`
-  (`RemoteFailed` carries the operation too), so `useRemoteTransferActions` never shows or
-  adopts it. `WorkerHandle::background_fetch` starts nothing and answers `null` while the
-  worker's `CancelRegistry` knows any operation (`allocate_if_idle`: a fetch, pull, push,
-  commit, merge, … queued or running), so it never overlaps another fetch or a mutation from
-  any tab or spelling. The frontend waits while its own action runs or the host is hidden
+  (`RemoteFailed` carries the operation too), so the tab's transfer session
+  (`lib/transferSession.ts`) never shows or adopts it. `WorkerHandle::background_fetch` starts
+  nothing and answers `null` while the worker's `CancelRegistry` knows any operation
+  (`allocate_if_idle`: a fetch, pull, push, commit, merge, … queued or running), so it never
+  overlaps another fetch or a mutation from any tab or spelling. The frontend waits while its own action runs or the host is hidden
   (`ipc/hostVisibility.ts`: the page's `visibilitychange`, plus the VSCode panel's
   `onDidChangeViewState`, posted by the extension host as a `panelVisibility` notification), and
   cancels a running background fetch when the user starts an action. Fetches never prompt for
@@ -2024,24 +2041,30 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   touching the store. A remote failing with
   `MissingCredential`, `CredentialStoreFailure` or `SshAgentFailure` is named once per session
   in a toast. Like every fetch it records no undo entry.
-- **A background fetch never holds the worker on a remote that doesn't answer (#462).** A fetch
-  blocked connecting calls no libgit2 callback, so the `CancelRegistry` side channel can't reach
-  it, and libgit2's connect/read timeouts (`git2::opts`) are process-wide, so shortening them
-  would shorten manual fetches too. `worker/background_fetch.rs` therefore fetches each remote
-  on a helper thread with its own `Repository` while the worker polls it. `git-core`'s
-  `fetch_remote_watched` connects first (`connect_auth`; the fetch then reuses the connection)
-  and asks a `ConnectWatch` before downloading or writing anything. While the helper is still
-  connecting, the worker gives up on it on a cancel or after `BACKGROUND_CONNECT_LIMIT` (30 s):
-  under one lock it marks the fetch abandoned, so the watch answers `false` and the helper,
-  when the OS finally lets it go, writes nothing. Once connected the worker waits as for any
-  fetch; the callbacks see a cancel. Helpers report progress through the worker, never through
-  the caller's event channel, so an abandoned one keeps no listener open. A remote whose connect
-  failed at the network level (`RemoteError::Unreachable`: the host didn't resolve or accept
-  the connection) or ran out of time is skipped by later background fetches for twice the
-  interval, doubling up to an hour (`Memory`; `backgroundFetch` passes the interval); a remote
-  whose abandoned helper still waits is skipped too, so at most one per remote lingers. A
-  skipped remote is a quiet `RemoteFailed` (`TransferFailed`). A fetch that connects, manual or
-  background, ends the backoff. Manual fetches keep libgit2's defaults.
+- **No transfer holds the worker past a cancel while it connects (#462, #547).** A fetch or
+  push blocked connecting calls no libgit2 callback, so the `CancelRegistry` side channel can't
+  reach it, and libgit2's connect/read timeouts (`git2::opts`) are process-wide, so they are
+  left alone. Fetch, Fetch all, the background fetch, Pull's fetch and every push-shaped command
+  (push, Push to…, force push, Push tags, delete remote branch/tag) therefore run their git-core
+  call on a helper thread with its own `Repository` and credential provider while the worker
+  polls it (`worker/transfer_thread.rs`). git-core connects first (`connect_auth`; the fetch or
+  push then reuses the connection) and asks `TransferReporter::connected` before downloading,
+  sending, running `pre-push` or writing anything. While the helper is still connecting, the
+  worker gives up on it on a cancel (the transfer ends `Cancelled` at once) or, for the
+  background fetch only, after `BACKGROUND_CONNECT_LIMIT` (30 s): under one lock it marks the
+  transfer abandoned, so `connected` answers `false` and the helper, when the OS finally lets
+  it go, writes nothing. Once connected the worker waits as for any transfer; the callbacks see
+  a cancel. Otherwise the worker always waits for the helper, so a helper's writes never overlap
+  another command; Pull's fast-forward and `post-merge` run on the worker after it. Helpers
+  report progress through the worker (stamped with the operation's ID), never through the
+  caller's event channel, so an abandoned one keeps no listener open. Manual Fetch all and the
+  background fetch share one loop (`worker/fetch_all.rs`). A remote whose connect failed at the
+  network level (`RemoteError::Unreachable`: the host didn't resolve or accept the connection)
+  or ran out of time is skipped by later background fetches for twice the interval, doubling up
+  to an hour (`Memory`; `backgroundFetch` passes the interval); a remote whose abandoned helper
+  still waits is skipped too, so at most one per remote lingers. A skipped remote is a quiet
+  `RemoteFailed` (`TransferFailed`). A fetch that connects, manual or background, ends the
+  backoff.
 - Push and force push of the current branch go where `git-core::remote::push_target` resolves
   from `push.default` (unset = `simple`): `upstream`/`tracking` push to the upstream's branch,
   `current` to the local name, `simple`/`matching` only when the names match, `nothing` never.
@@ -2256,7 +2279,10 @@ only `error`.
   regardless of debug/release, so it can't be driven standalone). One flow per major feature
   area, added where a flow spans backend+frontend in a way unit tests can't catch; `App`
   (`frontend/src/state/useE2eAutoOpen.ts`) reads a `VITE_E2E_REPO_PATH` build-time env var to auto-open a fixture repo, since
-  `RepoPicker`'s native folder dialog can't be driven through WebDriver. (Not Playwright:
+  `RepoPicker`'s native folder dialog can't be driven through WebDriver. The same variable
+  turns off the release notes dialog (`useReleaseNotes`) and the update check
+  (`UpdateBanner`), so E2E runs and the guide screenshots never contact the update endpoints or
+  download a release bundle (#576); release builds don't set it. (Not Playwright:
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
   actually-supported E2E path.) All four pnpm projects (`frontend/`, `extension/`, `e2e/`,

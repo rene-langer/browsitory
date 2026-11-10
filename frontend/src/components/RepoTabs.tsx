@@ -36,6 +36,7 @@ export function RepoTabs({
   onCloseGroup,
   onAddTab,
   tabMenuItems,
+  changedPaths,
 }: {
   openRepos: OpenRepo[];
   activePath: string | null;
@@ -47,6 +48,8 @@ export function RepoTabs({
   onAddTab: () => void;
   /** A tab's context menu (right-click, the ContextMenu key or Shift+F10); omitted, none. */
   tabMenuItems?: (path: string) => ContextMenuItem[];
+  /** Repositories with uncommitted changes: their tabs show a marker (#613). */
+  changedPaths?: ReadonlySet<string>;
 }) {
   const tablistRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
@@ -93,6 +96,8 @@ export function RepoTabs({
   const renderTab = (repo: OpenRepo) => {
     const selected = repo.path === activePath;
     const busy = busyPaths.has(repo.path);
+    const changed = changedPaths?.has(repo.path) ?? false;
+    const changesId = `${repoTabId(repo.path)}-changes`;
     return (
       <div key={repo.path} role="presentation" className={selected ? `${styles.tab} ${styles.active}` : styles.tab}>
         <button
@@ -103,6 +108,7 @@ export function RepoTabs({
           aria-controls={repoPanelId(repo.path)}
           tabIndex={repo.path === tabStopPath ? 0 : -1}
           aria-keyshortcuts="Delete"
+          aria-describedby={changed ? changesId : undefined}
           aria-haspopup={tabMenuItems !== undefined ? "menu" : undefined}
           onKeyDown={(event) => handleTabKeyDown(event, repo.path, busy)}
           onContextMenu={
@@ -119,6 +125,15 @@ export function RepoTabs({
         >
           {repo.displayName}
         </button>
+        {/* The dot is decoration; the tab's description carries the meaning (not only colour). */}
+        {changed && (
+          <>
+            <span className={styles.changeMarker} aria-hidden="true" title="Uncommitted changes" />
+            <span id={changesId} hidden>
+              Uncommitted changes
+            </span>
+          </>
+        )}
         {/* `aria-hidden`/`tabIndex={-1}` pull this out of the tablist's accessible children (a
             tablist may only own `role="tab"` elements per WAI-ARIA — axe's `aria-required-children`
             flags a focusable close button here) and out of the Tab order; it stays clickable by

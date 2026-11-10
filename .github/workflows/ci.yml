@@ -48,6 +48,11 @@ jobs:
           pnpm audit --prod
       - name: License compliance doc is in sync
         run: python3 scripts/check-license-compliance.py
+      # Every host the app's code names is listed in the privacy notice (#627).
+      - name: Privacy notice lists every hard-coded host
+        run: |
+          python3 scripts/test_check_privacy_hosts.py
+          python3 scripts/check-privacy-hosts.py
 
   # Every licence in the full dependency trees, Rust and npm, against the policy in AGENTS.md
   # and docs/LICENSE_COMPLIANCE.md (#273). Advisories stay in the `audit` job above. Also checks

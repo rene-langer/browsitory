@@ -5,7 +5,12 @@ shows who last changed each line. **All files** above the list browses every fil
 instead (see [Files at a commit](files-at-a-commit.md)). Each row shows the branches and tags that point at the commit,
 and the author and date (they hide when the pane is narrow). Selecting a commit shows its full
 message, author, date, full SHA (**Copy** copies it) and parents above the file list; click a
-parent to jump to it. The graph loads the latest 300 commits; choose **Load more** at the bottom
+parent to jump to it. Web links (`http://` and `https://`) in the message open in your browser
+when you click them or press Enter on them; the link's tooltip shows where it goes. When the
+repository has a supported forge remote, issue references such as `#123` and `owner/repo#123`
+are links to that issue too (on the forge of the remote the current branch tracks, else
+`origin`, else the first forge remote); without one they stay plain text. The message stays
+plain text to select and copy. The graph loads the latest 300 commits; choose **Load more** at the bottom
 (or keep pressing ↓ past the last row) to load the next page. Use ↑/↓ or j/k to move through the
 commits, and PageUp/PageDown to move a page at a time. To jump to a commit, branch, tag or stash,
 use **Go to commit…** and the other Go to commands in the [command

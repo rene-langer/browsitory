@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
 
 export interface OpenRepo {
@@ -22,6 +22,43 @@ export interface UseOpenReposResult {
   openWorkspace(workspace: Workspace): Promise<void>;
   closeRepo(path: string): void;
   switchTo(path: string): void;
+  /** Whether "Reopen closed tab" has a tab to bring back (#613). */
+  canReopenClosedRepo: boolean;
+  /**
+   * Reopens the most recently closed tab at its old position and in its old workspace group, and
+   * activates it. A closed repository that no longer opens is dropped and the next one back is
+   * tried; the dropped ones are returned, for the caller to report.
+   */
+  reopenClosedRepo(): Promise<ReopenFailure[]>;
+}
+
+export interface ReopenFailure {
+  path: string;
+  message: string;
+}
+
+interface ClosedRepo {
+  path: string;
+  workspaceId: string | null;
+  index: number;
+}
+
+// How many closed tabs the session remembers, newest last (#613).
+const CLOSED_STACK_LIMIT = 10;
+
+// Idempotent for the same entry, as `closeRepo`'s state updater may run twice.
+function pushClosed(stack: ClosedRepo[], closed: ClosedRepo): ClosedRepo[] {
+  return [...stack.filter((entry) => entry.path !== closed.path), closed].slice(-CLOSED_STACK_LIMIT);
+}
+
+// The old position, moved next to the workspace group's other open tabs when it would land
+// outside the group (`RepoTabs` groups contiguous tabs only).
+function reopenIndex(repos: OpenRepo[], closed: ClosedRepo): number {
+  const index = Math.min(closed.index, repos.length);
+  if (closed.workspaceId === null) return index;
+  const members = repos.flatMap((repo, i) => (repo.workspaceId === closed.workspaceId ? [i] : []));
+  if (members.length === 0) return index;
+  return Math.min(Math.max(index, members[0]), members[members.length - 1] + 1);
 }
 
 function displayNameFor(path: string): string {
@@ -39,6 +76,8 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
   const [activePath, setActivePath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  const closedRepos = useRef<ClosedRepo[]>([]);
+  const [closedCount, setClosedCount] = useState(0);
 
   useEffect(() => {
     let ignore = false;
@@ -150,6 +189,11 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
       setOpenRepos((prev) => {
         const closingIndex = prev.findIndex((r) => r.path === path);
         const next = prev.filter((r) => r.path !== path);
+        if (closingIndex !== -1) {
+          const closed = { path, workspaceId: prev[closingIndex].workspaceId, index: closingIndex };
+          closedRepos.current = pushClosed(closedRepos.current, closed);
+          setClosedCount(closedRepos.current.length);
+        }
         setActivePath((prevActive) => {
           if (prevActive !== path) {
             persist(next, prevActive);
@@ -173,6 +217,34 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
     [openRepos, persist],
   );
 
+  const reopenClosedRepo = useCallback(async () => {
+    const failures: ReopenFailure[] = [];
+    for (let closed = closedRepos.current.pop(); closed !== undefined; closed = closedRepos.current.pop()) {
+      const reopening = closed;
+      try {
+        await client.openRepo(reopening.path);
+      } catch (error) {
+        failures.push({ path: reopening.path, message: String(error) });
+        continue;
+      }
+      setOpenRepos((prev) => {
+        if (prev.some((repo) => repo.path === reopening.path)) {
+          persist(prev, reopening.path);
+          return prev;
+        }
+        const reopened = { path: reopening.path, displayName: displayNameFor(reopening.path), workspaceId: reopening.workspaceId };
+        const index = reopenIndex(prev, reopening);
+        const next = [...prev.slice(0, index), reopened, ...prev.slice(index)];
+        persist(next, reopening.path);
+        return next;
+      });
+      setActivePath(reopening.path);
+      break;
+    }
+    setClosedCount(closedRepos.current.length);
+    return failures;
+  }, [client, persist]);
+
   const dismissRestoreError = useCallback(() => {
     setRestoreError(null);
   }, []);
@@ -187,5 +259,7 @@ export function useOpenRepos(client: RepoClient): UseOpenReposResult {
     closeRepo,
     switchTo,
     openWorkspace,
+    canReopenClosedRepo: closedCount > 0,
+    reopenClosedRepo,
   };
 }

@@ -13,6 +13,12 @@
 //! anything is written, and writes git's conflict itself instead (#416,
 //! [`check_out_as_conflicts`]). Only a stash apply that restores the index, or whose untracked
 //! files meet the merge, refuses.
+//!
+//! When libgit2 does find the conflict for a file coming in over HEAD's folder, it records the
+//! file only as a conflict entry at `c` (stage 3, "added by them"; stages 1 and 3 when HEAD
+//! deleted it) next to the folder's entries at stage 0, and its checkout then tries to write the
+//! file over the folder ("could not open 'c' for writing: Is a directory", #607). That entry is
+//! moved to `c~<label>` the same way, as git moves it.
 
 use std::collections::HashSet;
 
@@ -29,15 +35,23 @@ pub struct FileFolderConflict {
     pub inside: String,
 }
 
-/// The first file/folder collision in `index` (a merge result): a stage-0 entry `p` while
-/// another entry lives below `p/`. A *conflict* entry `p` with entries below `p/` is libgit2's
-/// own record of a file/folder conflict (it checks the file out as `p~<label>`), so it is not
-/// one; nor is a stage-0 file below a conflicted name.
+/// The first file/folder collision in `index` (a merge result): an entry `p` while another
+/// entry lives below `p/`, where `p` is a stage-0 entry or a conflict entry without an "ours"
+/// side (stage 3, "added by them", or stages 1 and 3, "deleted by us"). libgit2 records the
+/// file coming in over HEAD's folder that way, and its checkout of that can write the file over
+/// the folder ("Is a directory", #607). A conflict entry `p` at stage 2 with entries below `p/`
+/// is libgit2's own record of a file/folder conflict (it checks HEAD's file out as `p~<label>`),
+/// so it is not one; nor is a stage-0 file below a conflicted name.
 pub(crate) fn find_file_folder_conflict(index: &git2::Index) -> Option<FileFolderConflict> {
+    let ours: HashSet<Vec<u8>> = index
+        .iter()
+        .filter(|entry| stage(entry) == 2)
+        .map(|entry| entry.path)
+        .collect();
     let files: HashSet<Vec<u8>> = index
         .iter()
-        .filter(|entry| stage(entry) == 0)
         .map(|entry| entry.path)
+        .filter(|path| !ours.contains(path))
         .collect();
     // `index.iter()` is sorted by path, so the report is the first collision in that order.
     index.iter().find_map(|entry| {
@@ -58,10 +72,11 @@ pub(crate) fn find_file_folder_conflict(index: &git2::Index) -> Option<FileFolde
 /// colliding file `p` leaves stage 0 and becomes a conflict entry at the path git moves it to,
 /// `p~<our_label>` at stage 2 ("added by us") when it is the file of `ours` (which has it with
 /// that id), else `p~<their_label>` at stage 3 ("added by them"). A `/` in a label becomes `_`,
-/// as git flattens it (`c~origin_side`). The entries below `p/` stay merged, so the checkout
-/// writes the folder's files and the moved file. A name already taken gets `_0`, `_1`... after
-/// it, as git does. Returns the moved files' old names (`p`), in index order; nothing when
-/// there is no collision.
+/// as git flattens it (`c~origin_side`). A file libgit2 already recorded as a conflict entry
+/// without an "ours" side (#607) keeps its stages (3, or 1 and 3) and moves to
+/// `p~<their_label>`. The entries below `p/` stay merged, so the checkout writes the folder's
+/// files and the moved file. A name already taken gets `_0`, `_1`... after it, as git does.
+/// Returns the moved files' old names (`p`), in index order; nothing when there is no collision.
 pub(crate) fn record_as_conflicts(
     index: &mut git2::Index,
     ours: &git2::Tree<'_>,
@@ -71,19 +86,34 @@ pub(crate) fn record_as_conflicts(
     let mut files = Vec::new();
     while let Some(conflict) = find_file_folder_conflict(index) {
         let path = std::path::Path::new(&conflict.file);
-        let Some(mut entry) = index.get_path(path, 0) else {
+        let (entries, label) = match index.get_path(path, 0) {
+            Some(mut entry) => {
+                let is_ours = ours
+                    .get_path(path)
+                    .map(|found| found.id() == entry.id)
+                    .unwrap_or(false);
+                let (stage, label) = if is_ours {
+                    (2, our_label)
+                } else {
+                    (3, their_label)
+                };
+                entry.flags = (entry.flags & !(0x3 << 12)) | (stage << 12);
+                (vec![(0, entry)], label)
+            }
+            None => {
+                let entries: Vec<_> = [1, 3]
+                    .into_iter()
+                    .filter_map(|stage| index.get_path(path, stage).map(|entry| (stage, entry)))
+                    .collect();
+                (entries, their_label)
+            }
+        };
+        if entries.is_empty() {
             break;
-        };
-        index.remove(path, 0)?;
-        let is_ours = ours
-            .get_path(path)
-            .map(|found| found.id() == entry.id)
-            .unwrap_or(false);
-        let (stage, label) = if is_ours {
-            (2, our_label)
-        } else {
-            (3, their_label)
-        };
+        }
+        for (stage, _) in &entries {
+            index.remove(path, *stage)?;
+        }
         let label = label.replace('/', "_");
         let mut moved = format!("{}~{label}", conflict.file);
         let mut counter = 0;
@@ -93,9 +123,10 @@ pub(crate) fn record_as_conflicts(
             moved = format!("{}~{label}_{counter}", conflict.file);
             counter += 1;
         }
-        entry.path = moved.into_bytes();
-        entry.flags = (entry.flags & !(0x3 << 12)) | (stage << 12);
-        index.add(&entry)?;
+        for (_, mut entry) in entries {
+            entry.path = moved.clone().into_bytes();
+            index.add(&entry)?;
+        }
         files.push(conflict.file);
     }
     Ok(files)
@@ -263,6 +294,59 @@ mod tests {
         // What libgit2 records when it does find the conflict (`ab` vs `ab/g`).
         let index = index(&[("ab", 2), ("ab/g", 0)]);
         assert_eq!(find_file_folder_conflict(&index), None);
+    }
+
+    #[test]
+    fn a_file_added_by_them_over_a_folder_is_a_collision() {
+        // What libgit2 records for a file coming in over HEAD's folder (#607).
+        let index = index(&[("c", 3), ("c.txt", 0), ("c/g", 0)]);
+        assert_eq!(
+            find_file_folder_conflict(&index),
+            Some(FileFolderConflict {
+                file: "c".into(),
+                inside: "c/g".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_file_deleted_by_us_for_a_folder_is_a_collision() {
+        let index = index(&[("c", 1), ("c", 3), ("c/g", 0)]);
+        assert!(find_file_folder_conflict(&index).is_some());
+    }
+
+    #[test]
+    fn a_conflict_with_our_side_next_to_a_folder_is_no_collision() {
+        let index = index(&[("c", 1), ("c", 2), ("c", 3), ("c/g", 0)]);
+        assert_eq!(find_file_folder_conflict(&index), None);
+    }
+
+    #[test]
+    fn a_file_added_by_them_moves_to_their_label() {
+        let repo_dir = tempfile::TempDir::new().unwrap();
+        let repo = git2::Repository::init(repo_dir.path()).unwrap();
+        let empty = repo.treebuilder(None).unwrap().write().unwrap();
+        let ours = repo.find_tree(empty).unwrap();
+        let mut index = index(&[("c", 1), ("c", 3), ("c/g", 0)]);
+        let moved = record_as_conflicts(&mut index, &ours, "HEAD", "topic/file").unwrap();
+        assert_eq!(moved, ["c"]);
+        let entries: Vec<(String, u16)> = index
+            .iter()
+            .map(|entry| {
+                (
+                    String::from_utf8_lossy(&entry.path).into_owned(),
+                    stage(&entry),
+                )
+            })
+            .collect();
+        assert_eq!(
+            entries,
+            [
+                ("c/g".to_string(), 0),
+                ("c~topic_file".to_string(), 1),
+                ("c~topic_file".to_string(), 3)
+            ]
+        );
     }
 
     #[test]

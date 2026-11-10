@@ -143,6 +143,30 @@ describe("RepoTabs", () => {
   });
 });
 
+describe("RepoTabs change marker", () => {
+  it("marks a tab whose repository has uncommitted changes, in words as well as a dot (#613)", () => {
+    render(
+      <RepoTabs
+        openRepos={repos}
+        activePath="/repos/gadget"
+        busyPaths={noneBusy}
+        workspaceNames={{}}
+        onSwitchTo={vi.fn()}
+        onClose={vi.fn()}
+        onCloseGroup={vi.fn()}
+        onAddTab={vi.fn()}
+        changedPaths={new Set(["/repos/widget"])}
+      />,
+    );
+    const dirty = screen.getByRole("tab", { name: "widget" });
+    expect(dirty).toHaveAccessibleDescription("Uncommitted changes");
+    expect(dirty.closest(`.${styles.tab}`)?.querySelector(`.${styles.changeMarker}`)).not.toBeNull();
+    const clean = screen.getByRole("tab", { name: "gadget" });
+    expect(clean).toHaveAccessibleDescription("/repos/gadget");
+    expect(clean.closest(`.${styles.tab}`)?.querySelector(`.${styles.changeMarker}`)).toBeNull();
+  });
+});
+
 describe("RepoTabs grouping", () => {
   const grouped = [
     { path: "/repos/widget", displayName: "widget", workspaceId: "ws-1" },
