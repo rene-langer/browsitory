@@ -1,5 +1,8 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
 
 // Shared by the E2E suite (`runTests.ts`) and the packaged-VSIX smoke test (`runVsixSmoke.ts`).
 
@@ -57,4 +60,16 @@ export function getFreePort(): Promise<number> {
       server.close(() => resolve(port));
     });
   });
+}
+
+// Issue #546: gives the E2E host its own, empty Browsitory config dir, as the Tauri suite's
+// `wdio.conf.ts` does, so a spec can set app-wide preferences (`[fetch] auto_fetch_minutes`) and
+// the sidecar never reads or writes the developer's real `config.toml` (recent repositories,
+// open tabs). VSCode, its extension host and the sidecar inherit it from this process.
+export function prepareConfigDir(): string {
+  const configDir = path.join(os.tmpdir(), "browsitory-vscode-e2e-config");
+  fs.rmSync(configDir, { recursive: true, force: true });
+  fs.mkdirSync(configDir, { recursive: true });
+  process.env["BROWSITORY_CONFIG_DIR"] = configDir;
+  return configDir;
 }

@@ -636,6 +636,59 @@ describe("DiffPane", () => {
       expect(screen.getByRole("button", { name: "Stage all" })).toBeDisabled();
     });
 
+    describe("Stage modified (#621)", () => {
+      it("stages only the tracked files' changes, leaving untracked files and conflicts alone", () => {
+        const mixed: StatusEntry[] = [
+          { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+          { path: "gone.txt", oldPath: null, staged: false, kind: "Deleted" },
+          { path: "new.txt", oldPath: null, staged: false, kind: "New" },
+          { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+          { path: "b.txt", oldPath: null, staged: true, kind: "Modified" },
+        ];
+        const onStageAllFiles = vi.fn();
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixed, { onStageAllFiles });
+
+        const button = screen.getByRole("button", { name: "Stage modified" });
+        expect(button).toBeEnabled();
+        expect(button).toHaveAttribute("title", expect.stringContaining("1 untracked file"));
+        expect(screen.getByRole("button", { name: "Stage all" })).toHaveAttribute(
+          "title",
+          expect.stringContaining("untracked files included"),
+        );
+        fireEvent.click(button);
+
+        expect(onStageAllFiles).toHaveBeenCalledTimes(1);
+        expect(onStageAllFiles).toHaveBeenCalledWith(["a.txt", "gone.txt"]);
+      });
+
+      it("is not shown when the group holds no untracked file", () => {
+        const trackedOnly: StatusEntry[] = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }];
+        renderUncommitted(fakeClient({}), trackedOnly);
+
+        expect(screen.queryByRole("button", { name: "Stage modified" })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Stage all" })).not.toHaveAttribute("title");
+      });
+
+      it("is not shown when the group holds only untracked files", () => {
+        const untrackedOnly: StatusEntry[] = [{ path: "new.txt", oldPath: null, staged: false, kind: "New" }];
+        renderUncommitted(fakeClient({}), untrackedOnly);
+
+        expect(screen.queryByRole("button", { name: "Stage modified" })).not.toBeInTheDocument();
+      });
+
+      it("is disabled, with a reason, when the only tracked changes are conflicts", () => {
+        const conflictAndUntracked: StatusEntry[] = [
+          { path: "shared.txt", oldPath: null, staged: false, kind: "Conflicted" },
+          { path: "new.txt", oldPath: null, staged: false, kind: "New" },
+        ];
+        renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), conflictAndUntracked);
+
+        const button = screen.getByRole("button", { name: "Stage modified" });
+        expect(button).toBeDisabled();
+        expect(button).toHaveAttribute("title", expect.stringContaining("No tracked file has changes to stage"));
+      });
+    });
+
     it("Unstage all makes a single bulk call with every staged path", () => {
       const onUnstageFile = vi.fn();
       const onUnstageAllFiles = vi.fn();
@@ -1652,6 +1705,16 @@ describe("DiffPane diff options contract", () => {
     );
   }
 
+  // A hunk or line action bumps the path's diff version once it settles, which refetches the
+  // diff; the refetched hunks reset the line selection. Wait for that refetch (the `calls`-th
+  // fetch) to land before selecting a line, or the selection can be cleared under the test (#596).
+  async function settleRefetch(fetch: ReturnType<typeof vi.fn>, calls: number) {
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(calls));
+    await act(async () => {
+      await fetch.mock.results[calls - 1].value;
+    });
+  }
+
   function deferred<T>() {
     let resolve!: (value: T) => void;
     const promise = new Promise<T>((r) => {
@@ -1670,9 +1733,10 @@ describe("DiffPane diff options contract", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
     expect(getWorkingDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "f.txt", false, { ignoreWhitespace: false, contextLines: 7, algorithm: "Default" });
     await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: 7, algorithm: "Default" }));
+    await settleRefetch(getWorkingDiff, 2);
 
     fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
-    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stage lines (1)" }));
     await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: 7, algorithm: "Default" }, [2], shown));
   });
 
@@ -1694,8 +1758,9 @@ describe("DiffPane diff options contract", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "Stage hunk" }));
     await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: WHOLE_FILE_CONTEXT_LINES, algorithm: "Default" }));
+    await settleRefetch(getWorkingDiff, 3);
     fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
-    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stage lines (1)" }));
     await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, { contextLines: WHOLE_FILE_CONTEXT_LINES, algorithm: "Default" }, [2], shown));
 
     fireEvent.click(screen.getByRole("button", { name: "Show whole file" }));
@@ -1774,12 +1839,14 @@ describe("DiffPane diff options contract", () => {
     });
     const hunk = { contextLines: 5, algorithm: "Patience" };
     await waitFor(() => expect(onStageHunk).toHaveBeenCalledWith("f.txt", 1, 1, hunk));
+    await settleRefetch(getWorkingDiff, 2);
     fireEvent.click(screen.getByText("Discard hunk"));
     fireEvent.click(screen.getByText("Confirm discard"));
     await waitFor(() => expect(onDiscardHunk).toHaveBeenCalledWith("f.txt", 1, 1, hunk));
+    await settleRefetch(getWorkingDiff, 3);
 
     fireEvent.click(container.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="2"]')!);
-    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stage lines (1)" }));
     await waitFor(() => expect(onStageLines).toHaveBeenCalledWith("f.txt", 1, 1, hunk, [2], shown));
   });
 

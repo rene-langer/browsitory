@@ -6,6 +6,12 @@ right-hand pane. It has two groups, **Changes** and **Staged**, each with **Stag
 use **Blame** to see who last changed each line. Type a commit message and click **Commit**.
 **Stash** sets the current changes aside; see [Stashes](stashes.md).
 
+When **Changes** holds both changes to tracked files and untracked (new) files, **Stage
+modified** sits next to **Stage all**: it stages the tracked files' changes (edits, deletions,
+type changes) and leaves the untracked files where they are, like `git add -u`. **Stage all**
+stages the untracked files too. Both leave conflicted files alone, and each is one undo step. The
+command palette has the same action as **Stage modified files (tracked only)**.
+
 Each hunk header has **Stage hunk** (or **Unstage hunk**) and **Discard hunk**. Discard asks once
 more: the button turns into **Confirm discard**, and a second click discards the hunk.
 

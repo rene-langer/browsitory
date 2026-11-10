@@ -9,8 +9,6 @@
 # when the script exits. Set KEEP=1 to keep it, for example to look at the demo repository.
 set -euo pipefail
 
-# The E2E build bakes /tmp paths into the app, and demoRepo.ts uses os.tmpdir(): keep them equal.
-export TMPDIR=/tmp
 cleanup() {
   if [[ "${KEEP:-}" != "1" ]]; then
     rm -rf -- /tmp/browsitory-screenshots
@@ -32,7 +30,9 @@ fi
 # A 24-bit screen: xvfb-run's default is 8-bit, which bands the colours.
 # Always under Xvfb, also on a desktop, so the window never opens on the real screen.
 screen=(-s "-screen 0 1600x1000x24")
-(cd e2e && dbus-run-session -- xvfb-run -a "${screen[@]}" pnpm screenshots)
+# The E2E build bakes /tmp paths into the app, and demoRepo.ts uses os.tmpdir(): keep them equal.
+# Only for the capture: the build keeps your TMPDIR, so a small tmpfs /tmp can't fill up (#574).
+(cd e2e && TMPDIR=/tmp dbus-run-session -- xvfb-run -a "${screen[@]}" pnpm screenshots)
 
 # Lossless size reduction, if optipng is installed.
 if command -v optipng >/dev/null; then

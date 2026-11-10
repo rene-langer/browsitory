@@ -18,6 +18,10 @@ export function UpdateBanner() {
   const [readyUpdate, setReadyUpdate] = useState<UpdateInfo | null>(null);
 
   useEffect(() => {
+    // Skip in E2E builds (VITE_E2E_REPO_PATH is set at build time): the E2E suite and the guide
+    // screenshots must not contact the update endpoints, download a release bundle, or show the
+    // banner over the window (#576).
+    if (typeof import.meta.env.VITE_E2E_REPO_PATH === "string") return;
     let cancelled = false;
     let timer: number | undefined;
     // Failed tries in a row; a successful check resets it.

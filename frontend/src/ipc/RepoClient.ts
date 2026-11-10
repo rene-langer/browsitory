@@ -1182,8 +1182,9 @@ export interface RepoClient {
   listPullRequests(repoPath: string, remoteName: string, account: string): Promise<PullRequestList>;
   createPullRequest(repoPath: string, remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<PullRequest>;
   // Opens `url` in the user's default external browser/handler rather than navigating this
-  // app's own window away from the app entirely (see `tauriRepoClient.ts` and
-  // `PullRequestPanel.tsx`, the only caller).
+  // app's own window away from the app entirely (see `tauriRepoClient.ts`). Callers: the pull
+  // request panel, the user guide command and commit message links (#612). Both transports
+  // refuse anything but an `http`/`https` URL.
   openExternalUrl(url: string): Promise<void>;
   // External tools. The five launch methods (`openInEditor` … `openMergeTool`) are answered by
   // the VSCode extension host itself (see `sidecarBridge.ts`'s `NATIVE_METHODS`); the desktop

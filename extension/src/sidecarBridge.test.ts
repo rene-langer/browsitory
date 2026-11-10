@@ -351,6 +351,25 @@ describe("SidecarBridge", () => {
     });
   });
 
+  it("refuses to open a URL that is not http or https (#612)", async () => {
+    const { bridge, spawn, postToWebview, openExternal } = createBridge({ externalResult: true });
+
+    const urls = ["javascript:alert(1)", "file:///etc/passwd", "vscode://settings", "not a url"];
+    for (const [index, url] of urls.entries()) {
+      await bridge.handleWebviewMessage({ jsonrpc: "2.0", id: 30 + index, method: "open_external_url", params: { url } });
+    }
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(postToWebview.mock.calls.map(([message]) => message)).toEqual(
+      urls.map((url, index) => ({
+        jsonrpc: "2.0",
+        id: 30 + index,
+        error: { code: -32000, message: `Only http and https links can be opened: ${url}` },
+      })),
+    );
+  });
+
   it("returns null when the native folder picker is cancelled", async () => {
     const { bridge, spawn, postToWebview } = createBridge({ folder: undefined });
 

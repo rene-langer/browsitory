@@ -33,6 +33,7 @@ export function SubmodulePanel({
   onOpenInNewTab,
   operationDisabled,
   operationDisabledReason,
+  revealRequest,
 }: {
   submodules: SubmoduleInfo[];
   onInit: (path: string) => Promise<void>;
@@ -43,6 +44,8 @@ export function SubmodulePanel({
   // Human-readable reason `operationDisabled` is true, shown as a `title` on the menu items it
   // disables (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
+  /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
+  revealRequest?: number;
 }) {
   const [recursive, setRecursive] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
@@ -103,7 +106,13 @@ export function SubmodulePanel({
   };
 
   return (
-    <AccordionSection title="Submodules" storageKey="sidebar-submodules" icon={Package} count={submodules.length}>
+    <AccordionSection
+      title="Submodules"
+      storageKey="sidebar-submodules"
+      icon={Package}
+      count={submodules.length}
+      revealRequest={revealRequest}
+    >
       <label>
         <input
           type="checkbox"

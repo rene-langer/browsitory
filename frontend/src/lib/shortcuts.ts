@@ -12,6 +12,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "Ctrl/Cmd+Z", description: "Undo the last Git operation" },
       { keys: "Ctrl/Cmd+Shift+Z / Ctrl+Y", description: "Redo" },
       { keys: "Ctrl/Cmd+W", description: "Close the active tab (where the host doesn't claim it)" },
+      { keys: "Ctrl/Cmd+Shift+T", description: "Reopen the last closed tab (where the host doesn't claim it)" },
       { keys: "?", description: "Show keyboard shortcuts" },
     ],
   },

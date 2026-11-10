@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
 import { ChevronRight, Cloud, MoreHorizontal } from "lucide-react";
 import type { BranchInfo, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { branchActions, remoteBranchActions } from "../lib/actions/branchActions";
@@ -326,6 +326,7 @@ export function BranchTreeView({
   onSetGraphRemoteBranchSelection,
   remoteBranchesInGraph,
   remoteCache,
+  remoteHeaders,
   rename,
   rowMenu,
   onOpenRowMenu,
@@ -346,6 +347,8 @@ export function BranchTreeView({
   /** The null-selection fallback for the remote swatches; see `BranchTree`'s prop of that name. */
   remoteBranchesInGraph: string[];
   remoteCache: RemoteBranchCache;
+  /** Each remote folder's header button by remote name, for `BranchTree`'s reveal request (#494). */
+  remoteHeaders?: RefObject<Map<string, HTMLButtonElement>>;
   rename: BranchRename;
   rowMenu: RowContextMenu | null;
   onOpenRowMenu: (menu: RowContextMenu) => void;
@@ -452,6 +455,13 @@ export function BranchTreeView({
           <li key={remote.name} className={styles.folder}>
             <div className={styles.folderRow}>
               <button
+                ref={(element) => {
+                  if (element === null || remoteHeaders === undefined) return;
+                  remoteHeaders.current.set(remote.name, element);
+                  return () => {
+                    remoteHeaders.current.delete(remote.name);
+                  };
+                }}
                 type="button"
                 className={styles.folderHeader}
                 aria-expanded={open}
@@ -480,9 +490,7 @@ export function BranchTreeView({
                 <Cloud size={14} aria-hidden="true" />
                 {remote.name}
               </button>
-              {/* The remote's actions without knowing Shift+F10 (macOS keyboards have no Menu key).
-                  No text content: `commands.ts`'s `expandRemoteBranches` finds the header by its
-                  text, which must keep matching only the button above. */}
+              {/* The remote's actions without knowing Shift+F10 (macOS keyboards have no Menu key). */}
               <button
                 type="button"
                 className={styles.iconButton}

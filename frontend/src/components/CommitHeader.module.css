@@ -101,3 +101,15 @@
 .signature[data-tone="danger"] .signatureIcon::before {
   content: "✗";
 }
+
+/* A URL or issue reference in the message (#612); a span, so copying stays plain text. */
+.messageLink {
+  color: var(--color-accent, inherit);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.messageLink:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CommitDraft } from "./components/CommitBox";
 import { folderSearchQuery } from "./lib/folderHistory";
 import { repoPanelId, repoTabId } from "./components/repoTabIds";
@@ -7,7 +7,7 @@ import { HookRunStrip } from "./components/HookRunStrip";
 import type { ToastAction } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { SplitView } from "./components/primitives/SplitView";
-import type { RepoClient } from "./ipc/RepoClient";
+import type { RepoClient, StatusEntry } from "./ipc/RepoClient";
 import { buildCommands, type AppCommands, type CommitCommands } from "./lib/commands";
 import { useExternalTools } from "./state/useExternalTools";
 import {
@@ -32,6 +32,7 @@ import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiffPanePatchActions, DiscardRequest, ReportedFileSelection } from "./components/DiffPane";
 import type { OpenRepo } from "./state/useOpenRepos";
 import { useSidebarPanelVisibility } from "./state/useSidebarPanelVisibility";
+import { useSidebarReveal } from "./state/useSidebarReveal";
 import styles from "./App.module.css";
 import { useAnnounce } from "./state/useAnnounce";
 import { useCommitDraftActions } from "./state/useCommitDraftActions";
@@ -61,13 +62,14 @@ export function RepoWorkspace({
   onCommitDraftChange,
   appCommands,
   pushToast,
+  onStatusChange,
 }: {
   repoPath: string;
   client: RepoClient;
   active: boolean;
   // `Promise<void>` rather than the plan's `void`: `WorktreePanel`'s `onOpenWorktree` is typed
   // `(path: string) => Promise<void>`, and this is the only value passed to it. It stays
-  // assignable to `buildCommands`' `(path: string) => void` parameter (Task 8).
+  // assignable to `TabCommands.onOpenRepoTab`'s `(path: string) => void` (Task 8).
   onOpenRepoTab: (path: string) => Promise<void>;
   onBusyChange: (repoPath: string, busy: boolean) => void;
   openRepos: OpenRepo[];
@@ -80,8 +82,17 @@ export function RepoWorkspace({
   appCommands?: AppCommands;
   // The single app-level toast stack (`App` owns the one `ToastRegion`).
   pushToast: (message: string, action?: ToastAction) => void;
+  // The live status, for the tab strip's "uncommitted changes" marker (#613).
+  onStatusChange?: (repoPath: string, status: StatusEntry[]) => void;
 }) {
   const appState = useAppState(client, repoPath);
+  // Reported once loaded: the initial empty list is no answer yet.
+  const initialStatus = useRef(appState.state.status);
+  const liveStatus = appState.state.status;
+  useEffect(() => {
+    if (liveStatus === initialStatus.current) return;
+    onStatusChange?.(repoPath, liveStatus);
+  }, [liveStatus, onStatusChange, repoPath]);
   const fileHistory = useFileHistory(
     client,
     repoPath,
@@ -156,6 +167,8 @@ export function RepoWorkspace({
     appState,
   );
   const panelVisibility = useSidebarPanelVisibility();
+  // The palette's sidebar commands ("Go to Tags", "Browse branches on origin", #494).
+  const sidebarReveal = useSidebarReveal();
   const [focusCommitMessage, setFocusCommitMessage] = useState(false);
   const clearFocusCommitMessage = useCallback(() => setFocusCommitMessage(false), []);
   // Discard confirmations live here (not in DiffPane) so the palette can open the same dialogs.
@@ -214,6 +227,7 @@ export function RepoWorkspace({
     active,
     repositoryOperationDisabled,
     onCloseRepoTab,
+    onReopenClosedTab: appCommands?.onReopenClosedTab,
     repoPath,
     handleUndo,
     handleRedo,
@@ -305,15 +319,22 @@ export function RepoWorkspace({
 
   // The palette's commands, built only while it is open.
   const paletteCommands = () =>
-    buildCommands(
-      { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
-      onOpenRepoTab,
-      openRepos.filter((repo) => repo.path !== repoPath),
-      onSwitchRepoTab,
-      panelVisibility.visibility,
-      () => setShortcutsOpen(true),
-      () => onCloseRepoTab(repoPath),
-      {
+    buildCommands({
+      appState: { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
+      onShowShortcuts: () => setShortcutsOpen(true),
+      app: appCommands,
+      tabs: {
+        onOpenRepoTab: (path) => void onOpenRepoTab(path),
+        otherOpenRepos: openRepos.filter((repo) => repo.path !== repoPath),
+        onSwitchRepoTab,
+        onCloseActiveRepoTab: () => onCloseRepoTab(repoPath),
+      },
+      sidebar: {
+        panelVisibility: panelVisibility.visibility,
+        revealSection: sidebarReveal.revealSection,
+        revealRemote: sidebarReveal.revealRemote,
+      },
+      diff: {
         settings: diffSettings.settings,
         update: diffSettings.update,
         currentFile,
@@ -344,15 +365,14 @@ export function RepoWorkspace({
           setDiscardRequest({ kind: "files", paths: fileSelection.paths });
         },
       },
-      appCommands,
-      {
+      undo: {
         undoLabel: appState.state.undoState.undo,
         redoLabel: appState.state.undoState.redo,
         onUndo: handleUndo,
         onRedo: handleRedo,
       },
-      { onSearchCommits: requestSearchFocus },
-      {
+      search: { onSearchCommits: requestSearchFocus },
+      tools: {
         onOpenTerminal: externalTools.openTerminal,
         onRevealRepository: () => externalTools.reveal(null),
         onOpenCurrentFileInEditor: () => {
@@ -362,15 +382,15 @@ export function RepoWorkspace({
           if (currentFile !== null) externalTools.openDiffTool(currentFile, { kind: "Unstaged" });
         },
       },
-      {
+      goTo: {
         onGoToCommit: (revision) => void goTo.goToRevision(revision),
         onSearchHistory: searchHistory,
         onGoToBranch: (kind, name) => void goTo.goToBranch(kind, name),
         onGoToTag: (name, commitId) => void goTo.goToTag(name, commitId),
         onGoToStash: (commitId) => reveal({ commitId }),
       },
-      commitCommands,
-    );
+      commit: commitCommands,
+    });
 
   // What the diff pane's views and the commit dock can do (#491), read from
   // `WorkspaceActionsContext` instead of being passed down through every level.
@@ -461,10 +481,9 @@ export function RepoWorkspace({
   return (
     // `data-active-repo` marks which workspace is the visible one. `App` only ever mounts the
     // active tab's `RepoWorkspace` now (PERF-001), so in practice exactly one of these exists at
-    // a time — but the attribute (and the `active` prop it mirrors) stays: `commands.ts`'s
-    // `goToSidebarSection` still scopes its `document.querySelector` lookup to it, and this
-    // component's own internal gates (`active &&` below) still need a real boolean rather than an
-    // assumption that they're always mounted-implies-active.
+    // a time — but the attribute (and the `active` prop it mirrors) stays: tests find the visible
+    // workspace by it, and this component's own internal gates (`active &&` below) still need a
+    // real boolean rather than an assumption that they're always mounted-implies-active.
     <CurrentDiffContext.Provider value={currentDiff}>
     <WorkspaceActionsContext.Provider value={workspaceActions}>
     <div
@@ -501,7 +520,11 @@ export function RepoWorkspace({
       )}
       {appState.state.error !== null && (
         <div className={styles.errorLayer}>
-          <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
+          <InlineError
+            message={appState.state.error}
+            hint={appState.state.errorHint ?? undefined}
+            onDismiss={appState.dismissError}
+          />
           {appState.state.forcePushOffer !== null && appState.state.dialog?.kind !== "forcePush" && (
             <button
               type="button"
@@ -563,6 +586,7 @@ export function RepoWorkspace({
             onDropStash={dropStash}
             stashBlockers={storedStashBlockers}
             onOpenRepoTab={onOpenRepoTab}
+            revealRequest={sidebarReveal.request}
           />
         }
         right={

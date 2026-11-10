@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import type { CreatePullRequest, ForgeProvider, PullRequestList, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import { errorAfterOwnSuccess, type OwnError } from "./ownError";
-import { credentialFailureMessage, type RunMutation, type RunMutationWithOutcome } from "./useMutationRunner";
+import { failureError, type RunMutation, type RunMutationWithOutcome } from "./useMutationRunner";
 
 export interface ForgeActions {
   listPullRequests(remoteName: string, account: string): Promise<void>;
@@ -42,12 +42,12 @@ export function useForgeActions(
         // re-list can't leave stale, possibly-successful-looking rows on screen under this
         // remote's heading. Other remotes' entries are untouched — a failure listing remote B
         // must never affect what's shown for remote A.
-        const message = credentialFailureMessage(err);
-        ownError.set(message);
+        const failure = failureError(err);
+        ownError.set(failure.error);
         setState((prev) => {
           const rest = { ...prev.pullRequests };
           delete rest[remoteName];
-          return { ...prev, pullRequests: rest, error: message };
+          return { ...prev, pullRequests: rest, ...failure };
         });
       }
     },

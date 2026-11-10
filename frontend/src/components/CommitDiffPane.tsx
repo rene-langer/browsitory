@@ -1,7 +1,7 @@
 import type { CommitView, DiffPanePatchActions, FileHistoryFocus } from "./diffPaneShared";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { useEffect, useMemo, useState } from "react";
-import type { CommitHunk, DiffOptions, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import type { CommitHunk, DiffOptions, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { CollapseAllToggle } from "./CollapseToggle";
 import { CommitHeader } from "./CommitHeader";
@@ -41,6 +41,7 @@ export function CommitDiffPane({
   view,
   onViewChange,
   restoreBlockedReason,
+  issueForge = null,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -50,6 +51,8 @@ export function CommitDiffPane({
   view: CommitView;
   onViewChange: (view: CommitView) => void;
   restoreBlockedReason: string | null;
+  // Passed to `CommitHeader` (#612).
+  issueForge?: ForgeRepository | null;
 }) {
   const {
     onSelectRow,
@@ -137,6 +140,7 @@ export function CommitDiffPane({
         commit={commits?.find((c) => c.id === commitId)}
         knownCommitIds={knownCommitIds}
         onSelectRow={onSelectRow}
+        issueForge={issueForge}
       />
       <div className={treeStyles.viewToggle} role="group" aria-label="Commit files">
         <button type="button" aria-pressed={view === "changes"} onClick={() => onViewChange("changes")}>
