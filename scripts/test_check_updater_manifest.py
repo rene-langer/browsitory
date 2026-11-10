@@ -265,6 +265,45 @@ class MainTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("latest.json", err)
 
+    def test_pages_copy_links_bundles_on_github_com(self):
+        assets, signatures, manifest = release()
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            assets_file = self.write_release(d, manifest, assets, signatures)
+            out_file = d / "pages" / "latest.json"
+            out_file.parent.mkdir()
+            status, _, err = self.run_main(
+                ["--version", VERSION, "--assets", str(assets_file),
+                 "--pages-copy", str(out_file), str(d)]
+            )
+            self.assertEqual(status, 0, err)
+            copy = json.loads(out_file.read_text(encoding="utf-8"))
+            original = json.loads((d / "latest.json").read_text(encoding="utf-8"))
+        base = f"https://github.com/{REPO}/releases/download/release%2F{VERSION}/"
+        self.assertEqual(copy["platforms"].keys(), manifest["platforms"].keys())
+        for platform, entry in copy["platforms"].items():
+            name = BUNDLES[PLATFORM_BUNDLE[platform]]
+            self.assertEqual(entry["url"], base + name)
+            self.assertEqual(entry["signature"], manifest["platforms"][platform]["signature"])
+        self.assertEqual(copy["version"], VERSION)
+        self.assertEqual(copy["notes"], "notes")
+        # The release's own manifest is not touched.
+        self.assertEqual(original, manifest)
+
+    def test_pages_copy_is_not_written_for_a_bad_manifest(self):
+        assets, signatures, manifest = release()
+        del manifest["platforms"]["linux-x86_64-rpm"]
+        with tempfile.TemporaryDirectory() as tmp:
+            d = pathlib.Path(tmp)
+            assets_file = self.write_release(d, manifest, assets, signatures)
+            out_file = d / "copy.json"
+            status, _, _ = self.run_main(
+                ["--version", VERSION, "--assets", str(assets_file),
+                 "--pages-copy", str(out_file), str(d)]
+            )
+            self.assertEqual(status, 1)
+            self.assertFalse(out_file.exists())
+
     def test_rejects_a_bad_version_argument(self):
         status, _, _ = self.run_main(["--version", "v0.4.0", "--assets", "a.json", "."])
         self.assertEqual(status, 2)
