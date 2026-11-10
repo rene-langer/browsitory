@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { errorKind } from "../ipc/RepoClient";
-import { describeError } from "../lib/errorMessages";
+import { credentialRemediation, describeError } from "../lib/errorMessages";
 import type { AppState } from "./useAppState";
 
 // Shared by every domain action hook composed inside `useAppState`: wraps a mutation with the
@@ -29,18 +29,6 @@ export interface MutationRunner {
 // is closed and reopened (which spawns a fresh worker). AUD-2026-09-05-CONC-002.
 export const REPO_CONNECTION_LOST_MESSAGE =
   "Connection to this repository was lost. Close and reopen the repository to reconnect.";
-
-/** What to do about a credential failure a transfer reported (`TransferProgress.errorKind`). */
-export function credentialRemediation(kind: "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure"): string {
-  switch (kind) {
-    case "MissingCredential":
-      return "Save an HTTPS token for this remote before retrying.";
-    case "CredentialStoreFailure":
-      return "The operating-system credential store is unavailable. Unlock it and try again.";
-    case "SshAgentFailure":
-      return "Load a key into your SSH agent and try again.";
-  }
-}
 
 /**
  * What a failed request shows: a fixed remediation for the kinds that have one (#496), else the

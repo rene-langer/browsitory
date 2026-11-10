@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import App from "./App";
 import styles from "./App.module.css";
 import { RepoError, type CommitOutcome, type HookProgress, type OperationKind, type RepoClient, type SequenceOutcome, type TerminalSequence } from "./ipc/RepoClient";
-import { credentialRemediation } from "./state/useMutationRunner";
+import { credentialRemediation } from "./lib/errorMessages";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
 import { fakeRepoClient } from "./test/fakeRepoClient";

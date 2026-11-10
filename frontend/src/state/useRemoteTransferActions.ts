@@ -1,90 +1,47 @@
 import { useCallback, useEffect, useRef } from "react";
-import { errorKind, type PullOutcome, type RemoteAuthMode, type RepoClient, type TransferProgress } from "../ipc/RepoClient";
+import { errorKind, type PullOutcome, type RemoteAuthMode, type RepoClient } from "../ipc/RepoClient";
 import { recordFetch } from "../lib/autoFetch";
 import { writeFetchPrune } from "../lib/fetchPrune";
 import { upstreamPushBranch } from "../lib/pushTarget";
-import { credentialRemediation, failureError } from "./useMutationRunner";
-import type {
-  RunMutation,
-  RunMutationWithMessage,
-  RunMutationWithOutcome,
-  RunOptimisticMutation,
-  RunOptimisticMutationWithMessage,
-  RunOptimisticMutationWithOutcome,
-} from "./useMutationRunner";
+import { failureError, type MutationRunner } from "./useMutationRunner";
 import type { RemoteInfo, TagInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { refNameClash, takenNameMessage } from "../lib/takenNames";
 import type { AppState, RemoteDialog } from "./useAppState";
-import { hookFailedMessage, type PushRequest } from "../lib/hookFailure";
+import {
+  IDLE_TRANSFER,
+  finishCompletedTransfer,
+  onTransferProgress,
+  onTransferRejected,
+  onTransferStarted,
+  requestTransfer,
+  transferRequest,
+  type TransferRequest,
+  type TransferSession,
+} from "../lib/transferSession";
 
-function transferFailureMessage(progress: TransferProgress, upstreamLabel: string): string {
-  // A cancellation reaches the UI as a `Failed` terminal event — the transfer really did stop
-  // short — but the user pressed Cancel themselves, so it must not read as "Fetch failed".
-  // Reporting it here (rather than treating it as a completion) also keeps `state.error`
-  // non-null, which is what stops `App`'s success toast from announcing "Fetch complete" for a
-  // transfer that never completed.
-  if (progress.errorKind === "Cancelled") {
-    if (progress.operation === "Pull") return "Pull cancelled.";
-    if (progress.operation === "Fetch" || progress.operation === "FetchAll") return "Fetch cancelled.";
-    if (progress.operation === "DeleteRemoteBranch" || progress.operation === "DeleteRemoteTag") return "Delete cancelled.";
-    return "Push cancelled.";
-  }
-  if (progress.errorKind === "HookFailed") return hookFailedMessage("pre-push");
-  if (progress.errorKind === "MissingCredential") return credentialRemediation("MissingCredential");
-  if (progress.errorKind === "CredentialStoreFailure") return credentialRemediation("CredentialStoreFailure");
-  if (progress.errorKind === "SshAgentFailure") return credentialRemediation("SshAgentFailure");
-  if (progress.errorKind === "StaleLease") {
-    return `${upstreamLabel} changed since your last fetch. Fetch and review before force pushing.`;
-  }
-  if (progress.operation === "DeleteRemoteBranch") {
-    return progress.errorKind === "RejectedRemoteRef"
-      ? "The remote refused to delete the branch."
-      : "Deleting the remote branch failed";
-  }
-  if (progress.operation === "DeleteRemoteTag") {
-    return progress.errorKind === "RejectedRemoteRef"
-      ? "The remote refused to delete the tag."
-      : "Deleting the remote tag failed";
-  }
-  const isPush =
-    progress.operation === "PushBranch" || progress.operation === "PushTags" || progress.operation === "ForcePushBranch";
-  if (progress.operation === "ForcePushBranch" && progress.errorKind === "NonFastForward") {
-    return "The remote refused the force push.";
-  }
-  if (isPush && progress.errorKind === "NonFastForward") {
-    return "Push was rejected because the remote has newer commits. Pull or reconcile history, then try again.";
-  }
-  if (isPush && progress.errorKind === "RejectedRemoteRef") {
-    return "The remote rejected the pushed reference.";
-  }
-  if (isPush) return "Push failed";
-  if (progress.operation === "Pull") return "Pull failed";
-  if (progress.operation === "Fetch" || progress.operation === "FetchAll") return "Fetch failed";
-  return "Transfer failed";
+/** What the actions read from the repository state when they run, not when they were made. */
+export interface RemoteTransferSnapshot {
+  upstream: UpstreamInfo | null;
+  fetchPrune: boolean | null;
+  currentBranch: string | null;
+  remotes: RemoteInfo[];
+  tags: TagInfo[];
 }
 
-/** One remote that failed during a Fetch all, as its `RemoteFailed` event reported it. */
-interface FailedRemote {
-  remoteName: string;
-  errorKind: TransferProgress["errorKind"];
-}
-
-// The same fixed hints `transferFailureMessage` gives a single-remote transfer.
-function credentialHint(errorKind: TransferProgress["errorKind"]): string | null {
-  if (errorKind === "MissingCredential") return credentialRemediation("MissingCredential");
-  if (errorKind === "CredentialStoreFailure") return credentialRemediation("CredentialStoreFailure");
-  if (errorKind === "SshAgentFailure") return credentialRemediation("SshAgentFailure");
-  return null;
-}
-
-function fetchAllFailureMessage(failed: FailedRemote[], othersFetched: boolean): string {
-  const parts = [`Could not fetch from ${failed.map((remote) => remote.remoteName).join(", ")}.`];
-  if (othersFetched) parts.push("The other remotes were fetched.");
-  for (const remote of failed) {
-    const hint = credentialHint(remote.errorKind);
-    if (hint !== null) parts.push(`${remote.remoteName}: ${hint}`);
-  }
-  return parts.join(" ");
+export interface RemoteTransferContext {
+  client: RepoClient;
+  repoPath: string;
+  refresh: () => Promise<void>;
+  runners: Pick<
+    MutationRunner,
+    | "runMutation"
+    | "runMutationWithOutcome"
+    | "runOptimisticMutation"
+    | "runOptimisticMutationWithMessage"
+    | "runOptimisticMutationWithOutcome"
+  >;
+  setState: (updater: (prev: AppState) => AppState) => void;
+  snapshot: RemoteTransferSnapshot;
 }
 
 export interface RemoteTransferActions {
@@ -145,152 +102,66 @@ export interface RemoteTransferActions {
 
 // Owns everything transfer-progress-shaped (fetch/push/pull), plus the rest of remote/upstream/tag
 // management that shares its `startTransfer`/credential-failure plumbing — the "remotes/transfer"
-// domain named in MAINT-002. Also owns the `subscribeTransferProgress` effect and the
-// `activeTransferId`/`transferRequestPending` refs that coordinate it with `startTransfer` and
-// `pullCurrentUpstream`, since nothing outside this domain touches transfer progress.
-export function useRemoteTransferActions(
-  client: RepoClient,
-  repoPath: string,
-  refresh: () => Promise<void>,
-  runMutation: RunMutation,
-  _runMutationWithMessage: RunMutationWithMessage,
-  runMutationWithOutcome: RunMutationWithOutcome,
-  runOptimisticMutation: RunOptimisticMutation,
-  runOptimisticMutationWithMessage: RunOptimisticMutationWithMessage,
-  runOptimisticMutationWithOutcome: RunOptimisticMutationWithOutcome,
-  setState: (updater: (prev: AppState) => AppState) => void,
-  upstream: UpstreamInfo | null,
-  fetchPrune: boolean | null,
-  currentBranch: string | null,
-  remotes: RemoteInfo[],
-  tags: TagInfo[],
-): RemoteTransferActions {
-  const activeTransferId = useRef<string | null>(null);
-  const transferRequestPending = useRef(false);
-  const lastPushRemote = useRef<string | null>(null);
-  // The last push-shaped request started, so a `pre-push` failure can be retried without hooks.
-  const lastPushRequest = useRef<PushRequest | null>(null);
-  // The `<remote>/<branch>` a force push targets (the lease and confirm dialog use the force-push
-  // remote and the local branch name), recorded when it starts so a stale-lease failure can name it.
-  const forcePushTarget = useRef<{ remoteName: string; branch: string | null } | null>(null);
-  const upstreamRef = useRef<UpstreamInfo | null>(upstream);
+// domain named in MAINT-002. Also owns the `subscribeTransferProgress` effect. The transfer's
+// lifecycle (which events belong to the transfer this tab started, and what its end shows) is
+// `lib/transferSession.ts`; this hook only feeds it and applies what it returns.
+export function useRemoteTransferActions(context: RemoteTransferContext): RemoteTransferActions {
+  const { client, repoPath, refresh, setState, snapshot } = context;
+  const {
+    runMutation,
+    runMutationWithOutcome,
+    runOptimisticMutation,
+    runOptimisticMutationWithMessage,
+    runOptimisticMutationWithOutcome,
+  } = context.runners;
+  const session = useRef<TransferSession>(IDLE_TRANSFER);
+  // The latest snapshot, for the actions and the progress listener, which outlive a render.
+  const latest = useRef<RemoteTransferSnapshot>(snapshot);
   useEffect(() => {
-    upstreamRef.current = upstream;
-  }, [upstream]);
-  const fetchPruneRef = useRef<boolean | null>(fetchPrune);
-  useEffect(() => {
-    fetchPruneRef.current = fetchPrune;
-  }, [fetchPrune]);
-  const currentBranchRef = useRef<string | null>(currentBranch);
-  useEffect(() => {
-    currentBranchRef.current = currentBranch;
-  }, [currentBranch]);
-  const remotesRef = useRef<RemoteInfo[]>(remotes);
-  useEffect(() => {
-    remotesRef.current = remotes;
-  }, [remotes]);
-  const tagsRef = useRef<TagInfo[]>(tags);
-  useEffect(() => {
-    tagsRef.current = tags;
-  }, [tags]);
-  // Remotes a Fetch all reported as failed (`RemoteFailed`), for the active operation only.
-  const failedRemotes = useRef<FailedRemote[]>([]);
-  // The local tag a running "Delete from remote" also deletes once it lands ("also delete
-  // locally"), and the action that does it (`deleteTag`, defined below the subscription).
-  const localTagDeleteAfterRemote = useRef<string | null>(null);
-  const deleteTagRef = useRef<(name: string) => Promise<void>>(async () => {});
+    latest.current = snapshot;
+  });
+
+  const deleteTag = useCallback(
+    (name: string) =>
+      runOptimisticMutation(
+        (prev) => ({ ...prev, tags: prev.tags.filter((tag) => tag.name !== name) }),
+        () => client.deleteTag(repoPath, name),
+      ),
+    [client, runOptimisticMutation, repoPath],
+  );
 
   useEffect(() => {
     return client.subscribeTransferProgress((progress) => {
-      // "Fetch automatically" runs quietly (`useAutoFetch`): never shown as this tab's transfer,
-      // and never adopted by a transfer the user starts while its events are in flight.
-      if (progress.operation === "BackgroundFetch") return;
-      if (progress.phase === "Starting") {
-        if (!transferRequestPending.current || activeTransferId.current !== null) return;
-        activeTransferId.current = progress.operationId;
-        failedRemotes.current = [];
-        setState((prev) => ({ ...prev, transfer: progress }));
-        return;
+      const step = onTransferProgress(session.current, progress, latest.current.upstream);
+      session.current = step.session;
+      const effect = step.effect;
+      switch (effect.kind) {
+        case "none":
+          return;
+        case "show":
+          setState((prev) => ({ ...prev, transfer: effect.transfer }));
+          return;
+        case "failed":
+          setState((prev) => ({ ...prev, ...effect.patch }));
+          return;
+        case "completed":
+          if (effect.recordFetch) recordFetch(repoPath);
+          setState((prev) => ({ ...prev, forcePushOffer: null }));
+          void refresh().finally(() => {
+            const finish = finishCompletedTransfer(session.current, effect.operationId);
+            session.current = finish.session;
+            if (!finish.finished) return;
+            // Set after `refresh()` (the transfer cleared `error` when it started; a refresh only
+            // clears an error a failed refresh set) and in the same update that clears `transfer`,
+            // so a partial Fetch all both reports the dead remotes and suppresses App's "Fetch
+            // complete" toast.
+            setState((prev) => ({ ...prev, transfer: null, pending: false, error: effect.error ?? prev.error }));
+            if (finish.deleteLocalTag !== null) void deleteTag(finish.deleteLocalTag);
+          });
+          return;
       }
-
-      if (progress.operationId !== activeTransferId.current) return;
-
-      if (progress.phase === "RemoteFailed") {
-        if (progress.remoteName !== undefined) {
-          failedRemotes.current = [
-            ...failedRemotes.current,
-            { remoteName: progress.remoteName, errorKind: progress.errorKind },
-          ];
-        }
-        return;
-      }
-
-      if (progress.phase === "Completed") {
-        transferRequestPending.current = false;
-        if (progress.operation === "Fetch" || progress.operation === "FetchAll") recordFetch(repoPath);
-        const failed = failedRemotes.current;
-        failedRemotes.current = [];
-        setState((prev) => ({ ...prev, forcePushOffer: null }));
-        void refresh().finally(() => {
-          if (activeTransferId.current !== progress.operationId) return;
-          activeTransferId.current = null;
-          // Set after `refresh()` (the transfer cleared `error` when it started; a refresh only
-          // clears an error a failed refresh set) and in the same update that clears `transfer`,
-          // so a partial Fetch all both reports the dead remotes and suppresses App's "Fetch
-          // complete" toast.
-          setState((prev) => ({
-            ...prev,
-            transfer: null,
-            pending: false,
-            error: failed.length > 0 ? fetchAllFailureMessage(failed, true) : prev.error,
-          }));
-          const localTag = progress.operation === "DeleteRemoteTag" ? localTagDeleteAfterRemote.current : null;
-          localTagDeleteAfterRemote.current = null;
-          if (localTag !== null) void deleteTagRef.current(localTag);
-        });
-        return;
-      }
-
-      if (progress.phase === "Failed") {
-        transferRequestPending.current = false;
-        activeTransferId.current = null;
-        localTagDeleteAfterRemote.current = null;
-        const current = upstreamRef.current;
-        const target = progress.operation === "ForcePushBranch" ? forcePushTarget.current : null;
-        const upstreamLabel =
-          target !== null && target.branch !== null
-            ? `${target.remoteName}/${target.branch}`
-            : current !== null
-              ? `${current.remoteName}/${current.remoteBranch}`
-              : (lastPushRemote.current ?? "The remote branch");
-        const offer =
-          progress.operation === "PushBranch" && progress.errorKind === "NonFastForward" && lastPushRemote.current !== null
-            ? { remoteName: lastPushRemote.current }
-            : null;
-        const failed = failedRemotes.current;
-        failedRemotes.current = [];
-        const message =
-          progress.operation === "FetchAll" && progress.errorKind !== "Cancelled" && failed.length > 0
-            ? fetchAllFailureMessage(failed, false)
-            : transferFailureMessage(progress, upstreamLabel);
-        const push = lastPushRequest.current;
-        setState((prev) => ({
-          ...prev,
-          transfer: null,
-          error: message,
-          pending: false,
-          forcePushOffer: offer,
-          hookFailure:
-            progress.errorKind === "HookFailed" && push !== null
-              ? { hook: "pre-push", output: progress.hookOutput ?? "", retry: { kind: "push", push }, dialogOpen: true }
-              : null,
-        }));
-        return;
-      }
-
-      setState((prev) => ({ ...prev, transfer: progress }));
     });
-  }, [client, refresh, repoPath, setState]);
+  }, [client, deleteTag, refresh, repoPath, setState]);
 
   // Refuses `name` when `existing` already holds it, reporting it like any failed mutation (also
   // in `state.error`); returns the message, or `null` when the name is free. `folders` also
@@ -311,7 +182,7 @@ export function useRemoteTransferActions(
       // A taken name is refused here, before the optimistic append: appending it would render the
       // remote twice (with a duplicate React key in `BranchTree`) until the backend refused it, with
       // libgit2's raw "already exists" error (#408).
-      const refused = refuseTakenName("remote", remotesRef.current.map((remote) => remote.name), name, false);
+      const refused = refuseTakenName("remote", latest.current.remotes.map((remote) => remote.name), name, false);
       if (refused !== null) return refused;
       return runOptimisticMutationWithMessage(
         (prev) =>
@@ -330,7 +201,7 @@ export function useRemoteTransferActions(
   const renameRemote = useCallback(
     async (oldName: string, newName: string) => {
       // As `addRemote`: renaming onto another remote's name would list that name twice (#413).
-      const others = remotesRef.current.map((remote) => remote.name).filter((name) => name !== oldName);
+      const others = latest.current.remotes.map((remote) => remote.name).filter((name) => name !== oldName);
       if (refuseTakenName("remote", others, newName, false) !== null) return false;
       return runOptimisticMutationWithOutcome(
         (prev) =>
@@ -399,33 +270,17 @@ export function useRemoteTransferActions(
     [client, runOptimisticMutation, repoPath],
   );
   const startTransfer = useCallback(
-    async (operation: TransferProgress["operation"], start: () => Promise<string>) => {
+    async (request: TransferRequest, start: () => Promise<string>) => {
       try {
-        transferRequestPending.current = true;
-        activeTransferId.current = null;
-        failedRemotes.current = [];
+        session.current = requestTransfer(request);
         setState((prev) => ({ ...prev, pending: true, error: null, forcePushOffer: null, hookFailure: null }));
         const operationId = await start();
-        if (transferRequestPending.current && activeTransferId.current === null) {
-          activeTransferId.current = operationId;
-          setState((prev) => ({
-            ...prev,
-            transfer: {
-              operationId,
-              operation,
-              phase: "Starting",
-              errorKind: null,
-              current: 0,
-              total: 0,
-              receivedBytes: 0,
-              message: null,
-              hookOutput: null,
-            },
-          }));
-        }
+        const step = onTransferStarted(session.current, operationId);
+        session.current = step.session;
+        const transfer = step.transfer;
+        if (transfer !== null) setState((prev) => ({ ...prev, transfer }));
       } catch (err) {
-        transferRequestPending.current = false;
-        activeTransferId.current = null;
+        session.current = onTransferRejected();
         setState((prev) => ({ ...prev, ...failureError(err), pending: false }));
       }
     },
@@ -434,19 +289,19 @@ export function useRemoteTransferActions(
 
   const fetchRemote = useCallback(
     (remoteName: string) => {
-      lastPushRequest.current = null;
-      return startTransfer("Fetch", () => client.fetchRemote(repoPath, remoteName, fetchPruneRef.current));
+      return startTransfer(transferRequest("Fetch"), () =>
+        client.fetchRemote(repoPath, remoteName, latest.current.fetchPrune),
+      );
     },
     [client, startTransfer, repoPath],
   );
   const fetchAllRemotes = useCallback(() => {
-    lastPushRequest.current = null;
-    return startTransfer("FetchAll", () => client.fetchAllRemotes(repoPath, fetchPruneRef.current));
+    return startTransfer(transferRequest("FetchAll"), () => client.fetchAllRemotes(repoPath, latest.current.fetchPrune));
   }, [client, startTransfer, repoPath]);
   const setFetchPrune = useCallback(
     (prune: boolean) => {
       writeFetchPrune(repoPath, prune);
-      fetchPruneRef.current = prune;
+      latest.current = { ...latest.current, fetchPrune: prune };
       setState((prev) => ({ ...prev, fetchPrune: prune }));
     },
     [repoPath, setState],
@@ -459,7 +314,7 @@ export function useRemoteTransferActions(
   const createTag = useCallback(
     async (name: string, message: string | null, target: string | null) => {
       // A taken tag name would show twice in `TagPanel` (keyed by name) until refused (#413).
-      const refused = refuseTakenName("tag", tagsRef.current.map((tag) => tag.name), name, true);
+      const refused = refuseTakenName("tag", latest.current.tags.map((tag) => tag.name), name, true);
       if (refused !== null) return refused;
       return runOptimisticMutationWithMessage(
         (prev) =>
@@ -477,17 +332,6 @@ export function useRemoteTransferActions(
     },
     [client, refuseTakenName, runOptimisticMutationWithMessage, repoPath],
   );
-  const deleteTag = useCallback(
-    (name: string) =>
-      runOptimisticMutation(
-        (prev) => ({ ...prev, tags: prev.tags.filter((tag) => tag.name !== name) }),
-        () => client.deleteTag(repoPath, name),
-      ),
-    [client, runOptimisticMutation, repoPath],
-  );
-  useEffect(() => {
-    deleteTagRef.current = deleteTag;
-  }, [deleteTag]);
   const openCreateTagDialog = useCallback(
     (commitId: string) => setState((prev) => ({ ...prev, createTagDialog: { commitId } })),
     [setState],
@@ -498,15 +342,17 @@ export function useRemoteTransferActions(
       // push.default does not choose where the current branch goes on its upstream's remote
       // (e.g. `simple` with a differently named upstream): ask with Push to… (prefilled with
       // that remote and the local name) instead of pushing. The backend refuses such a push too.
-      const upstream = upstreamRef.current;
+      const { upstream, currentBranch } = latest.current;
       if (upstream !== null && upstream.remoteName === remoteName && upstreamPushBranch(upstream) === null) {
-        const localBranch = currentBranchRef.current ?? upstream.localBranch;
+        const localBranch = currentBranch ?? upstream.localBranch;
         setState((prev) => ({ ...prev, pushDialog: { localBranch } }));
         return;
       }
-      lastPushRemote.current = remoteName;
-      lastPushRequest.current = { operation: "PushBranch", remoteName };
-      return startTransfer("PushBranch", () => client.pushCurrentBranch(repoPath, remoteName, noVerify));
+      const request = transferRequest("PushBranch", {
+        push: { operation: "PushBranch", remoteName },
+        forcePushOfferRemote: remoteName,
+      });
+      return startTransfer(request, () => client.pushCurrentBranch(repoPath, remoteName, noVerify));
     },
     [client, startTransfer, repoPath, setState],
   );
@@ -522,23 +368,22 @@ export function useRemoteTransferActions(
     (remoteName: string, noVerify = false) => {
       // The lease targets what `force_push_current_branch` resolves under push.default (see
       // `lib/pushTarget.ts`), else the current branch's own name.
-      const upstream = upstreamRef.current;
+      // A stale-lease failure names the leased branch, else the current one.
+      const { upstream, currentBranch } = latest.current;
       const leased = upstream !== null && upstream.remoteName === remoteName ? upstreamPushBranch(upstream) : null;
-      forcePushTarget.current = { remoteName, branch: leased ?? upstream?.localBranch ?? currentBranchRef.current };
-      setState((prev) => {
-        const branch = prev.branches.find((candidate) => candidate.isCurrent)?.name;
-        if (leased === null && branch !== undefined) forcePushTarget.current = { remoteName, branch };
-        return { ...prev, forcePushOffer: null, forcePushConfirm: null };
+      setState((prev) => ({ ...prev, forcePushOffer: null, forcePushConfirm: null }));
+      const request = transferRequest("ForcePushBranch", {
+        push: { operation: "ForcePushBranch", remoteName },
+        forcePushTarget: { remoteName, branch: leased ?? currentBranch ?? upstream?.localBranch ?? null },
       });
-      lastPushRequest.current = { operation: "ForcePushBranch", remoteName };
-      return startTransfer("ForcePushBranch", () => client.forcePushCurrentBranch(repoPath, remoteName, noVerify));
+      return startTransfer(request, () => client.forcePushCurrentBranch(repoPath, remoteName, noVerify));
     },
     [client, startTransfer, repoPath, setState],
   );
   const pushTags = useCallback(
     (remoteName: string, names: string[], noVerify = false) => {
-      lastPushRequest.current = { operation: "PushTags", remoteName, names };
-      return startTransfer("PushTags", () => client.pushTags(repoPath, remoteName, names, noVerify));
+      const request = transferRequest("PushTags", { push: { operation: "PushTags", remoteName, names } });
+      return startTransfer(request, () => client.pushTags(repoPath, remoteName, names, noVerify));
     },
     [client, startTransfer, repoPath],
   );
@@ -546,16 +391,16 @@ export function useRemoteTransferActions(
     (remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify = false) => {
       // The force-push offer force-pushes the *current* branch to where force_push_current_branch
       // resolves it: only offer it when that is exactly what this push targeted.
-      const upstream = upstreamRef.current;
+      const { upstream, currentBranch } = latest.current;
       const forceTarget =
         upstream !== null && upstream.remoteName === remoteName ? upstreamPushBranch(upstream) : localBranch;
-      lastPushRemote.current =
-        forceTarget !== null && localBranch === currentBranchRef.current && remoteBranch === forceTarget
-          ? remoteName
-          : null;
+      const offersForcePush = forceTarget !== null && localBranch === currentBranch && remoteBranch === forceTarget;
       setState((prev) => ({ ...prev, pushDialog: null }));
-      lastPushRequest.current = { operation: "PushBranchTo", remoteName, localBranch, remoteBranch, setUpstream };
-      return startTransfer("PushBranch", () =>
+      const request = transferRequest("PushBranch", {
+        push: { operation: "PushBranchTo", remoteName, localBranch, remoteBranch, setUpstream },
+        forcePushOfferRemote: offersForcePush ? remoteName : null,
+      });
+      return startTransfer(request, () =>
         client.pushBranch(repoPath, remoteName, localBranch, remoteBranch, setUpstream, noVerify),
       );
     },
@@ -564,8 +409,10 @@ export function useRemoteTransferActions(
   const deleteRemoteBranch = useCallback(
     (remoteName: string, branchName: string, noVerify = false) => {
       setState((prev) => ({ ...prev, deleteRemoteBranchDialog: null }));
-      lastPushRequest.current = { operation: "DeleteRemoteBranch", remoteName, branchName };
-      return startTransfer("DeleteRemoteBranch", () =>
+      const request = transferRequest("DeleteRemoteBranch", {
+        push: { operation: "DeleteRemoteBranch", remoteName, branchName },
+      });
+      return startTransfer(request, () =>
         client.deleteRemoteBranch(repoPath, remoteName, branchName, noVerify),
       );
     },
@@ -574,9 +421,11 @@ export function useRemoteTransferActions(
   const deleteRemoteTag = useCallback(
     (remoteName: string, tagName: string, deleteLocal: boolean, noVerify = false) => {
       setState((prev) => ({ ...prev, deleteRemoteTagDialog: null }));
-      lastPushRequest.current = { operation: "DeleteRemoteTag", remoteName, tagName, deleteLocal };
-      localTagDeleteAfterRemote.current = deleteLocal ? tagName : null;
-      return startTransfer("DeleteRemoteTag", () => client.deleteRemoteTag(repoPath, remoteName, tagName, noVerify));
+      const request = transferRequest("DeleteRemoteTag", {
+        push: { operation: "DeleteRemoteTag", remoteName, tagName, deleteLocal },
+        deleteLocalTag: deleteLocal ? tagName : null,
+      });
+      return startTransfer(request, () => client.deleteRemoteTag(repoPath, remoteName, tagName, noVerify));
     },
     [client, startTransfer, repoPath, setState],
   );
@@ -605,8 +454,8 @@ export function useRemoteTransferActions(
 
   const pullCurrentUpstream = useCallback(async () => {
     try {
-      transferRequestPending.current = true;
-      activeTransferId.current = null;
+      // No operation id comes back: the pull's own Starting event is adopted.
+      session.current = requestTransfer(transferRequest("Pull"));
       setState((prev) => ({
         ...prev,
         pending: true,
@@ -628,8 +477,7 @@ export function useRemoteTransferActions(
       // from there: a credential remediation, or "Pull cancelled.".
       const kind = errorKind(err);
       if (kind === "PullFailed" || kind === "Cancelled") return;
-      transferRequestPending.current = false;
-      activeTransferId.current = null;
+      session.current = onTransferRejected();
       setState((prev) => ({
         ...prev,
         transfer: null,

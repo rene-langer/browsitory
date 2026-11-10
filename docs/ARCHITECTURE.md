@@ -1936,11 +1936,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   repository's override is a `localStorage` preference like Prune (`lib/autoFetch.ts`). The
   frontend schedules it (`state/useAutoFetch.ts`, active tab only) and calls
   `backgroundFetch`, which is `fetch_all` reported as `TransferOperation::BackgroundFetch`
-  (`RemoteFailed` carries the operation too), so `useRemoteTransferActions` never shows or
-  adopts it. `WorkerHandle::background_fetch` starts nothing and answers `null` while the
-  worker's `CancelRegistry` knows any operation (`allocate_if_idle`: a fetch, pull, push,
-  commit, merge, … queued or running), so it never overlaps another fetch or a mutation from
-  any tab or spelling. The frontend waits while its own action runs or the host is hidden
+  (`RemoteFailed` carries the operation too), so the tab's transfer session
+  (`lib/transferSession.ts`) never shows or adopts it. `WorkerHandle::background_fetch` starts
+  nothing and answers `null` while the worker's `CancelRegistry` knows any operation
+  (`allocate_if_idle`: a fetch, pull, push, commit, merge, … queued or running), so it never
+  overlaps another fetch or a mutation from any tab or spelling. The frontend waits while its own action runs or the host is hidden
   (`ipc/hostVisibility.ts`: the page's `visibilitychange`, plus the VSCode panel's
   `onDidChangeViewState`, posted by the extension host as a `panelVisibility` notification), and
   cancels a running background fetch when the user starts an action. Fetches never prompt for

@@ -3,7 +3,8 @@ import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import type { AppState } from "./useAppState";
 import { RepoError } from "../ipc/RepoClient";
-import { credentialFailureMessage, credentialRemediation, failureError, useMutationRunner, withoutStaleErrorHint } from "./useMutationRunner";
+import { credentialRemediation } from "../lib/errorMessages";
+import { credentialFailureMessage, failureError, useMutationRunner, withoutStaleErrorHint } from "./useMutationRunner";
 
 const BASE_STATE: AppState = {
   repoPath: "/repo",
