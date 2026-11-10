@@ -20,7 +20,7 @@ such as the UK GDPR, the Swiss FADP and the CCPA.
 
 - Browsitory talks only to the servers you choose (your Git remotes and, if you set it up,
   GitHub's or Bitbucket's pull request API) and to GitHub, to look for updates of the desktop
-  app.
+  app (you can turn the automatic check off).
 - Everything else stays on your computer: your settings, your recent repositories, a log file
   and some state inside each repository's `.git` folder.
 - Tokens and passwords go to your system's credential store, never into a file of ours.
@@ -33,8 +33,10 @@ your IP address and the time of the request; what else it learns is listed for e
 
 ### Update check (desktop app only)
 
-The desktop app checks for a new version when it starts, then every 6 hours while it runs.
-When a check fails, it tries again after 10 minutes, then after longer waits up to 3 hours.
+By default the desktop app checks for a new version when it starts, then every 6 hours while it
+runs. When a check fails, it tries again after 10 minutes, then after longer waits up to 3
+hours. You can turn this off (see below); then it checks only when you click **Check for
+updates**.
 
 - **Where:** first `github.com` (the file `latest.json` of the latest Browsitory release),
   and, only when that fails, the same file on this site, `rene-langer.github.io`. Both are run
@@ -44,10 +46,11 @@ When a check fails, it tries again after 10 minutes, then after longer waits up 
   repositories.
 - **When there is an update:** the app downloads it from GitHub's release files and checks its
   signature. It installs it only when you choose **Restart to update**.
-- **Turning it off:** not possible yet; a setting is planned
-  ([#630](https://github.com/rene-langer/browsitory/issues/630)). Until then, block the two
-  addresses above in your firewall if you don't want the check. The VSCode extension never
-  checks for updates itself: your editor does that (see below).
+- **Turning it off:** clear **Check for updates automatically** under **Updates** in
+  **Preferences** (`check_automatically = false` under `[updates]` in `config.toml`). The app
+  then makes no update request until you click **Check for updates** there or run it from the
+  command palette, and only that once. The VSCode extension never checks for updates itself:
+  your editor does that (see below).
 
 GitHub's handling of this data: the
 [GitHub General Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
@@ -87,7 +90,7 @@ None of this leaves your computer, and we can't see it.
 
 | What | Where |
 |---|---|
-| Settings: recent and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool and fetch preferences, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
+| Settings: recent and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch and update preferences, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
 | Display choices: theme, panel sizes, open and closed sections, recent commands, recent searches, recent commit messages, the per-repository **Fetch automatically** and **Prune** choices | The app's web storage (`localStorage`) |
 | HTTPS tokens for Git remotes and pull request tokens | Your system's credential store: Keychain on macOS, Credential Manager on Windows, the Secret Service (for example GNOME Keyring or KWallet) on Linux, under the names `com.browsitory.git` and `com.browsitory.forge` |
 | Undo and redo history, a paused rebase, cherry-pick or revert | Inside each repository: the folder `.git/browsitory/` and Git references under `refs/browsitory/` (in a linked worktree, in that worktree's own Git folder) |

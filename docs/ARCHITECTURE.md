@@ -2130,7 +2130,7 @@ only `error`.
   - Limits and defaults (#497): `wire_bindings_are_current` also writes
     `frontend/src/ipc/generated/wire-constants.ts`: `MAX_CONTEXT_LINES`,
     `WHOLE_FILE_CONTEXT_LINES`, `COMMIT_MESSAGE_COLUMNS`, the `Default` of `config`'s
-    `DiffSettings`, `CommitMessageSettings` and `FetchSettings` serialized as their DTOs, and the
+    `DiffSettings`, `CommitMessageSettings`, `FetchSettings` and `UpdateSettings` serialized as their DTOs, and the
     commit search keys (`git_core::search::KEYS`). `RepoClient.ts` re-exports them; the frontend
     declares none of these values itself. `searchSyntax.test.ts` checks the search help's keys
     against `SEARCH_KEYS`.
@@ -2196,9 +2196,14 @@ only `error`.
   area, added where a flow spans backend+frontend in a way unit tests can't catch; `App`
   (`frontend/src/state/useE2eAutoOpen.ts`) reads a `VITE_E2E_REPO_PATH` build-time env var to auto-open a fixture repo, since
   `RepoPicker`'s native folder dialog can't be driven through WebDriver. The same variable
-  turns off the release notes dialog (`useReleaseNotes`) and the update check
+  turns off the release notes dialog (`useReleaseNotes`) and the automatic update check
   (`UpdateBanner`), so E2E runs and the guide screenshots never contact the update endpoints or
-  download a release bundle (#576); release builds don't set it. (Not Playwright:
+  download a release bundle (#576); release builds don't set it. Outside E2E builds the automatic
+  check runs only once `[updates] check_automatically` (`get_update_settings`, default on, #630)
+  has been read as on; a failed read leaves it off. "Check for updates" (palette and the
+  Preferences "Updates" section, both shown only when `main.tsx` passes the `updateBanner`, so
+  never in VSCode) runs the check the banner registers through `state/updateCheck.ts`, whatever
+  the setting. (Not Playwright:
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
   actually-supported E2E path.) All four pnpm projects (`frontend/`, `extension/`, `e2e/`,

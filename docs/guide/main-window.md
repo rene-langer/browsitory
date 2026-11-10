@@ -25,8 +25,8 @@ the right:
   your system's setting.
 - The gear button opens **Preferences**: the commit message settings, **Fetch automatically**
   (see [Branches and remotes](branches-and-remotes.md#fetching-automatically)), diff word wrap
-  and diff algorithm (see [Diff options](history.md#diff-options)), and your editor, terminal and diff tools (see
-  [External tools](external-tools.md)).
+  and diff algorithm (see [Diff options](history.md#diff-options)), your editor, terminal and diff tools (see
+  [External tools](external-tools.md)) and, in the desktop app, **Updates** (see below).
 - The sparkle button (**What's new**) opens the **Release notes**: what changed in each version. They also open
   by themselves the first time you start a new version. The buttons at the bottom stay in view
   while you scroll: **Close** (or Escape, or a click outside the dialog) closes them, and
@@ -37,7 +37,13 @@ hours, and downloads it in the background. If a check or download fails (for exa
 download server is down), it tries again after 10 minutes, then waits twice as long each time, up
 to 3 hours, until a check succeeds. When it is ready, a banner says "Update v… ready".
 Click **Restart to update** to install it, or keep working: nothing changes until you restart.
-The VSCode extension updates through VSCode instead.
+
+To stop the automatic checks, clear **Check for updates automatically** under **Updates** in
+**Preferences** (it is `check_automatically = false` under `[updates]` in `config.toml`).
+Browsitory then contacts the update server only when you ask: click **Check for updates** in
+that section, or run **Check for updates** from the command palette. It tells you whether you
+are up to date; a new version downloads and shows the same banner.
+The VSCode extension updates through VSCode instead and has neither setting nor command.
 
 ![The main window: sidebar, commit graph and diff pane](assets/overview.png)
 

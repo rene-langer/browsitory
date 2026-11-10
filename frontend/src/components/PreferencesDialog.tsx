@@ -14,6 +14,8 @@ import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettin
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useExternalToolSettings } from "../state/useExternalToolSettings";
 import { useFetchSettingsContext } from "../state/useFetchSettings";
+import { useUpdateSettingsContext } from "../state/useUpdateSettings";
+import type { UpdateCheckOutcome } from "../state/updateCheck";
 import {
   AUTO_FETCH_CHOICES,
   autoFetchLabel,
@@ -241,6 +243,68 @@ export function FetchSection({ repoPath }: { repoPath: string | null }) {
         Fetches all remotes in the background while Browsitory is visible and no other action runs, using
         each repository's Prune choice. A remote that would need you to sign in is skipped and named once.
       </p>
+      {error !== null && (
+        <p role="alert" className={styles.problem}>
+          {error}{" "}
+          <button type="button" onClick={dismissError}>
+            Dismiss
+          </button>
+        </p>
+      )}
+    </PreferencesSection>
+  );
+}
+
+function updateCheckText(check: UpdateCheckOutcome | "checking"): string {
+  if (check === "checking") return "Checking for updates…";
+  switch (check.kind) {
+    case "none":
+      return "Browsitory is up to date.";
+    case "ready":
+      return `Update v${check.version} is ready. Restart from the banner at the top to install it.`;
+    case "failed":
+      return `Couldn't check for updates: ${check.message}`;
+  }
+}
+
+/**
+ * "Updates" (desktop app only, #630): whether Browsitory checks for a new version on its own,
+ * and a button that checks now either way.
+ */
+export function UpdatesSection({ onCheckNow }: { onCheckNow: () => Promise<UpdateCheckOutcome> }) {
+  const { settings, update, error, dismissError } = useUpdateSettingsContext();
+  const [check, setCheck] = useState<UpdateCheckOutcome | "checking" | null>(null);
+  return (
+    <PreferencesSection title="Updates">
+      <label className={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={settings.checkAutomatically}
+          onChange={(event) => update({ checkAutomatically: event.target.checked })}
+        />
+        Check for updates automatically
+      </label>
+      <p className={styles.hint}>
+        At start and every 6 hours, Browsitory asks GitHub for the latest release and downloads a newer one.
+        Turned off, it checks only when you click Check for updates.
+      </p>
+      <div>
+        <button
+          type="button"
+          disabled={check === "checking"}
+          onClick={() => {
+            setCheck("checking");
+            void onCheckNow().then(setCheck);
+          }}
+        >
+          Check for updates
+        </button>
+      </div>
+      {check !== null && (
+        <p role={check !== "checking" && check.kind === "failed" ? "alert" : "status"} className={styles.hint}>
+          {updateCheckText(check)}
+        </p>
+      )}
       {error !== null && (
         <p role="alert" className={styles.problem}>
           {error}{" "}

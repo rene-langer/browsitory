@@ -15,12 +15,26 @@ import { Overlay } from "./components/primitives/Overlay";
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import type { AppCommands } from "./lib/commands";
-import { CommitMessageSection, DiffSection, ExternalToolsSection, FetchSection, PreferencesDialog } from "./components/PreferencesDialog";
+import {
+  CommitMessageSection,
+  DiffSection,
+  ExternalToolsSection,
+  FetchSection,
+  PreferencesDialog,
+  UpdatesSection,
+} from "./components/PreferencesDialog";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
 import { repoNameOf } from "./lib/repoName";
 import { persistTheme } from "./lib/theme";
 import { CommitMessageSettingsProvider } from "./state/CommitMessageSettingsProvider";
 import { FetchSettingsProvider } from "./state/FetchSettingsProvider";
+import { UpdateSettingsProvider } from "./state/UpdateSettingsProvider";
+import {
+  UpdateCheckContext,
+  type UpdateCheck,
+  type UpdateCheckOutcome,
+  type UpdateCheckRegistry,
+} from "./state/updateCheck";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useOpenRepos } from "./state/useOpenRepos";
 import { useWorkspaces } from "./state/useWorkspaces";
@@ -34,6 +48,10 @@ import { useTheme } from "./state/useTheme";
 
 export default function App(props: {
   client: RepoClient;
+  /**
+   * The desktop app's `UpdateBanner`. Given, the app also offers the "Updates" preferences and
+   * "Check for updates" (#630); the VS Code extension updates through its marketplace and has none.
+   */
   updateBanner?: ReactNode;
   /** Which host launches external tools; VSCode opens them in VSCode itself. */
   toolHost?: "desktop" | "vscode";
@@ -44,12 +62,16 @@ export default function App(props: {
     <DiffSettingsProvider client={props.client}>
       <CommitMessageSettingsProvider client={props.client}>
         <FetchSettingsProvider client={props.client}>
-          <AppContent {...props} />
+          <UpdateSettingsProvider client={props.client} enabled={hasUpdater(props.updateBanner)}>
+            <AppContent {...props} />
+          </UpdateSettingsProvider>
         </FetchSettingsProvider>
       </CommitMessageSettingsProvider>
     </DiffSettingsProvider>
   );
 }
+
+const hasUpdater = (updateBanner: ReactNode) => updateBanner !== undefined && updateBanner !== null;
 
 function AppContent({
   client,
@@ -127,6 +149,39 @@ function AppContent({
     );
   }, [client, openRepoTab, pushAppToast]);
   const openPreferences = useCallback(() => setPreferencesOpen(true), []);
+  // "Check for updates" (#630) runs the check the update banner registers.
+  const updateCheck = useRef<UpdateCheck | null>(null);
+  const updateCheckRegistry = useMemo<UpdateCheckRegistry>(
+    () => ({
+      register(check) {
+        updateCheck.current = check;
+        return () => {
+          if (updateCheck.current === check) updateCheck.current = null;
+        };
+      },
+    }),
+    [],
+  );
+  const runUpdateCheck = useCallback(
+    (): Promise<UpdateCheckOutcome> =>
+      updateCheck.current?.() ?? Promise.resolve({ kind: "failed", message: "The updater isn't running." }),
+    [],
+  );
+  const updaterAvailable = hasUpdater(updateBanner);
+  const checkForUpdates = useMemo(
+    () =>
+      updaterAvailable
+        ? () => {
+            pushAppToast("Checking for updates…");
+            void runUpdateCheck().then((outcome) => {
+              if (outcome.kind === "none") pushAppToast("Browsitory is up to date");
+              else if (outcome.kind === "ready") pushAppToast(`Update v${outcome.version} is ready: restart to update`);
+              else setTabToolError(`Couldn't check for updates: ${outcome.message}`);
+            });
+          }
+        : undefined,
+    [updaterAvailable, pushAppToast, runUpdateCheck],
+  );
   const openLicences = useMemo(
     () => (loadThirdPartyNotices === undefined ? undefined : () => setLicencesOpen(true)),
     [loadThirdPartyNotices],
@@ -147,8 +202,17 @@ function AppContent({
       onOpenPreferences: openPreferences,
       onOpenThirdPartyLicences: openLicences,
       onOpenUserGuide: openUserGuide,
+      onCheckForUpdates: checkForUpdates,
     }),
-    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences, openLicences, openUserGuide],
+    [
+      client.supportsCloneAndInit,
+      startClone,
+      startNewRepository,
+      openPreferences,
+      openLicences,
+      openUserGuide,
+      checkForUpdates,
+    ],
   );
   const tabMenuItems = useCallback(
     (path: string) => {
@@ -200,7 +264,7 @@ function AppContent({
 
   return (
     <main>
-      {updateBanner}
+      <UpdateCheckContext.Provider value={updateCheckRegistry}>{updateBanner}</UpdateCheckContext.Provider>
       <header className={styles.headerRow}>
         <h1>Browsitory</h1>
         <RepoTabs
@@ -252,6 +316,7 @@ function AppContent({
           <CommitMessageSection />
           <FetchSection repoPath={openRepos.activePath} />
           <DiffSection />
+          {updaterAvailable && <UpdatesSection onCheckNow={runUpdateCheck} />}
         </PreferencesDialog>
       )}
       {(transportError !== null || openError !== null) && (

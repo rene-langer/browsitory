@@ -2310,6 +2310,32 @@ impl From<FetchSettingsDto> for config::FetchSettings {
     }
 }
 
+/// The `[updates]` preferences (desktop app only, #630): `checkAutomatically` checks for a new
+/// version at start and every few hours; off, only "Check for updates" checks.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UpdateSettings"))]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSettingsDto {
+    pub check_automatically: bool,
+}
+
+impl From<config::UpdateSettings> for UpdateSettingsDto {
+    fn from(s: config::UpdateSettings) -> Self {
+        Self {
+            check_automatically: s.check_automatically,
+        }
+    }
+}
+
+impl From<UpdateSettingsDto> for config::UpdateSettings {
+    fn from(d: UpdateSettingsDto) -> Self {
+        Self {
+            check_automatically: d.check_automatically,
+        }
+    }
+}
+
 /// The payload of a transfer event: the desktop app's `transfer-progress`/`transfer-complete`
 /// events and the sidecar's `transferProgress` notification. `phase` adds `Starting`,
 /// `RemoteFailed`, `Completed` and `Failed` to the `TransferPhase` names.
@@ -2657,6 +2683,7 @@ mod ts_bindings {
             WordWrapDto,
             CommitMessageSettingsDto,
             FetchSettingsDto,
+            UpdateSettingsDto,
         );
         test_support::assert_generated_file(
             &test_support::repo_root().join("frontend/src/ipc/generated/wire-dto.ts"),
@@ -2679,7 +2706,7 @@ mod ts_bindings {
         let lines = [
             "// Generated from the backend's limits and defaults (crates/repo-service/src/wire.rs).".to_string(),
             "// Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current".to_string(),
-            "import type { CommitMessageSettings, DiffSettings, FetchSettings } from \"./wire-dto\";".to_string(),
+            "import type { CommitMessageSettings, DiffSettings, FetchSettings, UpdateSettings } from \"./wire-dto\";".to_string(),
             String::new(),
             "/** `git_core::diff::MAX_CONTEXT_LINES`: more context is clamped to it. */".to_string(),
             format!(
@@ -2713,6 +2740,11 @@ mod ts_bindings {
             format!(
                 "export const DEFAULT_FETCH_SETTINGS: FetchSettings = {};",
                 json(FetchSettingsDto::from(config::FetchSettings::default()))
+            ),
+            "/** `config::UpdateSettings::default()`. */".to_string(),
+            format!(
+                "export const DEFAULT_UPDATE_SETTINGS: UpdateSettings = {};",
+                json(UpdateSettingsDto::from(config::UpdateSettings::default()))
             ),
             "/** `git_core::search::KEYS`: the keys a commit search `key:value` term can use. */".to_string(),
             format!(
