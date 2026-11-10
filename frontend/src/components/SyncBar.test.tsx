@@ -95,6 +95,23 @@ describe("SyncBar", () => {
     expect(props.onTogglePrune).toHaveBeenCalledWith(false);
   });
 
+  it("offers the pull strategies in Pull's menu, checking the one in effect (#652)", () => {
+    const onPullWith = vi.fn();
+    renderBar({ pullStrategy: { current: "Rebase", onPullWith } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Pull options" }));
+    expect(screen.getByRole("menuitemcheckbox", { name: "Pull with rebase" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Pull with merge" })).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Pull, fast-forward only" }));
+    expect(onPullWith).toHaveBeenCalledWith("FastForwardOnly");
+  });
+
+  it("disables Pull's menu with Pull", () => {
+    renderBar({ upstream: null, pullStrategy: { current: null, onPullWith: vi.fn() } });
+    expect(screen.getByRole("button", { name: "Pull" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Pull options" })).toBeDisabled();
+  });
+
   it("disables fetch actions exactly when Fetch is disabled", () => {
     renderBar({ remotes: [], upstream: null });
     expect(screen.getByRole("button", { name: "More fetch actions" })).toBeDisabled();

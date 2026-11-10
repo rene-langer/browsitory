@@ -22,11 +22,23 @@ short notification confirms the copy, or an error says why it failed.
 
 The **+** button in the section header opens **New branch…**, **Add remote…** and **Show all
 branches**. Creating a branch from a specific commit, or starting a rebase onto one, is
-available from that commit's row in the graph.
+available from that commit's row in the graph. The New branch form's **Check out after
+creating** is on at first, as `git switch -c`, and keeps your last choice; creating and checking
+out is one step, which one **Undo** takes back. **Create branch…** in the command palette, or in
+the toolbar's branch list, opens the same form, also in a narrow window.
+
+**Switching with local changes.** When your changes to a file (or an untracked file) would be
+overwritten by switching branches, the switch doesn't happen, and a dialog names the files in the
+way. **Stash and switch** stashes all your local changes, untracked files included, switches,
+and with **Re-apply the changes on ⟨branch⟩** (on by default) applies them there and drops the
+stash. Changes that conflict on the new branch are left to resolve, and stay in the stash list
+too; without re-applying they wait in the stash list. **Undo** goes back to the branch you were
+on with the changes in your working tree; a stash entry the switch left stays in the list (the
+undo history doesn't cover stashes), and a re-apply with conflicts isn't on the undo history.
 
 **Upstream.** The bottom of the section says which remote branch the current branch tracks
 ("main tracks origin/main."); **Pull** in the repository toolbar pulls from it (see
-[The main window](main-window.md)). **Clear upstream** removes the setting
+[The main window](main-window.md) and [Pulling](#pulling)). **Clear upstream** removes the setting
 (after asking); the branches themselves don't change. To set an upstream, use **Set upstream…**
 in the current branch's menu, or **Set as upstream for current branch** on a remote branch.
 While a merge, rebase, cherry-pick or revert is in progress, or another action, a fetch, pull or
@@ -128,8 +140,29 @@ nothing, when the branches have diverged). **Squash** stages the combined change
 without committing and without recording a merge: HEAD does not move, the commit box is
 pre-filled with the squashed commits' messages, and the commit you make has a single parent.
 **Undo** reverts a squash. The dialog remembers your last choice per repository; until then it
-follows your git `merge.ff` (`false` = always a merge commit, `only` = fast-forward only). The
-**Merge** button of the "Pull has diverged" prompt always allows a fast-forward and does not ask.
+follows your git `merge.ff` (`false` = always a merge commit, `only` = fast-forward only). A
+pull that merges (see [Pulling](#pulling)) always allows a fast-forward and does not ask.
+
+## Pulling
+
+**Pull** fetches the upstream's remote and fast-forwards the current branch when it has no
+commits of its own. When both the branch and its upstream have new commits, the pull combines
+them the way your pull strategy says:
+
+- **Pull with merge**: merges the upstream into the branch (a merge commit, or conflicts to
+  resolve);
+- **Pull with rebase**: replays the branch's own commits onto the upstream, a plain rebase that
+  pauses on a conflict like any other (see [Rebase](rebase.md)); the interactive planner doesn't
+  open;
+- **Pull, fast-forward only**: stops and asks, changing nothing.
+
+Choose one from the menu next to **Pull** (or in the command palette): it is remembered for this
+repository and pulls at once. Until you choose, Browsitory follows your git config like `git
+pull`: `branch.<name>.rebase`, else `pull.rebase` (`true`, `merges` or `interactive` rebase,
+`false` merges), else `pull.ff=only`. With none of them set, a diverged pull asks: **Merge**,
+**Rebase** or **Cancel**, with **Remember for this repository**. A merge, or a rebase that
+finished, can be undone with **Undo**. `pull.ff=false` (always create a merge commit) isn't
+followed yet: a pull that can fast-forward does.
 
 **Deleting a remote branch** deletes it on the remote and removes its remote-tracking branch.
 Like every network operation, it can't be undone with **Undo**. Local branches that tracked it

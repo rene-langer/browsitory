@@ -191,6 +191,13 @@ PullOutcome/Diverged {"kind":"Diverged","upstreamRef":"refs/remotes/origin/main"
 StashEntry/plain {"commitId":"1515151515151515151515151515151515151515","index":0,"message":"WIP on main: Add"}
 StashApplyOutcome/Applied {"kind":"Applied"}
 StashApplyOutcome/Conflicted {"files":["a.txt"],"kind":"Conflicted"}
+StashSwitchOutcome/Stashed {"kind":"Stashed"}
+StashSwitchOutcome/Reapplied {"kind":"Reapplied"}
+StashSwitchOutcome/Conflicted {"files":["a.txt"],"kind":"Conflicted"}
+StashSwitchOutcome/NotReapplied {"kind":"NotReapplied","reason":"The stash list changed; refresh and try again."}
+PullStrategy/Merge "Merge"
+PullStrategy/Rebase "Rebase"
+PullStrategy/FastForwardOnly "FastForwardOnly"
 StashFiles/with-untracked {"tracked":["a.txt"],"untracked":["new.txt"],"untrackedCommitId":"1616161616161616161616161616161616161616"}
 StashFiles/tracked-only {"tracked":["a.txt"],"untracked":[],"untrackedCommitId":null}
 BlameLine/plain {"authorName":"Ada Lovelace","commitId":"1717171717171717171717171717171717171717","content":"fn main() {}\n","lineNumber":1,"shortId":"1717171","timestamp":1700000300}
@@ -228,3 +235,5 @@ RepoErrorPayload/Cancelled {"kind":"Cancelled","message":"the transfer was cance
 RepoErrorPayload/AddDeleteConflict {"kind":"AddDeleteConflict","message":"'a.bin' is an add/delete conflict, not a text conflict"}
 RepoErrorPayload/InvalidSearchQuery {"kind":"InvalidSearchQuery","message":"Invalid search: Missing closing parenthesis."}
 RepoErrorPayload/PermissionDenied {"kind":"PermissionDenied","message":"failed to write resolved file: Permission denied"}
+RepoErrorPayload/LocalChanges {"kind":"LocalChanges","message":"Your local changes would be overwritten by switching to feature. Commit or stash them first."}
+RepoErrorPayload/MissingIdentity {"kind":"MissingIdentity","message":"Set your name and email for git before committing."}

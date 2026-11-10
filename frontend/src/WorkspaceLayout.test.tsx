@@ -188,14 +188,32 @@ describe("the current-branch switcher (#638)", () => {
     expect(options[0]).toBe("fix/login");
   });
 
-  it("creates and switches to a new branch from here", async () => {
+  // One create-and-checkout, so one Undo takes it back (#656).
+  it("creates and switches to a new branch from here in one step", async () => {
     const createBranch = vi.fn(async () => {});
     const switchBranch = vi.fn(async () => {});
     await renderApp(layoutClient({ createBranch, switchBranch }));
     fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
     fireEvent.change(await screen.findByRole("combobox", { name: "Switch branch" }), { target: { value: "topic" } });
     fireEvent.click(screen.getByRole("option", { name: "Create branch topic from main" }));
-    await waitFor(() => expect(createBranch).toHaveBeenCalledWith("/repos/a", "topic", "HEAD"));
-    await waitFor(() => expect(switchBranch).toHaveBeenCalledWith("/repos/a", "topic"));
+    await waitFor(() => expect(createBranch).toHaveBeenCalledWith("/repos/a", "topic", "HEAD", true));
+    expect(switchBranch).not.toHaveBeenCalled();
+  });
+
+  it("lists a remote-only branch and checks it out as a tracking branch (#726)", async () => {
+    const createBranch = vi.fn(async () => {});
+    const setCurrentUpstream = vi.fn(async () => {});
+    await renderApp(
+      layoutClient({
+        createBranch,
+        setCurrentUpstream,
+        listRemoteBranches: async () => ["main", "feature", "spike"],
+      }),
+    );
+    fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
+    expect(screen.queryByRole("option", { name: "origin/feature" })).toBeNull();
+    fireEvent.click(await screen.findByRole("option", { name: "origin/spike" }));
+    await waitFor(() => expect(createBranch).toHaveBeenCalledWith("/repos/a", "spike", "origin/spike", true));
+    await waitFor(() => expect(setCurrentUpstream).toHaveBeenCalledWith("/repos/a", "origin", "spike"));
   });
 });

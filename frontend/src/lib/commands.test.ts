@@ -92,6 +92,9 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       historyEditOutcome: null,
       patchOutcome: null,
       pendingPull: null,
+      switchConflict: null,
+      stashSwitchOutcome: null,
+      identityRequired: null,
       pullOutcome: null,
       mergeOutcome: null,
       stashRestoreIndex: true,
@@ -155,6 +158,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     pushCurrentBranch: vi.fn(),
     pushTags: vi.fn(),
     pullCurrentUpstream: vi.fn(),
+    setPullStrategy: vi.fn(),
     clearPendingPull: vi.fn(),
     openCreateBranchDraft: vi.fn(),
     closeCreateBranchDraft: vi.fn(),
@@ -447,6 +451,25 @@ describe("buildCommands", () => {
       const commands = commandsFor(makeAppState({ pending: true }));
       expect(commands.some((c) => c.id.startsWith("browse-remote-branches:"))).toBe(false);
     });
+  });
+
+  it("offers each pull strategy, which is remembered and then pulls (#652)", async () => {
+    const appState = makeAppState();
+    const order: string[] = [];
+    vi.mocked(appState.setPullStrategy).mockImplementation(async (strategy) => {
+      order.push(`remember ${strategy}`);
+    });
+    vi.mocked(appState.pullCurrentUpstream).mockImplementation(async () => {
+      order.push("pull");
+    });
+    const commands = commandsFor(appState);
+    const labels = ["Merge", "Rebase", "FastForwardOnly"].map(
+      (strategy) => commands.find((c) => c.id === `pull-strategy:${strategy}`)?.label,
+    );
+    expect(labels).toEqual(["Pull with merge", "Pull with rebase", "Pull, fast-forward only"]);
+    commands.find((c) => c.id === "pull-strategy:Rebase")!.run();
+    await vi.waitFor(() => expect(order).toEqual(["remember Rebase", "pull"]));
+    expect(commandsFor(makeAppState({ upstream: null })).some((c) => c.id.startsWith("pull-strategy:"))).toBe(false);
   });
 
   it("only includes pull when an upstream is set", () => {
@@ -1865,8 +1888,18 @@ describe("Switch branch… (#638)", () => {
     { name: "fix/login", isCurrent: false },
     { name: "old", isCurrent: false },
   ];
-  function switcher(state: Parameters<typeof makeAppState>[0] = {}, recentBranches: string[] = []) {
-    const handlers = { recentBranches, onSwitchBranch: vi.fn(), onCreateAndSwitch: vi.fn() };
+  function switcher(
+    state: Parameters<typeof makeAppState>[0] = {},
+    recentBranches: string[] = [],
+    remoteBranches: { remoteName: string; branchName: string }[] = [],
+  ) {
+    const handlers = {
+      recentBranches,
+      onSwitchBranch: vi.fn(),
+      onCreateAndSwitch: vi.fn(),
+      remoteBranches,
+      onCheckoutRemoteBranch: vi.fn(),
+    };
     const command = commandsFor(makeAppState({ branches, ...state }), { branchSwitch: handlers }).find(
       (c) => c.id === SWITCH_BRANCH_PICKER_ID,
     );
@@ -1881,7 +1914,13 @@ describe("Switch branch… (#638)", () => {
   });
 
   it("is in the palette's full list and found by fuzzy words (#644)", () => {
-    const handlers = { recentBranches: [], onSwitchBranch: vi.fn(), onCreateAndSwitch: vi.fn() };
+    const handlers = {
+      recentBranches: [],
+      onSwitchBranch: vi.fn(),
+      onCreateAndSwitch: vi.fn(),
+      remoteBranches: [],
+      onCheckoutRemoteBranch: vi.fn(),
+    };
     const commands = commandsFor(makeAppState({ branches }), { branchSwitch: handlers });
     expect(filterAndSortCommands(commands, "").some((c) => c.id === SWITCH_BRANCH_PICKER_ID)).toBe(true);
     expect(filterAndSortCommands(commands, "br sw")[0]?.id).toBe(SWITCH_BRANCH_PICKER_ID);
@@ -1889,7 +1928,36 @@ describe("Switch branch… (#638)", () => {
 
   it("lists the recent branches first, then the other local ones, never the current one", () => {
     const { labels } = switcher({}, ["old", "gone", "main"]);
-    expect(labels("")).toEqual(["old", "feature", "fix/login"]);
+    expect(labels("")).toEqual(["old", "feature", "fix/login", "Create branch…"]);
+  });
+
+  it("lists the remote branches without a local one after the local ones (#726)", () => {
+    const remote = [
+      { remoteName: "origin", branchName: "HEAD" },
+      { remoteName: "origin", branchName: "feature" },
+      { remoteName: "origin", branchName: "release" },
+      { remoteName: "fork", branchName: "spike" },
+    ];
+    const { command, handlers, labels } = switcher({}, [], remote);
+    expect(labels("")).toEqual(["feature", "fix/login", "old", "origin/release", "fork/spike", "Create branch…"]);
+    command.picker!.items("release")[0].run();
+    expect(handlers.onCheckoutRemoteBranch).toHaveBeenCalledWith("origin", "release");
+  });
+
+  it("opens the New branch form from its Create branch… item (#656)", () => {
+    const appState = makeAppState({ branches });
+    const handlers = {
+      recentBranches: [],
+      onSwitchBranch: vi.fn(),
+      onCreateAndSwitch: vi.fn(),
+      remoteBranches: [],
+      onCheckoutRemoteBranch: vi.fn(),
+    };
+    const command = commandsFor(appState, { branchSwitch: handlers }).find((c) => c.id === SWITCH_BRANCH_PICKER_ID)!;
+    command.picker!.items("").at(-1)!.run();
+    expect(appState.openCreateBranchDraft).toHaveBeenCalledWith("HEAD");
+    commandsFor(appState).find((c) => c.id === "create-branch")!.run();
+    expect(appState.openCreateBranchDraft).toHaveBeenCalledTimes(2);
   });
 
   it("switches to the chosen branch", () => {
@@ -2292,6 +2360,7 @@ function groupOf(id: string): CommandGroup {
 describe("command ids and groups", () => {
   const EXPECTED: Record<keyof typeof STATES, [string, CommandGroup][]> = {
     normal: [
+      ["create-branch", "Branches"],
       ["add-remote", "Remotes"],
       ["amend-last-commit", "General"],
       ["apply-patch", "Diff"],
@@ -2343,6 +2412,9 @@ describe("command ids and groups", () => {
       ["preferences", "General"],
       ["prune-worktrees", "General"],
       ["pull", "Remotes"],
+      ["pull-strategy:Merge", "Remotes"],
+      ["pull-strategy:Rebase", "Remotes"],
+      ["pull-strategy:FastForwardOnly", "Remotes"],
       ["push-branch-to", "Remotes"],
       ["push-branch:origin", "Remotes"],
       ["push-tags:origin", "Remotes"],
@@ -2378,6 +2450,7 @@ describe("command ids and groups", () => {
       ["update-submodule:libs/b", "General"],
     ],
     rebase: [
+      ["create-branch", "Branches"],
       ["add-remote", "Remotes"],
       ["clone-repository", "General"],
       ["create-tag-head", "Branches"],
@@ -2429,6 +2502,7 @@ describe("command ids and groups", () => {
       ["toggle-wrap-lines", "Diff"],
     ],
     sequence: [
+      ["create-branch", "Branches"],
       ["abort-sequence", "General"],
       ["add-remote", "Remotes"],
       ["clone-repository", "General"],
@@ -2480,6 +2554,7 @@ describe("command ids and groups", () => {
       ["toggle-wrap-lines", "Diff"],
     ],
     merge: [
+      ["create-branch", "Branches"],
       ["add-remote", "Remotes"],
       ["clone-repository", "General"],
       ["create-tag-head", "Branches"],
@@ -2534,6 +2609,7 @@ describe("command ids and groups", () => {
       ["toggle-wrap-lines", "Diff"],
     ],
     clean: [
+      ["create-branch", "Branches"],
       ["add-remote", "Remotes"],
       ["amend-last-commit", "General"],
       ["apply-patch", "Diff"],
@@ -2583,6 +2659,9 @@ describe("command ids and groups", () => {
       ["preferences", "General"],
       ["prune-worktrees", "General"],
       ["pull", "Remotes"],
+      ["pull-strategy:Merge", "Remotes"],
+      ["pull-strategy:Rebase", "Remotes"],
+      ["pull-strategy:FastForwardOnly", "Remotes"],
       ["push-branch-to", "Remotes"],
       ["push-branch:origin", "Remotes"],
       ["push-tags:origin", "Remotes"],

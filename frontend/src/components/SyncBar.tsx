@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { autoFetchLabel } from "../lib/autoFetch";
 import { formatRelativeDate } from "../lib/formatDate";
-import type { RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
+import type { PullStrategy, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { upstreamPushBranch } from "../lib/pushTarget";
 import { SplitButton } from "./primitives/SplitButton";
 import { Toolbar } from "./primitives/Toolbar";
@@ -36,6 +36,7 @@ export function SyncBar({
   trailing,
   stash,
   pullPending = false,
+  pullStrategy,
   activity,
   ariaLabel,
   lastFetchedAt = null,
@@ -61,6 +62,11 @@ export function SyncBar({
   stash?: { reason: string | null; onStash: () => void; onStashWithOptions: () => void };
   /** A diverged pull waits for Merge, Rebase or Cancel: Pull is disabled meanwhile. */
   pullPending?: boolean;
+  /**
+   * The Pull menu (#652): the strategy in effect (remembered, else git config's; `null` asks) and
+   * picking one, which remembers it and pulls. Without it Pull is a plain button.
+   */
+  pullStrategy?: { current: PullStrategy | null; onPullWith: (strategy: PullStrategy) => void };
   /** What the repository is busy with (`RepoActivity`), after the counts (#659). */
   activity?: ReactNode;
   /** Names the row as a group ("Repository"). */
@@ -79,6 +85,12 @@ export function SyncBar({
   const detachedTitle = "Check out a branch to push or pull.";
   const showCounts = !detached && upstream !== null && upstream.ahead != null && upstream.behind != null;
   const fetchDisabled = operationDisabled || fetchRemote === null;
+  const pullDisabled = operationDisabled || detached || upstream === null || pullPending;
+  const pullTitle = detached
+    ? detachedTitle
+    : pullPending && !operationDisabled
+      ? "Choose how to finish the diverged pull first."
+      : upstreamTitle("Pull from");
   const canPublish = !detached && upstream === null && remotes.length > 0;
   const pushBranch = upstream === null ? null : upstreamPushBranch(upstream);
   const pushTitle = detached
@@ -112,20 +124,27 @@ export function SyncBar({
             },
           ]}
         />
-        <button
-          type="button"
-          disabled={operationDisabled || detached || upstream === null || pullPending}
-          title={
-            detached
-              ? detachedTitle
-              : pullPending && !operationDisabled
-                ? "Choose how to finish the diverged pull first."
-                : upstreamTitle("Pull from")
-          }
-          onClick={() => void onPull()}
-        >
-          Pull
-        </button>
+        {pullStrategy === undefined ? (
+          <button type="button" disabled={pullDisabled} title={pullTitle} onClick={() => void onPull()}>
+            Pull
+          </button>
+        ) : (
+          // The Pull menu (#652): how a diverged pull combines the branches, remembered for the
+          // repository; picking one also pulls. Without a choice, git config decides or the pull asks.
+          <SplitButton
+            label="Pull"
+            disabled={pullDisabled}
+            title={pullTitle}
+            onClick={() => void onPull()}
+            menuLabel="Pull options"
+            chevronClassName={styles.split}
+            items={PULL_STRATEGIES.map(([strategy, label]) => ({
+              label,
+              checked: pullStrategy.current === strategy,
+              onSelect: () => pullStrategy.onPullWith(strategy),
+            }))}
+          />
+        )}
         <button
           type="button"
           disabled={operationDisabled || detached || (upstream === null && !canPublish)}
@@ -170,6 +189,12 @@ export function SyncBar({
     </div>
   );
 }
+
+const PULL_STRATEGIES: [PullStrategy, string][] = [
+  ["Merge", "Pull with merge"],
+  ["Rebase", "Pull with rebase"],
+  ["FastForwardOnly", "Pull, fast-forward only"],
+];
 
 /** "Fetched 5 minutes ago", refreshed every 30 seconds. */
 function LastFetch({ at, autoFetchMinutes }: { at: number; autoFetchMinutes: number }) {

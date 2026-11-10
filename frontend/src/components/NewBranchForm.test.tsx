@@ -12,7 +12,7 @@ describe("NewBranchForm (in BranchTree)", () => {
     const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
     fireEvent.change(screen.getByPlaceholderText("New branch name"), { target: { value: "feat/new" } });
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    expect(props.onCreateBranch).toHaveBeenCalledWith("feat/new", "HEAD");
+    expect(props.onCreateBranch).toHaveBeenCalledWith("feat/new", "HEAD", true);
   });
 
   // Ported from BranchSwitcher.test.tsx — the create-form failure/dismiss flow doesn't involve
@@ -96,12 +96,19 @@ describe("NewBranchForm (in BranchTree)", () => {
     expect(props.onCreateBranch).not.toHaveBeenCalled();
   });
 
-  it("checks out the new branch when the option is ticked", async () => {
-    const { props } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
+  // #656: checked out by default, in the create itself (one undo step), and remembered.
+  it("checks out the new branch by default, and only creates it when unticked, remembering that", async () => {
+    const { props, unmount } = renderTree({ createBranchDraft: { startPoint: "HEAD" } });
+    const checkbox = screen.getByRole("checkbox", { name: "Check out after creating" });
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
     fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "feat/x" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Check out after creating" }));
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
-    await waitFor(() => expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/x"));
+    await waitFor(() => expect(props.onCreateBranch).toHaveBeenCalledWith("feat/x", "HEAD", false));
+    expect(props.onSwitchBranch).not.toHaveBeenCalled();
+    unmount();
+    renderTree({ createBranchDraft: { startPoint: "HEAD" } });
+    expect(screen.getByRole("checkbox", { name: "Check out after creating" })).not.toBeChecked();
   });
 
   // #561: Create follows `operationBlockers`, not only a rebase run here.
@@ -141,6 +148,6 @@ describe("NewBranchForm (in BranchTree)", () => {
     expect(screen.queryByRole("form", { name: "New branch" })).toBeNull();
     rerender(<BranchTree {...props} />);
     expect(screen.getByRole("textbox", { name: "Branch name" })).toHaveValue("feat/x");
-    expect(screen.getByRole("checkbox", { name: "Check out after creating" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Check out after creating" })).not.toBeChecked();
   });
 });

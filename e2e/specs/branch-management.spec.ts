@@ -42,8 +42,8 @@ describe("Browsitory branch management", () => {
     const createButton = await $("button=Create");
     await createButton.click();
 
-    // Switching happens automatically on create. The branch tree splits a "/"-containing name
-    // into nested folders, so "feature/e2e-branch" renders as a "feature" folder containing an
+    // "Check out after creating" is on by default (#656), so Create switches to it. The branch
+    // tree splits a "/"-containing name into nested folders, so "feature/e2e-branch" renders as a "feature" folder containing an
     // "e2e-branch" leaf row — only that leaf's own text carries the " (current)" suffix. The row
     // itself is the interactive element (a `role="button"` `<li>`, not a nested `<button>` — see
     // `ListRow.tsx`), so it's matched by role rather than tag.

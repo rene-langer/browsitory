@@ -48,6 +48,7 @@ import { useCommitDraftActions } from "./state/useCommitDraftActions";
 import { useCommitFlow } from "./state/useCommitFlow";
 import { useNarrowLayout } from "./state/useNarrowLayout";
 import { useRemoteBranchList } from "./state/useRemoteBranchList";
+import { usePullStrategy } from "./state/usePullStrategy";
 import { useStashSwitchToasts } from "./state/useStashSwitchToasts";
 import { useOutcomeToasts } from "./state/useOutcomeToasts";
 import { useSequenceActions } from "./state/useSequenceActions";
@@ -288,6 +289,8 @@ export function RepoWorkspace({
   // The toolbar's branch chip opens the palette straight into "Switch branch…" (#638).
   const [paletteInitialPicker, setPaletteInitialPicker] = useState<string | null>(null);
   if (!paletteOpen && paletteInitialPicker !== null) setPaletteInitialPicker(null);
+  // The toolbar's Pull menu (#652).
+  const pullStrategy = usePullStrategy(appState);
   // The switcher's remote-only branches (#726), read while the palette is open.
   const remoteBranches = useRemoteBranchList(client, repoPath, appState.state.remotes, paletteOpen);
   const openBranchSwitcher = () => {
@@ -759,6 +762,7 @@ export function RepoWorkspace({
           onFetch: appState.fetchRemote,
           onPull: appState.pullCurrentUpstream,
           pullPending: appState.state.pendingPull !== null,
+          pullStrategy,
           onPush: appState.pushCurrentBranch,
           prune: effectiveFetchPrune(appState.state.fetchPrune, appState.state.remotes, appState.state.upstream),
           onFetchAll: appState.fetchAllRemotes,

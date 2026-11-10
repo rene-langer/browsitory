@@ -169,6 +169,16 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
                 "Permission denied",
             ))),
         ),
+        case(
+            "LocalChanges",
+            ErrorDto::from_error(git_core::branch::BranchError::LocalChanges(
+                "feature".into(),
+            )),
+        ),
+        case(
+            "MissingIdentity",
+            ErrorDto::from_error(git_core::commit::CommitError::MissingIdentity),
+        ),
     ];
     assert_every_variant!(
         cases
@@ -185,6 +195,8 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
         ErrorKind::AddDeleteConflict,
         ErrorKind::InvalidSearchQuery,
         ErrorKind::PermissionDenied,
+        ErrorKind::LocalChanges,
+        ErrorKind::MissingIdentity,
     );
     cases
 }
