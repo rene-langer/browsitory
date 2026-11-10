@@ -46,7 +46,7 @@ describe("Browsitory commit graph", () => {
     // Wait for the row to move under Staged before committing (#697).
     await waitUntilInPage(`button[aria-label="Unstage ${PRIME_FILE}"]`);
     await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: prime the refresh"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
-    await clickInPage("button", "Commit");
+    await clickInPage('button[data-action="commit"]');
 
     const baseCommitEntry = await $("li*=e2e: commit graph base commit");
     await baseCommitEntry.waitForExist();
@@ -141,7 +141,7 @@ describe("Browsitory commit graph", () => {
     await waitUntilInPage(`button[aria-label="Unstage ${DETACHED_FILE}"]`);
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
     await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: commit on a detached HEAD"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
-    await clickInPage("button", "Commit");
+    await clickInPage('button[data-action="commit"]');
 
     await browser.waitUntil(
       () =>

@@ -33,6 +33,7 @@ import type {
   ChangedFile,
   CommitLocation,
   CommitStatsEntry,
+  CommitDetails,
   GraphSelection,
   CompareRange,
   SearchPage,
@@ -171,6 +172,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<void>("clear_graph_remote_branch_selection", { repoPath }),
     getCommitFiles: (repoPath: string, commitId: string) =>
       call<string[]>("get_commit_files", { repoPath, commitId }),
+    getCommitDetails: (repoPath: string, commitId: string) =>
+      call<CommitDetails>("get_commit_details", { repoPath, commitId }),
     getCommitStats: (repoPath: string, commitIds: string[], withFiles: boolean) =>
       call<CommitStatsEntry[]>("get_commit_stats", { repoPath, commitIds, withFiles }),
     getRangeFiles: (repoPath: string, fromId: string, toId: string) =>

@@ -7,10 +7,12 @@ import {
   type Trailer,
 } from "../ipc/RepoClient";
 import type { MessageHistoryEntry } from "../lib/commitMessageHistory";
+import { commitLabel } from "../lib/commitLabel";
 import { coAuthorTrailers, formatPerson, parsePerson, sameEmail } from "../lib/people";
 import { CoAuthorPicker } from "./CoAuthorPicker";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { Field } from "./primitives/Field";
+import { SplitButton } from "./primitives/SplitButton";
 import { Toolbar } from "./primitives/Toolbar";
 import { HookStatus } from "./HookStatus";
 import styles from "./CommitBox.module.css";
@@ -64,6 +66,9 @@ export function CommitBox({
   messageSettings = DEFAULT_COMMIT_MESSAGE_SETTINGS,
   loadRecentAuthors,
   loadMessageHistory,
+  stagedCount,
+  branchName,
+  commitAndPush,
 }: {
   /**
    * Resolves `true` once the commit landed. The message (and the co-author chips) are cleared
@@ -121,6 +126,18 @@ export function CommitBox({
   onClearMessageHandled?: () => void;
   /** The summary counter's soft limit and the body ruler (Preferences → Commit message). */
   messageSettings?: CommitMessageSettings;
+  /** The staged files the commit takes, for the button's label (#651). */
+  stagedCount?: number;
+  /** The branch the commit lands on, for the label; `null` on a detached HEAD. */
+  branchName?: string | null;
+  /**
+   * "Commit and push" in the button's menu (#651): resolves like `onCommit`, once the commit
+   * landed (the push runs on after). `disabledReason` disables the item and says why.
+   */
+  commitAndPush?: {
+    onCommitAndPush: (message: string, trailers: Trailer[]) => Promise<boolean>;
+    disabledReason: string | null;
+  };
   /** Amend-last-commit mode; omit to hide the toggle entirely. */
   amend?: {
     /** headId !== null && no operation in progress. */
@@ -241,7 +258,7 @@ export function CommitBox({
   const headAuthorText = headAuthor === null ? "" : formatPerson(headAuthor);
   const authorText = amendAuthor ?? headAuthorText;
 
-  const commitIfReady = () => {
+  const commitIfReady = (submit: (message: string, trailers: Trailer[]) => Promise<boolean> = onCommit) => {
     const submittedCoAuthors = coAuthors;
     const trailers = showCoAuthors ? coAuthorTrailers(submittedCoAuthors) : [];
     if (amendOn) {
@@ -268,7 +285,7 @@ export function CommitBox({
     }
     const submitted = message;
     setSubmitting(true);
-    void onCommit(submitted, trailers)
+    void submit(submitted, trailers)
       .then((ok) => {
         if (!ok) return;
         // Only clear what was committed: text typed (or chips changed) while the commit (and its
@@ -357,6 +374,30 @@ export function CommitBox({
       restoreReplaced();
     }
   };
+
+  const emptyMessage = message.trim() === "";
+  const buttonDisabled = submitting || emptyMessage || (!amendOn && disabled);
+  const showDisabledReason = !amendOn && disabled && disabledReason !== undefined;
+  // Without a message Commit is disabled too: say so, unless a stronger reason is shown (#651).
+  const showEmptyHint = !amendOn && emptyMessage && !showDisabledReason;
+  const describedBy = showDisabledReason ? "commit-disabled-reason" : showEmptyHint ? "commit-message-hint" : undefined;
+  // The button's menu (#651): Commit and push, and amend mode. None while amending: the button
+  // then amends.
+  const menuItems: ContextMenuItem[] = amendOn
+    ? []
+    : [
+        ...(commitAndPush === undefined
+          ? []
+          : [
+              {
+                label: "Commit and push",
+                disabled: commitAndPush.disabledReason !== null,
+                title: commitAndPush.disabledReason ?? undefined,
+                onSelect: () => commitIfReady(commitAndPush.onCommitAndPush),
+              },
+            ]),
+        ...(amend?.available === true ? [{ label: "Amend last commit", onSelect: () => amend.onToggle(true) }] : []),
+      ];
 
   return (
     <div>
@@ -462,9 +503,14 @@ export function CommitBox({
           )}
         </Field>
       )}
-      {!amendOn && disabled && disabledReason !== undefined && (
+      {showDisabledReason && (
         <p id="commit-disabled-reason" className={styles.reason}>
           {disabledReason}
+        </p>
+      )}
+      {showEmptyHint && (
+        <p id="commit-message-hint" className={styles.hint}>
+          Write a commit message to commit.
         </p>
       )}
       {amend?.available === true && (
@@ -491,16 +537,31 @@ export function CommitBox({
       )}
       {hooks?.running != null && <HookStatus running={hooks.running} onCancel={hooks.onCancel} />}
       <Toolbar>
-        <button
-          className={styles.commitButton}
-          onClick={commitIfReady}
-          disabled={submitting || message.trim() === "" || (!amendOn && disabled)}
-          aria-describedby={
-            !amendOn && disabled && disabledReason !== undefined ? "commit-disabled-reason" : undefined
-          }
-        >
-          {amendOn ? "Amend" : "Commit"}
-        </button>
+        {menuItems.length > 0 ? (
+          <SplitButton
+            label={commitLabel(stagedCount, branchName)}
+            onClick={() => commitIfReady()}
+            disabled={buttonDisabled}
+            title={commitLabel(stagedCount, branchName)}
+            menuTitle="More commit options"
+            className={styles.commitButton}
+            chevronClassName={styles.commitButton}
+            describedBy={describedBy}
+            action="commit"
+            menuLabel="More commit options"
+            items={menuItems}
+          />
+        ) : (
+          <button
+            className={styles.commitButton}
+            onClick={() => commitIfReady()}
+            disabled={buttonDisabled}
+            aria-describedby={describedBy}
+            data-action={amendOn ? "amend" : "commit"}
+          >
+            {amendOn ? "Amend" : commitLabel(stagedCount, branchName)}
+          </button>
+        )}
         {showAbort && <button onClick={onAbortMerge}>{abortLabel}</button>}
       </Toolbar>
     </div>

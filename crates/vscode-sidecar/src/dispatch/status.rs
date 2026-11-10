@@ -1,3 +1,4 @@
+use repo_service::wire::CommitDetailsDto;
 use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
@@ -289,6 +290,15 @@ pub(super) fn get_commit_signature(
     let signature =
         worker_handle(repos, &params.repo_path)?.get_commit_signature(params.commit_id)?;
     serde_json::to_value(CommitSignatureDto::from(signature)).map_err(ErrorDto::from_error)
+}
+
+/// Author, committer and the branches and tags that contain `commit_id` (#641).
+pub(super) fn get_commit_details(
+    params: GetCommitFilesParams,
+    repos: &Repos,
+) -> Result<Value, ErrorDto> {
+    let details = worker_handle(repos, &params.repo_path)?.get_commit_details(params.commit_id)?;
+    serde_json::to_value(CommitDetailsDto::from(details)).map_err(ErrorDto::from_error)
 }
 
 pub(super) fn stage_file(params: RepoFilePathParams, repos: &Repos) -> Result<Value, ErrorDto> {

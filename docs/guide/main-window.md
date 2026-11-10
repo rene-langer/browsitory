@@ -43,7 +43,9 @@ hide the ones a project doesn't use.
 **Header.** The top row holds the repository tabs (see [Multiple repositories](tabs.md)) and, on
 the right:
 
-- **Ctrl+K** (**⌘K** on macOS) reminds you of the [command palette](command-palette.md) shortcut.
+- **Commands** (with **Ctrl+K**, **⌘K** on macOS, beside it) opens the
+  [command palette](command-palette.md), the same as its shortcut. It shows once a repository is
+  open.
 - The moon or sun button switches between the light and dark theme (**Switch to dark theme** /
   **Switch to light theme**). Browsitory remembers your choice. Until you pick one, it follows
   your system's setting; **Theme** under **Appearance** in **Preferences** goes back to that. In
@@ -54,6 +56,10 @@ the right:
   and diff algorithm (see [Diff options](history.md#diff-options)), your editor, terminal and diff tools (see
   [External tools](external-tools.md)), the **Appearance** settings below and, in the desktop
   app, **Updates** (see below).
+- The sparkle button (**What's new**) opens the release notes (see below).
+- The question mark button (**Help**) opens a menu: **User guide** opens this guide in your
+  browser, **Keyboard shortcuts** shows the list of shortcuts (while a repository is open), and
+  **What's new** opens the release notes.
 
 **Appearance.** The Appearance section of Preferences changes how the window and its text look.
 Each change shows at once, without a restart:

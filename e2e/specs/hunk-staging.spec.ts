@@ -47,7 +47,7 @@ describe("Browsitory hunk staging", () => {
 
     const commitMessageBox = await $("textarea");
     await commitMessageBox.setValue("stage one hunk");
-    const commitButton = await $("button=Commit");
+    const commitButton = await $('button[data-action="commit"]');
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
     // Wait for the commit itself. The working file has "line 14 changed" before and after the

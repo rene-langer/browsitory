@@ -817,7 +817,7 @@ describe("DiffPane", () => {
         target: { value: "a message" },
       });
 
-      expect(screen.getByText("Commit")).not.toBeDisabled();
+      expect(screen.getByText("Commit 1 file")).not.toBeDisabled();
     });
 
     it("has no Stash button of its own: Stash is in the repository toolbar (#637)", () => {
@@ -1158,7 +1158,7 @@ describe("DiffPane", () => {
       ];
       renderUncommitted(fakeClient({ getConflictHunks: async () => [] }), mixedStatus);
 
-      const commitButton = screen.getByText("Commit").closest("button");
+      const commitButton = screen.getByText("Commit 1 file").closest("button");
       expect(commitButton).toBeDisabled();
     });
 
@@ -2723,7 +2723,7 @@ describe("DiffPane co-authors and amend author", () => {
     fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: "Fix" } });
     fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
     fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
-    fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Commit 1 file" }));
     expect(listRecentAuthors).toHaveBeenCalledWith(TEST_REPO_PATH);
     expect(onCommit).toHaveBeenCalledWith("Fix", [{ key: "Co-authored-by", value: "Ada <ada@x.org>" }]);
   });

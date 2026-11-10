@@ -35,8 +35,14 @@ export interface StagingActions {
   ignorePaths(patterns: string[]): Promise<void>;
   // Resolves `true` once committed; `false` on any failure (a hook failure also stores
   // `hookFailure`), so CommitBox only clears the message after a commit that landed. `noVerify`
-  // skips the `pre-commit` and `commit-msg` hooks.
-  commit(message: string, noVerify: boolean, trailers?: Trailer[]): Promise<boolean>;
+  // skips the `pre-commit` and `commit-msg` hooks. `onCommitted` gets the new commit's id once
+  // it landed, before the refresh (the commit toast names it, #651).
+  commit(
+    message: string,
+    noVerify: boolean,
+    trailers?: Trailer[],
+    onCommitted?: (commitId: string) => void,
+  ): Promise<boolean>;
 }
 
 // A path can have two StatusEntry rows simultaneously (staged + unstaged, for a partially-staged
@@ -178,7 +184,7 @@ export function useStagingActions(
     [client, runMutation, repoPath],
   );
   const commit = useCallback(
-    async (message: string, noVerify: boolean, trailers: Trailer[] = []) => {
+    async (message: string, noVerify: boolean, trailers: Trailer[] = [], onCommitted?: (commitId: string) => void) => {
       const ok = await runMutationWithOutcome(async () => {
         const outcome = await client.commit(repoPath, message, noVerify, trailers);
         if (outcome.kind === "HookFailed") {
@@ -194,6 +200,7 @@ export function useStagingActions(
           throw new Error(hookFailedMessage(outcome.hook));
         }
         setState((prev) => ({ ...prev, skipHooks: false, hookFailure: null }));
+        onCommitted?.(outcome.commitId);
       });
       setState((prev) => ({ ...prev, hookRun: null }));
       return ok;

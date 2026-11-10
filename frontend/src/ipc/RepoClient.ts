@@ -713,6 +713,28 @@ export interface CommitStatsEntry {
   stats: CommitStats | null;
 }
 
+/** A commit's author or committer, with the Unix-seconds time git recorded for them (#641). */
+export interface CommitPerson {
+  name: string;
+  email: string;
+  timestamp: number;
+}
+
+/**
+ * What the commit details show beyond the graph row (#641): the author and the committer with
+ * their own times, and the branches and tags whose tip is or contains the commit, sorted.
+ */
+export interface CommitDetails {
+  author: CommitPerson;
+  committer: CommitPerson;
+  branches: string[];
+  /** As `<remote>/<branch>`; symbolic refs such as `origin/HEAD` are left out. */
+  remoteBranches: string[];
+  tags: string[];
+  /** `false`: the backend ran out of time before checking every ref, so the lists may be short. */
+  complete: boolean;
+}
+
 /** Resolved ends of a branch compare: the merge base with HEAD, and the branch tip. */
 export interface CompareRange {
   fromId: string;
@@ -1050,6 +1072,8 @@ export interface RepoClient {
   cancelSearch(repoPath: string): Promise<void>;
   getCommitRenameDiff(repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
+  /** Author, committer and the branches and tags that contain `commitId` (#641). */
+  getCommitDetails(repoPath: string, commitId: string): Promise<CommitDetails>;
   /**
    * Line counts of `commitIds` (#620), in order. The backend stops starting commits after a short
    * time budget, so the answer can leave out the commits at the end: ask for those again.

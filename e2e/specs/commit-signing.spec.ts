@@ -64,7 +64,7 @@ describe("Browsitory commit signing", () => {
       commitMessageInput,
       SUMMARY,
     );
-    await clickInPage("button", "Commit");
+    await clickInPage('button[data-action="commit"]');
 
     await browser.waitUntil(() => git("log", "-1", "--format=%s") === SUMMARY, {
       timeoutMsg: "commit did not land",

@@ -154,6 +154,10 @@ pub(crate) enum Command {
         commit_id: String,
         reply: Sender<Result<git_core::signing::CommitSignature, ErrorDto>>,
     },
+    GetCommitDetails {
+        commit_id: String,
+        reply: Sender<Result<git_core::commit_details::CommitDetails, ErrorDto>>,
+    },
     GetBlame {
         commit_id: String,
         path: String,
