@@ -33,6 +33,7 @@ mod background_fetch;
 mod branch;
 mod cancel;
 mod compare;
+mod fetch_all;
 mod forge;
 mod gate;
 mod history;
@@ -53,6 +54,7 @@ mod status;
 mod submodule;
 mod tag;
 mod tools;
+mod transfer_thread;
 mod tree;
 mod undo;
 mod undo_store;
@@ -1701,30 +1703,18 @@ impl Worker {
                     ),
                     Command::FetchAllRemotes {
                         prune,
-                        background: None,
+                        background,
                         operation_id,
                         events,
                         reply,
-                    } => remote::fetch_all(
+                    } => fetch_all::run(
                         &repo,
                         &credential_service,
                         &background_memory,
-                        prune,
-                        remote::TransferOp::new(operation_id),
-                        events,
-                        reply,
-                    ),
-                    Command::FetchAllRemotes {
-                        background: Some(options),
-                        operation_id,
-                        events,
-                        reply,
-                        ..
-                    } => background_fetch::run(
-                        &repo,
-                        &credential_service,
-                        &background_memory,
-                        options,
+                        background.map_or(
+                            fetch_all::Mode::Manual { prune },
+                            fetch_all::Mode::Background,
+                        ),
                         remote::TransferOp::new(operation_id),
                         events,
                         reply,
