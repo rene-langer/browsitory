@@ -9,12 +9,10 @@ site. It is meant to meet the EU General Data Protection Regulation (GDPR) and s
 such as the UK GDPR, the Swiss FADP and the CCPA.
 
 !!! note "Who is responsible"
-    Browsitory is an open-source project. Questions about this notice or your data:
-    open an issue at <https://github.com/rene-langer/browsitory/issues>.
-    Issues are public, so don't put personal data in one.
-
-    <!-- TODO(owner): name the controller and add a private contact (e-mail or postal address)
-    for privacy requests. -->
+    Browsitory is a free, non-commercial open-source project by Rene Langer, who is responsible
+    for this notice. Questions about this notice or your data:
+    [privacy@browsitory.com](mailto:privacy@browsitory.com). Please don't send privacy requests
+    as GitHub issues: issues are public.
 
 ## In short
 
@@ -38,14 +36,16 @@ runs. When a check fails, it tries again after 10 minutes, then after longer wai
 hours. You can turn this off (see below); then it checks only when you click **Check for
 updates**.
 
-- **Where:** first `github.com` (the file `latest.json` of the latest Browsitory release),
-  and, only when that fails, the same file on this site, `rene-langer.github.io`. Both are run
-  by GitHub.
+- **Where:** first `github.com` (the file `latest.json` of the latest Browsitory release,
+  which GitHub serves from `release-assets.githubusercontent.com`), and, only when that fails,
+  the same file on this site, `rene-langer.github.io`. All are run by GitHub.
 - **What they see:** your IP address, the time, and a request header naming the update
   library (`tauri-plugin-updater` and its version). The request says nothing about you or your
   repositories.
-- **When there is an update:** the app downloads it from GitHub's release files and checks its
-  signature. It installs it only when you choose **Restart to update**.
+- **When there is an update:** the app downloads it from GitHub's release files (through
+  `api.github.com`, which hands the download to `release-assets.githubusercontent.com`) and
+  checks its signature. This request carries no token. It installs the update only when you
+  choose **Restart to update**.
 - **Turning it off:** clear **Check for updates automatically** under **Updates** in
   **Preferences** (`check_automatically = false` under `[updates]` in `config.toml`). The app
   then makes no update request until you click **Check for updates** there or run it from the
@@ -59,7 +59,9 @@ We see only how often each release file was downloaded, not by whom.
 ### Your Git remotes
 
 Fetch, pull, push and clone connect to the remotes you added, over HTTPS or SSH, and send what
-Git sends: the commits you push, and your token or SSH key to sign in. With **Fetch
+Git sends: the commits you push, and your token or SSH key to sign in. Cloning with
+submodules, or initializing or updating a submodule, also connects to the submodule's address
+that the repository names in its `.gitmodules` file. With **Fetch
 automatically** turned on (off by default), Browsitory fetches the open repository's remotes
 in the background at the interval you chose. No other server is involved. The server's owner
 (for example GitHub, GitLab, Bitbucket or your company) handles that data under its own terms.
@@ -70,7 +72,8 @@ When you save a personal access token under **Pull requests**, Browsitory asks t
 for the repository's pull requests and creates the ones you ask for. It connects to
 `api.github.com` for GitHub remotes and `api.bitbucket.org` for Bitbucket remotes. The request
 carries your token, the repository's owner and name, and the pull request you create (title,
-description, branches). Without a saved token, Browsitory doesn't contact these APIs.
+description, branches). Without a saved token, Browsitory doesn't ask these APIs for pull
+requests (the update download above also goes through `api.github.com`, without a token).
 
 ### Links you open
 
@@ -93,11 +96,13 @@ None of this leaves your computer, and we can't see it.
 | Settings: recent and open repositories, workspaces, branch filters, merge choices, diff, commit message, tool, fetch and update preferences, the last version whose release notes you saw | `config.toml` in Browsitory's config folder (see below) |
 | Display choices: theme, panel sizes, open and closed sections, recent commands, recent searches, recent commit messages, the per-repository **Fetch automatically** and **Prune** choices | The app's web storage (`localStorage`) |
 | HTTPS tokens for Git remotes and pull request tokens | Your system's credential store: Keychain on macOS, Credential Manager on Windows, the Secret Service (for example GNOME Keyring or KWallet) on Linux, under the names `com.browsitory.git` and `com.browsitory.forge` |
-| Undo and redo history, a paused rebase, cherry-pick or revert | Inside each repository: the folder `.git/browsitory/` and Git references under `refs/browsitory/` (in a linked worktree, in that worktree's own Git folder) |
+| Undo and redo history, a paused rebase, cherry-pick or revert | Inside each repository: the folder `.git/browsitory/` (in a linked worktree, `browsitory/` in that worktree's own Git folder, `.git/worktrees/<name>/`) and Git references under `refs/browsitory/`, shared by all worktrees |
+| How you sign in to each remote: HTTPS token or SSH agent, and the HTTPS user name (not the token) | The repository's Git config (`.git/config`), under `browsitory.remote.<remote name>` |
 | A log file of errors, with up to 5 older copies (desktop app) | `browsitory.log` in the app's log folder, see [Troubleshooting](troubleshooting.md) |
 
-The log file holds errors and warnings. An error message can contain a file path, a branch
-name or a remote's address. Browsitory writes no other log files.
+The log file holds errors, warnings and a few notes, for example the folders the app moved
+when its identifier changed. A message can contain a file path, a branch name or a remote's
+address. Browsitory writes no other log files.
 
 The web storage holds the path of each repository it remembers something for, and the text of
 your recent searches and commit messages.
@@ -117,8 +122,10 @@ Uninstall the app, then delete what you want to remove:
 3. **Tokens:** before you uninstall, use **Forget HTTPS credential** in a remote's
    credentials dialog and **Forget token** under **Pull requests**. Or delete the entries named
    `com.browsitory.git` and `com.browsitory.forge` in your system's credential store.
-4. **Per repository** (this also deletes undo history): delete `.git/browsitory/` and run
-   `git for-each-ref --format="delete %(refname)" refs/browsitory/ | git update-ref --stdin`.
+4. **Per repository** (this also deletes undo history): delete `.git/browsitory/` (and
+   `.git/worktrees/*/browsitory/` for linked worktrees), run
+   `git for-each-ref --format="delete %(refname)" refs/browsitory/ | git update-ref --stdin`,
+   and for each remote run `git config --remove-section browsitory.remote.<remote name>`.
 
 If you set `XDG_CONFIG_HOME`, `XDG_DATA_HOME` or `XDG_CACHE_HOME` on Linux, look there instead
 of `~/.config`, `~/.local/share` and `~/.cache`.
@@ -154,8 +161,9 @@ to give you a copy of, correct or delete. You control everything Browsitory keep
 computer, and the steps above remove it.
 
 For data held by GitHub, Bitbucket, the Marketplace, Open VSX or the host of your remotes,
-contact that provider: they decide how it is processed. You can also complain to the data
-protection authority where you live.
+contact that provider: they decide how it is processed. For any question about this notice,
+write to [privacy@browsitory.com](mailto:privacy@browsitory.com). You can also complain to the
+data protection authority where you live.
 
 ## Changes to this notice
 
