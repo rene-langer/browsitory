@@ -8,7 +8,8 @@
 //! snapshots in `crates/tauri-app/tests/wire/` and `crates/vscode-sidecar/tests/wire/` pin both.
 //!
 //! With the `ts` feature (test builds only) every type also derives ts-rs's `TS`; the bindings
-//! test below writes `frontend/src/ipc/generated/wire-dto.ts` from them.
+//! test below writes `frontend/src/ipc/generated/wire-dto.ts` from them, and
+//! `wire-constants.ts` from the backend's limits and settings defaults (#497).
 
 use git_core::diff::DiffHunk;
 use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase};
@@ -2613,6 +2614,65 @@ mod ts_bindings {
             &test_support::repo_root().join("frontend/src/ipc/generated/wire-dto.ts"),
             &bindings,
         );
+        test_support::assert_generated_file(
+            &test_support::repo_root().join("frontend/src/ipc/generated/wire-constants.ts"),
+            &wire_constants(),
+        );
+    }
+
+    /// #497: the limits and defaults the backend enforces, for the frontend to use instead of
+    /// its own copies. The settings defaults are each `config` type's `Default`, serialized as
+    /// its DTO.
+    fn wire_constants() -> String {
+        fn json(value: impl Serialize) -> String {
+            serde_json::to_string(&value).unwrap()
+        }
+        let columns = config::COMMIT_MESSAGE_COLUMNS;
+        let lines = [
+            "// Generated from the backend's limits and defaults (crates/repo-service/src/wire.rs).".to_string(),
+            "// Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current".to_string(),
+            "import type { CommitMessageSettings, DiffSettings, FetchSettings } from \"./wire-dto\";".to_string(),
+            String::new(),
+            "/** `git_core::diff::MAX_CONTEXT_LINES`: more context is clamped to it. */".to_string(),
+            format!(
+                "export const MAX_CONTEXT_LINES = {};",
+                git_core::diff::MAX_CONTEXT_LINES
+            ),
+            "/** `git_core::diff::WHOLE_FILE_CONTEXT_LINES`: the context that shows the whole file. */".to_string(),
+            format!(
+                "export const WHOLE_FILE_CONTEXT_LINES = {};",
+                git_core::diff::WHOLE_FILE_CONTEXT_LINES
+            ),
+            "/** `config::COMMIT_MESSAGE_COLUMNS`: the range commit message columns are clamped to. */".to_string(),
+            format!(
+                "export const COMMIT_MESSAGE_COLUMNS = {{ min: {}, max: {} }} as const;",
+                columns.start(),
+                columns.end()
+            ),
+            "/** `config::DiffSettings::default()`. */".to_string(),
+            format!(
+                "export const DEFAULT_DIFF_SETTINGS: DiffSettings = {};",
+                json(DiffSettingsDto::from(config::DiffSettings::default()))
+            ),
+            "/** `config::CommitMessageSettings::default()`. */".to_string(),
+            format!(
+                "export const DEFAULT_COMMIT_MESSAGE_SETTINGS: CommitMessageSettings = {};",
+                json(CommitMessageSettingsDto::from(
+                    config::CommitMessageSettings::default()
+                ))
+            ),
+            "/** `config::FetchSettings::default()`. */".to_string(),
+            format!(
+                "export const DEFAULT_FETCH_SETTINGS: FetchSettings = {};",
+                json(FetchSettingsDto::from(config::FetchSettings::default()))
+            ),
+            "/** `git_core::search::KEYS`: the keys a commit search `key:value` term can use. */".to_string(),
+            format!(
+                "export const SEARCH_KEYS = {} as const;",
+                json(git_core::search::KEYS)
+            ),
+        ];
+        lines.join("\n") + "\n"
     }
 }
 

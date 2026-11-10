@@ -132,7 +132,9 @@ fn invalid(message: impl Into<String>) -> SearchError {
     }
 }
 
-const KEYS: [&str; 11] = [
+/// The keys a `key:value` term can use (#450). The frontend's search help is checked against
+/// them through `frontend/src/ipc/generated/wire-constants.ts` (#497).
+pub const KEYS: [&str; 11] = [
     "author",
     "committer",
     "message",

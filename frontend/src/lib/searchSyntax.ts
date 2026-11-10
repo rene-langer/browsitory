@@ -1,4 +1,7 @@
-/** Rows of the commit search syntax help. docs/guide/search.md has the same table; keep them in step. */
+/**
+ * Rows of the commit search syntax help. docs/guide/search.md has the same table, and the keys are
+ * the backend's `SEARCH_KEYS`; `searchSyntax.test.ts` checks both.
+ */
 export const SEARCH_SYNTAX: { syntax: string; meaning: string }[] = [
   { syntax: "word", meaning: "Message contains it, or SHA starts with it" },
   { syntax: '"two words"', meaning: "Exact phrase" },
