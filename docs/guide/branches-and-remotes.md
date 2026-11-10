@@ -11,10 +11,14 @@ right-click a branch, a remote folder, or a remote branch to bring up its action
 - a local branch: checkout, rename, delete, merge, **Push to…**, **Isolate branch** (the graph
   then shows only that branch's own commits and merges, see
   [Which branches the graph shows](history.md#which-branches-the-graph-shows)), and for the
-  current branch **Set upstream…** and **Push to ⟨remote⟩**;
+  current branch **Set upstream…** and **Push to ⟨remote⟩**, and **Copy branch name**;
 - a remote branch: checkout, **Set as upstream for current branch**, **Isolate branch** (as for
-  a local branch), or **Delete ⟨remote⟩/⟨branch⟩…**;
-- a remote: fetch, **Push current branch here**, edit, manage credentials, or remove.
+  a local branch), **Copy branch name** (as `remote/branch`), or **Delete ⟨remote⟩/⟨branch⟩…**;
+- a remote: fetch, **Push current branch here**, edit, manage credentials, **Copy fetch URL**
+  (and **Copy push URL** when pushes go to a different URL), or remove.
+
+The copy items put plain text on the clipboard and work even while another operation runs; a
+short notification confirms the copy, or an error says why it failed.
 
 The **+** button in the section header opens **New branch…**, **Add remote…** and **Show all
 branches**. Creating a branch from a specific commit, or starting a rebase onto one, is

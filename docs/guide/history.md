@@ -18,6 +18,14 @@ palette](command-palette.md#go-to-a-commit-branch-tag-or-stash), or click a bran
 sidebar. To revert or apply only one file or hunk of a commit, or to save commits as a patch,
 see [Patches and partial reverts](patches.md).
 
+**Copying a commit's details.** A commit's menu (right-click its row, or the Menu key or
+Shift+F10 on it) ends with **Copy SHA**, **Copy short SHA**, **Copy subject**, **Copy author**
+(`Name <email>`) and **Copy date** (ISO 8601, for example `2026-11-10T09:30:00.000Z`, the same
+instant the details show). They copy plain text, work while another operation runs, and a
+short notification confirms the copy; if the clipboard refuses, an error says so. Branch, remote
+and tag menus have copy items too (see [Branches and remotes](branches-and-remotes.md) and
+[Tags](tags.md)).
+
 The bar above the graph has **Fetch**, **Pull** and **Push** buttons for the
 current branch's upstream, with ahead/behind counts (for example `↑2 ↓1`)
 based on the last fetch.

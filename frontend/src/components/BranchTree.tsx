@@ -10,6 +10,7 @@ import { rectAnchor } from "../lib/menuKeys";
 import type { OperationBlockers } from "../lib/operationStatus";
 import { branchNameProblem } from "../lib/refName";
 import { scrollBehavior } from "../lib/scrollBehavior";
+import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import type { SidebarRevealRequest } from "../state/useSidebarReveal";
 import type { RemoteDialog } from "../state/workspaceDialog";
 import { AccordionSection } from "./primitives/AccordionSection";
@@ -188,6 +189,7 @@ export function BranchTree({
   const [clearUpstreamConfirm, setClearUpstreamConfirm] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const remoteCache = useRemoteBranchCache({ remotes, listRemoteBranches: onListRemoteBranches, refreshGeneration });
+  const copyToClipboard = useCopyToClipboard();
   // The menus' availability and labels come from the shared action rules (#509), like the palette's.
   const blockers: OperationBlockers = { blocked: operationDisabled, reason: operationDisabledReason };
 
@@ -414,6 +416,7 @@ export function BranchTree({
                   onOpenSetUpstream: () => setUpstreamDialogOpen(true),
                   onOpenPushDialog,
                   onIsolateGraphBranch,
+                  onCopy: copyToClipboard,
                   onDelete: (name) => void handleDeleteClick(name),
                 })}
               />
@@ -443,6 +446,8 @@ export function BranchTree({
                 {...menuProps(rowMenu)}
                 items={remoteFolderMenuItems({
                   remoteName,
+                  fetchUrl: remote.fetchUrl,
+                  pushUrl: remote.pushUrl,
                   blockers,
                   // The cache's `refreshGeneration` reload already refreshes the branch list after
                   // any fetch; this explicit drop-and-reload just makes the update immediate here.
@@ -450,6 +455,7 @@ export function BranchTree({
                   onPushCurrentBranch: () => void onPushCurrentBranch(remoteName),
                   onEdit: () => onOpenRemoteDialog({ kind: "remote", action: "edit", remoteName }),
                   onCredentials: () => onOpenRemoteDialog({ kind: "remote", action: "credentials", remoteName }),
+                  onCopy: copyToClipboard,
                   onRemove: () => onOpenRemoteDialog({ kind: "remote", action: "remove", remoteName }),
                 })}
               />
@@ -468,6 +474,7 @@ export function BranchTree({
               onSetUpstream,
               onCompareBranch,
               onIsolateGraphBranch,
+              onCopy: copyToClipboard,
               onOpenDeleteRemoteBranch,
             })}
           />

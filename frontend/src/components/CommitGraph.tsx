@@ -18,6 +18,7 @@ import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } fro
 import { commitActions } from "../lib/actions/commitActions";
 import type { VisitKind } from "../lib/navigationHistory";
 import { rowsEqual, type SelectedRow } from "../state/useAppState";
+import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
 import { ListRow } from "./primitives/ListRow";
@@ -157,6 +158,7 @@ export function CommitGraph({
   } | null>(null);
   const [tagMenu, setTagMenu] = useState<{ tag: string; commitId: string; x: number; y: number } | null>(null);
   const [tagToDelete, setTagToDelete] = useState<string | null>(null);
+  const copyToClipboard = useCopyToClipboard();
   // The parent or child picker of the parent/child keys (#618).
   const [navigationPicker, setNavigationPicker] = useState<{ items: ContextMenuItem[]; x: number; y: number } | null>(
     null,
@@ -251,6 +253,23 @@ export function CommitGraph({
     if (onSavePatch !== undefined) {
       items.push({ label: "Save as patch…", onSelect: () => onSavePatch([commitId]) });
     }
+    items.push(...copyItems(commitId, commit));
+    return items;
+  }
+
+  // "Copy …" (#614): last in the menu and never disabled (copying is not a Git operation). The
+  // date is the instant the commit details show, in ISO 8601.
+  function copyItems(commitId: string, commit: GraphCommit | undefined): ContextMenuItem[] {
+    const items: ContextMenuItem[] = [{ label: "Copy SHA", onSelect: () => copyToClipboard(commitId, "SHA") }];
+    if (commit === undefined) return items;
+    const author = `${commit.authorName} <${commit.authorEmail}>`;
+    const date = new Date(commit.timestamp * 1000).toISOString();
+    items.push(
+      { label: "Copy short SHA", onSelect: () => copyToClipboard(commit.shortId, "short SHA") },
+      { label: "Copy subject", onSelect: () => copyToClipboard(commit.summary, "subject") },
+      { label: "Copy author", onSelect: () => copyToClipboard(author, "author") },
+      { label: "Copy date", onSelect: () => copyToClipboard(date, "date") },
+    );
     return items;
   }
 
@@ -295,6 +314,7 @@ export function CommitGraph({
       onBranchFromCommit,
       onCheckoutCommit,
       onDeleteFromRemote: onDeleteTagFromRemote,
+      onCopy: copyToClipboard,
       onDelete: setTagToDelete,
     });
   }
