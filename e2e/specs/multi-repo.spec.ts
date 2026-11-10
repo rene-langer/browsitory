@@ -58,7 +58,7 @@ describe("Browsitory multi-repo tabs", () => {
       await browser.waitUntil(marked, { timeoutMsg: "expected the inactive second tab to show the changes marker" });
       const description = await browser.execute(
         (id) => document.getElementById(id)?.textContent ?? null,
-        await secondTab.getAttribute("aria-describedby"),
+        (await secondTab.getAttribute("aria-describedby")) ?? "",
       );
       expect(description).toBe("Uncommitted changes");
       expect(await firstTab.getAttribute("aria-describedby")).toBeNull();
