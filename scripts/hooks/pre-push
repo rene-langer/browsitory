@@ -5,3 +5,15 @@ set -euo pipefail
 # main. Fetch now and then so origin/main stays current; the hook itself never fetches.
 repo_root="$(git rev-parse --show-toplevel)"
 python3 "$repo_root/scripts/check-changelog.py"
+
+# Rust formatting, the same check as CI's "Format check" step. Bypass once with
+# SKIP_FMT_CHECK=1; without rustfmt installed the check is skipped with a note.
+if [ "${SKIP_FMT_CHECK:-}" = "1" ]; then
+  echo "pre-push: SKIP_FMT_CHECK=1, skipping cargo fmt --check" >&2
+elif ! cargo fmt --version >/dev/null 2>&1; then
+  echo "pre-push: rustfmt is not installed, skipping cargo fmt --check (CI still runs it)" >&2
+elif ! (cd "$repo_root" && cargo fmt --all -- --check >/dev/null); then
+  echo "pre-push: Rust code is not formatted. Run \`cargo fmt --all\`, commit, and push again" >&2
+  echo "pre-push: (or bypass once with SKIP_FMT_CHECK=1 git push)." >&2
+  exit 1
+fi
