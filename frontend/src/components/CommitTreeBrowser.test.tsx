@@ -215,7 +215,10 @@ describe("CommitTreeBrowser", () => {
       document.dispatchEvent(new Event("selectionchange"));
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "History of line 2 of README.txt" }));
+    // The button mounts with the file's lines, but the effect that subscribes it to
+    // `selectionchange` can still be pending when `findByText` resolves (#712). It reads the
+    // selection when it runs, so wait for the label instead of reading it at once.
+    fireEvent.click(await screen.findByRole("button", { name: "History of line 2 of README.txt" }));
     expect(onOpenLineHistory).toHaveBeenCalledWith("README.txt", COMMIT, 2, 2);
   });
 
