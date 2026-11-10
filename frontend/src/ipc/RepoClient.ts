@@ -648,6 +648,35 @@ export interface CommitLocation {
   remoteBranches: string[];
 }
 
+/** One file's line counts in a commit (#620). */
+export interface FileStats {
+  path: string;
+  insertions: number;
+  deletions: number;
+  /** Binary content: counted as a changed file, with no lines. */
+  binary: boolean;
+}
+
+/**
+ * A commit's line counts against its first parent (a root commit against the empty tree), with
+ * the diff the commit's file list uses: no rename detection, so a rename is a removed and an
+ * added file (#620).
+ */
+export interface CommitStats {
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+  /** Each changed file, in diff order; empty unless `withFiles` asked for them. */
+  files: FileStats[];
+}
+
+/** One answered commit of `getCommitStats`. */
+export interface CommitStatsEntry {
+  commitId: string;
+  /** `null`: the commit is over the size or time cap (or couldn't be read); it gets no numbers. */
+  stats: CommitStats | null;
+}
+
 /** Resolved ends of a branch compare: the merge base with HEAD, and the branch tip. */
 export interface CompareRange {
   fromId: string;
@@ -972,6 +1001,11 @@ export interface RepoClient {
   cancelSearch(repoPath: string): Promise<void>;
   getCommitRenameDiff(repoPath: string, commitId: string, oldPath: string, newPath: string, opts: DiffOptions): Promise<DiffHunk[]>;
   getCommitFiles(repoPath: string, commitId: string): Promise<string[]>;
+  /**
+   * Line counts of `commitIds` (#620), in order. The backend stops starting commits after a short
+   * time budget, so the answer can leave out the commits at the end: ask for those again.
+   */
+  getCommitStats(repoPath: string, commitIds: string[], withFiles: boolean): Promise<CommitStatsEntry[]>;
   /** Files that differ between two commits' trees (`git diff from to`), renames detected. */
   getRangeFiles(repoPath: string, fromId: string, toId: string): Promise<ChangedFile[]>;
   /** One file's diff between two commits; pass `oldPath` from `getRangeFiles` for a rename. */

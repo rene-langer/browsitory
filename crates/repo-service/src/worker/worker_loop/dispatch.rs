@@ -53,6 +53,11 @@ where
             Command::GetCommitFiles { commit_id, reply } => {
                 status::get_commit_files(&self.repo, commit_id, reply)
             }
+            Command::GetCommitStats {
+                commit_ids,
+                with_files,
+                reply,
+            } => status::get_commit_stats(&self.repo, commit_ids, with_files, reply),
             Command::GetCommitMessage { commit_id, reply } => {
                 status::get_commit_message(&self.repo, commit_id, reply)
             }

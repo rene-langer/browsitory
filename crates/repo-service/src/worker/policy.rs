@@ -164,6 +164,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetWorkingDiff { .. }
         | Command::GetCommitDiff { .. }
         | Command::GetCommitFiles { .. }
+        | Command::GetCommitStats { .. }
         | Command::GetPatch { .. }
         | Command::GetCommitMessage { .. }
         | Command::GetCommitSignature { .. }
@@ -441,6 +442,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetWorkingDiff,
         GetCommitDiff,
         GetCommitFiles,
+        GetCommitStats,
         GetCommitMessage,
         GetCommitSignature,
         GetBlame,

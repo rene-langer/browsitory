@@ -66,6 +66,26 @@ fn locate_commit_finds_a_commit_through_the_worker() {
 }
 
 #[test]
+fn commit_stats_count_a_commit_through_the_worker() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "one\ntwo\n");
+    commit_all(&repo, "initial commit");
+    let id = repo.head().unwrap().target().unwrap().to_string();
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let entries = handle.get_commit_stats(vec![id.clone()], true).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].commit_id, id);
+    let stats = entries[0].stats.as_ref().unwrap();
+    assert_eq!(stats.files_changed, 1);
+    assert_eq!(stats.insertions, 2);
+    assert_eq!(stats.deletions, 0);
+    assert_eq!(stats.files[0].path, "file.txt");
+}
+
+#[test]
 fn stage_then_commit_round_trips_through_the_worker() {
     let (dir, _repo) = init_repo();
     write_file(dir.path(), "new.txt", "hello");

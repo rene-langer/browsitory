@@ -23,6 +23,8 @@ ChangedFile/renamed {"oldPath":"a.txt","path":"b.txt"}
 CompareRange/plain {"fromId":"1111111111111111111111111111111111111111","toId":"2222222222222222222222222222222222222222"}
 CommitLocation/in-graph {"branches":[],"commitId":"1111111111111111111111111111111111111111","position":42,"remoteBranches":[]}
 CommitLocation/hidden {"branches":["feature"],"commitId":"2222222222222222222222222222222222222222","position":null,"remoteBranches":["origin/feature"]}
+CommitStatsEntry/counted {"commitId":"1111111111111111111111111111111111111111","stats":{"deletions":3,"files":[{"binary":false,"deletions":3,"insertions":12,"path":"src/main.rs"},{"binary":true,"deletions":0,"insertions":0,"path":"logo.png"}],"filesChanged":2,"insertions":12}}
+CommitStatsEntry/capped {"commitId":"2222222222222222222222222222222222222222","stats":null}
 PatchContent/text {"base64":"ZGlmZiAtLWdpdCBhL2YgYi9mCg=="}
 PatchContent/latin-1 {"base64":"K+kK"}
 OpenRepoEntry/loose {"path":"/repos/app","workspaceId":null}

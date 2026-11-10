@@ -26,6 +26,7 @@ CommitSignature/status-GoodUntrusted key-order
 CommitSignature/status-RevokedKey key-order
 CommitSignature/status-UnknownKey key-order
 CommitSignature/status-Unsigned key-order
+CommitStatsEntry/counted key-order
 ConflictSegment/Clean key-order
 DiffHunk/empty key-order
 DiffHunk/every-origin key-order

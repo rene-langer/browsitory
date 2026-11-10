@@ -465,6 +465,19 @@ describe("vscodeRepoClient", () => {
     await expect(promise).resolves.toEqual(["a.txt"]);
   });
 
+  it("wires getCommitStats (#620)", async () => {
+    const promise = vscodeRepoClient.getCommitStats("/repo", ["abc123", "def456"], false);
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_commit_stats",
+      params: { repoPath: "/repo", commitIds: ["abc123", "def456"], withFiles: false },
+    });
+    const entries = [{ commitId: "abc123", stats: null }];
+    respond(1, entries);
+    await expect(promise).resolves.toEqual(entries);
+  });
+
   it("wires the compare methods", async () => {
     const opts = { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" as const };
     const files = vscodeRepoClient.getRangeFiles("/repo", "a", "b");

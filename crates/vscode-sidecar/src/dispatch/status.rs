@@ -1,3 +1,4 @@
+use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
@@ -249,6 +250,28 @@ pub(super) fn get_commit_files(
 ) -> Result<Value, ErrorDto> {
     let files = worker_handle(repos, &params.repo_path)?.get_commit_files(params.commit_id)?;
     serde_json::to_value(files).map_err(ErrorDto::from_error)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GetCommitStatsParams {
+    repo_path: String,
+    commit_ids: Vec<String>,
+    with_files: bool,
+}
+
+/// Line counts of `commit_ids` (#620). The commits the worker's time budget didn't reach are
+/// left out; the caller asks for them again.
+pub(super) fn get_commit_stats(
+    params: GetCommitStatsParams,
+    repos: &Repos,
+) -> Result<Value, ErrorDto> {
+    let entries: Vec<CommitStatsEntryDto> = worker_handle(repos, &params.repo_path)?
+        .get_commit_stats(params.commit_ids, params.with_files)?
+        .into_iter()
+        .map(CommitStatsEntryDto::from)
+        .collect();
+    serde_json::to_value(entries).map_err(ErrorDto::from_error)
 }
 
 pub(super) fn get_commit_message(

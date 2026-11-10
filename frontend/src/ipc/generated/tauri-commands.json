@@ -53,6 +53,7 @@
   "get_commit_message_settings",
   "get_commit_rename_diff",
   "get_commit_signature",
+  "get_commit_stats",
   "get_commit_tree",
   "get_conflict_hunks",
   "get_current_upstream",

@@ -455,6 +455,45 @@ pub fn commit_locations() -> Cases<git_core::locate::CommitLocation> {
     ]
 }
 
+/// `getCommitStats` answers (#620): counted with its files, and over the cap.
+pub fn commit_stats_entries() -> Cases<git_core::commit_stats::CommitStatsEntry> {
+    use git_core::commit_stats::{CommitStats, CommitStatsEntry, FileStats};
+    vec![
+        case(
+            "counted",
+            CommitStatsEntry {
+                commit_id: "1111111111111111111111111111111111111111".to_string(),
+                stats: Some(CommitStats {
+                    files_changed: 2,
+                    insertions: 12,
+                    deletions: 3,
+                    files: vec![
+                        FileStats {
+                            path: "src/main.rs".to_string(),
+                            insertions: 12,
+                            deletions: 3,
+                            binary: false,
+                        },
+                        FileStats {
+                            path: "logo.png".to_string(),
+                            insertions: 0,
+                            deletions: 0,
+                            binary: true,
+                        },
+                    ],
+                }),
+            },
+        ),
+        case(
+            "capped",
+            CommitStatsEntry {
+                commit_id: "2222222222222222222222222222222222222222".to_string(),
+                stats: None,
+            },
+        ),
+    ]
+}
+
 /// A patch's bytes (#448): text, and bytes that aren't UTF-8.
 pub fn patch_contents() -> Cases<Vec<u8>> {
     vec![

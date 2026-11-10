@@ -938,8 +938,9 @@ fn commit_stats_batch_answers_in_order_and_stops_at_the_request_budget() {
     let first_only = commit_stats_batch(&repo, &ids, false, hurried);
 
     let mut answered = Vec::new();
-    for (id, stats) in &all {
-        answered.push((id.as_str(), stats.as_ref().map(|s| s.insertions)));
+    for entry in &all {
+        let inserted = entry.stats.as_ref().map(|s| s.insertions);
+        answered.push((entry.commit_id.as_str(), inserted));
     }
     assert_eq!(
         answered,
@@ -950,5 +951,5 @@ fn commit_stats_batch_answers_in_order_and_stops_at_the_request_budget() {
         ]
     );
     assert_eq!(first_only.len(), 1);
-    assert_eq!(first_only[0].0, ids[0]);
+    assert_eq!(first_only[0].commit_id, ids[0]);
 }

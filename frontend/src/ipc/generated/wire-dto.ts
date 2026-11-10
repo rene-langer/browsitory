@@ -39,6 +39,14 @@ export type CommitOutcome = { "kind": "Committed", commitId: string, } | { "kind
 
 export type CommitSignature = { status: SignatureStatus, format: SignatureFormat | null, signer: string | null, key: string | null, detail: string | null, };
 
+export type CommitStats = { filesChanged: number, insertions: number, deletions: number, 
+/**
+ * Empty unless `withFiles` asked for them.
+ */
+files: Array<FileStats>, };
+
+export type CommitStatsEntry = { commitId: string, stats: CommitStats | null, };
+
 export type CompareRange = { fromId: string, toId: string, };
 
 export type ConfirmedAbort = { headId: string, startedAt: string, rewinds: boolean, commitsToRemove: number, pausedOnConflict: boolean, };
@@ -80,6 +88,8 @@ export type FileHistoryEntry = { commit: GraphCommit, path: string, oldPath: str
 export type FileSide = { "kind": "Missing" } | { "kind": "TooLarge", size: number, } | { "kind": "Loaded", size: number, base64: string, mime: string | null, };
 
 export type FileSides = { old: FileSide, new: FileSide, };
+
+export type FileStats = { path: string, insertions: number, deletions: number, binary: boolean, };
 
 export type ForgeProvider = "GitHub" | "Bitbucket";
 

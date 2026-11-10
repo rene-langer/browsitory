@@ -113,16 +113,23 @@ pub fn commit_stats(
     Ok(Some(stats))
 }
 
-/// The line counts of `commit_ids`, in order, within `budget`. Each answered commit comes with
-/// its stats, or `None` when it was over the cap or couldn't be read (a commit that is gone);
-/// the commits after the request budget ran out are left out. The first commit is always
-/// answered, so asking again always makes progress.
+/// One answered commit of `commit_stats_batch`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitStatsEntry {
+    pub commit_id: String,
+    /// `None`: over the cap, or the commit couldn't be read (gone after a force push).
+    pub stats: Option<CommitStats>,
+}
+
+/// The line counts of `commit_ids`, in order, within `budget`. The commits after the request
+/// budget ran out are left out. The first commit is always answered, so asking again always
+/// makes progress.
 pub fn commit_stats_batch(
     repo: &Repository,
     commit_ids: &[String],
     with_files: bool,
     budget: StatsBudget,
-) -> Vec<(String, Option<CommitStats>)> {
+) -> Vec<CommitStatsEntry> {
     let start = Instant::now();
     let mut answered = Vec::new();
     for commit_id in commit_ids {
@@ -133,7 +140,10 @@ pub fn commit_stats_batch(
         let stats = commit_stats(repo, commit_id, with_files, budget.max_files, Some(deadline))
             .ok()
             .flatten();
-        answered.push((commit_id.clone(), stats));
+        answered.push(CommitStatsEntry {
+            commit_id: commit_id.clone(),
+            stats,
+        });
     }
     answered
 }
