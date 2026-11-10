@@ -452,8 +452,10 @@ the rule and still has its own fields.
   make directory 'c': directory exists". Every operation that writes a libgit2 merge checks its
   in-memory merge (`merge_commits`, `cherrypick_commit`, `revert_commit`; for a stash
   `merge_trees` redoing `git_stash_apply`'s merges against HEAD's tree) before anything is
-  written. `file_folder::find_file_folder_conflict` finds a stage-0 entry `p` while another entry
-  lives below `p/` (libgit2's own conflict entry `p` next to `p/…` is left alone).
+  written. `file_folder::find_file_folder_conflict` finds an entry `p` while another entry lives
+  below `p/`, where `p` is a stage-0 entry or a conflict entry without a stage 2 (see the file
+  coming in over a folder, below); libgit2's own conflict entry `p` with HEAD's side (stage 2)
+  next to `p/…` is left alone.
   Each operation then produces git's outcome itself (#416), without libgit2's
   `merge`/`cherrypick`/`revert`/`stash_apply`, whose checkout of such an index fails.
   `file_folder::check_out_as_conflicts` rewrites the merged index (`record_as_conflicts`: the
@@ -465,6 +467,16 @@ the rule and still has its own fields.
   us/them" like git's own. git's labels: `HEAD` for ours; the branch for a merge,
   `<short id> (<subject>)` for a cherry-pick or rebase step, `parent of <short id> (<subject>)`
   for a revert; `Updated upstream`/`Stashed changes` for a stash.
+  - **A file coming in over HEAD's folder (#607)**: here libgit2 does find the conflict, but
+    records the incoming file only as a conflict entry at `c` (stage 3, "added by them"; stages 1
+    and 3, "deleted by us", when HEAD deleted a file the other side changed) next to the folder's
+    entries at stage 0. With a name sorting between them (`c.txt`), its checkout then writes the
+    file over the folder and fails on Linux ("could not open 'c' for writing: Is a directory",
+    while on macOS libgit2's own checkout got through in CI); without
+    one it writes the file as `c~<its own label>` but leaves the conflict at `c`. git moves the
+    conflict stages to `c~<their label>`. `record_as_conflicts` does the same: the entry keeps
+    its stages and moves to `c~<their label>`, checked out as above.
+    `libgit2_still_writes_a_file_coming_in_over_a_folder_onto_the_folder` pins the libgit2 side.
   - **Merge, squash, cherry-pick and revert**: the caller writes the operation's state files as
     libgit2 would (`MERGE_HEAD`/`MERGE_MODE`/`MERGE_MSG`, or `CHERRY_PICK_HEAD`/`REVERT_HEAD`/
     `MERGE_MSG`; a squash only `SQUASH_MSG`), so Abort (`reset --merge` semantics, via the index
