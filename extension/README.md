@@ -69,6 +69,8 @@ A `.vsix` install doesn't update itself.
 - [User guide](https://rene-langer.github.io/browsitory/)
 - [Release notes](https://github.com/rene-langer/browsitory/blob/main/CHANGELOG.md)
 - [Report a problem](https://github.com/rene-langer/browsitory/issues)
+- [Privacy notice](https://rene-langer.github.io/browsitory/privacy/): the extension collects
+  no data and sends no telemetry
 - [Source code](https://github.com/rene-langer/browsitory)
 
 ## Licence
