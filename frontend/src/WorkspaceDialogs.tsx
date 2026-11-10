@@ -114,8 +114,11 @@ export function WorkspaceDialogs({
   const stashDialog = dialogOf(dialog, "stash");
   const deleteRemoteBranchDialog = dialogOf(dialog, "deleteRemoteBranch");
   const deleteRemoteTagDialog = dialogOf(dialog, "deleteRemoteTag");
+  const remoteDialog = dialogOf(dialog, "remote");
   const rewordDialog = dialogOf(dialog, "reword");
-  const rewordCommitId = rewordDialog?.commitId ?? null;
+  // Read from `dialog` itself, not `rewordDialog`: the React Compiler cannot keep the memoization
+  // below on a value a helper call returned.
+  const rewordCommitId = dialog?.kind === "reword" ? dialog.commitId : null;
   const loadRewordMessage = useCallback(
     () => (rewordCommitId === null ? Promise.resolve("") : client.getCommitMessage(repoPath, rewordCommitId)),
     [client, repoPath, rewordCommitId],
@@ -259,7 +262,7 @@ export function WorkspaceDialogs({
       {active && (
         // Here, not in `BranchTree`: the sidebar stays mounted but `hidden` while collapsed.
         <RemoteDialogs
-          remoteDialog={dialogOf(dialog, "remote")}
+          remoteDialog={remoteDialog}
           remotes={appState.state.remotes}
           remoteUpstreams={appState.state.remoteUpstreams}
           blockedReason={operationDisabledReason}

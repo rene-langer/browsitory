@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BranchTree } from "./BranchTree";
 import { renderTree } from "../test/branchTreeProps";
+import { BranchTreeWithDialogs } from "../test/BranchTreeWithDialogs";
 
 const oneRemote = [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }];
 const up = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
@@ -48,7 +48,7 @@ describe("SetUpstreamDialog (in BranchTree)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
     await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
 
-    rerender(<BranchTree {...props} operationDisabled operationDisabledReason={reason} />);
+    rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason={reason} />);
     const dialog = screen.getByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
     expect(dialog).toHaveTextContent(reason);
     const confirm = within(dialog).getByRole("button", { name: "Clear upstream", hidden: true });

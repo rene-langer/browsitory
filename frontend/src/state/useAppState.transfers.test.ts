@@ -598,13 +598,13 @@ describe("useAppState", () => {
     const { result } = renderHook(() => useAppState(transferClient({ createTag }), TEST_REPO_PATH));
     await act(() => result.current.refresh());
 
-    act(() => result.current.openCreateTagDialog("abc123"));
-    expect(result.current.state.createTagDialog).toEqual({ commitId: "abc123" });
+    act(() => result.current.openDialog({ kind: "createTag", commitId: "abc123" }));
+    expect(result.current.state.dialog).toEqual({ kind: "createTag", commitId: "abc123" });
     await act(() => result.current.createTag("v1", "notes", "abc123"));
 
     expect(createTag).toHaveBeenCalledWith(TEST_REPO_PATH, "v1", "notes", "abc123");
-    act(() => result.current.closeCreateTagDialog());
-    expect(result.current.state.createTagDialog).toBeNull();
+    act(() => result.current.closeDialog("createTag"));
+    expect(result.current.state.dialog).toBeNull();
   });
 
   const progress = (phase: "Starting" | "Completed" | "Failed", errorKind: TransferProgress["errorKind"] = null): TransferProgress => ({
@@ -633,12 +633,12 @@ describe("useAppState", () => {
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
-    act(() => result.current.openDeleteRemoteTagDialog("v1"));
-    expect(result.current.state.deleteRemoteTagDialog).toEqual({ tagName: "v1" });
+    act(() => result.current.openDialog({ kind: "deleteRemoteTag", tagName: "v1" }));
+    expect(result.current.state.dialog).toEqual({ kind: "deleteRemoteTag", tagName: "v1" });
 
     await act(() => result.current.deleteRemoteTag("origin", "v1", deleteLocal));
     expect(deleteRemoteTag).toHaveBeenCalledWith(TEST_REPO_PATH, "origin", "v1", false);
-    expect(result.current.state.deleteRemoteTagDialog).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
     expect(deleteTag).not.toHaveBeenCalled();
 
     await act(async () => listener?.(progress("Completed")));

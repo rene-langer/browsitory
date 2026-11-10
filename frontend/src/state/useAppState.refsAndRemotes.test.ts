@@ -18,7 +18,7 @@ describe("useAppState — refs and remotes (4b)", () => {
     await act(() => result.current.pushCurrentBranch("origin"));
 
     expect(pushCurrentBranch).not.toHaveBeenCalled();
-    expect(result.current.state.pushDialog).toEqual({ localBranch: "fx" });
+    expect(result.current.state.dialog).toEqual({ kind: "push", localBranch: "fx" });
   });
 
   it("treats an upstream without pushBranch like push.default=simple", async () => {
@@ -34,7 +34,7 @@ describe("useAppState — refs and remotes (4b)", () => {
     await act(() => result.current.pushCurrentBranch("origin"));
 
     expect(pushCurrentBranch).not.toHaveBeenCalled();
-    expect(result.current.state.pushDialog).toEqual({ localBranch: "fx" });
+    expect(result.current.state.dialog).toEqual({ kind: "push", localBranch: "fx" });
   });
 
   it("pushes when push.default resolves the differently named upstream", async () => {
@@ -55,7 +55,7 @@ describe("useAppState — refs and remotes (4b)", () => {
     await act(() => result.current.pushCurrentBranch("origin"));
 
     expect(pushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin", false);
-    expect(result.current.state.pushDialog).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
   });
 
   it("offers no force push for a rejected push to an upstream push.default does not resolve", async () => {
@@ -354,34 +354,63 @@ describe("useAppState — refs and remotes (4b)", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
 
-    act(() => result.current.openPushDialog("topic"));
-    expect(result.current.state.pushDialog).toEqual({ localBranch: "topic" });
-    act(() => result.current.closePushDialog());
-    expect(result.current.state.pushDialog).toBeNull();
-    act(() => result.current.openPushDialog("topic"));
+    act(() => result.current.openDialog({ kind: "push", localBranch: "topic" }));
+    expect(result.current.state.dialog).toEqual({ kind: "push", localBranch: "topic" });
+    act(() => result.current.closeDialog("push"));
+    expect(result.current.state.dialog).toBeNull();
+    act(() => result.current.openDialog({ kind: "push", localBranch: "topic" }));
     await act(() => result.current.pushBranch("origin", "topic", "topic", true));
-    expect(result.current.state.pushDialog).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
 
-    act(() => result.current.openDeleteRemoteBranchDialog("origin", "topic"));
-    expect(result.current.state.deleteRemoteBranchDialog).toEqual({ remoteName: "origin", branchName: "topic" });
-    act(() => result.current.closeDeleteRemoteBranchDialog());
-    expect(result.current.state.deleteRemoteBranchDialog).toBeNull();
-    act(() => result.current.openDeleteRemoteBranchDialog(null, null));
+    const deleteDialog = { kind: "deleteRemoteBranch", remoteName: "origin", branchName: "topic" } as const;
+    act(() => result.current.openDialog(deleteDialog));
+    expect(result.current.state.dialog).toEqual(deleteDialog);
+    act(() => result.current.closeDialog("deleteRemoteBranch"));
+    expect(result.current.state.dialog).toBeNull();
+    act(() => result.current.openDialog({ kind: "deleteRemoteBranch", remoteName: null, branchName: null }));
     await act(() => result.current.deleteRemoteBranch("origin", "topic"));
-    expect(result.current.state.deleteRemoteBranchDialog).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
   });
 
-  it("openRemoteDialog/closeRemoteDialog toggle remoteDialog without calling the client", async () => {
+  it("openDialog/closeDialog toggle the remote dialog without calling the client", async () => {
     const client = transferClient({});
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
     const calls = Object.values(client).filter((fn) => vi.isMockFunction(fn)).map((fn) => fn.mock.calls.length);
-    expect(result.current.state.remoteDialog).toBeNull();
-    act(() => result.current.openRemoteDialog("credentials", "origin"));
-    expect(result.current.state.remoteDialog).toEqual({ kind: "credentials", remoteName: "origin" });
-    act(() => result.current.closeRemoteDialog());
-    expect(result.current.state.remoteDialog).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
+    act(() => result.current.openDialog({ kind: "remote", action: "credentials", remoteName: "origin" }));
+    expect(result.current.state.dialog).toEqual({ kind: "remote", action: "credentials", remoteName: "origin" });
+    act(() => result.current.closeDialog());
+    expect(result.current.state.dialog).toBeNull();
     expect(Object.values(client).filter((fn) => vi.isMockFunction(fn)).map((fn) => fn.mock.calls.length)).toEqual(calls);
+  });
+
+  // #493: one dialog at a time, and a finishing action closes only its own.
+  it("opening a dialog replaces the open one, and a closing kind leaves another kind open", async () => {
+    const client = transferClient({});
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+
+    act(() => result.current.openDialog({ kind: "merge", branchName: "feature" }));
+    act(() => result.current.openDialog({ kind: "push", localBranch: "topic" }));
+    expect(result.current.state.dialog).toEqual({ kind: "push", localBranch: "topic" });
+
+    act(() => result.current.closeDialog("merge"));
+    expect(result.current.state.dialog).toEqual({ kind: "push", localBranch: "topic" });
+    await act(() => result.current.deleteRemoteBranch("origin", "topic"));
+    expect(result.current.state.dialog).toEqual({ kind: "push", localBranch: "topic" });
+  });
+
+  it("keeps the open dialog, as the same object, through a refresh", async () => {
+    const client = transferClient({});
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    act(() => result.current.openDialog({ kind: "remote", action: "edit", remoteName: "origin" }));
+    const open = result.current.state.dialog;
+
+    await act(() => result.current.refresh());
+
+    expect(result.current.state.dialog).toBe(open);
   });
 
   it("removes a deleted branch from the saved graph selection", async () => {

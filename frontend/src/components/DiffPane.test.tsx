@@ -14,13 +14,30 @@ import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const TEST_REPO_PATH = "/repo";
 
+type PaneProps = React.ComponentProps<typeof WorkspaceDiffPane>;
+
 // `DiffPane` reads its actions from `WorkspaceActionsContext` (#491). The tests pass them as props
-// alongside the data, as before: this wrapper provides them and passes the rest on.
-function DiffPane(props: React.ComponentProps<typeof WorkspaceDiffPane> & Partial<WorkspaceActions>) {
-  const [actions, paneProps] = splitWorkspaceActions(props);
+// alongside the data, as before: this wrapper provides them and passes the rest on. It also owns
+// the discard confirmation as `RepoWorkspace` does (#493): `discardRequest` is the one open at
+// first, and `onDiscardRequestChange` sees every change.
+function DiffPane(
+  props: Omit<PaneProps, "discardRequest" | "onDiscardRequestChange"> &
+    Partial<Pick<PaneProps, "discardRequest" | "onDiscardRequestChange">> &
+    Partial<WorkspaceActions>,
+) {
+  const [actions, { discardRequest: initialDiscardRequest = null, onDiscardRequestChange, ...paneProps }] =
+    splitWorkspaceActions(props);
+  const [discardRequest, setDiscardRequest] = useState<DiscardRequest | null>(initialDiscardRequest);
   return (
     <WorkspaceActionsContext.Provider value={testWorkspaceActions(actions)}>
-      <WorkspaceDiffPane {...paneProps} />
+      <WorkspaceDiffPane
+        {...paneProps}
+        discardRequest={discardRequest}
+        onDiscardRequestChange={(request) => {
+          onDiscardRequestChange?.(request);
+          setDiscardRequest(request);
+        }}
+      />
     </WorkspaceActionsContext.Provider>
   );
 }
@@ -535,8 +552,8 @@ describe("DiffPane", () => {
       });
 
       it("clears a file request whose path disappears, and does not reopen when it returns", () => {
+        // The wrapper `DiffPane` holds the request, as `RepoWorkspace` does.
         function Harness({ status }: { status: StatusEntry[] }) {
-          const [req, setReq] = useState<DiscardRequest | null>({ kind: "file", path: "src/a.ts" });
           return (
             <DiffPane
               repoPath={TEST_REPO_PATH}
@@ -546,8 +563,7 @@ describe("DiffPane", () => {
               mergeMessage={null}
               rebaseProgress={null}
               {...noopHandlers}
-              discardRequest={req}
-              onDiscardRequestChange={setReq}
+              discardRequest={{ kind: "file", path: "src/a.ts" }}
             />
           );
         }
