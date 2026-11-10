@@ -471,7 +471,8 @@ the rule and still has its own fields.
     records the incoming file only as a conflict entry at `c` (stage 3, "added by them"; stages 1
     and 3, "deleted by us", when HEAD deleted a file the other side changed) next to the folder's
     entries at stage 0. With a name sorting between them (`c.txt`), its checkout then writes the
-    file over the folder and fails ("could not open 'c' for writing: Is a directory"); without
+    file over the folder and fails on Linux ("could not open 'c' for writing: Is a directory",
+    while on macOS libgit2's own checkout got through in CI); without
     one it writes the file as `c~<its own label>` but leaves the conflict at `c`. git moves the
     conflict stages to `c~<their label>`. `record_as_conflicts` does the same: the entry keeps
     its stages and moves to `c~<their label>`, checked out as above.

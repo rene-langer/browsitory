@@ -1114,6 +1114,9 @@ fn libgit2_still_writes_a_file_coming_in_over_a_folder_onto_the_folder() {
             ("c/g".to_string(), 0)
         ]
     );
-    let result = f.repo.revert(&dropped, None);
-    assert!(result.is_err(), "libgit2's revert checked the file out");
+    // Seen on Linux; on macOS CI libgit2's own revert got through this checkout.
+    if cfg!(target_os = "linux") {
+        let result = f.repo.revert(&dropped, None);
+        assert!(result.is_err(), "libgit2's revert checked the file out");
+    }
 }
