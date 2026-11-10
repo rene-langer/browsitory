@@ -86,7 +86,8 @@ describe("Browsitory multi-repo workspaces", function () {
         await browser.setWindowSize(size.width, size.height);
         // Give the resize a moment to lay out, then assert with the measured boxes in the message.
         await browser.waitUntil(async () => (await groupedTabFitsHeader(E2E_WORKSPACE_REPO_A)).ok, { timeout: 5000 }).catch(() => undefined);
-        expect({ size, ...(await groupedTabFitsHeader(E2E_WORKSPACE_REPO_A)) }).toMatchObject({ size, ok: true });
+        const fit = await groupedTabFitsHeader(E2E_WORKSPACE_REPO_A);
+        if (!fit.ok) throw new Error(`grouped tab doesn't fit the header at ${size.width}x${size.height}: ${fit.detail}`);
       }
     } finally {
       await browser.setWindowSize(originalSize.width, originalSize.height);
