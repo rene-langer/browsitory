@@ -807,6 +807,24 @@ certificate.
   (`isolateGraphBranch`): on a remote branch, local `[]` and remote `[name]`; on a local branch,
   local `[name]`, and remote `[]` only when a non-empty remote selection was saved (a
   never-saved one walks nothing and keeps every remote badge).
+- "Collapse merges" (#617) is the optional `firstParent` of `GraphSelectionDto` (absent is
+  `false`, sent only when on), saved per repository in `config.toml`'s `graph_collapse_merges`
+  path list (`get/set_graph_collapse_merges`). With it, `graph_log` and `locate_commit` walk
+  first parents from every start point; `search_commits` ignores it (it still narrows only for
+  one isolated branch, `isolates_one_branch`), so a search finds commits inside collapsed merges.
+  In any first-parent walk each merge row carries `mergedCount`, the size of `first..other`
+  (every other parent of an octopus merge together), counted with one hide/push revwalk per
+  merge row of the page; `get_merged_commits(mergeId, limit)` lists that range
+  `TOPOLOGICAL | TIME` (a worker read). `CommitLocation.merge` (`{ mergeId, mergePosition,
+  offset }`) names the merge row that holds a target the walk doesn't reach: along a tip's
+  first-parent line the commits reaching the target come first, so a binary search with
+  `graph_descendant_of` finds the last one, the merge. The frontend keeps the walk's rows
+  (`graphRows`) and the expanded merges (`expandedMerges`, reloaded by `refresh()` while the
+  merge is still a merge row) apart and lists `withExpandedMerges(rows, expansions)` as
+  `commits`, so selection, keys, menus, history entries and the lines-changed badges see expanded
+  commits as ordinary rows and never a collapsed one. `assignLanes(commits, merged)` gives a
+  spliced commit whose first parent isn't listed a stub instead of a lane to the bottom. "Go to"
+  loads the graph through `mergePosition`, then expands the merge to at least `offset + 1`.
 - Going back to the default clears a saved selection (`clear_graph_branch_selection`,
   `clear_graph_remote_branch_selection`, #402) instead of saving today's branch names, which
   would hide branches created later and, with one local branch, walk first parents only. The

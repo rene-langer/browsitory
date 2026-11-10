@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { CircleHelp, Diff, Search, X } from "lucide-react";
+import { CircleHelp, Diff, FoldVertical, Search, X } from "lucide-react";
 import { SEARCH_SYNTAX, SEARCH_SYNTAX_FOOTER } from "../lib/searchSyntax";
 import styles from "./CommitSearchBar.module.css";
 
@@ -23,6 +23,8 @@ export function CommitSearchBar({
   onRemoveRecentSearch,
   showLineStats,
   onToggleLineStats,
+  collapseMerges,
+  onToggleCollapseMerges,
 }: {
   query: string;
   onQueryChange: (text: string) => void;
@@ -39,6 +41,9 @@ export function CommitSearchBar({
   /** The commit list's lines-changed badges (#620): the toggle shows with `onToggleLineStats`. */
   showLineStats?: boolean;
   onToggleLineStats?: () => void;
+  /** "Collapse merges" (#617): the toggle shows with `onToggleCollapseMerges`. */
+  collapseMerges?: boolean;
+  onToggleCollapseMerges?: () => void;
 }) {
   const [helpOpen, setHelpOpen] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -160,6 +165,18 @@ export function CommitSearchBar({
           onClick={onToggleLineStats}
         >
           <Diff size={14} aria-hidden="true" />
+        </button>
+      )}
+      {onToggleCollapseMerges !== undefined && (
+        <button
+          type="button"
+          className={styles.iconButton}
+          aria-label="Collapse merges"
+          aria-pressed={collapseMerges === true}
+          title="Collapse merges: follow first parents, expand a merge on demand"
+          onClick={onToggleCollapseMerges}
+        >
+          <FoldVertical size={14} aria-hidden="true" />
         </button>
       )}
       <button

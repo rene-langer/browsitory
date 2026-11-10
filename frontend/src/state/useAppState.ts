@@ -25,6 +25,7 @@ import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
 import { failureError, useMutationRunner, withoutStaleErrorHint } from "./useMutationRunner";
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
+import { MERGE_PAGE_SIZE, type MergeExpansion, withExpandedMerges } from "../lib/mergeExpansion";
 import {
   initialNavigationHistory,
   moveToEntry,
@@ -71,7 +72,16 @@ export interface AppState {
   // The rows this tab visited, for Back and Forward (#618); `selectRow` records them.
   navigation: NavigationHistory;
   status: StatusEntry[];
+  // The graph's rows as the list shows them: `graphRows` with each expanded merge's commits
+  // spliced in below it (#617, `withExpandedMerges`).
   commits: GraphCommit[];
+  // The commits `getCommitGraph` returned, without expanded merges.
+  graphRows: GraphCommit[];
+  // "Collapse merges" (#617), saved per repository: the graph follows first parents from every
+  // selected branch, and merge rows expand on demand.
+  collapseMerges: boolean;
+  // The expanded merges by merge id, with the commits each loaded (#617).
+  expandedMerges: Record<string, MergeExpansion>;
   // Limit the current `commits` were fetched with, and whether the graph filled it (so older
   // history probably exists beyond what is shown).
   graphLimit: number;
@@ -179,6 +189,13 @@ export interface AppStateOwnMembers {
   // Reloads the graph with at least `count` commits (whole pages), so a "Go to" target's row
   // (`CommitLocation.position + 1`) is loaded (#441).
   loadHistoryThrough(count: number): Promise<void>;
+  // Turns "Collapse merges" on or off for this repository and reloads the graph (#617).
+  setCollapseMerges(collapse: boolean): Promise<void>;
+  // Shows the commits merge `mergeId` brought in below its row, at least `atLeast` of them (whole
+  // pages); again on an expanded merge, loads up to that many (#617).
+  expandMerge(mergeId: string, atLeast?: number): Promise<void>;
+  // Hides an expanded merge's commits again.
+  collapseMerge(mergeId: string): void;
   refresh(): Promise<void>;
   refreshUndoState(): Promise<void>;
   // Clears `state.error` without waiting for the next successful action of the same kind — the
@@ -245,6 +262,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     navigation: initialNavigationHistory("uncommitted"),
     status: [],
     commits: [],
+    graphRows: [],
+    collapseMerges: false,
+    expandedMerges: {},
     graphLimit: GRAPH_PAGE_SIZE,
     hasMoreHistory: false,
     graphSelection: { local: null, remote: null },
@@ -292,6 +312,8 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   });
 
   const graphLimit = useRef(GRAPH_PAGE_SIZE);
+  // The expanded merges and the limit each loads with (#617); `refresh()` reloads them.
+  const mergeLimits = useRef(new Map<string, number>());
   const selectedReflogReference = useRef<string | null>(null);
   const reflogRequestGeneration = useRef(0);
   const reflogError = useOwnError();
@@ -316,16 +338,17 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const refresh = useCallback(async () => {
     let ticket = 0;
     try {
-      const [local, remote] = await Promise.all([
+      const [local, remote, collapseMerges] = await Promise.all([
         client.getGraphBranchSelection(repoPath),
         client.getGraphRemoteBranchSelection(repoPath),
+        client.getGraphCollapseMerges(repoPath),
       ]);
       const limit = graphLimit.current;
       ticket = takeReadTicket();
-      const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, forgeRepositories, headInfo, undoState] =
+      const [status, graphRows, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, forgeRepositories, headInfo, undoState] =
         await Promise.all([
           client.getStatus(repoPath),
-          client.getCommitGraph(repoPath, limit, toGraphSelection({ local, remote })),
+          client.getCommitGraph(repoPath, limit, toGraphSelection({ local, remote }, collapseMerges)),
           client.listBranches(repoPath),
           client.listWorktrees(repoPath),
           client.listSubmodules(repoPath),
@@ -342,6 +365,19 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const remoteUpstreams = Object.fromEntries(
         await Promise.all(
           remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams(repoPath, remote.name)]),
+        ),
+      );
+      // An expanded merge stays expanded while it is a merge row of the graph (#617).
+      const expandable = new Set(graphRows.filter((row) => row.mergedCount !== undefined).map((row) => row.id));
+      for (const mergeId of [...mergeLimits.current.keys()]) {
+        if (!expandable.has(mergeId)) mergeLimits.current.delete(mergeId);
+      }
+      const reloaded: Record<string, MergeExpansion> = Object.fromEntries(
+        await Promise.all(
+          [...mergeLimits.current].map(async ([mergeId, mergeLimit]) => [
+            mergeId,
+            { commits: await client.getMergedCommits(repoPath, mergeId, mergeLimit), limit: mergeLimit },
+          ]),
         ),
       );
       const reference = selectedReflogReference.current;
@@ -362,35 +398,49 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const undoIsNewest = ticket > order.undoApplied;
       if (undoIsNewest) order.undoApplied = ticket;
       const own = refreshError.take();
-      setState((prev) => ({
-        ...prev,
-        status,
-        commits,
-        graphLimit: limit,
-        hasMoreHistory: commits.length >= limit,
-        graphSelection: { local, remote },
-        branches,
-        worktrees,
-        submodules,
-        reflogRefs,
-        selectedReflogReference: selectedReference,
-        reflog,
-        remotes,
-        tags,
-        upstream,
-        remoteUpstreams,
-        stashes,
-        mergeMessage,
-        headInfo,
-        // The backend reports a paused rebase in `HeadInfo`, restored from disk after a restart.
-        rebaseProgress: headInfo.rebase
-          ? { currentStep: headInfo.rebase.currentStep, totalSteps: headInfo.rebase.totalSteps }
-          : null,
-        forgeRepositories,
-        undoState: undoIsNewest ? undoState : prev.undoState,
-        error: errorAfterOwnSuccess(prev.error, own),
-        refreshGeneration: prev.refreshGeneration + 1,
-      }));
+      setState((prev) => {
+        // A merge expanded (or grown) while these reads were out keeps what its own read loaded.
+        const expandedMerges: Record<string, MergeExpansion> = {};
+        for (const [mergeId, mergeLimit] of mergeLimits.current) {
+          if (!expandable.has(mergeId)) continue;
+          const candidates = [reloaded[mergeId], prev.expandedMerges[mergeId]];
+          const expansion =
+            candidates.find((candidate) => candidate?.limit === mergeLimit) ?? candidates.find((c) => c !== undefined);
+          if (expansion !== undefined) expandedMerges[mergeId] = expansion;
+        }
+        return {
+          ...prev,
+          status,
+          commits: withExpandedMerges(graphRows, expandedMerges),
+          graphRows,
+          collapseMerges,
+          expandedMerges,
+          graphLimit: limit,
+          hasMoreHistory: graphRows.length >= limit,
+          graphSelection: { local, remote },
+          branches,
+          worktrees,
+          submodules,
+          reflogRefs,
+          selectedReflogReference: selectedReference,
+          reflog,
+          remotes,
+          tags,
+          upstream,
+          remoteUpstreams,
+          stashes,
+          mergeMessage,
+          headInfo,
+          // The backend reports a paused rebase in `HeadInfo`, restored from disk after a restart.
+          rebaseProgress: headInfo.rebase
+            ? { currentStep: headInfo.rebase.currentStep, totalSteps: headInfo.rebase.totalSteps }
+            : null,
+          forgeRepositories,
+          undoState: undoIsNewest ? undoState : prev.undoState,
+          error: errorAfterOwnSuccess(prev.error, own),
+          refreshGeneration: prev.refreshGeneration + 1,
+        };
+      });
     } catch (err) {
       // Runs the same worker-death/credential classification as every mutation's catch block
       // (`useMutationRunner`'s `credentialFailureMessage`) — a `refresh()` call after a
@@ -444,9 +494,51 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     [refresh],
   );
 
+  const expandMerge = useCallback(
+    async (mergeId: string, atLeast = 0) => {
+      const limit = Math.max(
+        mergeLimits.current.get(mergeId) ?? 0,
+        Math.ceil(Math.max(atLeast, 1) / MERGE_PAGE_SIZE) * MERGE_PAGE_SIZE,
+      );
+      mergeLimits.current.set(mergeId, limit);
+      try {
+        const commits = await client.getMergedCommits(repoPath, mergeId, limit);
+        // Collapsed again, or grown by a later call, while this read was out.
+        if (mergeLimits.current.get(mergeId) !== limit) return;
+        setState((prev) => {
+          const expandedMerges = { ...prev.expandedMerges, [mergeId]: { commits, limit } };
+          return { ...prev, expandedMerges, commits: withExpandedMerges(prev.graphRows, expandedMerges) };
+        });
+      } catch (err) {
+        if (mergeLimits.current.get(mergeId) === limit) mergeLimits.current.delete(mergeId);
+        setState((prev) => ({ ...prev, ...failureError(err) }));
+      }
+    },
+    [client, repoPath, setState],
+  );
+
+  const collapseMerge = useCallback(
+    (mergeId: string) => {
+      mergeLimits.current.delete(mergeId);
+      setState((prev) => {
+        if (!(mergeId in prev.expandedMerges)) return prev;
+        const expandedMerges = Object.fromEntries(
+          Object.entries(prev.expandedMerges).filter(([id]) => id !== mergeId),
+        );
+        return { ...prev, expandedMerges, commits: withExpandedMerges(prev.graphRows, expandedMerges) };
+      });
+    },
+    [setState],
+  );
+
   const mutationRunner = useMutationRunner(refresh, setState);
   const { runMutation, runMutationWithOutcome, runOptimisticMutation, runOptimisticMutationWithMessage } =
     mutationRunner;
+
+  const setCollapseMerges = useCallback(
+    (collapse: boolean) => runMutation(() => client.setGraphCollapseMerges(repoPath, collapse)),
+    [client, repoPath, runMutation],
+  );
 
   const dialogs = useDialogActions(setState);
   const staging = useStagingActions(client, repoPath, runMutation, runMutationWithOutcome, runOptimisticMutation, setState);
@@ -584,6 +676,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     retryWithoutHooks,
     loadMoreHistory,
     loadHistoryThrough,
+    setCollapseMerges,
+    expandMerge,
+    collapseMerge,
     refresh,
     refreshUndoState,
     dismissError,

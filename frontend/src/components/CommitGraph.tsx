@@ -27,11 +27,13 @@ import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import formStyles from "./primitives/FormDialog.module.css";
 import { LineStatsBadge } from "./LineStatsBadge";
+import { expandedFrom, expansionHasMore, MERGE_PAGE_SIZE, type MergeExpansion } from "../lib/mergeExpansion";
 import { RefBadges } from "./RefBadges";
 import { tagMenuItems } from "./tagMenuItems";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
+const NO_EXPANSIONS: Readonly<Record<string, MergeExpansion>> = {};
 
 export function CommitGraph({
   status,
@@ -71,6 +73,9 @@ export function CommitGraph({
   revealRequest = 0,
   lineStats,
   onCommitsVisible,
+  expandedMerges = NO_EXPANSIONS,
+  onExpandMerge,
+  onCollapseMerge,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -161,6 +166,14 @@ export function CommitGraph({
   lineStats?: ReadonlyMap<string, CommitStats | null>;
   /** The commits whose rows are on screen, in graph order, whenever that changes. */
   onCommitsVisible?: (commitIds: string[]) => void;
+  /**
+   * Collapsed merges (#617): the expanded ones, whose commits `commits` already lists below them.
+   * A row with `mergedCount` gets a "+N" control (and ArrowRight/ArrowLeft on the selected row)
+   * when `onExpandMerge` is given; `atLeast` is how many of its commits to load.
+   */
+  expandedMerges?: Readonly<Record<string, MergeExpansion>>;
+  onExpandMerge?: (mergeId: string, atLeast?: number) => void;
+  onCollapseMerge?: (mergeId: string) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -174,7 +187,9 @@ export function CommitGraph({
   const [navigationPicker, setNavigationPicker] = useState<{ items: ContextMenuItem[]; x: number; y: number } | null>(
     null,
   );
-  const commitLayouts = useMemo(() => assignLanes(commits), [commits]);
+  // The commit of an expanded merge each listed commit belongs to (#617).
+  const mergeOwners = useMemo(() => expandedFrom(commits, expandedMerges), [commits, expandedMerges]);
+  const commitLayouts = useMemo(() => assignLanes(commits, new Set(mergeOwners.keys())), [commits, mergeOwners]);
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
   // `focusId` is the last focus the graph itself reported through `onSelectRow`. A focus that
   // differs from it came from outside (search, sidebar, refresh) and drops the multi-selection.
@@ -426,6 +441,37 @@ export function CommitGraph({
     );
   };
 
+  // Collapsed merges (#617). Collapsing a merge whose commits hold the selection selects the merge,
+  // so the selection never sits on a row that is gone.
+  const canExpand = (commit: GraphCommit) =>
+    onExpandMerge !== undefined && commit.mergedCount !== undefined && commit.mergedCount > 0;
+  const expandMerge = (mergeId: string) => onExpandMerge?.(mergeId);
+  const collapseMerge = (mergeId: string) => {
+    const inside = primaryId !== null && primaryId !== mergeId && mergeOwners.get(primaryId) === mergeId;
+    if (inside) setSelection(selectOnly(mergeId), { commitId: mergeId });
+    onCollapseMerge?.(mergeId);
+  };
+  // ArrowRight expands the selected merge; ArrowLeft collapses it, or from one of its commits
+  // goes to the merge. `true` when the key did something.
+  const expandOrCollapseSelected = (expand: boolean): boolean => {
+    if (selectedIndex < 1) return false;
+    const commit = commits[selectedIndex - 1];
+    const expanded = commit.id in expandedMerges;
+    if (expand) {
+      if (!canExpand(commit) || expanded) return false;
+      expandMerge(commit.id);
+      return true;
+    }
+    if (expanded) {
+      collapseMerge(commit.id);
+      return true;
+    }
+    const owner = mergeOwners.get(commit.id);
+    if (owner === undefined) return false;
+    setSelection(selectOnly(owner), { commitId: owner }, "step");
+    return true;
+  };
+
   const openMenuForSelected = (list: HTMLUListElement) => {
     if (selectedIndex < 1) return;
     const row = list.children[selectedIndex] as HTMLElement | undefined;
@@ -456,6 +502,16 @@ export function CommitGraph({
     if (bracketKey && event.key === "]") {
       event.preventDefault();
       goToChild(event.currentTarget);
+      return;
+    }
+    if (
+      (event.key === "ArrowRight" || event.key === "ArrowLeft") &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      if (expandOrCollapseSelected(event.key === "ArrowRight")) event.preventDefault();
       return;
     }
     const extend = event.shiftKey;
@@ -647,7 +703,7 @@ export function CommitGraph({
       role="listbox"
       aria-multiselectable="true"
       aria-label="Commit history"
-      aria-keyshortcuts="ArrowUp ArrowDown Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F [ ] Shift+["
+      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F [ ] Shift+["
     >
       <ListRow
         className={styles.uncommittedRow}
@@ -666,7 +722,7 @@ export function CommitGraph({
       {commits.map((commit, index) => (
         <ListRow
           key={commit.id}
-          className="commit-row"
+          className={mergeOwners.has(commit.id) ? `commit-row ${styles.mergedRow}` : "commit-row"}
           data-commit-id={commit.id}
           selected={effectiveSelection.ids.has(commit.id)}
           onClick={(event) => handleCommitClick(event, commit.id)}
@@ -694,6 +750,15 @@ export function CommitGraph({
           <span className={styles.commitSummary}>
             {commit.shortId} {commit.summary}
           </span>
+          {canExpand(commit) && (
+            <MergeToggle
+              mergedCount={commit.mergedCount ?? 0}
+              expansion={expandedMerges[commit.id]}
+              onExpand={() => expandMerge(commit.id)}
+              onCollapse={() => collapseMerge(commit.id)}
+              onShowMore={(atLeast) => onExpandMerge?.(commit.id, atLeast)}
+            />
+          )}
           <CommitRowLineStats stats={lineStats?.get(commit.id)} />
           <span className={styles.author} title={commit.authorEmail}>
             {commit.authorName}
@@ -795,6 +860,60 @@ export function CommitGraph({
       </div>
     )}
     </>
+  );
+}
+
+/**
+ * A collapsed merge's "+N" (#617): expands the N commits it brought in below its row, "−N" hides
+ * them again; "More" loads the next page of a long side branch. A mouse affordance: the list's
+ * ArrowRight/ArrowLeft do the same from the keyboard, so the buttons stay out of the tab order.
+ */
+function MergeToggle({
+  mergedCount,
+  expansion,
+  onExpand,
+  onCollapse,
+  onShowMore,
+}: {
+  mergedCount: number;
+  expansion: MergeExpansion | undefined;
+  onExpand: () => void;
+  onCollapse: () => void;
+  onShowMore: (atLeast: number) => void;
+}) {
+  const commitsWord = mergedCount === 1 ? "commit" : "commits";
+  const expanded = expansion !== undefined;
+  return (
+    <span className={styles.mergeToggle}>
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-expanded={expanded}
+        aria-label={`${expanded ? "Hide" : "Show"} the ${mergedCount} ${commitsWord} this merge brought in`}
+        title={`${expanded ? "Hide" : "Show"} the ${mergedCount} merged ${commitsWord}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (expanded) onCollapse();
+          else onExpand();
+        }}
+      >
+        {expanded ? "−" : "+"}
+        {mergedCount}
+      </button>
+      {expansion !== undefined && expansionHasMore(expansion) && (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Show more merged commits (${expansion.commits.length} of ${mergedCount} shown)`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onShowMore(expansion.limit + MERGE_PAGE_SIZE);
+          }}
+        >
+          More
+        </button>
+      )}
+    </span>
   );
 }
 

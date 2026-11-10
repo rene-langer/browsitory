@@ -57,7 +57,8 @@ When the commit is further down than the loaded history, the graph loads more un
 there. When the graph doesn't show it at all, the commit is still selected (its changes show),
 and a note above the graph says why: it is only on a branch the graph hides (**Show ⟨branch⟩**
 adds that branch to the graph), it is on a side branch of the one branch the graph shows
-(**Show all branches**), or it is on no branch at all.
+(**Show all branches**), or it is on no branch at all. A commit inside a collapsed merge (see
+[Collapse merges](history.md#collapse-merges)) is shown by expanding that merge.
 
 ## Keyboard shortcuts
 
@@ -80,6 +81,7 @@ Press **?** (outside a text field) for the full list of shortcuts. The most usef
 | d d | Discard the selected lines or hunk |
 | [ and ] | Previous and next hunk (in a diff); parent and child commit (in the commit list) |
 | Shift+[ | Choose one of a merge commit's parents (in the commit list) |
+| →/← | Expand or collapse a merge with **Collapse merges** on (in the commit list) |
 | Alt+Left/Right (Cmd+[ / Cmd+] on macOS) | Back and forward through the selected commits (where the host doesn't use them) |
 | Left/Right, Home/End | Switch tabs, with a tab focused |
 | Delete | Close the focused tab |

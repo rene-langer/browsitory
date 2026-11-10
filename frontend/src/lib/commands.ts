@@ -294,7 +294,7 @@ export function buildCommands(context: CommandContext): Command[] {
 }
 
 /** App-wide commands: help, dialogs and the commit search. */
-function appCommands({ onShowShortcuts, app, search }: FamilyContext): Command[] {
+function appCommands({ onShowShortcuts, app, search, appState, state }: FamilyContext): Command[] {
   const { commands, add } = family("General");
   if (onShowShortcuts !== undefined) {
     add({
@@ -353,6 +353,13 @@ function appCommands({ onShowShortcuts, app, search }: FamilyContext): Command[]
       run: search.onSearchCommits,
     });
   }
+  // The graph's "Collapse merges" toggle (#617); a view setting, so never blocked.
+  add({
+    id: "toggle-collapse-merges",
+    label: state.collapseMerges ? "Show every commit of merged branches" : "Collapse merges",
+    keywords: ["collapse", "expand", "merges", "first parent", "graph", "history", "side branches"],
+    run: () => void appState.setCollapseMerges(!state.collapseMerges),
+  });
   return commands;
 }
 

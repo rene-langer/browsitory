@@ -72,6 +72,34 @@
   flex-shrink: 0;
 }
 
+/* A collapsed merge's "+N" / "−N" and "More" (#617): small, quiet, tabular digits. */
+.mergeToggle {
+  display: inline-flex;
+  gap: var(--space-1);
+  flex: 0 0 auto;
+}
+
+.mergeToggle button {
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  padding: 0 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-control);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.mergeToggle button[aria-expanded="true"] {
+  color: var(--color-text);
+}
+
+/* The commits of an expanded merge: their summaries a step quieter than the merge line's. */
+li.mergedRow .commitSummary {
+  color: var(--color-text-muted);
+}
+
 /* Match the commit rows' size and face; the selected tint comes from ListRow's shared token. */
 li.uncommittedRow {
   font-size: var(--text-sm);
