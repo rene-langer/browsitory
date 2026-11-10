@@ -1811,6 +1811,19 @@ pub fn drop_stash(
 mod tests {
     use super::*;
 
+    /// Only libgit2's checkout conflict ("1 conflict prevents checkout") is a file in the way;
+    /// a conflict code from another class, or another checkout error, is not (#416).
+    #[test]
+    fn only_a_checkout_conflict_is_a_file_in_the_way() {
+        use ErrorClass::{Checkout, Index, Os};
+        use ErrorCode::{Conflict, GenericError};
+        let in_the_way = |code, class| is_checkout_conflict(&git2::Error::new(code, class, "x"));
+        assert!(in_the_way(Conflict, Checkout));
+        assert!(!in_the_way(Conflict, Index));
+        assert!(!in_the_way(GenericError, Checkout));
+        assert!(!in_the_way(GenericError, Os));
+    }
+
     #[test]
     fn ntfs_fold_meets_letter_case_only() {
         // #389, as NTFS showed on CI: `Café`/`CAFÉ` are one file name, `Straße`/`STRASSE` and
