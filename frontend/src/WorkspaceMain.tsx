@@ -13,7 +13,7 @@ import { UndoRedoButtons } from "./components/UndoRedoButtons";
 import type { RepoClient } from "./ipc/RepoClient";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
 import { issueForgeRepository } from "./lib/messageLinks";
-import { sequenceToast } from "./lib/operationStatus";
+import { sequenceToast, sequenceUndoable } from "./lib/operationStatus";
 import type { useAnnounce } from "./state/useAnnounce";
 import type { SelectedRow, UseAppStateResult } from "./state/useAppState";
 import type { UseCommitSearchResult } from "./state/useCommitSearch";
@@ -244,15 +244,17 @@ export function WorkspaceMain({
                   void runPickAction(
                     () => appState.cherryPickMany(ids),
                     (outcome) => sequenceToast("CherryPick", outcome),
+                    sequenceUndoable,
                   )
                 }
                 onRevertMany={(ids) =>
                   void runPickAction(
                     () => appState.revertMany(ids),
                     (outcome) => sequenceToast("Revert", outcome),
+                    sequenceUndoable,
                   )
                 }
-                onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
+                onCheckoutCommit={announce((commitId) => `Checked out ${commitId.slice(0, 7)}`, appState.checkoutCommit, { undoable: true })}
                 onChooseParent={openCommitDialog}
                 onRequestReset={(commitId, returnFocusTo) => openCommitDialog("Reset", commitId, returnFocusTo)}
                 onEditHeadMessage={onEditHeadMessage}
