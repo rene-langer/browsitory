@@ -18,18 +18,14 @@ import type {
   DiffHunk,
   DiffSource,
   DiffOptions,
-  FileConflictChoice,
   HunkOptions,
-  MarkResolvedOutcome,
-  ConflictSide,
   RepoClient,
   StatusEntry,
   StatusKind,
 } from "../ipc/RepoClient";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWholeFile } from "../state/useWholeFile";
-import type { SelectedRow } from "../state/useAppState";
-import type { ExternalToolsApi } from "../state/useExternalTools";
+import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { BlameView } from "./BlameView";
 import { CollapseToggle } from "./CollapseToggle";
 import { ConflictResolutionPane } from "./ConflictResolutionPane";
@@ -76,26 +72,15 @@ export function UncommittedFileSection({
   selectionSummary,
   onSelectionAction,
   selectionBusyReason,
-  onStageFile,
-  onUnstageFile,
   onStageHunk,
   onUnstageHunk,
   onDiscardHunk,
   onStageLines,
   onUnstageLines,
   onDiscardLines,
-  onSelectRow,
-  onResolveConflict,
-  onResolveAddDeleteConflict,
   onRequestDiscardFile,
-  onIgnorePath,
   onStashFile,
   stashDisabledReason,
-  onOpenFileHistory,
-  onOpenFolderHistory,
-  externalTools,
-  onMarkResolved,
-  onResolveWholeFile,
   sectionRef,
 }: {
   repoPath: string;
@@ -120,30 +105,31 @@ export function UncommittedFileSection({
   onSelectionAction: (kind: SelectionActionKind) => void;
   /** Why the selection's repository actions are disabled (another action is running), else `null`. */
   selectionBusyReason: string | null;
-  onStageFile: (path: string) => void;
-  onUnstageFile: (path: string) => void;
   onStageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void;
   onUnstageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void;
   onDiscardHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void;
   onStageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void;
   onUnstageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void;
   onDiscardLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void;
-  onSelectRow: (row: SelectedRow) => void;
-  onResolveConflict: (path: string, resolvedContent: string) => void;
-  onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   onRequestDiscardFile: (path: string) => void;
-  onIgnorePath: (pattern: string) => void;
   onStashFile: (path: string) => void;
   /** `stashBlockReason`: disables "Stash file…" like the Stash button. */
   stashDisabledReason: string | null;
-  onOpenFileHistory?: (path: string) => void;
-  onOpenFolderHistory?: (folder: string) => void;
-  externalTools?: ExternalToolsApi;
-  onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
-  // The conflict pane's "Use ours/theirs (whole file)".
-  onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   sectionRef: (el: HTMLDivElement | null) => void;
 }) {
+  const {
+    onStageFile,
+    onUnstageFile,
+    onSelectRow,
+    onResolveConflict,
+    onResolveAddDeleteConflict,
+    onIgnorePath,
+    onOpenFileHistory,
+    onOpenFolderHistory,
+    externalTools,
+    onMarkResolved,
+    onResolveWholeFile,
+  } = useWorkspaceActions();
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo?: HTMLElement } | null>(null);
   const actionsRef = useRef<HTMLButtonElement>(null);
   const [confirmMarkers, setConfirmMarkers] = useState(false);

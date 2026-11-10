@@ -2,7 +2,7 @@ import { withBlockedReason, type StashActions } from "./diffPaneShared";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { useEffect, useState } from "react";
 import type { RepoClient, StashEntry, StashFiles } from "../ipc/RepoClient";
-import type { SelectedRow } from "../state/useAppState";
+import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./DiffPane.module.css";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
@@ -20,14 +20,13 @@ export function StashDiffPane({
   client,
   stash,
   actions,
-  onSelectRow,
 }: {
   repoPath: string;
   client: RepoClient;
   stash: StashEntry;
   actions: StashActions;
-  onSelectRow: (row: SelectedRow) => void;
 }) {
+  const { onSelectRow } = useWorkspaceActions();
   const [files, setFiles] = useState<StashFiles | null>(null);
   const [error, setError] = useState<DescribedError | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());

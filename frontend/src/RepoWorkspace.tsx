@@ -85,6 +85,7 @@ import { useOutcomeToasts } from "./state/useOutcomeToasts";
 import { useSequenceActions } from "./state/useSequenceActions";
 import { useUndoRedoActions } from "./state/useUndoRedoActions";
 import { useWorkspaceShortcuts } from "./state/useWorkspaceShortcuts";
+import { WorkspaceActionsContext, type WorkspaceActions } from "./state/useWorkspaceActions";
 
 // Toast copy for line-level stage/unstage/discard ("Staged 1 line", "Discarded 3 lines").
 const linesToast = (verb: string, n: number) => `${verb} ${n} ${n === 1 ? "line" : "lines"}`;
@@ -383,6 +384,80 @@ export function RepoWorkspace({
   );
   useOutcomeToasts(appState.state, pushToast);
 
+  // What the diff pane's views and the commit dock can do (#491), read from
+  // `WorkspaceActionsContext` instead of being passed down through every level.
+  const workspaceActions: WorkspaceActions = {
+    onSelectRow: appState.selectRow,
+    onStageFile: appState.stageFile,
+    onUnstageFile: appState.unstageFile,
+    onStageAllFiles: appState.stageAllFiles,
+    onUnstageAllFiles: appState.unstageAllFiles,
+    onStageHunk: appState.stageHunk,
+    onUnstageHunk: appState.unstageHunk,
+    onDiscardHunk: appState.discardHunk,
+    onStageLines: (p, o, n, c, idx, shown) => announce(linesToast("Staged", idx.length), appState.stageLines)(p, o, n, c, idx, shown),
+    onUnstageLines: (p, o, n, c, idx, shown) => announce(linesToast("Unstaged", idx.length), appState.unstageLines)(p, o, n, c, idx, shown),
+    onDiscardLines: (p, o, n, c, idx, shown) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx, shown),
+    // Re-checked: the repository can become busy while a confirmation is open (#521).
+    onDiscardFile: (path) =>
+      discardDropBlockedReason !== null
+        ? undefined
+        : announce(`Discarded changes to ${path}`, appState.discardFile)(path),
+    onDiscardAllUnstaged: (paths) => {
+      if (discardDropBlockedReason === null) void announce("Discarded all unstaged changes", appState.discardAllUnstaged)(paths);
+    },
+    onDiscardFiles: (paths) => {
+      if (discardDropBlockedReason !== null) return;
+      void announce(`Discarded changes to ${paths.length} ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged)(paths);
+    },
+    onIgnorePath: (pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern),
+    onIgnorePaths: (patterns) =>
+      announce(`Added ${patterns.length} ${patterns.length === 1 ? "pattern" : "patterns"} to .gitignore`, appState.ignorePaths)(patterns),
+    onResolveConflict: appState.resolveConflict,
+    onResolveAddDeleteConflict: appState.resolveAddDeleteConflict,
+    onMarkResolved: appState.markResolved,
+    onResolveWholeFile: (path, side) => void appState.resolveWholeFile(path, side),
+    onCommit: (message, trailers) => announce("Committed", commitAndClearDraft)(message, appState.state.skipHooks, trailers),
+    onAmendCommit: (message, options) => announce("Amended commit", amendAndRecord)(message, appState.state.skipHooks, options),
+    onSetAmendMode: appState.setAmendMode,
+    onAbortMerge: abortMergeOrSequence,
+    onSaveStash: announce("Changes stashed", () => appState.saveStash()),
+    onOpenStashDialog: appState.openStashDialog,
+    onRebaseContinue: appState.rebaseContinue,
+    onRebaseAbort: () => void abortRebase(),
+    onSequenceContinue: continueSequence,
+    onSequenceAbort: abortSequence,
+    onCommitDraftChange: handleCommitDraftChange,
+    onCommitMessageFocused: clearFocusCommitMessage,
+    onCommitMessageCleared: appState.clearCommitMessageHandled,
+    commitHooks: {
+      skip: appState.state.skipHooks,
+      onToggleSkip: appState.setSkipHooks,
+      // Only a commit's, amend's or Continue's hooks; the others show in the "Hook status" strip
+      // (#185).
+      running: appState.state.hookRun?.source === "Commit" ? appState.state.hookRun : null,
+      onCancel: () => void appState.cancelHookRun(),
+    },
+    onOpenFileHistory: fileHistory.open,
+    onOpenLineHistory: fileHistory.openLines,
+    onOpenFolderHistory: openFolderHistory,
+    externalTools,
+    onRestoreFileVersion: (commitId, path) =>
+      announce(`Restored ${path} from ${commitId.slice(0, 7)}`, appState.restoreFileVersion)(commitId, path),
+    patchActions: diffPanePatchActions,
+    stashActions: {
+      onApply: appState.applyStash,
+      onPop: appState.popStash,
+      onDrop: (index) => void dropStash(index),
+      restoreIndex: appState.state.stashRestoreIndex,
+      onSetRestoreIndex: appState.setStashRestoreIndex,
+      blockers: storedStashBlockers,
+    },
+    onCurrentFileChange: setCurrentFile,
+    onSelectionChange: setFileSelection,
+  };
+
+
   // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
   // — report busy status up so `App`'s `RepoTabs` can disable this tab's close button, the same
   // rule that already disables every other mutating action while this is true.
@@ -404,6 +479,7 @@ export function RepoWorkspace({
     // component's own internal gates (`active &&` below) still need a real boolean rather than an
     // assumption that they're always mounted-implies-active.
     <CurrentDiffContext.Provider value={currentDiff}>
+    <WorkspaceActionsContext.Provider value={workspaceActions}>
     <div
       ref={setWorkspaceElement}
       style={{ display: active ? "contents" : "none" }}
@@ -1074,96 +1150,21 @@ export function RepoWorkspace({
                   branchCommits={appState.state.commits}
                   fileHistoryFocus={historyEntry === null ? null : { path: historyEntry.path, oldPath: historyEntry.oldPath }}
                   stashes={appState.state.stashes}
-                  stashActions={{
-                    onApply: appState.applyStash,
-                    onPop: appState.popStash,
-                    onDrop: (index) => void dropStash(index),
-                    restoreIndex: appState.state.stashRestoreIndex,
-                    onSetRestoreIndex: appState.setStashRestoreIndex,
-                    blockers: storedStashBlockers,
-                  }}
-                  onOpenFileHistory={fileHistory.open}
-                  onOpenLineHistory={fileHistory.openLines}
-                  onOpenFolderHistory={openFolderHistory}
-                  externalTools={externalTools}
-                  onRestoreFileVersion={(commitId, path) =>
-                    announce(`Restored ${path} from ${commitId.slice(0, 7)}`, appState.restoreFileVersion)(commitId, path)
-                  }
                   restoreBlockedReason={operationDisabledReason}
-                  patchActions={diffPanePatchActions}
-                  onMarkResolved={appState.markResolved}
-                  onResolveWholeFile={(path, side) => void appState.resolveWholeFile(path, side)}
                   status={appState.state.status}
                   refreshGeneration={appState.state.refreshGeneration}
                   discardRequest={discardRequest}
                   onDiscardRequestChange={setDiscardRequest}
-                  onCurrentFileChange={setCurrentFile}
                   initialCommitDraft={getCommitDraft(repoPath)}
-                  onCommitDraftChange={handleCommitDraftChange}
-                  onStageFile={appState.stageFile}
-                  onUnstageFile={appState.unstageFile}
-                  onStageAllFiles={appState.stageAllFiles}
-                  onUnstageAllFiles={appState.unstageAllFiles}
-                  onStageHunk={appState.stageHunk}
-                  onUnstageHunk={appState.unstageHunk}
-                  onDiscardHunk={appState.discardHunk}
-                  onStageLines={(p, o, n, c, idx, shown) => announce(linesToast("Staged", idx.length), appState.stageLines)(p, o, n, c, idx, shown)}
-                  onUnstageLines={(p, o, n, c, idx, shown) => announce(linesToast("Unstaged", idx.length), appState.unstageLines)(p, o, n, c, idx, shown)}
-                  onDiscardLines={(p, o, n, c, idx, shown) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx, shown)}
                   discardBlockedReason={discardDropBlockedReason}
-                  // Re-checked: the repository can become busy while a confirmation is open (#521).
-                  onDiscardFile={(path) =>
-                    discardDropBlockedReason !== null
-                      ? undefined
-                      : announce(`Discarded changes to ${path}`, appState.discardFile)(path)
-                  }
-                  onDiscardAllUnstaged={(paths) => {
-                    if (discardDropBlockedReason === null) void announce("Discarded all unstaged changes", appState.discardAllUnstaged)(paths);
-                  }}
-                  onDiscardFiles={(paths) => {
-                    if (discardDropBlockedReason !== null) return;
-                    void announce(`Discarded changes to ${paths.length} ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged)(paths);
-                  }}
-                  onIgnorePaths={(patterns) =>
-                    announce(`Added ${patterns.length} ${patterns.length === 1 ? "pattern" : "patterns"} to .gitignore`, appState.ignorePaths)(patterns)
-                  }
-                  onSelectionChange={setFileSelection}
                   selectionBusyReason={appState.state.pending ? "Another action is in progress." : null}
-                  onIgnorePath={(pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern)}
-                  onCommit={(message, trailers) =>
-                    announce("Committed", commitAndClearDraft)(message, appState.state.skipHooks, trailers)
-                  }
-                  onSaveStash={announce("Changes stashed", () => appState.saveStash())}
-                  onOpenStashDialog={appState.openStashDialog}
-                  onSelectRow={appState.selectRow}
-                  onResolveConflict={appState.resolveConflict}
-                  onResolveAddDeleteConflict={appState.resolveAddDeleteConflict}
                   mergeMessage={appState.state.mergeMessage}
-                  onAbortMerge={abortMergeOrSequence}
-                  onSequenceContinue={continueSequence}
-                  onSequenceAbort={abortSequence}
                   sequencePending={appState.state.pending}
                   amendMode={appState.state.amendMode}
                   headInfo={appState.state.headInfo}
-                  onSetAmendMode={appState.setAmendMode}
-                  onAmendCommit={(message, options) =>
-                    announce("Amended commit", amendAndRecord)(message, appState.state.skipHooks, options)
-                  }
                   focusCommitMessage={focusCommitMessage}
-                  onCommitMessageFocused={clearFocusCommitMessage}
-                  commitHooks={{
-                    skip: appState.state.skipHooks,
-                    onToggleSkip: appState.setSkipHooks,
-                    // Only a commit's, amend's or Continue's hooks; the others show in the
-                    // "Hook status" strip (#185).
-                    running: appState.state.hookRun?.source === "Commit" ? appState.state.hookRun : null,
-                    onCancel: () => void appState.cancelHookRun(),
-                  }}
                   clearCommitMessage={appState.state.clearCommitMessage}
-                  onCommitMessageCleared={appState.clearCommitMessageHandled}
                   rebaseProgress={appState.state.rebaseProgress}
-                  onRebaseContinue={appState.rebaseContinue}
-                  onRebaseAbort={() => void abortRebase()}
                 />
               )
             }
@@ -1188,6 +1189,7 @@ export function RepoWorkspace({
         </Overlay>
       )}
     </div>
+    </WorkspaceActionsContext.Provider>
     </CurrentDiffContext.Provider>
   );
 }

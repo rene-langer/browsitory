@@ -14,8 +14,6 @@ export interface CommitHooksControls {
 }
 
 export const NO_HEAD_INFO: HeadInfo = { headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
-export const noop = () => {};
-export const noAmend = async () => false;
 
 /** What a commit's view lists: the files it changed, or its whole tree (#446). */
 export type CommitView = "changes" | "tree";

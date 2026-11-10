@@ -1,43 +1,11 @@
+import { CommitDock } from "./CommitDock";
 import { UncommittedFileSection } from "./UncommittedFileSection";
-import {
-  NO_HEAD_INFO,
-  noAmend,
-  noop,
-  withBlockedReason,
-  type CommitHooksControls,
-  type DiffPanePatchActions,
-  type DiscardRequest,
-  type ReportedFileSelection,
-  type SelectionActionKind,
-} from "./diffPaneShared";
-import { conflictReason, rebaseInterruption, sequenceNoun, stashBlockReason } from "../lib/operationStatus";
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type MouseEvent,
-} from "react";
-import type {
-  AmendOptions,
-  FileConflictChoice,
-  GraphCommit,
-  HeadInfo,
-  HunkOptions,
-  MarkResolvedOutcome,
-  ConflictSide,
-  RepoClient,
-  StatusEntry,
-  Trailer,
-} from "../ipc/RepoClient";
-import { messageHistoryEntries, readCommitMessages, recentBranchCommits } from "../lib/commitMessageHistory";
-import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
-import type { SelectedRow } from "../state/useAppState";
-import type { ExternalToolsApi } from "../state/useExternalTools";
-import { CommitBox, type CommitDraft } from "./CommitBox";
-import { SplitButton } from "./primitives/SplitButton";
+import { NO_HEAD_INFO, withBlockedReason, type DiscardRequest, type SelectionActionKind } from "./diffPaneShared";
+import { stashBlockReason } from "../lib/operationStatus";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import type { GraphCommit, HeadInfo, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import { useWorkspaceActions } from "../state/useWorkspaceActions";
+import type { CommitDraft } from "./CommitBox";
 import { CollapseAllToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
 import {
@@ -58,7 +26,6 @@ import {
 } from "../lib/fileSelection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { isMenuKey } from "../lib/menuKeys";
-import { RebaseProgressPanel } from "./RebaseProgressPanel";
 
 // The change lists' keys (#449): arrows/j/k move, Shift extends, Ctrl/Cmd+A selects the group,
 // Escape keeps only the current file, `s` stages or unstages, the Menu key opens the menu.
@@ -75,165 +42,66 @@ export function UncommittedDiffPane({
   commits,
   branchCommits,
   status,
-  onStageFile,
-  onUnstageFile,
-  onStageAllFiles,
-  onUnstageAllFiles,
-  onStageHunk,
-  onUnstageHunk,
-  onDiscardHunk,
-  onStageLines,
-  onUnstageLines,
-  onDiscardLines,
-  onDiscardFile,
-  onDiscardAllUnstaged,
-  onIgnorePath,
-  onCommit,
-  onSaveStash,
-  onOpenStashDialog,
-  onSelectRow,
-  onResolveConflict,
-  onResolveAddDeleteConflict,
   mergeMessage,
-  onAbortMerge,
   amendMode = false,
   headInfo = NO_HEAD_INFO,
-  onSetAmendMode = noop,
-  onAmendCommit = noAmend,
   focusCommitMessage = false,
-  onCommitMessageFocused,
-  commitHooks,
   clearCommitMessage = null,
-  onCommitMessageCleared,
   rebaseProgress,
-  onRebaseContinue,
-  onRebaseAbort,
-  onSequenceContinue = noop,
-  onSequenceAbort = noop,
   sequencePending = false,
   refreshGeneration,
   discardRequest: discardRequestProp,
   onDiscardRequestChange,
-  onCurrentFileChange,
   initialCommitDraft,
-  onCommitDraftChange,
-  onOpenFileHistory,
-  onOpenFolderHistory,
-  externalTools,
-  onMarkResolved,
-  onResolveWholeFile,
-  onDiscardFiles,
-  onIgnorePaths,
-  onSelectionChange,
   selectionBusyReason,
   discardBlockedReason,
-  patchActions,
 }: {
-  patchActions?: DiffPanePatchActions;
-  onDiscardFiles: (paths: string[]) => void;
-  onIgnorePaths: (patterns: string[]) => void;
-  onSelectionChange?: (selection: ReportedFileSelection | null) => void;
   selectionBusyReason: string | null;
   discardBlockedReason: string | null;
-  onOpenFileHistory?: (path: string) => void;
-  onOpenFolderHistory?: (folder: string) => void;
-  externalTools?: ExternalToolsApi;
-  onMarkResolved?: (path: string, force: boolean) => Promise<MarkResolvedOutcome | null>;
-  // The conflict pane's "Use ours/theirs (whole file)".
-  onResolveWholeFile?: (path: string, side: ConflictSide) => void;
   repoPath: string;
   client: RepoClient;
   status: StatusEntry[];
   refreshGeneration: number;
   discardRequest?: DiscardRequest | null;
   onDiscardRequestChange?: (request: DiscardRequest | null) => void;
-  onCurrentFileChange?: (path: string | null) => void;
   initialCommitDraft?: CommitDraft;
-  onCommitDraftChange?: (draft: CommitDraft) => void;
-  onStageFile: (path: string) => void;
-  onUnstageFile: (path: string) => void;
-  onStageAllFiles: (paths: string[]) => void;
-  onUnstageAllFiles: (paths: string[]) => void;
-  // May return the mutation's promise (as `useAppState`'s do): the pane waits for it to settle
-  // before marking that path's diff stale, so the refetch can't race the mutation itself.
-  onStageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>;
-  onUnstageHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>;
-  onDiscardHunk: (path: string, oldStart: number, newStart: number, hunk: HunkOptions) => void | Promise<void>;
-  onStageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
-  onUnstageLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
-  onDiscardLines: (path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]) => void | Promise<void>;
-  onDiscardFile: (path: string) => void | Promise<void>;
-  // The paths the confirm dialog listed; only those are discarded.
-  onDiscardAllUnstaged: (paths: string[]) => void;
-  onIgnorePath: (pattern: string) => void;
-  // Resolves `true` once committed; CommitBox keeps the message otherwise.
   /** The loaded history (may be a file history or search results); stands in for
    * `branchCommits` when that is absent. */
   commits?: GraphCommit[];
   /** The graph's commits (not a file history or search), for the branch's recent messages and
    * HEAD's author in the amend Author field. */
   branchCommits?: GraphCommit[];
-  onCommit: (message: string, trailers: Trailer[]) => Promise<boolean>;
-  onSaveStash: () => void;
-  onOpenStashDialog: (paths: string[]) => void;
-  onSelectRow: (row: SelectedRow) => void;
-  onResolveConflict: (path: string, resolvedContent: string) => void;
-  onResolveAddDeleteConflict: (path: string, choice: FileConflictChoice) => void;
   mergeMessage: string | null;
-  onAbortMerge: () => void;
   amendMode?: boolean;
   headInfo?: HeadInfo;
-  onSetAmendMode?: (on: boolean) => void;
-  onAmendCommit?: (message: string, options: AmendOptions) => Promise<boolean>;
   focusCommitMessage?: boolean;
-  onCommitMessageFocused?: () => void;
-  // CommitBox's "Skip hooks" toggle and running-hook status (installed hooks come from
-  // `headInfo.commitHooks`); omitted, neither shows.
-  commitHooks?: CommitHooksControls;
   // One-shot CommitBox clear request (see its `clearMessage`).
   clearCommitMessage?: string | null;
-  onCommitMessageCleared?: () => void;
   rebaseProgress: { currentStep: number; totalSteps: number } | null;
-  onRebaseContinue: () => void;
-  onRebaseAbort: () => void;
-  // Continue/Abort for a stopped cherry-pick/revert sequence (`headInfo.sequence`).
-  onSequenceContinue?: () => void;
-  onSequenceAbort?: () => void;
   // An action is running: the sequence's Continue/Abort are disabled (no double submit).
   sequencePending?: boolean;
 }) {
-  const { settings: commitMessageSettings } = useCommitMessageSettingsContext();
-  const loadRecentAuthors = useCallback(() => client.listRecentAuthors(repoPath), [client, repoPath]);
-  const loadMessageHistory = useCallback(
-    () =>
-      messageHistoryEntries(
-        readCommitMessages(repoPath),
-        recentBranchCommits(branchCommits ?? commits ?? [], headInfo.headId),
-        (commitId) => client.getCommitMessage(repoPath, commitId),
-      ),
-    [client, repoPath, branchCommits, commits, headInfo.headId],
-  );
-  // HEAD's author comes from the graph's commits: in file-history or search mode `commits` holds
-  // those results, which may not include HEAD (#464).
-  const headCommit =
-    headInfo.headId === null ? undefined : (branchCommits ?? commits)?.find((c) => c.id === headInfo.headId);
-  const headAuthor = headCommit === undefined ? null : { name: headCommit.authorName, email: headCommit.authorEmail };
-  const [headMessage, setHeadMessage] = useState<string | null>(null);
-  useEffect(() => {
-    if (!amendMode || headInfo.headId === null) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setHeadMessage(null);
-      return;
-    }
-    let cancelled = false;
-    void client.getCommitMessage(repoPath, headInfo.headId).then(
-      (text) => !cancelled && setHeadMessage(text),
-      () => !cancelled && setHeadMessage(""),
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [amendMode, headInfo.headId, client, repoPath]);
+  const actions = useWorkspaceActions();
+  const {
+    onStageFile,
+    onUnstageFile,
+    onStageAllFiles,
+    onUnstageAllFiles,
+    onStageHunk,
+    onUnstageHunk,
+    onDiscardHunk,
+    onStageLines,
+    onUnstageLines,
+    onDiscardLines,
+    onDiscardFile,
+    onDiscardAllUnstaged,
+    onOpenStashDialog,
+    onCurrentFileChange,
+    onSelectionChange,
+    patchActions,
+  } = actions;
+  const onDiscardFiles = actions.onDiscardFiles ?? onDiscardAllUnstaged;
+  const onIgnorePaths = actions.onIgnorePaths ?? ((patterns: string[]) => patterns.forEach(actions.onIgnorePath));
   const [current, setCurrent] = useState<{ path: string; staged: boolean } | null>(null);
   // The files selected for a multi-file action (#449), within one group. The current file is
   // always part of it; a plain click or arrow key makes it the only one.
@@ -644,26 +512,15 @@ export function UncommittedDiffPane({
         selectionSummary={summary}
         onSelectionAction={(kind) => runSelectionAction(entry.staged, kind)}
         selectionBusyReason={selectionBusyReason}
-        onStageFile={onStageFile}
-        onUnstageFile={onUnstageFile}
         onStageHunk={wrapHunkAction(onStageHunk)}
         onUnstageHunk={wrapHunkAction(onUnstageHunk)}
         onDiscardHunk={wrapHunkAction(onDiscardHunk)}
         onStageLines={wrapLineAction(onStageLines)}
         onUnstageLines={wrapLineAction(onUnstageLines)}
         onDiscardLines={wrapLineAction(onDiscardLines)}
-        onSelectRow={onSelectRow}
-        onResolveConflict={onResolveConflict}
-        onResolveAddDeleteConflict={onResolveAddDeleteConflict}
         onRequestDiscardFile={(path) => setDiscardRequest({ kind: "file", path })}
-        onIgnorePath={onIgnorePath}
         onStashFile={(path) => onOpenStashDialog([path])}
         stashDisabledReason={stashReason}
-        onOpenFileHistory={onOpenFileHistory}
-        onOpenFolderHistory={onOpenFolderHistory}
-        externalTools={externalTools}
-        onMarkResolved={onMarkResolved}
-        onResolveWholeFile={onResolveWholeFile}
         sectionRef={(el) => {
           sectionRefs.current[key] = el;
         }}
@@ -790,105 +647,23 @@ export function UncommittedDiffPane({
           onCancel={() => setDiscardRequest(null)}
         />
       )}
-      <div className={styles.commitDock} role="group" aria-label="Commit actions">
-        {/* Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
-            resolved/amended content lives in the working tree, so stashing it away and continuing
-            lands an empty (or wrong) commit. Disabled for the whole pause by the stash rule the
-            file menu and the command palette share (`stashBlockReason`, #495). */}
-        <SplitButton
-          label="Stash"
-          onClick={onSaveStash}
-          disabled={stashReason !== null}
-          title={stashReason ?? undefined}
-          menuLabel="More stash options"
-          items={[
-            { label: "Stash all", onSelect: () => onSaveStash() },
-            { label: "Stash…", onSelect: () => onOpenStashDialog([]) },
-          ]}
-        />
-        {headInfo.sequence !== null ? (
-          // A stopped cherry-pick/revert sequence: no editable message per step; Continue
-          // commits the resolved step with its MERGE_MSG, like rebase continue.
-          <RebaseProgressPanel
-            currentStep={headInfo.sequence.currentStep}
-            totalSteps={headInfo.sequence.totalSteps}
-            disabled={sequencePending || conflictCount > 0}
-            disabledReason={conflictReason(conflictCount)}
-            onContinue={onSequenceContinue}
-            onAbort={onSequenceAbort}
-            abortDisabled={sequencePending}
-            title={headInfo.sequence.kind === "CherryPick" ? "Cherry-pick in progress" : "Revert in progress"}
-            continueLabel={`Continue ${sequenceNoun(headInfo.sequence.kind)}`}
-            abortLabel={`Abort ${sequenceNoun(headInfo.sequence.kind)}`}
-            hooks={
-              commitHooks === undefined ? undefined : { running: commitHooks.running, onCancel: commitHooks.onCancel }
-            }
-          />
-        ) : rebaseProgress !== null ? (
-          // An interrupted rebase (changed outside Browsitory) can only be aborted.
-          <RebaseProgressPanel
-            currentStep={rebaseProgress.currentStep}
-            totalSteps={rebaseProgress.totalSteps}
-            disabled={conflictCount > 0 || rebaseInterruption(headInfo.rebase) !== undefined}
-            disabledReason={rebaseInterruption(headInfo.rebase) ?? conflictReason(conflictCount)}
-            onContinue={onRebaseContinue}
-            onAbort={onRebaseAbort}
-          />
-        ) : (
-          <CommitBox
-            onCommit={onCommit}
-            disabled={stagedCount === 0 || conflictCount > 0}
-            disabledReason={conflictCount > 0 ? conflictReason(conflictCount) : "Stage changes to commit"}
-            onAbortMerge={onAbortMerge}
-            abortLabel={
-              headInfo.operation === "CherryPick"
-                ? "Abort cherry-pick"
-                : headInfo.operation === "Revert"
-                  ? "Abort revert"
-                  : "Abort merge"
-            }
-            // A pending squash merge pre-fills the message too, but there is no merge to abort.
-            // A leftover's message belongs to a commit already made: the next commit is the user's own.
-            initialMessage={(headInfo.operationLeftover ? null : mergeMessage) ?? headInfo.squashMessage ?? undefined}
-            // A terminal rebase's step writes MERGE_MSG (and a merge step MERGE_HEAD) too; only the
-            // terminal ends it (#263).
-            showAbort={mergeMessage !== null && headInfo.terminalRebase === null}
-            initialDraft={initialCommitDraft}
-            onDraftChange={onCommitDraftChange}
-            focusMessage={focusCommitMessage}
-            onFocusMessageHandled={onCommitMessageFocused}
-            hooks={
-              commitHooks === undefined
-                ? undefined
-                : {
-                    installed: headInfo.commitHooks.length > 0,
-                    // The worker lists `pre-merge-commit` only when the commit will run it.
-                    merging: headInfo.commitHooks.includes("pre-merge-commit"),
-                    ...commitHooks,
-                  }
-            }
-            clearMessage={clearCommitMessage}
-            onClearMessageHandled={onCommitMessageCleared}
-            messageSettings={commitMessageSettings}
-            loadRecentAuthors={loadRecentAuthors}
-            loadMessageHistory={loadMessageHistory}
-            amend={{
-              // A leftover merge/pick/revert doesn't block amend: the backend clears it first (#240).
-              available:
-                headInfo.headId !== null &&
-                (headInfo.operationLeftover || (headInfo.operation === null && mergeMessage === null)) &&
-                headInfo.sequence === null &&
-                headInfo.terminalRebase === null,
-              on: amendMode,
-              headMessage,
-              pushed: headInfo.headPushed,
-              onToggle: onSetAmendMode,
-              onAmend: onAmendCommit,
-              headAuthor,
-            }}
-          />
-        )}
-      </div>
+      <CommitDock
+        repoPath={repoPath}
+        client={client}
+        commits={commits}
+        branchCommits={branchCommits}
+        mergeMessage={mergeMessage}
+        amendMode={amendMode}
+        headInfo={headInfo}
+        rebaseProgress={rebaseProgress}
+        sequencePending={sequencePending}
+        stagedCount={stagedCount}
+        conflictCount={conflictCount}
+        stashReason={stashReason}
+        initialCommitDraft={initialCommitDraft}
+        focusCommitMessage={focusCommitMessage}
+        clearCommitMessage={clearCommitMessage}
+      />
     </div>
   );
 }

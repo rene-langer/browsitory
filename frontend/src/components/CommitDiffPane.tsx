@@ -2,8 +2,7 @@ import type { CommitView, DiffPanePatchActions, FileHistoryFocus } from "./diffP
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { useEffect, useMemo, useState } from "react";
 import type { CommitHunk, DiffOptions, GraphCommit, RepoClient } from "../ipc/RepoClient";
-import type { SelectedRow } from "../state/useAppState";
-import type { ExternalToolsApi } from "../state/useExternalTools";
+import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { CollapseAllToggle } from "./CollapseToggle";
 import { CommitHeader } from "./CommitHeader";
 import styles from "./DiffPane.module.css";
@@ -38,34 +37,29 @@ export function CommitDiffPane({
   client,
   commitId,
   commits,
-  onSelectRow,
   focus,
-  onOpenFileHistory,
-  onOpenLineHistory,
-  onOpenFolderHistory,
-  externalTools,
   view,
   onViewChange,
-  onRestoreFileVersion,
   restoreBlockedReason,
-  patchActions,
 }: {
-  patchActions?: DiffPanePatchActions;
   repoPath: string;
   client: RepoClient;
   commitId: string;
   commits?: GraphCommit[];
-  onSelectRow: (row: SelectedRow) => void;
   focus: FileHistoryFocus | null;
-  onOpenFileHistory?: (path: string) => void;
-  onOpenLineHistory?: (path: string, revision: string, startLine: number, endLine: number) => void;
-  onOpenFolderHistory?: (folder: string) => void;
-  externalTools?: ExternalToolsApi;
   view: CommitView;
   onViewChange: (view: CommitView) => void;
-  onRestoreFileVersion?: (commitId: string, path: string) => void | Promise<void>;
   restoreBlockedReason: string | null;
 }) {
+  const {
+    onSelectRow,
+    onOpenFileHistory,
+    onOpenLineHistory,
+    onOpenFolderHistory,
+    externalTools,
+    onRestoreFileVersion,
+    patchActions,
+  } = useWorkspaceActions();
   const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
   const fetchCommitDiff = (path: string, oldPath: string | null) => (opts: DiffOptions) =>
     oldPath != null
