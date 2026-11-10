@@ -348,11 +348,17 @@ function undoCommands({ undo, blocked }: FamilyContext): Command[] {
   return commands;
 }
 
-/** Pull and patches: what changes or exports the working tree as a whole. */
+/**
+ * Pull and patches: what changes or exports the working tree as a whole. The patches are listed
+ * under "Diff", Pull under "Remotes" with fetch and push (#592).
+ */
 function workingTreeCommands({ appState, state, blocked }: FamilyContext): Command[] {
-  const { commands, add } = family("General");
+  const { commands, add } = family("Diff");
   if (!blocked && state.upstream !== null) {
-    add({ id: "pull", label: "Pull", keywords: ["pull", "sync"], run: () => void appState.pullCurrentUpstream() });
+    add(
+      { id: "pull", label: "Pull", keywords: ["pull", "sync"], run: () => void appState.pullCurrentUpstream() },
+      "Remotes",
+    );
   }
   // #448: a patch file applied to the working tree (recorded, so behind the repository guard);
   // saving the staged changes only reads.
@@ -454,9 +460,14 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
       void appState.checkoutCommit(commitId),
     );
     // The keyboard path for the commit menu's "Create tag…" (#438). Only opens the dialog, whose
-    // Create button carries the busy rule, so it is offered while an operation runs.
-    offer("create-tag-selected", actions.createTag, ["tag", "create", "new", "release", "commit"], () =>
-      appState.openCreateTagDialog(commitId),
+    // Create button carries the busy rule, so it is offered while an operation runs. Like every
+    // local tag command, it is listed under "Branches" (#583).
+    offer(
+      "create-tag-selected",
+      actions.createTag,
+      ["tag", "create", "new", "release", "commit"],
+      () => appState.openCreateTagDialog(commitId),
+      "Branches",
     );
     // Reset asks for the mode in its dialog.
     if (commit !== undefined) {
@@ -465,12 +476,15 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
   }
   const headId = state.headInfo.headId;
   if (headId !== null) {
-    add({
-      id: "create-tag-head",
-      label: "Create tag at HEAD…",
-      keywords: ["tag", "create", "new", "release", "head"],
-      run: () => appState.openCreateTagDialog(headId),
-    });
+    add(
+      {
+        id: "create-tag-head",
+        label: "Create tag at HEAD…",
+        keywords: ["tag", "create", "new", "release", "head"],
+        run: () => appState.openCreateTagDialog(headId),
+      },
+      "Branches",
+    );
   }
 
   if (!blocked && selectedCommit !== undefined) {
@@ -582,17 +596,13 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
   }
 
   if (state.remotes.length > 0) {
-    // These three are listed under "General", as they were before groups were declared (#494, #583).
     if (!blocked) {
-      add(
-        {
-          id: "fetch-all-remotes",
-          label: "Fetch all remotes",
-          keywords: ["fetch", "all", "remotes", "prune"],
-          run: () => void appState.fetchAllRemotes(),
-        },
-        "General",
-      );
+      add({
+        id: "fetch-all-remotes",
+        label: "Fetch all remotes",
+        keywords: ["fetch", "all", "remotes", "prune"],
+        run: () => void appState.fetchAllRemotes(),
+      });
     }
     const current = state.branches.find((branch) => branch.isCurrent);
     if (current !== undefined && state.headInfo.detachedAt === null) {
@@ -601,19 +611,15 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
         branchActions({ blockers, remoteCount: state.remotes.length, upstream: state.upstream }, current).pushTo,
         ["push", "publish", "upstream", "remote", "branch"],
         () => appState.openPushDialog(current.name),
-        "General",
       );
     }
     if (!blocked) {
-      add(
-        {
-          id: "delete-remote-branch",
-          label: "Delete remote branch…",
-          keywords: ["delete", "remove", "remote", "branch"],
-          run: () => appState.openDeleteRemoteBranchDialog(null, null),
-        },
-        "General",
-      );
+      add({
+        id: "delete-remote-branch",
+        label: "Delete remote branch…",
+        keywords: ["delete", "remove", "remote", "branch"],
+        run: () => appState.openDeleteRemoteBranchDialog(null, null),
+      });
     }
   }
 
@@ -673,9 +679,12 @@ function remoteCommands({ appState, state, blockers, blocked, sidebar }: FamilyC
 /**
  * Deleting a tag has a real confirmation dialog in TagPanel, which the palette must not skip:
  * the command stays discoverable by tag name but only reveals the Tags section.
+ *
+ * The palette has no "Tags" group: local tag commands (create, check out, delete) are listed under
+ * "Branches" with the other local refs, a remote tag's delete under "Remotes" (#583).
  */
 function tagCommands({ state, blocked, sidebar, panelVisible }: FamilyContext): Command[] {
-  const { commands, add } = family("General");
+  const { commands, add } = family("Branches");
   if (blocked || sidebar === undefined || !panelVisible("tags")) return commands;
   for (const tag of state.tags) {
     add({
@@ -855,43 +864,32 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
     keywords: ["diff", "syntax", "highlight", "colors"],
     run: () => update({ syntaxHighlight: !settings.syntaxHighlight }),
   });
-  // The current diff's toggles and the file history are listed under "General", as they were
-  // before groups were declared (#494, #583).
   const currentDiff = diff.currentDiff ?? null;
   if (currentDiff !== null) {
     const of = currentDiff.path === null ? "" : ` (${currentDiff.path})`;
     const fileKeywords = currentDiff.path === null ? [] : [currentDiff.path];
-    add(
-      {
-        id: "toggle-wrap-lines",
-        label: `Toggle wrap lines${of}`,
-        keywords: ["diff", "wrap", "lines", "word", "long", ...fileKeywords],
-        run: currentDiff.toggleWrap,
-      },
-      "General",
-    );
+    add({
+      id: "toggle-wrap-lines",
+      label: `Toggle wrap lines${of}`,
+      keywords: ["diff", "wrap", "lines", "word", "long", ...fileKeywords],
+      run: currentDiff.toggleWrap,
+    });
     if (currentDiff.canShowWholeFile) {
-      add(
-        {
-          id: "toggle-show-whole-file",
-          label: `Toggle show whole file${of}`,
-          keywords: ["diff", "whole", "file", "full", "context", ...fileKeywords],
-          run: currentDiff.toggleWholeFile,
-        },
-        "General",
-      );
+      add({
+        id: "toggle-show-whole-file",
+        label: `Toggle show whole file${of}`,
+        keywords: ["diff", "whole", "file", "full", "context", ...fileKeywords],
+        run: currentDiff.toggleWholeFile,
+      });
     }
   }
   if (diff.currentFile !== null) {
-    add(
-      {
-        id: "file-history-current-file",
-        label: "File history of current file",
-        keywords: ["history", "log", "file", "follow", "rename"],
-        run: diff.openCurrentFileHistory,
-      },
-      "General",
-    );
+    add({
+      id: "file-history-current-file",
+      label: "File history of current file",
+      keywords: ["history", "log", "file", "follow", "rename"],
+      run: diff.openCurrentFileHistory,
+    });
   }
   // A selection of several files (#449): the same actions as its selection bar. Staging is not
   // behind the full repository guard (it is how a merge's resolutions get staged), only behind
