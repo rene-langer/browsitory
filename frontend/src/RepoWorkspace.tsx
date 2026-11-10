@@ -7,7 +7,7 @@ import { HookRunStrip } from "./components/HookRunStrip";
 import type { ToastAction } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { SplitView } from "./components/primitives/SplitView";
-import type { RepoClient, StatusEntry } from "./ipc/RepoClient";
+import type { GraphCommit, RepoClient, StatusEntry } from "./ipc/RepoClient";
 import { buildCommands, type AppCommands, type CommitCommands } from "./lib/commands";
 import { useExternalTools } from "./state/useExternalTools";
 import {
@@ -298,6 +298,12 @@ export function RepoWorkspace({
       (outcome) => pickToast("Revert", outcome),
     );
   const resetToCommit = announce("Reset branch", appState.resetToCommit);
+  // The commits the open search results or file history list, which the loaded graph may lack
+  // (#515): the palette offers their commit actions too.
+  const listedCommits = (): GraphCommit[] => [
+    ...(commitSearch.results?.commits ?? []),
+    ...(fileHistory.history?.entries.map((entry) => entry.commit) ?? []),
+  ];
   // The dialogs return focus to the list showing the selection (#146): the commit menu passes
   // its list; from the palette, which is gone by then, it is looked up.
   const openCommitDialog = (
@@ -305,7 +311,8 @@ export function RepoWorkspace({
     commitId: string,
     returnFocusTo?: HTMLElement | null,
   ) => {
-    const commit = appState.state.commits.find((candidate) => candidate.id === commitId);
+    const isTarget = (candidate: GraphCommit) => candidate.id === commitId;
+    const commit = appState.state.commits.find(isTarget) ?? listedCommits().find(isTarget);
     if (commit === undefined) return;
     setCommitDialog({
       kind,
@@ -404,7 +411,7 @@ export function RepoWorkspace({
         onGoBack: navigation.canGoBack ? navigation.goBack : undefined,
         onGoForward: navigation.canGoForward ? navigation.goForward : undefined,
       },
-      commit: commitCommands,
+      commit: { ...commitCommands, listedCommits: listedCommits() },
     });
 
   // What the diff pane's views and the commit dock can do (#491), read from
