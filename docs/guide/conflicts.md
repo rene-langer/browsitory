@@ -31,8 +31,9 @@ When one side has a file and the other a folder of the same name (`c` and `c/g`)
 keep both under that name. Like git, a merge, cherry-pick, revert, rebase step or stash apply
 then writes the folder's files and moves the file aside as a conflict: `c~HEAD` when the file
 is yours (`c~Updated upstream` for a stash apply), or `c~<branch>` (`c~<commit> (<subject>)`
-for a cherry-pick or rebase step, `c~Stashed changes` for a stash) when it comes in. Keep the
-moved file under a name of your choice, or delete it, then mark it resolved. A stash apply with
+for a cherry-pick or rebase step, `c~parent of <commit> (<subject>)` for a revert,
+`c~Stashed changes` for a stash) when it comes in. Keep the moved file under a name of your
+choice, or delete it, then mark it resolved. A stash apply with
 **Restore staged changes** refuses instead and changes nothing, as `git stash apply --index`
 does; apply it without that option.
 
