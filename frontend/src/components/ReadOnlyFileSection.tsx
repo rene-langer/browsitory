@@ -1,6 +1,6 @@
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { BlameLine, CommitHunk, DiffHunk, DiffOptions, DiffSource, RepoClient } from "../ipc/RepoClient";
+import type { BlameLine, CommitHunk, DiffHunk, DiffOptions, DiffSource, FileStats, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "../state/useAppState";
 import type { ExternalToolsApi } from "../state/useExternalTools";
@@ -18,6 +18,7 @@ import { commitFileMenuItems, type FileAction } from "./FileActionsMenu";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
+import { LineStatsBadge } from "./LineStatsBadge";
 
 /**
  * A commit's file's revert/apply/save actions (#448). The hunk actions get the hunk as the view
@@ -62,6 +63,7 @@ export function ReadOnlyFileSection({
   toolSource,
   previewSource,
   patch,
+  lineStats,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -89,6 +91,8 @@ export function ReadOnlyFileSection({
   previewSource?: DiffSource;
   /** A commit's file: Revert / Apply / Save as patch in its menu, Revert / Apply hunk (#448). */
   patch?: CommitFilePatchActions;
+  /** A commit's file: its lines added and removed (#620), or "Binary". */
+  lineStats?: FileStats;
 }) {
   const [mode, setMode] = useState<"diff" | "blame">("diff");
   const isImage = previewSource !== undefined && imageMimeType(path) !== null;
@@ -222,6 +226,12 @@ export function ReadOnlyFileSection({
         <CollapseToggle collapsed={collapsed} path={path} onToggle={onToggleCollapse} />
         <span className={styles.path}>{path}</span>
         {oldPath != null && <span className={styles.renamedFrom}>Renamed from {oldPath}</span>}
+        {lineStats !== undefined &&
+          (lineStats.binary ? (
+            <span className={styles.renamedFrom}>Binary</span>
+          ) : (
+            <LineStatsBadge insertions={lineStats.insertions} deletions={lineStats.deletions} />
+          ))}
         <div className={styles.rowActions}>
           <button type="button" onClick={() => setMode("blame")}>
             Blame

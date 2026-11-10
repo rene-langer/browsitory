@@ -26,6 +26,8 @@ import type { VisitKind } from "./lib/navigationHistory";
 import { NavigationButtons } from "./components/NavigationButtons";
 import { commitsPatchName } from "./state/usePatchActions";
 import type { useSequenceActions } from "./state/useSequenceActions";
+import { useCommitLineStats } from "./state/useCommitLineStats";
+import { useShowLineStats, writeShowLineStats } from "./lib/lineStatsPreference";
 
 /**
  * `RepoWorkspace`'s main area (#491): the sync bar and the commit list (the graph, search results
@@ -108,6 +110,9 @@ export function WorkspaceMain({
   focusCommitMessage: boolean;
 }) {
   const searchResultsRef = useRef<HTMLUListElement>(null);
+  // #620: the commit list's lines-changed badges, counted as rows come into view.
+  const showLineStats = useShowLineStats();
+  const lineStats = useCommitLineStats(client, repoPath);
   const { pending, transfer } = appState.state;
   const selectedRow = appState.state.selectedRow;
   const historyEntry =
@@ -197,6 +202,8 @@ export function WorkspaceMain({
               error={commitSearch.results?.queryError ?? null}
               recentSearches={commitSearch.recentSearches}
               onRemoveRecentSearch={commitSearch.removeRecentSearch}
+              showLineStats={showLineStats}
+              onToggleLineStats={() => writeShowLineStats(!showLineStats)}
             />
             {commitSearch.results !== null ? (
               <CommitSearchResults
@@ -256,6 +263,8 @@ export function WorkspaceMain({
                 onCreateTag={(commitId) => appState.openDialog({ kind: "createTag", commitId })}
                 onDeleteTagFromRemote={(tagName) => appState.openDialog({ kind: "deleteRemoteTag", tagName })}
                 revealRequest={revealRequest}
+                lineStats={showLineStats ? lineStats.stats : undefined}
+                onCommitsVisible={showLineStats ? lineStats.request : undefined}
               />
             )}
           </>

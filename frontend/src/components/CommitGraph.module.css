@@ -104,6 +104,13 @@ li.uncommittedRow[aria-selected="true"] {
   }
 }
 
+/* The lines-changed badge (#620) goes before the author when the pane gets narrower still. */
+@container (max-width: 420px) {
+  .lineStats {
+    display: none;
+  }
+}
+
 @container (max-width: 360px) {
   .author {
     display: none;
