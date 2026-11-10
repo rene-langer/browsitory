@@ -32,7 +32,7 @@ describe("Browsitory VSCode extension first flow", () => {
       await webview.click('button[aria-label="Stage first-flow-fixture.txt"]');
 
       await webview.fill("textarea[placeholder='Commit message']", "e2e: first commit");
-      await webview.clickByText("button", "Commit");
+      await webview.clickBySelector('button[data-action="commit"]');
 
       await webview.waitForText("li", "e2e: first commit", 15000);
     } finally {

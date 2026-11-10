@@ -46,8 +46,8 @@ export function useCommitDraftActions(
   );
   const { commit: commitStaged, amendCommit, retryWithoutHooks } = appState;
   const commitAndClearDraft = useCallback(
-    async (message: string, noVerify: boolean, trailers: Trailer[]) => {
-      const ok = await commitStaged(message, noVerify, trailers);
+    async (message: string, noVerify: boolean, trailers: Trailer[], onCommitted?: (commitId: string) => void) => {
+      const ok = await commitStaged(message, noVerify, trailers, onCommitted);
       if (ok) {
         clearCommittedDraft(message);
         recordLanded(message);

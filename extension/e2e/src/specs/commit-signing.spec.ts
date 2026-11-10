@@ -48,7 +48,7 @@ describe("Browsitory VSCode extension commit signing", () => {
       await webview.waitForText("span", `${file} (New)`, 15000);
       await webview.clickByText("button", "Stage all");
       await webview.fill('textarea[aria-label="Commit message"]', summary);
-      await webview.clickByText("button", "Commit");
+      await webview.clickBySelector('button[data-action="commit"]');
       await waitUntil(() => git("log", "-1", "--format=%s") === summary, "commit did not land");
       await webview.waitForText("li", summary, 15000);
       await webview.clickByTextContaining("li", summary);

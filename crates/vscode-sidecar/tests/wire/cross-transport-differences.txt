@@ -10,6 +10,8 @@ BranchInfo/local-only key-order
 BranchInfo/tracking key-order
 ChangedFile/plain key-order
 ChangedFile/renamed key-order
+CommitDetails/incomplete key-order
+CommitDetails/on-refs key-order
 CommitLocation/hidden key-order
 CommitLocation/in-graph key-order
 CommitLocation/in-merge key-order

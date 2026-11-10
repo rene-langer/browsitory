@@ -69,6 +69,9 @@ where
             Command::GetCommitSignature { commit_id, reply } => {
                 status::get_commit_signature(&self.repo, commit_id, reply)
             }
+            Command::GetCommitDetails { commit_id, reply } => {
+                status::get_commit_details(&self.repo, commit_id, reply)
+            }
             Command::GetBlame {
                 commit_id,
                 path,
