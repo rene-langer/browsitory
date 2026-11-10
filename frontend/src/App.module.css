@@ -1,10 +1,12 @@
-/* A slim chrome bar: wordmark, tabs that sit flush on the workspace below, quiet icons. */
+/* A slim chrome bar: wordmark, tabs that sit flush on the workspace below, quiet icons.
+   Its height comes from its content, with a floor for the single-row case: a fixed height
+   clipped a workspace group, whose label row stacks above its tabs (#606). */
 .headerRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  height: 38px;
+  min-height: 2.375rem;
   padding: 0 var(--space-2) 0 var(--space-4);
   background: var(--color-chrome);
   border-bottom: 1px solid var(--color-border);
