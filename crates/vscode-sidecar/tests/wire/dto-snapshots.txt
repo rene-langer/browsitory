@@ -27,6 +27,8 @@ CommitLocation/hidden {"branches":["feature"],"commitId":"2222222222222222222222
 CommitLocation/in-merge {"branches":["main"],"commitId":"3333333333333333333333333333333333333333","merge":{"mergeId":"4444444444444444444444444444444444444444","mergePosition":7,"offset":2},"position":null,"remoteBranches":[]}
 CommitStatsEntry/counted {"commitId":"1111111111111111111111111111111111111111","stats":{"deletions":3,"files":[{"binary":false,"deletions":3,"insertions":12,"path":"src/main.rs"},{"binary":true,"deletions":0,"insertions":0,"path":"logo.png"}],"filesChanged":2,"insertions":12}}
 CommitStatsEntry/capped {"commitId":"2222222222222222222222222222222222222222","stats":null}
+CommitDetails/on-refs {"author":{"email":"ada@example.com","name":"Ada Lovelace","timestamp":1700000000},"branches":["main"],"committer":{"email":"bob@example.com","name":"Bob","timestamp":1700000600},"complete":true,"remoteBranches":["origin/main"],"tags":["v1.0"]}
+CommitDetails/incomplete {"author":{"email":"ada@example.com","name":"Ada Lovelace","timestamp":1700000000},"branches":[],"committer":{"email":"ada@example.com","name":"Ada Lovelace","timestamp":1700000000},"complete":false,"remoteBranches":[],"tags":[]}
 PatchContent/text {"base64":"ZGlmZiAtLWdpdCBhL2YgYi9mCg=="}
 PatchContent/latin-1 {"base64":"K+kK"}
 OpenRepoEntry/loose {"path":"/repos/app","workspaceId":null}

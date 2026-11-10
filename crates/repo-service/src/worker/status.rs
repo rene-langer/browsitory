@@ -106,6 +106,22 @@ pub(super) fn get_commit_signature(
         .send(git_core::signing::verify_commit(repo, &commit_id).map_err(ErrorDto::from_error));
 }
 
+/// How long `get_commit_details` may spend checking which branches and tags contain a commit
+/// (#641); the rest are left unchecked and the answer says it is incomplete.
+const CONTAINMENT_BUDGET: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Author, committer and the refs that contain `commit_id` (#641).
+pub(super) fn get_commit_details(
+    repo: &git2::Repository,
+    commit_id: String,
+    reply: Sender<Result<git_core::commit_details::CommitDetails, ErrorDto>>,
+) {
+    let _ = reply.send(
+        git_core::commit_details::commit_details(repo, &commit_id, CONTAINMENT_BUDGET)
+            .map_err(ErrorDto::from_error),
+    );
+}
+
 pub(super) fn get_commit_message(
     repo: &git2::Repository,
     commit_id: String,
@@ -500,6 +516,18 @@ impl WorkerHandle {
 
     pub fn get_commit_message(&self, commit_id: String) -> Result<String, ErrorDto> {
         self.request(|tx| Command::GetCommitMessage {
+            commit_id,
+            reply: tx,
+        })
+    }
+
+    /// Author, committer and containing refs of `commit_id` (#641); see
+    /// `status::get_commit_details`.
+    pub fn get_commit_details(
+        &self,
+        commit_id: String,
+    ) -> Result<git_core::commit_details::CommitDetails, ErrorDto> {
+        self.request(|tx| Command::GetCommitDetails {
             commit_id,
             reply: tx,
         })
