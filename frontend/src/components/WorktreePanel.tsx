@@ -20,6 +20,7 @@ export function WorktreePanel({
   onPruneWorktrees,
   operationDisabled,
   operationDisabledReason,
+  revealRequest,
 }: {
   worktrees: WorktreeInfo[];
   branches: BranchInfo[];
@@ -38,6 +39,8 @@ export function WorktreePanel({
   // Human-readable reason `operationDisabled` is true, shown as a `title` on the buttons it
   // disables (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
+  /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
+  revealRequest?: number;
 }) {
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
@@ -76,7 +79,13 @@ export function WorktreePanel({
   };
 
   return (
-    <AccordionSection title="Worktrees" storageKey="sidebar-worktrees" icon={GitFork} count={worktrees.length}>
+    <AccordionSection
+      title="Worktrees"
+      storageKey="sidebar-worktrees"
+      icon={GitFork}
+      count={worktrees.length}
+      revealRequest={revealRequest}
+    >
       <form className={styles.form} onSubmit={createWorktree} aria-label="Create worktree">
         <label className={styles.label}>
           Worktree name

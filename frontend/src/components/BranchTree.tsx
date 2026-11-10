@@ -12,6 +12,8 @@ import { branchSwatchColor } from "../lib/laneColors";
 import { buildBranchTree, type BranchTreeNode } from "../lib/branchTree";
 import { coversEveryBranch } from "../lib/graphSelection";
 import { loadPersistedOpen, persistOpen } from "../lib/persistedOpenState";
+import { scrollBehavior } from "../lib/scrollBehavior";
+import type { SidebarRevealRequest } from "../state/useSidebarReveal";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { FormDialog } from "./primitives/FormDialog";
 import formStyles from "./primitives/FormDialog.module.css";
@@ -120,6 +122,7 @@ export function BranchTree({
   refreshGeneration,
   remoteDialog: remoteDialogProp,
   onRemoteDialogChange,
+  revealRequest,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -220,6 +223,12 @@ export function BranchTree({
    */
   remoteDialog?: RemoteDialog | null;
   onRemoteDialogChange?: (dialog: RemoteDialog | null) => void;
+  /**
+   * A reveal request for the Branches section (`useSidebarReveal`, #494): expands and scrolls to
+   * the section, or with `remote` to that remote's folder, expanded so its branch rows can be
+   * reached by Tab. The value it mounts with is not a request.
+   */
+  revealRequest?: Pick<SidebarRevealRequest, "nonce" | "remote">;
 }) {
   const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
@@ -551,6 +560,29 @@ export function BranchTree({
     }
   };
 
+  // A remote's reveal request opens its folder during render (not in an effect, which
+  // `react-hooks/set-state-in-effect` forbids), so the folder's header is there for the effect
+  // below to scroll to, even when the section itself was collapsed until this render.
+  const [seenRevealRequest, setSeenRevealRequest] = useState(revealRequest?.nonce);
+  if (revealRequest?.nonce !== seenRevealRequest) {
+    setSeenRevealRequest(revealRequest?.nonce);
+    const remote = revealRequest?.remote;
+    if (remote !== undefined) setOpenRemotes((prev) => ({ ...prev, [remote]: true }));
+  }
+  const remoteHeaders = useRef(new Map<string, HTMLButtonElement>());
+  const handledRevealRequest = useRef(revealRequest?.nonce);
+  useEffect(() => {
+    if (revealRequest === undefined || revealRequest.nonce === handledRevealRequest.current) return;
+    handledRevealRequest.current = revealRequest.nonce;
+    const remote = revealRequest.remote;
+    if (remote === undefined) return;
+    persistOpen(remoteFolderKey(remote), true);
+    if (remoteBranches[remote] === undefined) fetchRemoteBranchList(remote);
+    remoteHeaders.current.get(remote)?.scrollIntoView?.({ behavior: scrollBehavior(), block: "nearest" });
+    // Only a new request triggers this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealRequest]);
+
   const checkoutRemoteBranch = async (remoteName: string, branchName: string) => {
     const existingLocal = branches.find((b) => b.name === branchName);
     if (existingLocal !== undefined) {
@@ -766,6 +798,7 @@ export function BranchTree({
       <AccordionSection
         title="Branches"
         storageKey="sidebar-branches"
+        revealRequest={revealRequest?.nonce}
         icon={GitBranch}
         count={branches.length}
         defaultOpen
@@ -966,6 +999,13 @@ export function BranchTree({
             <li key={remote.name} className={styles.folder}>
               <div className={styles.folderRow}>
                 <button
+                  ref={(element) => {
+                    if (element === null) return;
+                    remoteHeaders.current.set(remote.name, element);
+                    return () => {
+                      remoteHeaders.current.delete(remote.name);
+                    };
+                  }}
                   type="button"
                   className={styles.folderHeader}
                   aria-expanded={isRemoteOpen(remote.name)}
@@ -994,9 +1034,7 @@ export function BranchTree({
                   <Cloud size={14} aria-hidden="true" />
                   {remote.name}
                 </button>
-                {/* The remote's actions without knowing Shift+F10 (macOS keyboards have no Menu key).
-                    No text content: `commands.ts`'s `expandRemoteBranches` finds the header by its
-                    text, which must keep matching only the button above. */}
+                {/* The remote's actions without knowing Shift+F10 (macOS keyboards have no Menu key). */}
                 <button
                   type="button"
                   className={styles.iconButton}
