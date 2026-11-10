@@ -6,6 +6,143 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-10
+
+A release of fixes: actions now follow one rule for when the repository is busy (a merge,
+rebase, cherry-pick or revert, another action, or a fetch, pull or push) everywhere they appear,
+and say why they are disabled. Aborting a sequence, rolling back a patch series and updating a
+submodule with files that differ only in case no longer lose or leave behind changes. Most of
+the rest is internal clean-up of the frontend's state and IPC code.
+
+### Same rules for branch, remote, stash and worktree actions in menus and the palette
+
+- Fixed: a branch's **Checkout** (and double-click) and **Rename** were only disabled during a
+  rebase run here, while the command palette left out **Switch to …** during any merge,
+  cherry-pick, revert, terminal rebase, action or transfer; the menu now follows the same rule
+  and says why (#509).
+- Fixed: a remote's **Edit remote** and **Manage credentials** stayed enabled while the
+  repository was busy, though the palette left them out, and **Remove remote** gave no reason;
+  all three are now disabled with the reason (#509).
+- Fixed: the command palette offered **Apply stash** and **Pop stash** with staged changes or
+  unresolved conflicts, which the Stashes panel refuses; it now leaves them out (#509).
+- Changed: the command palette now offers **Drop stash** while a merge, rebase, cherry-pick or
+  revert is paused, like the Stashes panel (#521), **Show stash** whenever a stash exists, and
+  **Add remote** while the repository is busy, like the **+** menu (its form waits) (#509).
+- Added: the main worktree's disabled **Remove** says why (#509).
+- Internal: branch, remote, stash and worktree action labels and rules live in
+  `lib/actions/*Actions.ts`, shared by the menus, panels and the palette, with an agreement test;
+  `CommitGraph`'s `pending` prop is now `operationsBlocked` (#509).
+
+### Busy guards for the remaining confirmations
+
+- Fixed: the force delete branch confirmation and the branch menu's **Delete** were only disabled
+  during a rebase run here; they now follow the one busy rule (a merge, cherry-pick, revert,
+  terminal rebase, another action or a transfer) and say why (#521).
+- Fixed: the delete local tag confirmations and the rebase planner's **Start rebase** now show
+  why they are disabled (#521).
+- Fixed: the stash view's **Drop…** and the discard confirmations could run while another action
+  or a fetch, pull or push was running; they are now disabled with the reason (#521).
+- Changed: dropping a stash from the Stashes panel, and the command palette's discard commands,
+  are now available while a merge, rebase, cherry-pick or revert is paused, like the stash view
+  and the diff pane's discard; only another action or a transfer blocks them (#521).
+- Fixed: **Clear upstream** and **Set upstream…** are disabled with the reason while the
+  repository is busy, like **Set as upstream for current branch** (#521).
+
+### Busy rule gaps
+
+- Fixed: the New branch form's **Create** was enabled during a merge, a cherry-pick or revert, a
+  rebase started in a terminal, another action or a transfer; only a rebase run here disabled it.
+  It now follows the same rule as the other branch actions and says why (#561).
+- Fixed: **Edit remote** and **Manage credentials** saved even when the repository became busy
+  after they opened; they now disable saving and forgetting, and say why (#561).
+- Fixed: the Remove remote and Remove worktree confirmations now say why they can't remove while
+  the repository is busy (#561).
+- Added: the command palette's **Open main worktree**, like the Worktrees panel's Open for the main
+  worktree (#561).
+
+### Aborting a cherry-pick or revert sequence
+
+- Fixed: aborting a sequence whose steps left a pair of file names that differ only in case
+  (with `core.ignorecase` on) unstaged changes staged on other files the rewind doesn't
+  change. They now stay staged, as they do when no such pair is involved (#553).
+
+### Files that differ only in case
+
+- Fixed: with `core.ignorecase` on in a submodule (or set globally for a new submodule clone),
+  updating the submodule to a commit whose files include two names that differ only in case
+  (`A` and `a`) that its current commit doesn't kept only one of the two in the submodule's
+  index and didn't write the other's file. The update is now refused before anything is
+  written and names both files (#534).
+- Fixed: with `core.ignorecase` on (Linux), aborting a cherry-pick or revert that had brought in
+  a file whose name differs only in case from an existing one (`a` next to `A`) overwrote what
+  you had written into the existing file during the pause. Abort now refuses, saying it would
+  discard that change, and leaves the file as it is (#543).
+- Internal: tests for the paths the mutation job found untested: Abort's refusal for a case
+  pair, the rewind around a case pair, and the patch module (a staged patch without commits, a
+  hunk ending without a final newline, a patch creating a file that is already there, a failed
+  or re-adding series, a message line starting with "From ") (#543, #544).
+- Internal: finding a commit no longer lower-cases an upper-case commit id itself; libgit2
+  reads hex digits in either case (#545).
+
+### Patch series rollback
+
+- Fixed: when a later mail of a patch series doesn't apply, the folders an earlier mail created
+  for a new file are removed too (deepest first, only when empty; a folder that was there before
+  stays), so the working tree is left exactly as it was (#539).
+
+### Error messages
+
+- Fixed: when file permissions block reading a file's changes, the error now says to check that
+  you can read and write the file or folder (#527).
+- Fixed: saving or forgetting a forge token while the operating-system credential store is
+  locked shows the same "unlock it and try again" advice as a remote's HTTPS token (#527).
+- Internal: the worker decides each error's kind where the error is made: replies carry
+  `ErrorDto`, typed errors get their kind from their type, every stopped-worker reply comes
+  from one helper, and nothing reads a kind from the message any more (#527).
+
+### Internal: one RepoClient for both transports
+
+- Changed: the desktop and VSCode clients now share one implementation of every method they
+  send alike (`createRepoClient`), and the transport parity test also compares the params each
+  transport sends (#504).
+- Fixed: on the desktop, a force push and the commands that run hooks (switch branch, checkout,
+  merge, cherry-pick, revert, continue) now wait for the progress listeners like fetch, push and
+  commit do, so a fast operation's first events are not lost (#504).
+
+### Internal: backend limits and defaults generated for the frontend
+
+- Changed: the frontend's diff context limits (`MAX_CONTEXT_LINES`, `WHOLE_FILE_CONTEXT_LINES`),
+  the commit message column range, the default diff, commit message and fetch settings, and the
+  commit search keys now come from `frontend/src/ipc/generated/wire-constants.ts`, which
+  `wire_bindings_are_current` writes from the Rust constants and `Default` impls and checks for
+  freshness. The `config` crate uses `git-core`'s `MAX_CONTEXT_LINES` instead of its own copy,
+  the Preferences column fields take their range from the generated constant, and a test checks
+  the search help's keys against the parser's. Behaviour is unchanged (#497).
+
+### Internal: useAppState built from its action slices
+
+- Changed: `UseAppStateResult` extends the action slice interfaces (`StagingActions`,
+  `BranchActions`, `RemoteTransferActions` and the others) and declares only the members
+  `useAppState` defines itself, and the hook spreads the slice objects into its result instead
+  of naming each action again. Each action is now declared and documented once, in its slice;
+  where the two comments had drifted, the more accurate one was kept. A compile-time check fails
+  when two slices share a member name, which the spread would otherwise resolve silently.
+  `useAppState.ts` shrinks from 949 to 594 lines. Behaviour is unchanged (#489).
+
+### Internal: one shared fake RepoClient for frontend tests
+
+- Changed: frontend tests build their `RepoClient` fakes with one `Proxy`-based helper,
+  `frontend/src/test/fakeRepoClient.ts`, instead of five complete hand-written copies, 21
+  inline ones in the `useAppState` tests and about 20 partial casts. A method a test doesn't
+  override fails with `not used in this test: <method>`, or answers an empty value in `"empty"`
+  mode, so a new `RepoClient` method needs no edit in the tests (#499).
+
+### Internal: e2e test stability
+
+- Fixed: the commit graph test for a commit on a detached HEAD wrote its file after the page had
+  reloaded, so the app could read the status before the file existed and never show it; the
+  test now reloads after the change on disk (#556).
+
 ## [0.6.0] - 2026-11-10
 
 Revert or apply a single file or hunk of a commit and save and apply patches, the history of a

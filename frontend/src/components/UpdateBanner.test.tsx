@@ -14,6 +14,36 @@ describe("UpdateBanner", () => {
     vi.mocked(updater.relaunchApp).mockReset();
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("checks for an update in a normal build", async () => {
+    vi.stubEnv("VITE_E2E_REPO_PATH", undefined);
+    vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
+
+    render(<UpdateBanner />);
+
+    await waitFor(() => expect(updater.checkForUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it("never checks for an update in an E2E build (#576)", async () => {
+    vi.stubEnv("VITE_E2E_REPO_PATH", "/tmp/browsitory-e2e-repo");
+    vi.mocked(updater.checkForUpdate).mockResolvedValue({
+      version: "1.2.3",
+      download: vi.fn().mockResolvedValue(undefined),
+      installAndRelaunch: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<UpdateBanner />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(updater.checkForUpdate).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("renders nothing when no update is found", async () => {
     vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
 

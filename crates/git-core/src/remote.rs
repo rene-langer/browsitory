@@ -171,6 +171,15 @@ pub struct TransferProgress {
 
 pub trait TransferReporter {
     fn report(&mut self, event: TransferProgress);
+
+    /// Told once a fetch or push has connected to its remote (#462, #547): the remote answered
+    /// and sent its references, and nothing has been downloaded, sent or written yet. `false`
+    /// stops the transfer there, as `Cancelled`. A caller waiting on another thread uses it to
+    /// tell a transfer still connecting (which no progress callback interrupts) from one that is
+    /// transferring, and to give up on the first safely.
+    fn connected(&mut self) -> bool {
+        true
+    }
 }
 
 pub trait CredentialProvider {
@@ -532,24 +541,12 @@ pub fn fetch_remote(
         credentials,
         reporter,
         cancel,
-        None,
     )
 }
 
-/// Told when a fetch has connected to its remote (#462): the remote answered and sent its
-/// references, and nothing has been downloaded or written yet.
-pub trait ConnectWatch {
-    /// `false` stops the fetch there, as `Cancelled`, before it downloads or writes anything.
-    fn connected(&self) -> bool;
-}
-
-/// `fetch_remote`, reporting progress as `operation` and telling `watch` once connected, so a
-/// caller waiting on another thread can tell a fetch still connecting (which no callback
-/// interrupts) from one that is transferring, and give up on the first safely: a fetch whose
-/// `watch` answers `false` writes nothing. A connect that fails at the network level is
-/// `RemoteError::Unreachable`.
+/// `fetch_remote`, reporting progress as `operation` (the background fetch reports its own).
 #[allow(clippy::too_many_arguments)]
-pub fn fetch_remote_watched(
+pub fn fetch_remote_as(
     operation: TransferOperation,
     repo: &Repository,
     remote_name: &str,
@@ -558,7 +555,6 @@ pub fn fetch_remote_watched(
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
-    watch: &dyn ConnectWatch,
 ) -> Result<(), RemoteError> {
     fetch_with(
         repo,
@@ -569,7 +565,6 @@ pub fn fetch_remote_watched(
         credentials,
         reporter,
         cancel,
-        Some(watch),
     )
 }
 
@@ -629,7 +624,6 @@ pub fn fetch_all_as<'c>(
                 provider.as_mut(),
                 reporter,
                 cancel,
-                None,
             )
         });
         match result {
@@ -651,7 +645,6 @@ fn fetch_with(
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
-    watch: Option<&dyn ConnectWatch>,
 ) -> Result<(), RemoteError> {
     let mut remote = repo.find_remote(remote_name)?;
     let credentials = RefCell::new(credentials);
@@ -659,8 +652,8 @@ fn fetch_with(
 
     // Connect first, on its own: `fetch` below reuses this connection (libgit2's
     // `connect_or_reset_options`), so the fetch is the same, but the caller learns when the
-    // remote answered (`watch`), and a network-level connect failure is told apart from a
-    // failure later in the transfer (#462).
+    // remote answered (`TransferReporter::connected`), and a network-level connect failure is
+    // told apart from a failure later in the transfer (#462).
     let mut connect_callbacks = RemoteCallbacks::new();
     connect_callbacks.credentials(|url, username, allowed| {
         credentials.borrow_mut().credential(url, username, allowed)
@@ -669,7 +662,7 @@ fn fetch_with(
     let mut connection = remote
         .connect_auth(Direction::Fetch, Some(connect_callbacks), None)
         .map_err(|error| connect_error(cancel, error, local))?;
-    if watch.is_some_and(|watch| !watch.connected()) || cancel() {
+    if !reporter.borrow_mut().connected() || cancel() {
         return Err(RemoteError::Cancelled);
     }
 
@@ -873,8 +866,8 @@ pub fn delete_tag(repo: &Repository, name: &str) -> Result<(), RemoteError> {
 
 /// Pushes the current branch to `remote_name`, to the target `push_target` resolves from
 /// `push.default` (`PushTargetNeedsChoice` when it settles none; nothing is sent). `cancel` is
-/// checked once, at `push_negotiation` (before any data is sent); a cancel requested after that
-/// is ignored so a push that lands is never reported as cancelled — see `push_refs`.
+/// checked once connected and at `push_negotiation` (before any data is sent); a cancel requested
+/// after that is ignored so a push that lands is never reported as cancelled — see `push_refs`.
 /// Runs the `pre-push` hook unless `no_verify`.
 pub fn push_current_branch(
     repo: &Repository,
@@ -1477,14 +1470,30 @@ fn push_refs(
     let credentials = RefCell::new(credentials);
     let reporter = RefCell::new(reporter);
     let rejection = Cell::new(None);
+
+    // Connect first, on its own, as a fetch does (`fetch_with`): `push` below reuses this
+    // connection (libgit2's `connect_or_reset_options`), and the caller learns when the remote
+    // answered (`TransferReporter::connected`) before anything is sent or written (#547).
+    let mut connect_callbacks = RemoteCallbacks::new();
+    connect_callbacks.credentials(|url, username, allowed| {
+        credentials.borrow_mut().credential(url, username, allowed)
+    });
+    let mut connection = remote
+        .connect_auth(Direction::Push, Some(connect_callbacks), None)
+        .map_err(|error| connect_error(cancel, error, is_local_url(&push_url)))?;
+    if !reporter.borrow_mut().connected() || cancel() {
+        return Err(RemoteError::Cancelled);
+    }
+
     let mut callbacks = RemoteCallbacks::new();
 
     callbacks.credentials(|url, username, allowed| {
         credentials.borrow_mut().credential(url, username, allowed)
     });
     // `push_negotiation` fires once between ref negotiation and the pack upload; returning an
-    // error there is libgit2's documented way to cancel a push, and it is the **only** point a
-    // push is cancelled. Nothing has been sent yet, so the remote is guaranteed untouched.
+    // error there is libgit2's documented way to cancel a push, and it is the **last** point a
+    // push is cancelled (the first is right after connecting, above). Nothing has been sent yet,
+    // so the remote is guaranteed untouched.
     //
     // After it, the push is committed: git2 0.21's `push_transfer_progress` returns `()` and
     // cannot abort, and `push_update_reference`/`sideband_progress` run from the server's
@@ -1596,7 +1605,7 @@ fn push_refs(
 
     let mut options = PushOptions::new();
     options.remote_callbacks(callbacks);
-    let pushed = remote.push(refspecs, Some(&mut options));
+    let pushed = connection.remote().push(refspecs, Some(&mut options));
     // Only a negotiation-time abort is a cancellation; a genuine failure that happens while
     // Cancel is pressed keeps its real classification.
     if let Err(error) = pushed {

@@ -1,84 +1,30 @@
 //! Persists a paused interactive rebase (`git_core::rebase::RebaseState`) to
 //! `<gitdir>/browsitory/rebase.json` (format: `git_core::rebase_file`), so Continue/Abort
-//! survive an app restart, a closed tab and a crashed worker. Written atomically (temp file +
-//! `sync_all` + `rename`, like `sequence.json`). A file that is unreadable, malformed, of another
-//! version, or that doesn't describe commits of this repository is ignored (logged once), never
-//! fatal: a corrupt file must not wedge the repository.
-use super::atomic_file::write_atomically;
-use std::cell::RefCell;
-use std::fs;
-use std::path::PathBuf;
+//! survive an app restart, a closed tab and a crashed worker. Loading, the "ignore a bad file,
+//! log once" rule and the atomic write are [`StateFile`]'s. Whether HEAD and the branch still
+//! match a loaded rebase is `rebase_health`'s job. Other worktrees load the file too, to protect
+//! its branch (#291).
+use super::state_file::{StateCodec, StateFile};
+use std::path::{Path, PathBuf};
 
 use git2::Repository;
 use git_core::rebase::RebaseState;
 
-pub(super) struct RebaseStore {
-    file: PathBuf,
-    /// The last "ignoring" message logged, so a bad file is reported once, not on every command.
-    last_warning: RefCell<Option<String>>,
-}
+pub(super) type RebaseStore = StateFile<RebaseCodec>;
 
-impl RebaseStore {
-    /// `repo.path()` is the worktree's own git dir, so every worktree has its own rebase. Other
-    /// worktrees load it too, to protect its branch (#291).
-    pub fn open(repo: &Repository) -> Self {
-        Self {
-            file: git_core::rebase_file::file(repo.path()),
-            last_warning: RefCell::new(None),
-        }
+pub(super) struct RebaseCodec;
+
+impl StateCodec for RebaseCodec {
+    type State = RebaseState;
+    const WHAT: &'static str = "rebase";
+    fn file(git_dir: &Path) -> PathBuf {
+        git_core::rebase_file::file(git_dir)
     }
-
-    /// The stored rebase, or `None` when there is none or the file can't be used. Whether HEAD
-    /// and the branch still match is `rebase_health`'s job: a stale but well-formed rebase is
-    /// still reported, so the user can see it and abort it.
-    pub fn load(&self, repo: &Repository) -> Option<RebaseState> {
-        let bytes = match fs::read(&self.file) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                self.last_warning.replace(None);
-                return None;
-            }
-            Err(error) => return self.ignore(format!("can't read it: {error}")),
-        };
-        match git_core::rebase_file::decode(&bytes, repo) {
-            Ok(state) => {
-                self.last_warning.replace(None);
-                Some(state)
-            }
-            Err(reason) => self.ignore(reason),
-        }
+    fn encode(state: &RebaseState) -> Result<Vec<u8>, String> {
+        git_core::rebase_file::encode(state)
     }
-
-    fn ignore(&self, reason: String) -> Option<RebaseState> {
-        let message = format!(
-            "browsitory: ignoring rebase state {}: {reason}",
-            self.file.display()
-        );
-        if self.last_warning.borrow().as_deref() != Some(message.as_str()) {
-            eprintln!("{message}");
-            self.last_warning.replace(Some(message));
-        }
-        None
-    }
-
-    pub fn save(&self, state: &RebaseState) -> Result<(), String> {
-        let json = git_core::rebase_file::encode(state)?;
-        let dir = self.file.parent().expect("rebase file has a parent");
-        fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        write_atomically(&self.file, &json).map_err(|error| error.to_string())?;
-        self.last_warning.replace(None);
-        Ok(())
-    }
-
-    /// Deletes the file; a missing file is fine.
-    pub fn clear(&self) -> Result<(), String> {
-        match fs::remove_file(&self.file) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
-            _ => {
-                self.last_warning.replace(None);
-                Ok(())
-            }
-        }
+    fn decode(bytes: &[u8], repo: &Repository) -> Result<RebaseState, String> {
+        git_core::rebase_file::decode(bytes, repo)
     }
 }
 
@@ -87,6 +33,7 @@ mod tests {
     use super::*;
     use git2::Oid;
     use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseStop};
+    use std::fs;
 
     /// A repo with three commits on `refs/heads/main`; returns their ids oldest-first.
     fn repo_with_commits() -> (tempfile::TempDir, Repository, Vec<Oid>) {

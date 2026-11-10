@@ -18,6 +18,13 @@ export type RemoteBranchCache = {
   clearError: () => void;
   /** Drops a remote's list and reloads it if its folder is open (after a Fetch from its menu). */
   reload: (remoteName: string) => void;
+  /**
+   * Marks a remote's folder expanded without persisting or loading, so it can run during render
+   * (a reveal request, #494); `persistOpenAndLoad` then finishes the expand from an effect.
+   */
+  markOpen: (remoteName: string) => void;
+  /** Persists a remote's folder as expanded and loads its list if it hasn't loaded. */
+  persistOpenAndLoad: (remoteName: string) => void;
 };
 
 /**
@@ -93,5 +100,21 @@ export function useRemoteBranchCache({
     if (isOpen(remoteName)) fetchRemoteBranchList(remoteName);
   };
 
-  return { isOpen, toggle, branches: remoteBranches, error, clearError: () => setError(null), reload };
+  const markOpen = (remoteName: string) => setOpenRemotes((prev) => ({ ...prev, [remoteName]: true }));
+
+  const persistOpenAndLoad = (remoteName: string) => {
+    persistOpen(remoteFolderKey(remoteName), true);
+    if (remoteBranches[remoteName] === undefined) fetchRemoteBranchList(remoteName);
+  };
+
+  return {
+    isOpen,
+    toggle,
+    branches: remoteBranches,
+    error,
+    clearError: () => setError(null),
+    reload,
+    markOpen,
+    persistOpenAndLoad,
+  };
 }

@@ -299,6 +299,7 @@ export function PullRequestPanel({
   operationDisabled,
   operationDisabledReason,
   branches,
+  revealRequest,
 }: {
   forgeRepositories: ForgeRepository[];
   pullRequests: Record<string, PullRequestList>;
@@ -316,10 +317,17 @@ export function PullRequestPanel({
   // (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
   branches: { name: string; isCurrent: boolean }[];
+  /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
+  revealRequest?: number;
 }) {
   if (forgeRepositories.length === 0) {
     return (
-      <AccordionSection title="Pull requests" storageKey="sidebar-pull-requests" icon={GitPullRequest}>
+      <AccordionSection
+        title="Pull requests"
+        storageKey="sidebar-pull-requests"
+        icon={GitPullRequest}
+        revealRequest={revealRequest}
+      >
         <p className={styles.empty}>
           No supported GitHub or Bitbucket remotes. Add one in the Branches section (Add remote) to see its pull requests here.
         </p>
@@ -341,6 +349,7 @@ export function PullRequestPanel({
         title="Pull requests"
         storageKey="sidebar-pull-requests"
         icon={GitPullRequest}
+        revealRequest={revealRequest}
         count={
           forgeRepositories.some((repository) => pullRequests[repository.remoteName] !== undefined)
             ? totalPullRequests

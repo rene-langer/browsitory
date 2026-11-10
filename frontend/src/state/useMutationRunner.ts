@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { errorKind } from "../ipc/RepoClient";
+import { credentialRemediation, describeError } from "../lib/errorMessages";
 import type { AppState } from "./useAppState";
 
 // Shared by every domain action hook composed inside `useAppState`: wraps a mutation with the
@@ -29,18 +30,6 @@ export interface MutationRunner {
 export const REPO_CONNECTION_LOST_MESSAGE =
   "Connection to this repository was lost. Close and reopen the repository to reconnect.";
 
-/** What to do about a credential failure a transfer reported (`TransferProgress.errorKind`). */
-export function credentialRemediation(kind: "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure"): string {
-  switch (kind) {
-    case "MissingCredential":
-      return "Save an HTTPS token for this remote before retrying.";
-    case "CredentialStoreFailure":
-      return "The operating-system credential store is unavailable. Unlock it and try again.";
-    case "SshAgentFailure":
-      return "Load a key into your SSH agent and try again.";
-  }
-}
-
 /**
  * What a failed request shows: a fixed remediation for the kinds that have one (#496), else the
  * backend's message. `Error`s are unwrapped rather than stringified: `String(new Error("x"))` is
@@ -56,6 +45,27 @@ export function credentialFailureMessage(error: unknown): string {
     default:
       return error instanceof Error ? error.message : String(error);
   }
+}
+
+/**
+ * `AppState`'s `error` and `errorHint` for a failed request: `credentialFailureMessage`'s message
+ * plus the hint `describeError` gives the error's kind (#573), so the banner explains a failed
+ * mutation (a `PermissionDenied` Stage, say) the same way a failed read's inline error does.
+ */
+export function failureError(error: unknown): { error: string; errorHint: string | null } {
+  return { error: credentialFailureMessage(error), errorHint: describeError(error).hint ?? null };
+}
+
+/**
+ * Drops `errorHint` when an update changes `error` without setting a hint of its own (cleared,
+ * dismissed, or replaced by a message set without `failureError`), so a hint never sits under
+ * another error's message. A message that still contains the old one (Undo's "Undo failed: …"
+ * prefix) is the same error and keeps its hint. `useAppState` runs every update through this.
+ */
+export function withoutStaleErrorHint(prev: AppState, next: AppState): AppState {
+  if (next.errorHint === null || next.errorHint !== prev.errorHint || next.error === prev.error) return next;
+  const reworded = next.error !== null && prev.error !== null && next.error.includes(prev.error);
+  return reworded ? next : { ...next, errorHint: null };
 }
 
 // Builds the `runMutation*` variants that every domain action hook composed inside
@@ -75,7 +85,7 @@ export function useMutationRunner(
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
       } catch (err) {
-        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
+        setState((prev) => ({ ...prev, ...failureError(err), pending: false }));
       }
     },
     [refresh, setState],
@@ -90,7 +100,7 @@ export function useMutationRunner(
         setState((prev) => ({ ...prev, pending: false }));
         return true;
       } catch (err) {
-        setState((prev) => ({ ...prev, error: credentialFailureMessage(err), pending: false }));
+        setState((prev) => ({ ...prev, ...failureError(err), pending: false }));
         return false;
       }
     },
@@ -111,9 +121,9 @@ export function useMutationRunner(
         setState((prev) => ({ ...prev, pending: false }));
         return null;
       } catch (err) {
-        const message = credentialFailureMessage(err);
-        setState((prev) => ({ ...prev, error: message, pending: false }));
-        return message;
+        const failure = failureError(err);
+        setState((prev) => ({ ...prev, ...failure, pending: false }));
+        return failure.error;
       }
     },
     [refresh, setState],
@@ -138,7 +148,7 @@ export function useMutationRunner(
         await refresh();
         setState((prev) => ({ ...prev, pending: false }));
       } catch (err) {
-        setState(() => ({ ...(snapshot as AppState), error: credentialFailureMessage(err), pending: false }));
+        setState(() => ({ ...(snapshot as AppState), ...failureError(err), pending: false }));
       }
     },
     [refresh, setState],
@@ -157,9 +167,9 @@ export function useMutationRunner(
         setState((prev) => ({ ...prev, pending: false }));
         return null;
       } catch (err) {
-        const message = credentialFailureMessage(err);
-        setState(() => ({ ...(snapshot as AppState), error: message, pending: false }));
-        return message;
+        const failure = failureError(err);
+        setState(() => ({ ...(snapshot as AppState), ...failure, pending: false }));
+        return failure.error;
       }
     },
     [refresh, setState],
@@ -178,7 +188,7 @@ export function useMutationRunner(
         setState((prev) => ({ ...prev, pending: false }));
         return true;
       } catch (err) {
-        setState(() => ({ ...(snapshot as AppState), error: credentialFailureMessage(err), pending: false }));
+        setState(() => ({ ...(snapshot as AppState), ...failureError(err), pending: false }));
         return false;
       }
     },

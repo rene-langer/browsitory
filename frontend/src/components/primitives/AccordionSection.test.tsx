@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { GitBranch } from "lucide-react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccordionSection } from "./AccordionSection";
 
 describe("AccordionSection", () => {
@@ -141,5 +141,62 @@ describe("AccordionSection", () => {
     fireEvent.click(add);
     expect(onAction).toHaveBeenCalledOnce();
     expect(screen.getByText("body")).toBeInTheDocument();
+  });
+
+  describe("reveal requests (#494)", () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    afterEach(() => {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    });
+
+    function renderSection(revealRequest: number | undefined) {
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      const view = render(
+        <AccordionSection title="Tags" storageKey="test-reveal" revealRequest={revealRequest}>
+          <div>tag list</div>
+        </AccordionSection>,
+      );
+      const rerender = (next: number | undefined) =>
+        view.rerender(
+          <AccordionSection title="Tags" storageKey="test-reveal" revealRequest={next}>
+            <div>tag list</div>
+          </AccordionSection>,
+        );
+      return { scrollIntoView, rerender };
+    }
+
+    it("does not treat the value it mounts with as a request", () => {
+      const { scrollIntoView } = renderSection(3);
+      expect(screen.queryByText("tag list")).not.toBeInTheDocument();
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    });
+
+    it("expands, persists and scrolls into view on each new request", () => {
+      const { scrollIntoView, rerender } = renderSection(undefined);
+      rerender(1);
+      expect(screen.getByText("tag list")).toBeInTheDocument();
+      expect(localStorage.getItem("test-reveal")).toBe("open");
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByRole("region", { name: "Tags" }));
+
+      // Collapsed by the user, then revealed again: a new request opens it once more.
+      fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+      expect(screen.queryByText("tag list")).not.toBeInTheDocument();
+      rerender(1);
+      expect(screen.queryByText("tag list")).not.toBeInTheDocument();
+      rerender(2);
+      expect(screen.getByText("tag list")).toBeInTheDocument();
+      expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    });
+
+    it("ignores a request going away (another section's request)", () => {
+      const { scrollIntoView, rerender } = renderSection(undefined);
+      rerender(1);
+      fireEvent.click(screen.getByRole("button", { name: "Tags" }));
+      rerender(undefined);
+      expect(screen.queryByText("tag list")).not.toBeInTheDocument();
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    });
   });
 });

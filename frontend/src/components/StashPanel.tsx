@@ -31,6 +31,7 @@ export function StashPanel({
   restoreIndex,
   onSetRestoreIndex,
   blockers,
+  revealRequest,
 }: {
   stashes: StashEntry[];
   onSelectRow: (row: SelectedRow) => void;
@@ -46,6 +47,8 @@ export function StashPanel({
   // by an action in flight or a transfer: dropping a stash while resolving a paused merge, rebase
   // or sequence step is fine (#521).
   blockers: StashBlockers;
+  /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
+  revealRequest?: number;
 }) {
   const [pendingDrop, setPendingDrop] = useState<StashEntry | null>(null);
   const [menu, setMenu] = useState<StashMenu | null>(null);
@@ -112,7 +115,13 @@ export function StashPanel({
   };
 
   return (
-    <AccordionSection title="Stashes" storageKey="sidebar-stashes" icon={Archive} count={stashes.length}>
+    <AccordionSection
+      title="Stashes"
+      storageKey="sidebar-stashes"
+      icon={Archive}
+      count={stashes.length}
+      revealRequest={revealRequest}
+    >
       {stashes.length === 0 ? (
         <p
           ref={(element) => {

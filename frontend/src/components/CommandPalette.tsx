@@ -2,10 +2,11 @@ import { Fragment, useId, useMemo, useState, type KeyboardEvent as ReactKeyboard
 import { ListRow } from "./primitives/ListRow";
 import {
   COMMAND_GROUPS,
-  commandGroup,
   filterAndSortCommands,
   recordCommandUsed,
   type Command,
+  type CommandGroup,
+  type PickerItem,
 } from "../lib/commands";
 import styles from "./CommandPalette.module.css";
 
@@ -23,20 +24,20 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
   const grouped = picker === undefined && query.trim() === "";
   // Unfiltered: reorder into kind groups (stable within a group). Filtered: keep relevance order.
   // Keyboard order always equals displayed order, so the highlight index is over this list.
-  const results = useMemo(() => {
+  const results = useMemo((): readonly (Command | PickerItem)[] => {
     const items = commands.find((command) => command.id === pickerId)?.picker?.items;
     if (items !== undefined) return items(query);
     const ranked = filterAndSortCommands(commands, query);
     if (query.trim() !== "") return ranked;
-    return COMMAND_GROUPS.flatMap((group) => ranked.filter((command) => commandGroup(command.id) === group));
+    return COMMAND_GROUPS.flatMap((group) => ranked.filter((command) => command.group === group));
   }, [commands, query, pickerId]);
   const clampedIndex = results.length === 0 ? 0 : Math.min(highlightedIndex, results.length - 1);
   const activeDescendantId =
     results.length === 0 ? undefined : `${listboxId}-option-${clampedIndex}`;
 
-  function runCommand(command: Command) {
+  function runCommand(command: Command | PickerItem) {
     if (picker === undefined) recordCommandUsed(command.id);
-    if (picker === undefined && command.picker !== undefined) {
+    if (picker === undefined && "picker" in command && command.picker !== undefined) {
       setPickerId(command.id);
       setQuery("");
       setHighlightedIndex(0);
@@ -86,8 +87,8 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
       />
       <ul className={styles.list} id={listboxId} role="listbox" aria-label={picker === undefined ? "Command results" : "Results"}>
         {results.map((command, index) => {
-          const group = commandGroup(command.id);
-          const startsGroup = grouped && (index === 0 || commandGroup(results[index - 1].id) !== group);
+          const group = groupOf(command);
+          const startsGroup = grouped && (index === 0 || groupOf(results[index - 1]) !== group);
           return (
             <Fragment key={command.id}>
               {startsGroup && (
@@ -117,4 +118,9 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
       </div>
     </div>
   );
+}
+
+/** A command's group; a picker's items have none. */
+function groupOf(item: Command | PickerItem): CommandGroup | undefined {
+  return "group" in item ? item.group : undefined;
 }
