@@ -98,7 +98,7 @@ export function useWorkspaceShortcuts({
         const target = event.target as HTMLElement | null;
         const tag = target?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
-        if (event.defaultPrevented || target?.getAttribute("role") === "separator") return;
+        if (event.defaultPrevented || (target instanceof Element && target.getAttribute("role") === "separator")) return;
         event.preventDefault();
         if (direction === -1) onNavigateBack?.();
         else onNavigateForward?.();

@@ -2669,4 +2669,91 @@ describe("App release notes on a new version", () => {
       expect(screen.queryByRole("dialog", { name: "Release notes" })).toBeNull();
     });
   });
+
+  describe("back and forward through the selected commits (#618)", () => {
+    const graph = [
+      { id: "c3", shortId: "c3", summary: "three", authorName: "A", authorEmail: "a@x", timestamp: 3, parentIds: ["c2"], branchRefs: ["main"], remoteBranchRefs: [] },
+      { id: "c2", shortId: "c2", summary: "two", authorName: "A", authorEmail: "a@x", timestamp: 2, parentIds: ["c1"], branchRefs: [], remoteBranchRefs: [] },
+      { id: "c1", shortId: "c1", summary: "one", authorName: "A", authorEmail: "a@x", timestamp: 1, parentIds: [], branchRefs: [], remoteBranchRefs: [] },
+    ];
+    function navClient() {
+      return fakeClient({
+        listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+        openRepo: async () => {},
+        persistOpenRepos: async () => {},
+        getStatus: async () => [],
+        getCommitGraph: async () => graph,
+        listBranches: async () => [{ name: "main", isCurrent: true }],
+        listStashes: async () => [],
+        getGraphBranchSelection: async () => null,
+        getCommitFiles: async () => [],
+        getCommitMessage: async () => "message",
+        getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
+      });
+    }
+    const row = (summary: RegExp) => screen.getByText(summary).closest("li")!;
+    const isSelected = (summary: RegExp) => row(summary).getAttribute("aria-selected") === "true";
+
+    it("goes back and forward with Alt+Left/Right, the mouse buttons and the toolbar", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        render(<App client={navClient()} />);
+        fireEvent.click((await screen.findByText(/c3 three/)).closest("li")!);
+        const list = screen.getByRole("listbox", { name: "Commit history" });
+        list.focus();
+        // `[` twice: two jumps to the parents, each its own entry.
+        fireEvent.keyDown(list, { key: "[" });
+        fireEvent.keyDown(list, { key: "[" });
+        await waitFor(() => expect(isSelected(/c1 one/)).toBe(true));
+        expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled();
+
+        fireEvent.keyDown(list, { key: "ArrowLeft", altKey: true });
+        await waitFor(() => expect(isSelected(/c2 two/)).toBe(true));
+        fireEvent.mouseUp(window, { button: 3 });
+        await waitFor(() => expect(isSelected(/c3 three/)).toBe(true));
+        fireEvent.click(screen.getByRole("button", { name: "Back" }));
+        await waitFor(() => expect(screen.getByText(/Uncommitted changes/).closest("li")).toHaveAttribute("aria-selected", "true"));
+        expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
+
+        fireEvent.mouseUp(window, { button: 4 });
+        await waitFor(() => expect(isSelected(/c3 three/)).toBe(true));
+        fireEvent.keyDown(window, { key: "ArrowRight", altKey: true });
+        await waitFor(() => expect(isSelected(/c2 two/)).toBe(true));
+        fireEvent.click(screen.getByRole("button", { name: "Forward" }));
+        await waitFor(() => expect(isSelected(/c1 one/)).toBe(true));
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    it("merges keyboard moves into one step, and the palette offers Back", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        render(<App client={navClient()} />);
+        fireEvent.click((await screen.findByText(/c3 three/)).closest("li")!);
+        const list = screen.getByRole("listbox", { name: "Commit history" });
+        fireEvent.keyDown(list, { key: "ArrowDown" });
+        fireEvent.keyDown(list, { key: "ArrowDown" });
+        await waitFor(() => expect(isSelected(/c1 one/)).toBe(true));
+
+        fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+        fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "Back to" } });
+        fireEvent.click(await screen.findByRole("option", { name: "Back to previous commit" }));
+        await waitFor(() => expect(isSelected(/c3 three/)).toBe(true));
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    it("leaves Alt+Left to a text field", async () => {
+      render(<App client={navClient()} />);
+      fireEvent.click((await screen.findByText(/c3 three/)).closest("li")!);
+      fireEvent.click(screen.getByText(/c2 two/).closest("li")!);
+      const search = screen.getByRole("searchbox", { name: "Search commits" });
+      fireEvent.keyDown(search, { key: "ArrowLeft", altKey: true });
+      expect(isSelected(/c2 two/)).toBe(true);
+    });
+  });
 });

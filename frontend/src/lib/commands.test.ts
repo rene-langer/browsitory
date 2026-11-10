@@ -1807,6 +1807,20 @@ describe("Go to pickers (#441)", () => {
     expect(handlers.onGoToBranch).toHaveBeenCalledWith("local", "feature");
   });
 
+  it("offers Back and Forward only while there is somewhere to go (#618)", () => {
+    expect(pickers().picker("go-back")).toBeUndefined();
+    expect(pickers().picker("go-forward")).toBeUndefined();
+    const handlers = { ...goTo(), onGoBack: vi.fn(), onGoForward: vi.fn() };
+    const { picker } = pickers({ pending: true }, handlers);
+    expect(picker("go-back")?.label).toBe("Back to previous commit");
+    expect(commandGroup("go-back")).toBe("Go to");
+    expect(commandGroup("go-forward")).toBe("Go to");
+    picker("go-back")!.run();
+    picker("go-forward")!.run();
+    expect(handlers.onGoBack).toHaveBeenCalledOnce();
+    expect(handlers.onGoForward).toHaveBeenCalledOnce();
+  });
+
   it("goes to a tag's commit and to a stash", () => {
     const { picker, handlers } = pickers();
     picker("go-to-tag")!.picker!.items("v1")[0].run();

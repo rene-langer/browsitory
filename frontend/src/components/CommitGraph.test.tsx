@@ -1,8 +1,9 @@
 import { useState, type ComponentProps } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphCommit, StatusEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
+import { assignLanes } from "../lib/commitGraphLayout";
 import { CommitGraph } from "./CommitGraph";
 import styles from "./CommitGraph.module.css";
 
@@ -177,7 +178,7 @@ describe("CommitGraph", () => {
     const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowDown" });
 
-    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "aaa111..." });
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "aaa111..." }, "step");
   });
 
   it("ArrowUp from the first row does nothing (clamped, not wrapped)", () => {
@@ -198,7 +199,7 @@ describe("CommitGraph", () => {
     const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowUp" });
 
-    expect(onSelectRow).toHaveBeenCalledWith("uncommitted");
+    expect(onSelectRow).toHaveBeenCalledWith("uncommitted", "step");
   });
 
   it("ArrowDown from the last commit does nothing (clamped)", () => {
@@ -219,7 +220,7 @@ describe("CommitGraph", () => {
     const list = screen.getByRole("listbox");
     fireEvent.keyDown(list, { key: "ArrowDown" });
 
-    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "bbb222..." });
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "bbb222..." }, "step");
   });
 
   it("right-clicking a commit row shows a 'Branch from here' menu entry", () => {
@@ -1103,24 +1104,24 @@ describe("CommitGraph — keyboard access", () => {
   it("Home and End jump to the first and last row", () => {
     const { list, onSelectRow } = setup({ commitId: "B" });
     fireEvent.keyDown(list, { key: "Home" });
-    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted");
+    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted", "step");
     fireEvent.keyDown(list, { key: "End" });
-    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" }, "step");
   });
 
   it("PageDown and PageUp move by a page, clamped to the ends", () => {
     const { list, onSelectRow } = setup({ commitId: "B" });
     fireEvent.keyDown(list, { key: "PageDown" });
-    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "A" }, "step");
     fireEvent.keyDown(list, { key: "PageUp" });
-    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted");
+    expect(onSelectRow).toHaveBeenLastCalledWith("uncommitted", "step");
   });
 
   it("Shift+ArrowDown extends the selection and the menu then offers Squash", () => {
     const { rerender, list, onSelectRow, onRebaseSelection, ...rest } = setup({ commitId: "C" });
     fireEvent.click(screen.getByText(/^C /).closest("li")!);
     fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true });
-    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "B" });
+    expect(onSelectRow).toHaveBeenLastCalledWith({ commitId: "B" }, "step");
     rerender(
       <CommitGraph
         {...historyProps}
@@ -1589,5 +1590,102 @@ describe("CommitGraph — Create tag…", () => {
     renderGraph();
     fireEvent.keyDown(screen.getByRole("listbox", { name: "Commit history" }), { key: "Enter" });
     expect(screen.queryByRole("menuitem", { name: "Create tag…" })).toBeNull();
+  });
+});
+
+describe("CommitGraph — parent and child keys (#618)", () => {
+  const node = (id: string, parentIds: string[]): GraphCommit => ({
+    ...commits[0],
+    id,
+    shortId: id,
+    summary: `${id} summary`,
+    parentIds,
+  });
+  // T on M; M merges S into B; B and S both start from A, whose parent R is not loaded.
+  const graph = [node("T", ["M"]), node("M", ["B", "S"]), node("S", ["A"]), node("B", ["A"]), node("A", ["R"])];
+
+  function setup(selected: string, graphCommits: GraphCommit[] = graph) {
+    const onSelectRow = vi.fn();
+    const onGoToCommit = vi.fn();
+    render(
+      <CommitGraph
+        {...historyProps}
+        status={status}
+        commits={graphCommits}
+        selectedRow={{ commitId: selected }}
+        operationsBlocked={false}
+        onSelectRow={onSelectRow}
+        onGoToCommit={onGoToCommit}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+      />,
+    );
+    return { onSelectRow, onGoToCommit, list: screen.getByRole("listbox", { name: "Commit history" }) };
+  }
+
+  it("[ selects the first parent", () => {
+    const { list, onSelectRow } = setup("M");
+    fireEvent.keyDown(list, { key: "[" });
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "B" });
+    expect(list.getAttribute("aria-keyshortcuts")).toContain("[ ] Shift+[");
+  });
+
+  it("[ finds a parent outside the loaded history as Go to does", () => {
+    const { list, onSelectRow, onGoToCommit } = setup("A");
+    fireEvent.keyDown(list, { key: "[" });
+    expect(onGoToCommit).toHaveBeenCalledWith("R");
+    expect(onSelectRow).not.toHaveBeenCalled();
+  });
+
+  it("Shift+[ on a merge commit picks among its parents", () => {
+    const { list, onSelectRow } = setup("M");
+    fireEvent.keyDown(list, { key: "{", shiftKey: true });
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Parent 1: B B summary",
+      "Parent 2: S S summary",
+    ]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Parent 2: S S summary" }));
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "S" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("Shift+[ on a commit with one parent goes straight to it", () => {
+    const { list, onSelectRow } = setup("B");
+    fireEvent.keyDown(list, { key: "{", shiftKey: true });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "A" });
+  });
+
+  it("] selects the only child, and of several the one on the same lane", () => {
+    const first = setup("M");
+    fireEvent.keyDown(first.list, { key: "]" });
+    expect(first.onSelectRow).toHaveBeenCalledWith({ commitId: "T" });
+    cleanup();
+    // S, the row above B, reserves A's lane first, so A is drawn on S's lane, not B's.
+    const lanes = assignLanes(graph);
+    expect(lanes[4].lane).toBe(lanes[2].lane);
+    expect(lanes[4].lane).not.toBe(lanes[3].lane);
+    const second = setup("A");
+    fireEvent.keyDown(second.list, { key: "]" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(second.onSelectRow).toHaveBeenCalledWith({ commitId: "S" });
+  });
+
+  it("] offers a picker when no child is on the commit's lane", () => {
+    // Q is the second parent of both merges, so it has a lane of its own.
+    const merges = [node("M1", ["X1", "Q"]), node("M2", ["X2", "Q"]), node("X1", []), node("X2", []), node("Q", [])];
+    const { list, onSelectRow } = setup("Q", merges);
+    fireEvent.keyDown(list, { key: "]" });
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["M1 M1 summary", "M2 M2 summary"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "M2 M2 summary" }));
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "M2" });
+  });
+
+  it("] without a loaded child and Cmd+[ (Back on macOS) do nothing here", () => {
+    const { list, onSelectRow, onGoToCommit } = setup("T");
+    fireEvent.keyDown(list, { key: "]" });
+    fireEvent.keyDown(list, { key: "[", metaKey: true });
+    expect(onSelectRow).not.toHaveBeenCalled();
+    expect(onGoToCommit).not.toHaveBeenCalled();
   });
 });

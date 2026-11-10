@@ -84,7 +84,7 @@ describe("FileHistoryList", () => {
     const list = screen.getByRole("listbox", { name: "File history commits" });
 
     fireEvent.keyDown(list, { key: "ArrowDown" });
-    expect(props.onSelectRow).toHaveBeenCalledWith({ commitId: "c1" });
+    expect(props.onSelectRow).toHaveBeenCalledWith({ commitId: "c1" }, "step");
     fireEvent.keyDown(list, { key: "Escape" });
     expect(props.onClose).toHaveBeenCalled();
   });
