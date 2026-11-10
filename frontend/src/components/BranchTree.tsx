@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { GitBranch, Plus } from "lucide-react";
-import type {
-  BranchInfo,
-  PullOutcome,
-  RemoteInfo,
-  UpstreamInfo,
-} from "../ipc/RepoClient";
+import type { BranchInfo, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { rectAnchor } from "../lib/menuKeys";
 import type { OperationBlockers } from "../lib/operationStatus";
 import { branchNameProblem } from "../lib/refName";
@@ -14,7 +9,6 @@ import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import type { SidebarRevealRequest } from "../state/useSidebarReveal";
 import type { RemoteDialog } from "../state/workspaceDialog";
 import { AccordionSection } from "./primitives/AccordionSection";
-import { FormDialog } from "./primitives/FormDialog";
 import formStyles from "./primitives/FormDialog.module.css";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu } from "./primitives/ContextMenu";
@@ -38,7 +32,8 @@ import styles from "./BranchTree.module.css";
 /**
  * The sidebar's Branches section: the local and remote branch tree (`BranchTreeView`), its
  * context menus (`branchMenuItems.ts`), the inline New branch and Add remote forms, inline rename,
- * and the upstream block and its dialogs. A remote's Edit / Credentials / Remove dialog is opened
+ * and the upstream block and its dialogs. Pull lives in the repository toolbar, and its diverged
+ * prompt in `WorkspaceDialogs` (#636, #637). A remote's Edit / Credentials / Remove dialog is opened
  * through `onOpenRemoteDialog` and rendered by its owner (`WorkspaceDialogs`' `RemoteDialogs`).
  */
 export function BranchTree({
@@ -69,12 +64,6 @@ export function BranchTree({
   onListRemoteBranches,
   onFetchRemote,
   onPushCurrentBranch,
-  onPull,
-  pendingPull,
-  pullOutcome,
-  onMergePull,
-  onRebasePull,
-  onCancelPull,
   addRemoteDraftOpen,
   onOpenAddRemoteDraft,
   onCloseAddRemoteDraft,
@@ -139,12 +128,6 @@ export function BranchTree({
   onListRemoteBranches: (remoteName: string) => Promise<string[]>;
   onFetchRemote: (remoteName: string) => Promise<void>;
   onPushCurrentBranch: (remoteName: string) => Promise<void>;
-  onPull: () => Promise<void>;
-  pendingPull: { upstreamRef: string } | null;
-  pullOutcome: PullOutcome | null;
-  onMergePull: (upstreamRef: string) => Promise<void>;
-  onRebasePull: (upstreamRef: string) => void;
-  onCancelPull: () => void;
   addRemoteDraftOpen: boolean;
   onOpenAddRemoteDraft: () => void;
   onCloseAddRemoteDraft: () => void;
@@ -489,22 +472,8 @@ export function BranchTree({
               {upstream.localBranch} tracks {upstream.remoteName}/{upstream.remoteBranch}.
             </p>
           )}
-          <Toolbar aria-label="Upstream actions">
-            <button
-              type="button"
-              disabled={operationDisabled || upstream === null || pendingPull !== null}
-              title={
-                operationDisabled
-                  ? (operationDisabledReason ?? undefined)
-                  : upstream === null
-                    ? "No upstream set for the current branch."
-                    : undefined
-              }
-              onClick={() => void onPull()}
-            >
-              Pull
-            </button>
-            {upstream !== null && (
+          {upstream !== null && (
+            <Toolbar aria-label="Upstream actions">
               <button
                 type="button"
                 disabled={operationDisabled}
@@ -513,9 +482,8 @@ export function BranchTree({
               >
                 Clear upstream
               </button>
-            )}
-          </Toolbar>
-          {pullOutcome?.kind === "UpToDate" && <p role="status">Already up to date.</p>}
+            </Toolbar>
+          )}
         </section>
 
         {clearUpstreamConfirm && upstream !== null && (
@@ -553,20 +521,6 @@ export function BranchTree({
           />
         )}
 
-        {pendingPull !== null && (
-          <FormDialog ariaLabel="Pull has diverged" onCancel={onCancelPull}>
-            <p>The pull has diverged from {pendingPull.upstreamRef}.</p>
-            <button type="button" disabled={operationDisabled} onClick={() => void onMergePull(pendingPull.upstreamRef)}>
-              Merge
-            </button>
-            <button type="button" disabled={operationDisabled} onClick={() => onRebasePull(pendingPull.upstreamRef)}>
-              Rebase
-            </button>
-            <button type="button" data-autofocus onClick={onCancelPull}>
-              Cancel
-            </button>
-          </FormDialog>
-        )}
       </AccordionSection>
     </>
   );

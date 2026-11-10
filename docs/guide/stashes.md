@@ -2,7 +2,7 @@
 
 ![The Stashes section](assets/stashes.png)
 
-**Stash** in the commit dock sets every change aside, untracked files included. Its chevron
+**Stash** in the repository toolbar sets every change aside, untracked files included. Its chevron
 opens **Stash all** and **Stash…**, a dialog with an optional message, **Keep staged changes**
 (stash them but also leave them staged) and **Include untracked files** (on by default).
 While a rebase or a cherry-pick or revert is paused, stashing waits: the Stash button, the
