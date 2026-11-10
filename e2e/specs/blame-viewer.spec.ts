@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { clickInPage, waitUntilInPage } from "../support/dom";
 import { git } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -43,9 +44,10 @@ describe("Browsitory blame", () => {
     // both the scroll and the click go through `browser.execute`.
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
+    // Wait for the row to move under Staged before committing (#697).
+    await waitUntilInPage(`button[aria-label="Unstage ${PRIME_FILE}"]`);
     await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: prime the refresh"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
-    const commitButton = await $("button=Commit");
-    await browser.execute((el) => (el as HTMLElement).click(), commitButton);
+    await clickInPage("button", "Commit");
 
     const secondCommitEntry = await $("li*=e2e: blame fixture second commit");
     await secondCommitEntry.waitForExist();

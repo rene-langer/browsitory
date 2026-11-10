@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { clickInPage, waitUntilInPage } from "../support/dom";
 import { gitIn } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -52,6 +53,8 @@ describe("Browsitory commit signing", () => {
     // Same opacity-0 workaround as first-flow.spec.ts.
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
+    // Wait for the row to move under Staged before committing (#697).
+    await waitUntilInPage(`button[aria-label="Unstage ${FILE}"]`);
     await browser.execute(
       (el, value) => {
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
@@ -61,7 +64,7 @@ describe("Browsitory commit signing", () => {
       commitMessageInput,
       SUMMARY,
     );
-    await browser.execute((el) => (el as HTMLElement).click(), await $("button=Commit"));
+    await clickInPage("button", "Commit");
 
     await browser.waitUntil(() => git("log", "-1", "--format=%s") === SUMMARY, {
       timeoutMsg: "commit did not land",
