@@ -6,6 +6,147 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-10
+
+A privacy notice, a setting to turn off the automatic update check, recent searches in the
+commit search field, and fixes: Cancel stops a transfer that is still connecting, and patches
+and discarded hunks now handle symbolic links. Most of the rest is internal clean-up of the
+worker loop, the transfer actions and the command palette.
+
+### Privacy notice
+
+- Added: a privacy notice in the user guide (`docs/guide/privacy.md`, linked from `PRIVACY.md`
+  and both READMEs). Browsitory collects no data; the notice lists every connection the app
+  makes, the data it keeps on your computer and how to delete it (#627).
+- Changed: the privacy notice names who is responsible for it and gives a private contact,
+  privacy@browsitory.com, instead of public GitHub issues. It gives the legal basis for the
+  site's hosting logs, says which providers may process data in the US and on what terms, and
+  describes how email to that address is kept and deleted (#627).
+- Fixed: the privacy notice also lists the hosts an update download goes through
+  (`api.github.com`, `release-assets.githubusercontent.com`), submodule addresses, the sign-in
+  mode and HTTPS user name kept in each repository's `.git/config`, and that the log file holds
+  notes as well as errors; its delete steps cover linked worktrees and that Git config (#627).
+- Changed: the user guide site no longer loads its fonts from Google Fonts, and no longer shows
+  the repository's star count and latest version in its header, so visiting it contacts neither
+  Google nor `api.github.com`; the header keeps a plain link to the repository (#627).
+
+### Update check setting
+
+- Added: **Preferences → Updates → Check for updates automatically** in the desktop app
+  (`[updates] check_automatically` in `config.toml`, on by default). Turned off, the app makes no
+  update request at start or every 6 hours. **Check for updates**, in that section and in the
+  command palette, checks once whatever the setting and says whether you are up to date (#630).
+
+### Recent searches
+
+- Added: the commit search field lists your last 10 searches in the repository when it's empty
+  and focused; pick one with ↓/↑ and Enter or a click, remove one with Delete or its ×. Only
+  searches that ran are remembered, not ones the field reports as invalid (#540).
+
+### Cancelling a transfer that is still connecting
+
+- Fixed: Cancel had no effect on a Fetch, Fetch all, Pull or Push that was still connecting to a
+  server that doesn't answer (or a VPN that is down): the app kept waiting for the connection,
+  for minutes or for good. Cancel now stops it at once, nothing is fetched or sent, and other
+  actions can go ahead (#547).
+
+### Symbolic links in patches and discarded hunks
+
+- Fixed: applying a patch, or applying or reverting a commit's file or hunk, failed whenever it
+  changed, deleted or renamed a symbolic link. The link itself is now changed, as `git apply`
+  does, and a patch series that fails later puts such a link back as it was (#563).
+- Fixed: discarding the hunk (or its lines) of a symbolic link that now points elsewhere works,
+  and points the link back where it pointed; it used to fail every time and leave the link
+  as it was. The file a link points to is never written (#586).
+
+### Command palette groups
+
+- Fixed: "Fetch all remotes", "Pull", "Push branch to…" and "Delete remote branch…" are listed
+  under Remotes, and "Toggle wrap lines", "Toggle show whole file", "File history of current
+  file", "Apply patch…" and "Save staged changes as patch…" under Diff, instead of General.
+  Creating, checking out and deleting a tag are all listed under Branches; deleting a tag on a
+  remote stays under Remotes. Command ids are unchanged, so recent commands keep working (#583,
+  #592).
+
+### Error messages
+
+- Fixed: when an action such as Stage failed because file permissions blocked it, the error banner
+  showed only the raw message. It now adds the same hint as the diff pane and other views (#573).
+
+### Internal: worker loop split up
+
+- Changed: `Worker::spawn_paused` no longer holds the whole worker thread. Its state lives in a
+  `WorkerLoop` struct (`worker/worker_loop.rs`) whose `step` runs each command through `acquire`
+  (the state lock), `before` (undo settle/begin, held reply, operation gate), `dispatch` (the
+  `match` over `Command`, `worker_loop/dispatch.rs`) and `after` (undo finish, lock release).
+  The `probe!`/`rebase_slot!` macros and the `marker` closure became methods. No behaviour
+  change (#486).
+
+### Internal: paused-operation stores
+
+- Internal: the stores for a paused rebase and a stopped cherry-pick/revert are one generic
+  `StateFile` over a codec, so loading, the "ignore a bad file, log once" rule and the atomic
+  write live in one place (#487).
+
+### Internal: remote transfer actions
+
+- Changed: `useRemoteTransferActions` takes one context object (`client`, `repoPath`, `refresh`,
+  `runners`, `setState`, `snapshot`) instead of 15 positional parameters, and reads the
+  repository state it needs from one latest-snapshot ref instead of five mirror refs (#490).
+- Changed: the transfer lifecycle (requested, active, completing, idle) moved into the React-free
+  `lib/transferSession.ts`, unit-tested with progress event sequences; the failure messages are a
+  lookup table keyed by error kind with per-operation overrides. No visible change (#490).
+
+### Internal: command palette builders
+
+- Changed: `buildCommands` takes one context object instead of 14 positional parameters and is
+  split into one builder per command family. Each command declares its palette group, set by its
+  builder, instead of the group being derived from the id; the ids stay, so recent commands still
+  match (#494).
+- Changed: the palette's sidebar commands ("Go to Tags", "Delete tag …", "Drop stash …",
+  "Remove worktree …", "Browse branches on origin") send reveal requests through the workspace's
+  state, which the sidebar sections and the branch tree handle, instead of finding and clicking
+  the sidebar's buttons by their labels (#494).
+
+### Internal: privacy host check
+
+- Internal: CI's `audit` job fails when the code names a host the privacy notice doesn't list
+  (`scripts/check-privacy-hosts.py`, #627). The script scans the whole text of each file, matches
+  the scheme in any case, finds protocol-relative `//host` URLs, flags URLs whose host isn't
+  written after the scheme (`format!`, `concat!`, template literals) unless they are listed,
+  skips the files of `#[cfg(test)] mod name;` modules, and also scans `frontend/index.html`,
+  `frontend/public/`, `frontend/vite*.ts`, `.json` sources, `extension/package.json` and the
+  Tauri capabilities (#706).
+- Internal: CI's licence-doc and privacy-host checks run even when `cargo audit` or
+  `pnpm audit` fails (#707).
+
+### Internal: tests and E2E
+
+- Added: a VS Code E2E spec for "Fetch automatically": with the interval at one minute, the open
+  panel fetches a local bare remote's new commit in the background and the sync bar shows
+  "Fetched just now" (#546).
+- Changed: the VS Code E2E host runs with its own empty `BROWSITORY_CONFIG_DIR`, like the Tauri
+  suite, so it no longer reads or writes the developer's real Browsitory config (#546).
+- Fixed: `e2e/screenshots/capture.sh` sets `TMPDIR=/tmp` only for the capture, so the build no
+  longer fails when `/tmp` is a small tmpfs (#574).
+- Fixed: E2E builds (`VITE_E2E_REPO_PATH`) skip the update check, so the E2E suite and the guide
+  screenshots no longer contact the update endpoints, download a release bundle or show the
+  "Update ready" banner (#576).
+- Fixed: `first-flow.spec.ts` clicked Commit right after the stage click, so when the stage had
+  not finished the commit never happened and the spec timed out waiting for it in history. It
+  now waits for the file's Unstage control (the row is under Staged) and clicks Commit with
+  `clickInPage`, which waits for the button to be enabled. `commit-graph.spec.ts` (both tests),
+  `blame-viewer.spec.ts` and `commit-signing.spec.ts` had the same race and get the same fix
+  (#697).
+- Fixed: three `DiffPane` diff-options tests selected a line right after a hunk action, while
+  the refetch that action starts could still land and clear the line selection, so "Stage lines
+  (1)" was sometimes missing. They now wait for that refetch to land before selecting a line, and
+  query the button with `findByRole` (#596).
+- Fixed: the `CommitTreeBrowser` line history test selected a line and read the button's label
+  at once, but the effect that subscribes the button to selection changes mounts together with
+  the file's lines and could still be pending, so "History of line 2 of README.txt" was
+  sometimes missing. The test now waits for the label with `findByRole` (#712).
+
 ## [0.7.0] - 2026-11-10
 
 A release of fixes: actions now follow one rule for when the repository is busy (a merge,
