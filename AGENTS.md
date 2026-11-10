@@ -103,6 +103,13 @@ keeps it accurate. Bypass once with `SKIP_CHANGELOG_CHECK=1 git push`. A diff th
 `rust-toolchain.toml`) needs no entry. CI's `changelog` job runs the same check (the
 `skip-changelog` PR label bypasses it).
 
+The same hook then runs `cargo fmt --all -- --check`, CI's format check, and blocks the push
+when Rust code isn't formatted; run `cargo fmt --all` and commit. It needs rustfmt (`rustup
+component add rustfmt`, or the distro's `rustfmt` package); without it the check is skipped with a
+note. Bypass once with `SKIP_FMT_CHECK=1 git push`. Agents without rustfmt must format by hand in
+default rustfmt style: there is no `rustfmt.toml`, so a call's arguments, a method chain or an
+array longer than 60 characters is split, not only lines over 100 columns.
+
 ## Changelog entries
 
 Don't edit `CHANGELOG.md` in a pull request; add a fragment instead, so parallel PRs don't
