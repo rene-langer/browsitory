@@ -215,6 +215,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     applyCommitChange: vi.fn(),
     savePatch: vi.fn(),
     applyPatchFile: vi.fn(),
+    applyPatchFiles: vi.fn(),
     setGraphBranchSelection: vi.fn(),
     setGraphRemoteBranchSelection: vi.fn(),
     clearGraphBranchSelection: vi.fn(),

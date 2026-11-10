@@ -64,6 +64,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   listTags: async () => [],
   subscribeTransferProgress: () => () => {},
   subscribeHookProgress: () => () => {},
+  subscribeFileDrops: () => () => {},
   getMergeMessage: async () => null,
   getHeadInfo: async () => ({
     headId: null,
@@ -116,7 +117,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
 };
 
 // The `RepoClient` methods that return synchronously; every other method returns a promise.
-const SYNC_METHODS = new Set<string>(["subscribeTransferProgress", "subscribeHookProgress"]);
+const SYNC_METHODS = new Set<string>(["subscribeTransferProgress", "subscribeHookProgress", "subscribeFileDrops"]);
 
 // Names other code probes on any object (promise resolution, serializers, matchers, React, the
 // test runner's pretty-printer). The fake must not answer them with a method stub: `await` on a

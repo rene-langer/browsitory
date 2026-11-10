@@ -110,6 +110,8 @@ export function StashPanel({
           setPendingDrop(stash);
         }),
         destructive: true,
+        // Its own group (#645), apart from Apply and Pop.
+        group: "drop",
       },
     ];
   };

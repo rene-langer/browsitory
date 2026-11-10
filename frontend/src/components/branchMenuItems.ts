@@ -89,33 +89,37 @@ export function localBranchMenuItems({
     {
       ...menuItem(actions.checkout, () => onSwitchBranch(branch.name)),
       title: actions.checkout.reason ?? "Same as double-clicking the branch.",
+      group: "branch",
     },
-    menuItem(actions.rename, () => onStartRename(branch.name)),
+    { ...menuItem(actions.rename, () => onStartRename(branch.name)), group: "branch" },
   ];
+  // Grouped (#645): the branch itself, merging, the remote, viewing and copying, then Delete.
   if (!branch.isCurrent) {
-    items.push(menuItem(actions.merge, () => onMergeBranch(branch.name)));
+    items.push({ ...menuItem(actions.merge, () => onMergeBranch(branch.name)), group: "merge" });
     if (onCompareBranch !== undefined) {
       items.push({
         label: compareLabel(branches),
         onSelect: () => onCompareBranch(`refs/heads/${branch.name}`, branch.name),
+        group: "merge",
       });
     }
   }
   if (actions.pushToUpstream !== null && upstream !== null) {
     const remoteName = upstream.remoteName;
-    items.push(menuItem(actions.pushToUpstream, () => void onPushCurrentBranch(remoteName)));
+    items.push({ ...menuItem(actions.pushToUpstream, () => void onPushCurrentBranch(remoteName)), group: "remote" });
   }
   if (actions.setUpstream !== null) {
-    items.push(menuItem(actions.setUpstream, onOpenSetUpstream));
+    items.push({ ...menuItem(actions.setUpstream, onOpenSetUpstream), group: "remote" });
   }
-  items.push(menuItem(actions.pushTo, () => onOpenPushDialog(branch.name)));
+  items.push({ ...menuItem(actions.pushTo, () => onOpenPushDialog(branch.name)), group: "remote" });
   items.push({
     label: "Isolate branch",
     title: "Show only this branch in the commit graph",
     onSelect: () => onIsolateGraphBranch("local", branch.name),
+    group: "view",
   });
-  items.push({ label: "Copy branch name", onSelect: () => onCopy(branch.name, "branch name") });
-  items.push({ ...menuItem(actions.delete, () => onDelete(branch.name)), destructive: true });
+  items.push({ label: "Copy branch name", onSelect: () => onCopy(branch.name, "branch name"), group: "view" });
+  items.push({ ...menuItem(actions.delete, () => onDelete(branch.name)), destructive: true, group: "delete" });
   return items;
 }
 
@@ -146,15 +150,15 @@ export function remoteFolderMenuItems({
 }): ContextMenuItem[] {
   const actions = remoteActions(blockers, remoteName);
   return [
-    menuItem(actions.fetch, onFetch),
-    menuItem(actions.pushCurrentBranch, onPushCurrentBranch),
-    menuItem(actions.edit, onEdit),
-    menuItem(actions.credentials, onCredentials),
-    { label: "Copy fetch URL", onSelect: () => onCopy(fetchUrl, "fetch URL") },
+    { ...menuItem(actions.fetch, onFetch), group: "sync" },
+    { ...menuItem(actions.pushCurrentBranch, onPushCurrentBranch), group: "sync" },
+    { ...menuItem(actions.edit, onEdit), group: "settings" },
+    { ...menuItem(actions.credentials, onCredentials), group: "settings" },
+    { label: "Copy fetch URL", onSelect: () => onCopy(fetchUrl, "fetch URL"), group: "copy" },
     ...(pushUrl !== null && pushUrl !== fetchUrl
-      ? [{ label: "Copy push URL", onSelect: () => onCopy(pushUrl, "push URL") }]
+      ? [{ label: "Copy push URL", onSelect: () => onCopy(pushUrl, "push URL"), group: "copy" }]
       : []),
-    { ...menuItem(actions.remove, onRemove), destructive: true },
+    { ...menuItem(actions.remove, onRemove), destructive: true, group: "delete" },
   ];
 }
 
@@ -184,13 +188,14 @@ export function remoteBranchMenuItems({
 }): ContextMenuItem[] {
   const actions = remoteBranchActions(blockers, remoteName, branchName);
   return [
-    menuItem(actions.checkout, onCheckout),
-    menuItem(actions.setAsUpstream, () => void onSetUpstream(remoteName, branchName)),
+    { ...menuItem(actions.checkout, onCheckout), group: "branch" },
+    { ...menuItem(actions.setAsUpstream, () => void onSetUpstream(remoteName, branchName)), group: "branch" },
     ...(onCompareBranch !== undefined
       ? [
           {
             label: compareLabel(branches),
             onSelect: () => onCompareBranch(`refs/remotes/${remoteName}/${branchName}`, `${remoteName}/${branchName}`),
+            group: "view",
           },
         ]
       : []),
@@ -198,9 +203,14 @@ export function remoteBranchMenuItems({
       label: "Isolate branch",
       title: "Show only this branch in the commit graph",
       onSelect: () => onIsolateGraphBranch("remote", `${remoteName}/${branchName}`),
+      group: "view",
     },
-    { label: "Copy branch name", onSelect: () => onCopy(`${remoteName}/${branchName}`, "branch name") },
-    { ...menuItem(actions.delete, () => onOpenDeleteRemoteBranch(remoteName, branchName)), destructive: true },
+    { label: "Copy branch name", onSelect: () => onCopy(`${remoteName}/${branchName}`, "branch name"), group: "view" },
+    {
+      ...menuItem(actions.delete, () => onOpenDeleteRemoteBranch(remoteName, branchName)),
+      destructive: true,
+      group: "delete",
+    },
   ];
 }
 
@@ -218,8 +228,8 @@ export function addMenuItems({
   onShowAllGraphBranches: () => void;
 }): ContextMenuItem[] {
   return [
-    { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD") },
-    menuItem(addRemoteAction(), onOpenAddRemoteDraft),
-    { label: "Show all branches", disabled: !hasGraphSelection, onSelect: onShowAllGraphBranches },
+    { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD"), group: "new" },
+    { ...menuItem(addRemoteAction(), onOpenAddRemoteDraft), group: "new" },
+    { label: "Show all branches", disabled: !hasGraphSelection, onSelect: onShowAllGraphBranches, group: "view" },
   ];
 }

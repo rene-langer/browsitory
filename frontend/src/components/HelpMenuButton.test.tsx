@@ -26,9 +26,11 @@ describe("HelpMenuButton (#647)", () => {
     expect(button).toHaveAttribute("aria-expanded", "true");
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "User guide",
-      "Keyboard shortcuts",
+      // The `?` that opens the sheet, as a hint after the label (#645).
+      "Keyboard shortcuts?",
       "What’s new",
     ]);
+    expect(screen.getByRole("menuitem", { name: "Keyboard shortcuts" })).toHaveAttribute("aria-keyshortcuts", "?");
   });
 
   it("runs the chosen item and closes", () => {

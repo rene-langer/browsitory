@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useEffect, useState } from "react";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
@@ -534,5 +534,53 @@ describe("ContextMenu focus and keys", () => {
     rerender(<Host menuOpen paletteOpen={false} />);
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "One" }), { key: "Escape" });
     expect(screen.getByRole("button", { name: "Origin" })).toHaveFocus();
+  });
+  describe("groups and shortcut hints (#645)", () => {
+    const grouped: ContextMenuItem[] = [
+      { label: "Open", onSelect: () => {}, group: "view" },
+      { label: "Stage", onSelect: () => {}, group: "change", shortcut: "s", ariaKeyShortcuts: "S" },
+      { label: "Ignore", onSelect: () => {}, group: "change" },
+      { label: "Discard", onSelect: () => {}, group: "danger", destructive: true },
+    ];
+
+    it("draws a separator between neighbours of different groups only", () => {
+      render(<ContextMenu x={0} y={0} onClose={() => {}} items={grouped} />);
+      const sequence = [...screen.getByRole("menu").children].map((child) =>
+        child.getAttribute("role") === "separator" ? "|" : child.querySelector("button")?.firstChild?.textContent,
+      );
+      expect(sequence).toEqual(["Open", "|", "Stage", "Ignore", "|", "Discard"]);
+      expect(screen.getAllByRole("separator")).toHaveLength(2);
+    });
+
+    it("draws no separator for a menu without groups", () => {
+      render(
+        <ContextMenu
+          x={0}
+          y={0}
+          onClose={() => {}}
+          items={[
+            { label: "One", onSelect: () => {} },
+            { label: "Two", onSelect: () => {} },
+          ]}
+        />,
+      );
+      expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+    });
+
+    it("shows the shortcut after the label, out of the accessible name, and names it in aria-keyshortcuts", () => {
+      render(<ContextMenu x={0} y={0} onClose={() => {}} items={grouped} />);
+      const stage = screen.getByRole("menuitem", { name: "Stage" });
+      expect(stage).toHaveAttribute("aria-keyshortcuts", "S");
+      expect(within(stage).getByText("s").tagName).toBe("KBD");
+      expect(screen.getByRole("menuitem", { name: "Open" })).not.toHaveAttribute("aria-keyshortcuts");
+    });
+
+    it("skips separators in arrow-key navigation", () => {
+      render(<ContextMenu x={0} y={0} onClose={() => {}} items={grouped} />);
+      const open = screen.getByRole("menuitem", { name: "Open" });
+      expect(open).toHaveFocus();
+      fireEvent.keyDown(open, { key: "ArrowDown" });
+      expect(screen.getByRole("menuitem", { name: "Stage" })).toHaveFocus();
+    });
   });
 });

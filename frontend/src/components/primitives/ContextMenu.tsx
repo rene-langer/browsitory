@@ -12,6 +12,19 @@ export interface ContextMenuItem {
   title?: string;
   /** When set, the item is a checkbox (`menuitemcheckbox` + `aria-checked`) with a check mark. */
   checked?: boolean;
+  /**
+   * The item's group (#645): a separator is drawn between neighbours whose groups differ, so a
+   * long menu reads as read-only, history-changing and destructive sections. Items without a
+   * group form one group of their own.
+   */
+  group?: string;
+  /**
+   * A key that runs the same action outside the menu (#645), shown dimmed after the label, such
+   * as `"s"` or `"Ctrl/Cmd+Z"`. Only a hint: it is not bound while the menu is open.
+   */
+  shortcut?: string;
+  /** The `shortcut` in `aria-keyshortcuts` syntax (`"Control+Z Meta+Z"`), for assistive tech. */
+  ariaKeyShortcuts?: string;
 }
 
 export function ContextMenu({
@@ -262,7 +275,10 @@ export function ContextMenu({
         event.stopPropagation();
       }}
     >
-      {items.map((item, index) => (
+      {items.map((item, index) => [
+        index > 0 && items[index - 1].group !== item.group && (
+          <li key={`separator:${item.label}`} role="separator" className={styles.separator} />
+        ),
         <li key={item.label} role="none">
           <button
             ref={(element) => {
@@ -271,6 +287,7 @@ export function ContextMenu({
             type="button"
             role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
             aria-checked={item.checked}
+            aria-keyshortcuts={item.ariaKeyShortcuts}
             className={styles.item}
             disabled={item.disabled}
             title={item.title}
@@ -283,9 +300,14 @@ export function ContextMenu({
               <Check size={12} aria-hidden="true" className={item.checked ? styles.check : styles.checkHidden} />
             )}
             {item.label}
+            {item.shortcut !== undefined && (
+              <kbd className={styles.shortcut} aria-hidden="true">
+                {item.shortcut}
+              </kbd>
+            )}
           </button>
-        </li>
-      ))}
+        </li>,
+      ])}
     </ul>
   );
 }

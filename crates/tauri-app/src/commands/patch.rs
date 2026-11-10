@@ -2,6 +2,7 @@
 //! patch file.
 use super::{off_runtime, repo_worker, AppState};
 use repo_service::wire::{CommitChangeRequestDto, ErrorDto, PatchContentDto, PatchSourceDto};
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -81,6 +82,38 @@ pub async fn open_patch_file(app: AppHandle) -> Result<Option<PatchContentDto>, 
         return Ok(None);
     };
     let path = picked.into_path().map_err(ErrorDto::from_error)?;
+    read_patch_at(path).await.map(Some)
+}
+
+/// Reads a patch file dropped on the window (#649): its content. Only a file named like a patch
+/// (`.patch`, `.diff`, `.mbox`, `.txt`, the "Apply patch…" dialog's filter) is read.
+#[tauri::command]
+pub async fn read_patch_file(path: String) -> Result<PatchContentDto, ErrorDto> {
+    let path = PathBuf::from(path);
+    if !is_patch_file_name(&path) {
+        return Err(format!(
+            "{} isn't a patch file (.patch, .diff, .mbox or .txt)",
+            path.display()
+        )
+        .into());
+    }
+    read_patch_at(path).await
+}
+
+/// The extensions "Apply patch…" offers and a dropped file may have, in any case.
+const PATCH_EXTENSIONS: [&str; 4] = ["patch", "diff", "mbox", "txt"];
+
+fn is_patch_file_name(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            PATCH_EXTENSIONS
+                .iter()
+                .any(|known| extension.eq_ignore_ascii_case(known))
+        })
+}
+
+async fn read_patch_at(path: PathBuf) -> Result<PatchContentDto, ErrorDto> {
     let shown = path.to_string_lossy().into_owned();
     let bytes = off_runtime(move || -> std::io::Result<Vec<u8>> {
         if std::fs::metadata(&path)?.len() > MAX_PATCH_FILE_BYTES {
@@ -90,5 +123,21 @@ pub async fn open_patch_file(app: AppHandle) -> Result<Option<PatchContentDto>, 
     })
     .await?
     .map_err(|e| format!("Couldn't read {shown}: {e}"))?;
-    Ok(Some(PatchContentDto::from_bytes(&bytes)))
+    Ok(PatchContentDto::from_bytes(&bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_patch_file_name;
+    use std::path::Path;
+
+    #[test]
+    fn reads_only_files_named_like_a_patch() {
+        for name in ["a.patch", "b.DIFF", "dir/c.mbox", "d.txt"] {
+            assert!(is_patch_file_name(Path::new(name)), "{name}");
+        }
+        for name in ["repo", "a.patch.exe", "notes.md", ".patch", "a.patchx"] {
+            assert!(!is_patch_file_name(Path::new(name)), "{name}");
+        }
+    }
 }

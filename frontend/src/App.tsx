@@ -10,6 +10,8 @@ import { ReleaseNotesModal } from "./components/ReleaseNotesModal";
 import { ThirdPartyLicencesDialog } from "./components/ThirdPartyLicencesDialog";
 import { ToastRegion } from "./components/primitives/ToastRegion";
 import { useToasts } from "./state/useToasts";
+import { useFileDrops } from "./state/useFileDrops";
+import { requestWorkspace } from "./lib/workspaceRequests";
 import { InlineError } from "./components/primitives/InlineError";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { CloneDialog } from "./components/CloneDialog";
@@ -269,11 +271,13 @@ function AppContent({
         setTabToolError(null);
         action().catch((error: unknown) => setTabToolError(error instanceof Error ? error.message : String(error)));
       };
+      // Grouped (#645): the tab, the folder's tools, its root files, then reopening.
       return [
-        { label: "Rename tab…", onSelect: () => setRenamingTab(path) },
-        { label: "Open terminal here", onSelect: () => run(() => client.openTerminal(path)) },
-        { label: "Reveal repository", onSelect: () => run(() => client.revealInFileManager(path, null)) },
+        { label: "Rename tab…", onSelect: () => setRenamingTab(path), shortcut: "F2", ariaKeyShortcuts: "F2" },
+        { label: "Open terminal here", onSelect: () => run(() => client.openTerminal(path)), group: "tools" },
+        { label: "Reveal repository", onSelect: () => run(() => client.revealInFileManager(path, null)), group: "tools" },
         ...rootFileItems(rootFiles[path]).map((item) => ({
+          group: "files",
           label: item.label,
           onSelect: () =>
             run(async () => {
@@ -289,6 +293,9 @@ function AppContent({
           onSelect: reopenClosedTab,
           disabled: !canReopenClosedRepo,
           title: canReopenClosedRepo ? undefined : "No closed tab to reopen",
+          group: "reopen",
+          shortcut: "Ctrl/Cmd+Shift+T",
+          ariaKeyShortcuts: "Control+Shift+T Meta+Shift+T",
         },
       ];
     },
@@ -311,6 +318,24 @@ function AppContent({
 
   useE2eAutoOpen(openRepos, openRepoTab);
 
+  // Folders dropped on the window open as tabs, one after the other; patch files are applied to
+  // the active tab's working tree (#649).
+  const fileDragging = useFileDrops(client, ({ folders, patches }) => {
+    void folders.reduce<Promise<unknown>>((previous, folder) => previous.then(() => openRepoTab(folder)), Promise.resolve());
+    if (patches.length === 0) return;
+    if (activePath === null) {
+      const names = patches.map((path) => path.split(/[\\/]/).pop() ?? path).join(", ");
+      setOpenError({ message: `Open a repository to apply ${names} to.`, path: "" });
+    } else {
+      requestWorkspace({ kind: "applyPatches", paths: patches });
+    }
+  });
+  const dropHint = fileDragging && (
+    <div className={styles.dropHint} aria-hidden="true">
+      <p>Drop a folder to open it, or a patch file to apply it to the current repository</p>
+    </div>
+  );
+
   if (openRepos.loading) {
     return (
       <main>
@@ -328,6 +353,7 @@ function AppContent({
 
   return (
     <main>
+      {dropHint}
       <UpdateCheckContext.Provider value={updateCheckRegistry}>{updateBanner}</UpdateCheckContext.Provider>
       <header className={styles.headerRow}>
         <h1>Browsitory</h1>

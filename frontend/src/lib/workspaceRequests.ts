@@ -1,9 +1,10 @@
 /**
- * Requests from the app header to the active repository workspace (#647): the header's Commands
- * button and Help menu open the palette and the shortcut sheet, whose open state each
- * `RepoWorkspace` owns (`useWorkspaceShortcuts`). Only the active workspace listens.
+ * Requests from the app to the active repository workspace (#647): the header's Commands button
+ * and Help menu open the palette and the shortcut sheet, whose open state each `RepoWorkspace`
+ * owns (`useWorkspaceShortcuts`), and patch files dropped on the window are applied to its
+ * working tree (#649). Only the active workspace listens.
  */
-export type WorkspaceRequest = "palette" | "shortcuts";
+export type WorkspaceRequest = "palette" | "shortcuts" | { kind: "applyPatches"; paths: string[] };
 
 type Listener = (request: WorkspaceRequest) => void;
 

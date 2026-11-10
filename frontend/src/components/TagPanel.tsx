@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent } from "react";
-import { MoreHorizontal, Tag } from "lucide-react";
+import { MoreHorizontal, Plus, Tag } from "lucide-react";
 import type { RemoteInfo, TagInfo } from "../ipc/RepoClient";
 import { isMenuKey, rectAnchor } from "../lib/menuKeys";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
@@ -21,7 +21,7 @@ type TagMenu = { name: string; x: number; y: number; returnFocusTo?: HTMLElement
  * actions in a menu (the "…" button, right-click, or the Menu key / Shift+F10 on the row's
  * checkbox or "…"), the same items as the tag badge menu in the graph (`tagMenuItems`). Above
  * the list a name filter, below it push selected / push all. Tags are created from the graph
- * (a commit's "Create tag…") or the palette ("Create tag at HEAD…"), not here (#438).
+ * (a commit's "Create tag…"), the palette or the header's "+" ("Create tag at HEAD…", #649).
  * Clicking a row (or Enter / Space on it) selects the tag's commit in the graph, like the
  * palette's "Go to tag…" (#441).
  */
@@ -38,6 +38,7 @@ export function TagPanel({
   pushDisabled,
   operationDisabledReason,
   revealRequest,
+  onCreateTagAtHead,
 }: {
   tags: TagInfo[];
   remotes: RemoteInfo[];
@@ -58,6 +59,8 @@ export function TagPanel({
   operationDisabledReason: string | null;
   /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
   revealRequest?: number;
+  /** Opens "Create tag" at HEAD (#649); omitted (no HEAD commit yet), no "+" button. */
+  onCreateTagAtHead?: () => void;
 }) {
   const [remoteName, setRemoteName] = useState(remotes[0]?.name ?? "");
   const [selected, setSelected] = useState<string[]>([]);
@@ -110,11 +113,23 @@ export function TagPanel({
       icon={Tag}
       count={tags.length}
       revealRequest={revealRequest}
+      actions={
+        onCreateTagAtHead === undefined ? undefined : (
+          <button
+            type="button"
+            className={styles.headerButton}
+            aria-label="Create tag at HEAD…"
+            title="Create tag at HEAD…"
+            onClick={onCreateTagAtHead}
+          >
+            <Plus size={14} aria-hidden="true" />
+          </button>
+        )
+      }
     >
       {tags.length === 0 ? (
         <p className={styles.empty}>
-          No local tags. To tag a commit, choose Create tag… in its menu in the graph, or Create tag at HEAD… in the
-          command palette.
+          No local tags. To tag a commit, choose Create tag… in its menu in the graph, or + above for a tag at HEAD.
         </p>
       ) : (
         <>

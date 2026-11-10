@@ -4,7 +4,7 @@ Every repo you open lands in its own tab at the top of the window, independent
 of the others. Only the active tab's view is kept loaded: switching back to a
 tab reloads its history and changes, and a half-typed commit message is kept,
 but the selected row and expanded diff sections start fresh. Open another via
-**+** at the end of the tab bar. Close a tab with its **×** button, **Delete**
+**+** at the end of the tab bar, or (desktop app) drop its folder on the window. Close a tab with its **×** button (dimmed on the other tabs), **Delete**
 on the focused tab, or **Close tab** in the command palette. While a push,
 fetch, or similar operation is running in the active tab, that tab can't be
 closed until it finishes.
