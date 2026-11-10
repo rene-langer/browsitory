@@ -1,0 +1,15 @@
+{#-
+  Replaces the theme's partials/source.html (#627, docs/guide/privacy.md). The theme's version
+  carries data-md-component="source", which makes its script ask api.github.com, from every
+  visitor's browser, for the repository's star count, forks and latest version. This one is the
+  same link without that attribute: a plain link to the repository that fetches nothing.
+-#}
+<a href="{{ config.repo_url }}" title="{{ lang.t('source') }}" class="md-source">
+  <div class="md-source__icon md-icon">
+    {% set icon = config.theme.icon.repo or "fontawesome/brands/git-alt" %}
+    {% include ".icons/" ~ icon ~ ".svg" %}
+  </div>
+  <div class="md-source__repository">
+    {{ config.repo_name }}
+  </div>
+</a>
