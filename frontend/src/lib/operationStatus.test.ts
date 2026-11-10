@@ -235,6 +235,18 @@ describe("busyReason (#521)", () => {
     expect(busyReason({ pending: true, transfer: null })).toBe("Another action is in progress.");
     expect(busyReason({ pending: false, transfer: {} })).toBe("A transfer is in progress.");
   });
+
+  it("names the running fetch, pull or push, also before its first event (#659)", () => {
+    const transferSubject = { kind: "fetch" as const, remoteName: "origin" };
+    expect(busyReason({ pending: true, transfer: null, transferSubject })).toBe(
+      "Fetching from origin. Wait for it to finish, or cancel it.",
+    );
+    const headInfo = { sequence: null, terminalRebase: null, operation: null, operationLeftover: false };
+    const state = { pending: true, transfer: {}, transferSubject, mergeMessage: null, rebaseProgress: null, headInfo };
+    expect(operationBlockers(state).reason).toBe(
+      "Fetching from origin. Wait for it to finish, or cancel it.",
+    );
+  });
 });
 
 describe("stashBlockReason (#495)", () => {

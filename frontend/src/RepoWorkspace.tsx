@@ -8,6 +8,7 @@ import type { PushToast } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { SplitView, type SplitViewLeftState, type SplitViewRequest } from "./components/primitives/SplitView";
 import { RepoToolbar } from "./components/RepoToolbar";
+import { RepoActivity } from "./components/RepoActivity";
 import type { GraphCommit, RepoClient, StatusEntry } from "./ipc/RepoClient";
 import { buildCommands, SWITCH_BRANCH_PICKER_ID, type AppCommands, type CommitCommands } from "./lib/commands";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
@@ -390,7 +391,22 @@ export function RepoWorkspace({
     onChooseParent: (action, commitId) => openCommitDialog(action, commitId),
     onReset: (commitId) => openCommitDialog("Reset", commitId),
   };
-  useOutcomeToasts(appState.state, pushToast, undoToastAction);
+  // A fetch's toast offers Pull when it left the branch behind (#661). Checked when clicked, not
+  // when the toast appeared: the repository may have become busy since, and then it says why.
+  const pullBlockedReason =
+    operationDisabledReason ??
+    (appState.state.pendingPull !== null ? "Choose how to finish the diverged pull first." : null);
+  const latestPullBlock = useRef(pullBlockedReason);
+  useEffect(() => {
+    latestPullBlock.current = pullBlockedReason;
+  });
+  const { pullCurrentUpstream } = appState;
+  const pullFromToast = useCallback(() => {
+    const reason = latestPullBlock.current;
+    if (reason !== null) pushToast(`Can't pull now. ${reason}`, { tone: "info" });
+    else void pullCurrentUpstream();
+  }, [pullCurrentUpstream, pushToast]);
+  useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast);
   useStashSwitchToasts(appState.state, pushToast, undoToastAction);
 
   // The palette's commands, built only while it is open.
@@ -713,7 +729,13 @@ export function RepoWorkspace({
         shortcutsOpen={shortcutsOpen}
         onShortcutsOpenChange={setShortcutsOpen}
       />
-      <div ref={setBodyElement} className={styles.workspaceBody}>
+      {/* Busy while the first reads are out, or while an action other than a transfer runs: a
+          transfer leaves browsing to the user and says so in the toolbar instead (#659, #660). */}
+      <div
+        ref={setBodyElement}
+        className={styles.workspaceBody}
+        aria-busy={!appState.state.loaded || (pending && appState.state.transferSubject === null)}
+      >
       <RepoToolbar
         sidebar={{ state: sidebarState, controls: sidebarId, onToggle: toggleSidebar }}
         branch={{
@@ -739,10 +761,20 @@ export function RepoWorkspace({
           pullPending: appState.state.pendingPull !== null,
           onPush: appState.pushCurrentBranch,
           prune: effectiveFetchPrune(appState.state.fetchPrune, appState.state.remotes, appState.state.upstream),
-          onFetchAll: announce("Fetch complete", appState.fetchAllRemotes),
+          onFetchAll: appState.fetchAllRemotes,
           onTogglePrune: appState.setFetchPrune,
           lastFetchedAt,
           autoFetchMinutes,
+          activity: (
+            <RepoActivity
+              subject={appState.state.transferSubject}
+              progress={transfer}
+              pending={pending}
+              // Fire-and-forget: the backend records the request, and the transfer's own terminal
+              // event (errorKind "Cancelled") ends it.
+              onCancel={(operationId) => void client.cancelTransfer(repoPath, operationId)}
+            />
+          ),
           onPublish: () => {
             if (currentBranch !== null) openDialog({ kind: "push", localBranch: currentBranch });
           },

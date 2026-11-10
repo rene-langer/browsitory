@@ -41,7 +41,8 @@ While a commit hook runs, or `post-merge` after you commit a merge that had no c
 branches or check out a commit, `post-merge` after a fast-forward or squash merge, or a
 cherry-pick's or revert's hooks, "Running post-checkout hook…" shows in a strip at the top of the
 repository, with **Cancel**. Cancelling stops the hook and keeps the switch,
-merge or commit. A running `pre-push` shows in the transfer panel, whose Cancel stops it; so
+merge or commit. A running `pre-push` shows in the repository toolbar with the push's progress, whose Cancel
+stops it; so
 does `post-merge` after a pull that fast-forwarded ("Running post-merge hook…"), whose Cancel
 stops only the hook and keeps the pull. Browsitory
 stops any hook after 10 minutes. Other actions on the repository wait while a hook runs.

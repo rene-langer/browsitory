@@ -12,7 +12,8 @@ function cancelledLabel(hook: string): string {
  * Non-modal "Hook status" strip under the operation strip (#185): "Running post-checkout hook…"
  * with Cancel while a hook runs for a switch, a checkout, a fast-forward or squash merge, or a
  * cherry-pick/revert. A commit's, amend's or Continue's hooks (`source: "Commit"`) show in the
- * commit box and the sequence panel instead, and pushes and pulls in the transfer panel.
+ * commit box and the sequence panel instead, and pushes and pulls in the toolbar's
+ * transfer progress (`RepoActivity`).
  *
  * The live region stays mounted (empty and unstyled while no hook runs), so screen readers
  * announce each hook as it starts. Cancel stays enabled while the command is pending (the hook

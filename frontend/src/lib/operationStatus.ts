@@ -13,6 +13,7 @@ import type {
   TerminalRebase,
   TerminalSequence,
 } from "../ipc/RepoClient";
+import { type TransferSubject, transferBusyReason } from "./transferCopy";
 
 /** Visible reason a merge/rebase step is blocked, or `undefined` when nothing blocks it. */
 export function conflictReason(conflictCount: number): string | undefined {
@@ -237,6 +238,8 @@ export function rebaseAbortSwitchTarget(abort: RebaseAbort, info: RebaseInfo | n
 export interface OperationState {
   pending: boolean;
   transfer: object | null;
+  /** The fetch, pull or push this tab started, from its request until it ends (#659). */
+  transferSubject?: TransferSubject | null;
   mergeMessage: string | null;
   rebaseProgress: object | null;
   headInfo: Pick<HeadInfo, "sequence" | "terminalRebase" | "operation" | "operationLeftover">;
@@ -266,7 +269,9 @@ export function operationBlockers(state: OperationState): OperationBlockers {
  * Narrower than `operationBlockers`, for discarding changes and dropping a stash, which users do
  * while resolving a step (#521). The reasons are `operationBlockers`' own.
  */
-export function busyReason(state: Pick<OperationState, "pending" | "transfer">): string | null {
+export function busyReason(state: Pick<OperationState, "pending" | "transfer" | "transferSubject">): string | null {
+  // A running transfer names itself, so a disabled control says what it waits for (#659).
+  if (state.transferSubject != null) return transferBusyReason(state.transferSubject);
   if (state.pending) return "Another action is in progress.";
   if (state.transfer !== null) return "A transfer is in progress.";
   return null;

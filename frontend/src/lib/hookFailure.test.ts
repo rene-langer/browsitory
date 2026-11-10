@@ -42,10 +42,6 @@ describe("hookFailure", () => {
 
   it("names the success toast after the original action", () => {
     expect(retrySuccessLabel({ kind: "commit", message: "m", trailers: [] })).toBe("Committed");
-    expect(retrySuccessLabel({ kind: "push", push: { operation: "ForcePushBranch", remoteName: "o" } })).toBe("Force pushed");
-    expect(retrySuccessLabel({ kind: "push", push: { operation: "PushTags", remoteName: "o", names: [] } })).toBe("Push complete");
-    expect(
-      retrySuccessLabel({ kind: "push", push: { operation: "DeleteRemoteBranch", remoteName: "o", branchName: "b" } }),
-    ).toBe("Remote branch deleted");
+    expect(retrySuccessLabel({ kind: "amend", message: "m", options: { author: null, trailers: [] } })).toBe("Amended commit");
   });
 });

@@ -166,8 +166,11 @@ tests that render such a component alone hold the state in a small wrapper
 Two kinds of UI state stay out of `dialog` on purpose. The sidebar's inline New branch and Add
 remote forms (`createBranchDraft`, `addRemoteDraftOpen`) are not modal: they can be open together
 and next to a dialog, so each keeps its own `AppState` field (the palette opens them too). And a
-prompt that an operation's state raises (the hook failure dialog, a diverged pull's choice, the
-transfer panel) stays with that state. The rebase planner (`rebaseOnto`/`rebasePreset`) predates
+prompt that an operation's state raises (the hook failure dialog, a diverged pull's choice)
+stays with that state. A running fetch, pull or push is no dialog at all: the toolbar shows it
+(`RepoActivity`, from `transfer` and `transferSubject`), and the window stays usable (#659); a
+tab that unmounts mid-transfer hands it to the next mount of its workspace
+(`useRemoteTransferActions`). The rebase planner (`rebaseOnto`/`rebasePreset`) predates
 the rule and still has its own fields.
 
 ## git2 API gotchas
@@ -1237,7 +1240,7 @@ certificate.
   it, and its result (cancel included) never changes the command's outcome; `no_verify` doesn't
   skip it. A pull that fast-forwarded sends `TransferEvent::Progress { phase: RunningHook }` on
   its own transfer operation (only when `post-merge` is installed) and runs `post-merge 0` with
-  the pull's cancel check, before `Completed`; the transfer panel labels `RunningHook` by
+  the pull's cancel check, before `Completed`; the toolbar's transfer progress (`RepoActivity`) labels `RunningHook` by
   operation (`Pull` → `post-merge`, else `pre-push`).
 - `HookEvent::{Started, Finished}` carry `source: HookSource` (`Commit` for commit, amend and
   Continue; `Checkout`, `Merge`, `Pick`), sent as `source` in both transports' `hook-progress` /

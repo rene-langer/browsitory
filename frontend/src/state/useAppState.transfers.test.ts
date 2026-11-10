@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RepoError, type BranchInfo, type TransferProgress } from "../ipc/RepoClient";
 import { lastFetchAt } from "../lib/autoFetch";
 import { useAppState } from "./useAppState";
+import { resetDetachedTransfers } from "./useRemoteTransferActions";
 import { unimplemented, TEST_REPO_PATH, upstream, transferClient } from "./useAppStateTestClient";
 
 describe("useAppState", () => {
@@ -691,5 +692,227 @@ describe("useAppState", () => {
 
     await act(() => result.current.retryWithoutHooks(result.current.state.hookFailure!.retry));
     expect(deleteRemoteTag).toHaveBeenLastCalledWith(TEST_REPO_PATH, "origin", "v1", true);
+  });
+
+  describe("the running transfer's subject and closing toast (#659, #661)", () => {
+    const event = (operationId: string, operation: TransferProgress["operation"], phase: TransferProgress["phase"]): TransferProgress => ({
+      operationId, operation, phase, errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null,
+    });
+
+    it("names a push from its request until it completes, then hands it to the toast", async () => {
+      let listener: ((progress: TransferProgress) => void) | null = null;
+      let reply: ((id: string) => void) | null = null;
+      const client = transferClient({
+        getCurrentUpstream: async () => ({ ...upstream, ahead: 2, behind: 0 }),
+        subscribeTransferProgress: (next) => {
+          listener = next;
+          return () => {};
+        },
+        pushCurrentBranch: () => new Promise<string>((resolve) => (reply = resolve)),
+      });
+
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      await act(async () => {
+        void result.current.pushCurrentBranch("origin");
+      });
+      // Before the backend answers: named, busy, and the reason says what it waits for.
+      expect(result.current.state.transferSubject).toEqual({
+        kind: "push", localBranch: "main", target: "origin/main", ahead: 2, setUpstream: false, force: false,
+      });
+      expect(result.current.state.transfer).toBeNull();
+
+      await act(async () => reply?.("push-1"));
+      await act(async () => listener?.(event("push-1", "PushBranch", "Completed")));
+      await waitFor(() => expect(result.current.state.transferSubject).toBeNull());
+      expect(result.current.state.pending).toBe(false);
+      expect(result.current.state.transferOutcome?.subject).toMatchObject({ kind: "push", target: "origin/main" });
+    });
+
+    it("clears the subject when a transfer fails, with no toast", async () => {
+      let listener: ((progress: TransferProgress) => void) | null = null;
+      const client = transferClient({
+        subscribeTransferProgress: (next) => {
+          listener = next;
+          return () => {};
+        },
+        fetchRemote: async () => {
+          listener?.(event("fetch-1", "Fetch", "Starting"));
+          listener?.({ ...event("fetch-1", "Fetch", "Failed"), errorKind: "Cancelled" });
+          return "fetch-1";
+        },
+      });
+
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      await act(() => result.current.fetchRemote("origin"));
+      expect(result.current.state.transferSubject).toBeNull();
+      expect(result.current.state.transferOutcome).toBeNull();
+      expect(result.current.state.error).toBe("Fetch cancelled.");
+    });
+
+    it("clears the subject when the request itself is refused", async () => {
+      const client = transferClient({
+        fetchRemote: async () => {
+          throw new RepoError("Other", "no such remote");
+        },
+      });
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      await act(() => result.current.fetchRemote("gone"));
+      expect(result.current.state.transferSubject).toBeNull();
+      expect(result.current.state.pending).toBe(false);
+    });
+
+    it("gives a partial Fetch all its error, not a toast", async () => {
+      let listener: ((progress: TransferProgress) => void) | null = null;
+      const client = transferClient({
+        subscribeTransferProgress: (next) => {
+          listener = next;
+          return () => {};
+        },
+        fetchAllRemotes: async () => {
+          listener?.(event("fetch-all-1", "FetchAll", "Starting"));
+          listener?.({ ...event("fetch-all-1", "FetchAll", "RemoteFailed"), remoteName: "fork" });
+          listener?.(event("fetch-all-1", "FetchAll", "Completed"));
+          return "fetch-all-1";
+        },
+      });
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      await act(() => result.current.fetchAllRemotes());
+      await waitFor(() => expect(result.current.state.transferSubject).toBeNull());
+      expect(result.current.state.transferOutcome).toBeNull();
+      expect(result.current.state.error).toContain("Could not fetch from fork.");
+    });
+
+    it("leaves a pull's toast to its outcome, and clears its subject", async () => {
+      let listener: ((progress: TransferProgress) => void) | null = null;
+      const client = transferClient({
+        subscribeTransferProgress: (next) => {
+          listener = next;
+          return () => {};
+        },
+        pullCurrentUpstream: async () => {
+          listener?.(event("pull-1", "Pull", "Starting"));
+          listener?.(event("pull-1", "Pull", "Completed"));
+          return { kind: "UpToDate" };
+        },
+      });
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      await act(() => result.current.pullCurrentUpstream());
+      await waitFor(() => expect(result.current.state.transfer).toBeNull());
+      expect(result.current.state.transferSubject).toBeNull();
+      expect(result.current.state.transferOutcome).toBeNull();
+      expect(result.current.state.pullOutcome).toEqual({ kind: "UpToDate" });
+    });
+
+    it("names the branch and target of a Push dialog push", async () => {
+      const client = transferClient({ pushBranch: () => new Promise<string>(() => {}) });
+      const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+      await act(() => result.current.refresh());
+      await act(async () => {
+        void result.current.pushBranch("origin", "feature", "topic", true);
+      });
+      expect(result.current.state.transferSubject).toEqual({
+        kind: "push", localBranch: "feature", target: "origin/topic", ahead: null, setUpstream: true, force: false,
+      });
+    });
+  });
+
+  it("picks a running transfer up again when its tab comes back, and ends it once the worker answers (#659)", async () => {
+    resetDetachedTransfers();
+    let listener: ((progress: TransferProgress) => void) | null = null;
+    let headInfoGate: (() => void) | null = null;
+    let gated = false;
+    const base = transferClient();
+    const client = transferClient({
+      subscribeTransferProgress: (next) => {
+        listener = next;
+        return () => {};
+      },
+      fetchRemote: async () => {
+        listener?.({ operationId: "fetch-9", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+        return "fetch-9";
+      },
+      // The remounted tab's probe waits behind the transfer, as the serial worker makes it.
+      getHeadInfo: async (path) => {
+        if (gated) await new Promise<void>((resolve) => (headInfoGate = resolve));
+        return base.getHeadInfo(path);
+      },
+    });
+
+    const first = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => first.result.current.refresh());
+    await act(() => first.result.current.fetchRemote("origin"));
+    expect(first.result.current.state.transferSubject).toEqual({ kind: "fetch", remoteName: "origin" });
+    first.unmount();
+
+    gated = true;
+    const second = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await waitFor(() => expect(second.result.current.state.transferSubject).toEqual({ kind: "fetch", remoteName: "origin" }));
+    expect(second.result.current.state.pending).toBe(true);
+    expect(second.result.current.state.transfer).toMatchObject({ operationId: "fetch-9" });
+
+    // Its events are followed again.
+    await act(async () =>
+      listener?.({ operationId: "fetch-9", operation: "Fetch", phase: "Receiving", errorKind: null, current: 1, total: 2, receivedBytes: 1, message: null, hookOutput: null }),
+    );
+    expect(second.result.current.state.transfer).toMatchObject({ phase: "Receiving" });
+
+    // The terminal event was missed: the answer of a read sent after it ends the transfer.
+    await act(async () => headInfoGate?.());
+    await waitFor(() => expect(second.result.current.state.transferSubject).toBeNull());
+    expect(second.result.current.state.pending).toBe(false);
+    expect(second.result.current.state.transfer).toBeNull();
+
+    // Nothing is left to restore after that.
+    second.unmount();
+    gated = false;
+    const third = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    expect(third.result.current.state.transferSubject).toBeNull();
+  });
+
+  it("keeps a running transfer through renders that pass a new client object", async () => {
+    resetDetachedTransfers();
+    let headInfoCalls = 0;
+    const overrides = {
+      fetchRemote: async () => "fetch-1",
+      getHeadInfo: async (path: string) => {
+        headInfoCalls += 1;
+        return transferClient().getHeadInfo(path);
+      },
+    };
+    // A new client each render, as callers that build one inline do.
+    const { result, rerender } = renderHook(() => useAppState(transferClient(overrides), TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    const before = headInfoCalls;
+    await act(() => result.current.fetchRemote("origin"));
+    rerender();
+    rerender();
+    // No save-and-restore cycle: no probe reads, still the same transfer.
+    expect(headInfoCalls).toBe(before);
+    expect(result.current.state.transferSubject).toEqual({ kind: "fetch", remoteName: "origin" });
+    expect(result.current.state.pending).toBe(true);
+  });
+
+  it("is not loaded until its first refresh has answered (#660)", async () => {
+    const { result } = renderHook(() => useAppState(transferClient(), TEST_REPO_PATH));
+    expect(result.current.state.loaded).toBe(false);
+    await act(() => result.current.refresh());
+    expect(result.current.state.loaded).toBe(true);
+  });
+
+  it("counts a failed first refresh as loaded, so its error shows instead of placeholders", async () => {
+    const client = transferClient({
+      getStatus: async () => {
+        throw new RepoError("Other", "boom");
+      },
+    });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    expect(result.current.state.loaded).toBe(true);
+    expect(result.current.state.error).not.toBeNull();
   });
 });

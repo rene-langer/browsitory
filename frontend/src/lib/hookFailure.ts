@@ -57,14 +57,10 @@ export function retryLabel(failure: HookFailure): string | null {
 }
 
 /**
- * The toast after a successful retry: the same one the original action announces. A Continue's
- * toast comes from its outcome (`sequenceToast`), so it is not listed here.
+ * The toast after a successful commit or amend retry: the same one the original action announces.
+ * A Continue's toast comes from its outcome (`sequenceToast`), a push's from its transfer
+ * (`transferToast`), so they are not listed here.
  */
-export function retrySuccessLabel(retry: Exclude<HookRetry, { kind: "continueSequence" } | { kind: "pick" }>): string {
-  if (retry.kind === "commit") return "Committed";
-  if (retry.kind === "amend") return "Amended commit";
-  if (retry.push.operation === "ForcePushBranch") return "Force pushed";
-  if (retry.push.operation === "DeleteRemoteBranch") return "Remote branch deleted";
-  if (retry.push.operation === "DeleteRemoteTag") return "Remote tag deleted";
-  return "Push complete";
+export function retrySuccessLabel(retry: Extract<HookRetry, { kind: "commit" } | { kind: "amend" }>): string {
+  return retry.kind === "commit" ? "Committed" : "Amended commit";
 }

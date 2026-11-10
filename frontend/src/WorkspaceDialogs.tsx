@@ -17,7 +17,6 @@ import { ResetDialog } from "./components/ResetDialog";
 import { RewordDialog } from "./components/RewordDialog";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { StashDialog } from "./components/StashDialog";
-import { TransferPanel } from "./components/TransferPanel";
 import type { GraphCommit, RepoClient } from "./ipc/RepoClient";
 import type { PushToast } from "./state/useToasts";
 import type { Command } from "./lib/commands";
@@ -42,7 +41,7 @@ type SequenceActions = ReturnType<typeof useSequenceActions>;
 /**
  * `RepoWorkspace`'s dialogs and overlays (#491). Each opens from its own state: mostly
  * `appState.state.dialog` (#493, one at a time), else one of the workspace's own (`commitDialog`,
- * the palette, the shortcut sheet) or another `AppState` field (hook failure, transfer, rebase
+ * the palette, the shortcut sheet) or another `AppState` field (hook failure, rebase
  * planner).
  */
 export function WorkspaceDialogs({
@@ -142,11 +141,14 @@ export function WorkspaceDialogs({
               dismissError();
               runContinueSequence(true);
             }
+            // A push's toast comes from the transfer it starts (`transferToast`), like any push's.
+            else if (retry.kind === "push") {
+              dismissError();
+              void retryWithCurrentMessage(retry);
+            }
             // A pick's failure offers no retry (`retryLabel` is null), so this never runs for it.
             else if (retry.kind !== "pick") {
-              // A commit or amend is an undo step; a push is not.
-              const undoable = retry.kind === "commit" || retry.kind === "amend";
-              void announce(retrySuccessLabel(retry), retryWithCurrentMessage, { undoable })(retry);
+              void announce(retrySuccessLabel(retry), retryWithCurrentMessage, { undoable: true })(retry);
             }
           }}
           onClose={appState.closeHookFailure}
@@ -170,7 +172,7 @@ export function WorkspaceDialogs({
           confirmTitle={operationDisabledReason ?? undefined}
           onConfirm={() => {
             if (repositoryOperationDisabled) return;
-            void announce("Force pushed", appState.forcePushCurrentBranch)(forcePushConfirm.remoteName);
+            void appState.forcePushCurrentBranch(forcePushConfirm.remoteName);
           }}
           onCancel={appState.cancelForcePush}
         />
@@ -264,7 +266,7 @@ export function WorkspaceDialogs({
           blockedReason={operationDisabledReason}
           onPush={(remoteName, remoteBranch, setUpstream) => {
             if (repositoryOperationDisabled) return;
-            void announce("Push complete", appState.pushBranch)(remoteName, pushDialogBranch, remoteBranch, setUpstream);
+            void appState.pushBranch(remoteName, pushDialogBranch, remoteBranch, setUpstream);
           }}
           onCancel={() => closeDialog("push")}
         />
@@ -330,7 +332,7 @@ export function WorkspaceDialogs({
           blockedReason={operationDisabledReason}
           onDelete={(remoteName, branchName) => {
             if (repositoryOperationDisabled) return;
-            void announce("Remote branch deleted", appState.deleteRemoteBranch)(remoteName, branchName);
+            void appState.deleteRemoteBranch(remoteName, branchName);
           }}
           onCancel={() => closeDialog("deleteRemoteBranch")}
         />
@@ -350,7 +352,7 @@ export function WorkspaceDialogs({
             const failure = await create(name, message, createTagDialog.commitId);
             if (failure !== null) return failure;
             closeDialog("createTag");
-            if (pushTo !== null) void announce("Push complete", appState.pushTags)(pushTo, [name]);
+            if (pushTo !== null) void appState.pushTags(pushTo, [name]);
             return null;
           }}
           onCancel={() => closeDialog("createTag")}
@@ -381,7 +383,7 @@ export function WorkspaceDialogs({
           disabled={repositoryOperationDisabled}
           disabledReason={operationDisabledReason}
           onDelete={(remoteName, deleteLocal) =>
-            void announce("Remote tag deleted", appState.deleteRemoteTag)(
+            void appState.deleteRemoteTag(
               remoteName,
               deleteRemoteTagDialog.tagName,
               deleteLocal,
@@ -393,22 +395,11 @@ export function WorkspaceDialogs({
       {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`
           calls `dialog.showModal()`, which blocks the whole document (top-layer + `inert`
           outside the dialog) even when this wrapper is `display: none` — so a backgrounded tab
-          whose transfer/palette/rebase overlay is open would freeze the visible tab behind an
-          invisible modal. The transfer overlay makes that the common case: it opens by itself
-          whenever `state.transfer !== null`, i.e. exactly the "start a push, switch tabs"
-          flow this feature exists for. Gating unmounts the dialog (releasing the block) while
-          backgrounded and loses nothing — `paletteOpen`/`transfer`/`rebaseOnto` all live in
-          state this doesn't touch, so switching back re-shows the same overlay. */}
-      {active && appState.state.transfer !== null && (
-        <Overlay>
-          <TransferPanel
-            progress={appState.state.transfer}
-            // Fire-and-forget: the backend records the cancel request and the transfer's own
-            // terminal progress event (errorKind "Cancelled") is what closes this panel.
-            onCancel={(operationId) => void client.cancelTransfer(repoPath, operationId)}
-          />
-        </Overlay>
-      )}
+          whose palette/rebase overlay is open would freeze the visible tab behind an invisible
+          modal. Gating unmounts the dialog (releasing the block) while backgrounded and loses
+          nothing — `paletteOpen`/`rebaseOnto` live in state this doesn't touch, so switching
+          back re-shows the same overlay. A running fetch, pull or push is not a dialog: the
+          toolbar shows it, with Cancel (`RepoActivity`, #659). */}
       {active && paletteOpen && (
         <Overlay onClose={() => setPaletteOpen(false)}>
           <CommandPalette
