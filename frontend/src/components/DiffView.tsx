@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { type DiffHunk, type DiffLine, type DiffLineOrigin } from "../ipc/RepoClient";
 import { EMPTY_SELECTION, reduceSelection, type LineSelection, type SelectionAction } from "../lib/lineSelection";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
@@ -11,6 +11,7 @@ import { languageForPath } from "../lib/languageForPath";
 import { wrapLines } from "../lib/wordWrap";
 import { logFailure } from "../lib/logger";
 import { DiffLineContent } from "./DiffLineContent";
+import { DIFF_WINDOW_LINES, collapseReason, diffLineCount, windowHunks } from "../lib/largeDiff";
 import styles from "./DiffView.module.css";
 
 /**
@@ -147,7 +148,13 @@ const lineCount = new Intl.NumberFormat("en-US");
  *
  * With line callbacks, Add/Remove lines are selectable (click, shift-click, ctrl/cmd-click, drag,
  * ArrowUp/ArrowDown with optional Shift) within one hunk; `s`/`d` and the hunk header buttons
- * then act on the selected lines instead of the whole hunk.
+ * then act on the selected lines instead of the whole hunk. Each hunk's lines are then a
+ * listbox whose Add/Remove lines are options, the keyboard cursor its active descendant (#668).
+ *
+ * Every line tells a screen reader what it is and its number ("Added line 12: …", #668).
+ *
+ * A diff of a generated file, or longer than `LARGE_DIFF_LINES`, starts collapsed behind "Load
+ * diff (N lines)"; a loaded one renders `DIFF_WINDOW_LINES` at a time (#686, `lib/largeDiff.ts`).
  */
 /** A button in a hunk's header (`DiffView`'s `hunkActions`). */
 export interface HunkHeaderAction {
@@ -157,6 +164,7 @@ export interface HunkHeaderAction {
   /** Why it is disabled, or what it does. */
   title?: string;
 }
+
 
 export function DiffView({
   hunks,
@@ -201,19 +209,87 @@ export function DiffView({
   // Split view is the pane's (#640): its one `DiffOptionsToolbar` sets it for every diff.
   const { split } = useDiffViewOptions();
   const [selection, setSelection] = useState<LineSelection>(EMPTY_SELECTION);
+  // Large and generated diffs (#686): whether this file's collapsed diff was loaded, and how many
+  // lines a loaded one renders. Both belong to the file, so another file resets them; a refetch
+  // of the same file (after staging a hunk, say) keeps them.
+  const [previousPath, setPreviousPath] = useState(path);
+  const [opened, setOpened] = useState(false);
+  const [shownLimit, setShownLimit] = useState(DIFF_WINDOW_LINES);
   const dragging = useRef<{ hunkIndex: number; line: number } | null>(null);
   const hunkRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const diffRef = useRef<HTMLDivElement | null>(null);
+  const loadRef = useRef<HTMLButtonElement | null>(null);
+  const focusAfterLoad = useRef(false);
+  const scrollPending = useRef<number | null>(null);
   const focusedKey = useRef<number | undefined>(undefined);
+  const idBase = useId();
   const loaded = hunks !== null;
+
+  // The active hunk and the line selection are indexes into `hunks`, so a new hunk list resets
+  // them. Reset-during-render (as `TagPanel` does) rather than an effect, which would cost a
+  // second render per refetch.
+  if (previousHunks !== hunks) {
+    setPreviousHunks(hunks);
+    setActiveIndex(0);
+    setSelection(EMPTY_SELECTION);
+  }
+  if (previousPath !== path) {
+    setPreviousPath(path);
+    setOpened(false);
+    setShownLimit(DIFF_WINDOW_LINES);
+  }
+
+  const totalLines = useMemo(() => (hunks === null ? 0 : diffLineCount(hunks)), [hunks]);
+  const collapsed = opened ? null : collapseReason(path, totalLines);
+  // Where each hunk starts, in lines from the top of the diff.
+  const starts = useMemo(() => {
+    const out: number[] = [];
+    let n = 0;
+    for (const hunk of hunks ?? []) {
+      out.push(n);
+      n += hunk.lines.length;
+    }
+    return out;
+  }, [hunks]);
+  const active = hunks === null || hunks.length === 0 ? 0 : Math.min(activeIndex, hunks.length - 1);
+  // The window always holds the active hunk's start and the keyboard cursor: `]` and ArrowDown
+  // past its end show more, a window at a time.
+  const cursorAt =
+    selection.hunkIndex !== null && selection.cursor !== null ? (starts[selection.hunkIndex] ?? 0) + selection.cursor : 0;
+  const needed = Math.max((starts[active] ?? 0) + 1, cursorAt + 1);
+  const limit = Math.max(shownLimit, Math.ceil(needed / DIFF_WINDOW_LINES) * DIFF_WINDOW_LINES);
+  const windowed = useMemo(
+    () => (hunks === null || collapsed !== null ? null : windowHunks(hunks, limit)),
+    [hunks, collapsed, limit],
+  );
+  const shownCount = windowed === null ? 0 : diffLineCount(windowed);
+
   useEffect(() => {
     if (focusKey === undefined || focusKey === focusedKey.current || !loaded) return;
     focusedKey.current = focusKey;
-    diffRef.current?.focus({ preventScroll: true });
+    (diffRef.current ?? loadRef.current)?.focus({ preventScroll: true });
   }, [focusKey, loaded]);
-  const wordSegments = useMemo(() => computeWordSegments(hunks), [hunks]);
+  // Loading a collapsed diff removes its button: focus goes to the diff instead of the page.
+  useEffect(() => {
+    if (!focusAfterLoad.current || diffRef.current === null) return;
+    focusAfterLoad.current = false;
+    diffRef.current.focus({ preventScroll: true });
+  });
+  // `]`/`[` to a hunk the window did not hold yet: scroll once it has rendered.
+  useEffect(() => {
+    const index = scrollPending.current;
+    if (index === null || hunkRefs.current[index] == null) return;
+    scrollPending.current = null;
+    hunkRefs.current[index]?.scrollIntoView?.({ block: "nearest" });
+  });
+  const wordSegments = useMemo(() => computeWordSegments(windowed), [windowed]);
   const { settings, update } = useDiffSettingsContext();
-  const tokens = useHunkTokens(hunks, path ? languageForPath(path) : null, settings.syntaxHighlight, logHighlightError);
+  const tokens = useHunkTokens(
+    collapsed === null ? hunks : null,
+    path ? languageForPath(path) : null,
+    settings.syntaxHighlight,
+    logHighlightError,
+  );
   const wrapBySetting = useMemo(
     () => wrapLines(settings.wordWrap, { split, path, hunks }),
     [settings.wordWrap, split, path, hunks],
@@ -227,15 +303,6 @@ export function DiffView({
     current,
   );
   const claimHandlers = { onPointerDownCapture: claimCurrent, onFocusCapture: claimCurrent };
-
-  // The active hunk and the line selection are indexes into `hunks`, so a new hunk list resets
-  // them. Reset-during-render (as `TagPanel` does) rather than an effect, which would cost a
-  // second render per refetch.
-  if (previousHunks !== hunks) {
-    setPreviousHunks(hunks);
-    setActiveIndex(0);
-    setSelection(EMPTY_SELECTION);
-  }
 
   // A drag ends wherever the button is released, even outside the diff.
   useEffect(() => {
@@ -276,14 +343,46 @@ export function DiffView({
     );
   }
 
+  if (collapsed !== null || windowed === null) {
+    const count = lineCount.format(totalLines);
+    return (
+      <>
+        {hint}
+        <div className={styles.collapsed} {...claimHandlers}>
+          <p className={styles.placeholder}>
+            {collapsed === "generated"
+              ? "This file looks generated (a lockfile, minified code or a source map), so its diff is collapsed."
+              : `This diff is large (${count} lines), so it is collapsed.`}
+          </p>
+          <button
+            ref={loadRef}
+            type="button"
+            onClick={() => {
+              focusAfterLoad.current = true;
+              setOpened(true);
+            }}
+          >
+            Load diff ({count} {totalLines === 1 ? "line" : "lines"})
+          </button>
+        </div>
+      </>
+    );
+  }
+
   const lineActions =
     !partialActionsDisabled &&
     (onStageLines !== undefined || onUnstageLines !== undefined || onDiscardLines !== undefined);
   const hasActions =
     !partialActionsDisabled &&
     (onStageHunk !== undefined || onUnstageHunk !== undefined || onDiscardHunk !== undefined || lineActions);
-  const active = Math.min(activeIndex, hunks.length - 1);
   const selectedCount = selection.selected.size;
+  // Selectable lines are a listbox per hunk (#668): each Add/Remove line an option with its
+  // selected state, the keyboard cursor the diff's active descendant.
+  const rowId = (hunkIndex: number, lineIndex: number) => `${idBase}-${hunkIndex}-${lineIndex}`;
+  const cursorId =
+    lineActions && selection.hunkIndex !== null && selection.cursor !== null
+      ? rowId(selection.hunkIndex, selection.cursor)
+      : undefined;
 
   const apply = (action: SelectionAction) => {
     setSelection((prev) => reduceSelection(prev, action, hunks));
@@ -294,7 +393,9 @@ export function DiffView({
 
   const moveTo = (index: number) => {
     setActiveIndex(index);
-    hunkRefs.current[index]?.scrollIntoView?.({ block: "nearest" });
+    const hunk = hunkRefs.current[index];
+    if (hunk == null) scrollPending.current = index;
+    else hunk.scrollIntoView?.({ block: "nearest" });
   };
 
   // Handlers only go on Add/Remove rows, so `shiftClick`/`dragTo` always target a selectable line
@@ -304,6 +405,8 @@ export function DiffView({
     if (!lineActions) return base;
     return {
       ...base,
+      id: rowId(hunkIndex, lineIndex),
+      role: "option",
       "aria-selected": selection.hunkIndex === hunkIndex && selection.selected.has(lineIndex),
       onMouseDown: (event: MouseEvent<HTMLDivElement>) => {
         if (event.button !== 0) return;
@@ -329,6 +432,10 @@ export function DiffView({
       },
     };
   };
+  // A context line in a hunk's listbox: an option that can't be selected, so it is still read.
+  const contextProps = lineActions ? { role: "option", "aria-disabled": true } : {};
+  // A split row only lays out its two columns; in a listbox it must not hide them.
+  const splitRowProps = lineActions ? { role: "none" } : {};
 
   const lineClass = (hunkIndex: number, lineIndex: number) => {
     if (!lineActions || selection.hunkIndex !== hunkIndex) return "";
@@ -376,6 +483,18 @@ export function DiffView({
     }
   };
 
+  const content = (line: DiffLine) => (
+    <span className={styles.content}>
+      <DiffLineContent
+        line={line}
+        tokens={tokens?.get(line)}
+        segments={wordSegments.get(line)}
+        showWhitespace={settings.showWhitespace}
+      />
+    </span>
+  );
+  const notShown = totalLines - shownCount;
+
   return (
     <>
       {hint}
@@ -390,20 +509,25 @@ export function DiffView({
               role: "group",
               "aria-label": "Diff hunks",
               "aria-keyshortcuts": "[ ] s d ArrowUp ArrowDown Shift+ArrowUp Shift+ArrowDown",
+              "aria-activedescendant": cursorId,
               onKeyDown: handleKeyDown,
             }
-          : {})}
+          : opened
+            ? { tabIndex: -1 }
+            : {})}
       >
         {lineActions && (
           <span role="status" aria-live="polite" className={styles.srOnly}>
             {selectedCount > 0 ? `${selectedCount} ${selectedCount === 1 ? "line" : "lines"} selected` : ""}
           </span>
         )}
-        {hunks.map((hunk, hunkIndex) => {
+        {windowed.map((shownHunk, hunkIndex) => {
+          // `shownHunk` is the part of the hunk the window holds; actions act on the whole hunk.
+          const hunk = hunks[hunkIndex];
           let oldLine = hunk.oldStart;
           let newLine = hunk.newStart;
-          const splitRows = split ? buildSplitRows(hunk.lines) : null;
-          const indexOf = split ? new Map(hunk.lines.map((l, i) => [l, i])) : null;
+          const splitRows = split ? buildSplitRows(shownHunk.lines) : null;
+          const indexOf = split ? new Map(shownHunk.lines.map((l, i) => [l, i])) : null;
           const lines = selectedIn(hunkIndex);
           const byLines = lines.length > 0;
           const n = lines.length;
@@ -419,6 +543,13 @@ export function DiffView({
             : onDiscardHunk && { label: "Discard hunk", run: () => onDiscardHunk(oldStart, newStart) };
           // Split-view cells: the line's index in `hunk.lines` (the selection's coordinate space).
           const cell = (line: DiffLine) => indexOf!.get(line)!;
+          const listboxProps = lineActions
+            ? {
+                role: "listbox",
+                "aria-multiselectable": true,
+                "aria-label": `Lines of hunk ${hunkIndex + 1} of ${hunks.length}`,
+              }
+            : {};
           return (
             <div
               key={hunkIndex}
@@ -467,7 +598,7 @@ export function DiffView({
                 )}
               </div>
               {split ? (
-                <div className={`${styles.lines} ${styles.splitLines}`}>
+                <div className={`${styles.lines} ${styles.splitLines}`} {...listboxProps}>
                   {splitRows!.map((row, rowIndex) => {
                     if (row.kind === "context") {
                       const oldNo = oldLine++;
@@ -476,6 +607,7 @@ export function DiffView({
                         <div
                           key={rowIndex}
                           data-line-number={newNo}
+                          {...contextProps}
                           className={`${styles.line} ${styles.lineContext} diff-line diff-line-context`}
                         >
                           <span className={styles.gutter} aria-hidden="true">
@@ -484,10 +616,8 @@ export function DiffView({
                           <span className={styles.gutter} aria-hidden="true">
                             {newNo}
                           </span>
-                          <span className={styles.marker} aria-hidden="true">
-                            {originPrefix("Context")}
-                          </span>
-                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} showWhitespace={settings.showWhitespace} /></span>
+                          <Marker line={row.line} lineNo={newNo} />
+                          {content(row.line)}
                         </div>
                       );
                     }
@@ -497,7 +627,7 @@ export function DiffView({
                       const oldIndex = cell(row.oldLine);
                       const newIndex = cell(row.newLine);
                       return (
-                        <div key={rowIndex} className={styles.splitRow}>
+                        <div key={rowIndex} className={styles.splitRow} {...splitRowProps}>
                           <div
                             data-diff-column="old"
                             {...lineProps(hunkIndex, oldIndex)}
@@ -506,10 +636,8 @@ export function DiffView({
                             <span className={styles.gutter} aria-hidden="true">
                               {oldNo}
                             </span>
-                            <span className={styles.marker} aria-hidden="true">
-                              {originPrefix("Remove")}
-                            </span>
-                            <span className={styles.content}><DiffLineContent line={row.oldLine} tokens={tokens?.get(row.oldLine)} segments={wordSegments.get(row.oldLine)} showWhitespace={settings.showWhitespace} /></span>
+                            <Marker line={row.oldLine} lineNo={oldNo} />
+                            {content(row.oldLine)}
                           </div>
                           <div
                             data-diff-column="new"
@@ -520,10 +648,8 @@ export function DiffView({
                             <span className={styles.gutter} aria-hidden="true">
                               {newNo}
                             </span>
-                            <span className={styles.marker} aria-hidden="true">
-                              {originPrefix("Add")}
-                            </span>
-                            <span className={styles.content}><DiffLineContent line={row.newLine} tokens={tokens?.get(row.newLine)} segments={wordSegments.get(row.newLine)} showWhitespace={settings.showWhitespace} /></span>
+                            <Marker line={row.newLine} lineNo={newNo} />
+                            {content(row.newLine)}
                           </div>
                         </div>
                       );
@@ -532,7 +658,7 @@ export function DiffView({
                       const oldNo = oldLine++;
                       const index = cell(row.line);
                       return (
-                        <div key={rowIndex} className={styles.splitRow}>
+                        <div key={rowIndex} className={styles.splitRow} {...splitRowProps}>
                           <div
                             data-diff-column="old"
                             {...lineProps(hunkIndex, index)}
@@ -541,10 +667,8 @@ export function DiffView({
                             <span className={styles.gutter} aria-hidden="true">
                               {oldNo}
                             </span>
-                            <span className={styles.marker} aria-hidden="true">
-                              {originPrefix("Remove")}
-                            </span>
-                            <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} showWhitespace={settings.showWhitespace} /></span>
+                            <Marker line={row.line} lineNo={oldNo} />
+                            {content(row.line)}
                           </div>
                           <div className={styles.splitColumn} aria-hidden="true" />
                         </div>
@@ -553,7 +677,7 @@ export function DiffView({
                     const newNo = newLine++;
                     const index = cell(row.line);
                     return (
-                      <div key={rowIndex} className={styles.splitRow}>
+                      <div key={rowIndex} className={styles.splitRow} {...splitRowProps}>
                         <div className={styles.splitColumn} aria-hidden="true" />
                         <div
                           data-diff-column="new"
@@ -564,18 +688,16 @@ export function DiffView({
                           <span className={styles.gutter} aria-hidden="true">
                             {newNo}
                           </span>
-                          <span className={styles.marker} aria-hidden="true">
-                            {originPrefix("Add")}
-                          </span>
-                          <span className={styles.content}><DiffLineContent line={row.line} tokens={tokens?.get(row.line)} segments={wordSegments.get(row.line)} showWhitespace={settings.showWhitespace} /></span>
+                          <Marker line={row.line} lineNo={newNo} />
+                          {content(row.line)}
                         </div>
                       </div>
                     );
                   })}
                 </div>
               ) : (
-                <pre className={`${styles.lines} ${styles.unifiedLines}`}>
-                  {hunk.lines.map((line, lineIndex) => {
+                <pre className={`${styles.lines} ${styles.unifiedLines}`} {...listboxProps}>
+                  {shownHunk.lines.map((line, lineIndex) => {
                     const oldNo = line.origin !== "Add" ? oldLine++ : null;
                     const newNo = line.origin !== "Remove" ? newLine++ : null;
                     const selectable = line.origin !== "Context";
@@ -583,7 +705,7 @@ export function DiffView({
                       <div
                         key={lineIndex}
                         data-line-number={newNo ?? undefined}
-                        {...(selectable ? lineProps(hunkIndex, lineIndex) : {})}
+                        {...(selectable ? lineProps(hunkIndex, lineIndex) : contextProps)}
                         className={`${styles.line} ${styles[`line${line.origin}`]} diff-line diff-line-${line.origin.toLowerCase()}${selectable ? lineClass(hunkIndex, lineIndex) : ""}`}
                       >
                         <span className={styles.gutter} aria-hidden="true">
@@ -592,10 +714,8 @@ export function DiffView({
                         <span className={styles.gutter} aria-hidden="true">
                           {newNo ?? ""}
                         </span>
-                        <span className={styles.marker} aria-hidden="true">
-                          {originPrefix(line.origin)}
-                        </span>
-                        <span className={styles.content}><DiffLineContent line={line} tokens={tokens?.get(line)} segments={wordSegments.get(line)} showWhitespace={settings.showWhitespace} /></span>
+                        <Marker line={line} lineNo={(newNo ?? oldNo)!} />
+                        {content(line)}
                       </div>
                     );
                   })}
@@ -605,7 +725,41 @@ export function DiffView({
           );
         })}
       </div>
+      {notShown > 0 && (
+        <div className={styles.more}>
+          <span>
+            {lineCount.format(notShown)} more {notShown === 1 ? "line" : "lines"} not shown.
+          </span>
+          <button type="button" onClick={() => setShownLimit(limit + DIFF_WINDOW_LINES)}>
+            Show {lineCount.format(Math.min(DIFF_WINDOW_LINES, notShown))} more
+          </button>
+          {notShown > DIFF_WINDOW_LINES && (
+            <button type="button" onClick={() => setShownLimit(Number.POSITIVE_INFINITY)}>
+              Show all
+            </button>
+          )}
+        </div>
+      )}
     </>
+  );
+}
+
+// What a line is, for a screen reader (#668): the +/- marker and the gutters are hidden from it.
+const ORIGIN_LABEL: Record<DiffLineOrigin, string> = { Add: "Added", Remove: "Removed", Context: "Unchanged" };
+const isEofMarker = (line: DiffLine) => line.origin === "Context" && line.content.includes("\\ No newline at end of file");
+
+/**
+ * A line's +/- marker, shown, and what it means, read: "Added line 12: ", "Removed line 7: ",
+ * "Unchanged line 3: " (the new side's number; the old side's for a removal). Neither is
+ * selectable (`.marker`), so copying lines copies only their text. The "No newline at end of
+ * file" marker line says what it is itself.
+ */
+function Marker({ line, lineNo }: { line: DiffLine; lineNo: number }) {
+  return (
+    <span className={styles.marker}>
+      <span aria-hidden="true">{originPrefix(line.origin)}</span>
+      {!isEofMarker(line) && <span className={styles.srOnly}>{`${ORIGIN_LABEL[line.origin]} line ${lineNo}: `}</span>}
+    </span>
   );
 }
 

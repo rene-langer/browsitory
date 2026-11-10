@@ -685,3 +685,170 @@ describe("DiffView whole file", () => {
     expect(screen.getByText(/too long to show whole \(12,345 lines\)/)).toBeInTheDocument();
   });
 });
+
+describe("DiffView for screen readers (#668)", () => {
+  it("reads each line's kind and number before its text, not its marker or gutters", () => {
+    const { container } = render(<DiffView hunks={[lineHunk]} />);
+    const read = [...container.querySelectorAll<HTMLElement>(".diff-line")].map((line) =>
+      [...line.childNodes]
+        .filter((node) => !(node instanceof HTMLElement && node.getAttribute("aria-hidden") === "true"))
+        .map((node) => (node as HTMLElement).textContent?.replace(/^[+\- ]/, ""))
+        .join(""),
+    );
+    expect(read).toEqual([
+      "Unchanged line 1: a\n",
+      "Removed line 2: b\n",
+      "Added line 2: B\n",
+      "Unchanged line 3: c\n",
+      "Added line 4: d\n",
+    ]);
+  });
+
+  it("labels split-view lines by their own side's number", () => {
+    const { container } = render(<DiffView hunks={[lineHunk]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Split view" }));
+    expect(container.querySelector('[data-diff-column="old"]')).toHaveTextContent("Removed line 2:");
+    expect(container.querySelector('[data-diff-column="new"]')).toHaveTextContent("Added line 2:");
+  });
+
+  it("does not label the no-newline marker line with a number", () => {
+    const hunk: DiffHunk = {
+      oldStart: 1, oldLines: 1, newStart: 1, newLines: 1,
+      lines: [
+        { origin: "Remove", content: "x" },
+        { origin: "Context", content: "\\ No newline at end of file\n" },
+        { origin: "Add", content: "y\n" },
+      ],
+    };
+    const { container } = render(<DiffView hunks={[hunk]} />);
+    expect(container.querySelector(".diff-line-context")).not.toHaveTextContent("Unchanged");
+  });
+
+  it("makes selectable lines options of a listbox per hunk, with their selected state", () => {
+    render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={vi.fn()} />);
+    const listbox = screen.getByRole("listbox", { name: "Lines of hunk 1 of 1" });
+    expect(listbox).toHaveAttribute("aria-multiselectable", "true");
+    const options = within(listbox).getAllByRole("option");
+    expect(options).toHaveLength(5);
+    expect(options[0]).toHaveAttribute("aria-disabled", "true");
+    expect(options[0]).not.toHaveAttribute("aria-selected");
+    const added = within(listbox).getByRole("option", { name: /^Added line 4:\s*d$/ });
+    expect(added).toHaveAttribute("aria-selected", "false");
+    fireEvent.click(added);
+    expect(added).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("points the diff's active descendant at the keyboard cursor", () => {
+    render(<DiffView hunks={[lineHunk]} onStageHunk={vi.fn()} onStageLines={vi.fn()} />);
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    expect(group).not.toHaveAttribute("aria-activedescendant");
+    fireEvent.keyDown(group, { key: "ArrowDown" });
+    const removed = screen.getByRole("option", { name: /^Removed line 2:\s*b$/ });
+    expect(group).toHaveAttribute("aria-activedescendant", removed.id);
+    fireEvent.keyDown(group, { key: "ArrowDown" });
+    expect(group).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: /^Added line 2:\s*B$/ }).id);
+  });
+
+  it("keeps a read-only diff's lines free of selection roles", () => {
+    render(<DiffView hunks={[lineHunk]} />);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.queryByRole("option")).toBeNull();
+    expect(document.querySelector("[aria-selected]")).toBeNull();
+  });
+});
+
+// A hunk of `count` added lines, numbered from `start`.
+const addedHunk = (count: number, newStart = 1): DiffHunk => ({
+  oldStart: 0, oldLines: 0, newStart, newLines: count,
+  lines: Array.from({ length: count }, (_, i) => ({ origin: "Add" as const, content: `line ${newStart + i}\n` })),
+});
+
+describe("DiffView large and generated diffs (#686)", () => {
+  const renderedLines = () => document.querySelectorAll(".diff-line").length;
+
+  it("collapses a generated file's diff until Load diff is pressed, then focuses the diff", () => {
+    render(<DiffView hunks={[addedHunk(3)]} path="frontend/pnpm-lock.yaml" onStageHunk={vi.fn()} />);
+    expect(renderedLines()).toBe(0);
+    expect(screen.getByText(/looks generated/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load diff (3 lines)" }));
+    expect(renderedLines()).toBe(3);
+    expect(screen.getByRole("group", { name: "Diff hunks" })).toHaveFocus();
+  });
+
+  it("collapses a diff longer than 1,000 lines, but not one of 1,000", () => {
+    const { rerender } = render(<DiffView hunks={[addedHunk(1000)]} path="a.txt" />);
+    expect(renderedLines()).toBe(1000);
+    rerender(<DiffView hunks={[addedHunk(1001)]} path="b.txt" />);
+    expect(renderedLines()).toBe(0);
+    expect(screen.getByText("This diff is large (1,001 lines), so it is collapsed.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load diff (1,001 lines)" }));
+    expect(renderedLines()).toBe(1001);
+  });
+
+  it("keeps a loaded diff loaded across a refetch, and collapses the next file's", () => {
+    const { rerender } = render(<DiffView hunks={[addedHunk(2)]} path="Cargo.lock" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load diff (2 lines)" }));
+    rerender(<DiffView hunks={[addedHunk(3)]} path="Cargo.lock" />);
+    expect(renderedLines()).toBe(3);
+    rerender(<DiffView hunks={[addedHunk(3)]} path="sub/Cargo.lock" />);
+    expect(renderedLines()).toBe(0);
+  });
+
+  it("shows a loaded long diff 2,000 lines at a time", () => {
+    render(<DiffView hunks={[addedHunk(1500), addedHunk(3000, 2000)]} path="big.txt" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load diff (4,500 lines)" }));
+    expect(renderedLines()).toBe(2000);
+    expect(screen.getByText("2,500 more lines not shown.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show 2,000 more" }));
+    expect(renderedLines()).toBe(4000);
+    expect(screen.queryByRole("button", { name: "Show all" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show 500 more" }));
+    expect(renderedLines()).toBe(4500);
+    expect(screen.queryByText(/not shown/)).toBeNull();
+  });
+
+  it("Show all renders every line", () => {
+    render(<DiffView hunks={[addedHunk(5000)]} path="big.txt" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load diff (5,000 lines)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    expect(renderedLines()).toBe(5000);
+  });
+
+  it("] to a hunk past the window shows it, and its actions use the whole hunk", () => {
+    const onStageHunk = vi.fn();
+    const onStageLines = vi.fn();
+    const first = addedHunk(2500);
+    render(
+      <DiffView
+        hunks={[first, addedHunk(10, 5000)]}
+        path="big.txt"
+        onStageHunk={onStageHunk}
+        onStageLines={onStageLines}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Load diff (2,510 lines)" }));
+    expect(renderedLines()).toBe(2000);
+    // A line of the truncated hunk stages with every line of that hunk as expected content.
+    fireEvent.click(document.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="5"]')!);
+    fireEvent.click(screen.getByRole("button", { name: "Stage lines (1)" }));
+    expect(onStageLines).toHaveBeenCalledWith(0, 1, [5], first.lines.map((l) => l.content));
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "]" });
+    expect(renderedLines()).toBe(2510);
+    fireEvent.keyDown(group, { key: "s" });
+    expect(onStageHunk).toHaveBeenCalledWith(0, 5000);
+  });
+
+  it("shows more when the line cursor moves past the window", () => {
+    render(<DiffView hunks={[addedHunk(2001)]} path="big.txt" onStageHunk={vi.fn()} onStageLines={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load diff (2,001 lines)" }));
+    fireEvent.click(document.querySelector<HTMLElement>('[data-hunk-index="0"][data-line-index="1999"]')!);
+    const group = screen.getByRole("group", { name: "Diff hunks" });
+    fireEvent.keyDown(group, { key: "ArrowDown" });
+    expect(renderedLines()).toBe(2001);
+    expect(group).toHaveAttribute(
+      "aria-activedescendant",
+      document.querySelector('[data-line-index="2000"]')!.id,
+    );
+  });
+});
