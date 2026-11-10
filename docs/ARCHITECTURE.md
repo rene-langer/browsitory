@@ -436,7 +436,11 @@ send a `Command` enum value over a `std::sync::mpsc` channel to that thread and 
 result over a per-call reply channel; only owned, `Send` command/reply values cross the boundary.
 Commands clone the channel `Sender` out of the state mutex and drop the guard before blocking
 on a reply, so one slow repository operation can't serialize unrelated commands. One worker
-thread per open repo also means multiple repos never contend on a shared handle.
+thread per open repo also means multiple repos never contend on a shared handle. The thread's
+state and loop are `worker/worker_loop.rs`'s `WorkerLoop`: its `step` takes the state lock
+(`acquire`), does the undo bookkeeping and operation gate (`before`), runs the command
+(`dispatch`, the `match` over `Command` in `worker_loop/dispatch.rs`), then finishes the undo
+entry and releases the lock (`after`) (#486).
 
 **Every Tauri command that blocks must be an `async fn`.** A plain `#[tauri::command] fn` is
 dispatched by `tauri-macros`' `ExecutionContext::Blocking` path, which runs the function body
