@@ -137,9 +137,15 @@ pub fn commit_stats_batch(
             break;
         }
         let deadline = Instant::now() + budget.per_commit;
-        let stats = commit_stats(repo, commit_id, with_files, budget.max_files, Some(deadline))
-            .ok()
-            .flatten();
+        let stats = commit_stats(
+            repo,
+            commit_id,
+            with_files,
+            budget.max_files,
+            Some(deadline),
+        )
+        .ok()
+        .flatten();
         answered.push(CommitStatsEntry {
             commit_id: commit_id.clone(),
             stats,
