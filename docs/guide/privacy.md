@@ -5,8 +5,8 @@ no account. It doesn't send us your repositories, your file names or how you use
 
 This page lists every connection Browsitory makes, and everything it keeps on your computer, so
 you can check that claim. It covers the desktop app, the VSCode extension and this user guide
-site. It is meant to meet the EU General Data Protection Regulation (GDPR) and similar laws,
-such as the UK GDPR, the Swiss FADP and the CCPA.
+site. It follows the transparency rules of the EU General Data Protection Regulation (GDPR) and
+similar laws.
 
 !!! note "Who is responsible"
     Browsitory is a free, non-commercial open-source project by Rene Langer, who is responsible
@@ -138,7 +138,9 @@ The extension works the same way, with these differences:
   remotes, and the pull request APIs if you set them up). VSCode, or your editor, installs and
   updates it from the
   [Visual Studio Marketplace](https://marketplace.visualstudio.com/) or
-  [Open VSX](https://open-vsx.org/), under their own privacy terms.
+  [Open VSX](https://open-vsx.org/), under their own privacy terms. Open VSX is run by the
+  Eclipse Foundation in Europe
+  ([its privacy policy](https://www.eclipse.org/legal/privacy/)).
 - It sends no telemetry, so VSCode's `telemetry.telemetryLevel` setting has nothing to turn off.
 - It shares the settings file and the credential store with the desktop app.
 - Its web storage, the last version whose release notes you saw, and the messages in its
@@ -149,16 +151,39 @@ The extension works the same way, with these differences:
 
 The site is hosted on GitHub Pages, so GitHub sees your IP address and the pages you visit
 ([GitHub's privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement)).
-Each page also asks `api.github.com`, from your browser, for the repository's star count and
-latest version, shown in the header. The site uses no cookies, no analytics and no web fonts
-from other servers. Your browser keeps your light or dark choice and that header data in its
-own storage for this site.
+GitHub keeps this in its server logs. The legal basis is our legitimate interest in serving the
+site (GDPR Art. 6(1)(f)).
+
+Your browser connects to no other server. The link to the repository in the header and the
+edit links on each page are plain links: they fetch nothing until you click them. The site uses
+no cookies, no analytics and no web fonts from other servers. Your browser keeps your light or
+dark choice in its own storage for this site.
+
+## Transfers outside the EU
+
+GitHub and Microsoft (the Visual Studio Marketplace), Atlassian (Bitbucket), Cloudflare and
+Google (the privacy email, see below) may process data in the US. These transfers rely on the
+EU-US Data Privacy Framework and standard contractual clauses, under each provider's own terms.
 
 ## Your rights
 
-Because Browsitory collects no personal data, we hold none about you: there is nothing for us
-to give you a copy of, correct or delete. You control everything Browsitory keeps on your
-computer, and the steps above remove it.
+Browsitory collects no personal data, so the app gives us nothing about you to copy, correct
+or delete. You control everything Browsitory keeps on your computer, and the steps above remove
+it.
+
+The one thing we hold is email you send to
+[privacy@browsitory.com](mailto:privacy@browsitory.com):
+
+- **What:** your message and your email address.
+- **Why:** to answer you.
+- **Legal basis:** our legitimate interest in answering questions about this notice (GDPR
+  Art. 6(1)(f)), or, when you ask to exercise your rights under the GDPR, our legal duty to
+  answer (Art. 6(1)(c)).
+- **Who handles it:** Cloudflare Email Routing forwards the mail to a Google (Gmail) mailbox.
+- **How long:** we delete it once your request is settled, unless a law requires us to keep it
+  longer.
+
+You can ask for a copy of this email, or for it to be corrected or deleted.
 
 For data held by GitHub, Bitbucket, the Marketplace, Open VSX or the host of your remotes,
 contact that provider: they decide how it is processed. For any question about this notice,
