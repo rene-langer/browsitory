@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RebasePlanCommit, RepoClient } from "../ipc/RepoClient";
 import { RebasePlanner } from "./RebasePlanner";
@@ -106,8 +106,8 @@ describe("RebasePlanner", () => {
     );
     await screen.findByText(/add a/);
 
-    fireEvent.change(screen.getAllByLabelText("Action")[0], { target: { value: "Reword" } });
-    fireEvent.change(screen.getByPlaceholderText("New commit message"), {
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[0], { target: { value: "Reword" } });
+    fireEvent.change(await screen.findByPlaceholderText("New commit message"), {
       target: { value: "reworded" },
     });
     fireEvent.click(screen.getByText("Start rebase"));
@@ -124,7 +124,7 @@ describe("RebasePlanner", () => {
     );
     await screen.findByText(/add a/);
 
-    fireEvent.change(screen.getAllByLabelText("Action")[1], { target: { value: "Squash" } });
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[1], { target: { value: "Squash" } });
 
     const combined = await screen.findByLabelText("Combined message");
     expect(combined).toHaveValue("add a\n\nadd b");
@@ -152,8 +152,8 @@ describe("RebasePlanner", () => {
     await screen.findByText(/add a/);
 
     // Row 0 = "add a" (Pick, the real leader), row 1 = "add b" (Drop), row 2 = "add c" (Squash).
-    fireEvent.change(screen.getAllByLabelText("Action")[1], { target: { value: "Drop" } });
-    fireEvent.change(screen.getAllByLabelText("Action")[2], { target: { value: "Squash" } });
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[1], { target: { value: "Drop" } });
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[2], { target: { value: "Squash" } });
 
     // Exactly one combined-message field should exist, pre-filled from the leader ("add a")
     // and the surviving squash member ("add c") — not from the dropped row.
@@ -192,8 +192,8 @@ describe("RebasePlanner", () => {
     await screen.findByText(/add a/);
 
     // Group A: leader "add a" + squashed "add b". Group B: leader "add c" + squashed "add d".
-    fireEvent.change(screen.getAllByLabelText("Action")[1], { target: { value: "Squash" } });
-    fireEvent.change(screen.getAllByLabelText("Action")[3], { target: { value: "Squash" } });
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[1], { target: { value: "Squash" } });
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[3], { target: { value: "Squash" } });
     let combinedFields = await screen.findAllByLabelText("Combined message");
     expect(combinedFields).toHaveLength(2);
 
@@ -201,7 +201,7 @@ describe("RebasePlanner", () => {
 
     // Change group B only: its member switches Squash → Fixup, which legitimately changes B's
     // default message but says nothing about A.
-    fireEvent.change(screen.getAllByLabelText("Action")[3], { target: { value: "Fixup" } });
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[3], { target: { value: "Fixup" } });
 
     combinedFields = screen.getAllByLabelText("Combined message");
     expect(combinedFields[0]).toHaveValue("hand-written message for A");
@@ -223,7 +223,7 @@ describe("RebasePlanner", () => {
     await screen.findByText(/add a/);
 
     // One group: leader "add a" + squashed "add b". Rows "add c"/"add d" are plain Picks.
-    fireEvent.change(screen.getAllByLabelText("Action")[1], { target: { value: "Squash" } });
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[1], { target: { value: "Squash" } });
     const combined = await screen.findByLabelText("Combined message");
     fireEvent.change(combined, { target: { value: "hand-written message" } });
 
@@ -241,14 +241,14 @@ describe("RebasePlanner", () => {
     );
     await screen.findByText(/add a/);
 
-    fireEvent.change(screen.getAllByLabelText("Action")[1], { target: { value: "Squash" } });
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[1], { target: { value: "Squash" } });
     fireEvent.change(await screen.findByLabelText("Combined message"), {
       target: { value: "stale hand-written message" },
     });
 
     // A new member joins this very group: its default is genuinely out of date now, so it's
     // recomputed rather than preserved.
-    fireEvent.change(screen.getAllByLabelText("Action")[2], { target: { value: "Squash" } });
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[2], { target: { value: "Squash" } });
 
     expect(screen.getByLabelText("Combined message")).toHaveValue("add a\n\nadd b\n\nadd c");
   });
@@ -261,7 +261,7 @@ describe("RebasePlanner", () => {
     );
     await screen.findByText(/add a/);
 
-    const firstRowActionSelect = screen.getAllByLabelText("Action")[0] as HTMLSelectElement;
+    const firstRowActionSelect = screen.getAllByLabelText(/^Action for /)[0] as HTMLSelectElement;
     const squashOption = Array.from(firstRowActionSelect.options).find(
       (o) => o.value === "Squash",
     );
@@ -302,8 +302,8 @@ describe("RebasePlanner", () => {
     await screen.findAllByLabelText("Action");
 
     // Row 0 = "add a" (Pick, the leader), row 1 = "add b" (preset Squash).
-    expect(screen.getAllByLabelText("Action")[0]).toHaveValue("Pick");
-    expect(screen.getAllByLabelText("Action")[1]).toHaveValue("Squash");
+    expect(screen.getAllByLabelText(/^Action for /)[0]).toHaveValue("Pick");
+    expect(screen.getAllByLabelText(/^Action for /)[1]).toHaveValue("Squash");
 
     const combinedFields = await screen.findAllByLabelText("Combined message");
     expect(combinedFields).toHaveLength(1);
@@ -325,8 +325,8 @@ describe("RebasePlanner", () => {
     );
     await screen.findAllByLabelText("Action");
 
-    expect(screen.getAllByLabelText("Action")[0]).toHaveValue("Drop");
-    expect(screen.getAllByLabelText("Action")[1]).toHaveValue("Pick");
+    expect(screen.getAllByLabelText(/^Action for /)[0]).toHaveValue("Drop");
+    expect(screen.getAllByLabelText(/^Action for /)[1]).toHaveValue("Pick");
   });
 
   it("blocks Start and explains when a preset commit is not in the planned history", async () => {
@@ -368,5 +368,136 @@ describe("RebasePlanner", () => {
       "Some selected commits are not on the current branch",
     );
     expect(screen.getByRole("button", { name: "Start rebase" })).toBeDisabled();
+  });
+
+  // #655: the message field used to hold only the summary, and the backend replaces the whole
+  // message, so rewording silently dropped the body.
+  it("loads the full message, body included, into the reword field", async () => {
+    const onStartRebase = vi.fn();
+    const getCommitMessage = vi.fn(async (_repo: string, id: string) =>
+      id === "aaa" ? "add a\n\nWhy a matters.\nSigned-off-by: Rene\n" : "add b\n",
+    );
+    const client = fakeClient({ commitsSince: async () => commits, getCommitMessage });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={onStartRebase} onCancel={vi.fn()} />);
+    await screen.findByText(/add a/);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Action for aaa1111 add a" }), { target: { value: "Reword" } });
+    const field = await screen.findByRole("textbox", { name: "New message for aaa1111" });
+    await waitFor(() => expect(field).toHaveValue("add a\n\nWhy a matters.\nSigned-off-by: Rene\n"));
+    expect(field.tagName).toBe("TEXTAREA");
+    expect(getCommitMessage).toHaveBeenCalledWith(TEST_REPO_PATH, "aaa");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start rebase" }));
+    const [, plan] = onStartRebase.mock.calls[0];
+    expect(plan[0].action).toEqual({ kind: "Reword", message: "add a\n\nWhy a matters.\nSigned-off-by: Rene\n" });
+  });
+
+  it("keeps Start disabled while a reworded commit's message loads", async () => {
+    let resolveMessage: (message: string) => void = () => {};
+    const client = fakeClient({
+      commitsSince: async () => commits,
+      getCommitMessage: () => new Promise((resolve) => (resolveMessage = resolve)),
+    });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />);
+    await screen.findByText(/add a/);
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[0], { target: { value: "Reword" } });
+
+    expect(screen.getByText("Loading the message…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeDisabled();
+    resolveMessage("add a\n\nbody\n");
+    expect(await screen.findByRole("textbox", { name: "New message for aaa1111" })).toHaveValue("add a\n\nbody\n");
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeEnabled();
+  });
+
+  it("falls back to the summary, and says so, when the full message can't be read", async () => {
+    const client = fakeClient({
+      commitsSince: async () => commits,
+      getCommitMessage: async () => {
+        throw new Error("object not found");
+      },
+    });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />);
+    await screen.findByText(/add a/);
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[0], { target: { value: "Reword" } });
+
+    expect(await screen.findByRole("textbox", { name: "New message for aaa1111" })).toHaveValue("add a");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Couldn't read the full message of aaa1111 (object not found). Only the summary is filled in; add the body back if it had one.",
+    );
+  });
+
+  it("shows a loading state, with Start disabled, until the commits arrive", async () => {
+    let resolveCommits: (value: RebasePlanCommit[]) => void = () => {};
+    const client = fakeClient({ commitsSince: () => new Promise((resolve) => (resolveCommits = resolve)) });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.getByText("Loading commits…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeDisabled();
+    resolveCommits(commits);
+    expect(await screen.findByText(/add a/)).toBeInTheDocument();
+    expect(screen.queryByText("Loading commits…")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeEnabled();
+  });
+
+  it("shows a failure to list the commits, with Retry, and keeps Start disabled", async () => {
+    const commitsSince = vi
+      .fn<RepoClient["commitsSince"]>()
+      .mockRejectedValueOnce(new Error("revspec 'base' not found"))
+      .mockResolvedValueOnce(commits);
+    const client = fakeClient({ commitsSince });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("revspec 'base' not found");
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText(/add a/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeEnabled();
+  });
+
+  it("says when there is nothing to rebase, and keeps Start disabled", async () => {
+    const client = fakeClient({ commitsSince: async () => [] });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(await screen.findByText("No commits to rebase: the current branch has nothing above this base.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeDisabled();
+  });
+
+  it("says the rows are oldest first and names each row's controls after its commit", async () => {
+    const client = fakeClient({ commitsSince: async () => commits });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />);
+    await screen.findByText(/add a/);
+
+    expect(screen.getByText(/Oldest commit first/)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Action for bbb2222 add b" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Move up: aaa1111 add a" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move up: bbb2222 add b" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Move down: aaa1111 add a" })).toBeEnabled();
+  });
+
+  it("moves a row with Alt+Up and Alt+Down, keeping focus on it", async () => {
+    const onStartRebase = vi.fn();
+    const client = fakeClient({ commitsSince: async () => threeCommits });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={onStartRebase} onCancel={vi.fn()} />);
+    await screen.findByText(/add a/);
+
+    const select = screen.getByRole("combobox", { name: "Action for aaa1111 add a" });
+    select.focus();
+    fireEvent.keyDown(select, { key: "ArrowDown", altKey: true });
+    fireEvent.keyDown(select, { key: "ArrowDown", altKey: true });
+    expect(select).toHaveFocus();
+    fireEvent.keyDown(select, { key: "ArrowUp", altKey: true });
+    // A plain arrow key belongs to the control (the select changes its value), not to the row.
+    fireEvent.keyDown(select, { key: "ArrowDown" });
+    const rows = within(screen.getByRole("list")).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent?.slice(0, 7))).toEqual(["bbb2222", "aaa1111", "ccc3333"]);
+    expect(select).toHaveFocus();
   });
 });
