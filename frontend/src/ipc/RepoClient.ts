@@ -51,6 +51,8 @@ export interface DiffSettings extends DiffOptions {
   wordWrap: WordWrap;
   /** Faint markers for spaces, tabs and carriage returns in diff lines (#616); display only. */
   showWhitespace: boolean;
+  /** Untracked files start expanded in the uncommitted changes (#623); off, they start collapsed. */
+  expandUntracked: boolean;
 }
 
 // The backend's limits and defaults (#497), generated from the Rust constants:

@@ -2240,6 +2240,7 @@ pub struct DiffSettingsDto {
     pub word_wrap: WordWrapDto,
     pub algorithm: DiffAlgorithmDto,
     pub show_whitespace: bool,
+    pub expand_untracked: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2280,6 +2281,7 @@ impl From<config::DiffSettings> for DiffSettingsDto {
             word_wrap: s.word_wrap.into(),
             algorithm: s.algorithm.into(),
             show_whitespace: s.show_whitespace,
+            expand_untracked: s.expand_untracked,
         }
     }
 }
@@ -2293,6 +2295,7 @@ impl From<DiffSettingsDto> for config::DiffSettings {
             word_wrap: d.word_wrap.into(),
             algorithm: d.algorithm.into(),
             show_whitespace: d.show_whitespace,
+            expand_untracked: d.expand_untracked,
         }
     }
 }

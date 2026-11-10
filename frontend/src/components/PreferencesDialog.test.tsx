@@ -207,7 +207,7 @@ describe("DiffSection", () => {
   it("loads and saves the word wrap setting with the other diff settings", async () => {
     const setDiffSettings = vi.fn(async () => {});
     const client = fakeRepoClient({
-      getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const, algorithm: "Default" as const, showWhitespace: false }),
+      getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true }),
       setDiffSettings,
     });
     render(
@@ -230,6 +230,7 @@ describe("DiffSection", () => {
         wordWrap: "Auto",
         algorithm: "Default",
         showWhitespace: false,
+        expandUntracked: true,
       }),
     );
   });
@@ -237,7 +238,7 @@ describe("DiffSection", () => {
   it("loads and saves the diff algorithm (#469)", async () => {
     const setDiffSettings = vi.fn(async () => {});
     const client = fakeRepoClient({
-      getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Patience" as const, showWhitespace: false }),
+      getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Patience" as const, showWhitespace: false, expandUntracked: true }),
       setDiffSettings,
     });
     render(
@@ -263,8 +264,38 @@ describe("DiffSection", () => {
         wordWrap: "Auto",
         algorithm: "Minimal",
         showWhitespace: false,
+        expandUntracked: true,
       }),
     );
+  });
+  it("loads and saves Expand untracked files (#623)", async () => {
+    const setDiffSettings = vi.fn(async () => {});
+    const client = fakeRepoClient({
+      getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true }),
+      setDiffSettings,
+    });
+    render(
+      <DiffSettingsProvider client={client}>
+        <PreferencesDialog onClose={vi.fn()}>
+          <DiffSection />
+        </PreferencesDialog>
+      </DiffSettingsProvider>,
+    );
+    const expand = within(screen.getByRole("group", { name: "Diff" })).getByRole("checkbox", { name: "Expand untracked files" });
+    await waitFor(() => expect(expand).toBeChecked());
+    fireEvent.click(expand);
+    await waitFor(() =>
+      expect(setDiffSettings).toHaveBeenCalledWith({
+        ignoreWhitespace: false,
+        contextLines: 3,
+        syntaxHighlight: true,
+        wordWrap: "Auto",
+        algorithm: "Default",
+        showWhitespace: false,
+        expandUntracked: false,
+      }),
+    );
+    expect(expand).not.toBeChecked();
   });
 });
 

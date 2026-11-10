@@ -54,6 +54,7 @@ fn commit_message_settings_coexist_with_other_tables_and_lists() {
             word_wrap: config::WordWrap::On,
             algorithm: config::DiffAlgorithm::Default,
             show_whitespace: true,
+            expand_untracked: false,
         },
     )
     .unwrap();

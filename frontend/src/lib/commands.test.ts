@@ -839,7 +839,7 @@ describe("buildCommands", () => {
       ],
     ])("omits the stash commands while %s, like DiffPane's Stash button", (_label, overrides) => {
       const ids = commandsFor(makeAppState(overrides), { diff: {
-        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false },
+        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
         update: vi.fn(),
         currentFile: "a.txt",
         requestDiscardCurrentFile: vi.fn(),
@@ -1270,7 +1270,7 @@ describe("history commands", () => {
 });
 
 describe("diff option and discard commands", () => {
-  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false };
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true };
   const build = (state: ReturnType<typeof makeAppState>, extra: Record<string, unknown> = {}) => {
     const diffCommands = {
       settings,
@@ -1524,7 +1524,7 @@ describe("preferences and external tool commands", () => {
     onOpenCurrentFileInDiffTool: vi.fn(),
   });
   const diffCommands = (currentFile: string | null) => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true },
     update: vi.fn(),
     currentFile,
     requestDiscardCurrentFile: vi.fn(),
@@ -2055,7 +2055,7 @@ const allFamilies = (appState: UseAppStateResult) =>
     tabs: tabs({ otherOpenRepos: [{ path: "/other", displayName: "other" } as OpenRepo] }),
     sidebar: sidebar(),
     diff: {
-      settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false },
+      settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
       update: noop,
       currentFile: "b.txt",
       requestDiscardCurrentFile: noop,

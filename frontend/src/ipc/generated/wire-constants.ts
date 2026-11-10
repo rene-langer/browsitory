@@ -9,7 +9,7 @@ export const WHOLE_FILE_CONTEXT_LINES = 4294967295;
 /** `config::COMMIT_MESSAGE_COLUMNS`: the range commit message columns are clamped to. */
 export const COMMIT_MESSAGE_COLUMNS = { min: 10, max: 200 } as const;
 /** `config::DiffSettings::default()`. */
-export const DEFAULT_DIFF_SETTINGS: DiffSettings = {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Default","showWhitespace":false};
+export const DEFAULT_DIFF_SETTINGS: DiffSettings = {"ignoreWhitespace":false,"contextLines":3,"syntaxHighlight":true,"wordWrap":"Auto","algorithm":"Default","showWhitespace":false,"expandUntracked":true};
 /** `config::CommitMessageSettings::default()`. */
 export const DEFAULT_COMMIT_MESSAGE_SETTINGS: CommitMessageSettings = {"summaryLimit":50,"bodyRuler":72,"showRuler":true};
 /** `config::FetchSettings::default()`. */
