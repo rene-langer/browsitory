@@ -7,3 +7,5 @@ The desktop app checks GitHub for updates; every other connection goes to a serv
 The full privacy notice, with every connection, the data kept on your computer and how to
 delete it, is in the user guide: [docs/guide/privacy.md](docs/guide/privacy.md), also published at
 <https://rene-langer.github.io/browsitory/privacy/>.
+
+Questions about privacy: [privacy@browsitory.com](mailto:privacy@browsitory.com).

@@ -9,12 +9,10 @@ site. It is meant to meet the EU General Data Protection Regulation (GDPR) and s
 such as the UK GDPR, the Swiss FADP and the CCPA.
 
 !!! note "Who is responsible"
-    Browsitory is an open-source project. Questions about this notice or your data:
-    open an issue at <https://github.com/rene-langer/browsitory/issues>.
-    Issues are public, so don't put personal data in one.
-
-    <!-- TODO(owner): name the controller and add a private contact (e-mail or postal address)
-    for privacy requests. -->
+    Browsitory is a free, non-commercial open-source project by Rene Langer, who is responsible
+    for this notice. Questions about this notice or your data:
+    [privacy@browsitory.com](mailto:privacy@browsitory.com). Please don't send privacy requests
+    as GitHub issues: issues are public.
 
 ## In short
 
@@ -154,8 +152,9 @@ to give you a copy of, correct or delete. You control everything Browsitory keep
 computer, and the steps above remove it.
 
 For data held by GitHub, Bitbucket, the Marketplace, Open VSX or the host of your remotes,
-contact that provider: they decide how it is processed. You can also complain to the data
-protection authority where you live.
+contact that provider: they decide how it is processed. For any question about this notice,
+write to [privacy@browsitory.com](mailto:privacy@browsitory.com). You can also complain to the
+data protection authority where you live.
 
 ## Changes to this notice
 
