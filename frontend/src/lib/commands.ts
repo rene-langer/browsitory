@@ -348,11 +348,17 @@ function undoCommands({ undo, blocked }: FamilyContext): Command[] {
   return commands;
 }
 
-/** Pull and patches: what changes or exports the working tree as a whole. */
+/**
+ * Pull and patches: what changes or exports the working tree as a whole. The patches are listed
+ * under "Diff", Pull under "Remotes" with fetch and push (#592).
+ */
 function workingTreeCommands({ appState, state, blocked }: FamilyContext): Command[] {
-  const { commands, add } = family("General");
+  const { commands, add } = family("Diff");
   if (!blocked && state.upstream !== null) {
-    add({ id: "pull", label: "Pull", keywords: ["pull", "sync"], run: () => void appState.pullCurrentUpstream() });
+    add(
+      { id: "pull", label: "Pull", keywords: ["pull", "sync"], run: () => void appState.pullCurrentUpstream() },
+      "Remotes",
+    );
   }
   // #448: a patch file applied to the working tree (recorded, so behind the repository guard);
   // saving the staged changes only reads.

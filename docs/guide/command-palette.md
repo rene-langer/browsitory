@@ -12,7 +12,7 @@ The palette has almost every action in Browsitory, grouped like this:
 
 - **Branches:** switch to a branch, merge a branch into the current one, and create, check out
   or delete a tag.
-- **Remotes:** fetch one or all remotes, push, **Push branch to…**, **Force push current
+- **Remotes:** fetch one or all remotes, pull, push, **Push branch to…**, **Force push current
   branch…**, push all tags, **Browse branches on ⟨remote⟩**, add, edit or remove a remote,
   manage its credentials, delete a remote branch, and delete a tag on a remote.
 - **Stash:** stash all, **Stash…**, stash the current file or the selected files, and show,

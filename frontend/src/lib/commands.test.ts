@@ -1983,14 +1983,14 @@ function groupOf(id: string): CommandGroup {
 
 // #494: the commands, ids and groups before the builders were split by family. Recents are stored
 // by id, so a builder must keep the ids, and each group is now declared by the builder instead of
-// derived from the id. #583 moved the remote, diff and tag commands that had fallen under
-// "General" into their family's group.
+// derived from the id. #583 and #592 moved the remote, diff and tag commands that had fallen
+// under "General" into their family's group.
 describe("command ids and groups", () => {
   const EXPECTED: Record<keyof typeof STATES, [string, CommandGroup][]> = {
     normal: [
       ["add-remote", "Remotes"],
       ["amend-last-commit", "General"],
-      ["apply-patch", "General"],
+      ["apply-patch", "Diff"],
       ["browse-remote-branches:origin", "Remotes"],
       ["checkout-selected", "General"],
       ["checkout-tag:v1.0", "Branches"],
@@ -2037,7 +2037,7 @@ describe("command ids and groups", () => {
       ["open-worktree:/repo-wt1", "General"],
       ["preferences", "General"],
       ["prune-worktrees", "General"],
-      ["pull", "General"],
+      ["pull", "Remotes"],
       ["push-branch-to", "Remotes"],
       ["push-branch:origin", "Remotes"],
       ["push-tags:origin", "Remotes"],
@@ -2048,7 +2048,7 @@ describe("command ids and groups", () => {
       ["reset-selected", "General"],
       ["reveal-repository", "Repositories"],
       ["revert-selected", "General"],
-      ["save-staged-patch", "General"],
+      ["save-staged-patch", "Diff"],
       ["save-stash", "Stash"],
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
@@ -2101,7 +2101,7 @@ describe("command ids and groups", () => {
       ["rebase-continue", "General"],
       ["refresh", "General"],
       ["reveal-repository", "Repositories"],
-      ["save-staged-patch", "General"],
+      ["save-staged-patch", "Diff"],
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
@@ -2147,7 +2147,7 @@ describe("command ids and groups", () => {
       ["preferences", "General"],
       ["refresh", "General"],
       ["reveal-repository", "Repositories"],
-      ["save-staged-patch", "General"],
+      ["save-staged-patch", "Diff"],
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
       ["show-stash:0", "Stash"],
@@ -2192,7 +2192,7 @@ describe("command ids and groups", () => {
       ["preferences", "General"],
       ["refresh", "General"],
       ["reveal-repository", "Repositories"],
-      ["save-staged-patch", "General"],
+      ["save-staged-patch", "Diff"],
       ["save-stash", "Stash"],
       ["search-commits", "General"],
       ["show-shortcuts", "General"],
@@ -2212,7 +2212,7 @@ describe("command ids and groups", () => {
     clean: [
       ["add-remote", "Remotes"],
       ["amend-last-commit", "General"],
-      ["apply-patch", "General"],
+      ["apply-patch", "Diff"],
       ["apply-stash:0", "Stash"],
       ["browse-remote-branches:origin", "Remotes"],
       ["checkout-tag:v1.0", "Branches"],
@@ -2257,7 +2257,7 @@ describe("command ids and groups", () => {
       ["pop-stash:0", "Stash"],
       ["preferences", "General"],
       ["prune-worktrees", "General"],
-      ["pull", "General"],
+      ["pull", "Remotes"],
       ["push-branch-to", "Remotes"],
       ["push-branch:origin", "Remotes"],
       ["push-tags:origin", "Remotes"],
