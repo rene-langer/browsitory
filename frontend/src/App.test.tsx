@@ -2602,6 +2602,57 @@ describe("App external tools", () => {
     expect(await screen.findByText("Couldn't find the program 'kitty'.")).toBeInTheDocument();
     expect(openTerminal).toHaveBeenCalledWith("/repos/a");
   });
+
+  it("the tab menu renames a tab, an empty name restores the folder name, and a failure shows (#625)", async () => {
+    const setRepoAlias = vi.fn(async () => {});
+    render(<App client={toolsClient({ setRepoAlias })} />);
+    fireEvent.contextMenu(await screen.findByRole("tab", { name: "a" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename tab…" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename tab" });
+    const field = within(dialog).getByLabelText("Tab name");
+    expect(field).toHaveValue("");
+    expect(field).toHaveAttribute("placeholder", "a");
+    fireEvent.change(field, { target: { value: "alpha" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+
+    const renamed = await screen.findByRole("tab", { name: "alpha" });
+    expect(setRepoAlias).toHaveBeenCalledWith("/repos/a", "alpha");
+    expect(renamed).toHaveAttribute("title", "/repos/a");
+    expect(screen.queryByRole("dialog", { name: "Rename tab" })).toBeNull();
+
+    // F2 on the tab opens the dialog with the current name.
+    fireEvent.keyDown(renamed, { key: "F2" });
+    const again = within(screen.getByRole("dialog", { name: "Rename tab" })).getByLabelText("Tab name");
+    expect(again).toHaveValue("alpha");
+    fireEvent.change(again, { target: { value: "" } });
+    fireEvent.submit(again);
+    expect(await screen.findByRole("tab", { name: "a" })).toBeInTheDocument();
+    expect(setRepoAlias).toHaveBeenLastCalledWith("/repos/a", null);
+
+    setRepoAlias.mockRejectedValueOnce(new Error("config.toml is read-only"));
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "a" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename tab…" }));
+    const failing = within(screen.getByRole("dialog", { name: "Rename tab" })).getByLabelText("Tab name");
+    fireEvent.change(failing, { target: { value: "beta" } });
+    fireEvent.submit(failing);
+    expect(await screen.findByText("Couldn't save the tab name: config.toml is read-only")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "a" })).toBeInTheDocument();
+  });
+
+  it("the palette's Rename tab… renames the active tab (#625)", async () => {
+    const setRepoAlias = vi.fn(async () => {});
+    const { container } = render(<App client={toolsClient({ setRepoAlias })} />);
+    await screen.findByRole("tab", { name: "a" });
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "Rename tab" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Rename tab…" }));
+    const field = within(await screen.findByRole("dialog", { name: "Rename tab" })).getByLabelText("Tab name");
+    fireEvent.change(field, { target: { value: "alpha" } });
+    fireEvent.submit(field);
+    expect(await screen.findByRole("tab", { name: "alpha" })).toBeInTheDocument();
+    expect(setRepoAlias).toHaveBeenCalledWith("/repos/a", "alpha");
+  });
 });
 
 describe("App release notes on a new version", () => {

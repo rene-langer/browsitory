@@ -23,8 +23,9 @@ The palette has almost every action in Browsitory, grouped like this:
   patch…** (see [Patches and partial reverts](patches.md)).
 - **Go to:** **Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** (see
   below), and open a sidebar section and move to it, for example **Go to Tags**.
-- **Repositories:** switch to another tab, close the tab, open a terminal, reveal the
-  repository in the file manager.
+- **Repositories:** switch to another tab (one command per tab, or **Switch to tab…** to pick
+  one by name, folder name or path), **Rename tab…**, close the tab, open a terminal, reveal the
+  repository in the file manager (see [Multiple repositories](tabs.md)).
 - **General:** **Refresh**, undo and redo, search commits, file history of the current file,
   the selected commit's actions (cherry-pick, revert, reset, check out, reword, squash, fixup,
   move, drop), worktree and submodule
@@ -78,6 +79,7 @@ Press **?** (outside a text field) for the full list of shortcuts. The most usef
 | [ and ] | Previous and next hunk |
 | Left/Right, Home/End | Switch tabs, with a tab focused |
 | Delete | Close the focused tab |
+| F2 | Rename the focused tab |
 | Menu key or Shift+F10 | Open the focused item's menu |
 | Esc | Close a dialog or menu |
 

@@ -22,6 +22,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "Left / Right", description: "Switch to the previous / next tab" },
       { keys: "Home / End", description: "Switch to the first / last tab" },
       { keys: "Delete", description: "Close the focused tab (Fn+Delete on a Mac laptop)" },
+      { keys: "F2", description: "Rename the focused tab" },
     ],
   },
   {

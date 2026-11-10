@@ -19,6 +19,24 @@ active tab's dot follows its changes live; the other tabs are checked when you
 leave them, when the window comes back into view, and after a fetch.
 Reopening Browsitory restores every tab you had open, workspace groupings
 included.
+
+## Naming a tab
+
+A tab is named after its repository's folder. To give it a name of its own, for
+example to tell several clones or worktrees of one project apart, choose **Rename
+tab…** in the tab's menu (right-click) or in the command palette, or press **F2**
+on the focused tab. Leave the name empty to show the folder name again. The name
+belongs to the repository's path: it comes back when you close and reopen the
+tab, after a restart, and it is also shown in the recent repositories and the
+workspace editor. Hovering a tab still shows its full path.
+
+## Finding a tab
+
+When many tabs are open, the **⌄** button at the end of the tab bar (next to
+**+**) lists them all, grouped by workspace, with the uncommitted-changes dot
+where it applies. Type to filter by name, folder name or path, move with
+**↑**/**↓**, and press **Enter** or click to switch; **Esc** closes the list. In
+the command palette, **Switch to tab…** does the same for the other open tabs.
 If two tabs show the same repository through different paths (for example a
 subfolder, a symbolic link, or the **Open** button of a worktree), they share its
 actions: one runs after the other, never both at once. They also share one

@@ -1648,6 +1648,48 @@ describe("preferences and external tool commands", () => {
     expect(onReopenClosedTab).toHaveBeenCalledOnce();
   });
 
+  it("adds Rename tab…, grouped under Repositories, also while an operation runs (#625)", () => {
+    const onRenameTab = vi.fn();
+    const build = (appCommands: AppCommands) =>
+      buildCommands(makeAppState({ pending: true }), undefined, [], undefined, undefined, undefined, undefined, undefined, appCommands);
+    expect(build({}).some((c) => c.id === "rename-tab")).toBe(false);
+    const rename = build({ onRenameTab }).find((c) => c.id === "rename-tab");
+    expect(rename?.label).toBe("Rename tab…");
+    expect(rename?.keywords).toEqual(expect.arrayContaining(["rename", "alias", "tab"]));
+    expect(commandGroup("rename-tab")).toBe("Repositories");
+    rename!.run();
+    expect(onRenameTab).toHaveBeenCalledOnce();
+  });
+
+  it("adds Switch to tab…, a picker of the other open tabs by name, folder name and path (#625)", () => {
+    const onSwitchRepoTab = vi.fn();
+    const otherRepos = [
+      { path: "/work/one/app", displayName: "app (main)", alias: "app (main)", workspaceId: null },
+      { path: "/work/two/app", displayName: "app", alias: null, workspaceId: null },
+      { path: "/libs/core", displayName: "core", alias: null, workspaceId: "ws-1" },
+    ];
+    expect(buildCommands(makeAppState(), vi.fn(), [], onSwitchRepoTab).some((c) => c.id === "switch-to-tab")).toBe(false);
+
+    const commands = buildCommands(makeAppState(), vi.fn(), otherRepos, onSwitchRepoTab);
+    const switchTo = commands.find((c) => c.id === "switch-to-tab");
+    expect(switchTo?.label).toBe("Switch to tab…");
+    expect(commandGroup("switch-to-tab")).toBe("Repositories");
+    const items = (query: string) => switchTo!.picker!.items(query).map((item) => item.label);
+    expect(items("")).toEqual(["app (main)", "app", "core"]);
+    expect(items("main")).toEqual(["app (main)"]);
+    // The renamed tab's folder name and the path find it too; an exact name comes first.
+    expect(items("app")).toEqual(["app", "app (main)"]);
+    expect(items("/work/two")).toEqual(["app"]);
+    expect(items("libs")).toEqual(["core"]);
+
+    switchTo!.picker!.items("core")[0].run();
+    expect(onSwitchRepoTab).toHaveBeenCalledWith("/libs/core");
+    // The one-step commands find a tab by its folder name and path as well.
+    const renamed = commands.find((c) => c.id === "switch-repo:/work/one/app");
+    expect(renamed?.label).toBe("Switch to app (main)");
+    expect(renamed?.keywords).toEqual(expect.arrayContaining(["app", "/work/one/app"]));
+  });
+
   it("adds tool commands, with current-file ones only when there is a current file", () => {
     const toolCommands = tools();
     const without = build(makeAppState(), null, toolCommands).map((c) => c.label);
