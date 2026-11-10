@@ -192,6 +192,63 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: "b" })).toBeInTheDocument();
   });
 
+  it("reopens a closed tab at its old position on Ctrl/Cmd+Shift+T (#613)", async () => {
+    const openRepo = vi.fn().mockResolvedValue(undefined);
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo,
+      closeRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+    const { container } = render(<App client={client} />);
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    await waitFor(() => expect(screen.getAllByTitle("Close (Delete)")).toHaveLength(2));
+
+    fireEvent.keyDown(window, { key: "w", ctrlKey: true });
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "a" })).not.toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+
+    fireEvent.keyDown(window, { key: "T", ctrlKey: true, shiftKey: true });
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: "a", selected: true })).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["a", "b"]);
+    expect(openRepo).toHaveBeenLastCalledWith("/repos/a");
+  });
+
+  it("marks an inactive tab with uncommitted changes, checked through getStatus (#613)", async () => {
+    const change = { path: "file.txt", oldPath: null, staged: false, kind: "Modified" as const };
+    const getStatus = vi.fn(async (path: string) => (path === "/repos/b" ? [change] : []));
+    const client = fakeClient({
+      listOpenRepos: async () => ({
+        entries: [
+          { path: "/repos/a", workspaceId: null },
+          { path: "/repos/b", workspaceId: null },
+        ],
+        activePath: "/repos/a",
+      }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus,
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+    });
+    render(<App client={client} />);
+
+    await waitFor(() => expect(screen.getByRole("tab", { name: "b" })).toHaveAccessibleDescription("Uncommitted changes"));
+    expect(screen.getByRole("tab", { name: "a" })).not.toHaveAccessibleDescription("Uncommitted changes");
+  });
+
   it("opens the user guide site from the palette through the client (#320)", async () => {
     const openExternalUrl = vi.fn().mockResolvedValue(undefined);
     const client = fakeClient({

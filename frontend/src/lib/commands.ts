@@ -1180,7 +1180,7 @@ export function commandGroup(id: string): CommandGroup {
     return "Diff";
   }
   if (id.startsWith("go-to:") || id.startsWith("go-to-")) return "Go to";
-  if (id.startsWith("switch-repo:") || id === "close-tab" || id === "open-terminal" || id === "reveal-repository") {
+  if (id.startsWith("switch-repo:") || id === "close-tab" || id === "reopen-closed-tab" || id === "open-terminal" || id === "reveal-repository") {
     return "Repositories";
   }
   return "General";

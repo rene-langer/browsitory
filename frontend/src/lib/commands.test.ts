@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
+  type AppCommands,
   buildCommands,
   commandGroup,
   commitPickerItems,
@@ -1604,6 +1605,19 @@ describe("preferences and external tool commands", () => {
     expect(commandGroup("open-user-guide")).toBe("General");
     guide!.run();
     expect(onOpenUserGuide).toHaveBeenCalled();
+  });
+
+  it("adds Reopen closed tab, grouped under Repositories, only when a closed tab can be reopened (#613)", () => {
+    const onReopenClosedTab = vi.fn();
+    const build = (appCommands: AppCommands) =>
+      buildCommands(makeAppState({ pending: true }), undefined, [], undefined, undefined, undefined, undefined, undefined, appCommands);
+    expect(build({}).some((c) => c.id === "reopen-closed-tab")).toBe(false);
+    // Offered while an operation runs: it opens another tab, it doesn't touch this one.
+    const reopen = build({ onReopenClosedTab }).find((c) => c.id === "reopen-closed-tab");
+    expect(reopen?.label).toBe("Reopen closed tab");
+    expect(commandGroup("reopen-closed-tab")).toBe("Repositories");
+    reopen!.run();
+    expect(onReopenClosedTab).toHaveBeenCalledOnce();
   });
 
   it("adds tool commands, with current-file ones only when there is a current file", () => {

@@ -66,6 +66,7 @@ Press **?** (outside a text field) for the full list of shortcuts. The most usef
 | Ctrl/Cmd+Z | Undo the last Git operation |
 | Ctrl/Cmd+Shift+Z or Ctrl+Y | Redo |
 | Ctrl/Cmd+W | Close the active tab (in VSCode only where VSCode doesn't use it) |
+| Ctrl/Cmd+Shift+T | Reopen the last closed tab (where the host doesn't use it) |
 | Ctrl/Cmd+F | Search commits (with the commit list focused) |
 | Ctrl/Cmd+Enter | Commit (in the commit message) |
 | ↑/↓ or j/k | Move through commits or changed files |

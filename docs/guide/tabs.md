@@ -8,6 +8,15 @@ but the selected row and expanded diff sections start fresh. Open another via
 on the focused tab, or **Close tab** in the command palette. While a push,
 fetch, or similar operation is running in the active tab, that tab can't be
 closed until it finishes.
+To bring a closed tab back, use **Reopen closed tab** in the command palette or in a
+tab's menu (right-click), or press **Ctrl/Cmd+Shift+T** where the host doesn't use that
+key. It returns to its old place and workspace group and becomes the active tab;
+repeat it to go further back (up to ten tabs, until you quit). A repository that
+can no longer be opened is skipped, with a message saying why.
+A dot after a tab's name means its repository has uncommitted changes: staged,
+unstaged or untracked files, as the **Uncommitted changes** row counts them. The
+active tab's dot follows its changes live; the other tabs are checked when you
+leave them, when the window comes back into view, and after a fetch.
 Reopening Browsitory restores every tab you had open, workspace groupings
 included.
 If two tabs show the same repository through different paths (for example a
