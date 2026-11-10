@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
+import { clickInPage, waitUntilInPage } from "../support/dom";
 
 // Deviation from the task brief: the brief sketched the fixture-repo setup as a `before` hook
 // in this spec file. That doesn't work here — the app auto-opens its fixture repo path (baked
@@ -39,9 +40,10 @@ describe("Browsitory first flow", () => {
     // run) rejects a fully transparent element.
     await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
     await browser.execute((el) => (el as HTMLElement).click(), stageButton);
+    // Wait for the row to move under Staged before committing (#697).
+    await waitUntilInPage('button[aria-label="Unstage first-flow-fixture.txt"]');
     await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: first commit"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
-    const commitButton = await $("button=Commit");
-    await browser.execute((el) => (el as HTMLElement).click(), commitButton);
+    await clickInPage("button", "Commit");
 
     // The new commit should now appear in the history list.
     const historyEntry = await $("li*=e2e: first commit");

@@ -47,6 +47,8 @@ FetchSettings/every-10 {"autoFetchMinutes":10}
 AppearanceSettings/default {"codeFont":null,"codeFontSize":null,"tabSize":4,"uiSize":"Normal"}
 AppearanceSettings/set {"codeFont":"Example Mono","codeFontSize":15,"tabSize":8,"uiSize":"Large"}
 AppearanceSettings/small {"codeFont":null,"codeFontSize":null,"tabSize":4,"uiSize":"Small"}
+UpdateSettings/on {"checkAutomatically":true}
+UpdateSettings/off {"checkAutomatically":false}
 GitTools/diff-tool-System {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"System","viaMergeTool":true},"mergeTool":null}
 GitTools/diff-tool-Xdg {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"Xdg","viaMergeTool":true},"mergeTool":null}
 GitTools/diff-tool-Global {"diffTool":{"command":"meld \"$LOCAL\" \"$REMOTE\"","name":"meld","problem":"not found on PATH","source":"Global","viaMergeTool":true},"mergeTool":null}

@@ -29,6 +29,8 @@ export interface AppCommands {
   onReopenClosedTab?: () => void;
   /** Opens the active tab's rename dialog ("Rename tab…", #625). */
   onRenameTab?: () => void;
+  /** Checks for a new version now ("Check for updates", #630); desktop app only. */
+  onCheckForUpdates?: () => void;
 }
 
 /**
@@ -334,6 +336,14 @@ function appCommands({ onShowShortcuts, app, search, appState, state }: FamilyCo
       label: "Open user guide",
       keywords: ["help", "user guide", "documentation", "docs", "manual"],
       run: app.onOpenUserGuide,
+    });
+  }
+  if (app?.onCheckForUpdates !== undefined) {
+    add({
+      id: "check-for-updates",
+      label: "Check for updates",
+      keywords: ["update", "upgrade", "new version", "release", "download"],
+      run: app.onCheckForUpdates,
     });
   }
   if (app?.onOpenThirdPartyLicences !== undefined) {

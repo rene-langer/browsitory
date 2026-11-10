@@ -243,6 +243,9 @@ get_status/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"inva
 get_undo_state/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoPathParams"}}}
 get_undo_state/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 get_undo_state/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoPathParams"}}}
+get_update_settings/absent {"jsonrpc":"2.0","id":7,"result":{"checkAutomatically":true}}
+get_update_settings/empty {"jsonrpc":"2.0","id":7,"result":{"checkAutomatically":true}}
+get_update_settings/string {"jsonrpc":"2.0","id":7,"result":{"checkAutomatically":true}}
 get_working_diff/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct GetWorkingDiffParams","data":{"kind":"Other","message":"invalid type: null, expected struct GetWorkingDiffParams"}}}
 get_working_diff/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 get_working_diff/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct GetWorkingDiffParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct GetWorkingDiffParams"}}}
@@ -432,6 +435,9 @@ set_remote_auth_mode/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"mess
 set_repo_alias/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetRepoAliasParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetRepoAliasParams"}}}
 set_repo_alias/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 set_repo_alias/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetRepoAliasParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetRepoAliasParams"}}}
+set_update_settings/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetUpdateSettingsParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetUpdateSettingsParams"}}}
+set_update_settings/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `settings`","data":{"kind":"Other","message":"missing field `settings`"}}}
+set_update_settings/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetUpdateSettingsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetUpdateSettingsParams"}}}
 stage_file/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoFilePathParams"}}}
 stage_file/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 stage_file/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoFilePathParams"}}}

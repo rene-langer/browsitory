@@ -46,10 +46,15 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm audit --prod
+      # The two doc checks below run even when an audit step above failed (#707): a newly
+      # disclosed advisory, which no PR is at fault for, must not hide a missing doc entry.
+      # `!cancelled()` rather than `always()`, so a cancelled run still stops here.
       - name: License compliance doc is in sync
+        if: ${{ !cancelled() }}
         run: python3 scripts/check-license-compliance.py
       # Every host the app's code names is listed in the privacy notice (#627).
       - name: Privacy notice lists every hard-coded host
+        if: ${{ !cancelled() }}
         run: |
           python3 scripts/test_check_privacy_hosts.py
           python3 scripts/check-privacy-hosts.py

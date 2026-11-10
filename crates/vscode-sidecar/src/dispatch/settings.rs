@@ -1,6 +1,7 @@
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     AppearanceSettingsDto, CommitMessageSettingsDto, DiffSettingsDto, FetchSettingsDto,
+    UpdateSettingsDto,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -66,5 +67,20 @@ pub(super) fn set_appearance_settings(
     params: SetAppearanceSettingsParams,
 ) -> Result<Value, ErrorDto> {
     config::set_appearance_settings(&params.settings.into()).map_err(ErrorDto::from_error)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+pub(super) struct SetUpdateSettingsParams {
+    settings: UpdateSettingsDto,
+}
+
+pub(super) fn get_update_settings() -> Result<Value, ErrorDto> {
+    let settings = config::get_update_settings().map_err(ErrorDto::from_error)?;
+    serde_json::to_value(UpdateSettingsDto::from(settings)).map_err(ErrorDto::from_error)
+}
+
+pub(super) fn set_update_settings(params: SetUpdateSettingsParams) -> Result<Value, ErrorDto> {
+    config::set_update_settings(&params.settings.into()).map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }

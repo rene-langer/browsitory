@@ -67,6 +67,7 @@ export {
   DEFAULT_COMMIT_MESSAGE_SETTINGS,
   DEFAULT_DIFF_SETTINGS,
   DEFAULT_FETCH_SETTINGS,
+  DEFAULT_UPDATE_SETTINGS,
   MAX_CONTEXT_LINES,
   SEARCH_KEYS,
   TAB_SIZES,
@@ -106,6 +107,14 @@ export interface AppearanceSettings {
   codeFontSize: number | null;
   uiSize: UiSize;
   tabSize: number;
+}
+
+/**
+ * Update settings (`[updates]`, desktop app only, #630): `checkAutomatically` checks for a new
+ * version at start and every few hours; off, only "Check for updates" checks.
+ */
+export interface UpdateSettings {
+  checkAutomatically: boolean;
 }
 
 /** A `Key: value` line for a commit message's trailer block, e.g. `Co-authored-by`. */
@@ -1214,6 +1223,9 @@ export interface RepoClient {
   setFetchSettings(settings: FetchSettings): Promise<void>;
   getAppearanceSettings(): Promise<AppearanceSettings>;
   setAppearanceSettings(settings: AppearanceSettings): Promise<void>;
+  /** Only the desktop app uses these; the VS Code extension updates through its marketplace. */
+  getUpdateSettings(): Promise<UpdateSettings>;
+  setUpdateSettings(settings: UpdateSettings): Promise<void>;
   /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
   getUndoState(repoPath: string): Promise<UndoState>;
   /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `OperationInProgress`) resolve; only real failures reject. */

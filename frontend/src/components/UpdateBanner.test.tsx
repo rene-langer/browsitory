@@ -2,6 +2,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpdateBanner } from "./UpdateBanner";
 import * as updater from "../ipc/updater";
+import { UpdateCheckContext, type UpdateCheck, type UpdateCheckRegistry } from "../state/updateCheck";
+import { UpdateSettingsContext, type UpdateSettingsApi, type UpdateSettingsStatus } from "../state/useUpdateSettings";
 
 vi.mock("../ipc/updater", () => ({
   checkForUpdate: vi.fn(),
@@ -259,5 +261,184 @@ describe("UpdateBanner check schedule (#477)", () => {
 
     await advance(24 * HOUR);
     expect(checks()).toBe(1);
+  });
+});
+
+describe("UpdateBanner with the update settings (#630)", () => {
+  const HOUR = 60 * 60 * 1000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(updater.checkForUpdate).mockReset();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("VITE_E2E_REPO_PATH", undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  const checks = () => vi.mocked(updater.checkForUpdate).mock.calls.length;
+
+  function settingsApi(checkAutomatically: boolean, status: UpdateSettingsStatus = "loaded"): UpdateSettingsApi {
+    return { settings: { checkAutomatically }, status, update: () => {}, error: null, dismissError: () => {} };
+  }
+
+  // Renders the banner with the given settings and returns the check it registers.
+  function renderBanner(settings: UpdateSettingsApi) {
+    let registered: UpdateCheck | null = null;
+    const registry: UpdateCheckRegistry = {
+      register(check) {
+        registered = check;
+        return () => {
+          if (registered === check) registered = null;
+        };
+      },
+    };
+    const ui = (api: UpdateSettingsApi) => (
+      <UpdateSettingsContext.Provider value={api}>
+        <UpdateCheckContext.Provider value={registry}>
+          <UpdateBanner />
+        </UpdateCheckContext.Provider>
+      </UpdateSettingsContext.Provider>
+    );
+    const result = render(ui(settings));
+    return {
+      checkNow: () => {
+        if (registered === null) throw new Error("no check registered");
+        return registered();
+      },
+      rerenderWith: (api: UpdateSettingsApi) => result.rerender(ui(api)),
+      unmount: result.unmount,
+      isRegistered: () => registered !== null,
+    };
+  }
+
+  it("checks at start and every 6 hours while the setting is on", async () => {
+    vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
+    renderBanner(settingsApi(true));
+    await advance(0);
+    expect(checks()).toBe(1);
+    await advance(6 * HOUR);
+    expect(checks()).toBe(2);
+  });
+
+  it("never checks on its own while the setting is off", async () => {
+    vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
+    renderBanner(settingsApi(false));
+    await advance(48 * HOUR);
+    expect(checks()).toBe(0);
+  });
+
+  it("doesn't check before the saved setting is read, nor when it can't be read", async () => {
+    vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
+    const { rerenderWith } = renderBanner(settingsApi(true, "loading"));
+    await advance(HOUR);
+    expect(checks()).toBe(0);
+    rerenderWith(settingsApi(true, "failed"));
+    await advance(48 * HOUR);
+    expect(checks()).toBe(0);
+  });
+
+  it("checks on demand while the setting is off, and shows a found update", async () => {
+    vi.mocked(updater.checkForUpdate).mockResolvedValueOnce(null).mockResolvedValue({
+      version: "1.2.3",
+      download: vi.fn().mockResolvedValue(undefined),
+      installAndRelaunch: vi.fn(),
+    });
+    const { checkNow } = renderBanner(settingsApi(false));
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await checkNow();
+    });
+    expect(outcome).toEqual({ kind: "none" });
+    expect(checks()).toBe(1);
+
+    await act(async () => {
+      outcome = await checkNow();
+    });
+    expect(outcome).toEqual({ kind: "ready", version: "1.2.3" });
+    expect(screen.getByRole("button", { name: /restart/i })).toBeInTheDocument();
+
+    // Once an update is ready, asking again doesn't contact the update host.
+    await act(async () => {
+      outcome = await checkNow();
+    });
+    expect(outcome).toEqual({ kind: "ready", version: "1.2.3" });
+    expect(checks()).toBe(2);
+    // ...and nothing was scheduled.
+    await advance(48 * HOUR);
+    expect(checks()).toBe(2);
+  });
+
+  it("reports a failed check on demand with its message", async () => {
+    vi.mocked(updater.checkForUpdate).mockRejectedValue(new Error("no endpoint answered"));
+    const { checkNow } = renderBanner(settingsApi(false));
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await checkNow();
+    });
+    expect(outcome).toEqual({ kind: "failed", message: "no endpoint answered" });
+  });
+
+  it("checks on demand in an E2E build", async () => {
+    vi.stubEnv("VITE_E2E_REPO_PATH", "/tmp/browsitory-e2e-repo");
+    vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
+    const { checkNow } = renderBanner(settingsApi(true));
+    await advance(HOUR);
+    expect(checks()).toBe(0);
+    await act(async () => {
+      await checkNow();
+    });
+    expect(checks()).toBe(1);
+  });
+
+  it("joins a check already running instead of starting a second one", async () => {
+    let answer: (value: null) => void = () => {};
+    vi.mocked(updater.checkForUpdate).mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    const { checkNow } = renderBanner(settingsApi(true));
+    await advance(0);
+    expect(checks()).toBe(1);
+
+    const manual = checkNow();
+    expect(checks()).toBe(1);
+    await act(async () => {
+      answer(null);
+      await manual;
+    });
+    await expect(manual).resolves.toEqual({ kind: "none" });
+    expect(checks()).toBe(1);
+  });
+
+  it("starts checking when the setting is turned on and stops when it is turned off", async () => {
+    vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
+    const { rerenderWith } = renderBanner(settingsApi(false));
+    await advance(HOUR);
+    expect(checks()).toBe(0);
+
+    rerenderWith(settingsApi(true));
+    await advance(0);
+    expect(checks()).toBe(1);
+
+    rerenderWith(settingsApi(false));
+    await advance(48 * HOUR);
+    expect(checks()).toBe(1);
+  });
+
+  it("withdraws its check when unmounted", async () => {
+    vi.mocked(updater.checkForUpdate).mockResolvedValue(null);
+    const { isRegistered, unmount } = renderBanner(settingsApi(false));
+    expect(isRegistered()).toBe(true);
+    unmount();
+    expect(isRegistered()).toBe(false);
   });
 });
