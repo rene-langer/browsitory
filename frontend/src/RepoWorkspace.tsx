@@ -77,6 +77,7 @@ import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiscardRequest, ReportedFileSelection } from "./components/DiffPane";
 import type { OpenRepo } from "./state/useOpenRepos";
 import { useSidebarPanelVisibility } from "./state/useSidebarPanelVisibility";
+import { sectionRevealRequest, useSidebarReveal } from "./state/useSidebarReveal";
 import styles from "./App.module.css";
 import { useAnnounce } from "./state/useAnnounce";
 import { useCommitDraftActions } from "./state/useCommitDraftActions";
@@ -108,7 +109,7 @@ export function RepoWorkspace({
   active: boolean;
   // `Promise<void>` rather than the plan's `void`: `WorktreePanel`'s `onOpenWorktree` is typed
   // `(path: string) => Promise<void>`, and this is the only value passed to it. It stays
-  // assignable to `buildCommands`' `(path: string) => void` parameter (Task 8).
+  // assignable to `TabCommands.onOpenRepoTab`'s `(path: string) => void` (Task 8).
   onOpenRepoTab: (path: string) => Promise<void>;
   onBusyChange: (repoPath: string, busy: boolean) => void;
   openRepos: OpenRepo[];
@@ -210,6 +211,8 @@ export function RepoWorkspace({
     appState,
   );
   const panelVisibility = useSidebarPanelVisibility();
+  // The palette's sidebar commands ("Go to Tags", "Browse branches on origin", #494).
+  const sidebarReveal = useSidebarReveal();
   const [focusCommitMessage, setFocusCommitMessage] = useState(false);
   const clearFocusCommitMessage = useCallback(() => setFocusCommitMessage(false), []);
   // Discard confirmations live here (not in DiffPane) so the palette can open the same dialogs.
@@ -400,10 +403,9 @@ export function RepoWorkspace({
   return (
     // `data-active-repo` marks which workspace is the visible one. `App` only ever mounts the
     // active tab's `RepoWorkspace` now (PERF-001), so in practice exactly one of these exists at
-    // a time — but the attribute (and the `active` prop it mirrors) stays: `commands.ts`'s
-    // `goToSidebarSection` still scopes its `document.querySelector` lookup to it, and this
-    // component's own internal gates (`active &&` below) still need a real boolean rather than an
-    // assumption that they're always mounted-implies-active.
+    // a time — but the attribute (and the `active` prop it mirrors) stays: tests find the visible
+    // workspace by it, and this component's own internal gates (`active &&` below) still need a
+    // real boolean rather than an assumption that they're always mounted-implies-active.
     <CurrentDiffContext.Provider value={currentDiff}>
     <div
       ref={setWorkspaceElement}
@@ -698,15 +700,22 @@ export function RepoWorkspace({
       {active && paletteOpen && (
         <Overlay onClose={() => setPaletteOpen(false)}>
           <CommandPalette
-            commands={buildCommands(
-              { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
-              onOpenRepoTab,
-              openRepos.filter((repo) => repo.path !== repoPath),
-              onSwitchRepoTab,
-              panelVisibility.visibility,
-              () => setShortcutsOpen(true),
-              () => onCloseRepoTab(repoPath),
-              {
+            commands={buildCommands({
+              appState: { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
+              onShowShortcuts: () => setShortcutsOpen(true),
+              app: appCommands,
+              tabs: {
+                onOpenRepoTab: (path) => void onOpenRepoTab(path),
+                otherOpenRepos: openRepos.filter((repo) => repo.path !== repoPath),
+                onSwitchRepoTab,
+                onCloseActiveRepoTab: () => onCloseRepoTab(repoPath),
+              },
+              sidebar: {
+                panelVisibility: panelVisibility.visibility,
+                revealSection: sidebarReveal.revealSection,
+                revealRemote: sidebarReveal.revealRemote,
+              },
+              diff: {
                 settings: diffSettings.settings,
                 update: diffSettings.update,
                 currentFile,
@@ -737,15 +746,14 @@ export function RepoWorkspace({
                   setDiscardRequest({ kind: "files", paths: fileSelection.paths });
                 },
               },
-              appCommands,
-              {
+              undo: {
                 undoLabel: appState.state.undoState.undo,
                 redoLabel: appState.state.undoState.redo,
                 onUndo: handleUndo,
                 onRedo: handleRedo,
               },
-              { onSearchCommits: requestSearchFocus },
-              {
+              search: { onSearchCommits: requestSearchFocus },
+              tools: {
                 onOpenTerminal: externalTools.openTerminal,
                 onRevealRepository: () => externalTools.reveal(null),
                 onOpenCurrentFileInEditor: () => {
@@ -755,15 +763,15 @@ export function RepoWorkspace({
                   if (currentFile !== null) externalTools.openDiffTool(currentFile, { kind: "Unstaged" });
                 },
               },
-              {
+              goTo: {
                 onGoToCommit: (revision) => void goTo.goToRevision(revision),
                 onSearchHistory: searchHistory,
                 onGoToBranch: (kind, name) => void goTo.goToBranch(kind, name),
                 onGoToTag: (name, commitId) => void goTo.goToTag(name, commitId),
                 onGoToStash: (commitId) => reveal({ commitId }),
               },
-              commitCommands,
-            )}
+              commit: commitCommands,
+            })}
             onRun={() => setPaletteOpen(false)}
           />
         </Overlay>
@@ -851,6 +859,7 @@ export function RepoWorkspace({
               onRemoteDialogChange={(dialog) =>
                 dialog === null ? appState.closeRemoteDialog() : appState.openRemoteDialog(dialog.kind, dialog.remoteName)
               }
+              revealRequest={sidebarReveal.request?.section === "branches" ? sidebarReveal.request : undefined}
             />
             {panelVisibility.visibility.stash && (
               <StashPanel
@@ -862,6 +871,7 @@ export function RepoWorkspace({
                 restoreIndex={appState.state.stashRestoreIndex}
                 onSetRestoreIndex={appState.setStashRestoreIndex}
                 blockers={storedStashBlockers}
+                revealRequest={sectionRevealRequest(sidebarReveal.request, "stash")}
               />
             )}
             {panelVisibility.visibility.worktree && (
@@ -874,6 +884,7 @@ export function RepoWorkspace({
                 onPruneWorktrees={appState.pruneWorktrees}
                 operationDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
+                revealRequest={sectionRevealRequest(sidebarReveal.request, "worktree")}
               />
             )}
             {panelVisibility.visibility.submodule && (
@@ -884,6 +895,7 @@ export function RepoWorkspace({
                 onOpenInNewTab={(workdir) => void onOpenRepoTab(workdir)}
                 operationDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
+                revealRequest={sectionRevealRequest(sidebarReveal.request, "submodule")}
               />
             )}
             {panelVisibility.visibility.reflog && (
@@ -894,6 +906,7 @@ export function RepoWorkspace({
                 onSelectReference={appState.selectReflogReference}
                 onRestore={appState.restoreReflogEntry}
                 operationDisabled={repositoryOperationDisabled}
+                revealRequest={sectionRevealRequest(sidebarReveal.request, "reflog")}
               />
             )}
             {panelVisibility.visibility.tags && (
@@ -909,6 +922,7 @@ export function RepoWorkspace({
                 onGoToTag={(tag) => void goTo.goToTag(tag.name, tag.commitId)}
                 pushDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
+                revealRequest={sectionRevealRequest(sidebarReveal.request, "tags")}
               />
             )}
             {panelVisibility.visibility.pullRequests && (
@@ -923,6 +937,7 @@ export function RepoWorkspace({
                 branches={appState.state.branches}
                 operationDisabled={repositoryOperationDisabled}
                 operationDisabledReason={operationDisabledReason}
+                revealRequest={sectionRevealRequest(sidebarReveal.request, "pullRequests")}
               />
             )}
           </Sidebar>

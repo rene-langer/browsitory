@@ -13,6 +13,7 @@ export function ReflogPanel({
   onSelectReference,
   onRestore,
   operationDisabled,
+  revealRequest,
 }: {
   references: string[];
   selectedReference: string | null;
@@ -20,6 +21,8 @@ export function ReflogPanel({
   onSelectReference: (reference: string) => Promise<void>;
   onRestore: (reference: string, newId: string) => Promise<void>;
   operationDisabled: boolean;
+  /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
+  revealRequest?: number;
 }) {
   const [restoreConfirmation, setRestoreConfirmation] = useState<ReflogEntry | null>(null);
   const selectableReferences = references.filter(
@@ -30,6 +33,7 @@ export function ReflogPanel({
     <AccordionSection
       title="Reflog"
       storageKey="sidebar-reflog"
+      revealRequest={revealRequest}
       icon={History}
       count={selectedReference === null ? undefined : entries.length}
     >

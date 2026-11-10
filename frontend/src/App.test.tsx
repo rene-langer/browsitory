@@ -216,6 +216,44 @@ describe("App", () => {
     await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith("https://rene-langer.github.io/browsitory/"));
   });
 
+  // #494: the palette's sidebar commands go through the workspace's reveal requests, which the
+  // sections handle themselves.
+  it("expands a collapsed sidebar section and a remote's folder from the palette (#494)", async () => {
+    localStorage.setItem("sidebar-tags", "closed");
+    localStorage.setItem("sidebar-branches", "closed");
+    const listRemoteBranches = vi.fn().mockResolvedValue(["develop"]);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [],
+      listStashes: async () => [],
+      listRemotes: async () => [{ name: "origin", fetchUrl: "https://example.com/r.git", pushUrl: null, authMode: null, authUsername: null }],
+      listRemoteBranches,
+    });
+    const { container } = render(<App client={client} />);
+    await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+    const sidebar = screen.getByRole("complementary", { name: "Repository sections" });
+    expect(within(sidebar).getByRole("button", { name: "Tags" })).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "Go to Tags" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Go to Tags" }));
+    expect(within(sidebar).getByRole("button", { name: "Tags" })).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), {
+      target: { value: "Browse branches on origin" },
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "Browse branches on origin" }));
+    expect(within(sidebar).getByRole("button", { name: "Branches" })).toHaveAttribute("aria-expanded", "true");
+    expect(within(sidebar).getByRole("button", { name: "origin" })).toHaveAttribute("aria-expanded", "true");
+    expect(await within(sidebar).findByText("develop")).toBeInTheDocument();
+    expect(listRemoteBranches).toHaveBeenCalledWith("/repos/a", "origin");
+  });
+
   function guideClient(openExternalUrl: RepoClient["openExternalUrl"]) {
     return fakeClient({
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
