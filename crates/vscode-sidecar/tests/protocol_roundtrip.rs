@@ -609,6 +609,35 @@ fn persist_and_list_open_repos_round_trip() {
 }
 
 #[test]
+fn set_and_list_repo_aliases_round_trip() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+
+    let empty = sidecar.call(1, "list_repo_aliases", serde_json::json!({}));
+    assert_eq!(empty["result"], serde_json::json!([]));
+    let set = sidecar.call(
+        2,
+        "set_repo_alias",
+        serde_json::json!({"repoPath": "/repos/a", "alias": " app (review) "}),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null, "{set}");
+    let listed = sidecar.call(3, "list_repo_aliases", serde_json::json!({}));
+    assert_eq!(
+        listed["result"],
+        serde_json::json!([{"repoPath": "/repos/a", "alias": "app (review)"}])
+    );
+
+    let cleared = sidecar.call(
+        4,
+        "set_repo_alias",
+        serde_json::json!({"repoPath": "/repos/a", "alias": null}),
+    );
+    assert_eq!(cleared["result"], serde_json::Value::Null, "{cleared}");
+    let after = sidecar.call(5, "list_repo_aliases", serde_json::json!({}));
+    assert_eq!(after["result"], serde_json::json!([]));
+}
+
+#[test]
 fn scan_repos_in_root_finds_a_nested_repo() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let root = tempfile::TempDir::new().expect("create root dir");

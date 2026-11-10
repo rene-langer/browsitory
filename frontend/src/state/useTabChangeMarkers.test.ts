@@ -10,7 +10,7 @@ import { useTabChangeMarkers } from "./useTabChangeMarkers";
 const change: StatusEntry = { path: "file.txt", oldPath: null, staged: false, kind: "Modified" };
 
 function tabs(...paths: string[]): OpenRepo[] {
-  return paths.map((path) => ({ path, displayName: path.slice(1), workspaceId: null }));
+  return paths.map((path) => ({ path, displayName: path.slice(1), alias: null, workspaceId: null }));
 }
 
 function setup(statusByPath: Record<string, StatusEntry[] | Error>) {

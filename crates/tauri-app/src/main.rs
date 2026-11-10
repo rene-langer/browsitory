@@ -39,6 +39,8 @@ use commands::{
     switch_branch, undo_last, unstage_file, unstage_hunk, unstage_lines, update_remote_urls,
     update_submodule, update_workspace, AppState, CloneState,
 };
+// The repository tab names (#625).
+use commands::{list_repo_aliases, set_repo_alias};
 
 /// Declares the desktop app's Tauri commands once: `invoke_handler` registers them, and
 /// `COMMAND_NAMES` lists the same names for the transport parity check (#306), which compares it

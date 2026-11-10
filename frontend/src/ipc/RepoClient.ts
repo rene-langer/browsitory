@@ -857,6 +857,12 @@ export interface OpenRepoEntry {
   workspaceId: string | null;
 }
 
+/** A repository's custom tab name (#625), kept by path in the app config. */
+export interface RepoAlias {
+  repoPath: string;
+  alias: string;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -874,6 +880,10 @@ export interface RepoClient {
   closeRepo(repoPath: string): Promise<void>;
   listOpenRepos(): Promise<{ entries: OpenRepoEntry[]; activePath: string | null }>;
   persistOpenRepos(entries: OpenRepoEntry[], activePath: string | null): Promise<void>;
+  /** Every stored tab name (#625), also of repositories that aren't open. */
+  listRepoAliases(): Promise<RepoAlias[]>;
+  /** Stores `alias` (trimmed) as the tab name of `repoPath`; `null` or a blank one removes it. */
+  setRepoAlias(repoPath: string, alias: string | null): Promise<void>;
   scanReposInRoot(root: string): Promise<string[]>;
   /** False in the VSCode extension, where VSCode's own Git: Clone / Initialize cover this. */
   readonly supportsCloneAndInit: boolean;

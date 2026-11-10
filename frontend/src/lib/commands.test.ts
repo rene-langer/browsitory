@@ -638,8 +638,8 @@ describe("buildCommands", () => {
   it("includes a Switch to <repo> command for every other open repo", () => {
     const appState = makeAppState();
     const otherRepos = [
-      { path: "/repos/widget", displayName: "widget", workspaceId: null },
-      { path: "/repos/gadget", displayName: "gadget", workspaceId: null },
+      { path: "/repos/widget", displayName: "widget", alias: null, workspaceId: null },
+      { path: "/repos/gadget", displayName: "gadget", alias: null, workspaceId: null },
     ];
     const onSwitchRepoTab = vi.fn();
     const commands = buildCommands(appState, vi.fn(), otherRepos, onSwitchRepoTab);

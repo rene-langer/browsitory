@@ -38,8 +38,8 @@ function groupCloseButtonFor(groupLabel: string) {
 }
 
 const repos = [
-  { path: "/repos/widget", displayName: "widget", workspaceId: null },
-  { path: "/repos/gadget", displayName: "gadget", workspaceId: null },
+  { path: "/repos/widget", displayName: "widget", alias: null, workspaceId: null },
+  { path: "/repos/gadget", displayName: "gadget", alias: null, workspaceId: null },
 ];
 
 const noneBusy = new Set<string>();
@@ -74,8 +74,8 @@ describe("RepoTabs", () => {
     render(
       <RepoTabs
         openRepos={[
-          { path: "/a", displayName: "a", workspaceId: null },
-          { path: "/b", displayName: "b", workspaceId: null },
+          { path: "/a", displayName: "a", alias: null, workspaceId: null },
+          { path: "/b", displayName: "b", alias: null, workspaceId: null },
         ]}
         activePath="/a"
         busyPaths={new Set()}
@@ -169,9 +169,9 @@ describe("RepoTabs change marker", () => {
 
 describe("RepoTabs grouping", () => {
   const grouped = [
-    { path: "/repos/widget", displayName: "widget", workspaceId: "ws-1" },
-    { path: "/repos/gadget", displayName: "gadget", workspaceId: "ws-1" },
-    { path: "/repos/solo", displayName: "solo", workspaceId: null },
+    { path: "/repos/widget", displayName: "widget", alias: null, workspaceId: "ws-1" },
+    { path: "/repos/gadget", displayName: "gadget", alias: null, workspaceId: "ws-1" },
+    { path: "/repos/solo", displayName: "solo", alias: null, workspaceId: null },
   ];
 
   it("wraps a contiguous run of same-workspace tabs in a chip labeled with the workspace name", () => {
@@ -255,7 +255,7 @@ describe("RepoTabs grouping", () => {
   it("a tab whose workspaceId has no matching name in workspaceNames renders standalone", () => {
     render(
       <RepoTabs
-        openRepos={[{ path: "/repos/orphan", displayName: "orphan", workspaceId: "deleted-ws" }]}
+        openRepos={[{ path: "/repos/orphan", displayName: "orphan", alias: null, workspaceId: "deleted-ws" }]}
         activePath="/repos/orphan"
         busyPaths={noneBusy}
         workspaceNames={{}}
@@ -321,8 +321,8 @@ describe("RepoTabs header height (#606)", () => {
     render(
       <RepoTabs
         openRepos={[
-          { path: "/repos/widget", displayName: "widget", workspaceId: "ws-1" },
-          { path: "/repos/gadget", displayName: "gadget", workspaceId: "ws-1" },
+          { path: "/repos/widget", displayName: "widget", alias: null, workspaceId: "ws-1" },
+          { path: "/repos/gadget", displayName: "gadget", alias: null, workspaceId: "ws-1" },
         ]}
         activePath="/repos/widget"
         busyPaths={noneBusy}

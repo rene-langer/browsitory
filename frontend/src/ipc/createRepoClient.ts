@@ -48,6 +48,7 @@ import type {
   RebaseStepResult,
   ReflogEntry,
   RemoteAuthMode,
+  RepoAlias,
   RemoteInfo,
   RepoClient,
   StashApplyOutcome,
@@ -139,6 +140,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<void>("set_last_seen_version", { version }),
     persistOpenRepos: (entries: OpenRepoEntry[], activePath: string | null) =>
       call<void>("persist_open_repos", { entries, activePath }),
+    listRepoAliases: () => call<RepoAlias[]>("list_repo_aliases"),
+    setRepoAlias: (repoPath: string, alias: string | null) => call<void>("set_repo_alias", { repoPath, alias }),
     scanReposInRoot: (root: string) => call<string[]>("scan_repos_in_root", { root }),
     listWorkspaces: () => call<Workspace[]>("list_workspaces"),
     saveWorkspace: (name: string, root: string, members: string[]) =>

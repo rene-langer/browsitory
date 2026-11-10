@@ -264,6 +264,9 @@ list_remote_branches/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"mess
 list_remotes/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoPathParams"}}}
 list_remotes/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 list_remotes/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoPathParams"}}}
+list_repo_aliases/absent {"jsonrpc":"2.0","id":7,"result":[]}
+list_repo_aliases/empty {"jsonrpc":"2.0","id":7,"result":[]}
+list_repo_aliases/string {"jsonrpc":"2.0","id":7,"result":[]}
 list_stashes/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoPathParams"}}}
 list_stashes/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 list_stashes/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoPathParams"}}}
@@ -402,6 +405,9 @@ set_merge_options/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message
 set_remote_auth_mode/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetRemoteAuthModeParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetRemoteAuthModeParams"}}}
 set_remote_auth_mode/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 set_remote_auth_mode/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetRemoteAuthModeParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetRemoteAuthModeParams"}}}
+set_repo_alias/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetRepoAliasParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetRepoAliasParams"}}}
+set_repo_alias/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
+set_repo_alias/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetRepoAliasParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetRepoAliasParams"}}}
 stage_file/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoFilePathParams"}}}
 stage_file/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 stage_file/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoFilePathParams"}}}

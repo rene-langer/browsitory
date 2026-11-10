@@ -10,6 +10,7 @@ import { busyReason, operationBlockers, stashBlockReason } from "./operationStat
 import { stageModifiedPaths } from "./stagePaths";
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
+import { repoNameOf } from "./repoName";
 import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
 
 export interface AppCommands {
@@ -24,6 +25,8 @@ export interface AppCommands {
   onOpenUserGuide?: () => void;
   /** Reopens the most recently closed tab ("Reopen closed tab"); absent when none was closed. */
   onReopenClosedTab?: () => void;
+  /** Opens the active tab's rename dialog ("Rename tab…", #625). */
+  onRenameTab?: () => void;
 }
 
 /**
@@ -985,12 +988,38 @@ export function buildCommands(
     });
   }
 
-  for (const repo of otherOpenRepos) {
+  if (appCommands?.onRenameTab !== undefined) {
     commands.push({
-      id: `switch-repo:${repo.path}`,
-      label: `Switch to ${repo.displayName}`,
-      keywords: ["repo", "switch", "tab", repo.displayName],
-      run: () => onSwitchRepoTab(repo.path),
+      id: "rename-tab",
+      label: "Rename tab…",
+      keywords: ["rename", "name", "alias", "label", "tab", "repo", "repository"],
+      run: appCommands.onRenameTab,
+    });
+  }
+
+  const tabItems = otherOpenRepos.map((repo) => ({
+    id: `switch-repo:${repo.path}`,
+    label: `Switch to ${repo.displayName}`,
+    keywords: ["repo", "switch", "tab", ...tabKeywords(repo)],
+    run: () => onSwitchRepoTab(repo.path),
+  }));
+  commands.push(...tabItems);
+  // The same tabs as one picker (#625): their names, folder names and paths are searchable.
+  if (tabItems.length > 0) {
+    commands.push({
+      id: "switch-to-tab",
+      label: "Switch to tab…",
+      keywords: ["switch", "tab", "tabs", "repo", "repository", "open", "list", "go to"],
+      run: () => {},
+      picker: {
+        placeholder: "Tab name or path…",
+        emptyText: "No other open tab matches",
+        items: (query) =>
+          filterPickerItems(
+            otherOpenRepos.map((repo, index) => ({ ...tabItems[index], label: repo.displayName, keywords: tabKeywords(repo) })),
+            query,
+          ),
+      },
     });
   }
 
@@ -998,6 +1027,11 @@ export function buildCommands(
 }
 
 const PICKER_KEYWORDS = ["go", "go to", "jump", "find", "show", "reveal", "select", "navigate"];
+
+/** What finds a tab in the palette: its name, its folder name and its path (#625). */
+function tabKeywords(repo: OpenRepo): string[] {
+  return [repo.displayName, repoNameOf(repo.path), repo.path];
+}
 
 function goToPickers(appState: UseAppStateResult, goTo: GoToCommands): Command[] {
   const { state } = appState;
@@ -1193,7 +1227,15 @@ export function commandGroup(id: string): CommandGroup {
     return "Diff";
   }
   if (id.startsWith("go-to:") || id.startsWith("go-to-")) return "Go to";
-  if (id.startsWith("switch-repo:") || id === "close-tab" || id === "reopen-closed-tab" || id === "open-terminal" || id === "reveal-repository") {
+  if (
+    id.startsWith("switch-repo:") ||
+    id === "switch-to-tab" ||
+    id === "rename-tab" ||
+    id === "close-tab" ||
+    id === "reopen-closed-tab" ||
+    id === "open-terminal" ||
+    id === "reveal-repository"
+  ) {
     return "Repositories";
   }
   return "General";
