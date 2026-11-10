@@ -1441,6 +1441,79 @@ describe("DiffPane", () => {
         expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Collapse b.txt" })).toBeInTheDocument();
       });
+
+      describe("with Expand untracked files off (#623)", () => {
+        const withUntracked: StatusEntry[] = [
+          { path: "a.txt", oldPath: null, staged: false, kind: "Modified" },
+          { path: "new.txt", oldPath: null, staged: false, kind: "New" },
+          { path: "added.txt", oldPath: null, staged: true, kind: "New" },
+        ];
+        const settings = {
+          ignoreWhitespace: false,
+          contextLines: 3,
+          syntaxHighlight: false,
+          wordWrap: "Auto" as const,
+          algorithm: "Default" as const,
+          showWhitespace: false,
+          expandUntracked: false,
+        };
+        const pane = (client: RepoClient, entries: StatusEntry[], refreshGeneration = 0) => (
+          <DiffSettingsContext.Provider value={{ settings, update: () => {}, error: null, dismissError: () => {} }}>
+            <DiffPane
+              repoPath={TEST_REPO_PATH}
+              client={client}
+              selectedRow="uncommitted"
+              status={entries}
+              mergeMessage={null}
+              rebaseProgress={null}
+              refreshGeneration={refreshGeneration}
+              {...noopHandlers}
+            />
+          </DiffSettingsContext.Provider>
+        );
+        const fetchedPaths = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls.map((call) => call[1]);
+
+        it("starts an untracked file collapsed, fetching nothing, and tracked and staged files expanded", async () => {
+          const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
+          render(pane(fakeClient({ getWorkingDiff }), withUntracked));
+
+          await waitFor(() => expect(fetchedPaths(getWorkingDiff)).toContain("a.txt"));
+          expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
+          expect(screen.getByRole("button", { name: "Collapse added.txt" })).toBeInTheDocument();
+          // The collapsed row keeps its path and status.
+          expect(screen.getByRole("button", { name: "Expand new.txt" })).toBeInTheDocument();
+          expect(screen.getByText("new.txt (New)")).toBeInTheDocument();
+          expect(fetchedPaths(getWorkingDiff)).not.toContain("new.txt");
+        });
+
+        it("keeps an expanded untracked file expanded across refreshes; a new one starts collapsed", async () => {
+          const getWorkingDiff = vi.fn(async () => [] as DiffHunk[]);
+          const client = fakeClient({ getWorkingDiff });
+          const { rerender } = render(pane(client, withUntracked));
+          fireEvent.click(await screen.findByRole("button", { name: "Expand new.txt" }));
+          await waitFor(() => expect(fetchedPaths(getWorkingDiff)).toContain("new.txt"));
+
+          const later: StatusEntry[] = [...withUntracked, { path: "later.txt", oldPath: null, staged: false, kind: "New" }];
+          rerender(pane(client, later.map((entry) => ({ ...entry })), 1));
+
+          expect(screen.getByRole("button", { name: "Collapse new.txt" })).toBeInTheDocument();
+          expect(screen.getByRole("button", { name: "Expand later.txt" })).toBeInTheDocument();
+          expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
+          await waitFor(() =>
+            expect(fetchedPaths(getWorkingDiff).filter((path) => path === "new.txt").length).toBeGreaterThan(1),
+          );
+          expect(fetchedPaths(getWorkingDiff)).not.toContain("later.txt");
+        });
+
+        it("Expand all opens the collapsed untracked files too", async () => {
+          render(pane(fakeClient({ getWorkingDiff: async () => [] }), withUntracked));
+          await screen.findByRole("button", { name: "Expand new.txt" });
+          fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+          fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+          expect(screen.getByRole("button", { name: "Collapse new.txt" })).toBeInTheDocument();
+          expect(screen.getByRole("button", { name: "Collapse a.txt" })).toBeInTheDocument();
+        });
+      });
     });
   });
 
@@ -1622,7 +1695,7 @@ describe("DiffPane line staging", () => {
   const TestDiffSettings = ({ ignoreWhitespace, children }: { ignoreWhitespace: boolean; children: ReactNode }) => (
     <DiffSettingsContext.Provider
       value={{
-        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false },
+        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
         update: () => {},
         error: null,
         dismissError: () => {},
@@ -1780,7 +1853,7 @@ describe("DiffPane diff options contract", () => {
   ) {
     return (
       <DiffSettingsContext.Provider
-        value={{ settings: { algorithm: "Default", ...settings, syntaxHighlight: false, wordWrap: "Auto", showWhitespace: false }, update: () => {}, error: null, dismissError: () => {} }}
+        value={{ settings: { algorithm: "Default", ...settings, syntaxHighlight: false, wordWrap: "Auto", showWhitespace: false, expandUntracked: true }, update: () => {}, error: null, dismissError: () => {} }}
       >
         <DiffPane
           repoPath={TEST_REPO_PATH}

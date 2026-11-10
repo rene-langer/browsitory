@@ -24,7 +24,9 @@ function clamp(settings: DiffSettings): DiffSettings {
     : DEFAULT_DIFF_SETTINGS.algorithm;
   // An older backend leaves `showWhitespace` out: off.
   const showWhitespace = settings.showWhitespace === true;
-  return { ...settings, contextLines, wordWrap, algorithm, showWhitespace };
+  // ...and `expandUntracked` (#623): on, the behaviour before the setting existed.
+  const expandUntracked = settings.expandUntracked !== false;
+  return { ...settings, contextLines, wordWrap, algorithm, showWhitespace, expandUntracked };
 }
 
 export function useDiffSettings(client: RepoClient): DiffSettingsApi {

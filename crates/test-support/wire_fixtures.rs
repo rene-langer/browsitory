@@ -525,6 +525,7 @@ pub fn diff_settings() -> Cases<config::DiffSettings> {
             word_wrap: config::WordWrap::Auto,
             algorithm: config::DiffAlgorithm::Patience,
             show_whitespace: true,
+            expand_untracked: false,
         },
     )];
     use config::{DiffAlgorithm, WordWrap};

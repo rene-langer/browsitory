@@ -16,6 +16,7 @@ fn defaults_when_never_set() {
             word_wrap: WordWrap::Auto,
             algorithm: DiffAlgorithm::Default,
             show_whitespace: false,
+            expand_untracked: true,
         }
     );
 }
@@ -32,6 +33,7 @@ fn round_trips_and_coexists_with_other_keys() {
         word_wrap: WordWrap::Off,
         algorithm: DiffAlgorithm::Patience,
         show_whitespace: true,
+        expand_untracked: false,
     };
     set_diff_settings_at(&file, &wanted).unwrap();
     assert_eq!(get_diff_settings_at(&file).unwrap(), wanted);
@@ -54,6 +56,7 @@ fn clamps_context_lines_on_write() {
             word_wrap: WordWrap::On,
             algorithm: DiffAlgorithm::Default,
             show_whitespace: false,
+            expand_untracked: true,
         },
     )
     .unwrap();
@@ -72,6 +75,7 @@ fn a_partial_diff_table_fills_missing_fields_with_defaults() {
     assert_eq!(s.word_wrap, WordWrap::Auto);
     assert_eq!(s.algorithm, DiffAlgorithm::Default);
     assert!(!s.show_whitespace);
+    assert!(s.expand_untracked);
 }
 
 #[test]
@@ -130,4 +134,23 @@ fn show_whitespace_round_trips_and_an_older_table_loads_it_as_off() {
     let text = std::fs::read_to_string(&file).unwrap();
     assert!(text.contains("show_whitespace = true"), "{text}");
     assert!(get_diff_settings_at(&file).unwrap().show_whitespace);
+}
+
+#[test]
+fn expand_untracked_round_trips_and_an_older_table_loads_it_as_on() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("config.toml");
+    std::fs::write(&file, "[diff]\nshow_whitespace = true\n").unwrap();
+    assert!(get_diff_settings_at(&file).unwrap().expand_untracked);
+    set_diff_settings_at(
+        &file,
+        &DiffSettings {
+            expand_untracked: false,
+            ..DiffSettings::default()
+        },
+    )
+    .unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(text.contains("expand_untracked = false"), "{text}");
+    assert!(!get_diff_settings_at(&file).unwrap().expand_untracked);
 }

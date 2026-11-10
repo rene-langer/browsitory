@@ -6,7 +6,7 @@ import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function clientWith(overrides: Partial<RepoClient>): RepoClient {
   return fakeRepoClient({
-    getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false })),
+    getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true })),
     setDiffSettings: vi.fn(async () => {}),
     ...overrides,
   });
@@ -14,7 +14,7 @@ function clientWith(overrides: Partial<RepoClient>): RepoClient {
 
 describe("useDiffSettings", () => {
   it("loads persisted settings", async () => {
-    const client = clientWith({ getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: true, contextLines: 7, syntaxHighlight: false, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false })) });
+    const client = clientWith({ getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: true, contextLines: 7, syntaxHighlight: false, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true })) });
     const { result } = renderHook(() => useDiffSettings(client));
     await waitFor(() => expect(result.current.settings.contextLines).toBe(7));
     expect(result.current.settings.ignoreWhitespace).toBe(true);
@@ -27,7 +27,7 @@ describe("useDiffSettings", () => {
     act(() => result.current.update({ contextLines: 5 }));
     expect(result.current.settings.contextLines).toBe(5);
     await waitFor(() =>
-      expect(client.setDiffSettings).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 5, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false }),
+      expect(client.setDiffSettings).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 5, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true }),
     );
   });
 
@@ -61,7 +61,21 @@ describe("useDiffSettings", () => {
     act(() => result.current.update({ showWhitespace: true }));
     expect(result.current.settings.showWhitespace).toBe(true);
     await waitFor(() =>
-      expect(client.setDiffSettings).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 4, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: true }),
+      expect(client.setDiffSettings).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 4, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: true, expandUntracked: true }),
+    );
+  });
+
+  it("loads a missing expandUntracked (an older backend) as on and persists turning it off (#623)", async () => {
+    const client = clientWith({
+      getDiffSettings: vi.fn(async () => ({ ignoreWhitespace: false, contextLines: 4, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false }) as never),
+    });
+    const { result } = renderHook(() => useDiffSettings(client));
+    await waitFor(() => expect(result.current.settings.contextLines).toBe(4));
+    expect(result.current.settings.expandUntracked).toBe(true);
+    act(() => result.current.update({ expandUntracked: false }));
+    expect(result.current.settings.expandUntracked).toBe(false);
+    await waitFor(() =>
+      expect(client.setDiffSettings).toHaveBeenCalledWith({ ignoreWhitespace: false, contextLines: 4, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: false }),
     );
   });
 
@@ -82,6 +96,6 @@ describe("useDiffSettings", () => {
 
   it("falls back to defaults without a provider", () => {
     const { result } = renderHook(() => useDiffSettingsContext());
-    expect(result.current.settings).toEqual({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false });
+    expect(result.current.settings).toEqual({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true });
   });
 });

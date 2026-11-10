@@ -546,7 +546,7 @@ describe("DiffView options toolbar", () => {
   it("toggles ignore whitespace and steps context lines through the settings context", () => {
     const update = vi.fn();
     render(
-      <TestDiffSettings value={{ settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false }, update }}>
+      <TestDiffSettings value={{ settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true }, update }}>
         <DiffView hunks={[lineHunk]} />
       </TestDiffSettings>,
     );
@@ -567,7 +567,7 @@ describe("DiffView show whitespace (#616)", () => {
     ],
   };
   const settingsWith = (showWhitespace: boolean, syntaxHighlight = false) => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace, expandUntracked: true },
     update: vi.fn(),
   });
   const contents = (container: HTMLElement) =>
@@ -651,7 +651,7 @@ describe("DiffView syntax highlighting", () => {
 
 describe("DiffView word wrap", () => {
   const settingsWith = (wordWrap: "Auto" | "On" | "Off") => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap, algorithm: "Default" as const, showWhitespace: false },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true },
     update: vi.fn(),
   });
   const wrapButton = () => screen.getByRole("button", { name: "Wrap lines" });
