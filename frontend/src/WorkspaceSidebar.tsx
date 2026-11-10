@@ -12,6 +12,7 @@ import type { SelectedRow, UseAppStateResult } from "./state/useAppState";
 import type { UseCompareResult } from "./state/useCompare";
 import type { UseGoToResult } from "./state/useGoTo";
 import type { useSidebarPanelVisibility } from "./state/useSidebarPanelVisibility";
+import { sectionRevealRequest, type SidebarRevealRequest } from "./state/useSidebarReveal";
 
 /** `RepoWorkspace`'s sidebar (#491): the branch tree and the panels the user has switched on. */
 export function WorkspaceSidebar({
@@ -26,6 +27,7 @@ export function WorkspaceSidebar({
   onDropStash: dropStash,
   stashBlockers: storedStashBlockers,
   onOpenRepoTab,
+  revealRequest,
 }: {
   appState: UseAppStateResult;
   announce: ReturnType<typeof useAnnounce>;
@@ -40,6 +42,8 @@ export function WorkspaceSidebar({
   onDropStash: (index: number) => Promise<void>;
   stashBlockers: StashBlockers;
   onOpenRepoTab: (path: string) => Promise<void>;
+  // The palette's sidebar reveal request (`useSidebarReveal`, #494), `null` when none.
+  revealRequest: SidebarRevealRequest | null;
 }) {
   const { openDialog } = appState;
   return (
@@ -102,6 +106,7 @@ export function WorkspaceSidebar({
         onGoToBranch={(kind, name) => void goTo.goToBranch(kind, name)}
         refreshGeneration={appState.state.refreshGeneration}
         onOpenRemoteDialog={openDialog}
+        revealRequest={revealRequest?.section === "branches" ? revealRequest : undefined}
       />
       {panelVisibility.visibility.stash && (
         <StashPanel
@@ -113,6 +118,7 @@ export function WorkspaceSidebar({
           restoreIndex={appState.state.stashRestoreIndex}
           onSetRestoreIndex={appState.setStashRestoreIndex}
           blockers={storedStashBlockers}
+          revealRequest={sectionRevealRequest(revealRequest, "stash")}
         />
       )}
       {panelVisibility.visibility.worktree && (
@@ -125,6 +131,7 @@ export function WorkspaceSidebar({
           onPruneWorktrees={appState.pruneWorktrees}
           operationDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
+          revealRequest={sectionRevealRequest(revealRequest, "worktree")}
         />
       )}
       {panelVisibility.visibility.submodule && (
@@ -135,6 +142,7 @@ export function WorkspaceSidebar({
           onOpenInNewTab={(workdir) => void onOpenRepoTab(workdir)}
           operationDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
+          revealRequest={sectionRevealRequest(revealRequest, "submodule")}
         />
       )}
       {panelVisibility.visibility.reflog && (
@@ -145,6 +153,7 @@ export function WorkspaceSidebar({
           onSelectReference={appState.selectReflogReference}
           onRestore={appState.restoreReflogEntry}
           operationDisabled={repositoryOperationDisabled}
+          revealRequest={sectionRevealRequest(revealRequest, "reflog")}
         />
       )}
       {panelVisibility.visibility.tags && (
@@ -160,6 +169,7 @@ export function WorkspaceSidebar({
           onGoToTag={(tag) => void goTo.goToTag(tag.name, tag.commitId)}
           pushDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
+          revealRequest={sectionRevealRequest(revealRequest, "tags")}
         />
       )}
       {panelVisibility.visibility.pullRequests && (
@@ -174,6 +184,7 @@ export function WorkspaceSidebar({
           branches={appState.state.branches}
           operationDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
+          revealRequest={sectionRevealRequest(revealRequest, "pullRequests")}
         />
       )}
     </Sidebar>

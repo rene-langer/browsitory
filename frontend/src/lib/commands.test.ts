@@ -1,14 +1,18 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   type AppCommands,
   buildCommands,
-  commandGroup,
   commitPickerItems,
+  type CommandContext,
+  type CommandGroup,
+  type SidebarCommands,
+  type TabCommands,
   type GoToCommands,
   filterAndSortCommands,
   loadRecentCommandIds,
   recordCommandUsed,
   type Command,
+  type PickerItem,
 } from "./commands";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import { createElement } from "react";
@@ -19,6 +23,8 @@ import { StashPanel } from "../components/StashPanel";
 import { WorktreePanel } from "../components/WorktreePanel";
 import { stashBlockers } from "./actions/stashActions";
 import { operationBlockers } from "./operationStatus";
+import type { OpenRepo } from "../state/useOpenRepos";
+import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
   return {
@@ -85,6 +91,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       stashOutcome: null,
       transfer: null,
       error: null,
+      errorHint: null,
       pending: false,
       addRemoteDraftOpen: false,
       dialog: null,
@@ -209,6 +216,23 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
   };
 }
 
+function sidebar(panelVisibility: Record<SidebarPanelId, boolean> = allPanelsVisible()): SidebarCommands {
+  return { panelVisibility, revealSection: vi.fn(), revealRemote: vi.fn() };
+}
+
+function allPanelsVisible(): Record<SidebarPanelId, boolean> {
+  return { stash: true, worktree: true, submodule: true, reflog: true, tags: true, pullRequests: true };
+}
+
+function tabs(overrides: Partial<TabCommands> = {}): TabCommands {
+  return { onOpenRepoTab: vi.fn(), otherOpenRepos: [], onSwitchRepoTab: vi.fn(), onCloseActiveRepoTab: vi.fn(), ...overrides };
+}
+
+/** The palette's commands with the sidebar and tab handlers every workspace passes, plus `extra`. */
+function commandsFor(appState: UseAppStateResult, extra: Partial<Omit<CommandContext, "appState">> = {}): Command[] {
+  return buildCommands({ appState, sidebar: sidebar(), tabs: tabs(), ...extra });
+}
+
 describe("buildCommands", () => {
   it("offers to toggle skip hooks only when commit hooks are installed, even while busy", () => {
     const withHooks = makeAppState({
@@ -216,7 +240,7 @@ describe("buildCommands", () => {
       skipHooks: false,
       pending: true,
     });
-    const command = buildCommands(withHooks).find((c) => c.id === "toggle-skip-hooks");
+    const command = commandsFor(withHooks).find((c) => c.id === "toggle-skip-hooks");
     expect(command?.label).toBe("Skip hooks for the next commit");
     expect(command?.keywords).toEqual(expect.arrayContaining(["no-verify", "pre-commit"]));
     command?.run();
@@ -227,17 +251,17 @@ describe("buildCommands", () => {
       headInfo: { headId: "abc", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: ["commit-msg"], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
       skipHooks: true,
     });
-    const toggleOff = buildCommands(on).find((c) => c.id === "toggle-skip-hooks");
+    const toggleOff = commandsFor(on).find((c) => c.id === "toggle-skip-hooks");
     expect(toggleOff?.label).toBe("Run hooks for the next commit");
     toggleOff?.run();
     expect(on.setSkipHooks).toHaveBeenCalledWith(false);
 
-    expect(buildCommands(makeAppState()).some((c) => c.id === "toggle-skip-hooks")).toBe(false);
+    expect(commandsFor(makeAppState()).some((c) => c.id === "toggle-skip-hooks")).toBe(false);
   });
 
   it("offers Fetch all remotes, Push branch to… and Delete remote branch… when a remote exists", () => {
     const appState = makeAppState();
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const fetchAll = commands.find((command) => command.label === "Fetch all remotes")!;
     expect(fetchAll.keywords).toEqual(expect.arrayContaining(["fetch", "all", "remotes", "prune"]));
     fetchAll.run();
@@ -250,7 +274,7 @@ describe("buildCommands", () => {
 
   it("hides the new remote commands without a remote, and Push branch to… on a detached HEAD", () => {
     const labels = (overrides: Parameters<typeof makeAppState>[0]) =>
-      buildCommands(makeAppState(overrides)).map((command) => command.label);
+      commandsFor(makeAppState(overrides)).map((command) => command.label);
     expect(labels({ remotes: [] })).not.toContain("Fetch all remotes");
     expect(labels({ remotes: [] })).not.toContain("Push branch to…");
     expect(labels({ remotes: [] })).not.toContain("Delete remote branch…");
@@ -263,7 +287,7 @@ describe("buildCommands", () => {
   });
 
   it("hides the new remote commands while a repository operation runs", () => {
-    const labels = buildCommands(makeAppState({ pending: true })).map((command) => command.label);
+    const labels = commandsFor(makeAppState({ pending: true })).map((command) => command.label);
     expect(labels).not.toContain("Fetch all remotes");
     expect(labels).not.toContain("Push branch to…");
     expect(labels).not.toContain("Delete remote branch…");
@@ -271,21 +295,21 @@ describe("buildCommands", () => {
 
   it("offers Apply patch… unless an operation runs, and Save staged changes as patch… with staged files (#448)", () => {
     const appState = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }] });
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     commands.find((command) => command.id === "apply-patch")!.run();
     expect(appState.applyPatchFile).toHaveBeenCalled();
     commands.find((command) => command.id === "save-staged-patch")!.run();
     expect(appState.savePatch).toHaveBeenCalledWith({ kind: "Staged" }, "staged.patch");
 
-    const ids = (overrides: Parameters<typeof makeAppState>[0]) => buildCommands(makeAppState(overrides)).map((c) => c.id);
+    const ids = (overrides: Parameters<typeof makeAppState>[0]) => commandsFor(makeAppState(overrides)).map((c) => c.id);
     expect(ids({ pending: true })).not.toContain("apply-patch");
     expect(ids({ status: [] })).not.toContain("save-staged-patch");
   });
 
   it("includes a shortcuts command only when a handler is supplied", () => {
     const onShow = vi.fn();
-    expect(buildCommands(makeAppState()).some((c) => c.id === "show-shortcuts")).toBe(false);
-    const cmd = buildCommands(makeAppState(), undefined, undefined, undefined, undefined, onShow).find(
+    expect(commandsFor(makeAppState()).some((c) => c.id === "show-shortcuts")).toBe(false);
+    const cmd = commandsFor(makeAppState(), { onShowShortcuts: onShow }).find(
       (c) => c.id === "show-shortcuts",
     );
     expect(cmd?.label).toBe("Show keyboard shortcuts");
@@ -295,49 +319,37 @@ describe("buildCommands", () => {
 
   it("offers Search commits when search commands are given", () => {
     const onSearchCommits = vi.fn();
-    expect(buildCommands(makeAppState()).some((c) => c.id === "search-commits")).toBe(false);
-    const cmd = buildCommands(
-      makeAppState(),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { onSearchCommits },
-    ).find((c) => c.id === "search-commits");
+    expect(commandsFor(makeAppState()).some((c) => c.id === "search-commits")).toBe(false);
+    const cmd = commandsFor(makeAppState(), { search: { onSearchCommits } }).find((c) => c.id === "search-commits");
     expect(cmd?.label).toBe("Search commits");
     cmd?.run();
     expect(onSearchCommits).toHaveBeenCalled();
   });
 
-  it("includes a Close tab command, grouped under Repositories, only when a close handler is supplied", () => {
+  it("includes a Close tab command, grouped under Repositories, only with the tab commands", () => {
     const onClose = vi.fn();
-    expect(buildCommands(makeAppState()).some((c) => c.id === "close-tab")).toBe(false);
-    const cmd = buildCommands(makeAppState(), undefined, undefined, undefined, undefined, undefined, onClose).find(
+    expect(commandsFor(makeAppState(), { tabs: undefined }).some((c) => c.id === "close-tab")).toBe(false);
+    const cmd = commandsFor(makeAppState(), { tabs: tabs({ onCloseActiveRepoTab: onClose }) }).find(
       (c) => c.id === "close-tab",
     );
     expect(cmd?.label).toBe("Close tab");
-    expect(commandGroup("close-tab")).toBe("Repositories");
+    expect(cmd?.group).toBe("Repositories");
     cmd?.run();
     expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("omits Close tab while a repository operation is in progress", () => {
-    const commands = buildCommands(makeAppState({ pending: true }), undefined, undefined, undefined, undefined, undefined, vi.fn());
+    const commands = commandsFor(makeAppState({ pending: true }), { tabs: tabs({ onCloseActiveRepoTab: vi.fn() }) });
     expect(commands.some((c) => c.id === "close-tab")).toBe(false);
   });
 
   it("adds clone and new-repository commands when app commands are given", () => {
     const onCloneRepository = vi.fn();
     const onNewRepository = vi.fn();
-    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, {
+    const commands = commandsFor(makeAppState(), { app: {
       onCloneRepository,
       onNewRepository,
-    });
+    } });
     commands.find((c) => c.label === "Clone repository…")!.run();
     commands.find((c) => c.label === "New repository…")!.run();
     expect(onCloneRepository).toHaveBeenCalled();
@@ -345,13 +357,13 @@ describe("buildCommands", () => {
   });
 
   it("omits clone and new-repository commands without app commands", () => {
-    const labels = buildCommands(makeAppState()).map((c) => c.label);
+    const labels = commandsFor(makeAppState()).map((c) => c.label);
     expect(labels).not.toContain("Clone repository…");
   });
 
   it("includes one switch-branch command per non-current branch", () => {
     const appState = makeAppState();
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const switchCommands = commands.filter((c) => c.id.startsWith("switch-branch:"));
     expect(switchCommands).toHaveLength(1);
     expect(switchCommands[0].label).toBe("Switch to feature");
@@ -361,7 +373,7 @@ describe("buildCommands", () => {
 
   it("includes fetch/push/push-tags commands per remote", () => {
     const appState = makeAppState();
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const fetchCmd = commands.find((c) => c.id === "fetch-remote:origin");
     expect(fetchCmd?.label).toBe("Fetch origin");
     fetchCmd?.run();
@@ -383,66 +395,45 @@ describe("buildCommands", () => {
   // branch rows become reachable, mirroring the existing "navigate instead of mutating directly"
   // pattern below.
   describe("browse-remote-branches", () => {
-    function mountBranchesWithRemoteFolder(remoteName: string): HTMLButtonElement {
-      const workspace = document.createElement("div");
-      workspace.setAttribute("data-active-repo", "true");
-      document.body.appendChild(workspace);
-
-      const section = document.createElement("section");
-      section.setAttribute("aria-label", "Branches");
-      workspace.appendChild(section);
-
-      const sectionToggle = document.createElement("button");
-      sectionToggle.setAttribute("aria-expanded", "true");
-      sectionToggle.textContent = "Branches";
-      section.appendChild(sectionToggle);
-
-      const remoteToggle = document.createElement("button");
-      remoteToggle.setAttribute("aria-expanded", "false");
-      remoteToggle.textContent = remoteName;
-      remoteToggle.scrollIntoView = vi.fn();
-      remoteToggle.addEventListener("click", () => remoteToggle.setAttribute("aria-expanded", "true"));
-      section.appendChild(remoteToggle);
-
-      return remoteToggle;
-    }
-
-    afterEach(() => {
-      document.body.innerHTML = "";
-    });
-
     it("includes one browse-remote-branches command per remote", () => {
-      const commands = buildCommands(makeAppState());
+      const commands = commandsFor(makeAppState());
       const command = commands.find((c) => c.id === "browse-remote-branches:origin");
       expect(command?.label).toBe("Browse branches on origin");
     });
 
-    it("expands the named remote's folder instead of mutating anything", () => {
-      const remoteToggle = mountBranchesWithRemoteFolder("origin");
-      const commands = buildCommands(makeAppState());
+    it("asks the sidebar to reveal the remote's folder instead of mutating anything (#494)", () => {
+      const appState = makeAppState();
+      const sidebarCommands = sidebar();
+      const commands = commandsFor(appState, { sidebar: sidebarCommands });
       commands.find((c) => c.id === "browse-remote-branches:origin")?.run();
-      expect(remoteToggle.getAttribute("aria-expanded")).toBe("true");
+      expect(sidebarCommands.revealRemote).toHaveBeenCalledWith("origin");
+      expect(appState.fetchRemote).not.toHaveBeenCalled();
+    });
+
+    it("is omitted without the sidebar commands", () => {
+      const commands = commandsFor(makeAppState(), { sidebar: undefined });
+      expect(commands.some((c) => c.id.startsWith("browse-remote-branches:"))).toBe(false);
     });
 
     it("is omitted while a repository operation is in progress", () => {
-      const commands = buildCommands(makeAppState({ pending: true }));
+      const commands = commandsFor(makeAppState({ pending: true }));
       expect(commands.some((c) => c.id.startsWith("browse-remote-branches:"))).toBe(false);
     });
   });
 
   it("only includes pull when an upstream is set", () => {
-    const withUpstream = buildCommands(makeAppState());
+    const withUpstream = commandsFor(makeAppState());
     expect(withUpstream.some((c) => c.id === "pull")).toBe(true);
 
-    const withoutUpstream = buildCommands(makeAppState({ upstream: null }));
+    const withoutUpstream = commandsFor(makeAppState({ upstream: null }));
     expect(withoutUpstream.some((c) => c.id === "pull")).toBe(false);
   });
 
   it("only includes rebase continue/abort while a rebase is in progress", () => {
-    const noRebase = buildCommands(makeAppState());
+    const noRebase = commandsFor(makeAppState());
     expect(noRebase.some((c) => c.id === "rebase-continue")).toBe(false);
 
-    const withRebase = buildCommands(makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 } }));
+    const withRebase = commandsFor(makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 } }));
     expect(withRebase.some((c) => c.id === "rebase-continue")).toBe(true);
     expect(withRebase.some((c) => c.id === "rebase-abort")).toBe(true);
   });
@@ -450,32 +441,28 @@ describe("buildCommands", () => {
   it("omits Continue rebase while the rebase is interrupted but keeps Abort", () => {
     const rebase = { branch: "main", onto: "o", currentStep: 1, totalSteps: 3, health: { kind: "Diverged" as const, reason: "HeadMoved" as const } };
     const base = makeAppState().state.headInfo;
-    const commands = buildCommands(
-      makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 }, headInfo: { ...base, rebase } }),
-    );
+    const commands = commandsFor(makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 }, headInfo: { ...base, rebase } }));
     expect(commands.some((c) => c.id === "rebase-continue")).toBe(false);
     expect(commands.some((c) => c.id === "rebase-abort")).toBe(true);
   });
 
   it("only includes abort merge while a merge is in progress", () => {
-    const noMerge = buildCommands(makeAppState());
+    const noMerge = commandsFor(makeAppState());
     expect(noMerge.some((c) => c.id === "merge-abort")).toBe(false);
 
-    const withMerge = buildCommands(makeAppState({ mergeMessage: "Merge branch" }));
+    const withMerge = commandsFor(makeAppState({ mergeMessage: "Merge branch" }));
     expect(withMerge.some((c) => c.id === "merge-abort")).toBe(true);
   });
 
   it("offers no Abort merge for a rebase started in a terminal, though git wrote MERGE_MSG (#263)", () => {
     const base = makeAppState().state.headInfo;
-    const commands = buildCommands(
-      makeAppState({
+    const commands = commandsFor(makeAppState({
         headInfo: {
           ...base,
           terminalRebase: { kind: "Rebase", branch: "topic", onto: "abc", currentStep: 1, totalSteps: 2 },
         },
         mergeMessage: "t1",
-      }),
-    );
+      }));
     expect(commands.some((c) => c.id === "merge-abort")).toBe(false);
     expect(commands.some((c) => c.id === "rebase-abort" || c.id === "rebase-continue")).toBe(false);
   });
@@ -491,7 +478,7 @@ describe("buildCommands", () => {
       commitsToRemove: 1,
     };
     const appState = makeAppState({ headInfo: { ...base, terminalSequence } });
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const abort = commands.find((c) => c.id === "abort-sequence");
     expect(abort?.label).toBe("Abort revert");
     expect(commands.some((c) => c.id === "continue-sequence")).toBe(false);
@@ -499,25 +486,21 @@ describe("buildCommands", () => {
     expect(appState.abortSequence).toHaveBeenCalled();
 
     // Its paused step: the same Abort, not "Abort merge" (which would end only the step).
-    const paused = buildCommands(
-      makeAppState({
+    const paused = commandsFor(makeAppState({
         headInfo: { ...base, operation: "Revert", terminalSequence: { ...terminalSequence, pausedOnConflict: true } },
         mergeMessage: "Revert",
-      }),
-    );
+      }));
     expect(paused.find((c) => c.id === "abort-sequence")?.label).toBe("Abort revert");
     expect(paused.some((c) => c.id === "merge-abort")).toBe(false);
 
     // A merge started during it is a plain merge.
-    const merging = buildCommands(
-      makeAppState({ headInfo: { ...base, operation: "Merge", terminalSequence }, mergeMessage: "Merge" }),
-    );
+    const merging = commandsFor(makeAppState({ headInfo: { ...base, operation: "Merge", terminalSequence }, mergeMessage: "Merge" }));
     expect(merging.some((c) => c.id === "merge-abort")).toBe(true);
     expect(merging.some((c) => c.id === "abort-sequence")).toBe(false);
   });
 
   it("offers Continue/Abort for a stopped cherry-pick or revert sequence, and hides other operations", () => {
-    const none = buildCommands(makeAppState());
+    const none = commandsFor(makeAppState());
     expect(none.some((c) => c.id === "continue-sequence" || c.id === "abort-sequence")).toBe(false);
 
     const base = makeAppState();
@@ -529,7 +512,7 @@ describe("buildCommands", () => {
       },
       mergeMessage: "Revert \"x\"",
     });
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const cont = commands.find((c) => c.id === "continue-sequence");
     const abort = commands.find((c) => c.id === "abort-sequence");
     expect(cont?.label).toBe("Continue revert");
@@ -542,18 +525,16 @@ describe("buildCommands", () => {
     expect(appState.continueSequence).toHaveBeenCalled();
     expect(appState.abortSequence).toHaveBeenCalled();
 
-    const picking = buildCommands(
-      makeAppState({
+    const picking = commandsFor(makeAppState({
         headInfo: { ...base.state.headInfo, sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c" } },
-      }),
-    );
+      }));
     expect(picking.find((c) => c.id === "continue-sequence")?.label).toBe("Continue cherry-pick");
     expect(picking.find((c) => c.id === "abort-sequence")?.label).toBe("Abort cherry-pick");
   });
 
   it("includes apply/drop per stash", () => {
     const appState = makeAppState();
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const applyCmd = commands.find((c) => c.id === "apply-stash:0");
     expect(applyCmd?.label).toBe("Apply stash: WIP");
     applyCmd?.run();
@@ -564,20 +545,20 @@ describe("buildCommands", () => {
 
   it("offers merge-branch per non-current local branch and omits it while an operation runs", () => {
     const appState = makeAppState();
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const merge = commands.find((c) => c.id === "merge-branch:feature");
     expect(merge?.label).toBe("Merge feature into current branch…");
     expect(commands.some((c) => c.id === "merge-branch:main")).toBe(false);
     merge?.run();
     expect(appState.openDialog).toHaveBeenCalledWith({ kind: "merge", branchName: "feature" });
 
-    const merging = buildCommands(makeAppState({ mergeMessage: "Merge branch" }));
+    const merging = commandsFor(makeAppState({ mergeMessage: "Merge branch" }));
     expect(merging.some((c) => c.id.startsWith("merge-branch:"))).toBe(false);
   });
 
   it("offers stash all and stash with options", () => {
     const appState = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }] });
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const all = commands.find((c) => c.id === "save-stash");
     expect(all?.label).toBe("Stash all changes");
     all?.run();
@@ -590,7 +571,7 @@ describe("buildCommands", () => {
 
   it("offers show and pop per stash", () => {
     const appState = makeAppState();
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const show = commands.find((c) => c.id === "show-stash:0");
     expect(show?.label).toBe("Show stash: WIP");
     show?.run();
@@ -602,9 +583,9 @@ describe("buildCommands", () => {
   });
 
   it("groups merge and stash commands", () => {
-    expect(commandGroup("merge-branch:x")).toBe("Branches");
+    expect(groupOf("merge-branch:feature")).toBe("Branches");
     for (const id of ["stash-with-options", "stash-current-file", "show-stash:0", "pop-stash:0"]) {
-      expect(commandGroup(id)).toBe("Stash");
+      expect(groupOf(id)).toBe("Stash");
     }
   });
 
@@ -612,7 +593,7 @@ describe("buildCommands", () => {
   it("offers to open the main worktree, not to remove it", () => {
     const appState = makeAppState();
     const onOpenRepoTab = vi.fn();
-    const commands = buildCommands(appState, onOpenRepoTab);
+    const commands = commandsFor(appState, { tabs: tabs({ onOpenRepoTab: onOpenRepoTab }) });
     const openMain = commands.find((c) => c.id === "open-worktree:/repo");
     expect(openMain?.label).toBe("Open main worktree");
     openMain?.run();
@@ -628,7 +609,7 @@ describe("buildCommands", () => {
       worktrees: [{ name: "feature", path: "/repos/feature-wt", head: "abc123", isMain: false, isLocked: false, isPrunable: false }],
     });
     const onOpenRepoTab = vi.fn();
-    const commands = buildCommands(appState, onOpenRepoTab, [], vi.fn());
+    const commands = commandsFor(appState, { tabs: tabs({ onOpenRepoTab: onOpenRepoTab, onSwitchRepoTab: vi.fn() }) });
 
     const openCommand = commands.find((c) => c.id === "open-worktree:/repos/feature-wt");
     openCommand?.run();
@@ -642,7 +623,7 @@ describe("buildCommands", () => {
       { path: "/repos/gadget", displayName: "gadget", workspaceId: null },
     ];
     const onSwitchRepoTab = vi.fn();
-    const commands = buildCommands(appState, vi.fn(), otherRepos, onSwitchRepoTab);
+    const commands = commandsFor(appState, { tabs: tabs({ onOpenRepoTab: vi.fn(), otherOpenRepos: otherRepos, onSwitchRepoTab: onSwitchRepoTab }) });
 
     const widgetCommand = commands.find((c) => c.id === "switch-repo:/repos/widget");
     expect(widgetCommand?.label).toBe("Switch to widget");
@@ -651,7 +632,7 @@ describe("buildCommands", () => {
   });
 
   it("splits submodule commands by initialized state", () => {
-    const commands = buildCommands(makeAppState());
+    const commands = commandsFor(makeAppState());
     const initCmd = commands.find((c) => c.id === "init-submodule:libs/a");
     expect(initCmd?.label).toBe("Initialize submodule libs/a");
     initCmd?.run();
@@ -666,7 +647,7 @@ describe("buildCommands", () => {
 
   it("opens a checked-out submodule's folder in a new tab, and offers nothing to open for one that isn't", () => {
     const onOpenRepoTab = vi.fn();
-    const commands = buildCommands(makeAppState(), onOpenRepoTab, [], vi.fn());
+    const commands = commandsFor(makeAppState(), { tabs: tabs({ onOpenRepoTab: onOpenRepoTab, onSwitchRepoTab: vi.fn() }) });
 
     const openCmd = commands.find((c) => c.id === "open-submodule:libs/b");
     expect(openCmd?.label).toBe("Open submodule libs/b in new tab");
@@ -692,111 +673,65 @@ describe("buildCommands", () => {
       message: "commit: test",
       summary: null,
     }));
-    const commands = buildCommands(makeAppState({ reflog: manyEntries }));
+    const commands = commandsFor(makeAppState({ reflog: manyEntries }));
     expect(commands.some((c) => c.id.startsWith("restore-reflog:"))).toBe(false);
     expect(commands.filter((c) => c.id === "go-to:Reflog")).toHaveLength(1);
   });
 
   describe("destructive commands navigate instead of mutating directly", () => {
-    // Mirrors one tab's `RepoWorkspace`: a wrapper div carrying `data-active-repo`, holding the
-    // sidebar section. Every open tab stays mounted at once, so the wrapper (not the document)
-    // is what `goToSidebarSection` scopes its lookup to.
-    function mountWorkspace(active: boolean): HTMLDivElement {
-      const workspace = document.createElement("div");
-      workspace.setAttribute("data-active-repo", active ? "true" : "false");
-      document.body.appendChild(workspace);
-      return workspace;
-    }
-
-    function mountSectionIn(workspace: HTMLElement, title: string): HTMLButtonElement {
-      const section = document.createElement("section");
-      section.setAttribute("aria-label", title);
-      // jsdom doesn't implement scrollIntoView; goToSidebarSection calls it
-      // unconditionally after expanding, so stub it out.
-      section.scrollIntoView = vi.fn();
-      const button = document.createElement("button");
-      button.setAttribute("aria-expanded", "false");
-      // Mirror AccordionSection's real toggle behavior so we can assert on
-      // the attribute goToSidebarSection reads and flips via button.click().
-      button.addEventListener("click", () => {
-        button.setAttribute("aria-expanded", "true");
-      });
-      section.appendChild(button);
-      workspace.appendChild(section);
-      return button;
-    }
-
-    function mountSection(title: string): HTMLButtonElement {
-      return mountSectionIn(mountWorkspace(true), title);
-    }
-
-    afterEach(() => {
-      document.body.innerHTML = "";
-    });
-
-    it("delete-tag expands the Tags section instead of calling deleteTag", () => {
-      const button = mountSection("Tags");
+    // #494: through the sidebar's reveal requests, which the owning sections handle
+    // (`useSidebarReveal`), never by looking up the rendered sidebar.
+    function run(id: string) {
       const appState = makeAppState();
-      const commands = buildCommands(appState);
-      const deleteTagCmd = commands.find((c) => c.id === "delete-tag:v1.0");
-      expect(deleteTagCmd).toBeDefined();
-      deleteTagCmd?.run();
-      expect(button.getAttribute("aria-expanded")).toBe("true");
+      const sidebarCommands = sidebar();
+      const command = commandsFor(appState, { sidebar: sidebarCommands }).find((c) => c.id === id);
+      expect(command).toBeDefined();
+      command?.run();
+      return { appState, command, revealSection: sidebarCommands.revealSection };
+    }
+
+    it("delete-tag reveals the Tags section instead of calling deleteTag", () => {
+      const { appState, revealSection } = run("delete-tag:v1.0");
+      expect(revealSection).toHaveBeenCalledWith("tags");
       expect(appState.deleteTag).not.toHaveBeenCalled();
     });
 
-    it("drop-stash selects the stash and expands the Stashes section instead of dropping", () => {
-      const button = mountSection("Stashes");
-      const appState = makeAppState();
-      const commands = buildCommands(appState);
-      const dropCmd = commands.find((c) => c.id === "drop-stash:0");
-      expect(dropCmd?.label).toBe("Drop stash: WIP");
-      dropCmd?.run();
+    it("drop-stash selects the stash and reveals the Stashes section instead of dropping", () => {
+      const { appState, command, revealSection } = run("drop-stash:0");
+      expect(command?.label).toBe("Drop stash: WIP");
       expect(appState.dropStash).not.toHaveBeenCalled();
       expect(appState.selectRow).toHaveBeenCalledWith({ commitId: "ccc" });
-      expect(button.getAttribute("aria-expanded")).toBe("true");
+      expect(revealSection).toHaveBeenCalledWith("stash");
     });
 
-    it("remove-worktree expands the Worktrees section instead of calling removeWorktree", () => {
-      const button = mountSection("Worktrees");
-      const appState = makeAppState();
-      const commands = buildCommands(appState);
-      const removeWorktreeCmd = commands.find((c) => c.id === "remove-worktree:wt1");
-      expect(removeWorktreeCmd).toBeDefined();
-      removeWorktreeCmd?.run();
-      expect(button.getAttribute("aria-expanded")).toBe("true");
+    it("remove-worktree reveals the Worktrees section instead of calling removeWorktree", () => {
+      const { appState, revealSection } = run("remove-worktree:wt1");
+      expect(revealSection).toHaveBeenCalledWith("worktree");
       expect(appState.removeWorktree).not.toHaveBeenCalled();
     });
 
-    it("go-to:Reflog (the only reflog affordance left) expands the Reflog section instead of calling restoreReflogEntry", () => {
-      const button = mountSection("Reflog");
-      const appState = makeAppState();
-      const commands = buildCommands(appState);
-      const goToReflogCmd = commands.find((c) => c.id === "go-to:Reflog");
-      expect(goToReflogCmd).toBeDefined();
-      goToReflogCmd?.run();
-      expect(button.getAttribute("aria-expanded")).toBe("true");
+    it("go-to:Reflog (the only reflog affordance left) reveals the Reflog section instead of calling restoreReflogEntry", () => {
+      const { appState, revealSection } = run("go-to:Reflog");
+      expect(revealSection).toHaveBeenCalledWith("reflog");
       expect(appState.restoreReflogEntry).not.toHaveBeenCalled();
     });
 
-    it("targets the active tab's section, not the first tab's, when the active tab isn't first", () => {
-      // Both tabs are mounted at once and both carry a "Reflog" section; only the second is
-      // active. A document-wide querySelector would match the first (hidden) tab's button.
-      const backgroundButton = mountSectionIn(mountWorkspace(false), "Reflog");
-      const activeButton = mountSectionIn(mountWorkspace(true), "Reflog");
-
-      buildCommands(makeAppState()).find((c) => c.id === "go-to:Reflog")?.run();
-
-      expect(activeButton.getAttribute("aria-expanded")).toBe("true");
-      expect(backgroundButton.getAttribute("aria-expanded")).toBe("false");
+    it.each([
+      ["go-to:Branches", "branches"],
+      ["go-to:Stashes", "stash"],
+      ["go-to:Worktrees", "worktree"],
+      ["go-to:Submodules", "submodule"],
+      ["go-to:Tags", "tags"],
+      ["go-to:Pull Requests", "pullRequests"],
+    ])("%s reveals the %s section", (id, section) => {
+      expect(run(id).revealSection).toHaveBeenCalledWith(section);
     });
 
-    it("does nothing when no workspace is active, rather than expanding a hidden tab's section", () => {
-      const backgroundButton = mountSectionIn(mountWorkspace(false), "Reflog");
-
-      buildCommands(makeAppState()).find((c) => c.id === "go-to:Reflog")?.run();
-
-      expect(backgroundButton.getAttribute("aria-expanded")).toBe("false");
+    it("are omitted without the sidebar commands", () => {
+      const ids = commandsFor(makeAppState(), { sidebar: undefined }).map((c) => c.id);
+      for (const prefix of ["delete-tag:", "drop-stash:", "remove-worktree:", "go-to:"]) {
+        expect(ids.some((id) => id.startsWith(prefix))).toBe(false);
+      }
     });
   });
 
@@ -826,7 +761,7 @@ describe("buildCommands", () => {
     it.each(guardedStates)(
       "omits mutating command families while %s, but keeps escape hatches, refresh, and go-to navigation",
       (_label, overrides) => {
-        const commands = buildCommands(makeAppState(overrides));
+        const commands = commandsFor(makeAppState(overrides));
         const ids = commands.map((c) => c.id);
 
         // Mutating families must be entirely absent, not merely disabled.
@@ -868,14 +803,12 @@ describe("buildCommands", () => {
     );
 
     it("keeps merge-abort available while a merge is in progress, even though it mutates state", () => {
-      const commands = buildCommands(makeAppState({ mergeMessage: "Merge branch" }));
+      const commands = commandsFor(makeAppState({ mergeMessage: "Merge branch" }));
       expect(commands.some((c) => c.id === "merge-abort")).toBe(true);
     });
 
     it("keeps rebase-continue/rebase-abort available while a rebase is in progress", () => {
-      const commands = buildCommands(
-        makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 } }),
-      );
+      const commands = commandsFor(makeAppState({ rebaseProgress: { currentStep: 1, totalSteps: 3 } }));
       expect(commands.some((c) => c.id === "rebase-continue")).toBe(true);
       expect(commands.some((c) => c.id === "rebase-abort")).toBe(true);
     });
@@ -886,7 +819,7 @@ describe("buildCommands", () => {
       ["an action is pending", { pending: true }],
       ["a merge is in progress", { mergeMessage: "Merge branch" }],
     ])("keeps the stash commands while %s, like DiffPane's Stash button", (_label, overrides) => {
-      const ids = buildCommands(makeAppState({ status: modified, ...overrides })).map((c) => c.id);
+      const ids = commandsFor(makeAppState({ status: modified, ...overrides })).map((c) => c.id);
       expect(ids).toContain("save-stash");
       expect(ids).toContain("stash-with-options");
     });
@@ -903,14 +836,14 @@ describe("buildCommands", () => {
         { status: modified, headInfo: { ...makeAppState().state.headInfo, terminalRebase: { kind: "Rebase", branch: "topic", onto: "c1", currentStep: 1, totalSteps: 2 } } },
       ],
     ])("omits the stash commands while %s, like DiffPane's Stash button", (_label, overrides) => {
-      const ids = buildCommands(makeAppState(overrides), undefined, [], undefined, undefined, undefined, undefined, {
+      const ids = commandsFor(makeAppState(overrides), { diff: {
         settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
         update: vi.fn(),
         currentFile: "a.txt",
         requestDiscardCurrentFile: vi.fn(),
         requestDiscardAllUnstaged: vi.fn(),
         openCurrentFileHistory: vi.fn(),
-      }).map((c) => c.id);
+      } }).map((c) => c.id);
       expect(ids).not.toContain("save-stash");
       expect(ids).not.toContain("stash-with-options");
       expect(ids).not.toContain("stash-current-file");
@@ -918,7 +851,7 @@ describe("buildCommands", () => {
   });
 
   it("always includes exactly one go-to command per sidebar section", () => {
-    const commands = buildCommands(makeAppState());
+    const commands = commandsFor(makeAppState());
     const goToCommands = commands.filter((c) => c.id.startsWith("go-to:"));
     expect(goToCommands.map((c) => c.label).sort()).toEqual(
       [
@@ -934,12 +867,12 @@ describe("buildCommands", () => {
   });
 
   it("keeps the go-to id of a renamed section, so palette recents survive the rename (#320)", () => {
-    const command = buildCommands(makeAppState()).find((c) => c.label === "Go to Pull requests");
+    const command = commandsFor(makeAppState()).find((c) => c.label === "Go to Pull requests");
     expect(command?.id).toBe("go-to:Pull Requests");
   });
 
   it("no longer emits a separate 'Go to Remotes' command (folded into Branches)", () => {
-    const commands = buildCommands(makeAppState());
+    const commands = commandsFor(makeAppState());
     expect(commands.find((c) => c.id === "go-to:Remotes")).toBeUndefined();
     expect(commands.find((c) => c.id === "go-to:Branches")).toBeDefined();
   });
@@ -947,48 +880,48 @@ describe("buildCommands", () => {
   describe("hidden sidebar panels", () => {
     // The sidebar panel-visibility toggles (a separate, already-merged task) fully unmount a
     // hidden panel rather than just CSS-hiding it. Without this filtering, every command that
-    // navigates to or names something in a hidden panel became a dead no-op: `goToSidebarSection`
-    // resolves the section by `aria-label` in the DOM and silently returns when nothing matches.
+    // navigates to or names something in a hidden panel became a dead no-op: the hidden section
+    // isn't there to handle the reveal request.
     const allVisible = { stash: true, worktree: true, submodule: true, reflog: true, tags: true, pullRequests: true };
 
     it("omits 'Go to <Panel>' for a panel whose visibility is false", () => {
-      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, tags: false });
+      const commands = commandsFor(makeAppState(), { sidebar: sidebar({ ...allVisible, tags: false }), tabs: tabs({ onOpenRepoTab: vi.fn(), onSwitchRepoTab: vi.fn() }) });
       expect(commands.some((c) => c.id === "go-to:Tags")).toBe(false);
       // Unaffected sections keep their command.
       expect(commands.some((c) => c.id === "go-to:Stashes")).toBe(true);
     });
 
     it("keeps 'Go to Branches' even though Branches has no visibility toggle", () => {
-      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, tags: false });
+      const commands = commandsFor(makeAppState(), { sidebar: sidebar({ ...allVisible, tags: false }), tabs: tabs({ onOpenRepoTab: vi.fn(), onSwitchRepoTab: vi.fn() }) });
       expect(commands.some((c) => c.id === "go-to:Branches")).toBe(true);
     });
 
     it("omits per-tag delete commands while the Tags panel is hidden", () => {
-      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, tags: false });
+      const commands = commandsFor(makeAppState(), { sidebar: sidebar({ ...allVisible, tags: false }), tabs: tabs({ onOpenRepoTab: vi.fn(), onSwitchRepoTab: vi.fn() }) });
       expect(commands.some((c) => c.id.startsWith("delete-tag:"))).toBe(false);
     });
 
     it("omits per-stash apply/drop commands while the Stashes panel is hidden", () => {
-      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, stash: false });
+      const commands = commandsFor(makeAppState(), { sidebar: sidebar({ ...allVisible, stash: false }), tabs: tabs({ onOpenRepoTab: vi.fn(), onSwitchRepoTab: vi.fn() }) });
       expect(commands.some((c) => c.id.startsWith("apply-stash:"))).toBe(false);
       expect(commands.some((c) => c.id.startsWith("drop-stash:"))).toBe(false);
     });
 
     it("omits per-worktree commands while the Worktrees panel is hidden", () => {
-      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, worktree: false });
+      const commands = commandsFor(makeAppState(), { sidebar: sidebar({ ...allVisible, worktree: false }), tabs: tabs({ onOpenRepoTab: vi.fn(), onSwitchRepoTab: vi.fn() }) });
       expect(commands.some((c) => c.id.startsWith("open-worktree:"))).toBe(false);
       expect(commands.some((c) => c.id.startsWith("remove-worktree:"))).toBe(false);
     });
 
     it("omits per-submodule commands while the Submodules panel is hidden", () => {
-      const commands = buildCommands(makeAppState(), vi.fn(), [], vi.fn(), { ...allVisible, submodule: false });
+      const commands = commandsFor(makeAppState(), { sidebar: sidebar({ ...allVisible, submodule: false }), tabs: tabs({ onOpenRepoTab: vi.fn(), onSwitchRepoTab: vi.fn() }) });
       expect(commands.some((c) => c.id.startsWith("init-submodule:"))).toBe(false);
       expect(commands.some((c) => c.id.startsWith("update-submodule:"))).toBe(false);
       expect(commands.some((c) => c.id.startsWith("open-submodule:"))).toBe(false);
     });
 
     it("defaults to every panel visible when no panelVisibility argument is passed", () => {
-      const commands = buildCommands(makeAppState());
+      const commands = commandsFor(makeAppState());
       expect(commands.some((c) => c.id === "go-to:Tags")).toBe(true);
       expect(commands.some((c) => c.id.startsWith("delete-tag:"))).toBe(true);
     });
@@ -996,7 +929,7 @@ describe("buildCommands", () => {
 
   it("emits an Add remote command that opens the add-remote draft", () => {
     const appState = makeAppState();
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const addRemote = commands.find((c) => c.id === "add-remote");
     expect(addRemote).toBeDefined();
     addRemote?.run();
@@ -1006,13 +939,13 @@ describe("buildCommands", () => {
   // #509: like "Create tag…", it only opens the form, whose Add remote button carries the busy rule.
   it("offers Add remote while a repository operation is in progress, as the Add menu does", () => {
     const appState = makeAppState({ pending: true });
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     expect(commands.find((c) => c.id === "add-remote")).toBeDefined();
   });
 });
 
 describe("filterAndSortCommands", () => {
-  const commands: Command[] = [
+  const commands: PickerItem[] = [
     { id: "a", label: "Switch to main", keywords: ["branch", "switch", "main"], run: vi.fn() },
     { id: "b", label: "Switch to feature", keywords: ["branch", "switch", "feature"], run: vi.fn() },
     { id: "c", label: "Fetch origin", keywords: ["fetch", "remote", "origin"], run: vi.fn() },
@@ -1023,7 +956,7 @@ describe("filterAndSortCommands", () => {
   });
 
   it("ranks a label-prefix match above a substring-only match", () => {
-    const withPrefixAndSubstring: Command[] = [
+    const withPrefixAndSubstring: PickerItem[] = [
       { id: "x", label: "Fetch origin", keywords: [], run: vi.fn() },
       { id: "y", label: "Switch to origin-backup", keywords: [], run: vi.fn() },
     ];
@@ -1095,22 +1028,7 @@ describe("history commands", () => {
     commitCommands: ReturnType<typeof makeCommitCommands> = makeCommitCommands(),
     onCloseActiveRepoTab?: () => void,
   ) =>
-    buildCommands(
-      appState,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      onCloseActiveRepoTab,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      commitCommands,
-    );
+    commandsFor(appState, { tabs: tabs({ onCloseActiveRepoTab: onCloseActiveRepoTab }), commit: commitCommands });
 
   it("offers the history commands when a commit is selected and nothing is running", () => {
     const ids = buildWithCommitCommands(makeAppState(historyState)).map((command) => command.id);
@@ -1160,7 +1078,7 @@ describe("history commands", () => {
   });
 
   it("leaves out cherry-pick, revert and reset without the commit actions to run them", () => {
-    const ids = buildCommands(makeAppState(historyState)).map((c) => c.id);
+    const ids = commandsFor(makeAppState(historyState)).map((c) => c.id);
     for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected"]) expect(ids).not.toContain(id);
     expect(ids).toContain("checkout-selected");
   });
@@ -1270,7 +1188,7 @@ describe("history commands", () => {
 
   it("opens the create-tag dialog at the selected commit or at HEAD", () => {
     const appState = makeAppState(historyState);
-    const commands = buildCommands(appState);
+    const commands = commandsFor(appState);
     const selected = commands.find((command) => command.id === "create-tag-selected")!;
     expect(selected.label).toBe("Create tag at c2…");
     selected.run();
@@ -1282,11 +1200,9 @@ describe("history commands", () => {
   });
 
   it("offers Create tag at HEAD… only once HEAD has a commit", () => {
-    const ids = buildCommands(
-      makeAppState({
+    const ids = commandsFor(makeAppState({
         headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
-      }),
-    ).map((c) => c.id);
+      })).map((c) => c.id);
     expect(ids).not.toContain("create-tag-head");
   });
 
@@ -1303,7 +1219,7 @@ describe("history commands", () => {
   });
 
   it("groups force push under Remotes", () => {
-    expect(commandGroup("force-push")).toBe("Remotes");
+    expect(groupOf("force-push")).toBe("Remotes");
   });
 
   describe("one-click history edits (#442)", () => {
@@ -1317,7 +1233,7 @@ describe("history commands", () => {
 
     it("offers every edit the commit menu enables, and runs it from the same base", () => {
       const appState = makeAppState(editState);
-      const commands = buildCommands(appState);
+      const commands = commandsFor(appState);
       const byId = (id: string) => commands.find((command) => command.id === id)!;
       expect(EDIT_IDS.map((id) => byId(id).label)).toEqual([
         "Reword c2…",
@@ -1338,16 +1254,14 @@ describe("history commands", () => {
     });
 
     it("leaves out edits the menu disables", () => {
-      const head = buildCommands(makeAppState({ ...editState, selectedRow: { commitId: "c1" } })).map((c) => c.id);
+      const head = commandsFor(makeAppState({ ...editState, selectedRow: { commitId: "c1" } })).map((c) => c.id);
       // HEAD: no Move up; its Reword… is Amend last commit.
       expect(head).not.toContain("move-up-selected");
       expect(head).not.toContain("reword-selected");
       expect(head).toContain("drop-selected");
-      const dirty = buildCommands(
-        makeAppState({ ...editState, status: [{ path: "a", oldPath: null, staged: false, kind: "Modified" }] }),
-      ).map((c) => c.id);
+      const dirty = commandsFor(makeAppState({ ...editState, status: [{ path: "a", oldPath: null, staged: false, kind: "Modified" }] })).map((c) => c.id);
       for (const id of EDIT_IDS) expect(dirty).not.toContain(id);
-      const busy = buildCommands(makeAppState({ ...editState, pending: true })).map((c) => c.id);
+      const busy = commandsFor(makeAppState({ ...editState, pending: true })).map((c) => c.id);
       for (const id of EDIT_IDS) expect(busy).not.toContain(id);
     });
   });
@@ -1365,7 +1279,7 @@ describe("diff option and discard commands", () => {
       openCurrentFileHistory: vi.fn(),
       ...extra,
     };
-    return { diffCommands, commands: buildCommands(state, undefined, [], undefined, undefined, undefined, undefined, diffCommands) };
+    return { diffCommands, commands: commandsFor(state, { diff: diffCommands }) };
   };
 
   it("offers stashing the current file only when there is one", () => {
@@ -1516,7 +1430,7 @@ describe("diff option and discard commands", () => {
     expect(command?.label).toBe("Stage modified files (tracked only)");
     command!.run();
     expect(state.stageAllFiles).toHaveBeenCalledWith(["a.txt", "gone.txt"]);
-    expect(commandGroup("stage-modified-files")).toBe("Diff");
+    expect(command?.group).toBe("Diff");
   });
 
   it("omits staging the tracked files' changes when there are none, or while busy (#621)", () => {
@@ -1532,23 +1446,23 @@ describe("diff option and discard commands", () => {
   });
 
   it("groups the new commands", () => {
-    expect(commandGroup("toggle-ignore-whitespace")).toBe("Diff");
-    expect(commandGroup("discard-all-unstaged")).toBe("Diff");
-    expect(commandGroup("stage-selected-files")).toBe("Diff");
-    expect(commandGroup("discard-selected-files")).toBe("Diff");
-    expect(commandGroup("stash-selected-files")).toBe("Stash");
+    expect(groupOf("toggle-ignore-whitespace")).toBe("Diff");
+    expect(groupOf("discard-all-unstaged")).toBe("Diff");
+    expect(groupOf("stage-selected-files")).toBe("Diff");
+    expect(groupOf("discard-selected-files")).toBe("Diff");
+    expect(groupOf("stash-selected-files")).toBe("Stash");
   });
 });
 
 describe("undo commands", () => {
   it("lists undo and redo with their labels when available", () => {
     const onUndo = vi.fn();
-    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, undefined, {
+    const commands = commandsFor(makeAppState(), { undo: {
       undoLabel: "Stage a.txt",
       redoLabel: null,
       onUndo,
       onRedo: vi.fn(),
-    });
+    } });
     const undo = commands.find((c) => c.id === "undo");
     expect(undo?.label).toBe("Undo Stage a.txt");
     expect(commands.find((c) => c.id === "redo")).toBeUndefined();
@@ -1557,12 +1471,12 @@ describe("undo commands", () => {
   });
 
   it("omits undo while a repository operation is running", () => {
-    const commands = buildCommands(makeAppState({ pending: true }), undefined, [], undefined, undefined, undefined, undefined, undefined, undefined, {
+    const commands = commandsFor(makeAppState({ pending: true }), { undo: {
       undoLabel: "Stage a.txt",
       redoLabel: "x",
       onUndo: vi.fn(),
       onRedo: vi.fn(),
-    });
+    } });
     expect(commands.find((c) => c.id === "undo")).toBeUndefined();
   });
 });
@@ -1583,28 +1497,15 @@ describe("preferences and external tool commands", () => {
     openCurrentFileHistory: vi.fn(),
   });
   const build = (state: ReturnType<typeof makeAppState>, currentFile: string | null, toolCommands: ReturnType<typeof tools>) =>
-    buildCommands(
-      state,
-      undefined,
-      [],
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      diffCommands(currentFile),
-      undefined,
-      undefined,
-      undefined,
-      toolCommands,
-    );
+    commandsFor(state, { diff: diffCommands(currentFile), tools: toolCommands });
 
   it("adds Preferences… with the app commands", () => {
     const onOpenPreferences = vi.fn();
-    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, {
+    const commands = commandsFor(makeAppState(), { app: {
       onCloneRepository: vi.fn(),
       onNewRepository: vi.fn(),
       onOpenPreferences,
-    });
+    } });
     const preferences = commands.find((c) => c.label === "Preferences…");
     expect(preferences?.keywords).toEqual(expect.arrayContaining(["settings", "editor", "terminal"]));
     preferences!.run();
@@ -1613,9 +1514,9 @@ describe("preferences and external tool commands", () => {
 
   it("adds Third-party licences with the app commands", () => {
     const onOpenThirdPartyLicences = vi.fn();
-    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, {
+    const commands = commandsFor(makeAppState(), { app: {
       onOpenThirdPartyLicences,
-    });
+    } });
     const licences = commands.find((c) => c.label === "Third-party licences");
     expect(licences?.keywords).toEqual(expect.arrayContaining(["licenses", "about", "open source"]));
     licences!.run();
@@ -1624,26 +1525,25 @@ describe("preferences and external tool commands", () => {
 
   it("adds Open user guide with the app commands (#320)", () => {
     const onOpenUserGuide = vi.fn();
-    const commands = buildCommands(makeAppState(), undefined, [], undefined, undefined, undefined, undefined, undefined, {
+    const commands = commandsFor(makeAppState(), { app: {
       onOpenUserGuide,
-    });
+    } });
     const guide = commands.find((c) => c.label === "Open user guide");
     expect(guide?.id).toBe("open-user-guide");
     expect(guide?.keywords).toEqual(expect.arrayContaining(["help", "documentation", "manual"]));
-    expect(commandGroup("open-user-guide")).toBe("General");
+    expect(groupOf("open-user-guide")).toBe("General");
     guide!.run();
     expect(onOpenUserGuide).toHaveBeenCalled();
   });
 
   it("adds Reopen closed tab, grouped under Repositories, only when a closed tab can be reopened (#613)", () => {
     const onReopenClosedTab = vi.fn();
-    const build = (appCommands: AppCommands) =>
-      buildCommands(makeAppState({ pending: true }), undefined, [], undefined, undefined, undefined, undefined, undefined, appCommands);
+    const build = (appCommands: AppCommands) => buildCommands({ appState: makeAppState({ pending: true }), app: appCommands });
     expect(build({}).some((c) => c.id === "reopen-closed-tab")).toBe(false);
     // Offered while an operation runs: it opens another tab, it doesn't touch this one.
     const reopen = build({ onReopenClosedTab }).find((c) => c.id === "reopen-closed-tab");
     expect(reopen?.label).toBe("Reopen closed tab");
-    expect(commandGroup("reopen-closed-tab")).toBe("Repositories");
+    expect(reopen?.group).toBe("Repositories");
     reopen!.run();
     expect(onReopenClosedTab).toHaveBeenCalledOnce();
   });
@@ -1663,8 +1563,8 @@ describe("preferences and external tool commands", () => {
     expect(toolCommands.onRevealRepository).toHaveBeenCalled();
     expect(toolCommands.onOpenCurrentFileInEditor).toHaveBeenCalled();
     expect(toolCommands.onOpenCurrentFileInDiffTool).toHaveBeenCalled();
-    expect(commandGroup("open-terminal")).toBe("Repositories");
-    expect(commandGroup("open-current-file-in-diff-tool")).toBe("Diff");
+    expect(groupOf("open-terminal")).toBe("Repositories");
+    expect(groupOf("open-current-file-in-diff-tool")).toBe("Diff");
   });
 
   it("keeps tool commands while an operation is running", () => {
@@ -1688,15 +1588,15 @@ describe("remote and tag palette entries", () => {
     ["remove-remote:fork", "Remove remote fork…", "remove"],
   ] as const)("%s (%s) opens the dialog for that remote", (id, label, kind) => {
     const appState = makeAppState({ remotes });
-    const command = buildCommands(appState).find((c) => c.id === id);
+    const command = commandsFor(appState).find((c) => c.id === id);
     expect(command?.label).toBe(label);
     command?.run();
     expect(appState.openDialog).toHaveBeenCalledWith({ kind: "remote", action: kind, remoteName: "fork" });
-    expect(commandGroup(id)).toBe("Remotes");
+    expect(command?.group).toBe("Remotes");
   });
 
   it("emits one entry per remote", () => {
-    const ids = buildCommands(makeAppState({ remotes })).map((c) => c.id);
+    const ids = commandsFor(makeAppState({ remotes })).map((c) => c.id);
     expect(ids.filter((id) => id.startsWith("edit-remote:"))).toEqual(["edit-remote:origin", "edit-remote:fork"]);
     expect(ids.filter((id) => id.startsWith("manage-credentials:"))).toHaveLength(2);
     expect(ids.filter((id) => id.startsWith("remove-remote:"))).toHaveLength(2);
@@ -1708,13 +1608,13 @@ describe("remote and tag palette entries", () => {
       { name: "v1", targetId: "tagobj", commitId: "c1", annotated: true, message: "m", taggerName: "t", timestamp: 1 },
     ];
     const appState = makeAppState({ tags });
-    const command = buildCommands(appState, vi.fn(), [], vi.fn(), { ...allVisible, tags: false }).find(
+    const command = commandsFor(appState, { sidebar: sidebar({ ...allVisible, tags: false }), tabs: tabs({ onOpenRepoTab: vi.fn(), onSwitchRepoTab: vi.fn() }) }).find(
       (c) => c.id === "checkout-tag:v1",
     );
     expect(command?.label).toBe("Check out tag v1 (detached)");
     command?.run();
     expect(appState.checkoutCommit).toHaveBeenCalledWith("c1");
-    expect(commandGroup("checkout-tag:v1")).toBe("Branches");
+    expect(command?.group).toBe("Branches");
   });
 
   it("opens Delete from remote… for each tag while a remote exists", () => {
@@ -1722,14 +1622,14 @@ describe("remote and tag palette entries", () => {
       { name: "v1", targetId: "c1", commitId: "c1", annotated: false, message: null, taggerName: null, timestamp: null },
     ];
     const appState = makeAppState({ tags });
-    const command = buildCommands(appState).find((c) => c.id === "delete-remote-tag:v1");
+    const command = commandsFor(appState).find((c) => c.id === "delete-remote-tag:v1");
     expect(command?.label).toBe("Delete tag v1 from remote…");
     command?.run();
     expect(appState.openDialog).toHaveBeenCalledWith({ kind: "deleteRemoteTag", tagName: "v1" });
 
-    const ids = buildCommands(makeAppState({ tags, remotes: [] })).map((c) => c.id);
+    const ids = commandsFor(makeAppState({ tags, remotes: [] })).map((c) => c.id);
     expect(ids).not.toContain("delete-remote-tag:v1");
-    const busy = buildCommands(makeAppState({ tags, pending: true })).map((c) => c.id);
+    const busy = commandsFor(makeAppState({ tags, pending: true })).map((c) => c.id);
     expect(busy).not.toContain("delete-remote-tag:v1");
   });
 
@@ -1737,7 +1637,7 @@ describe("remote and tag palette entries", () => {
     const tags = [
       { name: "tree", targetId: "t1", commitId: null, annotated: true, message: "m", taggerName: "t", timestamp: 1 },
     ];
-    const ids = buildCommands(makeAppState({ tags })).map((c) => c.id);
+    const ids = commandsFor(makeAppState({ tags })).map((c) => c.id);
     expect(ids).not.toContain("checkout-tag:tree");
   });
 });
@@ -1769,12 +1669,7 @@ describe("Go to pickers (#441)", () => {
     };
   }
   function pickers(state: Parameters<typeof makeAppState>[0] = {}, handlers = goTo()) {
-    const commands = buildCommands(
-      makeAppState({ commits, ...state }),
-      undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, undefined,
-      handlers,
-    );
+    const commands = commandsFor(makeAppState({ commits, ...state }), { goTo: handlers });
     return { commands, handlers, picker: (id: string) => commands.find((c) => c.id === id) };
   }
 
@@ -1782,14 +1677,14 @@ describe("Go to pickers (#441)", () => {
     const { picker } = pickers({ pending: true });
     for (const id of ["go-to-commit", "go-to-branch", "go-to-tag", "go-to-stash"]) {
       expect(picker(id)?.picker).toBeDefined();
-      expect(commandGroup(id)).toBe("Go to");
+      expect(groupOf(id)).toBe("Go to");
     }
     expect(picker("go-to-commit")?.label).toBe("Go to commit…");
 
     const empty = pickers({ tags: [], stashes: [] });
     expect(empty.picker("go-to-tag")).toBeUndefined();
     expect(empty.picker("go-to-stash")).toBeUndefined();
-    expect(buildCommands(makeAppState()).some((c) => c.id === "go-to-commit")).toBe(false);
+    expect(commandsFor(makeAppState()).some((c) => c.id === "go-to-commit")).toBe(false);
   });
 
   it("lists local branches, then remote ones the graph knows, and goes to the chosen one", () => {
@@ -1960,7 +1855,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
   it.each(states)("while %s", (_label, overrides) => {
     const appState = makeAppState(overrides);
     const { state } = appState;
-    const ids = buildCommands(appState, vi.fn()).map((command) => command.id);
+    const ids = commandsFor(appState, { tabs: tabs({ onOpenRepoTab: vi.fn() }) }).map((command) => command.id);
 
     expectAgreement(menu(branchTree(state), "Actions for feature"), ids, [
       ["Checkout", "switch-branch:feature"],
@@ -2034,5 +1929,378 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
     } finally {
       cleanup();
     }
+  });
+});
+
+// #494: a state for each kind of command (an operation in progress, a clean working tree, ...),
+// and the palette's commands for it with every family's handlers, as RepoWorkspace passes them.
+const noop = () => {};
+const REPRESENTATIVE_HEAD = { headId: "c1", detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: ["pre-commit"], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };
+const representativeCommit = (id: string, parentIds: string[]) => ({ id, shortId: id, summary: `commit ${id}`, authorName: "T", authorEmail: "t@example.com", timestamp: 0, parentIds, branchRefs: [], remoteBranchRefs: [] });
+const representativeState = (overrides: Partial<AppState> = {}) =>
+  makeAppState({
+    selectedRow: { commitId: "c2" },
+    commits: [representativeCommit("c1", ["c2"]), representativeCommit("c2", ["c3"]), representativeCommit("c3", [])],
+    headInfo: REPRESENTATIVE_HEAD,
+    status: [
+      { path: "a.txt", oldPath: null, staged: true, kind: "Modified" },
+      { path: "b.txt", oldPath: null, staged: false, kind: "Modified" },
+    ],
+    undoState: { undo: "commit", redo: "checkout" },
+    ...overrides,
+  });
+const STATES = {
+  normal: () => representativeState(),
+  rebase: () => representativeState({ rebaseProgress: { currentStep: 1, totalSteps: 2 } }),
+  sequence: () => representativeState({ headInfo: { ...REPRESENTATIVE_HEAD, sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 1 } } as AppState["headInfo"] }),
+  merge: () => representativeState({ mergeMessage: "Merge x" }),
+  clean: () => representativeState({ status: [], selectedRow: "uncommitted" }),
+};
+// Every family, as RepoWorkspace passes them.
+const allFamilies = (appState: UseAppStateResult) =>
+  buildCommands({
+    appState,
+    onShowShortcuts: noop,
+    app: { onCloneRepository: noop, onNewRepository: noop, onOpenPreferences: noop, onOpenThirdPartyLicences: noop, onOpenUserGuide: noop },
+    tabs: tabs({ otherOpenRepos: [{ path: "/other", displayName: "other" } as OpenRepo] }),
+    sidebar: sidebar(),
+    diff: {
+      settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
+      update: noop,
+      currentFile: "b.txt",
+      requestDiscardCurrentFile: noop,
+      requestDiscardAllUnstaged: noop,
+      openCurrentFileHistory: noop,
+      selection: { staged: false, paths: ["b.txt", "c.txt"] },
+      requestDiscardSelection: noop,
+      currentDiff: { path: "b.txt", canShowWholeFile: true, toggleWrap: noop, toggleWholeFile: noop },
+    },
+    undo: { undoLabel: "commit", redoLabel: "checkout", onUndo: noop, onRedo: noop },
+    search: { onSearchCommits: noop },
+    tools: { onOpenTerminal: noop, onRevealRepository: noop, onOpenCurrentFileInEditor: noop, onOpenCurrentFileInDiffTool: noop },
+    goTo: { onGoToCommit: noop, onSearchHistory: noop, onGoToBranch: noop, onGoToTag: noop, onGoToStash: noop },
+    commit: { onCherryPick: noop, onRevert: noop, onChooseParent: noop, onReset: noop },
+  });
+
+/** The group of a command offered in one of the representative states. */
+function groupOf(id: string): CommandGroup {
+  for (const state of Object.values(STATES)) {
+    const command = allFamilies(state()).find((candidate) => candidate.id === id);
+    if (command !== undefined) return command.group;
+  }
+  throw new Error(`no representative state offers ${id}`);
+}
+
+// #494: the commands, ids and groups before the builders were split by family. Recents are stored
+// by id, so a builder must keep the ids, and each group is now declared by the builder instead of
+// derived from the id. #583 and #592 moved the remote, diff and tag commands that had fallen
+// under "General" into their family's group. #621 added "stage-modified-files" since.
+describe("command ids and groups", () => {
+  const EXPECTED: Record<keyof typeof STATES, [string, CommandGroup][]> = {
+    normal: [
+      ["add-remote", "Remotes"],
+      ["amend-last-commit", "General"],
+      ["apply-patch", "Diff"],
+      ["browse-remote-branches:origin", "Remotes"],
+      ["checkout-selected", "General"],
+      ["checkout-tag:v1.0", "Branches"],
+      ["cherry-pick-selected", "General"],
+      ["clone-repository", "General"],
+      ["close-tab", "Repositories"],
+      ["create-tag-head", "Branches"],
+      ["create-tag-selected", "Branches"],
+      ["decrease-context-lines", "Diff"],
+      ["delete-remote-branch", "Remotes"],
+      ["delete-remote-tag:v1.0", "Remotes"],
+      ["delete-tag:v1.0", "Branches"],
+      ["discard-all-unstaged", "Diff"],
+      ["discard-current-file", "Diff"],
+      ["discard-selected-files", "Diff"],
+      ["drop-stash:0", "Stash"],
+      ["edit-remote:origin", "Remotes"],
+      ["fetch-all-remotes", "Remotes"],
+      ["fetch-remote:origin", "Remotes"],
+      ["file-history-current-file", "Diff"],
+      ["force-push", "Remotes"],
+      ["go-to-branch", "Go to"],
+      ["go-to-commit", "Go to"],
+      ["go-to-stash", "Go to"],
+      ["go-to-tag", "Go to"],
+      ["go-to:Branches", "Go to"],
+      ["go-to:Pull Requests", "Go to"],
+      ["go-to:Reflog", "Go to"],
+      ["go-to:Stashes", "Go to"],
+      ["go-to:Submodules", "Go to"],
+      ["go-to:Tags", "Go to"],
+      ["go-to:Worktrees", "Go to"],
+      ["increase-context-lines", "Diff"],
+      ["init-submodule:libs/a", "General"],
+      ["manage-credentials:origin", "Remotes"],
+      ["merge-branch:feature", "Branches"],
+      ["new-repository", "General"],
+      ["open-current-file-in-diff-tool", "Diff"],
+      ["open-current-file-in-editor", "Diff"],
+      ["open-submodule:libs/b", "General"],
+      ["open-terminal", "Repositories"],
+      ["open-user-guide", "General"],
+      ["open-worktree:/repo", "General"],
+      ["open-worktree:/repo-wt1", "General"],
+      ["preferences", "General"],
+      ["prune-worktrees", "General"],
+      ["pull", "Remotes"],
+      ["push-branch-to", "Remotes"],
+      ["push-branch:origin", "Remotes"],
+      ["push-tags:origin", "Remotes"],
+      ["redo", "General"],
+      ["refresh", "General"],
+      ["remove-remote:origin", "Remotes"],
+      ["remove-worktree:wt1", "General"],
+      ["reset-selected", "General"],
+      ["reveal-repository", "Repositories"],
+      ["revert-selected", "General"],
+      ["save-staged-patch", "Diff"],
+      ["save-stash", "Stash"],
+      ["search-commits", "General"],
+      ["show-shortcuts", "General"],
+      ["show-stash:0", "Stash"],
+      ["stage-modified-files", "Diff"],
+      ["stage-selected-files", "Diff"],
+      ["stash-current-file", "Stash"],
+      ["stash-selected-files", "Stash"],
+      ["stash-with-options", "Stash"],
+      ["switch-branch:feature", "Branches"],
+      ["switch-repo:/other", "Repositories"],
+      ["third-party-licences", "General"],
+      ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whole-file", "Diff"],
+      ["toggle-skip-hooks", "General"],
+      ["toggle-syntax-highlighting", "Diff"],
+      ["toggle-wrap-lines", "Diff"],
+      ["undo", "General"],
+      ["update-submodule:libs/b", "General"],
+    ],
+    rebase: [
+      ["add-remote", "Remotes"],
+      ["clone-repository", "General"],
+      ["create-tag-head", "Branches"],
+      ["create-tag-selected", "Branches"],
+      ["decrease-context-lines", "Diff"],
+      ["discard-all-unstaged", "Diff"],
+      ["discard-current-file", "Diff"],
+      ["discard-selected-files", "Diff"],
+      ["drop-stash:0", "Stash"],
+      ["file-history-current-file", "Diff"],
+      ["go-to-branch", "Go to"],
+      ["go-to-commit", "Go to"],
+      ["go-to-stash", "Go to"],
+      ["go-to-tag", "Go to"],
+      ["go-to:Branches", "Go to"],
+      ["go-to:Pull Requests", "Go to"],
+      ["go-to:Reflog", "Go to"],
+      ["go-to:Stashes", "Go to"],
+      ["go-to:Submodules", "Go to"],
+      ["go-to:Tags", "Go to"],
+      ["go-to:Worktrees", "Go to"],
+      ["increase-context-lines", "Diff"],
+      ["new-repository", "General"],
+      ["open-current-file-in-diff-tool", "Diff"],
+      ["open-current-file-in-editor", "Diff"],
+      ["open-terminal", "Repositories"],
+      ["open-user-guide", "General"],
+      ["preferences", "General"],
+      ["rebase-abort", "General"],
+      ["rebase-continue", "General"],
+      ["refresh", "General"],
+      ["reveal-repository", "Repositories"],
+      ["save-staged-patch", "Diff"],
+      ["search-commits", "General"],
+      ["show-shortcuts", "General"],
+      ["show-stash:0", "Stash"],
+      ["stage-modified-files", "Diff"],
+      ["stage-selected-files", "Diff"],
+      ["switch-repo:/other", "Repositories"],
+      ["third-party-licences", "General"],
+      ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whole-file", "Diff"],
+      ["toggle-skip-hooks", "General"],
+      ["toggle-syntax-highlighting", "Diff"],
+      ["toggle-wrap-lines", "Diff"],
+    ],
+    sequence: [
+      ["abort-sequence", "General"],
+      ["add-remote", "Remotes"],
+      ["clone-repository", "General"],
+      ["continue-sequence", "General"],
+      ["create-tag-head", "Branches"],
+      ["create-tag-selected", "Branches"],
+      ["decrease-context-lines", "Diff"],
+      ["discard-all-unstaged", "Diff"],
+      ["discard-current-file", "Diff"],
+      ["discard-selected-files", "Diff"],
+      ["drop-stash:0", "Stash"],
+      ["file-history-current-file", "Diff"],
+      ["go-to-branch", "Go to"],
+      ["go-to-commit", "Go to"],
+      ["go-to-stash", "Go to"],
+      ["go-to-tag", "Go to"],
+      ["go-to:Branches", "Go to"],
+      ["go-to:Pull Requests", "Go to"],
+      ["go-to:Reflog", "Go to"],
+      ["go-to:Stashes", "Go to"],
+      ["go-to:Submodules", "Go to"],
+      ["go-to:Tags", "Go to"],
+      ["go-to:Worktrees", "Go to"],
+      ["increase-context-lines", "Diff"],
+      ["new-repository", "General"],
+      ["open-current-file-in-diff-tool", "Diff"],
+      ["open-current-file-in-editor", "Diff"],
+      ["open-terminal", "Repositories"],
+      ["open-user-guide", "General"],
+      ["preferences", "General"],
+      ["refresh", "General"],
+      ["reveal-repository", "Repositories"],
+      ["save-staged-patch", "Diff"],
+      ["search-commits", "General"],
+      ["show-shortcuts", "General"],
+      ["show-stash:0", "Stash"],
+      ["stage-modified-files", "Diff"],
+      ["stage-selected-files", "Diff"],
+      ["switch-repo:/other", "Repositories"],
+      ["third-party-licences", "General"],
+      ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whole-file", "Diff"],
+      ["toggle-skip-hooks", "General"],
+      ["toggle-syntax-highlighting", "Diff"],
+      ["toggle-wrap-lines", "Diff"],
+    ],
+    merge: [
+      ["add-remote", "Remotes"],
+      ["clone-repository", "General"],
+      ["create-tag-head", "Branches"],
+      ["create-tag-selected", "Branches"],
+      ["decrease-context-lines", "Diff"],
+      ["discard-all-unstaged", "Diff"],
+      ["discard-current-file", "Diff"],
+      ["discard-selected-files", "Diff"],
+      ["drop-stash:0", "Stash"],
+      ["file-history-current-file", "Diff"],
+      ["go-to-branch", "Go to"],
+      ["go-to-commit", "Go to"],
+      ["go-to-stash", "Go to"],
+      ["go-to-tag", "Go to"],
+      ["go-to:Branches", "Go to"],
+      ["go-to:Pull Requests", "Go to"],
+      ["go-to:Reflog", "Go to"],
+      ["go-to:Stashes", "Go to"],
+      ["go-to:Submodules", "Go to"],
+      ["go-to:Tags", "Go to"],
+      ["go-to:Worktrees", "Go to"],
+      ["increase-context-lines", "Diff"],
+      ["merge-abort", "General"],
+      ["new-repository", "General"],
+      ["open-current-file-in-diff-tool", "Diff"],
+      ["open-current-file-in-editor", "Diff"],
+      ["open-terminal", "Repositories"],
+      ["open-user-guide", "General"],
+      ["preferences", "General"],
+      ["refresh", "General"],
+      ["reveal-repository", "Repositories"],
+      ["save-staged-patch", "Diff"],
+      ["save-stash", "Stash"],
+      ["search-commits", "General"],
+      ["show-shortcuts", "General"],
+      ["show-stash:0", "Stash"],
+      ["stage-modified-files", "Diff"],
+      ["stage-selected-files", "Diff"],
+      ["stash-current-file", "Stash"],
+      ["stash-selected-files", "Stash"],
+      ["stash-with-options", "Stash"],
+      ["switch-repo:/other", "Repositories"],
+      ["third-party-licences", "General"],
+      ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whole-file", "Diff"],
+      ["toggle-skip-hooks", "General"],
+      ["toggle-syntax-highlighting", "Diff"],
+      ["toggle-wrap-lines", "Diff"],
+    ],
+    clean: [
+      ["add-remote", "Remotes"],
+      ["amend-last-commit", "General"],
+      ["apply-patch", "Diff"],
+      ["apply-stash:0", "Stash"],
+      ["browse-remote-branches:origin", "Remotes"],
+      ["checkout-tag:v1.0", "Branches"],
+      ["clone-repository", "General"],
+      ["close-tab", "Repositories"],
+      ["create-tag-head", "Branches"],
+      ["decrease-context-lines", "Diff"],
+      ["delete-remote-branch", "Remotes"],
+      ["delete-remote-tag:v1.0", "Remotes"],
+      ["delete-tag:v1.0", "Branches"],
+      ["discard-current-file", "Diff"],
+      ["discard-selected-files", "Diff"],
+      ["drop-stash:0", "Stash"],
+      ["edit-remote:origin", "Remotes"],
+      ["fetch-all-remotes", "Remotes"],
+      ["fetch-remote:origin", "Remotes"],
+      ["file-history-current-file", "Diff"],
+      ["force-push", "Remotes"],
+      ["go-to-branch", "Go to"],
+      ["go-to-commit", "Go to"],
+      ["go-to-stash", "Go to"],
+      ["go-to-tag", "Go to"],
+      ["go-to:Branches", "Go to"],
+      ["go-to:Pull Requests", "Go to"],
+      ["go-to:Reflog", "Go to"],
+      ["go-to:Stashes", "Go to"],
+      ["go-to:Submodules", "Go to"],
+      ["go-to:Tags", "Go to"],
+      ["go-to:Worktrees", "Go to"],
+      ["increase-context-lines", "Diff"],
+      ["init-submodule:libs/a", "General"],
+      ["manage-credentials:origin", "Remotes"],
+      ["merge-branch:feature", "Branches"],
+      ["new-repository", "General"],
+      ["open-current-file-in-diff-tool", "Diff"],
+      ["open-current-file-in-editor", "Diff"],
+      ["open-submodule:libs/b", "General"],
+      ["open-terminal", "Repositories"],
+      ["open-user-guide", "General"],
+      ["open-worktree:/repo", "General"],
+      ["open-worktree:/repo-wt1", "General"],
+      ["pop-stash:0", "Stash"],
+      ["preferences", "General"],
+      ["prune-worktrees", "General"],
+      ["pull", "Remotes"],
+      ["push-branch-to", "Remotes"],
+      ["push-branch:origin", "Remotes"],
+      ["push-tags:origin", "Remotes"],
+      ["redo", "General"],
+      ["refresh", "General"],
+      ["remove-remote:origin", "Remotes"],
+      ["remove-worktree:wt1", "General"],
+      ["reveal-repository", "Repositories"],
+      ["search-commits", "General"],
+      ["show-shortcuts", "General"],
+      ["show-stash:0", "Stash"],
+      ["stage-selected-files", "Diff"],
+      ["switch-branch:feature", "Branches"],
+      ["switch-repo:/other", "Repositories"],
+      ["third-party-licences", "General"],
+      ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whole-file", "Diff"],
+      ["toggle-skip-hooks", "General"],
+      ["toggle-syntax-highlighting", "Diff"],
+      ["toggle-wrap-lines", "Diff"],
+      ["undo", "General"],
+      ["update-submodule:libs/b", "General"],
+    ],
+  };
+
+  it.each(Object.keys(STATES) as (keyof typeof STATES)[])("keeps every id and group (%s)", (name) => {
+    const commands = allFamilies(STATES[name]());
+    const actual = commands.map((command): [string, CommandGroup] => [command.id, command.group]);
+    expect(actual.sort(([a], [b]) => a.localeCompare(b))).toEqual(EXPECTED[name].sort(([a], [b]) => a.localeCompare(b)));
+    expect(new Set(commands.map((command) => command.id)).size).toBe(commands.length);
   });
 });

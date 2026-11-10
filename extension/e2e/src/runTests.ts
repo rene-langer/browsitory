@@ -7,6 +7,7 @@ import {
   getFreePort,
   killStaleDconfWatchers,
   PLATFORM_LAUNCH_ARGS,
+  prepareConfigDir,
   prepareLaunchEnvironment,
 } from "./support/launch";
 
@@ -28,6 +29,7 @@ async function main() {
   killStaleDconfWatchers();
 
   prepareLaunchEnvironment();
+  prepareConfigDir();
 
   const cdpPort = await getFreePort();
   process.env["BROWSITORY_VSCODE_E2E_CDP_PORT"] = String(cdpPort);
