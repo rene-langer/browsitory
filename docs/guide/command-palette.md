@@ -29,8 +29,9 @@ The palette has almost every action in Browsitory, grouped like this:
   one by name, folder name or path), **Rename tab…**, close the tab, open a terminal, reveal the
   repository in the file manager (see [Multiple repositories](tabs.md)).
 - **General:** **Refresh**, undo and redo, search commits, the selected commit's actions
-  (cherry-pick, revert, reset, check out, reword, squash, fixup, move, drop), worktree and
-  submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Third-party licences** and
+  (cherry-pick, revert, reset, check out, reword, squash, fixup, move, drop; for a search
+  result or file history commit older than the loaded history, all but the history edits),
+  worktree and submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Third-party licences** and
   **Open user guide**.
 
 Commands that can't run right now are left out. For example, while a rebase is paused, the

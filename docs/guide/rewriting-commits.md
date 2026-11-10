@@ -168,4 +168,7 @@ leaves it behind (it is still in the reflog).
 The palette also has commands to cherry-pick, revert, check out and reset to the selected commit,
 to reword, squash, fixup, move or drop it (**Reword 1a2b3c4…**, **Drop 1a2b3c4** and so on), and
 to amend the last commit (where the commit menu offers them), plus **Continue cherry-pick** /
-**Abort cherry-pick** (or revert) while a sequence is paused.
+**Abort cherry-pick** (or revert) while a sequence is paused. Cherry-pick, revert, check out,
+reset and **Create tag at…** also work for a commit selected in the search results or a file
+history that is older than the history loaded in the graph; the history edits need the commit in
+the graph, so load more history (or use **Go to commit…**) first.

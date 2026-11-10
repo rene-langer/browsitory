@@ -1079,6 +1079,68 @@ describe("history commands", () => {
     expect(appState.resetToCommit).not.toHaveBeenCalled();
   });
 
+  // #515: a commit the search results or file history list, beyond the loaded graph.
+  describe("a listed commit outside the loaded graph (#515)", () => {
+    const listed = { ...graphCommit("old", []), shortId: "old1234" };
+    const listedState: Partial<AppState> = { ...historyState, selectedRow: { commitId: "old" } };
+    const withListed = (appState: UseAppStateResult, commitCommands = makeCommitCommands()) =>
+      commandsFor(appState, { commit: { ...commitCommands, listedCommits: [listed] } });
+
+    it("offers the commit menu's actions from the listed commit's own data, and runs them", () => {
+      const commitCommands = makeCommitCommands();
+      const commands = withListed(makeAppState(listedState), commitCommands);
+      const label = (id: string) => commands.find((c) => c.id === id)?.label;
+      expect(label("cherry-pick-selected")).toBe("Cherry-pick old1234");
+      expect(label("revert-selected")).toBe("Revert old1234");
+      expect(label("reset-selected")).toBe("Reset to old1234…");
+      expect(label("checkout-selected")).toBe("Checkout old1234 (detached)");
+      expect(label("create-tag-selected")).toBe("Create tag at old1234…");
+      commands.find((c) => c.id === "cherry-pick-selected")!.run();
+      commands.find((c) => c.id === "revert-selected")!.run();
+      commands.find((c) => c.id === "reset-selected")!.run();
+      expect(commitCommands.onCherryPick).toHaveBeenCalledWith("old");
+      expect(commitCommands.onRevert).toHaveBeenCalledWith("old");
+      expect(commitCommands.onReset).toHaveBeenCalledWith("old");
+    });
+
+    it("asks for the parent of a listed merge commit", () => {
+      const merge = { ...graphCommit("m9", ["p1", "p2"]), shortId: "m9" };
+      const commitCommands = makeCommitCommands();
+      const commands = commandsFor(makeAppState({ ...historyState, selectedRow: { commitId: "m9" } }), {
+        commit: { ...commitCommands, listedCommits: [merge] },
+      });
+      expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m9…");
+      commands.find((c) => c.id === "revert-selected")!.run();
+      expect(commitCommands.onChooseParent).toHaveBeenCalledWith("Revert", "m9");
+    });
+
+    it("follows the commit menu's availability: none while blocked, no reset on a detached HEAD", () => {
+      const blockedIds = withListed(makeAppState({ ...listedState, mergeMessage: "Merge x" })).map((c) => c.id);
+      for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected", "checkout-selected"]) {
+        expect(blockedIds).not.toContain(id);
+      }
+      const detached = withListed(makeAppState({ ...listedState, branches: [] })).map((c) => c.id);
+      expect(detached).toContain("cherry-pick-selected");
+      expect(detached).not.toContain("reset-selected");
+    });
+
+    it("leaves out the history edits, which need the commit's ancestry in the graph", () => {
+      const ids = withListed(makeAppState(listedState)).map((c) => c.id);
+      for (const id of ["reword-selected", "squash-selected", "fixup-selected", "drop-selected", "move-up-selected"]) {
+        expect(ids).not.toContain(id);
+      }
+    });
+
+    it("offers nothing for a selected commit neither the graph nor a list has", () => {
+      const ids = commandsFor(makeAppState({ ...historyState, selectedRow: { commitId: "gone" } }), {
+        commit: { ...makeCommitCommands(), listedCommits: [listed] },
+      }).map((c) => c.id);
+      for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected", "checkout-selected"]) {
+        expect(ids).not.toContain(id);
+      }
+    });
+  });
+
   it("leaves out cherry-pick, revert and reset without the commit actions to run them", () => {
     const ids = commandsFor(makeAppState(historyState)).map((c) => c.id);
     for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected"]) expect(ids).not.toContain(id);
