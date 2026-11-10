@@ -21,6 +21,28 @@ async function openPickerOverlay(): Promise<void> {
   await browser.execute((el) => (el as HTMLElement).click(), await $('button[aria-label="Open another repository"]'));
 }
 
+// Whether a grouped tab, its close button and its group's label row all lie inside the header's
+// box and are not clipped by the scrolling tab list. The tab may overlap the header's bottom
+// border by its 1px merge into the workspace.
+async function groupedTabFitsHeader(repoPath: string): Promise<{ ok: boolean; detail: string }> {
+  return browser.execute((title) => {
+    const label = document.querySelector(`button[role="tab"][title="${title}"]`);
+    const tab = label?.parentElement;
+    const header = label?.closest("header");
+    const list = label?.closest('[role="tablist"]');
+    const groupHeader = tab?.parentElement?.previousElementSibling;
+    if (!tab || !header || !list || !groupHeader) return { ok: false, detail: "elements not found" };
+    const headerBox = header.getBoundingClientRect();
+    const boxes = [tab, ...tab.querySelectorAll("button"), groupHeader, ...groupHeader.querySelectorAll("button")].map(
+      (el) => el.getBoundingClientRect(),
+    );
+    const inside = boxes.every((box) => box.top >= headerBox.top - 0.5 && box.bottom <= headerBox.bottom + 0.5);
+    const unclipped = list.scrollHeight <= list.clientHeight;
+    const detail = `header ${headerBox.top}-${headerBox.bottom}, boxes ${boxes.map((b) => `${b.top}-${b.bottom}`).join(" ")}, list ${list.scrollHeight}/${list.clientHeight}`;
+    return { ok: inside && unclipped, detail };
+  }, repoPath);
+}
+
 describe("Browsitory multi-repo workspaces", function () {
   // Evidence from three real CI runs on 2026-08-24 (see the Edit-modal wait below): under
   // normal runner load the whole Edit-modal re-scan resolves in well under a second (confirmed
@@ -56,6 +78,20 @@ describe("Browsitory multi-repo workspaces", function () {
     const repoBTab = await $(`button[title="${E2E_WORKSPACE_REPO_B}"]`);
     await repoATab.waitForExist();
     await repoBTab.waitForExist();
+
+    // #606: the group's label row and its tabs fit inside the header at small window sizes.
+    const originalSize = await browser.getWindowSize();
+    try {
+      for (const size of [{ width: 1280, height: 720 }, { width: 1024, height: 640 }]) {
+        await browser.setWindowSize(size.width, size.height);
+        // Give the resize a moment to lay out, then assert with the measured boxes in the message.
+        await browser.waitUntil(async () => (await groupedTabFitsHeader(E2E_WORKSPACE_REPO_A)).ok, { timeout: 5000 }).catch(() => undefined);
+        const fit = await groupedTabFitsHeader(E2E_WORKSPACE_REPO_A);
+        if (!fit.ok) throw new Error(`grouped tab doesn't fit the header at ${size.width}x${size.height}: ${fit.detail}`);
+      }
+    } finally {
+      await browser.setWindowSize(originalSize.width, originalSize.height);
+    }
 
     await browser.waitUntil(
       async () => {

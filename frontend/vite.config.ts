@@ -24,5 +24,8 @@ export default defineConfig({
     // name of the element it was waiting for. 10 s keeps that wait well inside the test's budget
     // on a loaded machine (#217). A passing test is not slowed down.
     testTimeout: 10_000,
+    // Vitest stubs stylesheets to `{}`; let a `?raw` import keep its text, so a test can check a
+    // rule jsdom can't lay out (#606). Plain and module CSS imports stay stubbed.
+    css: { include: [/\.css\?raw$/] },
   },
 })
