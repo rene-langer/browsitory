@@ -98,7 +98,7 @@ describe("Browsitory restart resilience", () => {
     const rebaseButton = await $("button*=Rebase onto here");
     await rebaseButton.waitForExist();
     await rebaseButton.click();
-    const editRow = await $("//li[contains(., 'e2e: restart commit a')]//select[@aria-label='Action']");
+    const editRow = await $("//li[contains(., 'e2e: restart commit a')]//select[starts-with(@aria-label, 'Action for ')]");
     await editRow.waitForExist();
     await editRow.selectByVisibleText("Edit");
     await (await $("button=Start rebase")).click();

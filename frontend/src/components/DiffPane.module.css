@@ -60,6 +60,8 @@ li.fileSection.current {
 
 li.fileSection[aria-selected="true"] .fileSectionHeader {
   background: var(--color-selected-bg);
+  color: var(--color-selected-text);
+  box-shadow: inset 2px 0 0 var(--color-selected-marker);
 }
 
 .conflicted {

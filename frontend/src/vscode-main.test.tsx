@@ -23,6 +23,8 @@ describe("VSCode webview bootstrap", () => {
     rootRender.mockReset();
     vi.resetModules();
     document.body.replaceChildren();
+    delete document.documentElement.dataset.host;
+    delete document.documentElement.dataset.theme;
   });
 
   it("loads and mounts without evaluating any Tauri-only module", async () => {
@@ -33,6 +35,8 @@ describe("VSCode webview bootstrap", () => {
     await expect(import("./vscode-main")).resolves.toEqual(expect.any(Object));
 
     expect(rootRender).toHaveBeenCalledOnce();
+    // The editor's theme colours the panel (#676).
+    expect(document.documentElement.dataset.host).toBe("vscode");
     // The dynamic import loads and transforms the whole App module graph from cold inside the
     // test, so it gets more than the 10 s default: about 0.3 s in CI, but over 5 s on a busy
     // machine (#217).

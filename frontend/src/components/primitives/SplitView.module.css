@@ -40,7 +40,7 @@
   background: var(--color-accent);
   /* Matches index.css's focus convention; a background-only indicator would
      disappear under forced-colors. */
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid var(--color-focus-ring);
   outline-offset: 0;
 }
 

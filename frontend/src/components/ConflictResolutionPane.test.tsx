@@ -31,16 +31,106 @@ describe("ConflictResolutionPane", () => {
     expect(screen.getByText(/line three/)).toBeInTheDocument();
   });
 
-  it("Save resolution defaults to ours for every conflict and calls onResolve with the joined text", async () => {
+  // #654: nothing is chosen for the user; one click on Save used to take ours everywhere.
+  it("starts every conflict unresolved and keeps Save disabled until each one is chosen", async () => {
     const onResolve = vi.fn();
-    const client = fakeClient({ getConflictHunks: async () => segments });
+    const twoConflicts: ConflictSegment[] = [
+      { kind: "Conflict", ours: "a ours\n", theirs: "a theirs\n" },
+      { kind: "Clean", content: "middle\n" },
+      { kind: "Conflict", ours: "b ours\n", theirs: "b theirs\n" },
+    ];
+    const client = fakeClient({ getConflictHunks: async () => twoConflicts });
 
     render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={onResolve} onResolveAddDelete={vi.fn()} />);
 
-    await waitFor(() => screen.getByText(/line one/));
-    fireEvent.click(screen.getByText("Save resolution"));
+    const first = await screen.findByRole("region", { name: "Conflict 1 of 2" });
+    const second = screen.getByRole("region", { name: "Conflict 2 of 2" });
+    const save = screen.getByRole("button", { name: "Save resolution" });
+    expect(screen.getByRole("status")).toHaveTextContent("0 of 2 resolved");
+    expect(save).toBeDisabled();
+    expect(screen.getByText("Choose a side for every conflict to save.")).toBeInTheDocument();
+    for (const name of ["Accept ours", "Accept theirs", "Accept both"]) {
+      expect(within(first).getByRole("button", { name })).toHaveAttribute("aria-pressed", "false");
+    }
+    expect(within(first).getByLabelText("Result")).toHaveTextContent("Not chosen yet");
+    fireEvent.click(save);
+    expect(onResolve).not.toHaveBeenCalled();
 
-    expect(onResolve).toHaveBeenCalledWith("shared.txt", "line one\nmain two\nline three\n");
+    fireEvent.click(within(first).getByRole("button", { name: "Accept theirs" }));
+    expect(within(first).getByRole("button", { name: "Accept theirs" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(first).getByRole("button", { name: "Accept ours" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(first).getByLabelText("Result")).toHaveTextContent("a theirs");
+    expect(screen.getByRole("status")).toHaveTextContent("1 of 2 resolved");
+    expect(save).toBeDisabled();
+
+    fireEvent.click(within(second).getByRole("button", { name: "Accept both" }));
+    expect(within(second).getByLabelText("Result")).toHaveTextContent("b ours b theirs");
+    expect(screen.getByRole("status")).toHaveTextContent("2 of 2 resolved");
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    expect(onResolve).toHaveBeenCalledWith("shared.txt", "a theirs\nmiddle\nb ours\nb theirs\n");
+  });
+
+  it("shows an empty choice as an empty result, not as unresolved", async () => {
+    const client = fakeClient({
+      getConflictHunks: async () => [{ kind: "Conflict", ours: "", theirs: "kept\n" }],
+    });
+
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={vi.fn()} onResolveAddDelete={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Accept ours" }));
+    expect(screen.getByLabelText("Result")).toHaveTextContent("Empty: the block's lines are removed");
+    expect(screen.getByRole("button", { name: "Save resolution" })).toBeEnabled();
+  });
+
+  it("names the branches on each side of a merge conflict", async () => {
+    const client = fakeClient({
+      getConflictHunks: async () => segments,
+      getHeadInfo: async () => ({ ...(await fakeClient().getHeadInfo(TEST_REPO_PATH)), operation: "Merge" }),
+      listBranches: async () => [{ name: "main", isCurrent: true }],
+      getMergeMessage: async () => "Merge branch 'feature'\n",
+    });
+
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={vi.fn()} onResolveAddDelete={vi.fn()} />);
+
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    expect(await within(block).findByText("Ours (main)")).toBeInTheDocument();
+    expect(within(block).getByText("Theirs (feature)")).toBeInTheDocument();
+  });
+
+  it("labels the sides plainly when the branch names can't be read", async () => {
+    const client = fakeRepoClient({ getConflictHunks: async () => segments }, "throw");
+
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={vi.fn()} onResolveAddDelete={vi.fn()} />);
+
+    const block = await screen.findByRole("region", { name: "Conflict 1 of 1" });
+    expect(within(block).getByText("Ours")).toBeInTheDocument();
+    expect(within(block).getByText("Theirs")).toBeInTheDocument();
+  });
+
+  it("moves between conflicts with Next and Previous conflict", async () => {
+    const threeConflicts: ConflictSegment[] = [
+      { kind: "Conflict", ours: "1o\n", theirs: "1t\n" },
+      { kind: "Clean", content: "x\n" },
+      { kind: "Conflict", ours: "2o\n", theirs: "2t\n" },
+      { kind: "Conflict", ours: "3o\n", theirs: "3t\n" },
+    ];
+    const client = fakeClient({ getConflictHunks: async () => threeConflicts });
+
+    render(<ConflictResolutionPane repoPath={TEST_REPO_PATH} client={client} path="shared.txt" onResolve={vi.fn()} onResolveAddDelete={vi.fn()} />);
+
+    await screen.findByRole("region", { name: "Conflict 1 of 3" });
+    const next = screen.getByRole("button", { name: "Next conflict" });
+    const previous = screen.getByRole("button", { name: "Previous conflict" });
+    fireEvent.click(next);
+    expect(screen.getByRole("region", { name: "Conflict 1 of 3" })).toHaveFocus();
+    fireEvent.click(next);
+    expect(screen.getByRole("region", { name: "Conflict 2 of 3" })).toHaveFocus();
+    fireEvent.click(next);
+    expect(screen.getByRole("region", { name: "Conflict 3 of 3" })).toHaveFocus();
+    expect(next).toBeDisabled();
+    fireEvent.click(previous);
+    expect(screen.getByRole("region", { name: "Conflict 2 of 3" })).toHaveFocus();
   });
 
   it("Accept theirs changes that conflict's contribution to the saved text", async () => {
@@ -87,6 +177,7 @@ describe("ConflictResolutionPane", () => {
     expect(onResolve).not.toHaveBeenCalled();
 
     resolveHunks(segments);
+    fireEvent.click(await screen.findByRole("button", { name: "Accept ours" }));
     await waitFor(() => expect(saveButton).not.toBeDisabled());
   });
 
