@@ -960,46 +960,109 @@ fn stash_with_a_retargeted_committed_folder_link_never_writes_through() {
     );
 }
 
-/// On the link commit, merges `old2` (c1 + `d/new.txt`): libgit2 would merge `d/new.txt` without
-/// a conflict and write it through the committed link.
-#[test]
-fn merge_adding_below_a_committed_folder_link_is_refused() {
-    let f = fx();
-    commit_folder_link(&f, f.out.path());
-    git_core::branch::switch_branch(&f.repo, "old").unwrap();
-    f.commit(&[("d/new.txt", "NEW\n")], "old2");
-    git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
-    let result = git_core::merge::start_merge(&f.repo, "old", MergeOptions::default());
-    match result {
-        Err(error @ MergeError::LinkedFolder(_)) => assert_eq!(
-            error.to_string(),
-            "'d' is a symbolic link where the repository has a folder. Remove or rename it first."
-        ),
-        other => panic!("{other:?}"),
-    }
-    f.untouched();
-    assert!(!f.out.path().join("new.txt").exists());
-}
-
-#[test]
-fn cherry_pick_adding_below_a_committed_folder_link_is_refused() {
-    let f = fx();
-    commit_folder_link(&f, f.out.path());
+/// On the link commit, `old2` (c1 + `d/new.txt`) adds a file below the committed link. libgit2
+/// merges it without a conflict and would write it through the link. git reports a
+/// directory/file conflict: the link moves to `d~HEAD` ("added by us"), `d/new.txt` is written
+/// in a real folder `d` (#155). Returns `old2`.
+fn adding_below_a_committed_folder_link(f: &Fx) -> String {
+    commit_folder_link(f, f.out.path());
     git_core::branch::switch_branch(&f.repo, "old").unwrap();
     let picked = f.commit(&[("d/new.txt", "NEW\n")], "old2");
     git_core::branch::switch_branch(&f.repo, &f.main).unwrap();
+    picked
+}
+
+/// The work tree and index git leaves for that conflict, and nothing written outside.
+fn link_moved_aside_for_the_folder(f: &Fx) {
+    f.untouched();
+    assert!(!f.out.path().join("new.txt").exists());
+    assert!(std::fs::symlink_metadata(f.path().join("d"))
+        .unwrap()
+        .is_dir());
+    assert_eq!(common::read(f.path(), "d/new.txt"), "NEW\n");
+    assert!(common::is_link(f.path(), "d~HEAD"));
+    assert_eq!(
+        std::fs::read_link(f.path().join("d~HEAD")).unwrap(),
+        f.out.path()
+    );
+    let index = f.repo.index().unwrap();
+    let entries: Vec<(String, u16)> = index
+        .iter()
+        .filter(|entry| entry.path.starts_with(b"d"))
+        .map(|entry| {
+            (
+                String::from_utf8_lossy(&entry.path).into_owned(),
+                (entry.flags >> 12) & 0x3,
+            )
+        })
+        .collect();
+    assert_eq!(
+        entries,
+        [("d/new.txt".to_string(), 0), ("d~HEAD".to_string(), 2)]
+    );
+}
+
+#[test]
+fn merge_adding_below_a_committed_folder_link_is_a_directory_file_conflict() {
+    let f = fx();
+    adding_below_a_committed_folder_link(&f);
+    let result = git_core::merge::start_merge(&f.repo, "old", MergeOptions::default()).unwrap();
+    assert_eq!(
+        result,
+        MergeOutcome::Conflicted {
+            files: vec!["d~HEAD".to_string()]
+        }
+    );
+    link_moved_aside_for_the_folder(&f);
+    assert_eq!(f.repo.state(), git2::RepositoryState::Merge);
+    // Aborting puts the link back.
+    git_core::merge::abort_merge(&f.repo).unwrap();
+    f.untouched();
+    assert!(common::is_link(f.path(), "d"));
+    assert!(!f.path().join("d~HEAD").exists());
+}
+
+#[test]
+fn cherry_pick_adding_below_a_committed_folder_link_is_a_directory_file_conflict() {
+    let f = fx();
+    let picked = adding_below_a_committed_folder_link(&f);
     let result = git_core::pick::cherry_pick(
         &f.repo,
         &picked,
         None,
         git_core::hooks::HookOptions::default(),
-    );
+    )
+    .unwrap();
     assert!(
-        matches!(result, Err(git_core::pick::PickError::LinkedFolder(_))),
+        matches!(result, git_core::pick::PickOutcome::Conflicted { .. }),
         "{result:?}"
     );
+    link_moved_aside_for_the_folder(&f);
+    assert_eq!(f.repo.state(), git2::RepositoryState::CherryPick);
+}
+
+#[test]
+fn rebase_step_adding_below_a_committed_folder_link_is_a_directory_file_conflict() {
+    let f = fx();
+    let picked = adding_below_a_committed_folder_link(&f);
+    let onto = f.head();
+    // The rebase runs on a branch holding only `old2`'s change, onto the link commit.
+    git_core::branch::create_branch(&f.repo, "topic", &picked).unwrap();
+    git_core::branch::switch_branch(&f.repo, "topic").unwrap();
+    let plan = vec![git_core::rebase::RebasePlanEntry {
+        commit_id: picked,
+        action: git_core::rebase::RebaseAction::Pick,
+        combined_message: None,
+    }];
+    let (state, step) = git_core::rebase::start_rebase(&f.repo, &onto, plan).unwrap();
+    assert!(
+        matches!(step, git_core::rebase::RebaseStepResult::Conflicted { .. }),
+        "{step:?}"
+    );
+    link_moved_aside_for_the_folder(&f);
+    git_core::rebase::abort_rebase(&f.repo, &state).unwrap();
     f.untouched();
-    assert!(!f.out.path().join("new.txt").exists());
+    d_is_the_folder_again(&f);
 }
 
 /// A merge whose result has nothing below `d` is not blocked by the committed link; aborting its
@@ -1943,4 +2006,120 @@ fn discard_hunk_below_the_linked_folder_is_beyond_a_symbolic_link() {
         );
     }
     f.untouched();
+}
+
+/// As `adding_below_a_committed_folder_link`, without a folder in the merge base: `main`
+/// adds the link `e`, `other` adds `e/new.txt`. Nothing sorts between `d` and `d/new.txt`, so
+/// libgit2 finds this conflict itself (#155). Returns `other`'s tip.
+fn fresh_folder_against_a_committed_link(f: &Fx) -> String {
+    // `create_branch` checks the new branch out.
+    let picked = f.side_branch(&[("e/new.txt", "NEW\n")]);
+    std::os::unix::fs::symlink(f.out.path(), f.path().join("e")).unwrap();
+    common::commit_all(&f.repo, "e is a link");
+    picked
+}
+
+fn e_link_moved_aside(f: &Fx) {
+    f.untouched();
+    assert!(!f.out.path().join("new.txt").exists());
+    assert!(std::fs::symlink_metadata(f.path().join("e"))
+        .unwrap()
+        .is_dir());
+    assert_eq!(common::read(f.path(), "e/new.txt"), "NEW\n");
+    assert!(common::is_link(f.path(), "e~HEAD"));
+    let index = f.repo.index().unwrap();
+    let entries: Vec<(String, u16)> = index
+        .iter()
+        .filter(|entry| entry.path.starts_with(b"e"))
+        .map(|entry| {
+            (
+                String::from_utf8_lossy(&entry.path).into_owned(),
+                (entry.flags >> 12) & 0x3,
+            )
+        })
+        .collect();
+    // libgit2's own record of a file/folder conflict it finds: HEAD's side stays at `e`
+    // (stage 2) while its file is written as `e~HEAD`, as for a file (see `file_folder`).
+    assert_eq!(
+        entries,
+        [("e".to_string(), 2), ("e/new.txt".to_string(), 0)]
+    );
+}
+
+#[test]
+fn merge_adding_a_folder_where_head_added_a_link_is_a_directory_file_conflict() {
+    let f = fx();
+    fresh_folder_against_a_committed_link(&f);
+    let result = git_core::merge::start_merge(&f.repo, "other", MergeOptions::default()).unwrap();
+    assert!(
+        matches!(result, MergeOutcome::Conflicted { .. }),
+        "{result:?}"
+    );
+    e_link_moved_aside(&f);
+}
+
+#[test]
+fn cherry_pick_adding_a_folder_where_head_added_a_link_is_a_directory_file_conflict() {
+    let f = fx();
+    let picked = fresh_folder_against_a_committed_link(&f);
+    let result = git_core::pick::cherry_pick(
+        &f.repo,
+        &picked,
+        None,
+        git_core::hooks::HookOptions::default(),
+    )
+    .unwrap();
+    assert!(
+        matches!(result, git_core::pick::PickOutcome::Conflicted { .. }),
+        "{result:?}"
+    );
+    e_link_moved_aside(&f);
+}
+
+/// The committed link, retargeted by the user at the outside folder, is a local change: a pick's
+/// checkout (which leaves local changes in place) would write through it, so adding a file
+/// below it is still refused (#155).
+#[test]
+fn cherry_pick_adding_below_a_retargeted_committed_folder_link_is_refused() {
+    let f = fx();
+    retarget_link(&f);
+    git_core::branch::switch_branch(&f.repo, "old").unwrap_err();
+    // Switching away is refused over the retargeted link; the pick comes from a commit made
+    // with plain git2 instead.
+    let old = f
+        .repo
+        .revparse_single("old")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap();
+    let mut index = git2::Index::new().unwrap();
+    index.read_tree(&old.tree().unwrap()).unwrap();
+    let blob = f.repo.blob(b"NEW\n").unwrap();
+    let mut entry = index.get_path(std::path::Path::new("d/f"), 0).unwrap();
+    entry.id = blob;
+    entry.path = b"d/new.txt".to_vec();
+    index.add(&entry).unwrap();
+    let tree = f
+        .repo
+        .find_tree(index.write_tree_to(&f.repo).unwrap())
+        .unwrap();
+    let signature = f.repo.signature().unwrap();
+    let picked = f
+        .repo
+        .commit(None, &signature, &signature, "old2", &tree, &[&old])
+        .unwrap();
+
+    let result = git_core::pick::cherry_pick(
+        &f.repo,
+        &picked.to_string(),
+        None,
+        git_core::hooks::HookOptions::default(),
+    );
+
+    assert!(
+        matches!(result, Err(git_core::pick::PickError::LinkedFolder(_))),
+        "{result:?}"
+    );
+    f.untouched();
+    assert!(!f.out.path().join("new.txt").exists());
 }

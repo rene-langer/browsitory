@@ -107,13 +107,39 @@ impl RebaseSlot<'_> {
     }
 }
 
+/// Runs `f` with hook options whose signing program is reported on `events` and cancellable
+/// through `op` (#151). A rebase runs no hooks; the signer shows in the hook strip as a pick's
+/// does.
+fn with_signing<T>(
+    op: &super::remote::TransferOp,
+    events: Sender<super::HookEvent>,
+    f: impl FnOnce(git_core::hooks::HookOptions<'_>) -> T,
+) -> T {
+    let cancel = op.cancel_check();
+    let mut reporter = super::hooks::ChannelHookReporter {
+        events,
+        operation_id: op.id.clone(),
+        source: super::hooks::HookSource::Pick,
+    };
+    f(git_core::hooks::HookOptions {
+        cancel: Some(&cancel),
+        reporter: Some(&mut reporter),
+        ..Default::default()
+    })
+}
+
 pub(super) fn start(
     repo: &git2::Repository,
     onto: &str,
     plan: Vec<RebasePlanEntry>,
     mut slot: RebaseSlot<'_>,
+    op: super::remote::TransferOp,
+    events: Sender<super::HookEvent>,
 ) -> Result<RebaseStepResult, ErrorDto> {
-    match git_core::rebase::start_rebase(repo, onto, plan) {
+    let started = with_signing(&op, events, |hooks| {
+        git_core::rebase::start_rebase_with(repo, onto, plan, hooks)
+    });
+    match started {
         // Nothing to keep: the rebase finished in one go.
         Ok((_, RebaseStepResult::Done)) => slot.persist(repo, None, Ok(RebaseStepResult::Done)),
         Ok((state, step)) => slot.persist(repo, Some(&state), Ok(step)),
@@ -125,13 +151,17 @@ pub(super) fn start(
 pub(super) fn continue_rebase(
     repo: &git2::Repository,
     mut slot: RebaseSlot<'_>,
+    op: super::remote::TransferOp,
+    events: Sender<super::HookEvent>,
     reply: Sender<Result<RebaseStepResult, ErrorDto>>,
 ) {
     let result = match slot.load(repo) {
         Some(loaded) => {
             let mut state = loaded.clone();
-            let outcome =
-                git_core::rebase::rebase_continue(repo, &mut state).map_err(ErrorDto::from_error);
+            let outcome = with_signing(&op, events, |hooks| {
+                git_core::rebase::rebase_continue_with(repo, &mut state, hooks)
+            })
+            .map_err(ErrorDto::from_error);
             if matches!(outcome, Ok(RebaseStepResult::Done)) {
                 slot.persist(repo, None, outcome)
             } else if state == loaded || (outcome.is_err() && lost_head(repo, &state)) {
@@ -180,6 +210,7 @@ impl WorkerHandle {
         self.request(|tx| Command::CommitsSince { onto, reply: tx })
     }
 
+    /// `start_rebase_reporting` without anyone listening to the signing program.
     #[allow(dead_code)]
     pub fn start_rebase(
         &self,
@@ -187,17 +218,45 @@ impl WorkerHandle {
         plan: Vec<RebasePlanEntry>,
         edit: Option<HistoryEdit>,
     ) -> Result<RebaseStepResult, ErrorDto> {
+        self.start_rebase_reporting(onto, plan, edit, std::sync::mpsc::channel().0)
+    }
+
+    /// Starts a rebase. While a step's commit is signed, the signing program is reported on
+    /// `events` (`HookSource::Pick`, hook `"signing"`) under a `rebase-<n>` id that
+    /// `cancel_transfer` stops (#151).
+    pub fn start_rebase_reporting(
+        &self,
+        onto: String,
+        plan: Vec<RebasePlanEntry>,
+        edit: Option<HistoryEdit>,
+        events: Sender<super::HookEvent>,
+    ) -> Result<RebaseStepResult, ErrorDto> {
         self.request(|tx| Command::StartRebase {
             onto,
             plan,
             edit,
+            operation_id: self.cancelled.allocate("rebase"),
+            events,
             reply: tx,
         })
     }
 
+    /// `rebase_continue_reporting` without anyone listening to the signing program.
     #[allow(dead_code)]
     pub fn rebase_continue(&self) -> Result<RebaseStepResult, ErrorDto> {
-        self.request(|tx| Command::RebaseContinue { reply: tx })
+        self.rebase_continue_reporting(std::sync::mpsc::channel().0)
+    }
+
+    /// Continues the paused rebase; the signing program as for `start_rebase_reporting`.
+    pub fn rebase_continue_reporting(
+        &self,
+        events: Sender<super::HookEvent>,
+    ) -> Result<RebaseStepResult, ErrorDto> {
+        self.request(|tx| Command::RebaseContinue {
+            operation_id: self.cancelled.allocate("rebase"),
+            events,
+            reply: tx,
+        })
     }
 
     #[allow(dead_code)]

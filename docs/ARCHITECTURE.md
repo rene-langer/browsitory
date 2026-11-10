@@ -751,8 +751,12 @@ certificate.
   `SIGN_TIMEOUT` (120 s) → `SignError::TimedOut`. A signature over 1 MiB is an error, never
   truncated. Commit and amend pass the operation's cancel check (`SignOptions`) and report a
   `"signing"` pseudo-hook to the hook reporter, so the commit box shows "Waiting for the signing
-  program…" with the hooks' Cancel (`SignError::Cancelled`); cherry-pick, revert and rebase
-  commits get the timeout only. Verification is bounded by `VERIFY_TIMEOUT` (30 s), after which
+  program…" with the hooks' Cancel (`SignError::Cancelled`). Cherry-pick and revert steps do the
+  same through their hook options, and so do rebase steps (#151): `rebase::start_rebase_with`
+  and `rebase_continue_with` take `HookOptions` for its `cancel` and `reporter` only (a rebase
+  runs no hooks), and the worker reports the signer under `HookSource::Pick` with a `rebase-<n>`
+  operation id, so `HookRunStrip` offers Cancel. A cancelled step is an error like a timed-out
+  one: `start_rebase` rolls back, Continue keeps the step paused to try again. Verification is bounded by `VERIFY_TIMEOUT` (30 s), after which
   the signature shows the error status.
   - Signers start in a new session (`setsid`, #126), so they have no controlling terminal even
     when Browsitory was started from one: a signer that would prompt on `/dev/tty` (ssh-keygen
@@ -1255,7 +1259,12 @@ certificate.
   message, and the leftover merge/pick state stays visible in the operation strip, where Abort
   clears it harmlessly (worktree and index equal the new HEAD). A later commit that finds such a
   leftover merge (every `MERGE_HEAD` already in HEAD's history) clears it first and commits as an
-  ordinary single-parent commit, so no second merge commit is made; if it still can't be cleared,
+  ordinary single-parent commit, so no second merge commit is made. Otherwise the parents are
+  reduced as `git commit` does (`reduce_heads`, #227): HEAD and the `MERGE_HEAD` commits without
+  repeats and without any commit another of them has in its history (so a mixed octopus
+  `MERGE_HEAD` keeps its other parents, and a HEAD the merged commit contains is dropped too),
+  unless `MERGE_MODE` says `no-ff`. libgit2 always writes `no-ff` there; `start_merge` rewrites it
+  as `git merge` does (`no-ff` only for `FastForward::Never`, else empty); if it still can't be cleared,
   `CommitError::LeftoverMergeState` refuses the commit. A leftover cherry-pick is handled the
   same way (#226, D3-A): when HEAD is the pick's own commit (`pick::commit_carries_pick` with
   `Coverage::Exact`: one parent, the picked commit's author with its time, and exactly the
@@ -1373,7 +1382,19 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   fast-forward merge or pull checks out (libgit2's safe checkout kept one name in the index and
   didn't write the other's file). Only the result is compared with HEAD, not their union: a
   case-only rename (`A` in HEAD, only `a` in the result) holds no pair, and libgit2 commits it
-  correctly. A pair HEAD already holds is #512's.
+  correctly. A pair HEAD already holds is refused by a merge or squash up front (#512,
+  `merge::refuse_case_pair_held`, `CasePair`): libgit2's merge checkout fails on it with a raw
+  "1 conflict prevents checkout" even when the merge touches neither name. A fast-forward, a
+  cherry-pick, a revert, a switch and a checkout keep both names and go ahead
+  (`tests/case_pair_held.rs`). A clone refuses one the same way (#512): with `core.ignorecase`
+  on for the new repository (a global setting on a case-sensitive file system),
+  `clone::checkout_clone` runs `refuse_case_pair` on the fetched tree before its forced
+  checkout, and the clone is removed (`CloneError::CasePair`).
+- Cost of the case-pair check (#512, `worktree_guard`'s ignored `case_pair_cost`, release build,
+  100,000 files): a whole-tree check walks the target, HEAD's tree (once when it is the target)
+  and the index, about 0.19 s. A path-limited one (discarding a file) collects only the names
+  its paths select (`selected_case_pairs`: the index filtered, tree walks that skip every folder
+  neither on the way to nor below a selected path), about 0.01 s instead of 0.18 s.
 - Switches and checkouts refuse a case pair they bring in the same way (#532): `switch_branch`,
   `checkout_commit` (a commit, tag or remote branch) and `create_branch` (before the branch is
   created) run `refuse_case_pair_brought_in` on the target tree against HEAD's tree, after the
@@ -1679,7 +1700,16 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   was changed). Merge-like operations pass their merged result (`Incoming::Merge`): merge and
   squash `merge_commits`, cherry-pick/revert steps and rebase steps `cherrypick_commit` /
   `revert_commit`, stash apply/pop the stash's trees. Nothing is skipped there: libgit2 merges
-  `d/new.txt` without a conflict and writes it through a folder link HEAD tracks. The guard
+  `d/new.txt` without a conflict and writes it through a folder link HEAD tracks. Merge,
+  cherry-pick, revert and rebase steps pass `Incoming::MergeAsConflict` instead (#155): a folder
+  link HEAD tracks, that the result keeps unchanged and that still points where HEAD's does on
+  disk, is skipped, because files below it are a file/folder collision these operations write as
+  git's directory/file conflict ("directory in the way of d from HEAD; moving it to d~HEAD"):
+  `file_folder::check_out_as_conflicts` moves the link to `d~HEAD` (stage 2) and its safe
+  checkout unlinks `d` before it creates the folder, or, when the link and the folder's entries
+  sort next to each other, libgit2 records the conflict itself (`d` at stage 2, the link written
+  as `d~HEAD`). A retargeted link is a local change that the picks' checkout (allowing
+  conflicts) would keep and write through, so it is still refused. The guard
   examines each folder once across all sources and never stats files (100k-file repo: ~0.24 s).
   A leaf typechange is refused by libgit2 itself. `tests/symlink_write_through.rs` pins every
   operation × {file link, folder link, a new file below a tracked or an untracked folder link, a

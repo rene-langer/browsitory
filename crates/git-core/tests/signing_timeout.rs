@@ -194,3 +194,130 @@ fn a_signer_whose_output_never_finishes_fails_instead_of_truncating() {
         "Signing failed: the signing program's output did not finish."
     );
 }
+
+/// Records the hooks a command reports, as `started:<hook>` / `finished:<hook>`.
+#[derive(Default)]
+struct Recorder(Vec<String>);
+
+impl git_core::hooks::HookReporter for Recorder {
+    fn started(&mut self, hook: &str) {
+        self.0.push(format!("started:{hook}"));
+    }
+    fn finished(
+        &mut self,
+        hook: &str,
+        _result: &Result<git_core::hooks::HookOutcome, git_core::hooks::HookError>,
+    ) {
+        self.0.push(format!("finished:{hook}"));
+    }
+}
+
+/// `signing_repo`'s base, then `a.txt` changed on the checked-out branch. Returns the base and
+/// the branch's tip.
+fn rebase_repo(program: &str) -> (tempfile::TempDir, git2::Repository, git2::Oid, git2::Oid) {
+    let (dir, repo) = signing_repo(program);
+    // The base and the step's commit are made unsigned (`commit_all`), the rebase signs.
+    let base = repo.head().unwrap().target().unwrap();
+    common::write_file(dir.path(), "a.txt", "changed\n");
+    common::commit_all(&repo, "change a");
+    let tip = repo.head().unwrap().target().unwrap();
+    (dir, repo, base, tip)
+}
+
+fn reword(commit: git2::Oid, message: &str) -> git_core::rebase::RebasePlanEntry {
+    git_core::rebase::RebasePlanEntry {
+        commit_id: commit.to_string(),
+        action: git_core::rebase::RebaseAction::Reword {
+            message: message.to_string(),
+        },
+        combined_message: None,
+    }
+}
+
+#[test]
+fn cancelling_the_signer_of_a_rebase_step_rolls_the_rebase_back() {
+    // #151: a rebase step's signer is cancellable like a commit's, and reported as the
+    // `signing` pseudo-hook so the hook strip offers Cancel.
+    let bin = tempfile::TempDir::new().unwrap();
+    let (_dir, repo, base, tip) = rebase_repo(&script(bin.path(), "gpg", "sleep 30"));
+    let branch = repo.head().unwrap().name().unwrap().to_string();
+    let started = Instant::now();
+    let cancel = || started.elapsed() > Duration::from_millis(200);
+    let mut recorder = Recorder::default();
+
+    let result = git_core::rebase::start_rebase_with(
+        &repo,
+        &base.to_string(),
+        vec![reword(tip, "reworded\n")],
+        git_core::hooks::HookOptions {
+            cancel: Some(&cancel),
+            reporter: Some(&mut recorder),
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        matches!(
+            result,
+            Err(git_core::rebase::RebaseError::Sign(SignError::Cancelled))
+        ),
+        "{result:?}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(recorder.0, vec!["started:signing", "finished:signing"]);
+    let head = repo.head().unwrap();
+    assert_eq!(head.name().ok(), Some(branch.as_str()));
+    assert_eq!(head.target(), Some(tip));
+}
+
+#[test]
+fn cancelling_the_signer_of_a_continued_rebase_step_keeps_the_step_paused() {
+    let bin = tempfile::TempDir::new().unwrap();
+    let (_dir, repo, base, tip) = rebase_repo(&script(bin.path(), "gpg", FAKE_SIGNATURE));
+    let edit = git_core::rebase::RebasePlanEntry {
+        commit_id: tip.to_string(),
+        action: git_core::rebase::RebaseAction::Edit,
+        combined_message: None,
+    };
+    let (mut state, step) =
+        git_core::rebase::start_rebase(&repo, &base.to_string(), vec![edit]).unwrap();
+    assert_eq!(step, git_core::rebase::RebaseStepResult::PausedForEdit);
+    repo.config()
+        .unwrap()
+        .set_str("gpg.program", &script(bin.path(), "gpg-hung", "sleep 30"))
+        .unwrap();
+    let started = Instant::now();
+    let cancel = || started.elapsed() > Duration::from_millis(200);
+    let mut recorder = Recorder::default();
+
+    let result = git_core::rebase::rebase_continue_with(
+        &repo,
+        &mut state,
+        git_core::hooks::HookOptions {
+            cancel: Some(&cancel),
+            reporter: Some(&mut recorder),
+            ..Default::default()
+        },
+    );
+
+    assert!(
+        matches!(
+            result,
+            Err(git_core::rebase::RebaseError::Sign(SignError::Cancelled))
+        ),
+        "{result:?}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    assert_eq!(recorder.0, vec!["started:signing", "finished:signing"]);
+    assert_eq!(state.stop, git_core::rebase::RebaseStop::Edit);
+    assert_eq!(repo.head().unwrap().target(), Some(state.expected_head));
+    // With a signer that answers, Continue lands the step.
+    repo.config()
+        .unwrap()
+        .set_str("gpg.program", &script(bin.path(), "gpg-ok", FAKE_SIGNATURE))
+        .unwrap();
+    assert_eq!(
+        git_core::rebase::rebase_continue(&repo, &mut state).unwrap(),
+        git_core::rebase::RebaseStepResult::Done
+    );
+}

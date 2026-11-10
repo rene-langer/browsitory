@@ -389,6 +389,13 @@ fn clone_errors() -> Vec<(String, CloneErrorDto)> {
             }),
         ),
         (
+            "CasePair".into(),
+            CloneError::CasePair(git_core::CasePair {
+                path: "A".to_string(),
+                other: "a".to_string(),
+            }),
+        ),
+        (
             "CaseConfig".into(),
             CloneError::CaseConfig(git_core::CaseConfigUnreadable(
                 "failed to parse 'maybe' as a boolean".to_string(),
@@ -421,6 +428,7 @@ fn clone_errors() -> Vec<(String, CloneErrorDto)> {
         CloneError::Transfer { .. },
         CloneError::Io(_),
         CloneError::CaseCollision(_),
+        CloneError::CasePair(_),
         CloneError::CaseConfig(_),
         CloneError::HeldOpen(_),
     );

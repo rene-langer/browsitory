@@ -595,10 +595,17 @@ pub(crate) enum Command {
         plan: Vec<RebasePlanEntry>,
         /// The one-click history edit this rebase runs, for its undo label (#473).
         edit: Option<HistoryEdit>,
+        /// A step's signing program is reported on `events` (`HookSource::Pick`) under this
+        /// id, which `cancel_transfer` stops (#151).
+        operation_id: cancel::OperationId,
+        events: Sender<HookEvent>,
         reply: Sender<Result<RebaseStepResult, ErrorDto>>,
     },
     #[allow(dead_code)]
     RebaseContinue {
+        /// As for `StartRebase`.
+        operation_id: cancel::OperationId,
+        events: Sender<HookEvent>,
         reply: Sender<Result<RebaseStepResult, ErrorDto>>,
     },
     #[allow(dead_code)]

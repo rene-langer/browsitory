@@ -1,3 +1,4 @@
+use crate::hooks::HookOptions;
 use git2::{Repository, Sort};
 use thiserror::Error;
 
@@ -371,6 +372,20 @@ pub fn start_rebase(
     onto: &str,
     plan: Vec<RebasePlanEntry>,
 ) -> Result<(RebaseState, RebaseStepResult), RebaseError> {
+    start_rebase_with(repo, onto, plan, HookOptions::default())
+}
+
+/// `start_rebase` with a cancel check and a reporter for the signing program (#151). A rebase
+/// runs no hooks, like `git rebase` without `post-rewrite`: of `hooks`, only `cancel` and
+/// `reporter` are used. While a step's commit is signed the reporter sees the `"signing"`
+/// pseudo-hook, as for a commit; a cancel stops the signer (`RebaseError::Sign(Cancelled)`),
+/// and the rebase is rolled back as after any other failed step.
+pub fn start_rebase_with(
+    repo: &Repository,
+    onto: &str,
+    plan: Vec<RebasePlanEntry>,
+    mut hooks: HookOptions<'_>,
+) -> Result<(RebaseState, RebaseStepResult), RebaseError> {
     // Any operation in progress first, named (#265): a terminal rebase or `git am` (#263), a
     // paused merge, cherry-pick or revert, then a terminal cherry-pick or revert list, which
     // goes on after the rebase, on top of whatever it left (#258, D5-A). A terminal bisect is
@@ -456,7 +471,7 @@ pub fn start_rebase(
     // otherwise leave the repo on a detached HEAD with no `RebaseState` anywhere for the caller
     // to abort with (`worker.rs` only stores the state on `Ok`), stranding the user with no
     // in-app way back to their branch.
-    match advance(repo, &mut state) {
+    match advance(repo, &mut state, &mut hooks) {
         Ok(result) => Ok((state, result)),
         Err(err) => {
             // Best-effort: report the *original* failure even if the rollback itself fails,
@@ -488,17 +503,29 @@ pub fn rebase_continue(
     repo: &Repository,
     state: &mut RebaseState,
 ) -> Result<RebaseStepResult, RebaseError> {
+    rebase_continue_with(repo, state, HookOptions::default())
+}
+
+/// `rebase_continue` with a cancel check and a reporter for the signing program, as in
+/// `start_rebase_with` (#151). A cancelled signer is an error like a timed-out one: the step
+/// stays paused (or stops as an error), and Continue tries it again.
+pub fn rebase_continue_with(
+    repo: &Repository,
+    state: &mut RebaseState,
+    mut hooks: HookOptions<'_>,
+) -> Result<RebaseStepResult, RebaseError> {
+    let hooks = &mut hooks;
     let resume = resume_kind(repo, state)?;
     let result = match resume {
-        Resume::Land => land_current_step(repo, state).and_then(|()| {
+        Resume::Land => land_current_step(repo, state, hooks).and_then(|()| {
             state.cursor += 1;
-            advance(repo, state)
+            advance(repo, state, hooks)
         }),
-        Resume::Reapply => advance(repo, state),
+        Resume::Reapply => advance(repo, state, hooks),
         Resume::Finish => finish(repo, state),
-        Resume::Adopt => adopt_step(repo, state).and_then(|()| {
+        Resume::Adopt => adopt_step(repo, state, hooks).and_then(|()| {
             state.cursor += 1;
-            advance(repo, state)
+            advance(repo, state, hooks)
         }),
     };
     if result.is_err() {
@@ -679,15 +706,20 @@ fn is_step_committed_by_hand(repo: &Repository, state: &RebaseState) -> Result<b
 
 /// Takes HEAD (checked by `is_step_committed_by_hand`) as the current step: a `Reword` entry
 /// gets its planned message, then the bookkeeping `land_current_step` does after its commit.
-fn adopt_step(repo: &Repository, state: &mut RebaseState) -> Result<(), RebaseError> {
+fn adopt_step(
+    repo: &Repository,
+    state: &mut RebaseState,
+    hooks: &mut HookOptions<'_>,
+) -> Result<(), RebaseError> {
     let entry = state.plan[state.cursor].clone();
     if let RebaseAction::Reword { message } = &entry.action {
         let head = repo.head()?.peel_to_commit()?;
         if head.message_bytes() != message.as_bytes() {
             let parent = head.parent(0)?;
             let committer = repo.signature()?;
-            let reworded = crate::signing::create_commit(
+            let reworded = crate::commit::create_signed_reporting(
                 repo,
+                hooks,
                 None,
                 &head.author(),
                 &committer,
@@ -699,7 +731,7 @@ fn adopt_step(repo: &Repository, state: &mut RebaseState) -> Result<(), RebaseEr
         }
     }
     state.expected_head = repo.head()?.peel_to_commit()?.id();
-    after_landed(repo, state)
+    after_landed(repo, state, hooks)
 }
 
 /// HEAD detached at `expected_head`, where the rebase left it.
@@ -731,7 +763,11 @@ fn head_moved(repo: &Repository, state: &RebaseState) -> Result<RebaseError, Reb
 
 /// Auto-advances through plan entries starting at `state.cursor`: applies each via cherry-pick,
 /// pausing at the first conflict or `Edit` step, or reaching `Done` once every entry lands.
-fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResult, RebaseError> {
+fn advance(
+    repo: &Repository,
+    state: &mut RebaseState,
+    hooks: &mut HookOptions<'_>,
+) -> Result<RebaseStepResult, RebaseError> {
     loop {
         if state.cursor >= state.plan.len() {
             return finish(repo, state);
@@ -756,9 +792,7 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
         let merged = repo.cherrypick_commit(&commit, &head_commit, 0, None)?;
         crate::worktree_guard::refuse_linked_folders::<RebaseError>(
             repo,
-            &[crate::worktree_guard::Incoming::Merge(
-                crate::worktree_guard::GuardSource::Index(&merged),
-            )],
+            &[crate::worktree_guard::Incoming::MergeAsConflict(&merged)],
         )?;
         // libgit2 can miss a file/folder conflict and would land the step without one of them
         // (#410): the step stops at git's conflict instead (#416), after the link check, whose
@@ -812,7 +846,7 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
             return Ok(RebaseStepResult::PausedForEdit);
         }
 
-        land_current_step(repo, state)?;
+        land_current_step(repo, state, hooks)?;
         state.cursor += 1;
     }
 }
@@ -882,7 +916,11 @@ fn ends_a_group(plan: &[RebasePlanEntry], index: usize) -> bool {
 /// neither `Squash`/`Fixup` nor `Drop` (a `Drop` never lands a commit, so it can't be the leader
 /// either, even if one sits between the leader and the group) — guaranteed to exist, since
 /// `validate_plan` rejects a plan whose first non-`Drop` entry is `Squash`/`Fixup`.
-fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), RebaseError> {
+fn land_current_step(
+    repo: &Repository,
+    state: &mut RebaseState,
+    hooks: &mut HookOptions<'_>,
+) -> Result<(), RebaseError> {
     let entry = state.plan[state.cursor].clone();
     let original_commit = repo.find_commit(Oid::from_str(&entry.commit_id)?)?;
     let message = match &entry.action {
@@ -901,8 +939,9 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
     let tree = repo.find_tree(tree_id)?;
     let parent = repo.head()?.peel_to_commit()?;
     let committer = repo.signature()?;
-    crate::signing::create_commit(
+    crate::commit::create_signed_reporting(
         repo,
+        hooks,
         Some(crate::signing::HeadUpdate {
             expected: Some(parent.id()),
             reflog_operation: "commit",
@@ -917,13 +956,17 @@ fn land_current_step(repo: &Repository, state: &mut RebaseState) -> Result<(), R
     // cancelled), and a retried Continue must see the HEAD this step just landed, not a stale
     // one that would read as `HeadMoved`.
     state.expected_head = repo.head()?.peel_to_commit()?.id();
-    after_landed(repo, state)
+    after_landed(repo, state, hooks)
 }
 
 /// What follows a landed step (committed here, or by hand and adopted): if the entry ends a
 /// squash/fixup group, collapse the group; then re-baseline `expected_head` and forget git's
 /// paused pick.
-fn after_landed(repo: &Repository, state: &mut RebaseState) -> Result<(), RebaseError> {
+fn after_landed(
+    repo: &Repository,
+    state: &mut RebaseState,
+    hooks: &mut HookOptions<'_>,
+) -> Result<(), RebaseError> {
     let committer = repo.signature()?;
     if ends_a_group(&state.plan, state.cursor) {
         // Walk backward to the nearest preceding entry that's neither `Squash`/`Fixup` (a group
@@ -974,8 +1017,9 @@ fn after_landed(repo: &Repository, state: &mut RebaseState) -> Result<(), Rebase
         // intermediate commit in the group's chain, not `group_parent` — that's the whole point
         // of the collapse (reparenting past that chain). Create the commit untethered, then move
         // HEAD to it directly.
-        let final_oid = crate::signing::create_commit(
+        let final_oid = crate::commit::create_signed_reporting(
             repo,
+            hooks,
             None,
             &leader_commit.author(),
             &committer,

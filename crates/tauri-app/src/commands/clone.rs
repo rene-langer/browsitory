@@ -77,6 +77,7 @@ impl From<CloneError> for CloneErrorDto {
             CloneError::Transfer { kind, .. } => format!("{kind:?}"),
             CloneError::Io(_) => "Io".to_string(),
             CloneError::CaseCollision(_) => "CaseCollision".to_string(),
+            CloneError::CasePair(_) => "CasePair".to_string(),
             CloneError::CaseConfig(_) => "CaseConfig".to_string(),
             CloneError::HeldOpen(_) => "FileInUse".to_string(),
         };

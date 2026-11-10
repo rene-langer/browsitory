@@ -597,9 +597,7 @@ fn step(
     };
     crate::worktree_guard::refuse_linked_folders::<PickError>(
         repo,
-        &[crate::worktree_guard::Incoming::Merge(
-            crate::worktree_guard::GuardSource::Index(&merged),
-        )],
+        &[crate::worktree_guard::Incoming::MergeAsConflict(&merged)],
     )?;
     // libgit2 can miss a file/folder conflict and would commit without one of them (#410): the
     // step stops at git's conflict instead (#416), after the link check, whose refusal is the
