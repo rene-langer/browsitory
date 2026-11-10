@@ -75,7 +75,7 @@ it("navigates with arrows, closes on Escape, and asks for the field on Ctrl/Cmd+
   const props = renderResults({ ...base, commits: [c("a"), c("b")] }, { commitId: "a" });
   const list = screen.getByRole("listbox", { name: "Search results" });
   fireEvent.keyDown(list, { key: "ArrowDown" });
-  expect(props.onSelectRow).toHaveBeenCalledWith({ commitId: "b" });
+  expect(props.onSelectRow).toHaveBeenCalledWith({ commitId: "b" }, "step");
   fireEvent.keyDown(list, { key: "f", ctrlKey: true });
   expect(props.onRequestSearch).toHaveBeenCalled();
   fireEvent.keyDown(list, { key: "Escape" });

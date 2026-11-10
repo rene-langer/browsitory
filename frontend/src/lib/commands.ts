@@ -122,6 +122,9 @@ export interface GoToCommands {
   onGoToBranch(kind: "local" | "remote", name: string): void;
   onGoToTag(name: string, commitId: string | null): void;
   onGoToStash(commitId: string): void;
+  /** Back/Forward through the visited commits (#618); absent at that end. */
+  onGoBack?(): void;
+  onGoForward?(): void;
 }
 
 export interface DiffCommands {
@@ -1040,6 +1043,22 @@ function goToPickers(appState: UseAppStateResult, goTo: GoToCommands): Command[]
   const { commands: pickers, add } = family("Go to");
   const noop = () => {};
 
+  if (goTo.onGoBack !== undefined) {
+    add({
+      id: "go-back",
+      label: "Back to previous commit",
+      keywords: ["back", "previous", "history", "navigate", "go back"],
+      run: goTo.onGoBack,
+    });
+  }
+  if (goTo.onGoForward !== undefined) {
+    add({
+      id: "go-forward",
+      label: "Forward to next commit",
+      keywords: ["forward", "next", "history", "navigate", "go forward"],
+      run: goTo.onGoForward,
+    });
+  }
   add({
     id: "go-to-commit",
     label: "Go to commit…",

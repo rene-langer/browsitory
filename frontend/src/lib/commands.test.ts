@@ -31,6 +31,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     state: {
       repoPath: "/repo",
       selectedRow: "uncommitted",
+      navigation: { entries: ["uncommitted"], index: 0, merging: false },
       status: [],
       commits: [],
       graphLimit: 300,
@@ -213,6 +214,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     closeHookFailure: vi.fn(),
     clearCommitMessageHandled: vi.fn(),
     retryWithoutHooks: vi.fn(),
+    stepNavigation: vi.fn(() => null),
   };
 }
 
@@ -1729,6 +1731,20 @@ describe("Go to pickers (#441)", () => {
     items[1].run();
     expect(handlers.onGoToBranch).toHaveBeenCalledWith("remote", "upstream/dev");
     expect(handlers.onGoToBranch).toHaveBeenCalledWith("local", "feature");
+  });
+
+  it("offers Back and Forward only while there is somewhere to go (#618)", () => {
+    expect(pickers().picker("go-back")).toBeUndefined();
+    expect(pickers().picker("go-forward")).toBeUndefined();
+    const handlers = { ...goTo(), onGoBack: vi.fn(), onGoForward: vi.fn() };
+    const { picker } = pickers({ pending: true }, handlers);
+    expect(picker("go-back")?.label).toBe("Back to previous commit");
+    expect(picker("go-back")?.group).toBe("Go to");
+    expect(picker("go-forward")?.group).toBe("Go to");
+    picker("go-back")!.run();
+    picker("go-forward")!.run();
+    expect(handlers.onGoBack).toHaveBeenCalledOnce();
+    expect(handlers.onGoForward).toHaveBeenCalledOnce();
   });
 
   it("goes to a tag's commit and to a stash", () => {

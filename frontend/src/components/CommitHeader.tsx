@@ -47,9 +47,10 @@ function MessageText({
 
 /**
  * Metadata block at the top of a selected commit's diff pane: subject, body, author, date, full
- * SHA (copyable) and parents. Author/date/parents come from the already-loaded `GraphCommit`;
- * only the full message body and the signature status need a `RepoClient` round trip. URLs and,
- * with `issueForge`, issue references in the subject and body are links (#612).
+ * SHA (copyable), parents and children (#618). Author/date/parents come from the already-loaded
+ * `GraphCommit` and the children from the loaded history; only the full message body and the
+ * signature status need a `RepoClient` round trip. URLs and, with `issueForge`, issue
+ * references in the subject and body are links (#612).
  */
 export function CommitHeader({
   repoPath,
@@ -57,6 +58,7 @@ export function CommitHeader({
   commitId,
   commit,
   knownCommitIds,
+  childIds = [],
   onSelectRow,
   issueForge = null,
 }: {
@@ -67,6 +69,8 @@ export function CommitHeader({
   commit: GraphCommit | undefined;
   // Ids present in the loaded history; a parent outside it cannot be selected.
   knownCommitIds: ReadonlySet<string>;
+  // The loaded commits with this one as a parent (#618).
+  childIds?: readonly string[];
   onSelectRow: (row: SelectedRow) => void;
   // The forge repository `#123` refers to (`issueForgeRepository`); `null` leaves it text.
   issueForge?: ForgeRepository | null;
@@ -210,6 +214,27 @@ export function CommitHeader({
                   <code key={parentId} className={styles.sha}>
                     {shortId}
                   </code>
+                );
+              })}
+            </dd>
+          </>
+        )}
+        {childIds.length > 0 && (
+          <>
+            <dt>{childIds.length === 1 ? "Child" : "Children"}</dt>
+            <dd>
+              {childIds.map((childId) => {
+                const shortId = childId.slice(0, 7);
+                return (
+                  <button
+                    key={childId}
+                    type="button"
+                    className={styles.linkButton}
+                    aria-label={`Go to child ${shortId}`}
+                    onClick={() => onSelectRow({ commitId: childId })}
+                  >
+                    {shortId}
+                  </button>
                 );
               })}
             </dd>
