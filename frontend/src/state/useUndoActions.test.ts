@@ -1,11 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { RepoClient, UndoOutcome } from "../ipc/RepoClient";
+import type { UndoOutcome } from "../ipc/RepoClient";
 import { useUndoActions } from "./useUndoActions";
 import type { AppState } from "./useAppState";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function setup(outcome: UndoOutcome | Error) {
-  const client = {
+  const client = fakeRepoClient({
     undo: vi.fn(async () => {
       if (outcome instanceof Error) throw outcome;
       return outcome;
@@ -14,7 +15,7 @@ function setup(outcome: UndoOutcome | Error) {
       if (outcome instanceof Error) throw outcome;
       return outcome;
     }),
-  } as unknown as RepoClient;
+  });
   let state = { error: null, undoState: { undo: "Stage a.txt", redo: "Commit “x”" } } as unknown as AppState;
   const setState = vi.fn((updater: (prev: AppState) => AppState) => {
     state = updater(state);

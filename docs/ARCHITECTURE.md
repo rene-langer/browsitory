@@ -29,8 +29,9 @@ everything else, as server-initiated notifications (`crates/vscode-sidecar/src/d
 bundle the `extension/` host, the `frontend/dist-vscode` webview bundle, and exactly one matching
 sidecar binary.
 
-Dependency direction: `tauri-app` → `repo-service` ← `vscode-sidecar`, and `repo-service` →
-`git-core`, `config`. Neither transport depends on the other.
+Dependency direction: `tauri-app` → `repo-service` ← `vscode-sidecar`, `repo-service` →
+`git-core`, `config`, and `config` → `git-core` (for the limits both enforce, such as
+`MAX_CONTEXT_LINES`). Neither transport depends on the other.
 
 ### Wire DTOs
 
@@ -106,7 +107,15 @@ file directly for the current method list rather than a copy here, which would j
 `frontend/src/ipc/tauriRepoClient.ts` implements it over `@tauri-apps/api`'s `invoke()`. This
 is the *only* file allowed to import `@tauri-apps/api` — every other frontend file receives a
 `RepoClient` as a prop/context value, so it can't accidentally couple to Tauri.
-`frontend/src/ipc/vscodeRepoClient.ts` implements the same interface over webview `postMessage`;
+`frontend/src/ipc/vscodeRepoClient.ts` implements the same interface over webview `postMessage`.
+Both build most of it from `createRepoClient(call)` in `frontend/src/ipc/createRepoClient.ts`
+(#504), which holds every method the transports send alike (backend name and params) once; a
+transport passes its call function and adds only the members that really differ, listed in
+`TransportSpecific` there (clone and init, `listOpenRepos`'s reply shape, the event
+subscriptions, `logFrontendError`). What a transport does around a call (logging, error mapping,
+the desktop's wait for its event listeners before a command that emits transfer or hook events)
+lives in its call function, not in a per-method override. A new operation is one line in
+`createRepoClient.ts`.
 `frontend/src/ipc/transportStatus.ts` is a transport-neutral lifecycle seam that lets `App`
 reuse its global `InlineError` path without importing VSCode APIs. Tauri registers no lifecycle
 status listener and retains its existing updater/error behavior.
@@ -1266,6 +1275,11 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   than written around (as undo and aborts do): on the case-insensitive drives
   `core.ignorecase` exists for, both files can't exist at once anyway. Reflog restore moves
   only a ref and checks nothing out.
+- A submodule update refuses one too (#534): `check_submodule_tree` runs
+  `refuse_case_pair_brought_in` in the submodule, on the target commit's tree against the
+  submodule's HEAD tree, with the submodule's own `core.ignorecase` (a global one applies to a
+  fresh clone). A fresh clone, or one whose checkout was refused (empty work tree, HEAD already
+  at the target), has no base: any pair is refused, and the clone stays with an empty work tree.
 - Aborts never refuse a case pair (#511): a pick outside Browsitory (or one before #522) can
   bring one in that no up-front check sees (libgit2's merge then records one name in the index
   and writes the other's file, so the pair is split between HEAD, the index and the disk).
@@ -1278,7 +1292,9 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   stays. The index is then written from the target tree (rebase) or HEAD (`abort_merge`).
   `plan_operation_reset` compares a pair name's file with its own index entry instead of
   libgit2's diff, which under the fold reports the other name's file as a change
-  (`WouldDiscard`). A sequence abort's rewind (`pick::rewind_to`, a safe checkout of the
+  (`WouldDiscard`). A name the index lost to the other spelling is compared with HEAD's blob
+  and the blobs of its other spellings, so an edit to it is refused rather than overwritten
+  (#543). A sequence abort's rewind (`pick::rewind_to`, a safe checkout of the
   original commit) failed after such a step had landed ("1 conflict prevents checkout": HEAD
   holds the other name, and the original name's file is on disk); with pairs it checks out the
   other paths safely, writes the pair with `restore_case_pairs` and the index from the original
@@ -1989,15 +2005,29 @@ identifier again without extending this migration.
 ## Error handling
 
 `git-core` functions return typed errors (`thiserror` enums per module: `RepoError`,
-`StatusError`, ...). The worker maps these to `Result<T, String>`. At the transport boundary
-each error becomes the shared envelope `repo_service::wire::ErrorDto` (`{ kind, message }`,
-#496): Tauri commands return `Result<T, ErrorDto>` (Tauri sends `Err` as the rejected
-promise's value), and the sidecar puts it in the JSON-RPC error's `data`, next to the same
-`message`. `ErrorKind::of` picks the kind from the error text, by the constant or typed error
-its producer formats (`wire::WORKER_STOPPED`, `wire::PULL_FAILED`,
-`RemoteError::DirtyWorktree`, `MergeError::NotATextConflict`, ...), never by a copy of the text,
-so rewording a message keeps its kind; anything else is `Other`. `ErrorKind` lists only the
-failures the frontend tells apart: a new one needs a kind there, not a text check.
+`StatusError`, ...). The worker answers every request with the shared envelope
+`repo_service::wire::ErrorDto` (`{ kind, message }`, #496), and decides its kind where the error
+is made (#527): the reply channels carry `Result<T, ErrorDto>`, and a handler turns a typed error
+into one with `ErrorDto::from_error`, which reads the kind from the error's type along its
+`source()` chain (`RemoteError::DirtyWorktree`, `MergeError::NotATextConflict`,
+`SearchError::InvalidQuery`, a credential store failure, an OS permission error), or builds it
+with a constructor (`ErrorDto::worker_stopped`, `ErrorDto::pull_failed`). Every `WorkerHandle`
+method goes through `WorkerHandle::request`, so a stopped worker always answers `WorkerStopped`.
+Text (`ErrorDto::from(String)`) is always `Other`: nothing reads the kind from a message.
+Tauri commands return `Result<T, ErrorDto>` (Tauri sends `Err` as the rejected promise's
+value), and the sidecar puts it in the JSON-RPC error's `data`, next to the same `message`.
+`ErrorKind` lists only the failures the frontend tells apart: a new one needs a kind there and a
+typed producer, not a text check.
+
+`PermissionDenied` comes from `git_core::os_error::is_permission_denied`: an `io::Error` of that
+kind, or a libgit2 `Os` error. libgit2 keeps no error number, so the latter is recognised by the
+system's own text for `EACCES`/`EPERM` (`ERROR_ACCESS_DENIED` on Windows) at the end of its
+message, as `io::Error` renders it.
+
+Errors Tauri raises before a command runs (an argument its generated wrapper can't deserialise,
+an unknown command, an ACL refusal) stay bare strings: they go through Tauri's own
+`InvokeResolver`, whose responder an app can't wrap. The frontend reads them as `Other`
+(`toRepoError`).
 
 `RepoClient` methods reject with `RepoError` (`frontend/src/ipc/RepoClient.ts`): the message,
 whose `String()` is the message alone, and the `kind`. Frontend code switches on the kind
@@ -2049,10 +2079,16 @@ only `error`.
   uses `Worker::spawn_with_pause_on_lock_wait` (test-only) and `PauseControl`, not a fixed
   sleep: the worker stops when it first finds the lock busy, and its wait starts after `go`
   (#274).
-- `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam).
+- `frontend`: Vitest + Testing Library, mocking `RepoClient` (a real interface seam). Tests
+  build the fake with `frontend/src/test/fakeRepoClient.ts` (#499): a `Proxy` that answers the
+  test's overrides and fails every other call with `not used in this test: <method>`, or in
+  `"empty"` mode answers an empty value from its `EMPTY_RESULTS` table. A new `RepoClient`
+  method needs no edit in the tests. `useAppState` tests use `transferClient` in
+  `frontend/src/state/useAppStateTestClient.ts`, which adds an empty repository tracking
+  `origin/main` on top.
 - Transport parity (#306): `frontend/src/ipc/transportParity.test.ts` calls every method of
-  both `RepoClient` implementations with a mocked transport and records the backend name each
-  sends. It checks those names against four generated lists in `frontend/src/ipc/generated/`:
+  both `RepoClient` implementations with a mocked transport and records the backend name and
+  params each sends; the params must match for every method both send (#504). It checks those names against four generated lists in `frontend/src/ipc/generated/`:
   the Tauri commands (`tauri-commands.json`), the sidecar methods (`sidecar-methods.json`),
   the methods the extension host answers itself (`extension-native-methods.json`) and the
   sidecar methods only the extension host may call (`extension-host-sidecar-methods.json`).
@@ -2080,6 +2116,13 @@ only `error`.
   Rust field is renamed, retyped or made optional. The few intended differences are written out
   there. `dtoContract.test.ts` checks that every generated type is compared, and that no type
   name is generated in two files.
+  - Limits and defaults (#497): `wire_bindings_are_current` also writes
+    `frontend/src/ipc/generated/wire-constants.ts`: `MAX_CONTEXT_LINES`,
+    `WHOLE_FILE_CONTEXT_LINES`, `COMMIT_MESSAGE_COLUMNS`, the `Default` of `config`'s
+    `DiffSettings`, `CommitMessageSettings` and `FetchSettings` serialized as their DTOs, and the
+    commit search keys (`git_core::search::KEYS`). `RepoClient.ts` re-exports them; the frontend
+    declares none of these values itself. `searchSyntax.test.ts` checks the search help's keys
+    against `SEARCH_KEYS`.
   - Fields with a fixed set of names hold the `Serialize` enum itself (see "Wire DTOs"), so
     ts-rs generates their string-literal union. The `git-core`/`repo-service` enums derive
     `TS` behind the same `ts` feature (enabled only by dev-dependencies).

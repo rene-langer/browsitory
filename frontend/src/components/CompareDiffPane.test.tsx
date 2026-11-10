@@ -5,6 +5,7 @@ import type { ChangedFile, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import type { CompareState } from "../state/useCompare";
 import type { ExternalToolsApi } from "../state/useExternalTools";
 import { CompareDiffPane } from "./CompareDiffPane";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const A = "a".repeat(40);
 const B = "b".repeat(40);
@@ -24,14 +25,14 @@ const commits = [commit(B, "bbbbbbb", "newer"), commit(A, "aaaaaaa", "older")];
 const twoCommits: CompareState = { target: { kind: "commits", fromId: A, toId: B }, range: { fromId: A, toId: B }, error: null };
 
 function client(overrides: Partial<RepoClient> = {}): RepoClient {
-  return {
+  return fakeRepoClient({
     getRangeFiles: vi.fn(async (): Promise<ChangedFile[]> => []),
     getRangeDiff: vi.fn(async () => []),
     getWorkingTreeCompareFiles: vi.fn(async (): Promise<ChangedFile[]> => []),
     getWorkingTreeCompareDiff: vi.fn(async () => []),
     getBlame: vi.fn(async () => []),
     ...overrides,
-  } as unknown as RepoClient;
+  });
 }
 
 function renderPane(props: Partial<ComponentProps<typeof CompareDiffPane>> = {}) {

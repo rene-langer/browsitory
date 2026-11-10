@@ -129,13 +129,13 @@ fn plain_relative(rel: &Path) -> bool {
 }
 
 #[cfg(unix)]
-fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+pub(crate) fn path_from_bytes(bytes: &[u8]) -> PathBuf {
     use std::os::unix::ffi::OsStrExt;
     PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
 }
 
 #[cfg(not(unix))]
-fn path_from_bytes(bytes: &[u8]) -> PathBuf {
+pub(crate) fn path_from_bytes(bytes: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
 }
 
@@ -510,6 +510,11 @@ pub(crate) struct CasePairs {
 impl CasePairs {
     pub(crate) fn is_empty(&self) -> bool {
         self.tracked.is_empty() && self.untracked.is_empty()
+    }
+
+    /// The names a source (the target, HEAD or the index) holds.
+    pub(crate) fn tracked(&self) -> impl Iterator<Item = &[u8]> {
+        self.tracked.iter().map(Vec::as_slice)
     }
 
     /// Whether a forced checkout must leave `path` out (a name a source holds).

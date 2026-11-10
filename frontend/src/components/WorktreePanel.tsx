@@ -7,6 +7,9 @@ import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./WorktreePanel.module.css";
+import formStyles from "./primitives/FormDialog.module.css";
+import { pruneWorktreesAction, worktreeActions } from "../lib/actions/worktreeActions";
+import type { OperationBlockers } from "../lib/operationStatus";
 
 export function WorktreePanel({
   worktrees,
@@ -42,6 +45,10 @@ export function WorktreePanel({
   const [startPoint, setStartPoint] = useState("");
   const [removeConfirmation, setRemoveConfirmation] = useState<WorktreeInfo | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  // The rows' and Prune's availability and labels, shared with the palette (#509).
+  const blockers: OperationBlockers = { blocked: operationDisabled, reason: operationDisabledReason };
+  const prune = pruneWorktreesAction(blockers);
+  const busyReason = operationDisabled ? operationDisabledReason : null;
 
   const createWorktree = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -125,7 +132,9 @@ export function WorktreePanel({
         <p className={styles.empty}>No worktrees. Create one above to work on another branch in parallel.</p>
       ) : (
         <ul className={styles.list}>
-          {worktrees.map((worktree) => (
+          {worktrees.map((worktree) => {
+            const actions = worktreeActions(blockers, worktree);
+            return (
             // Keyed by entry, not path: two entries can name one folder (an old one whose folder was
             // deleted and a newer one made there; `list_worktrees` lists both), while a linked
             // worktree's name is its own folder under `.git/worktrees` (#413).
@@ -139,43 +148,48 @@ export function WorktreePanel({
               <Toolbar>
                 <button
                   type="button"
-                  disabled={operationDisabled}
-                  title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+                  disabled={!actions.open.enabled}
+                  title={actions.open.reason}
                   onClick={() => void onOpenWorktree(worktree.path)}
                 >
-                  Open {worktree.path}
+                  {actions.open.label}
                 </button>
                 <button
                   type="button"
-                  disabled={operationDisabled || worktree.isMain}
-                  title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
+                  disabled={!actions.remove.enabled}
+                  title={actions.remove.reason}
                   onClick={() => removeWorktree(worktree)}
                 >
-                  Remove {worktree.path}
+                  {actions.remove.label}
                 </button>
               </Toolbar>
             </ListRow>
-          ))}
+            );
+          })}
         </ul>
       )}
       <Toolbar>
-        <button
-          type="button"
-          disabled={operationDisabled}
-          title={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-          onClick={() => void onPruneWorktrees()}
-        >
-          Prune worktrees
+        <button type="button" disabled={!prune.enabled} title={prune.reason} onClick={() => void onPruneWorktrees()}>
+          {prune.label}
         </button>
       </Toolbar>
       {removeConfirmation !== null && (
         <ConfirmDialog
           ariaLabel={`Remove worktree ${removeConfirmation.path}`}
-          message={<p>Remove worktree at {removeConfirmation.path}?</p>}
+          message={
+            <>
+              <p>Remove worktree at {removeConfirmation.path}?</p>
+              {/* #561: the repository can become busy while the confirmation is open. */}
+              {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
+            </>
+          }
           confirmLabel="Remove worktree"
           confirmDisabled={operationDisabled}
-          confirmTitle={operationDisabled ? (operationDisabledReason ?? undefined) : undefined}
-          onConfirm={() => void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null))}
+          confirmTitle={busyReason ?? undefined}
+          onConfirm={() => {
+            if (operationDisabled) return;
+            void onRemoveWorktree(removeConfirmation.name).then(() => setRemoveConfirmation(null));
+          }}
           onCancel={() => setRemoveConfirmation(null)}
         />
       )}

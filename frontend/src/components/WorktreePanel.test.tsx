@@ -175,4 +175,30 @@ describe("WorktreePanel", () => {
 
     expect(onRemoveWorktree).toHaveBeenCalledWith("feature");
   });
+
+  // #561: the repository can become busy while the confirmation is open.
+  it("says why the confirmation can't remove once the repository became busy", () => {
+    const onRemoveWorktree = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = renderPanel({ onRemoveWorktree });
+    fireEvent.click(screen.getByRole("button", { name: "Remove /repos/project-feature" }));
+    rerender(
+      <WorktreePanel
+        worktrees={[mainWorktree, linkedWorktree]}
+        branches={branches}
+        onOpenWorktree={vi.fn()}
+        onCreateWorktree={vi.fn().mockResolvedValue(null)}
+        onRemoveWorktree={onRemoveWorktree}
+        onPruneWorktrees={vi.fn().mockResolvedValue(undefined)}
+        operationDisabled
+        operationDisabledReason="A merge is in progress."
+      />,
+    );
+    const dialog = screen.getByRole("dialog", { name: "Remove worktree /repos/project-feature" });
+    expect(within(dialog).getByText("A merge is in progress.")).toBeInTheDocument();
+    const confirm = within(dialog).getByRole("button", { name: "Remove worktree" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("title", "A merge is in progress.");
+    fireEvent.click(confirm);
+    expect(onRemoveWorktree).not.toHaveBeenCalled();
+  });
 });

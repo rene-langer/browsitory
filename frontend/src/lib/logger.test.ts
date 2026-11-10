@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { installGlobalErrorLogging } from "./logger";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function fakeClient(): RepoClient {
-  return {
+  return fakeRepoClient({
     logFrontendError: vi.fn(async () => {}),
-  } as unknown as RepoClient;
+  });
 }
 
 describe("installGlobalErrorLogging", () => {

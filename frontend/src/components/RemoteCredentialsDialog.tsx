@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import type { RemoteAuthMode, RemoteInfo } from "../ipc/RepoClient";
 import { FormDialog } from "./primitives/FormDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 import styles from "./BranchTree.module.css";
 
 /**
@@ -8,6 +9,8 @@ import styles from "./BranchTree.module.css";
  * credential. Opened from a remote folder's menu in `BranchTree` or the palette's "Manage
  * credentials for <name>…" (via `AppState.remoteDialog`). The fields start from `remote` when the
  * dialog mounts; the token is never held in React state and is cleared after every attempt.
+ * `blockedReason` (`operationBlockers`) disables saving and forgetting while it applies: the
+ * repository can become busy after the dialog opened (#561).
  */
 export function RemoteCredentialsDialog({
   remote,
@@ -15,23 +18,30 @@ export function RemoteCredentialsDialog({
   onSaveHttpsCredential,
   onForgetHttpsCredential,
   onClose,
+  blockedReason = null,
 }: {
   remote: RemoteInfo;
   onSetAuthMode: (remoteName: string, mode: RemoteAuthMode, username: string | null) => Promise<boolean>;
   onSaveHttpsCredential: (remoteName: string, username: string, token: string) => Promise<void>;
   onForgetHttpsCredential: (remoteName: string) => Promise<void>;
   onClose: () => void;
+  /** Why repository operations are blocked now, or `null`. */
+  blockedReason?: string | null;
 }) {
   const [mode, setMode] = useState<RemoteAuthMode>(remote.authMode ?? "HttpsToken");
   const [username, setUsername] = useState(remote.authUsername ?? "");
   const accessTokenRef = useRef<HTMLInputElement>(null);
   const remoteName = remote.name;
+  const blocked = blockedReason !== null;
+  const blockedTitle = blockedReason ?? undefined;
 
   return (
     <FormDialog ariaLabel={`Credentials for ${remoteName}`} onCancel={onClose}>
       <form
         onSubmit={async (event) => {
           event.preventDefault();
+          // Not an attempt: the typed token stays for when the repository is free again.
+          if (blocked) return;
           const trimmedUsername = username.trim();
           const token = accessTokenRef.current?.value ?? "";
           try {
@@ -69,8 +79,18 @@ export function RemoteCredentialsDialog({
               Access token
               <input ref={accessTokenRef} type="password" autoComplete="off" />
             </label>
-            <button type="submit">Save HTTPS credential</button>
-            <button type="button" onClick={() => void onForgetHttpsCredential(remoteName)}>
+            {blocked && <p className={formStyles.blocked}>{blockedReason}</p>}
+            <button type="submit" disabled={blocked} title={blockedTitle}>
+              Save HTTPS credential
+            </button>
+            <button
+              type="button"
+              disabled={blocked}
+              title={blockedTitle}
+              onClick={() => {
+                if (!blocked) void onForgetHttpsCredential(remoteName);
+              }}
+            >
               Forget HTTPS credential
             </button>
           </>
@@ -80,7 +100,10 @@ export function RemoteCredentialsDialog({
               Uses your system's SSH agent to authenticate — make sure one is running (for example via{" "}
               <code>ssh-add</code>) before fetching or pushing.
             </p>
-            <button type="submit">Use SSH agent</button>
+            {blocked && <p className={formStyles.blocked}>{blockedReason}</p>}
+            <button type="submit" disabled={blocked} title={blockedTitle}>
+              Use SSH agent
+            </button>
           </>
         )}
         <button type="button" onClick={onClose}>

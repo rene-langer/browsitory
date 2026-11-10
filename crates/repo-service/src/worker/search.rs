@@ -1,3 +1,4 @@
+use crate::wire::ErrorDto;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 
@@ -19,7 +20,7 @@ pub(super) fn search_commits(
     query: String,
     selection: GraphSelection,
     cursor: Option<String>,
-    reply: Sender<Result<SearchPage, String>>,
+    reply: Sender<Result<SearchPage, ErrorDto>>,
 ) {
     let result = git_core::search::parse_query(&query).and_then(|parsed| {
         git_core::search::search_commits(
@@ -31,7 +32,7 @@ pub(super) fn search_commits(
             &|| current.load(Ordering::SeqCst) != generation,
         )
     });
-    let _ = reply.send(result.map_err(|error| error.to_string()));
+    let _ = reply.send(result.map_err(ErrorDto::from_error));
 }
 
 impl WorkerHandle {
@@ -42,7 +43,7 @@ impl WorkerHandle {
         query: String,
         selection: GraphSelection,
         cursor: Option<String>,
-    ) -> Result<SearchPage, String> {
+    ) -> Result<SearchPage, ErrorDto> {
         let generation = self.claim_search_generation();
         self.search_commits_claimed(generation, query, selection, cursor)
     }
@@ -63,19 +64,14 @@ impl WorkerHandle {
         query: String,
         selection: GraphSelection,
         cursor: Option<String>,
-    ) -> Result<SearchPage, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::SearchCommits {
-                query,
-                selection,
-                cursor,
-                generation,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<SearchPage, ErrorDto> {
+        self.request(|tx| Command::SearchCommits {
+            query,
+            selection,
+            cursor,
+            generation,
+            reply: tx,
+        })
     }
 
     /// Stops the in-flight (or queued) search, if any, by bumping the shared

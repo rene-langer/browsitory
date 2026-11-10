@@ -409,6 +409,33 @@ describe("tauriRepoClient transfer progress subscription", () => {
     });
   });
 
+  // #504: the force push emits transfer events and these commands emit hook events, like the
+  // fetches and commit, but didn't wait for the listeners.
+  it.each([
+    ["forcePushCurrentBranch", "subscribeTransferProgress", () => tauriRepoClient.forcePushCurrentBranch("/r", "origin", false)],
+    ["switchBranch", "subscribeHookProgress", () => tauriRepoClient.switchBranch("/r", "topic")],
+    ["checkoutCommit", "subscribeHookProgress", () => tauriRepoClient.checkoutCommit("/r", "abc")],
+    ["mergeBranch", "subscribeHookProgress", () => tauriRepoClient.mergeBranch("/r", "topic", { fastForward: "Allow", squash: false })],
+    ["cherryPick", "subscribeHookProgress", () => tauriRepoClient.cherryPick("/r", "abc")],
+    ["revertCommit", "subscribeHookProgress", () => tauriRepoClient.revertCommit("/r", "abc")],
+    ["cherryPickMany", "subscribeHookProgress", () => tauriRepoClient.cherryPickMany("/r", ["abc"])],
+    ["revertMany", "subscribeHookProgress", () => tauriRepoClient.revertMany("/r", ["abc"])],
+    ["continueSequence", "subscribeHookProgress", () => tauriRepoClient.continueSequence("/r")],
+  ] as const)("%s waits for the %s listeners", async (_method, subscribe, send) => {
+    const registrations: Array<(unlisten: () => void) => void> = [];
+    vi.mocked(listen).mockImplementation(() => new Promise((resolve) => registrations.push(resolve)));
+    vi.mocked(invoke).mockResolvedValue(null);
+
+    tauriRepoClient[subscribe](() => {});
+    const call = send();
+    await Promise.resolve();
+    expect(invoke).not.toHaveBeenCalled();
+
+    for (const register of registrations) register(() => {});
+    await call;
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("normalizes progress events and unregisters its listeners", async () => {
     const unlisten = vi.fn();
     let progressListener: ((event: { payload: unknown }) => void) | undefined;

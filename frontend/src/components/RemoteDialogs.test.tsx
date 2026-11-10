@@ -20,7 +20,7 @@ function props(overrides: Partial<Props> = {}): Props {
     remoteDialog: null,
     remotes: [origin],
     remoteUpstreams: {},
-    operationDisabled: false,
+    blockedReason: null,
     onRenameRemote: vi.fn().mockResolvedValue(true),
     onUpdateRemoteUrls: vi.fn().mockResolvedValue(undefined),
     onRemoveRemote: vi.fn().mockResolvedValue(undefined),
@@ -120,6 +120,56 @@ describe("RemoteDialogs", () => {
     expect(screen.getByText(/clear upstreams for main/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Confirm remove", hidden: true }));
     expect(base.onRemoveRemote).toHaveBeenCalledWith("origin", true);
+  });
+
+  // #561: the repository can become busy while a dialog is open.
+  it("disables Remove with the reason, in the confirmation too", () => {
+    const base = props({ remoteDialog: { kind: "remove", remoteName: "origin" } });
+    const { rerender } = render(<RemoteDialogs {...base} />);
+    rerender(<RemoteDialogs {...base} blockedReason="A merge is in progress." />);
+    const confirm = screen.getByRole("button", { name: "Confirm remove", hidden: true });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("title", "A merge is in progress.");
+    expect(screen.getByText("A merge is in progress.")).toBeInTheDocument();
+    fireEvent.click(confirm);
+    expect(base.onRemoveRemote).not.toHaveBeenCalled();
+  });
+
+  it("does not save an edit once the repository became busy", () => {
+    const base = props({ remoteDialog: { kind: "edit", remoteName: "origin" } });
+    const { rerender } = render(<RemoteDialogs {...base} />);
+    const dialog = screen.getByRole("dialog", { name: "Edit origin", hidden: true });
+    fireEvent.change(within(dialog).getByLabelText("Remote name"), { target: { value: "upstream" } });
+    fireEvent.change(within(dialog).getByLabelText("Fetch URL"), { target: { value: "x" } });
+    rerender(<RemoteDialogs {...base} blockedReason="A transfer is in progress." />);
+    const save = within(dialog).getByRole("button", { name: "Save remote", hidden: true });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title", "A transfer is in progress.");
+    expect(within(dialog).getByText("A transfer is in progress.")).toBeInTheDocument();
+    fireEvent.submit(save.closest("form")!);
+    expect(base.onRenameRemote).not.toHaveBeenCalled();
+    expect(base.onUpdateRemoteUrls).not.toHaveBeenCalled();
+    expect(base.onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not change credentials once the repository became busy", () => {
+    const base = props({ remoteDialog: { kind: "credentials", remoteName: "origin" } });
+    const { rerender } = render(<RemoteDialogs {...base} />);
+    const dialog = screen.getByRole("dialog", { name: "Credentials for origin", hidden: true });
+    fireEvent.change(within(dialog).getByLabelText("HTTPS username"), { target: { value: "me" } });
+    fireEvent.change(within(dialog).getByLabelText("Access token"), { target: { value: "tok" } });
+    rerender(<RemoteDialogs {...base} blockedReason="A rebase is in progress." />);
+    for (const name of ["Save HTTPS credential", "Forget HTTPS credential"]) {
+      const button = within(dialog).getByRole("button", { name, hidden: true });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "A rebase is in progress.");
+    }
+    fireEvent.submit(within(dialog).getByLabelText("Access token").closest("form")!);
+    expect(base.onSetRemoteAuthMode).not.toHaveBeenCalled();
+    expect(base.onSaveHttpsCredential).not.toHaveBeenCalled();
+    expect(base.onClose).not.toHaveBeenCalled();
+    // Not an attempt: the token stays for when the repository is free again.
+    expect(within(dialog).getByLabelText("Access token")).toHaveValue("tok");
   });
 
   it("closes with a notice when opened for a remote that isn't listed", () => {

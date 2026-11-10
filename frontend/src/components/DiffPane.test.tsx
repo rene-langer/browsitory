@@ -6,183 +6,14 @@ import { useState, type ReactNode } from "react";
 import { DiffSettingsContext } from "../state/useDiffSettings";
 import { CommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import type { ExternalToolsApi } from "../state/useExternalTools";
-import { DiffPane, type DiscardRequest } from "./DiffPane";
+import { DiffPane, type DiscardRequest, type StashActions } from "./DiffPane";
 import styles from "./DiffPane.module.css";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const TEST_REPO_PATH = "/repo";
 
-function unused(): never {
-  throw new Error("not used in this test");
-}
-
-function fakeClient(overrides: Partial<RepoClient>): RepoClient {
-  return {
-    pickRepoFolder: unused,
-    listRecentRepos: unused,
-    getAppVersion: unused,
-    getLastSeenVersion: unused,
-    setLastSeenVersion: unused,
-    openRepo: unused,
-    closeRepo: async () => unused(),
-    listOpenRepos: async () => unused(),
-    persistOpenRepos: async () => unused(),
-    scanReposInRoot: async () => [],
-    supportsCloneAndInit: false,
-    cloneRepo: async () => unused(),
-    cancelClone: async () => unused(),
-    initRepo: async () => unused(),
-    listWorkspaces: async () => [],
-    saveWorkspace: async () => "workspace-id",
-    updateWorkspace: async () => {},
-    deleteWorkspace: async () => {},
-    getStatus: unused,
-    getCommitGraph: unused,
-    listBranches: unused,
-    createBranch: unused,
-    switchBranch: unused,
-    deleteBranch: unused,
-    renameBranch: unused,
-    listWorktrees: async () => unused(),
-    createWorktree: async () => unused(),
-    removeWorktree: async () => unused(),
-    pruneWorktrees: async () => unused(),
-    listSubmodules: async () => [],
-    initSubmodule: async () => unused(),
-    updateSubmodule: async () => unused(),
-    listReflogRefs: async () => [],
-    getReflog: async () => [],
-    restoreReflogEntry: async () => unused(),
-    listRemotes: async () => unused(),
-    listRemoteBranches: async () => unused(),
-    getCurrentUpstream: async () => null,
-    getRemoteUpstreams: async () => [],
-    addRemote: async () => unused(),
-    renameRemote: async () => unused(),
-    updateRemoteUrls: async () => unused(),
-    removeRemote: async () => unused(),
-    saveHttpsCredential: async () => unused(),
-    forgetHttpsCredential: async () => unused(),
-    setRemoteAuthMode: async () => unused(),
-    setCurrentUpstream: async () => unused(),
-    clearCurrentUpstream: async () => unused(),
-    listTags: async () => [],
-    createTag: async () => unused(),
-    deleteTag: async () => unused(),
-    fetchRemote: async () => unused(),
-    pushCurrentBranch: async () => unused(),
-    pushTags: async () => unused(),
-    fetchAllRemotes: async () => unused(),
-    backgroundFetch: async () => unused(),
-    pushBranch: async () => unused(),
-    deleteRemoteBranch: async () => unused(),
-    deleteRemoteTag: async () => unused(),
-    pullCurrentUpstream: async () => unused(),
-    cancelTransfer: async () => unused(),
-    subscribeTransferProgress: () => () => {},
-    subscribeHookProgress: () => () => {},
-    listStashes: unused,
-    saveStash: unused,
-    applyStash: unused,
-    popStash: unused,
-    getStashFiles: unused,
-    getRangeFiles: unused,
-    getRangeDiff: unused,
-    getWorkingTreeCompareFiles: unused,
-    getWorkingTreeCompareDiff: unused,
-    getBranchCompareRange: unused,
-    locateCommit: unused,
-    applyCommitChange: unused,
-    getPatch: unused,
-    applyPatch: unused,
-    savePatchFile: unused,
-    openPatchFile: unused,
-    getMergeOptions: unused,
-    setMergeOptions: unused,
-    dropStash: unused,
-    getBlame: unused,
-    mergeBranch: unused,
-    getConflictHunks: unused,
-    resolveConflict: unused,
-    abortMerge: unused,
-    getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
-    amendCommit: async () => { throw new Error("unimplemented"); },
-    getUndoState: async () => ({ undo: null, redo: null }),
-    getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),
-    undo: async () => ({ kind: "Nothing" as const }),
-    redo: async () => ({ kind: "Nothing" as const }),
-    cherryPick: async () => { throw new Error("unimplemented"); },
-    revertCommit: async () => { throw new Error("unimplemented"); },
-    resetToCommit: async () => { throw new Error("unimplemented"); },
-    checkoutCommit: async () => { throw new Error("unimplemented"); },
-    forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
-    resolveAddDeleteConflict: unused,
-    commitsSince: unused,
-    startRebase: unused,
-    rebaseContinue: unused,
-    abortRebase: unused,
-    detectForgeRepository: async () => [],
-    saveForgeToken: unused,
-    forgetForgeToken: unused,
-    listPullRequests: unused,
-    createPullRequest: unused,
-    openExternalUrl: unused,
-    openInEditor: async () => {},
-    revealInFileManager: async () => {},
-    openTerminal: async () => {},
-    openDiffTool: async () => {},
-    openMergeTool: async () => "Unresolved" as const,
-    markResolved: async () => "Resolved" as const,
-    resolveWholeFile: async () => {},
-    cherryPickMany: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
-    revertMany: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
-    continueSequence: async () => ({ kind: "Completed" as const, applied: 0, skipped: [] }),
-    abortSequence: async () => ({ rewound: true }),
-    getExternalToolSettings: async () => ({ editor: null, terminal: null }),
-    setExternalToolSettings: async () => {},
-    getGitTools: async () => ({ diffTool: null, mergeTool: null }),
-    getFileSides: async () => ({ old: { kind: "Missing" as const }, new: { kind: "Missing" as const } }),
-    getCommitTree: async () => ({ entries: [], truncated: false }),
-    getFileAtCommit: async () => ({ kind: "Binary" as const, size: 0 }),
-    saveFileVersion: async () => null,
-    restoreFileVersion: async () => {},
-    listRecentAuthors: async () => [],
-    getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
-    setCommitMessageSettings: async () => {},
-    getFetchSettings: async () => ({ autoFetchMinutes: 0 }),
-    setFetchSettings: async () => {},
-    getGraphBranchSelection: async () => null,
-    setGraphBranchSelection: unused,
-    getGraphRemoteBranchSelection: async () => null,
-    setGraphRemoteBranchSelection: unused,
-    clearGraphBranchSelection: unused,
-    clearGraphRemoteBranchSelection: unused,
-    getWorkingDiff: async () => [],
-    getCommitDiff: async () => [],
-    getFileHistory: unused,
-    getLineHistory: unused,
-    searchCommits: async () => ({ commits: [], nextCursor: null, scanned: 0 }),
-    cancelSearch: async () => {},
-    getCommitRenameDiff: unused,
-    getCommitFiles: unused,
-    getCommitMessage: unused,
-    stageFile: unused,
-    unstageFile: unused,
-    stageHunk: unused,
-    unstageHunk: unused,
-    discardHunk: unused,
-    stageLines: unused,
-    unstageLines: unused,
-    discardLines: unused,
-    discardFile: unused,
-    discardAllUnstaged: unused,
-    ignorePath: unused,
-    getDiffSettings: unused,
-    setDiffSettings: unused,
-    commit: unused,
-    logFrontendError: unused,
-    ...overrides,
-  };
+function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
+  return fakeRepoClient(overrides, "empty");
 }
 
 const noopHandlers = {
@@ -643,6 +474,33 @@ describe("DiffPane", () => {
         expect(onDiscardAllUnstaged).toHaveBeenCalledTimes(1);
         // Exactly what the dialog counted: the unstaged, non-conflicted entries.
         expect(onDiscardAllUnstaged).toHaveBeenCalledWith(["src/a.ts", "logs/run.log"]);
+      });
+
+      it("blocks the discard confirmations, saying why, while an action is in progress (#521)", () => {
+        const onDiscardFile = vi.fn();
+        const onDiscardAllUnstaged = vi.fn();
+        const reason = "Another action is in progress.";
+        render({ onDiscardFile, onDiscardAllUnstaged, discardBlockedReason: reason });
+
+        fireEvent.click(screen.getByRole("button", { name: "Actions for src/a.ts" }));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Discard changes…" }));
+        let dialog = screen.getByRole("dialog", { name: "Discard changes", hidden: true });
+        expect(dialog).toHaveTextContent(reason);
+        let confirm = within(dialog).getByRole("button", { name: "Discard changes", hidden: true });
+        expect(confirm).toBeDisabled();
+        expect(confirm).toHaveAttribute("title", reason);
+        fireEvent.click(confirm);
+        fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+
+        fireEvent.click(screen.getByRole("button", { name: "Discard all…" }));
+        dialog = screen.getByRole("dialog", { name: "Discard all changes", hidden: true });
+        expect(dialog).toHaveTextContent(reason);
+        confirm = within(dialog).getByRole("button", { name: "Discard all", hidden: true });
+        expect(confirm).toBeDisabled();
+        fireEvent.click(confirm);
+
+        expect(onDiscardFile).not.toHaveBeenCalled();
+        expect(onDiscardAllUnstaged).not.toHaveBeenCalled();
       });
 
       it("opens the file confirm from a lifted request and reports the current file", () => {
@@ -2096,7 +1954,7 @@ describe("DiffPane stash view", () => {
     onDrop: vi.fn(),
     restoreIndex: true,
     onSetRestoreIndex: vi.fn(),
-    disabledReason: null,
+    blockers: { apply: null, drop: null },
     ...overrides,
   });
 
@@ -2173,7 +2031,7 @@ describe("DiffPane stash view", () => {
   it("disables Apply and Pop with the reason, keeping Drop", async () => {
     renderStash(
       { tracked: ["a.txt"], untracked: [], untrackedCommitId: null },
-      stashActions({ disabledReason: "Unstage or commit staged changes first." }),
+      stashActions({ blockers: { apply: "Unstage or commit staged changes first.", drop: null } }),
     );
     const section = await screen.findByRole("region", { name: "Stash details" });
 
@@ -2182,6 +2040,41 @@ describe("DiffPane stash view", () => {
       expect(within(section).getByRole("button", { name })).toHaveAttribute("title", "Unstage or commit staged changes first.");
     }
     expect(within(section).getByRole("button", { name: "Drop…" })).toBeEnabled();
+  });
+
+  it("disables Drop… and its open confirmation, saying why, while an action is in progress (#521)", async () => {
+    const reason = "Another action is in progress.";
+    const client = fakeClient({
+      getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null })),
+      getCommitDiff: vi.fn(async () => []),
+      getBlame: async () => [],
+    });
+    const actions = stashActions();
+    const props = (current: StashActions) => ({
+      repoPath: TEST_REPO_PATH,
+      client,
+      selectedRow: { commitId: "s0" },
+      status: [],
+      mergeMessage: null,
+      rebaseProgress: null,
+      ...noopHandlers,
+      stashes: [stash],
+      stashActions: current,
+    });
+    const { rerender } = render(<DiffPane {...props(actions)} />);
+    const section = await screen.findByRole("region", { name: "Stash details" });
+    fireEvent.click(within(section).getByRole("button", { name: "Drop…" }));
+
+    rerender(<DiffPane {...props({ ...actions, blockers: { apply: null, drop: reason } })} />);
+    const drop = within(section).getByRole("button", { name: "Drop…" });
+    expect(drop).toBeDisabled();
+    expect(drop).toHaveAttribute("title", reason);
+    const dialog = screen.getByRole("dialog", { name: "Drop stash On main: wip", hidden: true });
+    expect(dialog).toHaveTextContent(reason);
+    const confirm = within(dialog).getByRole("button", { name: "Drop stash", hidden: true });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(actions.onDrop).not.toHaveBeenCalled();
   });
 
   it("shows a load failure with Retry", async () => {
@@ -2503,7 +2396,7 @@ describe("DiffPane image preview", () => {
           onDrop: vi.fn(),
           restoreIndex: true,
           onSetRestoreIndex: vi.fn(),
-          disabledReason: null,
+          blockers: { apply: null, drop: null },
         },
       },
     );

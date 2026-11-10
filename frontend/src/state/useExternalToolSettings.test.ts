@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { RepoClient } from "../ipc/RepoClient";
 import { useExternalToolSettings } from "./useExternalToolSettings";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 describe("useExternalToolSettings", () => {
   it("loads, saves and reports a failed save", async () => {
@@ -9,10 +9,10 @@ describe("useExternalToolSettings", () => {
       .fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("disk full"));
-    const client = {
+    const client = fakeRepoClient({
       getExternalToolSettings: async () => ({ editor: "code", terminal: null }),
       setExternalToolSettings,
-    } as unknown as RepoClient;
+    });
     const { result } = renderHook(() => useExternalToolSettings(client));
     expect(result.current.settings).toBeNull();
     await waitFor(() => expect(result.current.settings).toEqual({ editor: "code", terminal: null }));
@@ -25,11 +25,11 @@ describe("useExternalToolSettings", () => {
   });
 
   it("falls back to defaults and shows the error when loading fails", async () => {
-    const client = {
+    const client = fakeRepoClient({
       getExternalToolSettings: async () => {
         throw new Error("config unreadable");
       },
-    } as unknown as RepoClient;
+    });
     const { result } = renderHook(() => useExternalToolSettings(client));
     await waitFor(() => expect(result.current.settings).toEqual({ editor: null, terminal: null }));
     expect(result.current.error).toBe("config unreadable");

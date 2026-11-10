@@ -2,10 +2,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { FileSide, RepoClient } from "../ipc/RepoClient";
 import { ImageDiff } from "./ImageDiff";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function sides(old: FileSide, next: FileSide) {
   const getFileSides = vi.fn(async () => ({ old, new: next }));
-  return { getFileSides } as unknown as RepoClient & { getFileSides: typeof getFileSides };
+  return fakeRepoClient({ getFileSides }) as RepoClient & { getFileSides: typeof getFileSides };
 }
 
 const png = (base64: string, size = 3): FileSide => ({ kind: "Loaded", size, base64, mime: "image/png" });
@@ -87,7 +88,7 @@ describe("ImageDiff", () => {
       .fn()
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValue({ old: png("Zm9v"), new: png("YmFy") });
-    const client = { getFileSides } as unknown as RepoClient;
+    const client = fakeRepoClient({ getFileSides });
     const { rerender } = render(
       <ImageDiff client={client} repoPath="/r" source={{ kind: "Unstaged" }} path="a.png" refreshKey={0} />,
     );

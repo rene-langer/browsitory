@@ -14,6 +14,7 @@ pub mod line_history;
 mod line_patch;
 pub mod locate;
 pub mod merge;
+pub mod os_error;
 mod partial_checkout;
 pub mod patch;
 pub mod pick;

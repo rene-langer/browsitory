@@ -449,6 +449,53 @@ fn rebase_abort_restores_the_branch_after_a_pick_brought_in_a_case_pair() {
     }
 }
 
+/// `main` holds `pair.0` and `conf`; `side`, forked before `main`'s last commit, adds `pair.1`
+/// and edits `conf`. With `core.ignorecase` on, libgit2's cherry-pick of `side` onto `main`
+/// pauses on `conf`'s conflict, having written `pair.1`'s file. Returns `main`'s tip.
+fn cherry_pick_brought_in_a_case_pair(
+    pair: (&str, &str),
+) -> (tempfile::TempDir, git2::Repository, String) {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), pair.0, "first\n");
+    write_file(dir.path(), "conf", "base\n");
+    commit_all(&repo, "base");
+    {
+        let base = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("side", &base, false).unwrap();
+    }
+    write_file(dir.path(), "conf", "main\n");
+    commit_all(&repo, "main");
+    let main = head_id(&repo);
+    let main_ref = repo.head().unwrap().name().unwrap().to_string();
+    repo.set_head("refs/heads/side").unwrap();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.force();
+    repo.checkout_head(Some(&mut checkout)).unwrap();
+    write_file(dir.path(), pair.1, "second\n");
+    write_file(dir.path(), "conf", "side\n");
+    commit_all(&repo, "side");
+    let side = head_id(&repo);
+    repo.set_head(&main_ref).unwrap();
+    repo.checkout_head(Some(&mut checkout)).unwrap();
+    assert_eq!(read(dir.path(), pair.1), None);
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    drop(repo);
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert_eq!(head_id(&repo), main);
+
+    repo.cherrypick(
+        &repo
+            .find_commit(git2::Oid::from_str(&side).unwrap())
+            .unwrap(),
+        None,
+    )
+    .unwrap();
+    (dir, repo, main)
+}
+
 #[test]
 fn cherry_pick_abort_after_a_pick_brought_in_a_case_pair() {
     // #511: the same for a paused cherry-pick, whose Abort resets the paths the pick touched.
@@ -456,44 +503,7 @@ fn cherry_pick_abort_after_a_pick_brought_in_a_case_pair() {
     // other name's entry), or left the picked file behind. Browsitory's own pick refuses such a
     // commit since #522: the pick here is libgit2's, as a terminal's would be.
     for pair in CASE_PAIRS {
-        let (dir, repo) = init_repo();
-        write_file(dir.path(), pair.0, "first\n");
-        write_file(dir.path(), "conf", "base\n");
-        commit_all(&repo, "base");
-        {
-            let base = repo.head().unwrap().peel_to_commit().unwrap();
-            repo.branch("side", &base, false).unwrap();
-        }
-        write_file(dir.path(), "conf", "main\n");
-        commit_all(&repo, "main");
-        let main = head_id(&repo);
-        let main_ref = repo.head().unwrap().name().unwrap().to_string();
-        repo.set_head("refs/heads/side").unwrap();
-        let mut checkout = git2::build::CheckoutBuilder::new();
-        checkout.force();
-        repo.checkout_head(Some(&mut checkout)).unwrap();
-        write_file(dir.path(), pair.1, "second\n");
-        write_file(dir.path(), "conf", "side\n");
-        commit_all(&repo, "side");
-        let side = head_id(&repo);
-        repo.set_head(&main_ref).unwrap();
-        repo.checkout_head(Some(&mut checkout)).unwrap();
-        assert_eq!(read(dir.path(), pair.1), None);
-        repo.config()
-            .unwrap()
-            .set_bool("core.ignorecase", true)
-            .unwrap();
-        drop(repo);
-        let repo = git2::Repository::open(dir.path()).unwrap();
-        assert_eq!(head_id(&repo), main);
-
-        repo.cherrypick(
-            &repo
-                .find_commit(git2::Oid::from_str(&side).unwrap())
-                .unwrap(),
-            None,
-        )
-        .unwrap();
+        let (dir, repo, main) = cherry_pick_brought_in_a_case_pair(pair);
         assert!(repo.index().unwrap().has_conflicts(), "{pair:?}");
         assert_eq!(
             read(dir.path(), pair.1).as_deref(),
@@ -526,5 +536,102 @@ fn cherry_pick_abort_after_a_pick_brought_in_a_case_pair() {
             Some("main\n"),
             "{pair:?}"
         );
+    }
+}
+
+#[test]
+fn cherry_pick_abort_keeps_an_edit_to_one_of_a_case_pair() {
+    // #543: what the user wrote into a name of the pair during the pause is no change the pick
+    // made. Where libgit2's index took `pair.1` for `pair.0`'s entry, Abort would put both names
+    // back from HEAD: it refuses (`WouldDiscard`) and changes nothing. That held for the index's
+    // name only; an edit to HEAD's name was overwritten. For `a`/`A` the index kept `a` and the
+    // pick touched neither name: Abort goes ahead and leaves both files alone.
+    for pair in CASE_PAIRS {
+        for edited in [pair.0, pair.1] {
+            let (dir, repo, main) = cherry_pick_brought_in_a_case_pair(pair);
+            let split = index_paths(dir.path()).contains(&pair.1.to_string());
+            write_file(dir.path(), edited, "mine\n");
+
+            let result = git_core::merge::abort_merge(&repo);
+
+            assert_eq!(
+                read(dir.path(), edited).as_deref(),
+                Some("mine\n"),
+                "{pair:?} {edited}: {result:?}"
+            );
+            if split {
+                assert!(
+                    matches!(&result, Err(git_core::merge::MergeError::WouldDiscard(path)) if path == edited),
+                    "{pair:?} {edited}: {result:?}"
+                );
+                assert_eq!(
+                    repo.state(),
+                    git2::RepositoryState::CherryPick,
+                    "{pair:?} {edited}"
+                );
+            } else {
+                assert!(result.is_ok(), "{pair:?} {edited}: {result:?}");
+                assert_eq!(head_id(&repo), main, "{pair:?} {edited}");
+            }
+        }
+    }
+}
+
+#[test]
+fn cherry_pick_abort_after_a_conflict_on_one_of_a_case_pair() {
+    // #543: a conflict on a name of the pair is the pick's own, never a local change: Abort
+    // goes ahead, puts HEAD's file back and removes the picked name's.
+    for pair in CASE_PAIRS {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), pair.0, "first\n");
+        commit_all(&repo, "base");
+        {
+            let base = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("side", &base, false).unwrap();
+        }
+        write_file(dir.path(), pair.0, "main\n");
+        commit_all(&repo, "main");
+        let main = head_id(&repo);
+        let main_ref = repo.head().unwrap().name().unwrap().to_string();
+        repo.set_head("refs/heads/side").unwrap();
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        checkout.force();
+        repo.checkout_head(Some(&mut checkout)).unwrap();
+        write_file(dir.path(), pair.0, "side\n");
+        write_file(dir.path(), pair.1, "second\n");
+        commit_all(&repo, "side");
+        let side = head_id(&repo);
+        repo.set_head(&main_ref).unwrap();
+        repo.checkout_head(Some(&mut checkout)).unwrap();
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", true)
+            .unwrap();
+        drop(repo);
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        repo.cherrypick(
+            &repo
+                .find_commit(git2::Oid::from_str(&side).unwrap())
+                .unwrap(),
+            None,
+        )
+        .unwrap();
+        assert!(repo.index().unwrap().has_conflicts(), "{pair:?}");
+        assert_eq!(
+            read(dir.path(), pair.1).as_deref(),
+            Some("second\n"),
+            "{pair:?}"
+        );
+
+        let result = git_core::merge::abort_merge(&repo);
+
+        assert!(result.is_ok(), "{pair:?}: {result:?}");
+        assert_eq!(head_id(&repo), main, "{pair:?}");
+        assert_eq!(
+            read(dir.path(), pair.0).as_deref(),
+            Some("main\n"),
+            "{pair:?}"
+        );
+        assert_eq!(read(dir.path(), pair.1), None, "{pair:?}");
     }
 }

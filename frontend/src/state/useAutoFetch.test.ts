@@ -4,6 +4,7 @@ import { __resetHostVisibilityForTests, publishHostVisibility } from "../ipc/hos
 import type { RepoClient, TransferErrorKind, TransferProgress } from "../ipc/RepoClient";
 import { __resetAutoFetchForTests, lastFetchAt, recordFetch } from "../lib/autoFetch";
 import { useAutoFetch, type AutoFetchOptions } from "./useAutoFetch";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const REPO = "/repo";
 const MINUTE = 60_000;
@@ -44,7 +45,7 @@ function fakeClient(script: (id: string, emit: (progress: TransferProgress) => v
       return () => listeners.delete(listener);
     },
   };
-  return { client, emit, asClient: client as unknown as RepoClient };
+  return { client, emit, asClient: fakeRepoClient(client) };
 }
 
 function render(client: RepoClient, overrides: Partial<AutoFetchOptions> = {}) {

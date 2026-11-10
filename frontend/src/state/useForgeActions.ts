@@ -12,7 +12,7 @@ export interface ForgeActions {
   // failed creation from a successful one and only clear its form on success — `runMutation`
   // swallows the underlying error into `state.error` rather than rejecting, so the boolean is
   // the only success/failure signal available to the caller. Matches `renameRemote`/
-  // `setRemoteAuthMode`'s existing `Promise<boolean>` pattern in `useRemoteActions`.
+  // `setRemoteAuthMode`'s existing `Promise<boolean>` pattern in `RemoteTransferActions`.
   createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean>;
   openExternalUrl(url: string): Promise<void>;
 }

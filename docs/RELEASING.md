@@ -109,7 +109,12 @@ and every 6 hours; after a failed check or download it retries after 10 minutes,
 
 `build-release` writes the manifest with
 `tauri-apps/tauri-action`: each of its three jobs uploads its bundles and `.sig` files to the
-draft release and merges its platforms into the draft's `latest.json`.
+draft release and merges its platforms into the draft's `latest.json`. `release.yml` pins the
+action by commit with a `# vX.Y.Z` comment (#399), not by the floating `v1` tag, so a new
+release of it can't change the manifest unreviewed. Renovate proposes each update as its own PR,
+outside the Tauri and GitHub Actions groups (`renovate.json`). CI doesn't run `tauri-action`, so a
+green PR says nothing about it: read its release notes for changes to `latest.json`, the asset
+names or the release handling below before merging.
 
 What `tauri-action` v1 (since 0.4.0, #363) does differently from v0:
 

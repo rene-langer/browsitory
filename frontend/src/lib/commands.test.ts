@@ -12,7 +12,11 @@ import {
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import { createElement } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { BranchTree } from "../components/BranchTree";
 import { CommitGraph } from "../components/CommitGraph";
+import { StashPanel } from "../components/StashPanel";
+import { WorktreePanel } from "../components/WorktreePanel";
+import { stashBlockers } from "./actions/stashActions";
 import { operationBlockers } from "./operationStatus";
 
 function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseAppStateResult {
@@ -627,10 +631,15 @@ describe("buildCommands", () => {
     }
   });
 
-  it("excludes the main worktree from open/remove commands", () => {
+  // #561: like the Worktrees panel, the palette opens the main worktree too, never removes it.
+  it("offers to open the main worktree, not to remove it", () => {
     const appState = makeAppState();
-    const commands = buildCommands(appState);
-    expect(commands.some((c) => c.id === "open-worktree:/repo")).toBe(false);
+    const onOpenRepoTab = vi.fn();
+    const commands = buildCommands(appState, onOpenRepoTab);
+    const openMain = commands.find((c) => c.id === "open-worktree:/repo");
+    expect(openMain?.label).toBe("Open main worktree");
+    openMain?.run();
+    expect(onOpenRepoTab).toHaveBeenCalledWith("/repo");
     expect(commands.some((c) => c.id === "remove-worktree:main")).toBe(false);
 
     const openCmd = commands.find((c) => c.id === "open-worktree:/repo-wt1");
@@ -859,10 +868,14 @@ describe("buildCommands", () => {
         expect(ids.some((id) => id.startsWith("update-submodule:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("open-submodule:"))).toBe(false);
         expect(ids.some((id) => id.startsWith("apply-stash:"))).toBe(false);
-        expect(ids.some((id) => id.startsWith("drop-stash:"))).toBe(false);
+        // Dropping a stash is blocked only by an action in flight or a transfer (#521, #509).
+        const busy = "pending" in overrides || "transfer" in overrides;
+        expect(ids.some((id) => id.startsWith("drop-stash:"))).toBe(!busy);
 
         // Escape hatches and pure navigation stay available in every guarded state.
         expect(ids).toContain("refresh");
+        expect(ids).toContain("show-stash:0");
+        expect(ids).toContain("add-remote");
         for (const title of [
           "Branches",
           "Stashes",
@@ -1013,10 +1026,11 @@ describe("buildCommands", () => {
     expect(appState.openAddRemoteDraft).toHaveBeenCalledOnce();
   });
 
-  it("omits Add remote while a repository operation is in progress", () => {
+  // #509: like "Create tag…", it only opens the form, whose Add remote button carries the busy rule.
+  it("offers Add remote while a repository operation is in progress, as the Add menu does", () => {
     const appState = makeAppState({ pending: true });
     const commands = buildCommands(appState);
-    expect(commands.find((c) => c.id === "add-remote")).toBeUndefined();
+    expect(commands.find((c) => c.id === "add-remote")).toBeDefined();
   });
 });
 
@@ -1223,8 +1237,8 @@ describe("history commands", () => {
           status: state.status,
           commits: state.commits,
           selectedRow: state.selectedRow,
-          pending: blockers.blocked,
-          pendingReason: blockers.reason,
+          operationsBlocked: blockers.blocked,
+          operationsBlockedReason: blockers.reason,
           headInfo: state.headInfo,
           currentBranch,
           onSelectRow: vi.fn(),
@@ -1462,6 +1476,15 @@ describe("diff option and discard commands", () => {
     expect(commands.some((c) => c.id === "discard-current-file")).toBe(false);
     expect(commands.some((c) => c.id === "discard-all-unstaged")).toBe(false);
     expect(commands.some((c) => c.id === "toggle-ignore-whitespace")).toBe(true);
+  });
+
+  it("keeps discard commands during a merge, blocking them only while busy (#521)", () => {
+    const status = [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" as const }];
+    const merging = build(makeAppState({ mergeMessage: "Merge branch 'x'", status }), { currentFile: "a.txt" }).commands;
+    expect(merging.some((c) => c.id === "discard-current-file")).toBe(true);
+    expect(merging.some((c) => c.id === "discard-all-unstaged")).toBe(true);
+    const busy = build(makeAppState({ pending: true, mergeMessage: "Merge branch 'x'", status }), { currentFile: "a.txt" }).commands;
+    expect(busy.some((c) => c.id === "discard-all-unstaged")).toBe(false);
   });
 
   it("offers the selected files' actions while two or more are selected (#449)", () => {
@@ -1816,5 +1839,189 @@ describe("Go to pickers (#441)", () => {
 
       expect(commitPickerItems(commits, "two words", handlers).map((i) => i.id)).toEqual(["search-history"]);
     });
+  });
+});
+
+// #509: the branch, remote, stash and worktree menus and the palette decide with the same rules
+// (`lib/actions`), in every blocked state: a command is offered exactly where its item is enabled.
+describe("agree with the branch, remote, stash and worktree menus (#509)", () => {
+  const head = makeAppState().state.headInfo;
+  const staged = [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" as const }];
+  const conflicted = [{ path: "a.txt", oldPath: null, staged: false, kind: "Conflicted" as const }];
+  const states: [string, Partial<AppState>][] = [
+    ["nothing runs", {}],
+    ["an action is pending", { pending: true }],
+    ["a transfer runs", { transfer: { operationId: "op", operation: "Fetch", phase: "Receiving", errorKind: null, current: 1, total: 2, receivedBytes: 1, message: null, hookOutput: null } }],
+    ["a merge is in progress", { mergeMessage: "Merge x", status: conflicted }],
+    ["a rebase is in progress", { rebaseProgress: { currentStep: 1, totalSteps: 2 } }],
+    ["a sequence is stored", { headInfo: { ...head, sequence: { kind: "CherryPick", currentStep: 1, totalSteps: 2, currentCommit: "c2" } } }],
+    ["a terminal rebase is paused", { headInfo: { ...head, terminalRebase: { kind: "Rebase", branch: "topic", onto: "c2", currentStep: 1, totalSteps: 2 } } }],
+    ["changes are staged", { status: staged }],
+    ["no remote is configured", { remotes: [], upstream: null }],
+  ];
+
+  /** Opens a menu with `button` and returns its items' label → enabled, with each reason. */
+  function menu(element: ReturnType<typeof createElement>, button: string, sectionTitle?: string) {
+    localStorage.clear();
+    render(element);
+    try {
+      if (sectionTitle !== undefined) fireEvent.click(screen.getByRole("button", { name: sectionTitle }));
+      fireEvent.click(screen.getByRole("button", { name: button }));
+      return new Map(
+        screen.getAllByRole("menuitem").map((item) => [item.textContent!, { enabled: !item.hasAttribute("disabled"), title: item.getAttribute("title") }]),
+      );
+    } finally {
+      cleanup();
+    }
+  }
+
+  function branchTree(state: AppState) {
+    const blockers = operationBlockers(state);
+    const fn = () => vi.fn();
+    return createElement(BranchTree, {
+      branches: state.branches,
+      createBranchDraft: null,
+      onSwitchBranch: fn(),
+      onCreateBranch: vi.fn().mockResolvedValue(null),
+      onDeleteBranch: vi.fn().mockResolvedValue(undefined),
+      onRenameBranch: fn(),
+      onOpenCreateBranchDraft: fn(),
+      onCloseCreateBranchDraft: fn(),
+      onMergeBranch: fn(),
+      operationDisabled: blockers.blocked,
+      operationDisabledReason: blockers.reason,
+      graphBranchSelection: null,
+      onSetGraphBranchSelection: fn(),
+      onClearGraphBranchSelection: fn(),
+      onShowAllGraphBranches: fn(),
+      graphRemoteBranchSelection: null,
+      onSetGraphRemoteBranchSelection: fn(),
+      onIsolateGraphBranch: fn(),
+      remoteBranchesInGraph: [],
+      remotes: state.remotes,
+      upstream: state.upstream,
+      remoteUpstreams: {},
+      onAddRemote: vi.fn().mockResolvedValue(null),
+      onRenameRemote: vi.fn().mockResolvedValue(true),
+      onUpdateRemoteUrls: vi.fn().mockResolvedValue(undefined),
+      onRemoveRemote: vi.fn().mockResolvedValue(undefined),
+      onSaveHttpsCredential: vi.fn().mockResolvedValue(undefined),
+      onForgetHttpsCredential: vi.fn().mockResolvedValue(undefined),
+      onSetRemoteAuthMode: vi.fn().mockResolvedValue(true),
+      onSetUpstream: vi.fn().mockResolvedValue(undefined),
+      onClearUpstream: vi.fn().mockResolvedValue(undefined),
+      onListRemoteBranches: vi.fn().mockResolvedValue([]),
+      onFetchRemote: vi.fn().mockResolvedValue(undefined),
+      onPushCurrentBranch: vi.fn().mockResolvedValue(undefined),
+      onPull: vi.fn().mockResolvedValue(undefined),
+      pendingPull: null,
+      pullOutcome: null,
+      onMergePull: vi.fn().mockResolvedValue(undefined),
+      onRebasePull: fn(),
+      onCancelPull: fn(),
+      addRemoteDraftOpen: false,
+      onOpenAddRemoteDraft: fn(),
+      onCloseAddRemoteDraft: fn(),
+      onOpenPushDialog: fn(),
+      onOpenDeleteRemoteBranch: fn(),
+      refreshGeneration: 0,
+    });
+  }
+
+  /**
+   * Each menu item agrees with its command, and a disabled one says why: `busy` (the rule that
+   * blocks it, `operationBlockers`' reason by default) when that blocks, else some refusal.
+   */
+  function expectAgreement(
+    items: Map<string, { enabled: boolean; title: string | null }>,
+    ids: string[],
+    pairs: [label: string, id: string, busy?: string | null][],
+    state: AppState,
+  ) {
+    for (const [label, id, busy = operationBlockers(state).reason] of pairs) {
+      const item = items.get(label);
+      expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: item?.enabled ?? false });
+      if (item === undefined || item.enabled) continue;
+      expect({ label, title: item.title }).toEqual({ label, title: busy ?? expect.any(String) });
+    }
+  }
+
+  it.each(states)("while %s", (_label, overrides) => {
+    const appState = makeAppState(overrides);
+    const { state } = appState;
+    const ids = buildCommands(appState, vi.fn()).map((command) => command.id);
+
+    expectAgreement(menu(branchTree(state), "Actions for feature"), ids, [
+      ["Checkout", "switch-branch:feature"],
+      ["Merge into current branch…", "merge-branch:feature"],
+    ], state);
+    expectAgreement(menu(branchTree(state), "Actions for main"), ids, [
+      ["Checkout", "switch-branch:main"],
+      ["Merge into current branch…", "merge-branch:main"],
+      ["Push to…", "push-branch-to"],
+    ], state);
+    expectAgreement(menu(branchTree(state), "Add"), ids, [["Add remote…", "add-remote"]], state);
+    if (state.remotes.length > 0) {
+      expectAgreement(menu(branchTree(state), "Actions for remote origin"), ids, [
+        ["Fetch", "fetch-remote:origin"],
+        ["Push current branch here", "push-branch:origin"],
+        ["Edit remote", "edit-remote:origin"],
+        ["Manage credentials", "manage-credentials:origin"],
+        ["Remove remote", "remove-remote:origin"],
+      ], state);
+    }
+
+    const stashPanel = createElement(StashPanel, {
+      stashes: state.stashes,
+      onSelectRow: vi.fn(),
+      onApplyStash: vi.fn(),
+      onPopStash: vi.fn(),
+      onDropStash: vi.fn(),
+      restoreIndex: true,
+      onSetRestoreIndex: vi.fn(),
+      blockers: stashBlockers(state),
+    });
+    const stashRules = stashBlockers(state);
+    expectAgreement(menu(stashPanel, "Actions for WIP", "Stashes"), ids, [
+      ["Apply", "apply-stash:0", stashRules.apply],
+      ["Pop", "pop-stash:0", stashRules.apply],
+      ["Drop…", "drop-stash:0", stashRules.drop],
+    ], state);
+
+    // The worktree panel's buttons, for both worktrees (the main one can't be removed, #561).
+    const blockers = operationBlockers(state);
+    localStorage.clear();
+    render(
+      createElement(WorktreePanel, {
+        worktrees: state.worktrees,
+        branches: state.branches,
+        onOpenWorktree: vi.fn(),
+        onCreateWorktree: vi.fn(),
+        onRemoveWorktree: vi.fn(),
+        onPruneWorktrees: vi.fn(),
+        operationDisabled: blockers.blocked,
+        operationDisabledReason: blockers.reason,
+      }),
+    );
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Worktrees" }));
+      for (const [label, id] of [
+        ["Open /repo", "open-worktree:/repo"],
+        ["Remove /repo", "remove-worktree:main"],
+        ["Open /repo-wt1", "open-worktree:/repo-wt1"],
+        ["Remove /repo-wt1", "remove-worktree:wt1"],
+        ["Prune worktrees", "prune-worktrees"],
+      ]) {
+        const button = screen.getByRole("button", { name: label });
+        expect({ label, offered: ids.includes(id) }).toEqual({ label, offered: !button.hasAttribute("disabled") });
+        if (button.hasAttribute("disabled") && label !== "Remove /repo") expect(button).toHaveAttribute("title", blockers.reason);
+      }
+      expect(screen.getByRole("button", { name: "Remove /repo" })).toHaveAttribute(
+        "title",
+        blockers.reason ?? "The main worktree can't be removed.",
+      );
+    } finally {
+      cleanup();
+    }
   });
 });

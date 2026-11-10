@@ -113,9 +113,9 @@ pub struct SearchPage {
 
 #[derive(Debug, Error)]
 pub enum SearchError {
-    /// The query doesn't parse, or names something that isn't there. Its text starts with
-    /// `Invalid search: ` so the transports can tell it apart (`ErrorKind::InvalidSearchQuery`)
-    /// and the search field can show it (#450).
+    /// The query doesn't parse, or names something that isn't there. The worker answers it as
+    /// `ErrorKind::InvalidSearchQuery`, decided from this variant (#527), and the search field
+    /// shows its text (#450).
     #[error("Invalid search: {message}")]
     InvalidQuery { message: String },
     #[error("The history changed since this search started. Search again.")]
@@ -132,7 +132,9 @@ fn invalid(message: impl Into<String>) -> SearchError {
     }
 }
 
-const KEYS: [&str; 11] = [
+/// The keys a `key:value` term can use (#450). The frontend's search help is checked against
+/// them through `frontend/src/ipc/generated/wire-constants.ts` (#497).
+pub const KEYS: [&str; 11] = [
     "author",
     "committer",
     "message",

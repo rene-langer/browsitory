@@ -1,5 +1,6 @@
 //! #448: revert or apply a commit's file or hunk in the working tree, a patch's text, a patch
 //! applied. The extension host shows the save and open dialogs and does the file I/O.
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{CommitChangeRequestDto, PatchContentDto, PatchSourceDto};
 use serde::Deserialize;
 use serde_json::Value;
@@ -16,7 +17,7 @@ pub(super) struct ApplyCommitChangeParams {
 pub(super) fn apply_commit_change(
     params: ApplyCommitChangeParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.apply_commit_change(params.change.into())?;
     Ok(Value::Null)
 }
@@ -28,9 +29,9 @@ pub(super) struct GetPatchParams {
     source: PatchSourceDto,
 }
 
-pub(super) fn get_patch(params: GetPatchParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn get_patch(params: GetPatchParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let bytes = worker_handle(repos, &params.repo_path)?.get_patch(params.source.into())?;
-    serde_json::to_value(PatchContentDto::from_bytes(&bytes)).map_err(|error| error.to_string())
+    serde_json::to_value(PatchContentDto::from_bytes(&bytes)).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -40,7 +41,7 @@ pub(super) struct ApplyPatchParams {
     content: PatchContentDto,
 }
 
-pub(super) fn apply_patch(params: ApplyPatchParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn apply_patch(params: ApplyPatchParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let bytes = params.content.into_bytes()?;
     worker_handle(repos, &params.repo_path)?.apply_patch(bytes)?;
     Ok(Value::Null)

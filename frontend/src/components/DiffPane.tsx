@@ -12,7 +12,7 @@ import {
   MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import type {
   AmendOptions,
   BlameLine,
@@ -72,6 +72,7 @@ import {
   type FileSelection,
 } from "../lib/fileSelection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { InlineError } from "./primitives/InlineError";
@@ -81,6 +82,7 @@ import { CommitTreeBrowser } from "./CommitTreeBrowser";
 import treeStyles from "./CommitTreeBrowser.module.css";
 import { FolderHistoryButton } from "./FolderHistoryButton";
 import { RebaseProgressPanel } from "./RebaseProgressPanel";
+import { stashActions as stashActionRules, type StashBlockers } from "../lib/actions/stashActions";
 
 const STATUS_ICONS: Record<StatusKind, LucideIcon> = {
   New: FilePlus,
@@ -670,6 +672,7 @@ export function DiffPane({
   onIgnorePaths,
   onSelectionChange,
   selectionBusyReason = null,
+  discardBlockedReason = null,
   onRestoreFileVersion,
   restoreBlockedReason = null,
   patchActions,
@@ -690,6 +693,9 @@ export function DiffPane({
   onSelectionChange?: (selection: ReportedFileSelection | null) => void;
   // Why the selection's actions can't run now (another action is in progress), else `null`.
   selectionBusyReason?: string | null;
+  // Why the discard confirmations can't discard now (`busyReason`: an action in flight or a
+  // transfer; a paused merge, rebase or sequence step allows it, #521), else `null`.
+  discardBlockedReason?: string | null;
   // The stash list: a selected commit id that is a stash's renders the stash view instead of
   // the commit view.
   stashes?: StashEntry[];
@@ -835,6 +841,7 @@ export function DiffPane({
         onIgnorePaths={onIgnorePaths ?? ((patterns) => patterns.forEach(onIgnorePath))}
         onSelectionChange={onSelectionChange}
         selectionBusyReason={selectionBusyReason}
+        discardBlockedReason={discardBlockedReason}
         commits={commits}
         branchCommits={branchCommits}
         patchActions={patchActions}
@@ -915,8 +922,23 @@ export interface StashActions {
   onDrop: (index: number) => void;
   restoreIndex: boolean;
   onSetRestoreIndex: (on: boolean) => void;
-  // Why Apply/Pop can't run now (staged changes, conflicts, a running operation), else `null`.
-  disabledReason: string | null;
+  // Why Apply/Pop and Drop can't run now (`stashBlockers`, shared with the stash list and the
+  // palette, #509). A paused merge, rebase or sequence step allows Drop (#521).
+  blockers: StashBlockers;
+}
+
+/**
+ * A confirmation's message plus, while the action is blocked, why (#521): the repository can
+ * become busy while the confirmation is open.
+ */
+function withBlockedReason(message: ReactNode, blockedReason: string | null): ReactNode {
+  if (blockedReason === null) return message;
+  return (
+    <>
+      {typeof message === "string" ? <p>{message}</p> : message}
+      <p className={formStyles.blocked}>{blockedReason}</p>
+    </>
+  );
 }
 
 /** What the discard confirm dialogs are currently asking about; null when none is open. */
@@ -999,6 +1021,7 @@ function UncommittedDiffPane({
   onIgnorePaths,
   onSelectionChange,
   selectionBusyReason,
+  discardBlockedReason,
   patchActions,
 }: {
   patchActions?: DiffPanePatchActions;
@@ -1006,6 +1029,7 @@ function UncommittedDiffPane({
   onIgnorePaths: (patterns: string[]) => void;
   onSelectionChange?: (selection: ReportedFileSelection | null) => void;
   selectionBusyReason: string | null;
+  discardBlockedReason: string | null;
   onOpenFileHistory?: (path: string) => void;
   onOpenFolderHistory?: (folder: string) => void;
   externalTools?: ExternalToolsApi;
@@ -1382,6 +1406,8 @@ function UncommittedDiffPane({
   const discardRequest = onDiscardRequestChange !== undefined ? (discardRequestProp ?? null) : localDiscardRequest;
   const setDiscardRequest = onDiscardRequestChange ?? setLocalDiscardRequest;
   const discardableEntries = unstagedEntries.filter((entry) => entry.kind !== "Conflicted");
+  // The selection's discard also follows the selection's own busy rule.
+  const discardFilesBlockedReason = discardBlockedReason ?? selectionBusyReason;
 
   const discardFileEntry =
     discardRequest?.kind === "file"
@@ -1616,9 +1642,12 @@ function UncommittedDiffPane({
       {discardRequest?.kind === "all" && discardableEntries.length > 0 && (
         <ConfirmDialog
           ariaLabel="Discard all changes"
-          message={discardAllConfirmMessage(discardableEntries)}
+          message={withBlockedReason(discardAllConfirmMessage(discardableEntries), discardBlockedReason)}
           confirmLabel="Discard all"
+          confirmDisabled={discardBlockedReason !== null}
+          confirmTitle={discardBlockedReason ?? undefined}
           onConfirm={() => {
+            if (discardBlockedReason !== null) return;
             setDiscardRequest(null);
             onDiscardAllUnstaged(discardableEntries.map((e) => e.path));
           }}
@@ -1628,12 +1657,12 @@ function UncommittedDiffPane({
       {discardRequest?.kind === "files" && discardFilesEntries.length > 0 && (
         <ConfirmDialog
           ariaLabel="Discard selected changes"
-          message={discardAllConfirmMessage(discardFilesEntries)}
+          message={withBlockedReason(discardAllConfirmMessage(discardFilesEntries), discardFilesBlockedReason)}
           confirmLabel={`Discard ${discardFilesEntries.length} ${discardFilesEntries.length === 1 ? "file" : "files"}`}
-          confirmDisabled={selectionBusyReason !== null}
-          confirmTitle={selectionBusyReason ?? undefined}
+          confirmDisabled={discardFilesBlockedReason !== null}
+          confirmTitle={discardFilesBlockedReason ?? undefined}
           onConfirm={() => {
-            if (selectionBusyReason !== null) return;
+            if (discardFilesBlockedReason !== null) return;
             setDiscardRequest(null);
             setSelection(EMPTY_FILE_SELECTION);
             onDiscardFiles(discardFilesEntries.map((entry) => entry.path));
@@ -1644,9 +1673,12 @@ function UncommittedDiffPane({
       {discardFileEntry !== undefined && (
         <ConfirmDialog
           ariaLabel="Discard changes"
-          message={discardConfirmMessage(discardFileEntry)}
+          message={withBlockedReason(discardConfirmMessage(discardFileEntry), discardBlockedReason)}
           confirmLabel={isUntracked(discardFileEntry) ? "Delete file" : "Discard changes"}
+          confirmDisabled={discardBlockedReason !== null}
+          confirmTitle={discardBlockedReason ?? undefined}
           onConfirm={() => {
+            if (discardBlockedReason !== null) return;
             setDiscardRequest(null);
             wrapFileAction(onDiscardFile)(discardFileEntry.path);
           }}
@@ -2010,7 +2042,8 @@ function StashDiffPane({
     });
   };
 
-  const applyTitle = actions.disabledReason ?? undefined;
+  const rules = stashActionRules(actions.blockers, stash);
+  const dropDisabledReason = actions.blockers.drop;
   const untrackedCommitId = files?.untrackedCommitId ?? null;
 
   return (
@@ -2025,22 +2058,27 @@ function StashDiffPane({
         <Toolbar aria-label="Stash actions">
           <button
             type="button"
-            disabled={actions.disabledReason !== null}
-            title={applyTitle}
+            disabled={!rules.apply.enabled}
+            title={rules.apply.reason}
             onClick={() => actions.onApply(stash.index)}
           >
-            Apply
+            {rules.apply.label}
           </button>
           <button
             type="button"
-            disabled={actions.disabledReason !== null}
-            title={applyTitle}
+            disabled={!rules.pop.enabled}
+            title={rules.pop.reason}
             onClick={() => actions.onPop(stash.index)}
           >
-            Pop
+            {rules.pop.label}
           </button>
-          <button type="button" onClick={() => setConfirmingDrop(true)}>
-            Drop…
+          <button
+            type="button"
+            disabled={!rules.drop.enabled}
+            title={rules.drop.reason}
+            onClick={() => setConfirmingDrop(true)}
+          >
+            {rules.drop.label}
           </button>
           <label className={styles.restoreIndex}>
             <input
@@ -2111,9 +2149,12 @@ function StashDiffPane({
       {confirmingDrop && (
         <ConfirmDialog
           ariaLabel={`Drop stash ${stash.message}`}
-          message={<p>Drop "{stash.message}"? This cannot be undone.</p>}
+          message={withBlockedReason(<p>Drop "{stash.message}"? This cannot be undone.</p>, dropDisabledReason)}
           confirmLabel="Drop stash"
+          confirmDisabled={dropDisabledReason !== null}
+          confirmTitle={dropDisabledReason ?? undefined}
           onConfirm={() => {
+            if (dropDisabledReason !== null) return;
             setConfirmingDrop(false);
             actions.onDrop(stash.index);
           }}

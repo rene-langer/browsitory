@@ -24,6 +24,12 @@ available from that commit's row in the graph.
 ("main tracks origin/main."). **Pull** pulls from it. **Clear upstream** removes the setting
 (after asking); the branches themselves don't change. To set an upstream, use **Set upstream…**
 in the current branch's menu, or **Set as upstream for current branch** on a remote branch.
+While a merge, rebase, cherry-pick or revert is in progress, or another action, a fetch, pull or
+push runs, the branch and remote actions that change something (checkout, rename, merge, push,
+delete, setting or clearing the upstream, and a remote's fetch, edit, credentials and remove) are
+disabled with the reason, and the command palette leaves out their commands; an open
+confirmation or remote dialog says why and doesn't save. **New branch…** and **Add remote…**
+still open their forms, whose **Create** and **Add remote** buttons wait.
 
 **From the keyboard.** Tab to a branch, a remote branch or a remote folder and press the Menu key
 or Shift+F10 (Fn+Shift+F10 on most Mac keyboards), or use its **…** button, to open the same menu.

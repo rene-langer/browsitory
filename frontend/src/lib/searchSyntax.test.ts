@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import guide from "../../../docs/guide/search.md?raw";
+import { SEARCH_KEYS } from "../ipc/RepoClient";
 import { SEARCH_SYNTAX, SEARCH_SYNTAX_FOOTER } from "./searchSyntax";
 
 // The user guide repeats the in-app search help (#320); this keeps the two from drifting apart.
@@ -22,5 +23,15 @@ describe("docs/guide/search.md", () => {
 
   it("states the footer the app shows", () => {
     expect(plain(guide)).toContain(SEARCH_SYNTAX_FOOTER);
+  });
+});
+
+// #497: the keys come from the Rust parser (`git_core::search::KEYS`, generated into
+// `ipc/generated/wire-constants.ts`), so the help can't offer a key the backend rejects or leave
+// one out.
+describe("SEARCH_SYNTAX", () => {
+  it("shows exactly the keys the backend's search parser accepts", () => {
+    const shown = SEARCH_SYNTAX.flatMap(({ syntax }) => /^([a-z]+):/.exec(syntax)?.[1] ?? []);
+    expect([...new Set(shown)].sort()).toEqual([...SEARCH_KEYS].sort());
   });
 });

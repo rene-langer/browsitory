@@ -28,8 +28,6 @@ function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps {
     onOpenCreateBranchDraft: vi.fn(),
     onCloseCreateBranchDraft: vi.fn(),
     onMergeBranch: vi.fn(),
-    isMerging: false,
-    isRebasing: false,
     operationDisabled: false,
     operationDisabledReason: null,
     graphBranchSelection: null,
@@ -172,11 +170,49 @@ describe("BranchTree — local branches", () => {
   });
 
   it("disables Rename/Delete/Merge menu items while a rebase is in progress", () => {
-    renderTree({ isRebasing: true });
+    renderTree({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
     expect(screen.getByRole("menuitem", { name: "Rename" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("title", "A rebase is in progress.");
     expect(screen.getByRole("menuitem", { name: "Merge into current branch…" })).toBeDisabled();
+  });
+
+  it("disables Delete with the reason whenever the repository is busy, not just while rebasing (#521)", () => {
+    renderTree({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    const item = screen.getByRole("menuitem", { name: "Delete" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "A merge is in progress.");
+  });
+
+  // #509: the palette's rule (`branchActions`); before, only a rebase run here disabled them.
+  it("disables Checkout and Rename, and ignores a double-click, during a merge, like the palette", () => {
+    const { props } = renderTree({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    for (const name of ["Checkout", "Rename"]) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute("title", "A merge is in progress.");
+    }
+    fireEvent.doubleClick(screen.getByRole("button", { name: "foo" }));
+    expect(props.onSwitchBranch).not.toHaveBeenCalled();
+  });
+
+  it("blocks an open force-delete confirmation, saying why, once the repository is busy (#521)", async () => {
+    const { props, rerender } = renderTree();
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await screen.findByRole("dialog", { name: "Force delete feat/foo" });
+
+    rerender(<BranchTree {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
+    const dialog = screen.getByRole("dialog", { name: "Force delete feat/foo" });
+    expect(dialog).toHaveTextContent("A transfer is in progress.");
+    const confirm = within(dialog).getByRole("button", { name: "Force delete" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("title", "A transfer is in progress.");
+    fireEvent.click(confirm);
+    expect(props.onDeleteBranch).not.toHaveBeenCalledWith("feat/foo", true);
   });
 
   it("with no saved graph selection, every branch's graph swatch is pressed (shown) by default", () => {
@@ -505,7 +541,7 @@ describe("BranchTree — local branches", () => {
   });
 
   it("disables the merge action while a merge is already in progress", () => {
-    renderTree({ isMerging: true });
+    renderTree({ operationDisabled: true, operationDisabledReason: "A merge is in progress." });
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
 
@@ -533,7 +569,7 @@ describe("BranchTree — local branches", () => {
   });
 
   it("does not switch branches while a rebase is in progress", () => {
-    const { props } = renderTree({ isRebasing: true });
+    const { props } = renderTree({ operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
 
     fireEvent.doubleClick(screen.getByRole("button", { name: "foo" }));
 
@@ -560,6 +596,18 @@ describe("BranchTree — remotes", () => {
   });
 
   const oneRemote = [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }];
+
+  // #509: the palette's rule (`remoteActions`); before, Edit remote and Manage credentials stayed
+  // enabled and Remove remote gave no reason.
+  it("disables every remote action with the reason while the repository is busy, like the palette", () => {
+    renderTree({ remotes: oneRemote, operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
+    for (const name of ["Fetch", "Push current branch here", "Edit remote", "Manage credentials", "Remove remote"]) {
+      const item = screen.getByRole("menuitem", { name });
+      expect(item).toBeDisabled();
+      expect(item).toHaveAttribute("title", "A transfer is in progress.");
+    }
+  });
 
   it("lists remote folders and lazily loads their branches on first expand", async () => {
     const onListRemoteBranches = vi.fn().mockResolvedValue(["main", "feat/foo"]);
@@ -1345,6 +1393,29 @@ describe("BranchTree — remote list states and upstream block", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Clear upstream", hidden: true }));
     expect(props.onClearUpstream).toHaveBeenCalledOnce();
   });
+
+  it("blocks clearing and setting the upstream, saying why, while the repository is busy (#521)", async () => {
+    const reason = "A transfer is in progress.";
+    const { props, rerender } = renderTree({ upstream: up });
+    fireEvent.click(screen.getByRole("button", { name: "Clear upstream" }));
+    await screen.findByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+
+    rerender(<BranchTree {...props} operationDisabled operationDisabledReason={reason} />);
+    const dialog = screen.getByRole("dialog", { name: "Clear upstream confirmation", hidden: true });
+    expect(dialog).toHaveTextContent(reason);
+    const confirm = within(dialog).getByRole("button", { name: "Clear upstream", hidden: true });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(props.onClearUpstream).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel", hidden: true }));
+
+    expect(screen.getByRole("button", { name: "Clear upstream" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Clear upstream" })).toHaveAttribute("title", reason);
+    fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
+    const setItem = screen.getByRole("menuitem", { name: "Set upstream…" });
+    expect(setItem).toBeDisabled();
+    expect(setItem).toHaveAttribute("title", reason);
+  });
 });
 
 describe("BranchTree — new branch form", () => {
@@ -1371,6 +1442,33 @@ describe("BranchTree — new branch form", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Check out after creating" }));
     fireEvent.click(screen.getByRole("button", { name: "Create" }));
     await waitFor(() => expect(props.onSwitchBranch).toHaveBeenCalledWith("feat/x"));
+  });
+
+  // #561: Create follows `operationBlockers`, not only a rebase run here.
+  it("disables Create with the reason whenever the repository is busy", () => {
+    const { props } = renderTree({
+      createBranchDraft: { startPoint: "HEAD" },
+      operationDisabled: true,
+      operationDisabledReason: "A merge is in progress.",
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "feat/x" } });
+    const create = screen.getByRole("button", { name: "Create" });
+    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute("title", "A merge is in progress.");
+    expect(within(screen.getByRole("form", { name: "New branch" })).getByText("A merge is in progress.")).toBeInTheDocument();
+    fireEvent.submit(screen.getByRole("form", { name: "New branch" }));
+    expect(props.onCreateBranch).not.toHaveBeenCalled();
+  });
+
+  it("re-checks the busy rule when the repository becomes busy while the form is open", () => {
+    const props = treeProps({ createBranchDraft: { startPoint: "HEAD" } });
+    const { rerender } = render(<BranchTree {...props} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Branch name" }), { target: { value: "feat/x" } });
+    rerender(<BranchTree {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
+    expect(screen.getByRole("button", { name: "Create" })).toHaveAttribute("title", "A transfer is in progress.");
+    fireEvent.submit(screen.getByRole("form", { name: "New branch" }));
+    expect(props.onCreateBranch).not.toHaveBeenCalled();
+    expect(props.onSwitchBranch).not.toHaveBeenCalled();
   });
 });
 

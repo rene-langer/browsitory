@@ -23,6 +23,7 @@ import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import formStyles from "./primitives/FormDialog.module.css";
 import { RefBadges } from "./RefBadges";
 import { tagMenuItems } from "./tagMenuItems";
 import styles from "./CommitGraph.module.css";
@@ -33,8 +34,8 @@ export function CommitGraph({
   status,
   commits,
   selectedRow,
-  pending,
-  pendingReason = null,
+  operationsBlocked,
+  operationsBlockedReason = null,
   onSelectRow,
   onBranchFromCommit,
   onRebaseFromCommit,
@@ -70,9 +71,9 @@ export function CommitGraph({
   selectedRow: SelectedRow;
   // True while repository operations are blocked (`operationBlockers`): disables the menus'
   // mutating entries.
-  pending: boolean;
-  /** `operationBlockers`' reason, the title of the entries `pending` disables. */
-  pendingReason?: string | null;
+  operationsBlocked: boolean;
+  /** `operationBlockers`' reason, the title of the entries `operationsBlocked` disables. */
+  operationsBlockedReason?: string | null;
   onSelectRow: (row: SelectedRow) => void;
   onBranchFromCommit: (commitId: string) => void;
   onRebaseFromCommit: (commitId: string) => void;
@@ -119,7 +120,7 @@ export function CommitGraph({
   graphRemoteBranchSelection?: string[] | null;
   /** Ctrl/Cmd+F while the list has focus: focus the commit search field. */
   onRequestSearch?: () => void;
-  // Read-only compare actions: never disabled by `pending`.
+  // Read-only compare actions: never disabled by `operationsBlocked`.
   /** Exactly two commits selected: compare `fromId` (further down the graph) with `toId`. */
   onCompareCommits?: (fromId: string, toId: string) => void;
   /** Single-commit menu: compare that commit with the working tree. */
@@ -196,7 +197,7 @@ export function CommitGraph({
     setListElement(element);
   }, []);
 
-  const busyTitle = pending ? (pendingReason ?? undefined) : undefined;
+  const busyTitle = operationsBlocked ? (operationsBlockedReason ?? undefined) : undefined;
 
   function singleCommitItems(commitId: string): ContextMenuItem[] {
     const commit = commits.find((candidate) => candidate.id === commitId);
@@ -205,7 +206,7 @@ export function CommitGraph({
     if (commit !== undefined) {
       // Availability, reasons and labels shared with the command palette (#495).
       const actions = commitActions(
-        { blockers: { blocked: pending, reason: pendingReason }, headId: headInfo.headId, currentBranch },
+        { blockers: { blocked: operationsBlocked, reason: operationsBlockedReason }, headId: headInfo.headId, currentBranch },
         commit,
       );
       const menuItem = (action: { label: string; enabled: boolean; reason: string | undefined }, run: () => void) => ({
@@ -216,7 +217,7 @@ export function CommitGraph({
       });
       if (onCreateTag !== undefined) items.push(menuItem(actions.createTag, () => onCreateTag(commitId)));
       items.push(
-        { label: "Rebase onto here", onSelect: () => onRebaseFromCommit(commitId), disabled: pending, title: busyTitle },
+        { label: "Rebase onto here", onSelect: () => onRebaseFromCommit(commitId), disabled: operationsBlocked, title: busyTitle },
         // A merge commit needs a parent to apply against: the ellipsis opens the parent picker.
         menuItem(actions.cherryPick, () =>
           actions.cherryPick.needsParent
@@ -248,7 +249,7 @@ export function CommitGraph({
     const headReword: ContextMenuItem = {
       label: "Reword…",
       onSelect: onEditHeadMessage,
-      disabled: pending,
+      disabled: operationsBlocked,
       title: busyTitle,
     };
     if (onEditHistory === undefined) return isHead ? [headReword] : [];
@@ -258,7 +259,7 @@ export function CommitGraph({
       onSelect: () => {
         if (check.ok) run(check.onto);
       },
-      disabled: pending || !check.ok,
+      disabled: operationsBlocked || !check.ok,
       title: check.ok ? busyTitle : check.reason,
     });
     const edit = (request: HistoryEditRequest) => (onto: string) => onEditHistory(commitId, onto, request);
@@ -277,8 +278,8 @@ export function CommitGraph({
       tag,
       commitId,
       remotes,
-      disabled: pending,
-      disabledReason: pendingReason,
+      disabled: operationsBlocked,
+      disabledReason: operationsBlockedReason,
       onPushTag,
       onBranchFromCommit,
       onCheckoutCommit,
@@ -411,30 +412,30 @@ export function CommitGraph({
       {
         label: "Interactive rebase…",
         onSelect: () => onRebaseSelection?.(plan.onto, presetPickAll(plan)),
-        disabled: pending,
+        disabled: operationsBlocked,
       },
       {
         label: `Squash ${count} commits`,
         onSelect: act("Squash"),
-        disabled: pending || !plan.contiguous,
+        disabled: operationsBlocked || !plan.contiguous,
         title: plan.contiguous ? undefined : needsRun,
       },
       {
         label: `Fixup ${count} commits`,
         onSelect: act("Fixup"),
-        disabled: pending || !plan.contiguous,
+        disabled: operationsBlocked || !plan.contiguous,
         title: plan.contiguous ? undefined : needsRun,
       },
       {
         label: `Drop ${count} commits`,
         onSelect: act("Drop"),
-        disabled: pending,
+        disabled: operationsBlocked,
         destructive: true,
       },
     ];
   })();
 
-  // Read-only, so neither `pending` nor a blocked rebase plan disables it.
+  // Read-only, so neither `operationsBlocked` nor a blocked rebase plan disables it.
   const compareItem: ContextMenuItem | null = (() => {
     if (onCompareCommits === undefined || effectiveSelection.ids.size !== 2) return null;
     const [first, second] = [...effectiveSelection.ids];
@@ -459,7 +460,7 @@ export function CommitGraph({
       items.push({
         label: `Cherry-pick ${count} commits`,
         onSelect: () => onCherryPickMany(idsOldestFirst),
-        disabled: pending || hasMerge,
+        disabled: operationsBlocked || hasMerge,
         title: hasMerge ? "Cherry-pick merge commits one at a time." : undefined,
       });
     }
@@ -467,7 +468,7 @@ export function CommitGraph({
       items.push({
         label: `Revert ${count} commits`,
         onSelect: () => onRevertMany(idsOldestFirst),
-        disabled: pending || hasMerge,
+        disabled: operationsBlocked || hasMerge,
         title: hasMerge ? "Revert merge commits one at a time." : undefined,
       });
     }
@@ -609,10 +610,20 @@ export function CommitGraph({
     {tagToDelete !== null && (
       <ConfirmDialog
         ariaLabel={`Delete local tag ${tagToDelete}`}
-        message={`Delete local tag ${tagToDelete}?`}
+        message={
+          <>
+            <p>Delete local tag {tagToDelete}?</p>
+            {/* #521: the repository can become busy while the confirmation is open. */}
+            {operationsBlocked && operationsBlockedReason !== null && <p className={formStyles.blocked}>{operationsBlockedReason}</p>}
+          </>
+        }
         confirmLabel="Delete tag"
-        confirmDisabled={pending}
-        onConfirm={() => void onDeleteTag?.(tagToDelete).then(() => setTagToDelete(null))}
+        confirmDisabled={operationsBlocked}
+        confirmTitle={busyTitle}
+        onConfirm={() => {
+          if (operationsBlocked) return;
+          void onDeleteTag?.(tagToDelete).then(() => setTagToDelete(null));
+        }}
         onCancel={() => setTagToDelete(null)}
       />
     )}

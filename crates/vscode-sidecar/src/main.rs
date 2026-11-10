@@ -50,7 +50,7 @@ fn main() {
             let response =
                 match dispatch::dispatch(&request.method, request.params, &repos, &stdout) {
                     Ok(result) => JsonRpcResponse::ok(request.id, result),
-                    Err(message) => JsonRpcResponse::err(request.id, message),
+                    Err(error) => JsonRpcResponse::err(request.id, error),
                 };
 
             let serialized = serde_json::to_string(&response).expect("response always serializes");

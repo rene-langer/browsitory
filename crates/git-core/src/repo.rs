@@ -9,7 +9,7 @@ pub enum RepoError {
     #[error("This folder is already a Git repository.")]
     AlreadyRepository,
     #[error("failed to create repository: {0}")]
-    Init(git2::Error),
+    Init(#[source] git2::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

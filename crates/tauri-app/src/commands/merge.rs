@@ -32,7 +32,7 @@ pub async fn get_merge_options(
     state: State<'_, AppState>,
 ) -> Result<MergeOptionsDto, ErrorDto> {
     if let Some(preference) =
-        config::get_merge_preference(Path::new(&repo_path)).map_err(|error| error.to_string())?
+        config::get_merge_preference(Path::new(&repo_path)).map_err(ErrorDto::from_error)?
     {
         return Ok(MergeOptionsDto::from(preference));
     }
@@ -47,12 +47,12 @@ pub async fn set_merge_options(
     repo_path: String,
     options: MergeOptionsDto,
 ) -> Result<(), ErrorDto> {
-    Ok(config::set_merge_preference(
+    config::set_merge_preference(
         Path::new(&repo_path),
         options.fast_forward.into(),
         options.squash,
     )
-    .map_err(|error| error.to_string())?)
+    .map_err(ErrorDto::from_error)
 }
 #[tauri::command]
 pub async fn get_conflict_hunks(

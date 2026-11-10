@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{ChangedFileDto, CompareRangeDto, DiffHunkDto, DiffOptionsDto};
 use serde::Deserialize;
 use serde_json::Value;
@@ -12,13 +13,16 @@ pub(super) struct GetRangeFilesParams {
     to_id: String,
 }
 
-pub(super) fn get_range_files(params: GetRangeFilesParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn get_range_files(
+    params: GetRangeFilesParams,
+    repos: &Repos,
+) -> Result<Value, ErrorDto> {
     let files: Vec<ChangedFileDto> = worker_handle(repos, &params.repo_path)?
         .get_range_files(params.from_id, params.to_id)?
         .into_iter()
         .map(ChangedFileDto::from)
         .collect();
-    serde_json::to_value(files).map_err(|error| error.to_string())
+    serde_json::to_value(files).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -32,7 +36,7 @@ pub(super) struct GetRangeDiffParams {
     opts: DiffOptionsDto,
 }
 
-pub(super) fn get_range_diff(params: GetRangeDiffParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn get_range_diff(params: GetRangeDiffParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
         .get_range_diff(
             params.from_id,
@@ -44,19 +48,19 @@ pub(super) fn get_range_diff(params: GetRangeDiffParams, repos: &Repos) -> Resul
         .into_iter()
         .map(DiffHunkDto::from)
         .collect();
-    serde_json::to_value(hunks).map_err(|error| error.to_string())
+    serde_json::to_value(hunks).map_err(ErrorDto::from_error)
 }
 
 pub(super) fn get_working_tree_compare_files(
     params: GetCommitFilesParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let files: Vec<ChangedFileDto> = worker_handle(repos, &params.repo_path)?
         .get_working_tree_compare_files(params.commit_id)?
         .into_iter()
         .map(ChangedFileDto::from)
         .collect();
-    serde_json::to_value(files).map_err(|error| error.to_string())
+    serde_json::to_value(files).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -72,7 +76,7 @@ pub(super) struct GetWorkingTreeCompareDiffParams {
 pub(super) fn get_working_tree_compare_diff(
     params: GetWorkingTreeCompareDiffParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let hunks: Vec<DiffHunkDto> = worker_handle(repos, &params.repo_path)?
         .get_working_tree_compare_diff(
             params.commit_id,
@@ -83,7 +87,7 @@ pub(super) fn get_working_tree_compare_diff(
         .into_iter()
         .map(DiffHunkDto::from)
         .collect();
-    serde_json::to_value(hunks).map_err(|error| error.to_string())
+    serde_json::to_value(hunks).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -96,8 +100,8 @@ pub(super) struct GetBranchCompareRangeParams {
 pub(super) fn get_branch_compare_range(
     params: GetBranchCompareRangeParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let range =
         worker_handle(repos, &params.repo_path)?.get_branch_compare_range(params.ref_name)?;
-    serde_json::to_value(CompareRangeDto::from(range)).map_err(|error| error.to_string())
+    serde_json::to_value(CompareRangeDto::from(range)).map_err(ErrorDto::from_error)
 }

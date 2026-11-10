@@ -60,12 +60,14 @@ import { upstreamPushBranch } from "./lib/pushTarget";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
 import {
+  busyReason,
   operationBlockers,
   pickToast,
   sequenceToast,
   stashBlockReason,
   terminalAbortConfirm,
 } from "./lib/operationStatus";
+import { stashBlockers } from "./lib/actions/stashActions";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import { CurrentDiffContext, useCurrentDiffRegistry } from "./state/useCurrentDiff";
@@ -249,6 +251,13 @@ export function RepoWorkspace({
   // explaining the block instead of just going inert (issue #31/UX-003). Deliberately not a
   // fine-grained per-panel lock — that's the "Large" option the issue called out of scope.
   const { blocked: repositoryOperationDisabled, reason: operationDisabledReason } = operationBlockers(appState.state);
+  // Discarding changes and dropping a stash stay allowed during a paused merge, rebase or
+  // sequence step (users discard while resolving one); only an action in flight or a transfer
+  // blocks them (#521).
+  const discardDropBlockedReason = busyReason(appState.state);
+  // Re-checked: the repository can become busy while a Drop confirmation is open (#521).
+  const dropStash = (index: number): Promise<void> =>
+    discardDropBlockedReason !== null ? Promise.resolve() : appState.dropStash(index);
 
   const { pending, transfer } = appState.state;
   // #448: "Save as patch…" for commits (oldest first), and the commit view's revert/apply/save.
@@ -272,15 +281,9 @@ export function RepoWorkspace({
     transfer,
   });
 
-  // Stash Apply/Pop: libgit2 refuses while the index differs from HEAD or has conflicts, so say
-  // what to do instead of letting the backend error.
-  const stashApplyDisabledReason: string | null = appState.state.status.some((entry) => entry.kind === "Conflicted")
-    ? "Resolve conflicts first."
-    : appState.state.status.some((entry) => entry.staged)
-      ? "Unstage or commit staged changes first."
-      : repositoryOperationDisabled
-        ? operationDisabledReason
-        : null;
+  // A stored stash's Apply/Pop and Drop rules, shared by the stash list, the stash view and the
+  // palette (#509).
+  const storedStashBlockers = stashBlockers(appState.state);
 
   const { dismissError } = appState;
   const announce = useAnnounce(appState, pushToast);
@@ -589,7 +592,7 @@ export function RepoWorkspace({
           remoteDialog={appState.state.remoteDialog}
           remotes={appState.state.remotes}
           remoteUpstreams={appState.state.remoteUpstreams}
-          operationDisabled={repositoryOperationDisabled}
+          blockedReason={operationDisabledReason}
           onRenameRemote={appState.renameRemote}
           onUpdateRemoteUrls={appState.updateRemoteUrls}
           onRemoveRemote={appState.removeRemote}
@@ -795,8 +798,6 @@ export function RepoWorkspace({
               onOpenCreateBranchDraft={appState.openCreateBranchDraft}
               onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
               onMergeBranch={appState.openMergeDialog}
-              isMerging={appState.state.mergeMessage !== null}
-              isRebasing={appState.state.rebaseProgress !== null}
               operationDisabled={repositoryOperationDisabled}
               operationDisabledReason={operationDisabledReason}
               graphBranchSelection={appState.state.graphBranchSelection}
@@ -853,12 +854,10 @@ export function RepoWorkspace({
                 onSelectRow={selectRowClosingCompare}
                 onApplyStash={appState.applyStash}
                 onPopStash={appState.popStash}
-                onDropStash={appState.dropStash}
+                onDropStash={dropStash}
                 restoreIndex={appState.state.stashRestoreIndex}
                 onSetRestoreIndex={appState.setStashRestoreIndex}
-                applyDisabledReason={stashApplyDisabledReason}
-                operationDisabled={repositoryOperationDisabled}
-                operationDisabledReason={operationDisabledReason}
+                blockers={storedStashBlockers}
               />
             )}
             {panelVisibility.visibility.worktree && (
@@ -1005,8 +1004,8 @@ export function RepoWorkspace({
                       status={appState.state.status}
                       commits={appState.state.commits}
                       selectedRow={appState.state.selectedRow}
-                      pending={repositoryOperationDisabled}
-                      pendingReason={operationDisabledReason}
+                      operationsBlocked={repositoryOperationDisabled}
+                      operationsBlockedReason={operationDisabledReason}
                       onSelectRow={selectRowClosingCompare}
                       onBranchFromCommit={appState.openCreateBranchDraft}
                       onRebaseFromCommit={appState.openRebasePlanner}
@@ -1079,10 +1078,10 @@ export function RepoWorkspace({
                   stashActions={{
                     onApply: appState.applyStash,
                     onPop: appState.popStash,
-                    onDrop: appState.dropStash,
+                    onDrop: (index) => void dropStash(index),
                     restoreIndex: appState.state.stashRestoreIndex,
                     onSetRestoreIndex: appState.setStashRestoreIndex,
-                    disabledReason: stashApplyDisabledReason,
+                    blockers: storedStashBlockers,
                   }}
                   onOpenFileHistory={fileHistory.open}
                   onOpenLineHistory={fileHistory.openLines}
@@ -1112,11 +1111,20 @@ export function RepoWorkspace({
                   onStageLines={(p, o, n, c, idx, shown) => announce(linesToast("Staged", idx.length), appState.stageLines)(p, o, n, c, idx, shown)}
                   onUnstageLines={(p, o, n, c, idx, shown) => announce(linesToast("Unstaged", idx.length), appState.unstageLines)(p, o, n, c, idx, shown)}
                   onDiscardLines={(p, o, n, c, idx, shown) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx, shown)}
-                  onDiscardFile={(path) => announce(`Discarded changes to ${path}`, appState.discardFile)(path)}
-                  onDiscardAllUnstaged={announce("Discarded all unstaged changes", appState.discardAllUnstaged)}
-                  onDiscardFiles={(paths) =>
-                    announce(`Discarded changes to ${paths.length} ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged)(paths)
+                  discardBlockedReason={discardDropBlockedReason}
+                  // Re-checked: the repository can become busy while a confirmation is open (#521).
+                  onDiscardFile={(path) =>
+                    discardDropBlockedReason !== null
+                      ? undefined
+                      : announce(`Discarded changes to ${path}`, appState.discardFile)(path)
                   }
+                  onDiscardAllUnstaged={(paths) => {
+                    if (discardDropBlockedReason === null) void announce("Discarded all unstaged changes", appState.discardAllUnstaged)(paths);
+                  }}
+                  onDiscardFiles={(paths) => {
+                    if (discardDropBlockedReason !== null) return;
+                    void announce(`Discarded changes to ${paths.length} ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged)(paths);
+                  }}
                   onIgnorePaths={(patterns) =>
                     announce(`Added ${patterns.length} ${patterns.length === 1 ? "pattern" : "patterns"} to .gitignore`, appState.ignorePaths)(patterns)
                   }
@@ -1169,9 +1177,13 @@ export function RepoWorkspace({
             repoPath={repoPath}
             client={client}
             onto={appState.state.rebaseOnto}
-            onStartRebase={appState.startRebase}
+            onStartRebase={(onto, plan) => {
+              // Re-checked: the repository can become busy while the planner is open (#521).
+              if (repositoryOperationDisabled) return;
+              void appState.startRebase(onto, plan);
+            }}
             onCancel={appState.closeRebasePlanner}
-            operationDisabled={repositoryOperationDisabled}
+            blockedReason={operationDisabledReason}
             presetActions={appState.state.rebasePreset ?? undefined}
           />
         </Overlay>

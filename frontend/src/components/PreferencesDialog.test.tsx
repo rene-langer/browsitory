@@ -1,18 +1,19 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RepoClient } from "../ipc/RepoClient";
+import { COMMIT_MESSAGE_COLUMNS, type RepoClient } from "../ipc/RepoClient";
 import { CommitMessageSettingsProvider } from "../state/CommitMessageSettingsProvider";
 import { __resetAutoFetchForTests, readAutoFetchOverride } from "../lib/autoFetch";
 import { FetchSettingsProvider } from "../state/FetchSettingsProvider";
 import { CommitMessageSection, DiffSection, ExternalToolsSection, FetchSection, PreferencesDialog } from "./PreferencesDialog";
 import { DiffSettingsProvider } from "../state/DiffSettingsProvider";
 import { within } from "@testing-library/react";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function renderTools(client: Partial<RepoClient>, toolHost: "desktop" | "vscode" = "desktop", repoPath: string | null = "/r") {
   const onClose = vi.fn();
   render(
     <PreferencesDialog onClose={onClose}>
-      <ExternalToolsSection client={client as RepoClient} repoPath={repoPath} toolHost={toolHost} />
+      <ExternalToolsSection client={fakeRepoClient(client)} repoPath={repoPath} toolHost={toolHost} />
     </PreferencesDialog>,
   );
   return onClose;
@@ -134,7 +135,7 @@ describe("PreferencesDialog", () => {
 describe("Commit message preferences", () => {
   function renderCommitMessage(client: Partial<RepoClient>) {
     render(
-      <CommitMessageSettingsProvider client={client as RepoClient}>
+      <CommitMessageSettingsProvider client={fakeRepoClient(client)}>
         <PreferencesDialog onClose={vi.fn()}>
           <CommitMessageSection />
         </PreferencesDialog>
@@ -151,6 +152,9 @@ describe("Commit message preferences", () => {
     const group = await screen.findByRole("group", { name: "Commit message" });
     const summary = within(group).getByRole("spinbutton", { name: "Summary length limit" });
     await waitFor(() => expect(summary).toHaveValue(50));
+    // The backend's clamp range (#497).
+    expect(summary).toHaveAttribute("min", String(COMMIT_MESSAGE_COLUMNS.min));
+    expect(summary).toHaveAttribute("max", String(COMMIT_MESSAGE_COLUMNS.max));
     fireEvent.change(summary, { target: { value: "60" } });
     expect(setCommitMessageSettings).not.toHaveBeenCalled();
     fireEvent.blur(summary);
@@ -200,10 +204,10 @@ describe("Commit message preferences", () => {
 describe("DiffSection", () => {
   it("loads and saves the word wrap setting with the other diff settings", async () => {
     const setDiffSettings = vi.fn(async () => {});
-    const client = {
+    const client = fakeRepoClient({
       getDiffSettings: async () => ({ ignoreWhitespace: true, contextLines: 5, syntaxHighlight: true, wordWrap: "Off" as const, algorithm: "Default" as const }),
       setDiffSettings,
-    } as Partial<RepoClient> as RepoClient;
+    });
     render(
       <DiffSettingsProvider client={client}>
         <PreferencesDialog onClose={vi.fn()}>
@@ -229,10 +233,10 @@ describe("DiffSection", () => {
 
   it("loads and saves the diff algorithm (#469)", async () => {
     const setDiffSettings = vi.fn(async () => {});
-    const client = {
+    const client = fakeRepoClient({
       getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Patience" as const }),
       setDiffSettings,
-    } as Partial<RepoClient> as RepoClient;
+    });
     render(
       <DiffSettingsProvider client={client}>
         <PreferencesDialog onClose={vi.fn()}>
@@ -268,7 +272,7 @@ describe("Fetch preferences", () => {
 
   function renderFetch(client: Partial<RepoClient>, repoPath: string | null = "/work/app") {
     render(
-      <FetchSettingsProvider client={client as RepoClient}>
+      <FetchSettingsProvider client={fakeRepoClient(client)}>
         <PreferencesDialog onClose={() => {}}>
           <FetchSection repoPath={repoPath} />
         </PreferencesDialog>

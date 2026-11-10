@@ -2,9 +2,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { MergeToolOutcome, RepoClient } from "../ipc/RepoClient";
 import { useExternalTools } from "./useExternalTools";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function client(overrides: Partial<RepoClient>): RepoClient {
-  return overrides as RepoClient;
+  return fakeRepoClient(overrides);
 }
 
 describe("useExternalTools", () => {

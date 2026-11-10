@@ -127,4 +127,7 @@ disabled with the reason until then. A stash that conflicts with your current fi
 files in the conflict pane; a conflicting **Pop** keeps the stash, so drop it yourself once the
 files are resolved. If the stash list changed since you looked (another tool stashed or
 dropped), Apply, Pop and Drop stop and ask you to refresh. Dropping asks for confirmation first, since it can't be undone, and stash
-operations are not part of **Undo**.
+operations are not part of **Undo**. You can drop a stash while a merge, rebase, cherry-pick or
+revert is paused; while another action or a fetch, pull or push is running, **Drop…** and its
+confirmation are disabled with the reason. The command palette's **Apply stash**, **Pop stash** and
+**Drop stash** commands follow the same rules.

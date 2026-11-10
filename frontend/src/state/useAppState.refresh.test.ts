@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { RepoError, type GraphCommit, type RepoClient, type StatusEntry, type TagInfo } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
-import { unimplemented, TEST_REPO_PATH, remote, upstream, remoteManagementClient, transferClient } from "./useAppStateTestClient";
+import { TEST_REPO_PATH, remote, upstream, transferClient } from "./useAppStateTestClient";
 
 describe("useAppState", () => {
   it("reports a failed remote-auth mutation to dependent callers", async () => {
@@ -19,6 +19,24 @@ describe("useAppState", () => {
     });
 
     expect(configured).toBe(false);
+    expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
+  });
+
+  // #527: a forge token's keychain failure gets the same remediation as a remote's HTTPS token.
+  it.each([
+    ["saving", (state: ReturnType<typeof useAppState>) => state.saveForgeToken("GitHub", "alice", "secret")],
+    ["forgetting", (state: ReturnType<typeof useAppState>) => state.forgetForgeToken("GitHub", "alice")],
+  ] as const)("shows the credential store remediation when %s a forge token fails", async (_, run) => {
+    const keychain = async () => {
+      throw new RepoError("CredentialStoreFailure", "credential keychain failure: locked");
+    };
+    const client = transferClient({ saveForgeToken: keychain, forgetForgeToken: keychain });
+    const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
+
+    await act(async () => {
+      await run(result.current);
+    });
+
     expect(result.current.state.error).toBe("The operating-system credential store is unavailable. Unlock it and try again.");
   });
 
@@ -443,90 +461,10 @@ describe("useAppState", () => {
       branchRefs: [],
       remoteBranchRefs: [],
     };
-    const client: RepoClient = {
-      ...remoteManagementClient,
-      pickRepoFolder: async () => unimplemented(),
-      listRecentRepos: async () => unimplemented(),
-      getAppVersion: async () => unimplemented(),
-      getLastSeenVersion: async () => unimplemented(),
-      setLastSeenVersion: async () => unimplemented(),
-      openRepo: async () => {},
+    const client: RepoClient = transferClient({
       getStatus: async () => [entry],
       getCommitGraph: async () => [graphCommit],
-      listBranches: async () => [],
-      createBranch: async () => unimplemented(),
-      switchBranch: async () => unimplemented(),
-      deleteBranch: async () => unimplemented(),
-      renameBranch: async () => unimplemented(),
-      listStashes: async () => [],
-      saveStash: async () => unimplemented(),
-      applyStash: async () => unimplemented(),
-      popStash: async () => unimplemented(),
-      getStashFiles: async () => unimplemented(),
-      getRangeFiles: async () => unimplemented(),
-      getRangeDiff: async () => unimplemented(),
-      getWorkingTreeCompareFiles: async () => unimplemented(),
-      getWorkingTreeCompareDiff: async () => unimplemented(),
-      getCommitTree: async () => unimplemented(),
-      getFileAtCommit: async () => unimplemented(),
-      saveFileVersion: async () => unimplemented(),
-      restoreFileVersion: async () => unimplemented(),
-      getBranchCompareRange: async () => unimplemented(),
-      locateCommit: async () => unimplemented(),
-      applyCommitChange: async () => unimplemented(),
-      getPatch: async () => unimplemented(),
-      applyPatch: async () => unimplemented(),
-      savePatchFile: async () => unimplemented(),
-      openPatchFile: async () => unimplemented(),
-      getMergeOptions: async () => unimplemented(),
-      setMergeOptions: async () => unimplemented(),
-      dropStash: async () => unimplemented(),
-      getBlame: async () => unimplemented(),
-      mergeBranch: async () => unimplemented(),
-      getConflictHunks: async () => unimplemented(),
-      resolveConflict: async () => unimplemented(),
-      abortMerge: async () => unimplemented(),
-      getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
-      amendCommit: async () => { throw new Error("unimplemented"); },
-      getUndoState: async () => ({ undo: null, redo: null }),
-      undo: async () => ({ kind: "Nothing" as const }),
-      redo: async () => ({ kind: "Nothing" as const }),
-      cherryPick: async () => { throw new Error("unimplemented"); },
-      revertCommit: async () => { throw new Error("unimplemented"); },
-      resetToCommit: async () => { throw new Error("unimplemented"); },
-      checkoutCommit: async () => { throw new Error("unimplemented"); },
-      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
-      resolveAddDeleteConflict: async () => unimplemented(),
-      commitsSince: async () => unimplemented(),
-      startRebase: async () => unimplemented(),
-      rebaseContinue: async () => unimplemented(),
-      abortRebase: async () => unimplemented(),
-      getWorkingDiff: async () => unimplemented(),
-      getCommitDiff: async () => unimplemented(),
-      getFileHistory: async () => unimplemented(),
-      getLineHistory: async () => unimplemented(),
-      searchCommits: async () => ({ commits: [], nextCursor: null, scanned: 0 }),
-      cancelSearch: async () => {},
-      getCommitRenameDiff: async () => unimplemented(),
-      getCommitFiles: async () => unimplemented(),
-      getCommitMessage: async () => unimplemented(),
-      getCommitSignature: async () => unimplemented(),
-      stageFile: async () => unimplemented(),
-      unstageFile: async () => unimplemented(),
-      stageHunk: async () => unimplemented(),
-      unstageHunk: async () => unimplemented(),
-      discardHunk: async () => unimplemented(),
-      stageLines: async () => unimplemented(),
-      unstageLines: async () => unimplemented(),
-      discardLines: async () => unimplemented(),
-      discardFile: async () => unimplemented(),
-      discardAllUnstaged: async () => unimplemented(),
-      ignorePath: async () => unimplemented(),
-      getDiffSettings: async () => unimplemented(),
-      setDiffSettings: async () => unimplemented(),
-      commit: async () => unimplemented(),
-    };
+    });
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
@@ -543,93 +481,12 @@ describe("useAppState", () => {
 
   it("selectRow updates selectedRow without refetching", async () => {
     let getStatusCalls = 0;
-    const client: RepoClient = {
-      ...remoteManagementClient,
-      pickRepoFolder: async () => unimplemented(),
-      listRecentRepos: async () => unimplemented(),
-      getAppVersion: async () => unimplemented(),
-      getLastSeenVersion: async () => unimplemented(),
-      setLastSeenVersion: async () => unimplemented(),
-      openRepo: async () => {},
+    const client: RepoClient = transferClient({
       getStatus: async () => {
         getStatusCalls += 1;
         return [];
       },
-      getCommitGraph: async () => [],
-      listBranches: async () => [],
-      createBranch: async () => unimplemented(),
-      switchBranch: async () => unimplemented(),
-      deleteBranch: async () => unimplemented(),
-      renameBranch: async () => unimplemented(),
-      listStashes: async () => [],
-      saveStash: async () => unimplemented(),
-      applyStash: async () => unimplemented(),
-      popStash: async () => unimplemented(),
-      getStashFiles: async () => unimplemented(),
-      getRangeFiles: async () => unimplemented(),
-      getRangeDiff: async () => unimplemented(),
-      getWorkingTreeCompareFiles: async () => unimplemented(),
-      getWorkingTreeCompareDiff: async () => unimplemented(),
-      getCommitTree: async () => unimplemented(),
-      getFileAtCommit: async () => unimplemented(),
-      saveFileVersion: async () => unimplemented(),
-      restoreFileVersion: async () => unimplemented(),
-      getBranchCompareRange: async () => unimplemented(),
-      locateCommit: async () => unimplemented(),
-      applyCommitChange: async () => unimplemented(),
-      getPatch: async () => unimplemented(),
-      applyPatch: async () => unimplemented(),
-      savePatchFile: async () => unimplemented(),
-      openPatchFile: async () => unimplemented(),
-      getMergeOptions: async () => unimplemented(),
-      setMergeOptions: async () => unimplemented(),
-      dropStash: async () => unimplemented(),
-      getBlame: async () => unimplemented(),
-      mergeBranch: async () => unimplemented(),
-      getConflictHunks: async () => unimplemented(),
-      resolveConflict: async () => unimplemented(),
-      abortMerge: async () => unimplemented(),
-      getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
-      amendCommit: async () => { throw new Error("unimplemented"); },
-      getUndoState: async () => ({ undo: null, redo: null }),
-      undo: async () => ({ kind: "Nothing" as const }),
-      redo: async () => ({ kind: "Nothing" as const }),
-      cherryPick: async () => { throw new Error("unimplemented"); },
-      revertCommit: async () => { throw new Error("unimplemented"); },
-      resetToCommit: async () => { throw new Error("unimplemented"); },
-      checkoutCommit: async () => { throw new Error("unimplemented"); },
-      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
-      resolveAddDeleteConflict: async () => unimplemented(),
-      commitsSince: async () => unimplemented(),
-      startRebase: async () => unimplemented(),
-      rebaseContinue: async () => unimplemented(),
-      abortRebase: async () => unimplemented(),
-      getWorkingDiff: async () => unimplemented(),
-      getCommitDiff: async () => unimplemented(),
-      getFileHistory: async () => unimplemented(),
-      getLineHistory: async () => unimplemented(),
-      searchCommits: async () => ({ commits: [], nextCursor: null, scanned: 0 }),
-      cancelSearch: async () => {},
-      getCommitRenameDiff: async () => unimplemented(),
-      getCommitFiles: async () => unimplemented(),
-      getCommitMessage: async () => unimplemented(),
-      getCommitSignature: async () => unimplemented(),
-      stageFile: async () => unimplemented(),
-      unstageFile: async () => unimplemented(),
-      stageHunk: async () => unimplemented(),
-      unstageHunk: async () => unimplemented(),
-      discardHunk: async () => unimplemented(),
-      stageLines: async () => unimplemented(),
-      unstageLines: async () => unimplemented(),
-      discardLines: async () => unimplemented(),
-      discardFile: async () => unimplemented(),
-      discardAllUnstaged: async () => unimplemented(),
-      ignorePath: async () => unimplemented(),
-      getDiffSettings: async () => unimplemented(),
-      setDiffSettings: async () => unimplemented(),
-      commit: async () => unimplemented(),
-    };
+    });
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
@@ -644,93 +501,12 @@ describe("useAppState", () => {
 
   it("pending is true only while a mutation is in flight", async () => {
     let resolveStage: (() => void) | null = null;
-    const client: RepoClient = {
-      ...remoteManagementClient,
-      pickRepoFolder: async () => unimplemented(),
-      listRecentRepos: async () => unimplemented(),
-      getAppVersion: async () => unimplemented(),
-      getLastSeenVersion: async () => unimplemented(),
-      setLastSeenVersion: async () => unimplemented(),
-      openRepo: async () => {},
-      getStatus: async () => [],
-      getCommitGraph: async () => [],
-      listBranches: async () => [],
-      createBranch: async () => unimplemented(),
-      switchBranch: async () => unimplemented(),
-      deleteBranch: async () => unimplemented(),
-      renameBranch: async () => unimplemented(),
-      listStashes: async () => [],
-      saveStash: async () => unimplemented(),
-      applyStash: async () => unimplemented(),
-      popStash: async () => unimplemented(),
-      getStashFiles: async () => unimplemented(),
-      getRangeFiles: async () => unimplemented(),
-      getRangeDiff: async () => unimplemented(),
-      getWorkingTreeCompareFiles: async () => unimplemented(),
-      getWorkingTreeCompareDiff: async () => unimplemented(),
-      getCommitTree: async () => unimplemented(),
-      getFileAtCommit: async () => unimplemented(),
-      saveFileVersion: async () => unimplemented(),
-      restoreFileVersion: async () => unimplemented(),
-      getBranchCompareRange: async () => unimplemented(),
-      locateCommit: async () => unimplemented(),
-      applyCommitChange: async () => unimplemented(),
-      getPatch: async () => unimplemented(),
-      applyPatch: async () => unimplemented(),
-      savePatchFile: async () => unimplemented(),
-      openPatchFile: async () => unimplemented(),
-      getMergeOptions: async () => unimplemented(),
-      setMergeOptions: async () => unimplemented(),
-      dropStash: async () => unimplemented(),
-      getBlame: async () => unimplemented(),
-      mergeBranch: async () => unimplemented(),
-      getConflictHunks: async () => unimplemented(),
-      resolveConflict: async () => unimplemented(),
-      abortMerge: async () => unimplemented(),
-      getMergeMessage: async () => null,
-      getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
-      amendCommit: async () => { throw new Error("unimplemented"); },
-      getUndoState: async () => ({ undo: null, redo: null }),
-      undo: async () => ({ kind: "Nothing" as const }),
-      redo: async () => ({ kind: "Nothing" as const }),
-      cherryPick: async () => { throw new Error("unimplemented"); },
-      revertCommit: async () => { throw new Error("unimplemented"); },
-      resetToCommit: async () => { throw new Error("unimplemented"); },
-      checkoutCommit: async () => { throw new Error("unimplemented"); },
-      forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
-      resolveAddDeleteConflict: async () => unimplemented(),
-      commitsSince: async () => unimplemented(),
-      startRebase: async () => unimplemented(),
-      rebaseContinue: async () => unimplemented(),
-      abortRebase: async () => unimplemented(),
-      getWorkingDiff: async () => unimplemented(),
-      getCommitDiff: async () => unimplemented(),
-      getFileHistory: async () => unimplemented(),
-      getLineHistory: async () => unimplemented(),
-      searchCommits: async () => ({ commits: [], nextCursor: null, scanned: 0 }),
-      cancelSearch: async () => {},
-      getCommitRenameDiff: async () => unimplemented(),
-      getCommitFiles: async () => unimplemented(),
-      getCommitMessage: async () => unimplemented(),
-      getCommitSignature: async () => unimplemented(),
+    const client: RepoClient = transferClient({
       stageFile: async () =>
         new Promise<void>((resolve) => {
           resolveStage = resolve;
         }),
-      unstageFile: async () => unimplemented(),
-      stageHunk: async () => unimplemented(),
-      unstageHunk: async () => unimplemented(),
-      discardHunk: async () => unimplemented(),
-      stageLines: async () => unimplemented(),
-      unstageLines: async () => unimplemented(),
-      discardLines: async () => unimplemented(),
-      discardFile: async () => unimplemented(),
-      discardAllUnstaged: async () => unimplemented(),
-      ignorePath: async () => unimplemented(),
-      getDiffSettings: async () => unimplemented(),
-      setDiffSettings: async () => unimplemented(),
-      commit: async () => unimplemented(),
-    };
+    });
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());

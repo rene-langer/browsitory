@@ -209,7 +209,8 @@ pub fn staged_patch(repo: &git2::Repository) -> Result<Vec<u8>, PatchError> {
 
 /// Applies the patch file `content` to the working tree: a plain diff, or one or more
 /// `git format-patch` mails, applied in order. When any of them doesn't apply, the files the
-/// earlier ones changed are put back, so the working tree is left as it was.
+/// earlier ones changed are put back and the folders they created removed, so the working tree
+/// is left as it was.
 pub fn apply_patch(repo: &git2::Repository, content: &[u8]) -> Result<(), PatchError> {
     let parts = split_mails(content);
     if parts.len() <= 1 {
@@ -796,11 +797,19 @@ fn rewrite_header(line: &[u8], old_start: u32, new_start: u32) -> Option<Vec<u8>
 
 /// The working tree files a patch series touches, as they were before it, to put back when a
 /// later patch of the series doesn't apply.
-struct Saved(Vec<(String, Option<SavedFile>)>);
+struct Saved(Vec<(String, Before)>);
 
-enum SavedFile {
-    File { bytes: Vec<u8>, executable: bool },
+enum Before {
+    File {
+        bytes: Vec<u8>,
+        executable: bool,
+    },
     Link(std::path::PathBuf),
+    /// Not there; `folders` of its folders (from the top) were, so the others are the series'
+    /// own (#539).
+    Missing {
+        folders: usize,
+    },
 }
 
 impl Saved {
@@ -810,16 +819,24 @@ impl Saved {
             let full = workdir.join(path);
             let file = match full.symlink_metadata() {
                 Ok(meta) if meta.file_type().is_symlink() => {
-                    Some(SavedFile::Link(std::fs::read_link(&full)?))
+                    Before::Link(std::fs::read_link(&full)?)
                 }
-                Ok(meta) if meta.is_file() => Some(SavedFile::File {
+                Ok(meta) if meta.is_file() => Before::File {
                     bytes: std::fs::read(&full)?,
                     executable: is_executable(&meta),
-                }),
+                },
                 // A folder is never written by a patch to a file of that name: the check refuses.
                 Ok(_) => continue,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => None,
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    Before::Missing {
+                        folders: folders_there(workdir, path),
+                    }
+                }
                 Err(e) => return Err(e.into()),
             };
             saved.push((path.clone(), file));
@@ -827,10 +844,28 @@ impl Saved {
         Ok(Saved(saved))
     }
 
-    /// Best effort: each file is removed and written anew (never through a link or a hard
-    /// link's other names); a file that was missing is removed.
+    /// Best effort: a file that was missing is removed, with the folders the series made for
+    /// it that are empty now (from the deepest up; never one that was there before, #539). In
+    /// any order: the last file to go from a folder takes the folder with it. Then each
+    /// other file is removed and written anew (never through a link or a hard link's other
+    /// names).
     fn restore(&self, workdir: &Path) {
-        for (path, file) in &self.0 {
+        // The removals first: a folder the series made may stand where a file comes back.
+        let missing = self.0.iter().filter_map(|(path, before)| match before {
+            Before::Missing { folders } => Some((path.as_str(), *folders)),
+            _ => None,
+        });
+        for (path, folders) in missing {
+            if worktree_guard::has_symlinked_ancestor(workdir, path) {
+                continue;
+            }
+            let _ =
+                worktree_guard::remove_and_prune_beneath_keeping(workdir, Path::new(path), folders);
+        }
+        for (path, before) in &self.0 {
+            if matches!(before, Before::Missing { .. }) {
+                continue;
+            }
             if worktree_guard::has_symlinked_ancestor(workdir, path) {
                 continue;
             }
@@ -841,25 +876,36 @@ impl Saved {
                 }
                 let _ = std::fs::remove_file(&full);
             }
-            match file {
-                None => {}
-                Some(SavedFile::File { bytes, executable }) => {
-                    if let Some(parent) = full.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
+            if let Some(parent) = full.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            match before {
+                Before::File { bytes, executable } => {
                     if std::fs::write(&full, bytes).is_ok() {
                         set_executable(&full, *executable);
                     }
                 }
-                Some(SavedFile::Link(target)) => {
-                    if let Some(parent) = full.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    make_link(target, &full);
-                }
+                Before::Link(target) => make_link(target, &full),
+                Before::Missing { .. } => {}
             }
         }
     }
+}
+
+/// How many of `path`'s folders (relative to `workdir`, from the top) are there now.
+fn folders_there(workdir: &Path, path: &str) -> usize {
+    let mut at = workdir.to_path_buf();
+    let mut folders = 0;
+    if let Some(parent) = Path::new(path).parent() {
+        for part in parent.components() {
+            at.push(part);
+            match at.symlink_metadata() {
+                Ok(meta) if meta.is_dir() => folders += 1,
+                _ => break,
+            }
+        }
+    }
+    folders
 }
 
 #[cfg(unix)]

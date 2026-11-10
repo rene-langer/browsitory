@@ -1,44 +1,22 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type {
-  CommitChangeRequest,
-  PatchSource,
-  AmendOptions,
-  Trailer,
   BranchInfo,
-  ConflictSide,
-  PickOutcome,
-  SequenceAbort,
-  ConfirmedAbort,
-  RebaseAbort,
-  SequenceOutcome,
-  CreatePullRequest,
-  FileConflictChoice,
-  MarkResolvedOutcome,
-  ForgeProvider,
   ForgeRepository,
   GraphCommit,
-  MergeOptions,
-  MergeOutcome,
-  PullOutcome,
-  StashApplyOutcome,
-  StashOptions,
-  PullRequestList,
-  RebasePlanEntry,
-  RebaseStepResult,
-  RemoteAuthMode,
-  RemoteInfo,
-  ReflogEntry,
   HeadInfo,
   HookSource,
-  HunkOptions,
+  MergeOutcome,
+  PullOutcome,
+  PullRequestList,
+  ReflogEntry,
+  RemoteInfo,
   RepoClient,
-  ResetMode,
+  StashApplyOutcome,
   StashEntry,
   StatusEntry,
   SubmoduleInfo,
   TagInfo,
   TransferProgress,
-  UndoOutcome,
   UndoState,
   UpstreamInfo,
   WorktreeInfo,
@@ -46,22 +24,21 @@ import type {
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
-import { useBranchActions } from "./useBranchActions";
-import { useForgeActions } from "./useForgeActions";
-import { useHistoryActions } from "./useHistoryActions";
-import { useHookActions } from "./useHookActions";
 import type { HookFailure, HookRetry } from "../lib/hookFailure";
-import { useUndoActions } from "./useUndoActions";
-import { useMergeRebaseActions } from "./useMergeRebaseActions";
-import { useReflogActions } from "./useReflogActions";
-import { useRemoteTransferActions } from "./useRemoteTransferActions";
-import { useStagingActions } from "./useStagingActions";
-import { usePatchActions } from "./usePatchActions";
 import type { PresetAction } from "../lib/rebaseSelection";
-import type { HistoryEditRequest } from "../lib/historyEdits";
-import { useStashActions } from "./useStashActions";
-import { useSubmoduleActions } from "./useSubmoduleActions";
-import { useWorktreeActions } from "./useWorktreeActions";
+import { type BranchActions, useBranchActions } from "./useBranchActions";
+import { type ForgeActions, useForgeActions } from "./useForgeActions";
+import { type HistoryActions, useHistoryActions } from "./useHistoryActions";
+import { type HookActions, useHookActions } from "./useHookActions";
+import { type MergeRebaseActions, useMergeRebaseActions } from "./useMergeRebaseActions";
+import { type PatchActions, usePatchActions } from "./usePatchActions";
+import { type ReflogActions, useReflogActions } from "./useReflogActions";
+import { type RemoteTransferActions, useRemoteTransferActions } from "./useRemoteTransferActions";
+import { type StagingActions, useStagingActions } from "./useStagingActions";
+import { type StashActions, useStashActions } from "./useStashActions";
+import { type SubmoduleActions, useSubmoduleActions } from "./useSubmoduleActions";
+import { type UndoActions, useUndoActions } from "./useUndoActions";
+import { type WorktreeActions, useWorktreeActions } from "./useWorktreeActions";
 
 // History is loaded a page at a time; `loadMoreHistory` grows the limit by one page.
 const GRAPH_PAGE_SIZE = 300;
@@ -191,181 +168,69 @@ export interface AppState {
   undoState: UndoState;
 }
 
-export interface UseAppStateResult {
+/** The members `useAppState` defines itself; the rest come from its action slices. */
+export interface AppStateOwnMembers {
   state: AppState;
-  selectRow(row: SelectedRow): void;
-  stageFile(path: string): Promise<void>;
-  unstageFile(path: string): Promise<void>;
-  // Bulk variants for DiffPane's "Stage all"/"Unstage all". There is no bulk backend op (and
-  // none is planned) — these still make one `client.stageFile`/`unstageFile` IPC call per path,
-  // but wrap the whole loop in a *single* `runMutation`, so a batch costs one `pending`/
-  // `refresh()` cycle instead of one per file. `refresh()` alone is ~13 IPC reads plus one per
-  // remote, all serialized through the single per-repo worker thread, so looping the per-file
-  // action from the UI locked the app up on a large changeset.
-  stageAllFiles(paths: string[]): Promise<void>;
-  unstageAllFiles(paths: string[]): Promise<void>;
-  stageHunk(path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
-  unstageHunk(path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
-  discardHunk(path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
-  stageLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
-  unstageLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
-  discardLines(path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
-  discardFile(path: string): Promise<void>;
-  /** Writes `path` as it is in `commitId` to the work tree, not the index (#446); one undo step. */
-  restoreFileVersion(commitId: string, path: string): Promise<void>;
-  discardAllUnstaged(paths: string[]): Promise<void>;
-  ignorePath(pattern: string): Promise<void>;
-  ignorePaths(patterns: string[]): Promise<void>;
-  // `true` once committed. `noVerify` skips `pre-commit`/`commit-msg`; a failing hook stores
-  // `state.hookFailure` and resolves `false`.
-  commit(message: string, noVerify: boolean, trailers?: Trailer[]): Promise<boolean>;
-  // Resolves to `null` on success, or the failure message on failure — mirrors `addRemote`
-  // below. Naming a new branch is the one create-form action here with an obvious single trigger
-  // point (the "New branch…" draft form), so its failure surfaces next to that form instead of
-  // the shared banner (issue #30/UX-002).
-  createBranch(name: string, startPoint: string): Promise<string | null>;
-  switchBranch(name: string): Promise<void>;
-  deleteBranch(name: string, force: boolean): Promise<void>;
-  renameBranch(oldName: string, newName: string): Promise<void>;
-  // `Promise<string | null>` for the same reason as `createBranch` above — the "Create worktree"
-  // form is its own natural trigger point.
-  createWorktree(name: string, path: string, branch: string, startPoint: string | null): Promise<string | null>;
-  removeWorktree(name: string): Promise<void>;
-  pruneWorktrees(): Promise<void>;
-  initSubmodule(path: string): Promise<void>;
-  updateSubmodule(path: string, recursive: boolean): Promise<void>;
-  selectReflogReference(reference: string): Promise<void>;
-  restoreReflogEntry(reference: string, newId: string): Promise<void>;
-  // Resolves to `null` on success, or the failure message on failure — `RemotePanel` renders
-  // that message inline next to the Fetch URL field and keeps the typed values. A plain
-  // `runMutation` can't serve that: it swallows the error into `state.error` and *always*
-  // resolves, so a `try`/`catch` around this call in the panel would be dead code and its
-  // success path would wipe the user's input on a failed add. Returning the message (rather
-  // than `renameRemote`'s `boolean`) keeps the panel off global `state.error`, which isn't
-  // scoped to this action and can hold a stale message from an unrelated mutation.
-  addRemote(name: string, fetchUrl: string, pushUrl: string | null): Promise<string | null>;
-  renameRemote(oldName: string, newName: string): Promise<boolean>;
-  updateRemoteUrls(name: string, fetchUrl: string, pushUrl: string | null): Promise<void>;
-  removeRemote(name: string, clearUpstreams: boolean): Promise<void>;
-  saveHttpsCredential(remoteName: string, username: string, token: string): Promise<void>;
-  forgetHttpsCredential(remoteName: string): Promise<void>;
-  setRemoteAuthMode(remoteName: string, mode: RemoteAuthMode, username: string | null): Promise<boolean>;
-  setCurrentUpstream(remoteName: string, remoteBranch: string): Promise<void>;
-  clearCurrentUpstream(): Promise<void>;
-  listRemoteBranches(remoteName: string): Promise<string[]>;
-  fetchRemote(remoteName: string): Promise<void>;
-  // `Promise<string | null>` for the same reason as `createBranch`/`createWorktree` above.
-  createTag(name: string, message: string | null, target: string | null): Promise<string | null>;
-  openCreateTagDialog(commitId: string): void;
-  closeCreateTagDialog(): void;
-  deleteTag(name: string): Promise<void>;
-  pushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
-  pushTags(remoteName: string, names: string[], noVerify?: boolean): Promise<void>;
-  pullCurrentUpstream(): Promise<void>;
-  clearPendingPull(): void;
-  openAddRemoteDraft(): void;
-  closeAddRemoteDraft(): void;
-  openRemoteDialog(kind: RemoteDialog["kind"], remoteName: string): void;
-  closeRemoteDialog(): void;
-  requestForcePush(remoteName: string): void;
-  cancelForcePush(): void;
-  forcePushCurrentBranch(remoteName: string, noVerify?: boolean): Promise<void>;
-  fetchAllRemotes(): Promise<void>;
-  setFetchPrune(prune: boolean): void;
-  pushBranch(remoteName: string, localBranch: string, remoteBranch: string, setUpstream: boolean, noVerify?: boolean): Promise<void>;
-  openPushDialog(localBranch: string): void;
-  closePushDialog(): void;
-  deleteRemoteBranch(remoteName: string, branchName: string, noVerify?: boolean): Promise<void>;
-  openDeleteRemoteBranchDialog(remoteName: string | null, branchName: string | null): void;
-  closeDeleteRemoteBranchDialog(): void;
-  deleteRemoteTag(remoteName: string, tagName: string, deleteLocal: boolean, noVerify?: boolean): Promise<void>;
-  openDeleteRemoteTagDialog(tagName: string): void;
-  closeDeleteRemoteTagDialog(): void;
-  openCreateBranchDraft(startPoint: string): void;
-  closeCreateBranchDraft(): void;
-  saveStash(options?: StashOptions): Promise<void>;
-  openStashDialog(paths: string[]): void;
-  closeStashDialog(): void;
-  applyStash(index: number): Promise<void>;
-  popStash(index: number): Promise<void>;
-  setStashRestoreIndex(on: boolean): void;
-  dropStash(index: number): Promise<void>;
-  openMergeDialog(branchName: string): void;
-  closeMergeDialog(): void;
-  getMergeOptions(): Promise<MergeOptions>;
-  mergeBranch(branchName: string, options: MergeOptions): Promise<void>;
-  mergePull(upstreamRef: string): Promise<void>;
-  resolveConflict(path: string, resolvedContent: string): Promise<void>;
-  resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
-  /** See `MergeRebaseActions.resolveWholeFile`. */
-  resolveWholeFile(path: string, side: ConflictSide): Promise<void>;
-  /** See `MergeRebaseActions.markResolved`. */
-  markResolved(path: string, force: boolean): Promise<MarkResolvedOutcome | null>;
-  abortMerge(): Promise<void>;
-  openRebasePlanner(commitId: string): void;
-  openRebaseSelection(onto: string, preset: ReadonlyMap<string, PresetAction>): void;
-  closeRebasePlanner(): void;
-  startRebase(onto: string, plan: RebasePlanEntry[]): Promise<void>;
-  /** See `MergeRebaseActions.editHistory`. */
-  editHistory(commitId: string, onto: string, request: HistoryEditRequest): Promise<RebaseStepResult | null>;
-  openRewordDialog(commitId: string, onto: string): void;
-  closeRewordDialog(): void;
-  rebaseContinue(): Promise<void>;
-  abortRebase(): Promise<RebaseAbort | null>;
-  /** See `HistoryActions`: outcomes, or `null` on failure. */
-  cherryPick(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
-  revertCommit(commitId: string, mainline?: number | null): Promise<PickOutcome | null>;
-  cherryPickMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
-  revertMany(commitIdsOldestFirst: string[]): Promise<SequenceOutcome | null>;
-  continueSequence(noVerify?: boolean): Promise<SequenceOutcome | null>;
-  abortSequence(confirmed?: ConfirmedAbort): Promise<SequenceAbort | null>;
-  resetToCommit(commitId: string, mode: ResetMode): Promise<void>;
-  checkoutCommit(commitId: string): Promise<void>;
-  amendCommit(message: string, noVerify: boolean, options?: AmendOptions): Promise<boolean>;
-  setAmendMode(on: boolean): void;
-  setSkipHooks(on: boolean): void;
-  // Cancels the running commit/amend hook (`state.hookRun`) through `cancelTransfer`.
-  cancelHookRun(): Promise<void>;
-  openHookFailure(): void;
-  closeHookFailure(): void;
-  clearCommitMessageHandled(): void;
   // Replays the failed request with `noVerify: true`. Resolves `true` when a commit/amend landed
   // (pushes: once started; their outcome arrives as transfer progress).
   retryWithoutHooks(retry: HookRetry): Promise<boolean>;
-  listPullRequests(remoteName: string, account: string): Promise<void>;
-  saveForgeToken(provider: ForgeProvider, account: string, token: string): Promise<void>;
-  forgetForgeToken(provider: ForgeProvider, account: string): Promise<void>;
-  // `Promise<boolean>` (unlike the other forge actions above) so `PullRequestPanel` can tell a
-  // failed creation from a successful one and only clear its form on success — `runMutation`
-  // swallows the underlying error into `state.error` rather than rejecting, so the boolean is
-  // the only success/failure signal available to the caller. Matches `renameRemote`/
-  // `setRemoteAuthMode`'s existing `Promise<boolean>` pattern below.
-  createPullRequest(remoteName: string, account: string, pullRequest: CreatePullRequest): Promise<boolean>;
-  openExternalUrl(url: string): Promise<void>;
-  /** See `PatchActions` (#448). */
-  applyCommitChange(change: CommitChangeRequest): Promise<void>;
-  savePatch(source: PatchSource, suggestedName: string): Promise<void>;
-  applyPatchFile(): Promise<void>;
-  setGraphBranchSelection(selectedBranches: string[]): Promise<void>;
-  setGraphRemoteBranchSelection(selectedBranches: string[]): Promise<void>;
-  // See `BranchActions.clearGraphBranchSelection`/`showAllGraphBranches`.
-  clearGraphBranchSelection(): Promise<void>;
-  showAllGraphBranches(): Promise<void>;
-  // See `BranchActions.isolateGraphBranch`.
-  isolateGraphBranch(kind: "local" | "remote", name: string): Promise<void>;
   // Fetches the next page of history (grows the graph limit by one page and reloads).
   loadMoreHistory(): Promise<void>;
   // Reloads the graph with at least `count` commits (whole pages), so a "Go to" target's row
   // (`CommitLocation.position + 1`) is loaded (#441).
   loadHistoryThrough(count: number): Promise<void>;
   refresh(): Promise<void>;
-  undo(): Promise<UndoOutcome | null>;
-  redo(): Promise<UndoOutcome | null>;
   refreshUndoState(): Promise<void>;
   // Clears `state.error` without waiting for the next successful action of the same kind — the
   // global banner's dismiss control (issue #30/UX-002). See `RepoWorkspace.tsx`.
   dismissError(): void;
 }
+
+// The members are documented on the slice interfaces, the one place each is declared.
+export interface UseAppStateResult
+  extends AppStateOwnMembers,
+    StagingActions,
+    PatchActions,
+    BranchActions,
+    WorktreeActions,
+    SubmoduleActions,
+    ReflogActions,
+    RemoteTransferActions,
+    StashActions,
+    MergeRebaseActions,
+    HistoryActions,
+    HookActions,
+    UndoActions,
+    ForgeActions {}
+
+// `useAppState` spreads the slices into one object, where a later slice would silently replace
+// an earlier one's member of the same name (and `extends` accepts two identical declarations).
+// `UseAppStateParts` lists the same interfaces as `extends` above; `NoClash` fails to compile,
+// naming the member, when two parts share a member or a part is missing from the list.
+type UseAppStateParts = [
+  AppStateOwnMembers,
+  StagingActions,
+  PatchActions,
+  BranchActions,
+  WorktreeActions,
+  SubmoduleActions,
+  ReflogActions,
+  RemoteTransferActions,
+  StashActions,
+  MergeRebaseActions,
+  HistoryActions,
+  HookActions,
+  UndoActions,
+  ForgeActions,
+];
+type MembersOf<T extends unknown[]> = T extends [infer Head, ...infer Rest] ? keyof Head | MembersOf<Rest> : never;
+type SharedMembers<T extends unknown[]> = T extends [infer Head, ...infer Rest]
+  ? (keyof Head & MembersOf<Rest>) | SharedMembers<Rest>
+  : never;
+type NoClash<T extends never> = T;
+export type UseAppStatePartsCheck = NoClash<
+  SharedMembers<UseAppStateParts> | Exclude<keyof UseAppStateResult, MembersOf<UseAppStateParts>>
+>;
 
 export function useAppState(client: RepoClient, repoPath: string): UseAppStateResult {
   const [state, setRawState] = useState<AppState>({
@@ -590,49 +455,13 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutationWithOutcome,
   } = useMutationRunner(refresh, setState);
 
-  const {
-    selectRow,
-    stageFile,
-    unstageFile,
-    stageAllFiles,
-    unstageAllFiles,
-    stageHunk,
-    unstageHunk,
-    discardHunk,
-    stageLines,
-    unstageLines,
-    discardLines,
-    discardFile,
-    restoreFileVersion,
-    discardAllUnstaged,
-    ignorePath,
-    ignorePaths,
-    commit,
-  } = useStagingActions(client, repoPath, runMutation, runMutationWithOutcome, runOptimisticMutation, setState);
-
-  const { applyCommitChange, savePatch, applyPatchFile } = usePatchActions(
-    client,
-    repoPath,
-    runMutationWithOutcome,
-    setState,
-  );
+  const staging = useStagingActions(client, repoPath, runMutation, runMutationWithOutcome, runOptimisticMutation, setState);
+  const patches = usePatchActions(client, repoPath, runMutationWithOutcome, setState);
 
   const branchNames = useMemo(() => state.branches.map((branch) => branch.name), [state.branches]);
   const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
 
-  const {
-    createBranch,
-    switchBranch,
-    deleteBranch,
-    renameBranch,
-    openCreateBranchDraft,
-    closeCreateBranchDraft,
-    setGraphBranchSelection,
-    setGraphRemoteBranchSelection,
-    clearGraphBranchSelection,
-    showAllGraphBranches,
-    isolateGraphBranch,
-  } = useBranchActions(
+  const branches = useBranchActions(
     client,
     repoPath,
     runMutation,
@@ -643,7 +472,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     state.graphRemoteBranchSelection,
     branchNames,
   );
-  const { createWorktree, removeWorktree, pruneWorktrees } = useWorktreeActions(
+  const worktrees = useWorktreeActions(
     client,
     repoPath,
     runMutation,
@@ -653,9 +482,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     state.worktrees,
   );
 
-  const { initSubmodule, updateSubmodule } = useSubmoduleActions(client, repoPath, runMutation);
+  const submodules = useSubmoduleActions(client, repoPath, runMutation);
 
-  const { selectReflogReference, restoreReflogEntry } = useReflogActions(
+  const reflog = useReflogActions(
     client,
     repoPath,
     runMutation,
@@ -665,45 +494,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     reflogError,
   );
 
-  const {
-    addRemote,
-    renameRemote,
-    updateRemoteUrls,
-    removeRemote,
-    saveHttpsCredential,
-    forgetHttpsCredential,
-    setRemoteAuthMode,
-    setCurrentUpstream,
-    clearCurrentUpstream,
-    listRemoteBranches,
-    fetchRemote,
-    createTag,
-    openCreateTagDialog,
-    closeCreateTagDialog,
-    deleteTag,
-    pushCurrentBranch,
-    pushTags,
-    pullCurrentUpstream,
-    clearPendingPull,
-    openAddRemoteDraft,
-    closeAddRemoteDraft,
-    openRemoteDialog,
-    closeRemoteDialog,
-    requestForcePush,
-    cancelForcePush,
-    forcePushCurrentBranch,
-    fetchAllRemotes,
-    setFetchPrune,
-    pushBranch,
-    openPushDialog,
-    closePushDialog,
-    deleteRemoteBranch,
-    openDeleteRemoteBranchDialog,
-    closeDeleteRemoteBranchDialog,
-    deleteRemoteTag,
-    openDeleteRemoteTagDialog,
-    closeDeleteRemoteTagDialog,
-  } = useRemoteTransferActions(
+  const remoteTransfer = useRemoteTransferActions(
     client,
     repoPath,
     refresh,
@@ -721,15 +512,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     state.tags,
   );
 
-  const {
-    saveStash,
-    openStashDialog,
-    closeStashDialog,
-    applyStash,
-    popStash,
-    setStashRestoreIndex,
-    dropStash,
-  } = useStashActions(
+  const stash = useStashActions(
     client,
     repoPath,
     runMutation,
@@ -739,43 +522,16 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     state.stashRestoreIndex,
   );
 
-  const {
-    openMergeDialog,
-    closeMergeDialog,
-    getMergeOptions,
-    mergeBranch,
-    mergePull,
-    resolveConflict,
-    resolveAddDeleteConflict,
-    resolveWholeFile,
-    markResolved,
-    abortMerge,
-    openRebasePlanner,
-    openRebaseSelection,
-    closeRebasePlanner,
-    startRebase,
-    editHistory,
-    openRewordDialog,
-    closeRewordDialog,
-    rebaseContinue,
-    abortRebase,
-  } = useMergeRebaseActions(client, repoPath, runMutation, setState);
+  const mergeRebase = useMergeRebaseActions(client, repoPath, runMutation, setState);
 
-  const {
-    cherryPick,
-    revertCommit,
-    cherryPickMany,
-    revertMany,
-    continueSequence,
-    abortSequence,
-    resetToCommit,
-    checkoutCommit,
-    amendCommit,
-    setAmendMode,
-  } =
-    useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
-  const { setSkipHooks, cancelHookRun, openHookFailure, closeHookFailure, clearCommitMessageHandled } =
-    useHookActions(client, repoPath, state.hookRun, setState);
+  const history = useHistoryActions(client, repoPath, runMutation, runMutationWithOutcome, setState);
+  const hooks = useHookActions(client, repoPath, state.hookRun, setState);
+  // The slice objects are new on every render, their actions are not: the callback depends on
+  // the actions, so it stays as stable as they are.
+  const { commit } = staging;
+  const { amendCommit, continueSequence } = history;
+  const { pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag } =
+    remoteTransfer;
   const retryWithoutHooks = useCallback(
     async (retry: HookRetry) => {
       setState((prev) => ({ ...prev, hookFailure: null, error: null }));
@@ -806,144 +562,33 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     [commit, amendCommit, continueSequence, pushCurrentBranch, forcePushCurrentBranch, pushTags, pushBranch, deleteRemoteBranch, deleteRemoteTag, setState],
   );
 
-  const { undo, redo } = useUndoActions(client, repoPath, runMutationWithOutcome, setState);
+  const undoActions = useUndoActions(client, repoPath, runMutationWithOutcome, setState);
 
-  const { listPullRequests, saveForgeToken, forgetForgeToken, createPullRequest, openExternalUrl } =
-    useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState, forgeError);
+  const forge = useForgeActions(client, repoPath, runMutation, runMutationWithOutcome, setState, forgeError);
   const dismissError = useCallback(() => {
     setState((prev) => ({ ...prev, error: null, forcePushOffer: null, forcePushConfirm: null, hookFailure: null }));
   }, [setState]);
 
   return {
     state,
-    selectRow,
-    restoreFileVersion,
-    stageFile,
-    unstageFile,
-    stageAllFiles,
-    unstageAllFiles,
-    stageHunk,
-    unstageHunk,
-    discardHunk,
-    stageLines,
-    unstageLines,
-    discardLines,
-    discardFile,
-    discardAllUnstaged,
-    ignorePath,
-    ignorePaths,
-    commit,
-    createBranch,
-    createWorktree,
-    removeWorktree,
-    pruneWorktrees,
-    initSubmodule,
-    updateSubmodule,
-    selectReflogReference,
-    restoreReflogEntry,
-    switchBranch,
-    deleteBranch,
-    renameBranch,
-    addRemote,
-    renameRemote,
-    updateRemoteUrls,
-    removeRemote,
-    saveHttpsCredential,
-    forgetHttpsCredential,
-    setRemoteAuthMode,
-    setCurrentUpstream,
-    clearCurrentUpstream,
-    fetchRemote,
-    listRemoteBranches,
-    createTag,
-    openCreateTagDialog,
-    closeCreateTagDialog,
-    deleteTag,
-    pushCurrentBranch,
-    pushTags,
-    pullCurrentUpstream,
-    clearPendingPull,
-    openAddRemoteDraft,
-    closeAddRemoteDraft,
-    openRemoteDialog,
-    closeRemoteDialog,
-    requestForcePush,
-    cancelForcePush,
-    forcePushCurrentBranch,
-    fetchAllRemotes,
-    setFetchPrune,
-    pushBranch,
-    openPushDialog,
-    closePushDialog,
-    deleteRemoteBranch,
-    openDeleteRemoteBranchDialog,
-    closeDeleteRemoteBranchDialog,
-    deleteRemoteTag,
-    openDeleteRemoteTagDialog,
-    closeDeleteRemoteTagDialog,
-    openCreateBranchDraft,
-    closeCreateBranchDraft,
-    saveStash,
-    openStashDialog,
-    closeStashDialog,
-    applyStash,
-    popStash,
-    setStashRestoreIndex,
-    dropStash,
-    openMergeDialog,
-    closeMergeDialog,
-    getMergeOptions,
-    mergeBranch,
-    mergePull,
-    resolveConflict,
-    resolveAddDeleteConflict,
-    resolveWholeFile,
-    markResolved,
-    abortMerge,
-    openRebasePlanner,
-    openRebaseSelection,
-    closeRebasePlanner,
-    startRebase,
-    editHistory,
-    openRewordDialog,
-    closeRewordDialog,
-    rebaseContinue,
-    abortRebase,
-    cherryPick,
-    revertCommit,
-    cherryPickMany,
-    revertMany,
-    continueSequence,
-    abortSequence,
-    resetToCommit,
-    checkoutCommit,
-    amendCommit,
-    setAmendMode,
-    listPullRequests,
-    saveForgeToken,
-    forgetForgeToken,
-    createPullRequest,
-    openExternalUrl,
-    applyCommitChange,
-    savePatch,
-    applyPatchFile,
-    setGraphBranchSelection,
-    setGraphRemoteBranchSelection,
-    clearGraphBranchSelection,
-    showAllGraphBranches,
-    isolateGraphBranch,
+    retryWithoutHooks,
     loadMoreHistory,
     loadHistoryThrough,
     refresh,
-    undo,
-    redo,
     refreshUndoState,
     dismissError,
-    setSkipHooks,
-    cancelHookRun,
-    openHookFailure,
-    closeHookFailure,
-    clearCommitMessageHandled,
-    retryWithoutHooks,
+    ...staging,
+    ...patches,
+    ...branches,
+    ...worktrees,
+    ...submodules,
+    ...reflog,
+    ...remoteTransfer,
+    ...stash,
+    ...mergeRebase,
+    ...history,
+    ...hooks,
+    ...undoActions,
+    ...forge,
   };
 }

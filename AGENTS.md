@@ -39,11 +39,15 @@ pnpm test -- --run
 ```
 
 ```bash
+cargo build -p vscode-sidecar                      # from repo root, before the extension tests
 cd extension
 pnpm install
 pnpm test -- --run
 pnpm run compile
 ```
+
+`src/sidecarBridge.real.test.ts` spawns the real `target/debug/vscode-sidecar` and never builds
+it: without the binary it is skipped with a note, and under `CI` it fails instead (#552).
 
 ### E2E: Tauri app (tauri-driver + WebdriverIO), from repo root
 
@@ -117,7 +121,8 @@ is green. Covered: the Cargo workspace, all four pnpm projects (`frontend/`, `ex
 `e2e/`, `extension/e2e/`, each with its own lockfile), GitHub Actions,
 `rust-toolchain.toml`, and the user guide site's Python tools (`docs/requirements.in`, locked
 with hashes in `docs/requirements.txt` by Renovate's `pip-compile` manager). Minor/patch updates
-are grouped per ecosystem (Rust, JS, Python docs tools, GitHub Actions); Tauri crates and `@tauri-apps/*` packages share one group. Majors and
+are grouped per ecosystem (Rust, JS, Python docs tools, GitHub Actions); Tauri crates and `@tauri-apps/*` packages share one group;
+`tauri-apps/tauri-action` (pinned by commit in `release.yml`, #399) gets its own PR. Majors and
 `git2`/`libgit2-sys` wait for approval on the Dependency Dashboard issue (libgit2 bumps change
 behaviour the tests and `docs/ARCHITECTURE.md` characterize). Security fixes skip the
 schedule; lockfiles get a monthly maintenance PR. npm versions wait a day before Renovate proposes

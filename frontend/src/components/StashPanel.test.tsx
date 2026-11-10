@@ -19,9 +19,7 @@ function panel(overrides: Partial<Parameters<typeof StashPanel>[0]> = {}) {
       onDropStash={vi.fn()}
       restoreIndex={true}
       onSetRestoreIndex={vi.fn()}
-      applyDisabledReason={null}
-      operationDisabled={false}
-      operationDisabledReason={null}
+      blockers={{ apply: null, drop: null }}
       {...overrides}
     />
   );
@@ -363,15 +361,45 @@ describe("StashPanel", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("disables every menu action, with the reason as its title, while an operation is pending", () => {
-    renderPanel({ operationDisabled: true, operationDisabledReason: "A transfer is in progress." });
+  it("disables every menu action, with the reason as its title, while a transfer runs", () => {
+    const reason = "A transfer is in progress.";
+    renderPanel({ blockers: { apply: reason, drop: reason } });
 
     openMenu(/stash0fix/);
     for (const name of ["Apply", "Pop", "Drop…"]) {
       const item = screen.getByRole("menuitem", { name });
       expect(item).toBeDisabled();
-      expect(item).toHaveAttribute("title", "A transfer is in progress.");
+      expect(item).toHaveAttribute("title", reason);
     }
+  });
+
+  it("keeps Drop… during a paused merge, which only blocks Apply and Pop (#521)", () => {
+    const onDropStash = vi.fn();
+    renderPanel({ onDropStash, blockers: { apply: "A merge is in progress.", drop: null } });
+
+    openMenu(/stash0fix/);
+    expect(screen.getByRole("menuitem", { name: "Apply" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: /Drop stash/ })).getByRole("button", { name: "Drop stash" }));
+
+    expect(onDropStash).toHaveBeenCalledWith(0);
+  });
+
+  it("disables the open Drop confirmation, saying why, once an action is in progress (#521)", () => {
+    const onDropStash = vi.fn();
+    const { rerender } = renderPanel({ onDropStash });
+    openMenu(/stash0fix/);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Drop…" }));
+
+    rerender(panel({ onDropStash, blockers: { apply: null, drop: "Another action is in progress." } }));
+    const dialog = screen.getByRole("dialog", { name: /Drop stash/ });
+    const confirm = within(dialog).getByRole("button", { name: "Drop stash" });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAttribute("title", "Another action is in progress.");
+    expect(dialog).toHaveTextContent("Another action is in progress.");
+    fireEvent.click(confirm);
+
+    expect(onDropStash).not.toHaveBeenCalled();
   });
 });
 
@@ -400,7 +428,7 @@ describe("StashPanel pop and restore staged changes", () => {
   });
 
   it("disables Apply and Pop, not Drop, with the apply-disabled reason", () => {
-    renderPanel({ applyDisabledReason: "Unstage or commit staged changes first." });
+    renderPanel({ blockers: { apply: "Unstage or commit staged changes first.", drop: null } });
 
     openMenu(/stash0fix/);
     for (const name of ["Apply", "Pop"]) {

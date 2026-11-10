@@ -1,3 +1,5 @@
+import { DEFAULT_DIFF_SETTINGS } from "./generated/wire-constants";
+
 export type StatusKind = "New" | "Modified" | "Deleted" | "Renamed" | "TypeChange" | "Conflicted";
 
 export interface StatusEntry {
@@ -49,38 +51,39 @@ export interface DiffSettings extends DiffOptions {
   wordWrap: WordWrap;
 }
 
-export const DEFAULT_DIFF_SETTINGS: DiffSettings = {
-  ignoreWhitespace: false,
-  contextLines: 3,
-  syntaxHighlight: true,
-  wordWrap: "Auto",
-  algorithm: "Default",
+// The backend's limits and defaults (#497), generated from the Rust constants:
+// `DEFAULT_DIFF_SETTINGS`, `MAX_CONTEXT_LINES` and `WHOLE_FILE_CONTEXT_LINES`, which is
+// `DiffOptions.contextLines` for "Show whole file" (#444): the backend then returns every line of
+// the file in one hunk. Any other value above `MAX_CONTEXT_LINES` is clamped to it. Hunk and line
+// actions on such a diff pass the same value, as they do for any other context.
+export {
+  COMMIT_MESSAGE_COLUMNS,
+  DEFAULT_COMMIT_MESSAGE_SETTINGS,
+  DEFAULT_DIFF_SETTINGS,
+  DEFAULT_FETCH_SETTINGS,
+  MAX_CONTEXT_LINES,
+  SEARCH_KEYS,
+  WHOLE_FILE_CONTEXT_LINES,
+} from "./generated/wire-constants";
+export const DEFAULT_DIFF_OPTIONS: DiffOptions = {
+  ignoreWhitespace: DEFAULT_DIFF_SETTINGS.ignoreWhitespace,
+  contextLines: DEFAULT_DIFF_SETTINGS.contextLines,
+  algorithm: DEFAULT_DIFF_SETTINGS.algorithm,
 };
-export const DEFAULT_DIFF_OPTIONS: DiffOptions = { ignoreWhitespace: false, contextLines: 3, algorithm: "Default" };
-export const MAX_CONTEXT_LINES = 20;
-/**
- * `DiffOptions.contextLines` for "Show whole file" (#444): the backend then returns every line of
- * the file in one hunk. Any other value above `MAX_CONTEXT_LINES` is clamped to it. Hunk and line
- * actions on such a diff pass the same value, as they do for any other context.
- */
-export const WHOLE_FILE_CONTEXT_LINES = 4294967295;
 /** A whole-file diff longer than this many lines falls back to the normal context. */
 export const WHOLE_FILE_LINE_LIMIT = 10000;
 
-/** Commit message editor settings (`[commit_message]`); columns are clamped to 10–200. */
+/** Commit message editor settings (`[commit_message]`); columns are clamped to `COMMIT_MESSAGE_COLUMNS`. */
 export interface CommitMessageSettings {
   summaryLimit: number;
   bodyRuler: number;
   showRuler: boolean;
 }
-export const DEFAULT_COMMIT_MESSAGE_SETTINGS: CommitMessageSettings = { summaryLimit: 50, bodyRuler: 72, showRuler: true };
-export const COMMIT_MESSAGE_COLUMNS = { min: 10, max: 200 } as const;
 
 /** Fetch settings (`[fetch]`): the app-wide "Fetch automatically" interval, 0 for off. */
 export interface FetchSettings {
   autoFetchMinutes: number;
 }
-export const DEFAULT_FETCH_SETTINGS: FetchSettings = { autoFetchMinutes: 0 };
 
 /** A `Key: value` line for a commit message's trailer block, e.g. `Co-authored-by`. */
 export interface Trailer {
@@ -401,7 +404,8 @@ export type ErrorKind =
   | "PullFailed"
   | "Cancelled"
   | "AddDeleteConflict"
-  | "InvalidSearchQuery";
+  | "InvalidSearchQuery"
+  | "PermissionDenied";
 
 /** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
 export interface RepoErrorPayload {
@@ -445,11 +449,18 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
   "Cancelled",
   "AddDeleteConflict",
   "InvalidSearchQuery",
+  "PermissionDenied",
 ]);
 
 /**
  * Reads a backend rejection: a `RepoErrorPayload`, or a bare string (an error Tauri raises
  * itself, such as a bad argument). A kind this frontend doesn't know reads as `"Other"`.
+ *
+ * The bare strings stay `"Other"` here (#527): Tauri raises them before any command runs (an
+ * argument its generated wrapper can't deserialise, an unknown command, an ACL refusal) and
+ * sends them through its own `InvokeResolver`, whose responder an app can't wrap, so the
+ * backend can't put them in the envelope. They mean the frontend and backend disagree about a
+ * command, which no kind-specific remediation fixes.
  */
 export function toRepoError(raw: unknown): RepoError {
   if (raw instanceof RepoError) return raw;

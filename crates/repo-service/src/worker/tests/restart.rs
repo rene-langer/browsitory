@@ -90,7 +90,9 @@ fn a_refused_rebase_start_records_no_undo_entry_and_keeps_the_edit() {
     let error = handle.start_rebase(onto, plan, None).unwrap_err();
     assert_eq!(
         error,
-        "You have uncommitted changes to f.txt. Commit or stash them before starting a rebase."
+        crate::wire::ErrorDto::from(
+            "You have uncommitted changes to f.txt. Commit or stash them before starting a rebase."
+        )
     );
     assert_eq!(handle.get_undo_state().unwrap(), before);
     assert_eq!(
@@ -271,9 +273,12 @@ fn a_failed_save_keeps_the_rebase_for_the_session() {
 
     let error = handle.start_rebase(onto, plan, None).unwrap_err();
 
-    assert!(error.contains("could not be saved"), "{error}");
+    assert!(error.message.contains("could not be saved"), "{error}");
     let short = branch.trim_start_matches("refs/heads/");
-    assert!(error.contains(&format!("git switch {short}")), "{error}");
+    assert!(
+        error.message.contains(&format!("git switch {short}")),
+        "{error}"
+    );
     assert_eq!(rebase_progress(&handle), Some((1, 2)));
     assert_eq!(
         handle.rebase_continue().unwrap(),
@@ -304,31 +309,31 @@ fn assert_moves_are_refused(handle: &super::super::WorkerHandle, path: &Path) {
         handle
             .switch_branch(branch.clone(), no_events())
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
             .cherry_pick(id.clone(), None, no_events())
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
             .cherry_pick_many(vec![id.clone()], no_events())
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
             .commit("x".into(), false, Vec::new(), mpsc::channel().0)
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
             .amend_commit("x".into(), false, None, Vec::new(), mpsc::channel().0)
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
@@ -338,23 +343,26 @@ fn assert_moves_are_refused(handle: &super::super::WorkerHandle, path: &Path) {
                 no_events()
             )
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle.start_rebase(id.clone(), vec![], None).unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
             .reset_to_commit(id.clone(), git_core::reset::ResetMode::Hard)
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle.checkout_commit(id.clone(), no_events()).unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
-    assert_eq!(handle.pop_stash(0, id, false).unwrap_err(), busy);
+    assert_eq!(
+        handle.pop_stash(0, id, false).unwrap_err(),
+        crate::wire::ErrorDto::from(busy)
+    );
     assert_eq!(repo.head().unwrap().target().unwrap(), head);
 }
 
@@ -464,7 +472,9 @@ fn get_head_info_reports_a_diverged_rebase_when_head_moved_outside() {
         handle
             .checkout_commit(info.head_id.unwrap(), no_events())
             .unwrap_err(),
-        "Finish or abort the current merge/cherry-pick/revert/rebase first."
+        crate::wire::ErrorDto::from(
+            "Finish or abort the current merge/cherry-pick/revert/rebase first."
+        )
     );
     assert_eq!(
         handle.abort_rebase().unwrap(),
@@ -705,16 +715,19 @@ fn branch_and_stash_commands_are_refused_during_a_rebase() {
     let (_worker, handle, branch, tip) = paused_for_edit(dir.path(), &repo);
     let busy = "Finish or abort the current merge/cherry-pick/revert/rebase first.";
     let short = branch.trim_start_matches("refs/heads/").to_string();
-    assert_eq!(handle.delete_branch(short.clone(), true).unwrap_err(), busy);
+    assert_eq!(
+        handle.delete_branch(short.clone(), true).unwrap_err(),
+        crate::wire::ErrorDto::from(busy)
+    );
     assert_eq!(
         handle.rename_branch(short, "renamed".into()).unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(
         handle
             .save_stash(git_core::stash::StashOptions::default())
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     let parent = TempDir::new().unwrap();
     assert_eq!(
@@ -726,7 +739,7 @@ fn branch_and_stash_commands_are_refused_during_a_rebase() {
                 None,
             )
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     assert_eq!(branch_target(dir.path(), &branch), tip);
 
@@ -735,7 +748,7 @@ fn branch_and_stash_commands_are_refused_during_a_rebase() {
         handle
             .create_branch("new".into(), tip.to_string())
             .unwrap_err(),
-        busy
+        crate::wire::ErrorDto::from(busy)
     );
     // Other branches stay manageable.
     repo.branch("other", &repo.find_commit(tip).unwrap(), false)
@@ -765,10 +778,10 @@ fn another_worktree_cant_touch_the_branch_a_paused_sequence_runs_on() {
     let linked_worker = Worker::spawn(linked_path).unwrap();
     let linked = linked_worker.handle();
     let main_folder = std::fs::canonicalize(dir.path()).unwrap();
-    let refused = |result: Result<(), String>| {
+    let refused = |result: Result<(), crate::wire::ErrorDto>| {
         let message = result.unwrap_err();
         assert_eq!(
-            held_folder(&message, &branch, "has a paused cherry-pick"),
+            held_folder(&message.message, &branch, "has a paused cherry-pick"),
             main_folder
         );
     };
@@ -795,7 +808,7 @@ fn another_worktree_cant_touch_the_branch_a_paused_sequence_runs_on() {
     // Once the sequence is over, the branch is only checked out there, as before.
     let message = linked.delete_branch(branch.clone(), true).unwrap_err();
     assert_eq!(
-        held_folder(&message, &branch, "is checked out"),
+        held_folder(&message.message, &branch, "is checked out"),
         main_folder
     );
 }
@@ -816,10 +829,10 @@ fn another_worktree_cant_touch_the_branch_a_paused_rebase_rebases() {
     let linked_worker = Worker::spawn(linked_path).unwrap();
     let linked = linked_worker.handle();
     let main_folder = std::fs::canonicalize(dir.path()).unwrap();
-    let refused = |result: Result<(), String>| {
+    let refused = |result: Result<(), crate::wire::ErrorDto>| {
         let message = result.unwrap_err();
         assert_eq!(
-            held_folder(&message, &short, "is being rebased"),
+            held_folder(&message.message, &short, "is being rebased"),
             main_folder
         );
     };
@@ -838,7 +851,10 @@ fn another_worktree_cant_touch_the_branch_a_paused_rebase_rebases() {
     // Once the rebase is aborted, the branch is checked out there again, as before.
     handle.abort_rebase().unwrap();
     let message = linked.delete_branch(short.clone(), true).unwrap_err();
-    assert_eq!(held_folder(&message, &short, "is checked out"), main_folder);
+    assert_eq!(
+        held_folder(&message.message, &short, "is checked out"),
+        main_folder
+    );
 }
 
 /// A `rebase.json` that can't be deleted (read-only folder) must not keep gating the

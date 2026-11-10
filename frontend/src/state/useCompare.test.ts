@@ -3,9 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompareRange, RepoClient } from "../ipc/RepoClient";
 import type { SelectedRow } from "./useAppState";
 import { useCompare } from "./useCompare";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function setup(getBranchCompareRange: RepoClient["getBranchCompareRange"] = vi.fn()) {
-  const client = { getBranchCompareRange } as unknown as RepoClient;
+  const client = fakeRepoClient({ getBranchCompareRange });
   return renderHook(
     ({ generation, row }: { generation: number; row: SelectedRow }) => useCompare(client, "/repo", generation, row),
     { initialProps: { generation: 0, row: { commitId: "b" } as SelectedRow } },

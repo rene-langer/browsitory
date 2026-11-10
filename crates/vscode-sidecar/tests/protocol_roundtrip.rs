@@ -804,6 +804,40 @@ fn stage_commit_and_get_commit_files_round_trip_through_the_sidecar() {
     assert_eq!(unstaged["result"], serde_json::Value::Null);
 }
 
+/// #527: a file the operating system won't let the worker read answers `PermissionDenied` in
+/// the error's `data`. Skipped where the permission bits don't bind (running as root).
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_answers_permission_denied_through_the_sidecar() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, _repo) = init_repo();
+    write_file(dir.path(), "secret.txt", "hello");
+    let path = dir.path().join("secret.txt");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&path).is_ok() {
+        return;
+    }
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+
+    let staged = sidecar.call(
+        2,
+        "stage_file",
+        serde_json::json!({"repoPath": repo_path, "path": "secret.txt"}),
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    assert_eq!(
+        staged["error"]["data"]["kind"], "PermissionDenied",
+        "{staged}"
+    );
+    assert_eq!(
+        staged["error"]["data"]["message"],
+        staged["error"]["message"]
+    );
+}
+
 #[test]
 fn stage_unstage_and_discard_hunk_round_trip_through_the_sidecar() {
     let (dir, repo) = init_repo();

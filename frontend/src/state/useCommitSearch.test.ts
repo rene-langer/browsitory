@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RepoError, type GraphCommit, type RepoClient, type SearchPage } from "../ipc/RepoClient";
 import type { SelectedRow } from "./useAppState";
 import { SEARCH_DEBOUNCE_MS, SEARCH_ROUND_SIZE, useCommitSearch } from "./useCommitSearch";
+import { fakeRepoClient } from "../test/fakeRepoClient";
 
 function commit(id: string): GraphCommit {
   return {
@@ -32,7 +33,7 @@ function setup(
   { row = "uncommitted" as SelectedRow, debounceMs = 0 } = {},
 ) {
   const cancelSearch = vi.fn(async () => {});
-  const client = { searchCommits, cancelSearch } as unknown as RepoClient;
+  const client = fakeRepoClient({ searchCommits, cancelSearch });
   const selectRow = vi.fn();
   const hook = renderHook(
     ({

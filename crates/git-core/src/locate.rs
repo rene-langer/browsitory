@@ -83,14 +83,8 @@ fn resolve(repo: &Repository, revision: &str) -> Result<Option<Oid>, LocateError
         Err(error) if error.code() == ErrorCode::Ambiguous => {
             return Err(LocateError::Ambiguous(revision.to_string()))
         }
-        // An upper-case SHA prefix (copied from elsewhere) names the same commit.
-        Err(error)
-            if matches!(error.code(), ErrorCode::NotFound | ErrorCode::InvalidSpec)
-                && revision.chars().all(|c| c.is_ascii_hexdigit())
-                && revision.chars().any(|c| c.is_ascii_uppercase()) =>
-        {
-            return resolve(repo, &revision.to_ascii_lowercase());
-        }
+        // An upper-case SHA or SHA prefix needs no special case: libgit2 parses hex digits
+        // case-insensitively (its `from_hex` table), on every platform.
         Err(error) if matches!(error.code(), ErrorCode::NotFound | ErrorCode::InvalidSpec) => {
             return Ok(None)
         }

@@ -6,6 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use git_core::diff::MAX_CONTEXT_LINES;
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
@@ -161,18 +162,18 @@ pub enum WordWrap {
 }
 
 impl Default for DiffSettings {
+    /// Whitespace and context default to `git_core::diff::DiffOptions::default()`'s.
     fn default() -> Self {
+        let options = git_core::diff::DiffOptions::default();
         Self {
-            ignore_whitespace: false,
-            context_lines: 3,
+            ignore_whitespace: options.ignore_whitespace,
+            context_lines: options.context_lines,
             syntax_highlight: true,
             word_wrap: WordWrap::Auto,
             algorithm: DiffAlgorithm::Default,
         }
     }
 }
-
-const MAX_CONTEXT_LINES: u32 = 20;
 
 /// Commit message editor preferences, persisted as the `[commit_message]` TOML table: the
 /// summary length counter's soft limit and the body ruler column (both clamped to
@@ -338,7 +339,7 @@ pub fn get_diff_settings_at(config_file: &Path) -> Result<DiffSettings, ConfigEr
     Ok(read_config(config_file)?.diff)
 }
 
-/// Persists `settings`, clamping `context_lines` to 20 on write.
+/// Persists `settings`, clamping `context_lines` to `MAX_CONTEXT_LINES` on write.
 pub fn set_diff_settings_at(
     config_file: &Path,
     settings: &DiffSettings,

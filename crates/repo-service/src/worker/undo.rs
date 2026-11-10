@@ -1,5 +1,6 @@
 //! Undo stack: which worker commands are recorded, under which label, and the recorder that
 //! snapshots around them. See `docs/superpowers/specs/2026-10-18-parity-batch3b-design.md`.
+use crate::wire::ErrorDto;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -40,7 +41,7 @@ pub(super) struct UndoPlan {
 /// overwrite local changes.
 pub(super) fn reply_busy(command: &mut Command, busy: BusyReply) {
     if let Some(reply) = reply_of(command) {
-        reply.refuse(busy.text());
+        reply.refuse(busy.text().into());
     }
 }
 
@@ -78,7 +79,7 @@ pub(super) fn merge_label(branch_name: &str, squash: bool) -> String {
 pub(super) fn relabel_sequence(
     recorder: &mut UndoRecorder,
     kind: git_core::pick::SequenceKind,
-    result: &Result<git_core::pick::SequenceOutcome, String>,
+    result: &Result<git_core::pick::SequenceOutcome, ErrorDto>,
 ) {
     if let Ok(git_core::pick::SequenceOutcome::Completed { applied, .. }) = result {
         let verb = match kind {
@@ -136,7 +137,7 @@ pub(super) fn relabel_rebase_start(
     recorder: &mut UndoRecorder,
     repo: &Repository,
     label: &str,
-    result: &Result<git_core::rebase::RebaseStepResult, String>,
+    result: &Result<git_core::rebase::RebaseStepResult, ErrorDto>,
 ) {
     if result.is_err() {
         let rolled_back = !repo.head_detached().unwrap_or(true);
@@ -496,7 +497,7 @@ impl UndoRecorder {
         repo: &Repository,
         guard: Option<&StateGuard>,
         marker: impl Fn() -> Option<String>,
-    ) -> Result<UndoOutcome, String> {
+    ) -> Result<UndoOutcome, ErrorDto> {
         self.step(repo, guard, marker, Direction::Undo)
     }
 
@@ -505,7 +506,7 @@ impl UndoRecorder {
         repo: &Repository,
         guard: Option<&StateGuard>,
         marker: impl Fn() -> Option<String>,
-    ) -> Result<UndoOutcome, String> {
+    ) -> Result<UndoOutcome, ErrorDto> {
         self.step(repo, guard, marker, Direction::Redo)
     }
 
@@ -515,9 +516,9 @@ impl UndoRecorder {
         guard: Option<&StateGuard>,
         marker: impl Fn() -> Option<String>,
         direction: Direction,
-    ) -> Result<UndoOutcome, String> {
+    ) -> Result<UndoOutcome, ErrorDto> {
         let Some(_exclusive) = self.exclusive(guard, LOCK_WAIT) else {
-            return Err(UNDO_BUSY.to_string());
+            return Err(UNDO_BUSY.into());
         };
         if marker().is_some() || self.stacks.pending.is_some() {
             return Ok(UndoOutcome::OperationInProgress);
@@ -551,7 +552,7 @@ impl UndoRecorder {
                 })
             }
             Err(UndoError::OperationInProgress) => return Ok(UndoOutcome::OperationInProgress),
-            Err(error) => return Err(error.to_string()),
+            Err(error) => return Err(ErrorDto::from_error(error)),
         }
         let (from, to) = match direction {
             Direction::Undo => (&mut self.stacks.undo, &mut self.stacks.redo),
@@ -633,36 +634,21 @@ pub(super) fn hold_reply(command: &mut Command, held: &mut HeldReplies) {
     }
 }
 
-pub(super) fn get_state(recorder: &mut UndoRecorder, reply: Sender<Result<UndoState, String>>) {
+pub(super) fn get_state(recorder: &mut UndoRecorder, reply: Sender<Result<UndoState, ErrorDto>>) {
     let _ = reply.send(Ok(recorder.state()));
 }
 
 impl WorkerHandle {
-    pub fn get_undo_state(&self) -> Result<UndoState, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetUndoState { reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn get_undo_state(&self) -> Result<UndoState, ErrorDto> {
+        self.request(|reply| Command::GetUndoState { reply })
     }
 
-    pub fn undo(&self) -> Result<UndoOutcome, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::Undo { reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn undo(&self) -> Result<UndoOutcome, ErrorDto> {
+        self.request(|reply| Command::Undo { reply })
     }
 
-    pub fn redo(&self) -> Result<UndoOutcome, String> {
-        let (reply, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::Redo { reply })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn redo(&self) -> Result<UndoOutcome, ErrorDto> {
+        self.request(|reply| Command::Redo { reply })
     }
 }
 
@@ -809,9 +795,15 @@ mod tests {
         record_write(&mut a, &repo, "A1");
         let _guard = hold(&repo);
         let start = std::time::Instant::now();
-        assert_eq!(a.undo(&repo, None, || None), Err(UNDO_BUSY.to_string()));
+        assert_eq!(
+            a.undo(&repo, None, || None),
+            Err(crate::wire::ErrorDto::from(UNDO_BUSY))
+        );
         assert!(start.elapsed() >= super::super::state_lock::LOCK_WAIT);
-        assert_eq!(a.redo(&repo, None, || None), Err(UNDO_BUSY.to_string()));
+        assert_eq!(
+            a.redo(&repo, None, || None),
+            Err(crate::wire::ErrorDto::from(UNDO_BUSY))
+        );
         assert!(dir.path().join("A1").exists());
         assert_eq!(a.state().undo, Some("A1".into()));
     }

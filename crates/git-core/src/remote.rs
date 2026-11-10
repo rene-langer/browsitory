@@ -450,7 +450,7 @@ pub enum RemoteError {
     /// connection was refused or timed out) before anything was transferred (#462). Reported
     /// as `TransferFailed`, like any other transport failure.
     #[error("could not reach the remote: {0}")]
-    Unreachable(git2::Error),
+    Unreachable(#[source] git2::Error),
     /// `push.default` does not settle where `local_branch` goes on `remote` (e.g. `simple` with a
     /// differently named upstream): the caller must ask, e.g. with the "Push to…" dialog.
     #[error(

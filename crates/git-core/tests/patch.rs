@@ -446,3 +446,280 @@ fn a_case_pair_is_refused_where_case_folds() {
     let err = apply_patch(&repo, patch.as_bytes()).unwrap_err();
     assert!(matches!(err, PatchError::CasePair { .. }), "{err:?}");
 }
+
+#[test]
+fn the_staged_patch_of_a_repository_without_commits_holds_the_staged_files() {
+    // An unborn HEAD is no error: the staged files are all new.
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "first\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(std::path::Path::new("a.txt")).unwrap();
+    index.write().unwrap();
+
+    let text = String::from_utf8(staged_patch(&repo).unwrap()).unwrap();
+
+    assert!(
+        text.contains("new file mode") && text.contains("+first"),
+        "{text}"
+    );
+}
+
+#[test]
+fn the_staged_patch_reports_a_head_it_cannot_read() {
+    // Only an unborn HEAD counts as "no commits yet"; a damaged one is an error, not an empty
+    // tree to diff against.
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    std::fs::write(dir.path().join(".git/HEAD"), "not a reference\n").unwrap();
+
+    let err = staged_patch(&repo).unwrap_err();
+
+    assert!(matches!(err, PatchError::Git(_)), "{err:?}");
+}
+
+#[test]
+fn a_hunk_at_the_end_of_a_file_without_a_final_newline_reverts_exactly() {
+    // The trimmed hunk runs to the "No newline at end of file" marker after the last change, so
+    // the file comes back without a final newline.
+    let (dir, repo) = init_repo();
+    let base = format!("{}last", lines(0..10));
+    write_file(dir.path(), "f.txt", &base);
+    commit_all(&repo, "base");
+    write_file(dir.path(), "f.txt", &format!("{}LAST", lines(0..10)));
+    commit_all(&repo, "change the last line");
+    let id = head_id(&repo);
+    let last = hunk(&repo, &id, "f.txt", 0, 3);
+
+    apply_commit_change(
+        &repo,
+        &id,
+        "f.txt",
+        None,
+        Some(last),
+        true,
+        ApplyTarget::WorkTree,
+    )
+    .unwrap();
+
+    assert_eq!(read(dir.path(), "f.txt"), base);
+}
+
+#[test]
+fn a_commit_message_line_starting_with_from_is_not_a_new_mail() {
+    // Only `From <40 hex digits> Mon Sep 17 00:00:00 2001` starts a mail; a message line that
+    // merely starts with "From " stays in its mail.
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "one\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "f.txt", "two\n");
+    commit_all(
+        &repo,
+        "change f\n\nFrom now on f says two.\nFrom 0123456789 too.\n",
+    );
+    let id = head_id(&repo);
+    let patch = commits_patch(&repo, std::slice::from_ref(&id)).unwrap();
+    assert!(
+        String::from_utf8_lossy(&patch).contains("\nFrom now on f says two.\n"),
+        "{}",
+        String::from_utf8_lossy(&patch)
+    );
+    apply_commit_change(&repo, &id, "f.txt", None, None, true, ApplyTarget::WorkTree).unwrap();
+
+    apply_patch(&repo, &patch).unwrap();
+
+    assert_eq!(read(dir.path(), "f.txt"), "two\n");
+}
+
+#[test]
+fn a_patch_that_adds_a_file_over_an_untracked_one_names_it() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "new.txt", "mine\n");
+    let patch = "diff --git a/new.txt b/new.txt\nnew file mode 100644\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+theirs\n";
+
+    let err = apply_patch(&repo, patch.as_bytes()).unwrap_err();
+
+    assert!(
+        matches!(&err, PatchError::DoesNotApply(reason) if reason == "new.txt already exists in the working tree"),
+        "{err:?}"
+    );
+    assert_eq!(read(dir.path(), "new.txt"), "mine\n");
+}
+
+#[test]
+fn a_patch_that_renames_a_file_onto_an_untracked_one_names_it() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "old.txt", "content\n");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "new.txt", "mine\n");
+    let patch = "diff --git a/old.txt b/new.txt\nsimilarity index 100%\nrename from old.txt\nrename to new.txt\n";
+
+    let err = apply_patch(&repo, patch.as_bytes()).unwrap_err();
+
+    assert!(
+        matches!(&err, PatchError::DoesNotApply(reason) if reason == "new.txt already exists in the working tree"),
+        "{err:?}"
+    );
+    assert_eq!(read(dir.path(), "new.txt"), "mine\n");
+    assert_eq!(read(dir.path(), "old.txt"), "content\n");
+}
+
+#[test]
+fn a_failed_series_puts_back_every_file_an_earlier_mail_changed() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "one\n");
+    write_file(dir.path(), "h.txt", "one\n");
+    commit_all(&repo, "base");
+    let base = head_id(&repo);
+    write_file(dir.path(), "f.txt", "two\n");
+    write_file(dir.path(), "h.txt", "two\n");
+    commit_all(&repo, "both files");
+    let first = head_id(&repo);
+    write_file(dir.path(), "g.txt", "g\n");
+    commit_all(&repo, "add g");
+    let second = head_id(&repo);
+    let series = commits_patch(&repo, &[first, second]).unwrap();
+    let base_commit = repo
+        .find_commit(git2::Oid::from_str(&base).unwrap())
+        .unwrap();
+    std::fs::remove_file(dir.path().join("g.txt")).unwrap();
+    repo.reset(base_commit.as_object(), git2::ResetType::Hard, None)
+        .unwrap();
+    write_file(dir.path(), "g.txt", "mine\n");
+
+    let err = apply_patch(&repo, &series).unwrap_err();
+
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert_eq!(read(dir.path(), "f.txt"), "one\n");
+    assert_eq!(read(dir.path(), "h.txt"), "one\n");
+    assert_eq!(read(dir.path(), "g.txt"), "mine\n");
+}
+
+#[test]
+fn a_series_can_delete_a_file_and_add_it_back() {
+    // Each mail applies to what the one before it left: the second adds the file the first
+    // deleted.
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "f.txt", "one\n");
+    write_file(dir.path(), "g.txt", "old\n");
+    commit_all(&repo, "base");
+    let base = head_id(&repo);
+    std::fs::remove_file(dir.path().join("g.txt")).unwrap();
+    commit_all(&repo, "delete g");
+    let first = head_id(&repo);
+    write_file(dir.path(), "g.txt", "new\n");
+    commit_all(&repo, "add g again");
+    let second = head_id(&repo);
+    let series = commits_patch(&repo, &[first, second]).unwrap();
+    let base_commit = repo
+        .find_commit(git2::Oid::from_str(&base).unwrap())
+        .unwrap();
+    repo.reset(base_commit.as_object(), git2::ResetType::Hard, None)
+        .unwrap();
+
+    apply_patch(&repo, &series).unwrap();
+
+    assert_eq!(read(dir.path(), "g.txt"), "new\n");
+}
+
+// Linux: on the drives that fold case, the file check above already finds `a.txt`.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_new_file_meeting_an_untracked_one_where_case_folds_does_not_apply() {
+    // `core.ignorecase` on a drive that doesn't fold: the check for a file already there finds
+    // no `a.txt`, but libgit2's checkout takes the untracked `A.txt` for it and refuses. That
+    // refusal is the patch not applying, not a repository error, and nothing is written.
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "x.txt", "x\n");
+    commit_all(&repo, "base");
+    repo.config()
+        .unwrap()
+        .set_bool("core.ignorecase", true)
+        .unwrap();
+    drop(repo);
+    let repo = Repository::open(dir.path()).unwrap();
+    write_file(dir.path(), "A.txt", "mine\n");
+    let patch = "diff --git a/a.txt b/a.txt\nnew file mode 100644\n--- /dev/null\n+++ b/a.txt\n@@ -0,0 +1 @@\n+theirs\n";
+
+    let err = apply_patch(&repo, patch.as_bytes()).unwrap_err();
+
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert_eq!(read(dir.path(), "A.txt"), "mine\n");
+    assert!(!dir.path().join("a.txt").exists());
+}
+
+/// A two-mail series over the files `base` writes: the first mail makes `first`'s change, the
+/// second adds `g.txt`. The repository is reset to the base, with an untracked `g.txt` there, so the second
+/// mail doesn't apply.
+fn failing_series(
+    base: impl Fn(&std::path::Path),
+    first: impl Fn(&std::path::Path),
+) -> (tempfile::TempDir, Repository, Vec<u8>) {
+    let (dir, repo) = init_repo();
+    base(dir.path());
+    commit_all(&repo, "base");
+    let base_id = head_id(&repo);
+    first(dir.path());
+    // Deletions too.
+    let mut index = repo.index().unwrap();
+    index.update_all(["*"].iter(), None).unwrap();
+    index.write().unwrap();
+    commit_all(&repo, "first");
+    let first_id = head_id(&repo);
+    write_file(dir.path(), "g.txt", "g\n");
+    commit_all(&repo, "add g");
+    let second_id = head_id(&repo);
+    let series = commits_patch(&repo, &[first_id, second_id]).unwrap();
+    {
+        let base_commit = repo
+            .find_commit(git2::Oid::from_str(&base_id).unwrap())
+            .unwrap();
+        repo.reset(base_commit.as_object(), git2::ResetType::Hard, None)
+            .unwrap();
+    }
+    write_file(dir.path(), "g.txt", "mine\n");
+    (dir, repo, series)
+}
+
+/// [`failing_series`] whose first mail adds `new/dir/a.txt` (no `new/` in the base).
+fn series_adding_a_folder_then_failing() -> (tempfile::TempDir, Repository, Vec<u8>) {
+    failing_series(
+        |dir| write_file(dir, "f.txt", "one\n"),
+        |dir| write_file(dir, "new/dir/a.txt", "a\n"),
+    )
+}
+
+#[test]
+fn a_failed_series_removes_the_folders_an_earlier_mail_created() {
+    let (dir, repo, series) = series_adding_a_folder_then_failing();
+    let err = apply_patch(&repo, &series).unwrap_err();
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert!(!dir.path().join("new").exists());
+    assert_eq!(read(dir.path(), "g.txt"), "mine\n");
+}
+
+#[test]
+fn a_failed_series_keeps_a_folder_that_was_there_before() {
+    let (dir, repo, series) = series_adding_a_folder_then_failing();
+    std::fs::create_dir(dir.path().join("new")).unwrap();
+    let err = apply_patch(&repo, &series).unwrap_err();
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert!(dir.path().join("new").is_dir());
+    assert!(!dir.path().join("new/dir").exists());
+}
+
+#[test]
+fn a_failed_series_puts_back_a_folder_an_earlier_mail_replaced_with_a_file() {
+    let (dir, repo, series) = failing_series(
+        |dir| write_file(dir, "foo/bar.txt", "bar\n"),
+        |dir| {
+            std::fs::remove_dir_all(dir.join("foo")).unwrap();
+            write_file(dir, "foo", "file\n");
+        },
+    );
+    let err = apply_patch(&repo, &series).unwrap_err();
+    assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    assert_eq!(read(dir.path(), "foo/bar.txt"), "bar\n");
+}

@@ -62,13 +62,16 @@ fn stash_commands_refuse_a_stale_stash_id_through_the_worker() {
     let expected = "The stash list changed; refresh and try again.".to_string();
     assert_eq!(
         handle.apply_stash(0, stale.clone(), true),
-        Err(expected.clone())
+        Err(crate::wire::ErrorDto::from(expected.clone()))
     );
     assert_eq!(
         handle.pop_stash(0, stale.clone(), true),
-        Err(expected.clone())
+        Err(crate::wire::ErrorDto::from(expected.clone()))
     );
-    assert_eq!(handle.drop_stash(0, stale), Err(expected));
+    assert_eq!(
+        handle.drop_stash(0, stale),
+        Err(crate::wire::ErrorDto::from(expected))
+    );
     assert_eq!(handle.list_stashes().unwrap().len(), 2);
 }
 

@@ -4,6 +4,7 @@ import type { AppState } from "./useAppState";
 
 export interface HookActions {
   setSkipHooks(on: boolean): void;
+  // Cancels the hook running now (`state.hookRun`) through `cancelTransfer`; no-op when none is.
   cancelHookRun(): Promise<void>;
   openHookFailure(): void;
   closeHookFailure(): void;

@@ -61,7 +61,7 @@ pub async fn save_patch_file(
     else {
         return Ok(None);
     };
-    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let path = picked.into_path().map_err(ErrorDto::from_error)?;
     let shown = path.to_string_lossy().into_owned();
     off_runtime(move || std::fs::write(&path, bytes))
         .await?
@@ -80,7 +80,7 @@ pub async fn open_patch_file(app: AppHandle) -> Result<Option<PatchContentDto>, 
     else {
         return Ok(None);
     };
-    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let path = picked.into_path().map_err(ErrorDto::from_error)?;
     let shown = path.to_string_lossy().into_owned();
     let bytes = off_runtime(move || -> std::io::Result<Vec<u8>> {
         if std::fs::metadata(&path)?.len() > MAX_PATCH_FILE_BYTES {

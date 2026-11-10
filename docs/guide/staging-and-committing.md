@@ -82,7 +82,9 @@ doesn't stage or undo a mode change; stage or discard the whole file for that.
 Open a file's **⋯** menu, right-click the file header, or press Shift+F10 (or the Menu key)
 with the file row focused, for **Discard changes…**. Staged files don't offer discard; unstage them first. A confirmation dialog
 appears. A discard can be reverted with **Undo** (see [Undo and redo](undo-redo.md)) unless the
-file is changed again afterwards. **Discard all…** next to **Stage all** discards
+file is changed again afterwards. You can discard while a merge, rebase, cherry-pick or revert
+is paused, to resolve it; while another action or a fetch, pull or push is running, the
+confirmation's button is disabled and the dialog says why. **Discard all…** next to **Stage all** discards
 the unstaged changes of exactly the files its confirmation lists. It deletes untracked files
 and skips conflicted ones. Folders, such as an untracked nested repository, are never deleted;
 any file that couldn't be discarded is named in an error after the rest are done. Discarding

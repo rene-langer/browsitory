@@ -127,41 +127,53 @@ pub fn transfer_error_kinds() -> Vec<TransferErrorKind> {
     })
 }
 
-/// #496: one rejected request's error text per `ErrorKind`, as its producer formats it. Both
-/// transports build their `ErrorDto` from it with `ErrorDto::from`, as they do for every error.
-pub fn error_messages() -> Cases<String> {
+/// #496, #527: one rejected request per `ErrorKind`, made as its producer makes it. Both
+/// transports send the `ErrorDto` as it is.
+pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
     use git_core::remote::RemoteError;
-    use repo_service::wire::{self, ErrorKind};
+    use repo_service::credentials::CredentialStoreError;
+    use repo_service::wire::{ErrorDto, ErrorKind};
     let cases = vec![
-        case("Other", "repo not open: /repo".to_string()),
-        case("WorkerStopped", wire::WORKER_STOPPED.to_string()),
+        case("Other", ErrorDto::from("repo not open: /repo")),
+        case("WorkerStopped", ErrorDto::worker_stopped()),
         case(
             "WorkerStoppedBeforeReplying",
-            wire::WORKER_STOPPED_BEFORE_REPLYING.to_string(),
+            ErrorDto::worker_stopped_before_replying(),
         ),
         case(
             "CredentialStoreFailure",
-            wire::credential_store_failure_message("locked"),
+            ErrorDto::from(CredentialStoreError::Keychain("locked".into())),
         ),
-        case("DirtyWorktree", RemoteError::DirtyWorktree.to_string()),
-        case("PullFailed", wire::PULL_FAILED.to_string()),
-        case("Cancelled", RemoteError::Cancelled.to_string()),
+        case(
+            "DirtyWorktree",
+            ErrorDto::from_error(RemoteError::DirtyWorktree),
+        ),
+        case("PullFailed", ErrorDto::pull_failed()),
+        case("Cancelled", ErrorDto::from_error(RemoteError::Cancelled)),
         case(
             "AddDeleteConflict",
-            git_core::merge::MergeError::NotATextConflict("a.bin".into()).to_string(),
+            ErrorDto::from_error(git_core::merge::MergeError::NotATextConflict(
+                "a.bin".into(),
+            )),
         ),
         case(
             "InvalidSearchQuery",
-            git_core::search::SearchError::InvalidQuery {
+            ErrorDto::from_error(git_core::search::SearchError::InvalidQuery {
                 message: "Missing closing parenthesis.".into(),
-            }
-            .to_string(),
+            }),
+        ),
+        case(
+            "PermissionDenied",
+            ErrorDto::from_error(git_core::merge::MergeError::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Permission denied",
+            ))),
         ),
     ];
     assert_every_variant!(
         cases
             .iter()
-            .map(|(_, message)| ErrorKind::of(message))
+            .map(|(_, error)| error.kind)
             .collect::<Vec<_>>()
             .iter(),
         ErrorKind::Other,
@@ -172,6 +184,7 @@ pub fn error_messages() -> Cases<String> {
         ErrorKind::Cancelled,
         ErrorKind::AddDeleteConflict,
         ErrorKind::InvalidSearchQuery,
+        ErrorKind::PermissionDenied,
     );
     cases
 }

@@ -5,6 +5,7 @@ import styles from "./App.module.css";
 import type { CommitOutcome, HookProgress, OperationKind, RepoClient, SequenceOutcome, TerminalSequence } from "./ipc/RepoClient";
 import { publishTransportStatus } from "./ipc/transportStatus";
 import type { ReleaseNotesEntry } from "./components/ReleaseNotesModal";
+import { fakeRepoClient } from "./test/fakeRepoClient";
 
 // The generated release notes, which App reads once at import. Tests swap the contents of this
 // array in place; by default it holds the real notes.
@@ -24,178 +25,8 @@ vi.mock("./generated/releaseNotes.json", async (importOriginal) => {
 // "reset after tests, because user might call `vi.setConfig` in setupFile").
 vi.setConfig({ testTimeout: 20_000 });
 
-function unused(): never {
-  throw new Error("not used in this test");
-}
-
 function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
-  return {
-    pickRepoFolder: unused,
-    listRecentRepos: async () => [],
-    getAppVersion: async () => "0.0.0",
-    getLastSeenVersion: async () => "0.0.0",
-    setLastSeenVersion: async () => {},
-    openRepo: async () => {},
-    closeRepo: async () => unused(),
-    listOpenRepos: async () => ({ entries: [], activePath: null }),
-    persistOpenRepos: async () => unused(),
-    scanReposInRoot: async () => [],
-    supportsCloneAndInit: false,
-    cloneRepo: async () => unused(),
-    cancelClone: async () => unused(),
-    initRepo: async () => unused(),
-    listWorkspaces: async () => [],
-    saveWorkspace: async () => "workspace-id",
-    updateWorkspace: async () => {},
-    deleteWorkspace: async () => {},
-    getStatus: unused,
-    getCommitGraph: unused,
-    getGraphBranchSelection: async () => null,
-    setGraphBranchSelection: unused,
-    getGraphRemoteBranchSelection: async () => null,
-    setGraphRemoteBranchSelection: unused,
-    clearGraphBranchSelection: unused,
-    clearGraphRemoteBranchSelection: unused,
-    getWorkingDiff: async () => [],
-    getCommitDiff: async () => [],
-    getFileHistory: unused,
-    getLineHistory: unused,
-    searchCommits: unused,
-    cancelSearch: async () => {},
-    getCommitRenameDiff: unused,
-    getCommitFiles: unused,
-    getCommitMessage: unused,
-    getCommitSignature: unused,
-    stageFile: unused,
-    unstageFile: unused,
-    stageHunk: unused,
-    unstageHunk: unused,
-    discardHunk: unused,
-    stageLines: unused,
-    unstageLines: unused,
-    discardLines: unused,
-    discardFile: unused,
-    discardAllUnstaged: unused,
-    ignorePath: unused,
-    getDiffSettings: unused,
-    setDiffSettings: unused,
-    commit: unused,
-    listBranches: unused,
-    createBranch: unused,
-    switchBranch: unused,
-    deleteBranch: unused,
-    renameBranch: unused,
-    listWorktrees: async () => [],
-    createWorktree: async () => unused(),
-    removeWorktree: async () => unused(),
-    pruneWorktrees: async () => unused(),
-    listSubmodules: async () => [],
-    initSubmodule: async () => unused(),
-    updateSubmodule: async () => unused(),
-    listReflogRefs: async () => [],
-    getReflog: async () => [],
-    restoreReflogEntry: async () => unused(),
-    listRemotes: async () => [],
-    listRemoteBranches: async () => [],
-    getCurrentUpstream: async () => null,
-    getRemoteUpstreams: async () => [],
-    addRemote: async () => unused(),
-    renameRemote: async () => unused(),
-    updateRemoteUrls: async () => unused(),
-    removeRemote: async () => unused(),
-    saveHttpsCredential: async () => unused(),
-    forgetHttpsCredential: async () => unused(),
-    setRemoteAuthMode: async () => unused(),
-    setCurrentUpstream: async () => unused(),
-    clearCurrentUpstream: async () => unused(),
-    listTags: async () => [],
-    createTag: async () => unused(),
-    deleteTag: async () => unused(),
-    fetchRemote: async () => unused(),
-    pushCurrentBranch: async () => unused(),
-    pushTags: async () => unused(),
-    fetchAllRemotes: async () => unused(),
-    backgroundFetch: async () => unused(),
-    pushBranch: async () => unused(),
-    deleteRemoteBranch: async () => unused(),
-    deleteRemoteTag: async () => unused(),
-    pullCurrentUpstream: async () => unused(),
-    cancelTransfer: async () => unused(),
-    subscribeTransferProgress: () => () => {},
-    subscribeHookProgress: () => () => {},
-    listStashes: unused,
-    saveStash: unused,
-    applyStash: unused,
-    popStash: unused,
-    getStashFiles: unused,
-    getRangeFiles: unused,
-    getRangeDiff: unused,
-    getWorkingTreeCompareFiles: unused,
-    getWorkingTreeCompareDiff: unused,
-    getBranchCompareRange: unused,
-    locateCommit: unused,
-    applyCommitChange: unused,
-    getPatch: unused,
-    applyPatch: unused,
-    savePatchFile: unused,
-    openPatchFile: unused,
-    getMergeOptions: unused,
-    setMergeOptions: unused,
-    dropStash: unused,
-    getBlame: unused,
-    mergeBranch: unused,
-    getConflictHunks: unused,
-    resolveConflict: unused,
-    abortMerge: unused,
-    getMergeMessage: async () => null,
-    getHeadInfo: async () => ({ headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null }),
-    amendCommit: async () => { throw new Error("unimplemented"); },
-    getUndoState: async () => ({ undo: null, redo: null }),
-    undo: async () => ({ kind: "Nothing" as const }),
-    redo: async () => ({ kind: "Nothing" as const }),
-    cherryPick: async () => { throw new Error("unimplemented"); },
-    revertCommit: async () => { throw new Error("unimplemented"); },
-    resetToCommit: async () => { throw new Error("unimplemented"); },
-    checkoutCommit: async () => { throw new Error("unimplemented"); },
-    forcePushCurrentBranch: async () => { throw new Error("unimplemented"); },
-    resolveAddDeleteConflict: unused,
-    commitsSince: unused,
-    startRebase: unused,
-    rebaseContinue: unused,
-    abortRebase: unused,
-    detectForgeRepository: async () => [],
-    saveForgeToken: unused,
-    forgetForgeToken: unused,
-    listPullRequests: unused,
-    createPullRequest: unused,
-    openExternalUrl: unused,
-    openInEditor: unused,
-    revealInFileManager: unused,
-    openTerminal: unused,
-    openDiffTool: unused,
-    openMergeTool: unused,
-    markResolved: unused,
-    resolveWholeFile: unused,
-    cherryPickMany: unused,
-    revertMany: unused,
-    continueSequence: unused,
-    abortSequence: unused,
-    getExternalToolSettings: async () => ({ editor: null, terminal: null }),
-    setExternalToolSettings: async () => {},
-    getGitTools: async () => ({ diffTool: null, mergeTool: null }),
-    getFileSides: async () => ({ old: { kind: "Missing" as const }, new: { kind: "Missing" as const } }),
-    getCommitTree: async () => ({ entries: [], truncated: false }),
-    getFileAtCommit: async () => ({ kind: "Binary" as const, size: 0 }),
-    saveFileVersion: async () => null,
-    restoreFileVersion: async () => {},
-    listRecentAuthors: async () => [],
-    getCommitMessageSettings: async () => ({ summaryLimit: 50, bodyRuler: 72, showRuler: true }),
-    setCommitMessageSettings: async () => {},
-    getFetchSettings: async () => ({ autoFetchMinutes: 0 }),
-    setFetchSettings: async () => {},
-    logFrontendError: unused,
-    ...overrides,
-  };
+  return fakeRepoClient(overrides, "empty");
 }
 
 describe("App", () => {
@@ -333,9 +164,9 @@ describe("App", () => {
       openRepo: async () => {},
       closeRepo,
       persistOpenRepos: async () => {},
-      // RepoWorkspace's mount-time refresh() fans out to these; the fakeClient defaults for
-      // several of them are `unused` (throw), which is fine for tests that never mount a
-      // RepoWorkspace but this one does.
+      // RepoWorkspace's mount-time refresh() fans out to these; fakeClient has no empty answer
+      // for them (they throw), which is fine for tests that never mount a RepoWorkspace but
+      // this one does.
       getStatus: async () => [],
       getCommitGraph: async () => [],
       listBranches: async () => [],
@@ -483,6 +314,20 @@ describe("App", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Discard all" }));
       await waitFor(() => expect(client.discardAllUnstaged).toHaveBeenCalledTimes(1));
       expect(client.discardAllUnstaged).toHaveBeenCalledWith("/repos/a", ["a.txt"]);
+    });
+
+    // #521: discarding while resolving a merge or a paused step is allowed; only an action in
+    // flight or a transfer blocks it (`busyReason`), not `operationBlockers`.
+    it("discards during a merge, which blocks other repository operations (#521)", async () => {
+      const client = discardClient({ getMergeMessage: async () => "Merge branch 'x'" });
+      render(<App client={client} />);
+      await screen.findByText("a.txt (Modified)");
+
+      await runPaletteCommand("Discard all unstaged changes");
+      const confirm = await screen.findByRole("button", { name: "Discard all" });
+      expect(confirm).toBeEnabled();
+      fireEvent.click(confirm);
+      await waitFor(() => expect(client.discardAllUnstaged).toHaveBeenCalledWith("/repos/a", ["a.txt"]));
     });
   });
 

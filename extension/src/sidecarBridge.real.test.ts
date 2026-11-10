@@ -24,19 +24,25 @@ async function waitForMessage(
   return message;
 }
 
-describe("SidecarBridge with the real vscode-sidecar", () => {
-  it("reopens persisted repositories before serving a retry after a crash", async () => {
-    const extensionRoot = path.resolve(__dirname, "..");
-    const repoRoot = path.resolve(extensionRoot, "..");
-    const executablePath = resolveDevelopmentSidecarPath(extensionRoot);
-    if (!existsSync(executablePath)) {
-      execFileSync(
-        "cargo",
-        ["build", "--manifest-path", path.join(repoRoot, "Cargo.toml"), "-p", "vscode-sidecar"],
-        { cwd: repoRoot, stdio: "inherit" },
-      );
-    }
+const executablePath = resolveDevelopmentSidecarPath(path.resolve(__dirname, ".."));
+const sidecarMissing = !existsSync(executablePath);
+const sidecarMissingMessage =
+  `vscode-sidecar binary not found at ${executablePath}; ` +
+  "build it first with `cargo build -p vscode-sidecar` (from the repo root)";
 
+// The test never builds the binary itself (#552): a cold `cargo build` inside a JS test run
+// is slow, unexpected and blows the timeout. Locally a missing binary skips these tests with
+// a note; in CI (which builds the sidecar before `pnpm test`) it fails, so the coverage can't
+// quietly disappear.
+if (sidecarMissing) {
+  if (process.env["CI"]) {
+    throw new Error(`${sidecarMissingMessage}. CI must build it before the extension tests.`);
+  }
+  process.stderr.write(`Skipping the real-sidecar tests: ${sidecarMissingMessage}.\n`);
+}
+
+describe.skipIf(sidecarMissing)("SidecarBridge with the real vscode-sidecar", () => {
+  it("reopens persisted repositories before serving a retry after a crash", async () => {
     const testRoot = mkdtempSync(path.join(tmpdir(), "browsitory-sidecar-bridge-"));
     const repoPath = path.join(testRoot, "repo");
     const configDir = path.join(testRoot, "config");
