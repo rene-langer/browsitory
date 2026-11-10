@@ -49,13 +49,20 @@ const ARGS = Array.from({ length: 8 }, (_, index) => ({ [`arg${index}`]: index }
 const SUBSCRIPTIONS = [
   "subscribeTransferProgress",
   "subscribeHookProgress",
+  "subscribeFileDrops",
 ] as const satisfies readonly Method[];
 
 /**
  * Desktop only. VSCode has its own Git: Clone and Git: Initialize Repository commands, so the
  * extension reports `supportsCloneAndInit: false` and these reject without calling anything.
+ * `readPatchFile` reads a file dropped on the window (#649); VSCode handles drops itself.
  */
-const VSCODE_UNSUPPORTED = ["cloneRepo", "cancelClone", "initRepo"] as const satisfies readonly Method[];
+const VSCODE_UNSUPPORTED = [
+  "cloneRepo",
+  "cancelClone",
+  "initRepo",
+  "readPatchFile",
+] as const satisfies readonly Method[];
 
 /**
  * No Tauri command: the desktop app writes frontend errors to its log file through

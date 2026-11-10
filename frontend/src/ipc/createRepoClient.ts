@@ -93,7 +93,9 @@ export type BackendCall = <T>(method: string, params?: Record<string, unknown>) 
  *   own commands (`supportsCloneAndInit: false`).
  * - `listOpenRepos`: the Tauri command answers a `[entries, activePath]` tuple, the sidecar an
  *   object.
- * - the two subscriptions: Tauri events on the desktop, JSON-RPC notifications in VSCode.
+ * - the two progress subscriptions: Tauri events on the desktop, JSON-RPC notifications in VSCode.
+ * - file drops (#649): the desktop webview's drag and drop events and `readPatchFile`; none in
+ *   VSCode, which handles drops on its windows itself.
  * - `logFrontendError`: the desktop app writes through its log plugin and has no command for it.
  */
 export type TransportSpecific =
@@ -104,6 +106,8 @@ export type TransportSpecific =
   | "listOpenRepos"
   | "subscribeTransferProgress"
   | "subscribeHookProgress"
+  | "subscribeFileDrops"
+  | "readPatchFile"
   | "logFrontendError";
 
 export type SharedRepoClient = Omit<RepoClient, TransportSpecific>;

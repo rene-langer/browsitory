@@ -980,6 +980,12 @@ export interface Workspace {
 export const ROOT_FILE_NAMES = [".gitignore", ".gitattributes"] as const;
 export type RootFileName = (typeof ROOT_FILE_NAMES)[number];
 
+/**
+ * Files or folders dragged from the file manager onto the window (#649): `over` while they hover
+ * (repeated), `leave` when they go without a drop, `drop` with their absolute paths.
+ */
+export type FileDropEvent = { kind: "over" } | { kind: "leave" } | { kind: "drop"; paths: string[] };
+
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
@@ -1118,6 +1124,12 @@ export interface RepoClient {
   savePatchFile(suggestedName: string, content: PatchContent): Promise<string | null>;
   /** Asks the user for a patch file: its content, or `null` when cancelled. */
   openPatchFile(): Promise<PatchContent | null>;
+  /**
+   * Reads the patch file at `path`, one dropped on the window (#649). Rejects for a file not
+   * named like a patch (`.patch`, `.diff`, `.mbox`, `.txt`) or larger than 64 MB. Desktop only:
+   * the VSCode extension gets no file drops and rejects without calling anything.
+   */
+  readPatchFile(path: string): Promise<PatchContent>;
   ignorePath(repoPath: string, pattern: string): Promise<void>;
   getDiffSettings(): Promise<DiffSettings>;
   setDiffSettings(settings: DiffSettings): Promise<void>;
@@ -1197,6 +1209,11 @@ export interface RepoClient {
   cancelTransfer(repoPath: string, operationId: string): Promise<void>;
   subscribeTransferProgress(listener: (progress: TransferProgress) => void): () => void;
   subscribeHookProgress(listener: (event: HookProgress) => void): () => void;
+  /**
+   * File manager drags onto the window (#649), until the returned function is called. Desktop
+   * only: in the VSCode extension, VSCode handles drops itself and this never calls `listener`.
+   */
+  subscribeFileDrops(listener: (event: FileDropEvent) => void): () => void;
   listStashes(repoPath: string): Promise<StashEntry[]>;
   saveStash(repoPath: string, options: StashOptions): Promise<void>;
   /**

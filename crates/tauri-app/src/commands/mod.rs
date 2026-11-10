@@ -58,7 +58,9 @@ pub use merge::{
     resolve_add_delete_conflict, resolve_conflict, resolve_whole_file, set_merge_options,
     start_merge,
 };
-pub use patch::{apply_commit_change, apply_patch, get_patch, open_patch_file, save_patch_file};
+pub use patch::{
+    apply_commit_change, apply_patch, get_patch, open_patch_file, read_patch_file, save_patch_file,
+};
 pub use rebase::{abort_rebase, commits_since, rebase_continue, start_rebase};
 pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};
 pub use remote::*;

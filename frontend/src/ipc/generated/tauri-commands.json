@@ -122,6 +122,7 @@
   "push_branch",
   "push_current_branch",
   "push_tags",
+  "read_patch_file",
   "rebase_continue",
   "redo_last",
   "remove_remote",

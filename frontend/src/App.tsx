@@ -10,6 +10,8 @@ import { ReleaseNotesModal } from "./components/ReleaseNotesModal";
 import { ThirdPartyLicencesDialog } from "./components/ThirdPartyLicencesDialog";
 import { ToastRegion } from "./components/primitives/ToastRegion";
 import { useToasts } from "./state/useToasts";
+import { useFileDrops } from "./state/useFileDrops";
+import { requestWorkspace } from "./lib/workspaceRequests";
 import { InlineError } from "./components/primitives/InlineError";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { CloneDialog } from "./components/CloneDialog";
@@ -316,6 +318,24 @@ function AppContent({
 
   useE2eAutoOpen(openRepos, openRepoTab);
 
+  // Folders dropped on the window open as tabs, one after the other; patch files are applied to
+  // the active tab's working tree (#649).
+  const fileDragging = useFileDrops(client, ({ folders, patches }) => {
+    void folders.reduce<Promise<unknown>>((previous, folder) => previous.then(() => openRepoTab(folder)), Promise.resolve());
+    if (patches.length === 0) return;
+    if (activePath === null) {
+      const names = patches.map((path) => path.split(/[\\/]/).pop() ?? path).join(", ");
+      setOpenError({ message: `Open a repository to apply ${names} to.`, path: "" });
+    } else {
+      requestWorkspace({ kind: "applyPatches", paths: patches });
+    }
+  });
+  const dropHint = fileDragging && (
+    <div className={styles.dropHint} aria-hidden="true">
+      <p>Drop a folder to open it, or a patch file to apply it to the current repository</p>
+    </div>
+  );
+
   if (openRepos.loading) {
     return (
       <main>
@@ -333,6 +353,7 @@ function AppContent({
 
   return (
     <main>
+      {dropHint}
       <UpdateCheckContext.Provider value={updateCheckRegistry}>{updateBanner}</UpdateCheckContext.Provider>
       <header className={styles.headerRow}>
         <h1>Browsitory</h1>

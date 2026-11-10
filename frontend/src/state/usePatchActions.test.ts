@@ -13,6 +13,7 @@ function setup(overrides: Partial<Record<string, unknown>> = {}, ok = true) {
     getPatch: vi.fn(async () => CONTENT),
     savePatchFile: vi.fn(async () => "/home/me/x.patch"),
     openPatchFile: vi.fn(async () => CONTENT),
+    readPatchFile: vi.fn(async () => CONTENT),
     applyPatch: vi.fn(async () => {}),
     ...overrides,
   };
@@ -83,6 +84,32 @@ describe("usePatchActions", () => {
     const cancelled = setup({ openPatchFile: vi.fn(async () => null) });
     await cancelled.actions.applyPatchFile();
     expect(cancelled.client.applyPatch).not.toHaveBeenCalled();
+  });
+});
+
+describe("usePatchActions — dropped patch files (#649)", () => {
+  it("applies each dropped patch in order and names the last in the toast", async () => {
+    const { client, actions, state } = setup();
+    await actions.applyPatchFiles(["/tmp/0001-a.patch", "C:\\work\\0002-b.diff"]);
+    expect(client.readPatchFile.mock.calls).toEqual([["/tmp/0001-a.patch"], ["C:\\work\\0002-b.diff"]]);
+    expect(client.applyPatch).toHaveBeenCalledTimes(2);
+    expect(state().patchOutcome).toEqual({ message: "Applied 0002-b.diff to the working tree", undoable: true });
+  });
+
+  it("stops at a patch that can't be read, with the reason in the error banner", async () => {
+    const readPatchFile = vi.fn(async () => Promise.reject(new Error("Couldn't read /tmp/a.patch: gone")));
+    const { client, actions, state } = setup({ readPatchFile });
+    await actions.applyPatchFiles(["/tmp/a.patch", "/tmp/b.patch"]);
+    expect(readPatchFile).toHaveBeenCalledOnce();
+    expect(client.applyPatch).not.toHaveBeenCalled();
+    expect(state().error).toBe("Couldn't read /tmp/a.patch: gone");
+  });
+
+  it("stops at a patch that doesn't apply", async () => {
+    const { client, actions, state } = setup({}, false);
+    await actions.applyPatchFiles(["/tmp/a.patch", "/tmp/b.patch"]);
+    expect(client.readPatchFile).toHaveBeenCalledOnce();
+    expect(state().patchOutcome).toBeNull();
   });
 });
 
