@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::diff::{working_diff_options, HunkOptions};
 use crate::line_patch::{self, Direction, FileRef, HunkRef, LinePatchError, PatchLine};
+use crate::patch::{ApplyTarget, PatchError};
 use crate::worktree_guard::Leaf;
 
 #[derive(Debug, Error)]
@@ -841,9 +842,51 @@ fn apply_selection(
         direction,
     )?;
     let parsed = git2::Diff::from_buffer(&patch).map_err(not_applicable_or_index)?;
-    crate::hardlink::before_apply(repo, &parsed, location, &mut git2::ApplyOptions::new());
-    repo.apply(&parsed, location, None)
-        .map_err(not_applicable_or_index)
+    if !matches!(target, Target::Discard) {
+        return repo
+            .apply(&parsed, location, None)
+            .map_err(not_applicable_or_index);
+    }
+    // libgit2 reads a link in the working tree through it (#586): a link's hunk is left out of
+    // its apply and written here, as `apply_patch` writes one (#563), once the link points
+    // where the hunk says it does now.
+    let workdir = repo.workdir().ok_or(StageError::NoWorkdir)?;
+    // Reverting a link's removal while a file stands in its place (a type change).
+    let link_over_a_file = parsed.deltas().any(|delta| {
+        crate::patch::is_link(&delta)
+            && delta.status() == git2::Delta::Added
+            && delta
+                .new_file()
+                .path()
+                .is_some_and(|p| workdir.join(p).symlink_metadata().is_ok())
+    });
+    if link_over_a_file {
+        return Err(StageError::SelectionNotApplicable);
+    }
+    let links = crate::patch::check_links(repo, workdir, &parsed, ApplyTarget::WorkTree)
+        .map_err(link_error)?;
+    // The options are set up where they stay: git2 keeps a pointer to them for the callback.
+    let mut before = git2::ApplyOptions::new();
+    crate::patch::skip_links(&mut before);
+    crate::hardlink::before_apply(repo, &parsed, location, &mut before);
+    let mut apply = git2::ApplyOptions::new();
+    crate::patch::skip_links(&mut apply);
+    repo.apply(&parsed, location, Some(&mut apply))
+        .map_err(not_applicable_or_index)?;
+    crate::patch::write_links(repo, workdir, &links, ApplyTarget::WorkTree).map_err(link_error)
+}
+
+/// A link's hunk that doesn't apply is a selection that doesn't apply; anything else is
+/// reported as it is.
+fn link_error(e: PatchError) -> StageError {
+    match e {
+        PatchError::DoesNotApply(_) | PatchError::Unreadable(_) => {
+            StageError::SelectionNotApplicable
+        }
+        PatchError::Git(e) => StageError::Index(e),
+        PatchError::Io(e) => StageError::Io(e),
+        other => StageError::Index(git2::Error::from_str(&other.to_string())),
+    }
 }
 
 /// Only a patch libgit2 can't parse or apply means "this selection doesn't work"; anything else

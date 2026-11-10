@@ -465,18 +465,18 @@ fn apply_one(
 }
 
 /// Whether `delta` changes, adds or removes a symbolic link.
-fn is_link(delta: &git2::DiffDelta) -> bool {
+pub(crate) fn is_link(delta: &git2::DiffDelta) -> bool {
     delta.old_file().mode() == git2::FileMode::Link
         || delta.new_file().mode() == git2::FileMode::Link
 }
 
 /// Has libgit2 leave the links to [`write_links`]. `options` must not move afterwards.
-fn skip_links(options: &mut git2::ApplyOptions<'_>) {
+pub(crate) fn skip_links(options: &mut git2::ApplyOptions<'_>) {
     options.delta_callback(|delta| !delta.is_some_and(|d| is_link(&d)));
 }
 
 /// A symbolic link a patch changes, as `git apply` writes it.
-struct LinkChange {
+pub(crate) struct LinkChange {
     /// The link removed (or replaced).
     remove: Option<String>,
     /// The link written, and its target.
@@ -485,7 +485,7 @@ struct LinkChange {
 
 /// The link changes of `diff`, once each link it changes or removes is there and points where
 /// the patch says it did, and (`WorkTreeAndIndex`) the index holds the same.
-fn check_links(
+pub(crate) fn check_links(
     repo: &git2::Repository,
     workdir: &Path,
     diff: &git2::Diff,
@@ -595,7 +595,7 @@ fn link_targets(patch: &git2::Patch) -> Result<Targets, PatchError> {
 
 /// Removes and writes the links of `changes` (all removals first: a rename's new name may be
 /// another's old one), and stages them for `WorkTreeAndIndex`.
-fn write_links(
+pub(crate) fn write_links(
     repo: &git2::Repository,
     workdir: &Path,
     changes: &[LinkChange],
