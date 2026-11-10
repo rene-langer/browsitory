@@ -726,38 +726,30 @@ fn stop_at_file_folder_conflict(
     kind: Kind,
     mainline: Option<u32>,
 ) -> Result<StepResult, PickError> {
-    let label = target.id().to_string();
-    let index = crate::file_folder::check_out_as_conflicts::<PickError>(
-        repo,
-        merged,
-        &label[..label.len().min(7)],
-    )?;
-    let mut files: Vec<String> = index
-        .conflicts()?
-        .filter_map(|conflict| conflict.ok())
-        .filter_map(|conflict| conflict.our.or(conflict.their).or(conflict.ancestor))
-        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
-        .collect();
-    files.sort();
-    files.dedup();
-    let (head_file, message) = match kind {
+    // git's labels: `<short id> (<subject>)` for a pick, `parent of ` that for a revert.
+    let label = crate::file_folder::commit_label(target)?;
+    let (head_file, message, label) = match kind {
         Kind::CherryPick => (
             "CHERRY_PICK_HEAD",
             String::from_utf8_lossy(target.message_bytes()).into_owned(),
+            label,
         ),
-        Kind::Revert => ("REVERT_HEAD", revert_message(target, mainline)),
+        Kind::Revert => (
+            "REVERT_HEAD",
+            revert_message(target, mainline),
+            format!("parent of {label}"),
+        ),
     };
-    let mut message = message;
-    if !message.ends_with('\n') {
-        message.push('\n');
-    }
-    message.push_str("\n# Conflicts:\n");
-    for file in &files {
-        message.push_str(&format!("#\t{file}\n"));
-    }
-    let git_dir = repo.path();
-    std::fs::write(git_dir.join(head_file), format!("{}\n", target.id()))
-        .and_then(|()| std::fs::write(git_dir.join("MERGE_MSG"), message))
+    // As libgit2's pick checks out: safe, with conflicts allowed.
+    let how = crate::file_folder::ConflictCheckout {
+        our_label: "HEAD",
+        their_label: &label,
+        untracked: None,
+        skip_local_changes: true,
+    };
+    let index = crate::file_folder::check_out_as_conflicts::<PickError>(repo, merged, how)?;
+    let files = crate::file_folder::conflicted_files(&index)?;
+    crate::file_folder::write_step_state(repo, head_file, target.id(), &message, &files)
         .map_err(|error| PickError::Commit(crate::commit::CommitError::Io(error)))?;
     Ok(StepResult::Conflicted(files))
 }
