@@ -546,7 +546,7 @@ describe("DiffView options toolbar", () => {
   it("toggles ignore whitespace and steps context lines through the settings context", () => {
     const update = vi.fn();
     render(
-      <TestDiffSettings value={{ settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" }, update }}>
+      <TestDiffSettings value={{ settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true }, update }}>
         <DiffView hunks={[lineHunk]} />
       </TestDiffSettings>,
     );
@@ -555,6 +555,89 @@ describe("DiffView options toolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "More context lines" }));
     expect(update).toHaveBeenCalledWith({ contextLines: 4 });
   });
+});
+
+describe("DiffView show whitespace (#616)", () => {
+  const wsHunk: DiffHunk = {
+    oldStart: 1, oldLines: 2, newStart: 1, newLines: 2,
+    lines: [
+      { origin: "Context", content: "x y\r\n" },
+      { origin: "Remove", content: "\tvalue\n" },
+      { origin: "Add", content: "  value \n" },
+    ],
+  };
+  const settingsWith = (showWhitespace: boolean, syntaxHighlight = false) => ({
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace, expandUntracked: true },
+    update: vi.fn(),
+  });
+  const contents = (container: HTMLElement) =>
+    [...container.querySelectorAll<HTMLElement>(".diff-line")].map((line) => line.lastElementChild as HTMLElement);
+  const markers = (el: Element) =>
+    [...el.querySelectorAll<HTMLElement>("[data-whitespace]")].map(
+      (m) => `${m.dataset.whitespace}${m.dataset.trailing === undefined ? "" : "!"}`,
+    );
+
+  it("toggles through the settings context", () => {
+    const value = settingsWith(false);
+    render(
+      <TestDiffSettings value={value}>
+        <DiffView hunks={[wsHunk]} />
+      </TestDiffSettings>,
+    );
+    const button = screen.getByRole("button", { name: "Show whitespace" });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(button);
+    expect(value.update).toHaveBeenCalledWith({ showWhitespace: true });
+  });
+
+  it("renders no markers while off", () => {
+    const { container } = render(
+      <TestDiffSettings value={settingsWith(false)}>
+        <DiffView hunks={[wsHunk]} />
+      </TestDiffSettings>,
+    );
+    expect(container.querySelector("[data-whitespace]")).toBeNull();
+  });
+
+  it.each([false, true])("marks spaces, tabs, carriage returns and an added line's trailing space (split %s)", (split) => {
+    const { container } = render(
+      <TestDiffSettings value={settingsWith(true)}>
+        <DiffView hunks={[wsHunk]} />
+      </TestDiffSettings>,
+    );
+    if (split) fireEvent.click(screen.getByRole("button", { name: "Split view" }));
+    expect(screen.getByRole("button", { name: "Show whitespace" })).toHaveAttribute("aria-pressed", "true");
+    const [context, removed, added] = contents(container);
+    expect(markers(context)).toEqual(["space", "cr"]);
+    expect(markers(removed)).toEqual(["tab"]);
+    // Only the trailing space is highlighted, not the indentation.
+    expect(markers(added)).toEqual(["space", "space", "space!"]);
+    // Display only: the text (what a copy gives) is the original line.
+    expect([context, removed, added].map((c) => c.textContent)).toEqual(wsHunk.lines.map((l) => l.content));
+  });
+
+  it("does not highlight trailing whitespace on removed or context lines", () => {
+    const { container } = render(
+      <TestDiffSettings value={settingsWith(true)}>
+        <DiffView hunks={[{ ...wsHunk, lines: [{ origin: "Context", content: "a \n" }, { origin: "Remove", content: "b\t\n" }] }]} />
+      </TestDiffSettings>,
+    );
+    expect(container.querySelector("[data-trailing]")).toBeNull();
+    expect(container.querySelectorAll("[data-whitespace]")).toHaveLength(2);
+  });
+
+  it("keeps markers and the original text with syntax highlighting on", async () => {
+    const hunk: DiffHunk = { ...wsHunk, lines: [{ origin: "Add", content: "\tconst x = 1; \n" }] };
+    const { container } = render(
+      <TestDiffSettings value={settingsWith(true, true)}>
+        <DiffView hunks={[hunk]} path="f.ts" />
+      </TestDiffSettings>,
+    );
+    await waitFor(() => expect(container.querySelector('[style*="--shiki-token"]')).not.toBeNull(), { timeout: 15000 });
+    const [added] = contents(container);
+    expect(markers(added)).toEqual(["tab", "space", "space", "space", "space!"]);
+    expect(added.textContent).toBe("\tconst x = 1; \n");
+  }, 20000);
 });
 
 describe("DiffView syntax highlighting", () => {
@@ -568,7 +651,7 @@ describe("DiffView syntax highlighting", () => {
 
 describe("DiffView word wrap", () => {
   const settingsWith = (wordWrap: "Auto" | "On" | "Off") => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap, algorithm: "Default" as const },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true },
     update: vi.fn(),
   });
   const wrapButton = () => screen.getByRole("button", { name: "Wrap lines" });

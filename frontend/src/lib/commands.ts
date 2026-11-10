@@ -166,6 +166,11 @@ export interface DiffCommands {
  * history). Without these, the palette leaves the three out.
  */
 export interface CommitCommands {
+  /**
+   * The commits the open search results or file history list (#515). A selected commit there
+   * that the loaded graph lacks still gets the commit menu's actions, from its own data.
+   */
+  listedCommits?: readonly GraphCommit[];
   onCherryPick(commitId: string): void;
   onRevert(commitId: string): void;
   /** A merge commit's pick or revert: opens the parent picker. */
@@ -451,7 +456,11 @@ function operationCommands({ appState, state }: FamilyContext): Command[] {
 function historyCommands({ appState, state, blockers, blocked, commit }: FamilyContext): Command[] {
   const { commands, add, offer } = family("General");
   const selected = state.selectedRow === "uncommitted" ? null : state.selectedRow.commitId;
-  const selectedCommit = selected === null ? undefined : state.commits.find((c) => c.id === selected);
+  const graphCommit = selected === null ? undefined : state.commits.find((c) => c.id === selected);
+  // A search result or file history commit outside the loaded graph (#515) gets the commit menu's
+  // actions too; the history edits below need its ancestry in the graph, so they stay graph-only.
+  const selectedCommit =
+    graphCommit ?? (selected === null ? undefined : commit?.listedCommits?.find((c) => c.id === selected));
   const currentBranch = state.branches.find((branch) => branch.isCurrent)?.name ?? null;
   if (selectedCommit !== undefined) {
     // The commit menu's actions, with the same availability (`commitActions`, #495): the palette
@@ -498,12 +507,12 @@ function historyCommands({ appState, state, blockers, blocked, commit }: FamilyC
     );
   }
 
-  if (!blocked && selectedCommit !== undefined) {
-    const isHead = headId === selectedCommit.id;
+  if (!blocked && graphCommit !== undefined) {
+    const isHead = headId === graphCommit.id;
     // The commit menu's one-click history edits (#442), only where the menu enables them.
     // HEAD's Reword… is "Amend last commit" below.
-    const commitId = selectedCommit.id;
-    const short = selectedCommit.shortId;
+    const commitId = graphCommit.id;
+    const short = graphCommit.shortId;
     const checks = historyEditChecks(
       { commits: state.commits, headInfo: state.headInfo, currentBranch, status: state.status },
       commitId,
@@ -856,6 +865,12 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
     label: "Toggle ignore whitespace",
     keywords: ["diff", "whitespace", "ignore"],
     run: () => update({ ignoreWhitespace: !settings.ignoreWhitespace }),
+  });
+  add({
+    id: "toggle-show-whitespace",
+    label: "Toggle whitespace",
+    keywords: ["diff", "whitespace", "show", "spaces", "tabs", "markers", "trailing"],
+    run: () => update({ showWhitespace: !settings.showWhitespace }),
   });
   add({
     id: "increase-context-lines",

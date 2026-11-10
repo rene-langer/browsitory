@@ -17,8 +17,8 @@ The palette has almost every action in Browsitory, grouped like this:
   manage its credentials, delete a remote branch, and delete a tag on a remote.
 - **Stash:** stash all, **Stash…**, stash the current file or the selected files, and show,
   apply, pop or drop a stash.
-- **Diff:** ignore whitespace, more or fewer context lines, syntax highlighting, wrap lines and
-  show whole file in the current diff (see [Diff options](history.md#diff-options)), file
+- **Diff:** ignore whitespace, show whitespace, more or fewer context lines, syntax
+  highlighting, wrap lines and show whole file in the current diff (see [Diff options](history.md#diff-options)), file
   history of the current file, stage, unstage or discard the selected files, discard the current
   file or all unstaged changes, open the current file in your editor or diff tool, **Apply
   patch…** and **Save staged changes as patch…** (see [Patches and partial
@@ -29,8 +29,9 @@ The palette has almost every action in Browsitory, grouped like this:
   one by name, folder name or path), **Rename tab…**, close the tab, open a terminal, reveal the
   repository in the file manager (see [Multiple repositories](tabs.md)).
 - **General:** **Refresh**, undo and redo, search commits, the selected commit's actions
-  (cherry-pick, revert, reset, check out, reword, squash, fixup, move, drop), worktree and
-  submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Third-party licences** and
+  (cherry-pick, revert, reset, check out, reword, squash, fixup, move, drop; for a search
+  result or file history commit older than the loaded history, all but the history edits),
+  worktree and submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Third-party licences** and
   **Open user guide**.
 
 Commands that can't run right now are left out. For example, while a rebase is paused, the

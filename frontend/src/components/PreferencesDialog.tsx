@@ -131,8 +131,8 @@ const DIFF_ALGORITHM_LABEL: Record<DiffAlgorithm, string> = {
 };
 
 /**
- * "Diff": the default for wrapping long lines (#444), each diff's "Wrap lines" overriding it, and
- * the diff algorithm every diff uses (#469).
+ * "Diff": the default for wrapping long lines (#444), each diff's "Wrap lines" overriding it, the
+ * diff algorithm every diff uses (#469), and whether untracked files start expanded (#623).
  */
 export function DiffSection() {
   const { settings, update, error, dismissError } = useDiffSettingsContext();
@@ -175,6 +175,18 @@ export function DiffSection() {
       <p className={styles.hint}>
         Patience lines up the lines that occur once on each side, which often keeps moved or
         reordered blocks readable. Minimal searches longer for the smallest diff.
+      </p>
+      <label className={styles.checkbox}>
+        <input
+          type="checkbox"
+          checked={settings.expandUntracked}
+          onChange={(event) => update({ expandUntracked: event.target.checked })}
+        />
+        Expand untracked files
+      </label>
+      <p className={styles.hint}>
+        Off, untracked files start collapsed in the uncommitted changes and load nothing until you
+        expand them. Changes to tracked files always start expanded.
       </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>

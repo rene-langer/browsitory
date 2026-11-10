@@ -101,6 +101,44 @@ describe("Browsitory diff word wrap and whole file", () => {
     await (await $("button=Close")).click();
   });
 
+  it("shows whitespace markers without changing the text or the line widths (#616)", async () => {
+    const row = await $(`span=${FILE} (Modified)`);
+    await row.waitForExist();
+    await browser.execute((el) => (el as HTMLElement).click(), row);
+    await waitUntilInPage(".diff-line-add");
+    const state = () =>
+      browser.execute(() => {
+        const added = [...document.querySelectorAll<HTMLElement>(".diff-line-add")].find((el) =>
+          el.textContent!.includes("let long"),
+        )!;
+        const content = added.lastElementChild as HTMLElement;
+        const space = content.querySelector<HTMLElement>("[data-whitespace='space']");
+        return {
+          text: content.textContent,
+          width: content.scrollWidth,
+          markers: content.querySelectorAll("[data-whitespace]").length,
+          marker: space === null ? null : getComputedStyle(space, "::before").content,
+        };
+      });
+    const before = await state();
+    expect(before.markers).toBe(0);
+
+    await clickInPage("button", "Show whitespace");
+    await browser.waitUntil(async () => (await state()).markers > 0, { timeoutMsg: "no whitespace markers" });
+    const shown = await state();
+    expect(shown.marker).toBe('"·"');
+    expect(shown.text).toBe(before.text);
+    expect(shown.width).toBe(before.width);
+    await browser.waitUntil(() => /show_whitespace = true/.test(fs.readFileSync(CONFIG_FILE, "utf8")), {
+      timeoutMsg: "show whitespace did not reach config.toml",
+    });
+
+    // Off again, for the specs after this one.
+    await clickInPage("button", "Show whitespace");
+    await browser.waitUntil(async () => (await state()).markers === 0, { timeoutMsg: "markers stayed" });
+    await browser.waitUntil(() => /show_whitespace = false/.test(fs.readFileSync(CONFIG_FILE, "utf8")));
+  });
+
   it("shows the whole file and stages one selected change of it", async () => {
     await clickInPage("button", "Show whole file");
     // l20 is 15 lines from either change: only the whole file shows it.
