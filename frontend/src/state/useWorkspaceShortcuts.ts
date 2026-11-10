@@ -10,6 +10,7 @@ export function useWorkspaceShortcuts({
   active,
   repositoryOperationDisabled,
   onCloseRepoTab,
+  onReopenClosedTab,
   repoPath,
   handleUndo,
   handleRedo,
@@ -19,6 +20,8 @@ export function useWorkspaceShortcuts({
   active: boolean;
   repositoryOperationDisabled: boolean;
   onCloseRepoTab: (path: string) => void;
+  /** Ctrl/Cmd+Shift+T; absent when no tab was closed. */
+  onReopenClosedTab?: () => void;
   repoPath: string;
   handleUndo: () => void;
   handleRedo: () => void;
@@ -72,10 +75,17 @@ export function useWorkspaceShortcuts({
         event.preventDefault();
         onCloseRepoTab(repoPath);
       }
+      // Reopen closed tab (#613), best-effort like Ctrl/Cmd+W: a host may claim the key first;
+      // the palette and the tab menu offer the same command.
+      if (event.key.toLowerCase() === "t" && (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey) {
+        if (onReopenClosedTab === undefined) return;
+        event.preventDefault();
+        onReopenClosedTab();
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [active, repositoryOperationDisabled, onCloseRepoTab, repoPath, handleUndo, handleRedo, pending, transfer]);
+  }, [active, repositoryOperationDisabled, onCloseRepoTab, onReopenClosedTab, repoPath, handleUndo, handleRedo, pending, transfer]);
 
   return { paletteOpen, setPaletteOpen, shortcutsOpen, setShortcutsOpen };
 }

@@ -21,6 +21,8 @@ export interface AppCommands {
   onOpenThirdPartyLicences?: () => void;
   /** Opens the user guide site in the browser ("Open user guide"). */
   onOpenUserGuide?: () => void;
+  /** Reopens the most recently closed tab ("Reopen closed tab"); absent when none was closed. */
+  onReopenClosedTab?: () => void;
 }
 
 /**
@@ -959,6 +961,15 @@ export function buildCommands(
       label: "Close tab",
       keywords: ["close", "tab", "repo", "repository"],
       run: onCloseActiveRepoTab,
+    });
+  }
+
+  if (appCommands?.onReopenClosedTab !== undefined) {
+    commands.push({
+      id: "reopen-closed-tab",
+      label: "Reopen closed tab",
+      keywords: ["reopen", "restore", "closed", "tab", "repo", "repository", "undo close"],
+      run: appCommands.onReopenClosedTab,
     });
   }
 

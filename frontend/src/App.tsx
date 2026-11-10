@@ -23,6 +23,7 @@ import { CommitMessageSettingsProvider } from "./state/CommitMessageSettingsProv
 import { FetchSettingsProvider } from "./state/FetchSettingsProvider";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useOpenRepos } from "./state/useOpenRepos";
+import { useTabChangeMarkers } from "./state/useTabChangeMarkers";
 import { useWorkspaces } from "./state/useWorkspaces";
 import styles from "./App.module.css";
 import { RepoWorkspace } from "./RepoWorkspace";
@@ -68,6 +69,7 @@ function AppContent({
   // that workspace.
   const [tabToolError, setTabToolError] = useState<string | null>(null);
   const openRepos = useOpenRepos(client);
+  const tabChangeMarkers = useTabChangeMarkers(client, openRepos.openRepos, openRepos.activePath);
   const workspaces = useWorkspaces(client);
   const workspaceNames = useMemo(
     () => Object.fromEntries(workspaces.workspaces.map((workspace) => [workspace.id, workspace.name])),
@@ -141,14 +143,27 @@ function AppContent({
         setTabToolError(`Couldn't open the user guide: ${error instanceof Error ? error.message : String(error)}`),
       );
   }, [client]);
+  // "Reopen closed tab" (#613): a closed repository that no longer opens is skipped and reported
+  // in the open-error banner, like a failed restore.
+  const { reopenClosedRepo, canReopenClosedRepo } = openRepos;
+  const reopenClosedTab = useCallback(() => {
+    void reopenClosedRepo().then((failures) => {
+      if (failures.length === 0) return;
+      setOpenError({
+        message: failures.map((failure) => `Couldn't reopen ${repoNameOf(failure.path)}: ${failure.message}`).join("\n"),
+        path: "",
+      });
+    });
+  }, [reopenClosedRepo]);
   const appCommands = useMemo<AppCommands>(
     () => ({
       ...(client.supportsCloneAndInit ? { onCloneRepository: startClone, onNewRepository: startNewRepository } : {}),
       onOpenPreferences: openPreferences,
       onOpenThirdPartyLicences: openLicences,
       onOpenUserGuide: openUserGuide,
+      ...(canReopenClosedRepo ? { onReopenClosedTab: reopenClosedTab } : {}),
     }),
-    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences, openLicences, openUserGuide],
+    [client.supportsCloneAndInit, startClone, startNewRepository, openPreferences, openLicences, openUserGuide, canReopenClosedRepo, reopenClosedTab],
   );
   const tabMenuItems = useCallback(
     (path: string) => {
@@ -159,9 +174,15 @@ function AppContent({
       return [
         { label: "Open terminal here", onSelect: () => run(() => client.openTerminal(path)) },
         { label: "Reveal repository", onSelect: () => run(() => client.revealInFileManager(path, null)) },
+        {
+          label: "Reopen closed tab",
+          onSelect: reopenClosedTab,
+          disabled: !canReopenClosedRepo,
+          title: canReopenClosedRepo ? undefined : "No closed tab to reopen",
+        },
       ];
     },
-    [client],
+    [client, reopenClosedTab, canReopenClosedRepo],
   );
 
   const { releaseNotesView, setReleaseNotesView, closeReleaseNotes } = useReleaseNotes(client);
@@ -213,6 +234,7 @@ function AppContent({
           onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
           onAddTab={() => setPickingRepo(true)}
           tabMenuItems={tabMenuItems}
+          changedPaths={tabChangeMarkers.changedPaths}
         />
         {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}
         {openRepos.openRepos.length > 0 && <ShortcutHint />}
@@ -392,6 +414,7 @@ function AppContent({
               onCommitDraftChange={onCommitDraftChange}
               appCommands={appCommands}
               pushToast={pushAppToast}
+              onStatusChange={tabChangeMarkers.onLiveStatus}
             />
           ))
       )}

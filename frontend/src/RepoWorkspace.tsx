@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CommitDraft } from "./components/CommitBox";
 import { folderSearchQuery } from "./lib/folderHistory";
 import { repoPanelId, repoTabId } from "./components/repoTabIds";
@@ -7,7 +7,7 @@ import { HookRunStrip } from "./components/HookRunStrip";
 import type { ToastAction } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
 import { SplitView } from "./components/primitives/SplitView";
-import type { RepoClient } from "./ipc/RepoClient";
+import type { RepoClient, StatusEntry } from "./ipc/RepoClient";
 import { buildCommands, type AppCommands, type CommitCommands } from "./lib/commands";
 import { useExternalTools } from "./state/useExternalTools";
 import {
@@ -61,6 +61,7 @@ export function RepoWorkspace({
   onCommitDraftChange,
   appCommands,
   pushToast,
+  onStatusChange,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -80,8 +81,17 @@ export function RepoWorkspace({
   appCommands?: AppCommands;
   // The single app-level toast stack (`App` owns the one `ToastRegion`).
   pushToast: (message: string, action?: ToastAction) => void;
+  // The live status, for the tab strip's "uncommitted changes" marker (#613).
+  onStatusChange?: (repoPath: string, status: StatusEntry[]) => void;
 }) {
   const appState = useAppState(client, repoPath);
+  // Reported once loaded: the initial empty list is no answer yet.
+  const initialStatus = useRef(appState.state.status);
+  const liveStatus = appState.state.status;
+  useEffect(() => {
+    if (liveStatus === initialStatus.current) return;
+    onStatusChange?.(repoPath, liveStatus);
+  }, [liveStatus, onStatusChange, repoPath]);
   const fileHistory = useFileHistory(
     client,
     repoPath,
@@ -214,6 +224,7 @@ export function RepoWorkspace({
     active,
     repositoryOperationDisabled,
     onCloseRepoTab,
+    onReopenClosedTab: appCommands?.onReopenClosedTab,
     repoPath,
     handleUndo,
     handleRedo,
