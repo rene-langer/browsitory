@@ -123,8 +123,11 @@ describe("Browsitory multi-repo tabs", () => {
     const rename = async (name: string) => {
       const field = await $('dialog[aria-label="Rename tab"] input');
       await field.waitForDisplayed();
-      await field.clearValue();
-      if (name !== "") await field.setValue(name);
+      // Typed, not `clearValue()`: WebKitGTK's clear fires no input event, so React keeps the old
+      // name. The field selects its text on focus, so Backspace empties it.
+      await browser.execute((el) => (el as HTMLInputElement).select(), field);
+      await browser.keys(["Backspace"]);
+      if (name !== "") await field.addValue(name);
       await browser.execute((el) => (el as HTMLElement).click(), await $('dialog[aria-label="Rename tab"] button[type="submit"]'));
       await field.waitForExist({ reverse: true });
     };
