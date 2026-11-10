@@ -159,7 +159,8 @@ const lineCount = new Intl.NumberFormat("en-US");
 /** A button in a hunk's header (`DiffView`'s `hunkActions`). */
 export interface HunkHeaderAction {
   label: string;
-  run: () => void;
+  /** `shiftKey`: the click held Shift (a commit's hunk then also stages, #536). */
+  run: (event: { shiftKey: boolean }) => void;
   disabled?: boolean;
   /** Why it is disabled, or what it does. */
   title?: string;

@@ -10,6 +10,7 @@
 use crate::wire::ErrorDto;
 use std::sync::mpsc::Sender;
 
+use git_core::patch::PatchApply;
 use git_core::reset::ResetMode;
 use git_core::undo::SnapshotScope::{self, Full, RefsAndIndex};
 
@@ -167,6 +168,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetCommitFiles { .. }
         | Command::GetCommitStats { .. }
         | Command::GetPatch { .. }
+        | Command::PreviewPatch { .. }
         | Command::GetCommitMessage { .. }
         | Command::GetCommitSignature { .. }
         | Command::GetCommitDetails { .. }
@@ -299,9 +301,19 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         Command::ApplyCommitChange { change, .. } => {
             P::recorded(commit_change_label(change), Full).refused_when_busy(Discard)
         }
-        Command::ApplyPatch { .. } => {
-            P::recorded("Apply patch".to_string(), Full).refused_when_busy(Discard)
-        }
+        // As commits (#658) it moves HEAD, so like a commit it can't run under a stored rebase or
+        // sequence.
+        Command::ApplyPatch { how, .. } => match how {
+            PatchApply::WorkTree => {
+                P::recorded("Apply patch".to_string(), Full).refused_when_busy(Discard)
+            }
+            PatchApply::Stage => {
+                P::recorded("Apply and stage patch".to_string(), Full).refused_when_busy(Discard)
+            }
+            PatchApply::Commits => P::recorded("Apply patch as commits".to_string(), Full)
+                .refused_when_busy(Discard)
+                .gated(Refused),
+        },
 
         // Commits end a merge or pick, so they can't run under a stored rebase or sequence.
         Command::Commit { message, .. } => {
@@ -487,6 +499,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         ApplyCommitChange,
         GetPatch,
         ApplyPatch,
+        PreviewPatch,
         IgnorePath,
         CreateRootFile,
         Commit,

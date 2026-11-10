@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { ApplyPatchDialog } from "./components/ApplyPatchDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import { CreateTagDialog } from "./components/CreateTagDialog";
 import { DeleteRemoteBranchDialog } from "./components/DeleteRemoteBranchDialog";
@@ -117,6 +118,7 @@ export function WorkspaceDialogs({
     createTagDialog === null ? undefined : appState.state.commits.find((commit) => commit.id === createTagDialog.commitId);
   const mergeDialogBranch = dialogOf(dialog, "merge")?.branchName ?? null;
   const stashDialog = dialogOf(dialog, "stash");
+  const applyPatchDialog = dialogOf(dialog, "applyPatch");
   const deleteRemoteBranchDialog = dialogOf(dialog, "deleteRemoteBranch");
   const deleteRemoteTagDialog = dialogOf(dialog, "deleteRemoteTag");
   const remoteDialog = dialogOf(dialog, "remote");
@@ -225,6 +227,19 @@ export function WorkspaceDialogs({
             void announce("Changes stashed", appState.saveStash)(options);
           }}
           onCancel={() => closeDialog("stash")}
+        />
+      )}
+      {active && applyPatchDialog !== null && (
+        <ApplyPatchDialog
+          preview={applyPatchDialog.preview}
+          hasStagedChanges={appState.state.status.some((entry) => entry.staged)}
+          blockedReason={operationDisabledReason}
+          onApply={(how) => {
+            // Re-checked: the repository can become busy while the preview is open (#514).
+            if (repositoryOperationDisabled) return;
+            void appState.applyPatch(applyPatchDialog.content, applyPatchDialog.preview, how);
+          }}
+          onCancel={() => closeDialog("applyPatch")}
         />
       )}
       {active && commitDialog !== null && commitDialog.kind !== "Reset" && (

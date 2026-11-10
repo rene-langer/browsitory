@@ -1,7 +1,10 @@
 //! #448: revert or apply a commit's file or hunk in the working tree, save a patch, apply a
 //! patch file.
 use super::{off_runtime, repo_worker, AppState};
-use repo_service::wire::{CommitChangeRequestDto, ErrorDto, PatchContentDto, PatchSourceDto};
+use repo_service::wire::{
+    CommitChangeRequestDto, ErrorDto, PatchApplyDto, PatchContentDto, PatchPreviewDto,
+    PatchSourceDto,
+};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -35,12 +38,26 @@ pub async fn get_patch(
 pub async fn apply_patch(
     repo_path: String,
     content: PatchContentDto,
+    how: PatchApplyDto,
     state: State<'_, AppState>,
 ) -> Result<(), ErrorDto> {
     let bytes = content.into_bytes()?;
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.apply_patch(bytes))
+        .call(move |w| w.apply_patch(bytes, how.into()))
         .await
+}
+
+#[tauri::command]
+pub async fn preview_patch(
+    repo_path: String,
+    content: PatchContentDto,
+    state: State<'_, AppState>,
+) -> Result<PatchPreviewDto, ErrorDto> {
+    let bytes = content.into_bytes()?;
+    let preview = repo_worker(&state, &repo_path)?
+        .call(move |w| w.preview_patch(bytes))
+        .await?;
+    Ok(preview.into())
 }
 
 /// Asks where to save `content` (offering `suggested_name`) and writes it there. The path saved

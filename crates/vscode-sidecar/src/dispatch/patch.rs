@@ -1,7 +1,9 @@
 //! #448: revert or apply a commit's file or hunk in the working tree, a patch's text, a patch
 //! applied. The extension host shows the save and open dialogs and does the file I/O.
 use repo_service::wire::ErrorDto;
-use repo_service::wire::{CommitChangeRequestDto, PatchContentDto, PatchSourceDto};
+use repo_service::wire::{
+    CommitChangeRequestDto, PatchApplyDto, PatchContentDto, PatchPreviewDto, PatchSourceDto,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -39,10 +41,24 @@ pub(super) fn get_patch(params: GetPatchParams, repos: &Repos) -> Result<Value, 
 pub(super) struct ApplyPatchParams {
     repo_path: String,
     content: PatchContentDto,
+    how: PatchApplyDto,
 }
 
 pub(super) fn apply_patch(params: ApplyPatchParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let bytes = params.content.into_bytes()?;
-    worker_handle(repos, &params.repo_path)?.apply_patch(bytes)?;
+    worker_handle(repos, &params.repo_path)?.apply_patch(bytes, params.how.into())?;
     Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct PreviewPatchParams {
+    repo_path: String,
+    content: PatchContentDto,
+}
+
+pub(super) fn preview_patch(params: PreviewPatchParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    let bytes = params.content.into_bytes()?;
+    let preview = worker_handle(repos, &params.repo_path)?.preview_patch(bytes)?;
+    serde_json::to_value(PatchPreviewDto::from(preview)).map_err(ErrorDto::from_error)
 }

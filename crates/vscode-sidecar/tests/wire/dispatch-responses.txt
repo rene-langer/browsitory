@@ -327,6 +327,9 @@ persist_open_repos/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"messag
 pop_stash/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct StashApplyParams","data":{"kind":"Other","message":"invalid type: null, expected struct StashApplyParams"}}}
 pop_stash/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 pop_stash/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct StashApplyParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct StashApplyParams"}}}
+preview_patch/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct PreviewPatchParams","data":{"kind":"Other","message":"invalid type: null, expected struct PreviewPatchParams"}}}
+preview_patch/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
+preview_patch/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct PreviewPatchParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct PreviewPatchParams"}}}
 prune_worktrees/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoPathParams"}}}
 prune_worktrees/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 prune_worktrees/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoPathParams"}}}

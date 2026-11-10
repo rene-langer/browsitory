@@ -220,6 +220,7 @@ methods!(|params, repos, stdout| {
     "apply_commit_change" => apply_commit_change(ApplyCommitChangeParams, repos),
     "get_patch" => get_patch(GetPatchParams, repos),
     "apply_patch" => apply_patch(ApplyPatchParams, repos),
+    "preview_patch" => preview_patch(PreviewPatchParams, repos),
     "ignore_path" => ignore_path(IgnorePathParams, repos),
     "commit" => commit(CommitMessageParams, repos, stdout),
     "set_identity" => set_identity(SetIdentityParams, repos),

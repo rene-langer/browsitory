@@ -27,12 +27,16 @@ import { LineStatsBadge } from "./LineStatsBadge";
 export interface CommitFilePatchActions {
   /** Why reverting or applying can't run now, else `null`. */
   blockedReason: string | null;
-  onRevertFile: () => void;
-  onApplyFile: () => void;
+  /** `stage`: also stage the result (#536). */
+  onRevertFile: (stage: boolean) => void;
+  onApplyFile: (stage: boolean) => void;
   onSavePatch: () => void;
-  onRevertHunk: (hunk: CommitHunk) => void;
-  onApplyHunk: (hunk: CommitHunk) => void;
+  onRevertHunk: (hunk: CommitHunk, stage: boolean) => void;
+  onApplyHunk: (hunk: CommitHunk, stage: boolean) => void;
 }
+
+/** A commit's hunk buttons' title when they can run: Shift+click stages the result (#536). */
+export const HUNK_STAGE_HINT = "Shift+click to stage the result too";
 
 /** Hunk identity needs whitespace to count, as for staging. */
 const IGNORE_WHITESPACE_REASON = "Turn off Ignore whitespace to revert or apply a hunk.";
@@ -104,8 +108,8 @@ export function ReadOnlyFileSection({
   const hasMenu = tools !== null || patch !== undefined;
   const onPickFileAction = (action: FileAction) => {
     if (patch !== undefined) {
-      if (action.kind === "revertCommitFile") return patch.onRevertFile();
-      if (action.kind === "applyCommitFile") return patch.onApplyFile();
+      if (action.kind === "revertCommitFile") return patch.onRevertFile(action.stage);
+      if (action.kind === "applyCommitFile") return patch.onApplyFile(action.stage);
       if (action.kind === "saveFilePatch") return patch.onSavePatch();
     }
     if (tools === null) return;
@@ -138,10 +142,10 @@ export function ReadOnlyFileSection({
             algorithm: fetchedOptions?.algorithm ?? settings.algorithm,
           };
           const reason = settings.ignoreWhitespace ? IGNORE_WHITESPACE_REASON : patch.blockedReason;
-          const blocked = { disabled: reason !== null, title: reason ?? undefined };
+          const blocked = { disabled: reason !== null, title: reason ?? HUNK_STAGE_HINT };
           return [
-            { label: "Revert hunk", run: () => patch.onRevertHunk(ref), ...blocked },
-            { label: "Apply hunk", run: () => patch.onApplyHunk(ref), ...blocked },
+            { label: "Revert hunk", run: (event) => patch.onRevertHunk(ref, event.shiftKey), ...blocked },
+            { label: "Apply hunk", run: (event) => patch.onApplyHunk(ref, event.shiftKey), ...blocked },
           ];
         };
   const loadDiff = () => {

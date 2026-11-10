@@ -1,11 +1,18 @@
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CommitChangeRequest } from "../ipc/RepoClient";
+import type { CommitChangeRequest, PatchPreview } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
-import { commitChangeMessage, commitsPatchName, patchFileName, usePatchActions } from "./usePatchActions";
+import { applyPatchMessage, commitChangeMessage, commitsPatchName, patchFileName, usePatchActions } from "./usePatchActions";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const CONTENT = { base64: "aGk=" };
+const PREVIEW: PatchPreview = {
+  parts: [
+    { mail: { subject: "One", body: "", authorName: "Ada", authorEmail: "ada@x", timestamp: 0 }, files: [] },
+    { mail: { subject: "Two", body: "", authorName: "Ada", authorEmail: "ada@x", timestamp: 0 }, files: [] },
+  ],
+  problem: null,
+};
 
 function setup(overrides: Partial<Record<string, unknown>> = {}, ok = true) {
   const client = {
@@ -14,9 +21,10 @@ function setup(overrides: Partial<Record<string, unknown>> = {}, ok = true) {
     savePatchFile: vi.fn(async () => "/home/me/x.patch"),
     openPatchFile: vi.fn(async () => CONTENT),
     applyPatch: vi.fn(async () => {}),
+    previewPatch: vi.fn(async () => PREVIEW),
     ...overrides,
   };
-  let state = { patchOutcome: null, error: null } as unknown as AppState;
+  let state = { patchOutcome: null, error: null, dialog: null } as unknown as AppState;
   const setState = vi.fn((update: (prev: AppState) => AppState) => {
     state = update(state);
   });
@@ -74,15 +82,40 @@ describe("usePatchActions", () => {
     expect(cancelled.state().patchOutcome).toBeNull();
   });
 
-  it("applies a picked patch file, and nothing when the dialog is cancelled", async () => {
-    const { client, actions, state } = setup();
+  it("previews a picked patch file without applying it, and nothing when the dialog is cancelled (#658)", async () => {
+    const { client, actions, state, runMutationWithOutcome } = setup();
     await actions.applyPatchFile();
-    expect(client.applyPatch).toHaveBeenCalledWith("/repo", CONTENT);
-    expect(state().patchOutcome).toEqual({ message: "Applied the patch to the working tree", undoable: true });
+    expect(client.previewPatch).toHaveBeenCalledWith("/repo", CONTENT);
+    expect(client.applyPatch).not.toHaveBeenCalled();
+    expect(runMutationWithOutcome).not.toHaveBeenCalled();
+    expect(state().dialog).toEqual({ kind: "applyPatch", content: CONTENT, preview: PREVIEW });
 
     const cancelled = setup({ openPatchFile: vi.fn(async () => null) });
     await cancelled.actions.applyPatchFile();
-    expect(cancelled.client.applyPatch).not.toHaveBeenCalled();
+    expect(cancelled.client.previewPatch).not.toHaveBeenCalled();
+    expect(cancelled.state().dialog).toBeNull();
+  });
+
+  it("shows an unreadable patch file in the error banner instead of a preview", async () => {
+    const failing = setup({ previewPatch: vi.fn(async () => Promise.reject(new Error("The file holds no patch."))) });
+    await failing.actions.applyPatchFile();
+    expect(failing.state().error).toBe("The file holds no patch.");
+    expect(failing.state().dialog).toBeNull();
+  });
+
+  it("applies the previewed patch the chosen way, closing the preview", async () => {
+    const { client, actions, state } = setup();
+    await actions.applyPatchFile();
+    await actions.applyPatch(CONTENT, PREVIEW, "Commits");
+    expect(client.applyPatch).toHaveBeenCalledWith("/repo", CONTENT, "Commits");
+    expect(state().dialog).toBeNull();
+    expect(state().patchOutcome).toEqual({ message: "Committed the patch as 2 commits", undoable: true });
+  });
+
+  it("keeps no toast when the previewed patch doesn't apply", async () => {
+    const { actions, state } = setup({}, false);
+    await actions.applyPatch(CONTENT, PREVIEW, "Stage");
+    expect(state().patchOutcome).toBeNull();
   });
 });
 
@@ -96,6 +129,12 @@ describe("patch names and messages", () => {
     const commits = [{ id: "c1", summary: "Add tests" }] as never;
     expect(commitsPatchName(["c1"], commits)).toBe("0001-add-tests.patch");
     expect(commitsPatchName(["c1", "c2", "c3"], commits)).toBe("3-commits.patch");
+  });
+
+  it("says how a patch file landed", () => {
+    expect(applyPatchMessage(PREVIEW, "WorkTree")).toBe("Applied the patch to the working tree");
+    expect(applyPatchMessage(PREVIEW, "Stage")).toBe("Applied and staged the patch");
+    expect(applyPatchMessage({ ...PREVIEW, parts: PREVIEW.parts.slice(1) }, "Commits")).toBe("Committed the patch");
   });
 
   it("says what landed where", () => {
