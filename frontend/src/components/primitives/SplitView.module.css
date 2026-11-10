@@ -7,9 +7,11 @@
 }
 
 .left {
-  /* Shrinkable so the right pane's min-width below wins in narrow windows. */
+  /* Keeps its set width (inline style) when the window resizes; the right pane
+     takes the rest (#605). A collapsible pane hides instead when there is no
+     room (SplitView.tsx). A fixed one shrinks only as a last resort, once the
+     right pane is down to its min-width, and never below the inline min-width. */
   flex: 0 1 auto;
-  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -45,7 +47,10 @@
 /* A bare flex column so a nested SplitView (itself `flex: 1 1 auto;
    min-height: 0`) can fill it. Padding and scrolling live on .rightInner. */
 .right {
-  flex: 1 1 auto;
+  /* Basis 0, not auto: with an auto basis the right pane's content size makes
+     the flex algorithm shrink the left pane long before the right pane is down
+     to its min-width. */
+  flex: 1 1 0;
   /* Never let the right (diff) pane collapse to zero width. */
   min-width: 320px;
   display: flex;
