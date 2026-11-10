@@ -549,8 +549,8 @@ fn check_links(
             }
             current = Some(now);
         }
-        let creates = !had || (status != git2::Delta::Deleted && old_path != new_path);
-        if let (Some(index), true) = (&index, creates && keeps) {
+        let creates = keeps && (!had || old_path != new_path);
+        if let (Some(index), true) = (&index, creates) {
             if index.get_path(Path::new(&new_path), 0).is_some() {
                 return Err(PatchError::DoesNotApply(format!(
                     "{new_path} already exists in the index"

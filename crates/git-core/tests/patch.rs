@@ -1020,6 +1020,64 @@ mod links {
     }
 
     #[test]
+    fn a_link_renamed_with_the_index_onto_a_staged_name_does_not_apply() {
+        let (dir, repo, id, _) = link_change(|dir| {
+            std::fs::remove_file(dir.join("l")).unwrap();
+            link(dir, "m", "f.txt");
+        });
+        write_file(dir.path(), "m", "mine\n");
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("m")).unwrap();
+        index.write().unwrap();
+        std::fs::remove_file(dir.path().join("m")).unwrap();
+        let err = apply_commit_change(
+            &repo,
+            &id,
+            "m",
+            Some("l"),
+            None,
+            false,
+            ApplyTarget::WorkTreeAndIndex,
+        )
+        .unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+        assert!(dir.path().join("m").symlink_metadata().is_err());
+    }
+
+    #[test]
+    fn a_link_renamed_with_the_index_is_staged() {
+        let (dir, repo, id, _) = link_change(|dir| {
+            std::fs::remove_file(dir.join("l")).unwrap();
+            link(dir, "m", "f.txt");
+        });
+        apply_commit_change(
+            &repo,
+            &id,
+            "m",
+            Some("l"),
+            None,
+            false,
+            ApplyTarget::WorkTreeAndIndex,
+        )
+        .unwrap();
+        assert_eq!(target(dir.path(), "m"), "f.txt");
+        let index = repo.index().unwrap();
+        assert!(index.get_path(Path::new("l"), 0).is_none());
+        assert_eq!(index.get_path(Path::new("m"), 0).unwrap().mode, 0o120000);
+    }
+
+    #[test]
+    fn a_patch_renaming_a_link_into_a_file_does_not_apply() {
+        let (dir, repo, _, _) = link_change(|dir| write_file(dir, "h.txt", "h2\n"));
+        let patch = "diff --git a/l b/m\nold mode 120000\nnew mode 100644\nsimilarity index 50%\nrename from l\nrename to m\nindex 6a69f92..b6fc4c6\n--- a/l\n+++ b/m\n@@ -1 +1 @@\n-f.txt\n\\ No newline at end of file\n+text\n";
+        let err = apply_patch(&repo, patch.as_bytes()).unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+        assert!(dir.path().join("m").symlink_metadata().is_err());
+    }
+
+    #[test]
     fn a_link_added_with_the_index_is_staged() {
         let (dir, repo, id, _) = link_change(|dir| link(dir, "m", "h.txt"));
         apply_commit_change(
