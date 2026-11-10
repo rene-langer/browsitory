@@ -12,7 +12,9 @@
 //! the work tree kept the file `c` and never got `c/g`; a merge (also squash, also the diverged
 //! pull's merge) and a stash apply stopped with libgit2's raw "failed to make directory 'c':
 //! directory exists", the merge having already deleted `c.txt` from the index and work tree.
-//! Now each refuses with `FileFolderConflict` before anything is written.
+//! Each then refused with `FileFolderConflict` before anything was written (#410); now each
+//! writes git's conflict itself (#416). Only `git stash apply --index` still refuses, as git
+//! does.
 
 mod common;
 
@@ -22,8 +24,8 @@ use common::{commit_all, commit_tree, init_repo, write_file};
 use git2::{Oid, Repository};
 use git_core::hooks::HookOptions;
 use git_core::merge::MergeOptions;
-use git_core::rebase::{RebaseAction, RebaseError, RebasePlanEntry};
-use git_core::stash::{StashError, StashOptions};
+use git_core::rebase::{RebaseAction, RebasePlanEntry, RebaseStepResult};
+use git_core::stash::{StashApplyOutcome, StashError, StashOptions};
 use git_core::FileFolderConflict;
 use tempfile::TempDir;
 
@@ -323,29 +325,179 @@ fn revert_stops_at_a_file_folder_conflict_libgit2_misses_like_git() {
     assert_step_conflict(&f, "REVERT_HEAD", git2::RepositoryState::Revert);
 }
 
-#[test]
-fn rebase_step_refuses_a_file_folder_conflict_and_puts_the_branch_back() {
-    let f = fixture();
+/// The index's entries as (path, stage), in index order.
+fn index_entries(repo: &Repository) -> Vec<(String, u16)> {
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    index
+        .iter()
+        .map(|entry| {
+            (
+                String::from_utf8_lossy(&entry.path).into_owned(),
+                (entry.flags >> 12) & 0x3,
+            )
+        })
+        .collect()
+}
+
+/// `side` rebased onto the default branch: its one step stops at git's conflict.
+fn rebase_side(f: &Fixture) -> git_core::rebase::RebaseState {
     switch(&f.repo, "side");
     let plan = vec![RebasePlanEntry {
         commit_id: f.side.to_string(),
         action: RebaseAction::Pick,
         combined_message: None,
     }];
-    let Err(error) = git_core::rebase::start_rebase(&f.repo, &f.branch, plan) else {
-        panic!("libgit2 would land the step without the file c");
-    };
-    let conflict = match &error {
-        RebaseError::FileFolderConflict(conflict) => Some(conflict),
-        _ => None,
-    };
-    expect_conflict(&error, conflict);
+    let (state, result) = git_core::rebase::start_rebase(&f.repo, &f.branch, plan).unwrap();
+    assert_eq!(
+        result,
+        RebaseStepResult::Conflicted {
+            files: vec!["c~HEAD".to_string()]
+        }
+    );
+    state
+}
+
+/// git (`git rebase main` on `side`): "CONFLICT (file/directory): directory in the way of c from
+/// HEAD; moving it to c~HEAD instead", the step paused with `c/g` merged.
+#[test]
+fn rebase_step_stops_at_a_file_folder_conflict_libgit2_misses_like_git() {
+    let f = fixture();
+    let state = rebase_side(&f);
+    assert_eq!(state.stop, git_core::rebase::RebaseStop::Conflict);
+    assert_eq!(read(f.dir.path(), "c~HEAD"), "file\n");
+    assert_eq!(read(f.dir.path(), "c/g"), "g\n");
+    assert!(!f.dir.path().join("c.txt").exists());
+    assert_eq!(
+        index_entries(&f.repo),
+        [
+            ("a.txt".to_string(), 0),
+            ("c/g".to_string(), 0),
+            ("c~HEAD".to_string(), 2)
+        ]
+    );
+    assert!(f.repo.head_detached().unwrap());
+    assert_eq!(f.repo.head().unwrap().target(), Some(f.head));
+    assert_eq!(f.repo.state(), git2::RepositoryState::CherryPick);
+    let picked = std::fs::read_to_string(f.repo.path().join("CHERRY_PICK_HEAD")).unwrap();
+    assert_eq!(picked.trim(), f.side.to_string());
+    let message = std::fs::read_to_string(f.repo.path().join("MERGE_MSG")).unwrap();
+    assert!(
+        message.starts_with("c.txt becomes c/g\n\n# Conflicts:\n#\tc~HEAD\n"),
+        "{message}"
+    );
+    assert_eq!(
+        git_core::rebase::rebase_health(&f.repo, &state).unwrap(),
+        git_core::rebase::RebaseHealth::Paused
+    );
+}
+
+#[test]
+fn a_rebase_stopped_at_a_file_folder_conflict_continues_once_resolved() {
+    let f = fixture();
+    let mut state = rebase_side(&f);
+    // Like git: keep the moved file under the name git gave it, and stage it.
+    let mut index = f.repo.index().unwrap();
+    index.add_path(Path::new("c~HEAD")).unwrap();
+    index.write().unwrap();
+    let result = git_core::rebase::rebase_continue(&f.repo, &mut state).unwrap();
+    assert_eq!(result, RebaseStepResult::Done);
+    let head = f.repo.head().unwrap();
+    assert_eq!(head.name().unwrap(), "refs/heads/side");
+    let commit = head.peel_to_commit().unwrap();
+    assert_eq!(commit.parent_id(0).unwrap(), f.head);
+    assert_eq!(commit.summary().unwrap(), Some("c.txt becomes c/g"));
+    let mut tree = git2::Index::new().unwrap();
+    tree.read_tree(&commit.tree().unwrap()).unwrap();
+    let names: Vec<String> = tree
+        .iter()
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .collect();
+    assert_eq!(names, ["a.txt", "c/g", "c~HEAD"]);
+    assert_eq!(f.repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
+fn a_rebase_stopped_at_a_file_folder_conflict_can_be_aborted() {
+    let f = fixture();
+    let state = rebase_side(&f);
+    let abort = git_core::rebase::abort_rebase(&f.repo, &state).unwrap();
+    assert!(abort.restored);
     assert_untouched(&f.repo, "side", f.side);
+    assert_eq!(read(f.dir.path(), "c/g"), "g\n");
+    assert!(!f.dir.path().join("c~HEAD").exists());
     assert_eq!(
         f.repo
             .refname_to_id(&format!("refs/heads/{}", f.branch))
             .unwrap(),
         f.head
+    );
+}
+
+/// The other way round (`git rebase side` on the default branch): the step brings the file, so
+/// it is "added by them" and moved to `c~<short id> (<subject>)`, git's label for the step.
+#[test]
+fn a_rebase_step_bringing_the_file_moves_it_to_the_steps_label() {
+    let f = fixture();
+    let plan = vec![RebasePlanEntry {
+        commit_id: f.head.to_string(),
+        action: RebaseAction::Pick,
+        combined_message: None,
+    }];
+    let (_, result) = git_core::rebase::start_rebase(&f.repo, "side", plan).unwrap();
+    let short = f.head.to_string()[..7].to_string();
+    let moved = format!("c~{short} (add the file c)");
+    assert_eq!(
+        result,
+        RebaseStepResult::Conflicted {
+            files: vec![moved.clone()]
+        }
+    );
+    assert_eq!(read(f.dir.path(), &moved), "file\n");
+    assert_eq!(read(f.dir.path(), "c/g"), "g\n");
+    assert_eq!(
+        index_entries(&f.repo),
+        [
+            ("a.txt".to_string(), 0),
+            ("c/g".to_string(), 0),
+            (moved, 3)
+        ]
+    );
+    assert_eq!(f.repo.head().unwrap().target(), Some(f.side));
+}
+
+/// A `/` in git's label becomes `_` (git: `git merge topic/file` moves the file to
+/// `c~topic_file`).
+#[test]
+fn a_slash_in_the_label_is_flattened_like_git() {
+    let f = fixture();
+    f.repo
+        .branch("topic/file", &f.repo.find_commit(f.head).unwrap(), false)
+        .unwrap();
+    switch(&f.repo, "side");
+    git_core::merge::start_merge(&f.repo, "topic/file", MergeOptions::default()).unwrap();
+    assert_eq!(read(f.dir.path(), "c~topic_file"), "file\n");
+    assert!(!f.dir.path().join("c~topic").exists());
+}
+
+/// git's label for a revert's other side is `parent of <short id> (<subject>)`.
+#[test]
+fn a_revert_moves_the_file_to_gits_parent_of_label() {
+    let f = fixture();
+    // On HEAD (which added `c`), a commit dropping `c`; reverting it onto `side` brings `c`
+    // back, while `side` deleted `c.txt` and added `c/g`.
+    let drop = commit_tree(
+        &f.repo,
+        &[("a.txt", "a\n", FILE), ("c.txt", "c\n", FILE)],
+        &[f.head],
+        "drop c",
+    );
+    switch(&f.repo, "side");
+    git_core::pick::revert(&f.repo, &drop.to_string(), None, HookOptions::default()).unwrap();
+    let short = drop.to_string()[..7].to_string();
+    assert_eq!(
+        read(f.dir.path(), &format!("c~parent of {short} (drop c)")),
+        "file\n"
     );
 }
 
@@ -372,31 +524,254 @@ fn stash_count(repo: &mut Repository) -> usize {
     git_core::stash::list_stashes(repo).unwrap().len()
 }
 
+/// git's outcome for `git stash apply` (and pop): "CONFLICT (file/directory): directory in the
+/// way of c from Updated upstream; moving it to c~Updated upstream instead", `c/g` merged and
+/// staged, no operation in progress.
+fn assert_stash_conflict(f: &Fixture) {
+    assert_eq!(read(f.dir.path(), "c~Updated upstream"), "file\n");
+    assert_eq!(read(f.dir.path(), "c/g"), "g\n");
+    assert!(!f.dir.path().join("c.txt").exists());
+    assert_eq!(
+        index_entries(&f.repo),
+        [
+            ("a.txt".to_string(), 0),
+            ("c/g".to_string(), 0),
+            ("c~Updated upstream".to_string(), 2)
+        ]
+    );
+    assert_eq!(f.repo.head().unwrap().target(), Some(f.head));
+    assert_eq!(f.repo.state(), git2::RepositoryState::Clean);
+}
+
 #[test]
-fn stash_apply_refuses_a_file_folder_conflict_libgit2_misses() {
-    for restore_index in [false, true] {
+fn stash_apply_reports_a_file_folder_conflict_libgit2_misses_like_git() {
+    let mut f = stashed_fixture();
+    let outcome = git_core::stash::apply_stash(&mut f.repo, 0, None, false).unwrap();
+    assert_eq!(
+        outcome,
+        StashApplyOutcome::Conflicted {
+            files: vec!["c~Updated upstream".to_string()]
+        }
+    );
+    assert_stash_conflict(&f);
+    assert_eq!(stash_count(&mut f.repo), 1);
+}
+
+#[test]
+fn stash_pop_reports_it_and_keeps_the_stash() {
+    let mut f = stashed_fixture();
+    let outcome = git_core::stash::pop_stash(&mut f.repo, 0, None, false).unwrap();
+    assert!(
+        matches!(outcome, StashApplyOutcome::Conflicted { .. }),
+        "{outcome:?}"
+    );
+    assert_stash_conflict(&f);
+    assert_eq!(stash_count(&mut f.repo), 1);
+}
+
+/// git: `git stash apply --index` refuses ("Conflicts in index. Try without --index.") and
+/// changes nothing, since the staged part (`c/g`) can't be applied to the index either.
+#[test]
+fn stash_apply_restoring_the_index_refuses_it_like_git() {
+    for pop in [false, true] {
         let mut f = stashed_fixture();
-        let error = git_core::stash::apply_stash(&mut f.repo, 0, None, restore_index).unwrap_err();
-        let conflict = match &error {
-            StashError::FileFolderConflict(conflict) => Some(conflict),
-            _ => None,
+        let error = if pop {
+            git_core::stash::pop_stash(&mut f.repo, 0, None, true).unwrap_err()
+        } else {
+            git_core::stash::apply_stash(&mut f.repo, 0, None, true).unwrap_err()
         };
-        expect_conflict(&error, conflict);
+        assert!(matches!(error, StashError::IndexConflict), "{error}");
         assert_untouched(&f.repo, &f.branch, f.head);
         assert_eq!(stash_count(&mut f.repo), 1);
     }
 }
 
+/// `stashed_fixture` with the untracked file `u.txt` in the stash too.
+fn stashed_with_untracked_fixture() -> Fixture {
+    let mut f = fixture();
+    f.repo
+        .branch("stash-base", &f.repo.find_commit(f.base).unwrap(), false)
+        .unwrap();
+    switch(&f.repo, "stash-base");
+    std::fs::remove_file(f.dir.path().join("c.txt")).unwrap();
+    write_file(f.dir.path(), "c/g", "g\n");
+    write_file(f.dir.path(), "u.txt", "untracked\n");
+    let mut index = f.repo.index().unwrap();
+    index.remove_path(Path::new("c.txt")).unwrap();
+    index.add_path(Path::new("c/g")).unwrap();
+    index.write().unwrap();
+    let options = StashOptions {
+        include_untracked: true,
+        ..StashOptions::default()
+    };
+    git_core::stash::save_stash(&mut f.repo, &options).unwrap();
+    assert!(!f.dir.path().join("u.txt").exists());
+    switch(&f.repo, &f.branch.clone());
+    f
+}
+
+/// git restores the stash's untracked files next to the conflict, untracked.
 #[test]
-fn stash_pop_refuses_it_and_keeps_the_stash() {
-    let mut f = stashed_fixture();
-    let error = git_core::stash::pop_stash(&mut f.repo, 0, None, false).unwrap_err();
-    assert!(
-        matches!(error, StashError::FileFolderConflict(_)),
-        "{error}"
+fn stash_apply_restores_untracked_files_beside_the_conflict() {
+    let mut f = stashed_with_untracked_fixture();
+    git_core::stash::apply_stash(&mut f.repo, 0, None, false).unwrap();
+    assert_stash_conflict(&f);
+    assert_eq!(read(f.dir.path(), "u.txt"), "untracked\n");
+    let status = f.repo.status_file(Path::new("u.txt")).unwrap();
+    assert_eq!(status, git2::Status::WT_NEW);
+}
+
+/// An untracked file of the stash already in the work tree: refused like libgit2's apply
+/// refuses it, nothing written.
+#[test]
+fn stash_apply_refuses_an_untracked_file_in_the_way() {
+    let mut f = stashed_with_untracked_fixture();
+    write_file(f.dir.path(), "u.txt", "mine\n");
+    let error = git_core::stash::apply_stash(&mut f.repo, 0, None, false).unwrap_err();
+    assert!(matches!(error, StashError::WouldOverwrite), "{error}");
+    assert_eq!(read(f.dir.path(), "u.txt"), "mine\n");
+    assert_eq!(read(f.dir.path(), "c"), "file\n");
+    assert!(!f.dir.path().join("c/g").exists());
+    assert!(!f.dir.path().join("c~Updated upstream").exists());
+    assert_eq!(
+        index_entries(&f.repo),
+        [
+            ("a.txt".to_string(), 0),
+            ("c".to_string(), 0),
+            ("c.txt".to_string(), 0)
+        ]
     );
-    assert_untouched(&f.repo, &f.branch, f.head);
     assert_eq!(stash_count(&mut f.repo), 1);
+}
+
+/// A local change to a file the stash changes too: refused (the safe checkout would overwrite
+/// it), nothing written.
+#[test]
+fn stash_apply_refuses_to_overwrite_a_local_change() {
+    let mut f = fixture();
+    f.repo
+        .branch("stash-base", &f.repo.find_commit(f.base).unwrap(), false)
+        .unwrap();
+    switch(&f.repo, "stash-base");
+    std::fs::remove_file(f.dir.path().join("c.txt")).unwrap();
+    write_file(f.dir.path(), "c/g", "g\n");
+    write_file(f.dir.path(), "a.txt", "stashed\n");
+    let mut index = f.repo.index().unwrap();
+    index.remove_path(Path::new("c.txt")).unwrap();
+    index.add_path(Path::new("c/g")).unwrap();
+    index.write().unwrap();
+    git_core::stash::save_stash(&mut f.repo, &StashOptions::default()).unwrap();
+    switch(&f.repo, &f.branch.clone());
+    write_file(f.dir.path(), "a.txt", "mine\n");
+    let error = git_core::stash::apply_stash(&mut f.repo, 0, None, false).unwrap_err();
+    assert!(matches!(error, StashError::WouldOverwrite), "{error}");
+    assert_eq!(read(f.dir.path(), "a.txt"), "mine\n");
+    assert_eq!(read(f.dir.path(), "c"), "file\n");
+    assert!(!f.dir.path().join("c~Updated upstream").exists());
+    assert_eq!(stash_count(&mut f.repo), 1);
+}
+
+/// Unix: a checkout that stops part-way (at the read-only `z/m.txt`, after it wrote `c/g`,
+/// `c~Updated upstream` and the untracked `u.txt`) is rolled back (#321): nothing is left, the
+/// stash is kept, and the apply goes through once the file can be written.
+#[cfg(unix)]
+#[test]
+fn a_stash_apply_stopped_part_way_is_rolled_back() {
+    use std::os::unix::fs::PermissionsExt;
+    if unsafe { libc::geteuid() } == 0 {
+        assert!(std::env::var_os("CI").is_none(), "root writes read-only files");
+        return;
+    }
+    let (dir, mut repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    write_file(dir.path(), "c.txt", "c\n");
+    write_file(dir.path(), "z/m.txt", "m\n");
+    commit_all(&repo, "base");
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let base = repo.head().unwrap().target().unwrap();
+    repo.branch("stash-base", &repo.find_commit(base).unwrap(), false)
+        .unwrap();
+    write_file(dir.path(), "c", "file\n");
+    commit_all(&repo, "add the file c");
+    let head = repo.head().unwrap().target().unwrap();
+    switch(&repo, "stash-base");
+    std::fs::remove_file(dir.path().join("c.txt")).unwrap();
+    write_file(dir.path(), "c/g", "g\n");
+    write_file(dir.path(), "z/m.txt", "stashed\n");
+    write_file(dir.path(), "u.txt", "untracked\n");
+    let mut index = repo.index().unwrap();
+    index.remove_path(Path::new("c.txt")).unwrap();
+    index.add_path(Path::new("c/g")).unwrap();
+    index.write().unwrap();
+    let options = StashOptions {
+        include_untracked: true,
+        ..StashOptions::default()
+    };
+    git_core::stash::save_stash(&mut repo, &options).unwrap();
+    switch(&repo, &branch);
+
+    let modes = [("z/m.txt", 0o444), ("z", 0o555)];
+    for (rel, mode) in modes {
+        std::fs::set_permissions(dir.path().join(rel), std::fs::Permissions::from_mode(mode))
+            .unwrap();
+    }
+    let error = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap_err();
+    for (rel, mode) in [("z", 0o755), ("z/m.txt", 0o644)] {
+        std::fs::set_permissions(dir.path().join(rel), std::fs::Permissions::from_mode(mode))
+            .unwrap();
+    }
+    assert!(!matches!(error, StashError::WouldOverwrite), "{error}");
+    assert_untouched(&repo, &branch, head);
+    assert!(!dir.path().join("u.txt").exists());
+    assert!(!dir.path().join("c~Updated upstream").exists());
+    assert_eq!(read(dir.path(), "c"), "file\n");
+    assert_eq!(stash_count(&mut repo), 1);
+
+    let outcome = git_core::stash::apply_stash(&mut repo, 0, None, false).unwrap();
+    assert!(
+        matches!(outcome, StashApplyOutcome::Conflicted { .. }),
+        "{outcome:?}"
+    );
+    assert_eq!(read(dir.path(), "z/m.txt"), "stashed\n");
+    assert_eq!(read(dir.path(), "u.txt"), "untracked\n");
+}
+
+/// Makes `stash@{0}` the stash it is with an untracked parent holding `files`.
+fn add_untracked_parent(repo: &Repository, files: &[(&str, &str, u32)]) {
+    let stash = repo
+        .revparse_single("refs/stash")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap();
+    let untracked = commit_tree(repo, files, &[], "untracked");
+    let parents = [
+        stash.parent(0).unwrap(),
+        stash.parent(1).unwrap(),
+        repo.find_commit(untracked).unwrap(),
+    ];
+    let parents: Vec<&git2::Commit> = parents.iter().collect();
+    let signature = stash.author();
+    let tree = stash.tree().unwrap();
+    let id = repo
+        .commit(None, &signature, &signature, "stash", &tree, &parents)
+        .unwrap();
+    repo.reference("refs/stash", id, true, "with untracked")
+        .unwrap();
+}
+
+/// The stash's untracked file at a path the merge holds (`a.txt`, tracked since): git would
+/// leave the conflict without restoring it, so Browsitory refuses and changes nothing.
+#[test]
+fn stash_apply_refuses_an_untracked_file_the_merge_holds() {
+    let mut f = stashed_fixture();
+    add_untracked_parent(&f.repo, &[("a.txt", "other\n", FILE)]);
+    let error = git_core::stash::apply_stash(&mut f.repo, 0, None, false).unwrap_err();
+    let conflict = match &error {
+        StashError::FileFolderConflict(conflict) => Some(conflict),
+        _ => None,
+    };
+    expect_conflict(&error, conflict);
+    assert_untouched(&f.repo, &f.branch, f.head);
 }
 
 /// With no name between the file and the folder's entries libgit2 finds the conflict itself

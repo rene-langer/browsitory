@@ -740,13 +740,14 @@ fn stop_at_file_folder_conflict(
             format!("parent of {label}"),
         ),
     };
-    let index = crate::file_folder::check_out_as_conflicts::<PickError>(
-        repo,
-        merged,
-        "HEAD",
-        &label,
-        None,
-    )?;
+    // As libgit2's pick checks out: safe, with conflicts allowed.
+    let how = crate::file_folder::ConflictCheckout {
+        our_label: "HEAD",
+        their_label: &label,
+        untracked: None,
+        skip_local_changes: true,
+    };
+    let index = crate::file_folder::check_out_as_conflicts::<PickError>(repo, merged, how)?;
     let files = crate::file_folder::conflicted_files(&index)?;
     crate::file_folder::write_step_state(repo, head_file, target.id(), &message, &files)
         .map_err(|error| PickError::Commit(crate::commit::CommitError::Io(error)))?;

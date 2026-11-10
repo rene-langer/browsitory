@@ -1592,24 +1592,26 @@ fn apply_with_file_folder_conflict(
     untracked: Option<git2::Oid>,
 ) -> Result<StashApplyOutcome, StashError> {
     let untracked = untracked.map(|id| repo.find_tree(id)).transpose()?;
-    let index = crate::file_folder::check_out_as_conflicts::<StashError>(
-        repo,
-        merged,
-        "Updated upstream",
-        "Stashed changes",
-        untracked.as_ref(),
-    )
-    .map_err(|error| match error {
-        // A local change or an untracked file in the way, as libgit2's apply reports it.
-        StashError::Git(error)
-            if error.code() == ErrorCode::Conflict && error.class() == ErrorClass::Checkout =>
-        {
-            StashError::WouldOverwrite
-        }
-        other => other,
-    })?;
+    // libgit2's apply checks out safely here and refuses a local change in the way.
+    let how = crate::file_folder::ConflictCheckout {
+        our_label: "Updated upstream",
+        their_label: "Stashed changes",
+        untracked: untracked.as_ref(),
+        skip_local_changes: false,
+    };
+    let index = crate::file_folder::check_out_as_conflicts::<StashError>(repo, merged, how)
+        .map_err(|error| match error {
+            // A local change or an untracked file in the way, as libgit2's apply reports it.
+            StashError::Git(error) if is_checkout_conflict(&error) => StashError::WouldOverwrite,
+            other => other,
+        })?;
     let files = crate::file_folder::conflicted_files(&index)?;
     Ok(StashApplyOutcome::Conflicted { files })
+}
+
+/// libgit2's safe checkout refused before writing anything: a file in the way.
+fn is_checkout_conflict(error: &git2::Error) -> bool {
+    error.code() == ErrorCode::Conflict && error.class() == ErrorClass::Checkout
 }
 
 /// Refuses when `stash@{index}` holds an untracked file where the worktree has a real folder;

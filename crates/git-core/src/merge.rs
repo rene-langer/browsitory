@@ -194,13 +194,14 @@ fn merge_with_file_folder_conflict(
     merge_head: Option<(git2::Oid, &str)>,
     their_label: &str,
 ) -> Result<Vec<String>, MergeError> {
-    let index = crate::file_folder::check_out_as_conflicts::<MergeError>(
-        repo,
-        merged,
-        "HEAD",
+    // libgit2's merge checkout is safe and refuses a local change in the way.
+    let how = crate::file_folder::ConflictCheckout {
+        our_label: "HEAD",
         their_label,
-        None,
-    )?;
+        untracked: None,
+        skip_local_changes: false,
+    };
+    let index = crate::file_folder::check_out_as_conflicts::<MergeError>(repo, merged, how)?;
     let files = conflicted_files(&index)?;
     if let Some((their_id, label)) = merge_head {
         let git_dir = repo.path();

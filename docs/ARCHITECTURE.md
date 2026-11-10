@@ -409,21 +409,36 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   `merge_trees` redoing `git_stash_apply`'s merges against HEAD's tree) before anything is
   written. `file_folder::find_file_folder_conflict` finds a stage-0 entry `p` while another entry
   lives below `p/` (libgit2's own conflict entry `p` next to `p/…` is left alone).
-  - **Merge, squash, cherry-pick and revert (#416)** produce git's outcome themselves, without
-    libgit2's `merge`/`cherrypick`/`revert`, whose checkout of such an index fails.
-    `file_folder::check_out_as_conflicts` rewrites the merged index (`record_as_conflicts`: the
-    stage-0 `c` becomes `c~HEAD` at stage 2, "added by us", or `c~<their label>` at stage 3 when
-    the file comes from the other side; a taken name gets `_0`...), makes it the repository's
-    index and checks it out with a safe, conflict-allowing checkout (`c/g` is written, HEAD's file
-    moves to `c~HEAD`), rolled back by `partial_checkout` when it stops part-way (#321/#329). The
-    caller then writes the operation's state files as libgit2 would (`MERGE_HEAD`/`MERGE_MODE`/
-    `MERGE_MSG`, or `CHERRY_PICK_HEAD`/`REVERT_HEAD`/`MERGE_MSG`; a squash only `SQUASH_MSG`), so
-    Abort (`reset --merge` semantics, via the index diff) works as for any other conflict. The
-    conflict is a stage-2-only (or stage-3-only) entry, "added by us/them" like git's own.
-  - **Rebase steps and stash apply/pop** still refuse with `FileFolderConflict` and say to use
-    git: libgit2's `rebase.next()` and `stash_apply` merge and check out internally, so the
-    same rewrite would mean redoing their state (`rebase-merge/`, the stash's index and
-    untracked-file handling, `--index`) ourselves.
+  Each operation then produces git's outcome itself (#416), without libgit2's
+  `merge`/`cherrypick`/`revert`/`stash_apply`, whose checkout of such an index fails.
+  `file_folder::check_out_as_conflicts` rewrites the merged index (`record_as_conflicts`: the
+  stage-0 `c` becomes `c~<our label>` at stage 2, "added by us", or `c~<their label>` at stage 3
+  when the file comes from the other side; a `/` in a label becomes `_` and a taken name gets
+  `_0`..., as git does), makes it the repository's index and checks it out safely (`c/g` is
+  written, HEAD's file moves to `c~HEAD`), rolled back by `partial_checkout` when it stops
+  part-way (#321/#329). The conflict is a stage-2-only (or stage-3-only) entry, "added by
+  us/them" like git's own. git's labels: `HEAD` for ours; the branch for a merge,
+  `<short id> (<subject>)` for a cherry-pick or rebase step, `parent of <short id> (<subject>)`
+  for a revert; `Updated upstream`/`Stashed changes` for a stash.
+  - **Merge, squash, cherry-pick and revert**: the caller writes the operation's state files as
+    libgit2 would (`MERGE_HEAD`/`MERGE_MODE`/`MERGE_MSG`, or `CHERRY_PICK_HEAD`/`REVERT_HEAD`/
+    `MERGE_MSG`; a squash only `SQUASH_MSG`), so Abort (`reset --merge` semantics, via the index
+    diff) works as for any other conflict. A pick's checkout allows conflicts (skips a file with
+    local changes in the way) as libgit2's pick does; a merge's refuses, as libgit2's merge does.
+  - **Rebase steps**: the rebase is Browsitory's own (`advance` picks each step with libgit2's
+    `cherrypick`, no `rebase-merge/`), so `rebase::stop_at_file_folder_conflict` writes
+    `CHERRY_PICK_HEAD` and `MERGE_MSG` like the pick and stops the step at a conflict
+    (`RebaseStop::Conflict`): Continue lands the resolved index, Abort goes back to the branch.
+  - **Stash apply/pop**: `stash::file_folder_merge` redoes libgit2's merge of the stash's
+    worktree tree against HEAD's; `apply_with_file_folder_conflict` checks it out with the
+    stash's untracked files (written and rolled back with it, then dropped from the index; an
+    untracked file at a path the merge holds is still refused with `FileFolderConflict`). As
+    git, a conflicted apply leaves the merged changes staged, and a pop keeps the stash. A
+    local change or an untracked file in the way refuses (`WouldOverwrite`), as libgit2's apply
+    does. With "Restore staged changes" (`--index`) a collision in the index tree's merge is
+    refused as `IndexConflict`, as `git stash apply --index` refuses it ("Conflicts in index.
+    Try without --index."); one only in the worktree tree's merge gives the conflict without
+    the index, as git's "Index was not unstashed."
   The test
   `libgit2_still_merges_a_file_and_a_folder_without_a_conflict` (`tests/file_folder_conflict.rs`)
   pins the libgit2 behaviour: when a libgit2 update fixes it, that test fails and the guard can
@@ -1270,7 +1285,7 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   a result that holds a pair HEAD's tree doesn't. libgit2's in-memory merge holds both names,
   but its ignore-case index takes `a` for `A`'s entry: the commit made from it kept one name
   (`a` without `A`, or `A` not recorded) and left the other's file untracked. It runs next to
-  `refuse_file_folder_conflict` on each in-memory result: a rebase step (`advance`; the step
+  `find_file_folder_conflict` on each in-memory result: a rebase step (`advance`; the step
   stops as an error, so Continue retries and Abort works, or `start_rebase` rolls back), a
   cherry-pick or revert step (`pick::step`, single or in a sequence), a merge or squash
   (`merge_commits`), a stash apply's `merge_trees` (with `--index` both), and the tree a

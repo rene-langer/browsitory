@@ -830,13 +830,14 @@ fn stop_at_file_folder_conflict(
     commit: &git2::Commit<'_>,
 ) -> Result<RebaseStepResult, RebaseError> {
     let label = crate::file_folder::commit_label(commit)?;
-    let index = crate::file_folder::check_out_as_conflicts::<RebaseError>(
-        repo,
-        merged,
-        "HEAD",
-        &label,
-        None,
-    )?;
+    // As the step's own pick checks out: safe, with conflicts allowed.
+    let how = crate::file_folder::ConflictCheckout {
+        our_label: "HEAD",
+        their_label: &label,
+        untracked: None,
+        skip_local_changes: true,
+    };
+    let index = crate::file_folder::check_out_as_conflicts::<RebaseError>(repo, merged, how)?;
     let files = crate::file_folder::conflicted_files(&index)?;
     let message = String::from_utf8_lossy(commit.message_bytes());
     crate::file_folder::write_step_state(repo, "CHERRY_PICK_HEAD", commit.id(), &message, &files)?;

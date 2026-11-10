@@ -101,33 +101,44 @@ pub(crate) fn record_as_conflicts(
     Ok(files)
 }
 
+/// How [`check_out_as_conflicts`] writes a file/folder conflict.
+pub(crate) struct ConflictCheckout<'a, 'repo> {
+    /// git's name for HEAD's side (`HEAD`, a stash's `Updated upstream`).
+    pub our_label: &'a str,
+    /// git's name for the other side (a branch, `<short id> (<subject>)`, `Stashed changes`).
+    pub their_label: &'a str,
+    /// A stash's untracked files: checked out with the merge, rolled back with it, and left
+    /// out of the index. The caller makes sure the merge holds none of their paths.
+    pub untracked: Option<&'a git2::Tree<'repo>>,
+    /// Leave a file with local changes in the way as it is instead of refusing, as libgit2's
+    /// own cherry-pick and revert checkout does (`GIT_CHECKOUT_ALLOW_CONFLICTS`). A merge and a
+    /// stash apply refuse then, writing nothing.
+    pub skip_local_changes: bool,
+}
+
 /// Writes a merge result holding a file/folder collision as git's conflict (see
 /// [`record_as_conflicts`]): the repository's index becomes the rewritten `merged`, and a safe
-/// checkout with conflicts allowed writes it (HEAD's file becomes `c~<our_label>`, the
-/// folder's files appear), rolled back when it stops part-way (#321). HEAD is the "ours" side.
-/// The files of `untracked` (a stash's untracked files) are checked out with it, rolled back
-/// with it, and left out of the index; the caller makes sure `merged` holds none of their
-/// paths. The operation's own state files (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, the message) are
-/// the caller's. Returns the repository's index, written.
+/// checkout writes it (HEAD's file becomes `c~<our_label>`, the folder's files appear), rolled
+/// back when it stops part-way (#321). HEAD is the "ours" side. The operation's own state files
+/// (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, the message) are the caller's. Returns the repository's
+/// index, written.
 pub(crate) fn check_out_as_conflicts<E>(
     repo: &git2::Repository,
     mut merged: git2::Index,
-    our_label: &str,
-    their_label: &str,
-    untracked: Option<&git2::Tree<'_>>,
+    how: ConflictCheckout<'_, '_>,
 ) -> Result<git2::Index, E>
 where
     E: From<git2::Error> + From<crate::HeldOpen>,
 {
     let ours = repo.head()?.peel_to_commit()?.tree()?;
-    record_as_conflicts(&mut merged, &ours, our_label, their_label)?;
+    record_as_conflicts(&mut merged, &ours, how.our_label, how.their_label)?;
     let mut untracked_files = git2::Index::new()?;
-    if let Some(tree) = untracked {
+    if let Some(tree) = how.untracked {
         untracked_files.read_tree(tree)?;
     }
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
-    checkout.safe().allow_conflicts(true);
+    checkout.safe().allow_conflicts(how.skip_local_changes);
     crate::hardlink::on_checkout(repo, &mut checkout);
     written.record(repo, &mut checkout);
     written.expect_conflicts(repo, &merged);
