@@ -184,7 +184,11 @@ jobs:
       # latest.json links each bundle by its API asset URL
       # (https://api.github.com/repos/<owner>/<repo>/releases/assets/<id>), and the macOS
       # .app.tar.gz carries the version in its name.
-      - uses: tauri-apps/tauri-action@v1
+      # Pinned by commit (#399): a new tauri-action release changes latest.json for every
+      # installed app, so it arrives as a Renovate PR (renovate.json) instead of through a
+      # floating tag. The action tags each release twice at the same commit, `action-vX.Y.Z` and
+      # `vX.Y.Z`; the comment names the latter, which Renovate reads as a version.
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PKEY }}
