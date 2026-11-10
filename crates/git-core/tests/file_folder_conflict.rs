@@ -457,11 +457,7 @@ fn a_rebase_step_bringing_the_file_moves_it_to_the_steps_label() {
     assert_eq!(read(f.dir.path(), "c/g"), "g\n");
     assert_eq!(
         index_entries(&f.repo),
-        [
-            ("a.txt".to_string(), 0),
-            ("c/g".to_string(), 0),
-            (moved, 3)
-        ]
+        [("a.txt".to_string(), 0), ("c/g".to_string(), 0), (moved, 3)]
     );
     assert_eq!(f.repo.head().unwrap().target(), Some(f.side));
 }
@@ -679,7 +675,10 @@ fn stash_apply_refuses_to_overwrite_a_local_change() {
 fn a_stash_apply_stopped_part_way_is_rolled_back() {
     use std::os::unix::fs::PermissionsExt;
     if unsafe { libc::geteuid() } == 0 {
-        assert!(std::env::var_os("CI").is_none(), "root writes read-only files");
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "root writes read-only files"
+        );
         return;
     }
     let (dir, mut repo) = init_repo();

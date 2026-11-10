@@ -189,7 +189,10 @@ pub(crate) fn conflicted_files(index: &git2::Index) -> Result<Vec<String>, git2:
 pub(crate) fn commit_label(commit: &git2::Commit<'_>) -> Result<String, git2::Error> {
     let short = commit.as_object().short_id()?;
     let summary = commit.summary().ok().flatten().unwrap_or("");
-    Ok(format!("{} ({summary})", short.as_str().unwrap_or_default()))
+    Ok(format!(
+        "{} ({summary})",
+        short.as_str().unwrap_or_default()
+    ))
 }
 
 /// Pauses a cherry-pick, revert or rebase step at its file/folder conflict as libgit2's pick
