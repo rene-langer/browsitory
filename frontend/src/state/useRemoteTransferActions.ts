@@ -182,6 +182,12 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
   // ended while nobody listened. Show it again and keep following its events; the worker runs one
   // command at a time, so once a read sent now answers, the transfer is over, and a terminal event
   // missed meanwhile can't leave the tab busy for good. Saved again when the tab goes away.
+  // Runs on mount, unmount and a repository change only: a new `client` object (a caller that
+  // builds one per render) must not save and restore the running transfer in a loop.
+  const latestClient = useRef(client);
+  useEffect(() => {
+    latestClient.current = client;
+  });
   useEffect(() => {
     const detached = detachedTransfers.get(repoPath);
     detachedTransfers.delete(repoPath);
@@ -190,7 +196,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
       session.current = restored;
       shownProgress.current = detached.transfer;
       setState((prev) => ({ ...prev, pending: true, transfer: detached.transfer, transferSubject: restored.request.subject }));
-      void client
+      void latestClient.current
         .getHeadInfo(repoPath)
         .catch(() => {})
         .then(() => {
@@ -205,7 +211,7 @@ export function useRemoteTransferActions(context: RemoteTransferContext): Remote
         detachedTransfers.set(repoPath, { session: running, transfer: shownProgress.current });
       }
     };
-  }, [client, repoPath, setState]);
+  }, [repoPath, setState]);
 
   // Refuses `name` when `existing` already holds it, reporting it like any failed mutation (also
   // in `state.error`); returns the message, or `null` when the name is free. `folders` also

@@ -874,6 +874,29 @@ describe("useAppState", () => {
     expect(third.result.current.state.transferSubject).toBeNull();
   });
 
+  it("keeps a running transfer through renders that pass a new client object", async () => {
+    resetDetachedTransfers();
+    let headInfoCalls = 0;
+    const overrides = {
+      fetchRemote: async () => "fetch-1",
+      getHeadInfo: async (path: string) => {
+        headInfoCalls += 1;
+        return transferClient().getHeadInfo(path);
+      },
+    };
+    // A new client each render, as callers that build one inline do.
+    const { result, rerender } = renderHook(() => useAppState(transferClient(overrides), TEST_REPO_PATH));
+    await act(() => result.current.refresh());
+    const before = headInfoCalls;
+    await act(() => result.current.fetchRemote("origin"));
+    rerender();
+    rerender();
+    // No save-and-restore cycle: no probe reads, still the same transfer.
+    expect(headInfoCalls).toBe(before);
+    expect(result.current.state.transferSubject).toEqual({ kind: "fetch", remoteName: "origin" });
+    expect(result.current.state.pending).toBe(true);
+  });
+
   it("is not loaded until its first refresh has answered (#660)", async () => {
     const { result } = renderHook(() => useAppState(transferClient(), TEST_REPO_PATH));
     expect(result.current.state.loaded).toBe(false);
