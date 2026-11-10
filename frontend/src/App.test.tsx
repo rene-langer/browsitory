@@ -3384,6 +3384,31 @@ describe("commit flow (#651)", () => {
     await waitFor(() => expect(pushCurrentBranch).toHaveBeenCalledWith("/repos/a", "origin", false));
   });
 
+  it("asks for a git identity when none is set, saves it and commits again (#689)", async () => {
+    let attempts = 0;
+    const commit = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new RepoError("MissingIdentity", "Set your name and email for git before committing.");
+      return { kind: "Committed" as const, commitId: COMMIT_ID };
+    });
+    const setIdentity = vi.fn(async () => {});
+    render(<App client={flowClient({ listRemotes: async () => [], commit, setIdentity })} />);
+    const { button } = await typeAndFind();
+    fireEvent.click(button);
+
+    const dialog = await screen.findByRole("dialog", { name: "Set your git identity" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Name" }), { target: { value: "Ada" } });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Email" }), { target: { value: "ada@example.com" } });
+    fireEvent.click(within(dialog).getByRole("radio", { name: "This repository only" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save and commit" }));
+
+    await waitFor(() => expect(setIdentity).toHaveBeenCalledWith("/repos/a", "Ada", "ada@example.com", false));
+    expect(await notifications().findByText("Committed abcdef1 to main")).toBeInTheDocument();
+    expect(commit).toHaveBeenCalledTimes(2);
+    expect(commit).toHaveBeenLastCalledWith("/repos/a", "feat: flow", false, []);
+    expect(screen.queryByRole("dialog", { name: "Set your git identity" })).toBeNull();
+  });
+
   it("offers Undo when there is nowhere to push, and undoes the commit", async () => {
     const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Commit" }));
     render(<App client={flowClient({ listRemotes: async () => [], getUndoState: async () => ({ undo: "Commit", redo: null }), undo })} />);

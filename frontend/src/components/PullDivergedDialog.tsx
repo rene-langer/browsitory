@@ -1,12 +1,7 @@
 import { useState } from "react";
-import type { PullStrategy } from "../ipc/RepoClient";
+import { shortRefName } from "../lib/shortRefName";
 import { FormDialog } from "./primitives/FormDialog";
 import styles from "./PullDivergedDialog.module.css";
-
-/** `refs/remotes/origin/main` → `origin/main`, as the branch list shows it. */
-export function shortRefName(ref: string): string {
-  return ref.replace(/^refs\/(remotes|heads)\//, "");
-}
 
 /**
  * A pull whose branch and upstream have diverged and no strategy says how to combine them: Merge,
@@ -80,10 +75,3 @@ export function PullDivergedDialog({
     </FormDialog>
   );
 }
-
-/** The Pull menu's names for the strategies (#652). */
-export const PULL_STRATEGY_LABELS: Record<PullStrategy, string> = {
-  Merge: "Merge",
-  Rebase: "Rebase",
-  FastForwardOnly: "Fast-forward only",
-};

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { RepoClient } from "./ipc/RepoClient";
+import { RepoError, type RepoClient } from "./ipc/RepoClient";
 import { fakeRepoClient } from "./test/fakeRepoClient";
 
 // Whole-App renders, like App.test.tsx (#217's slow-machine budget).
@@ -186,6 +186,31 @@ describe("the current-branch switcher (#638)", () => {
     await screen.findByRole("combobox", { name: "Switch branch" });
     const options = screen.getAllByRole("option").map((option) => option.textContent);
     expect(options[0]).toBe("fix/login");
+  });
+
+  it("offers Stash and switch when local changes are in the way, then toasts with Undo (#653)", async () => {
+    const switchBranch = vi.fn(async () => {
+      throw new RepoError("LocalChanges", "Your local changes would be overwritten by switching to feature.");
+    });
+    const stashAndSwitch = vi.fn(async () => ({ kind: "Reapplied" as const }));
+    await renderApp(
+      layoutClient({
+        switchBranch,
+        getSwitchConflicts: async () => ["a.txt"],
+        stashAndSwitch,
+        getUndoState: async () => ({ undo: "Switch to feature with local changes", redo: null }),
+      }),
+    );
+    fireEvent.click(await within(toolbar()).findByRole("button", { name: /^Current branch main/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "feature" }));
+    const dialog = await screen.findByRole("dialog", { name: "Local changes are in the way" });
+    expect(dialog).toHaveTextContent("a.txt");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stash and switch" }));
+    await waitFor(() => expect(stashAndSwitch).toHaveBeenCalledWith("/repos/a", "feature", true));
+    const notifications = within(screen.getByRole("status", { name: "Notifications" }));
+    expect(await notifications.findByText("Switched to feature with your changes")).toBeInTheDocument();
+    expect(notifications.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Local changes are in the way" })).toBeNull();
   });
 
   // One create-and-checkout, so one Undo takes it back (#656).

@@ -20,6 +20,7 @@ import {
   type HistoryEditRequest,
 } from "../lib/historyEdits";
 import { logFailure } from "../lib/logger";
+import { shortRefName } from "../lib/shortRefName";
 import type { PresetAction } from "../lib/rebaseSelection";
 import type { AppState } from "./useAppState";
 import type { RunMutation } from "./useMutationRunner";
@@ -115,8 +116,8 @@ export function useMergeRebaseActions(
         const step = await client.startRebase(repoPath, upstreamRef, plan);
         // A pause shows in the rebase progress panel instead.
         if (step.kind === "Done") {
-          const onto = upstreamRef.replace(/^refs\/(remotes|heads)\//, "");
-          setState((prev) => ({ ...prev, historyEditOutcome: { message: `Rebased onto ${onto}` } }));
+          const message = `Rebased onto ${shortRefName(upstreamRef)}`;
+          setState((prev) => ({ ...prev, historyEditOutcome: { message } }));
         }
       }),
     [client, runMutation, repoPath, setState],

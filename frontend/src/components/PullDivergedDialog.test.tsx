@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { PullDivergedDialog, shortRefName } from "./PullDivergedDialog";
+import { shortRefName } from "../lib/shortRefName";
+import { PullDivergedDialog } from "./PullDivergedDialog";
 
 function renderDialog(props: Partial<Parameters<typeof PullDivergedDialog>[0]> = {}) {
   const handlers = { onMerge: vi.fn(), onRebase: vi.fn(), onCancel: vi.fn() };

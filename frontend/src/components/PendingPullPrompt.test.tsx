@@ -62,9 +62,25 @@ describe("PendingPullPrompt (#652)", () => {
     expect(await screen.findByRole("dialog", { name: "Pull has diverged" })).toBeInTheDocument();
   });
 
-  it("asks instead of merging while the repository is busy", async () => {
-    const { onMerge } = renderPrompt("Merge", { operationDisabled: true, operationDisabledReason: "A rebase is in progress." });
+  it("waits while the repository is busy, saying why, then merges once it is idle", async () => {
+    const handlers = {
+      getPullStrategy: vi.fn(async () => "Merge" as const),
+      setPullStrategy: vi.fn(async () => {}),
+      onMerge: vi.fn(),
+      onRebase: vi.fn(),
+      onCancel: vi.fn(),
+    };
+    const props = { upstreamRef: "refs/remotes/origin/main", branchName: "main", ...handlers };
+    const { rerender } = render(
+      <PendingPullPrompt {...props} operationDisabled operationDisabledReason="A transfer is in progress." />,
+    );
     await screen.findByRole("dialog", { name: "Pull has diverged" });
-    expect(onMerge).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Merge" })).toHaveAttribute("title", "A transfer is in progress.");
+    expect(handlers.onMerge).not.toHaveBeenCalled();
+
+    rerender(<PendingPullPrompt {...props} operationDisabled={false} operationDisabledReason={null} />);
+    await waitFor(() => expect(handlers.onMerge).toHaveBeenCalledTimes(1));
+    rerender(<PendingPullPrompt {...props} operationDisabled={false} operationDisabledReason={null} />);
+    expect(handlers.onMerge).toHaveBeenCalledTimes(1);
   });
 });
