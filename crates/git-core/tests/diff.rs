@@ -2,8 +2,10 @@ use git_core::diff::DiffOptions;
 mod common;
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
-use common::{commit_all, init_repo, write_file};
+use common::{commit_all, commit_tree, init_repo, write_file};
+use git_core::commit_stats::{commit_stats, commit_stats_batch, CommitStats, StatsBudget};
 use git_core::diff::DiffLineOrigin;
 
 #[test]
@@ -750,4 +752,203 @@ fn staged_rename_diff_shows_only_the_edit() {
             (DiffLineOrigin::Add, "THREE\n".to_string())
         ]
     );
+}
+
+const BLOB: u32 = 0o100644;
+
+fn stats_of(repo: &git2::Repository, commit: git2::Oid) -> CommitStats {
+    commit_stats(repo, &commit.to_string(), true, 100, None)
+        .unwrap()
+        .expect("under the cap")
+}
+
+fn totals(stats: &CommitStats) -> (usize, usize, usize) {
+    (stats.files_changed, stats.insertions, stats.deletions)
+}
+
+/// Each file as `path +insertions -deletions`, sorted.
+fn file_counts(stats: &CommitStats) -> Vec<String> {
+    let mut files = Vec::new();
+    for f in &stats.files {
+        let kind = if f.binary { " (binary)" } else { "" };
+        let line = format!("{} +{} -{}{kind}", f.path, f.insertions, f.deletions);
+        files.push(line);
+    }
+    files.sort();
+    files
+}
+
+#[test]
+fn commit_stats_count_added_removed_and_modified_lines() {
+    let (_dir, repo) = init_repo();
+    let base = commit_tree(
+        &repo,
+        &[
+            ("a", "one\ntwo\nthree\n", BLOB),
+            ("c", "gone\ngone\ngone\n", BLOB),
+        ],
+        &[],
+        "base",
+    );
+    let next = commit_tree(
+        &repo,
+        &[
+            ("a", "one\nTWO\nthree\nfour\n", BLOB),
+            ("b", "new\nfile\n", BLOB),
+        ],
+        &[base],
+        "edit",
+    );
+
+    let stats = stats_of(&repo, next);
+
+    assert_eq!(totals(&stats), (3, 4, 4));
+    assert_eq!(file_counts(&stats), ["a +2 -1", "b +2 -0", "c +0 -3"]);
+}
+
+#[test]
+fn commit_stats_of_a_root_commit_count_every_line_as_added() {
+    let (_dir, repo) = init_repo();
+    let root = commit_tree(
+        &repo,
+        &[("a", "1\n2\n", BLOB), ("b", "3\n", BLOB)],
+        &[],
+        "root",
+    );
+
+    assert_eq!(totals(&stats_of(&repo, root)), (2, 3, 0));
+}
+
+/// Like the commit's file list (`commit_files`), a rename is a removed and an added file.
+#[test]
+fn commit_stats_count_a_rename_like_the_file_list() {
+    let (_dir, repo) = init_repo();
+    let contents = "1\n2\n3\n4\n5\n";
+    let base = commit_tree(&repo, &[("old", contents, BLOB)], &[], "base");
+    let moved = commit_tree(&repo, &[("new", contents, BLOB)], &[base], "move");
+
+    let stats = stats_of(&repo, moved);
+
+    assert_eq!(totals(&stats), (2, 5, 5));
+    assert_eq!(file_counts(&stats), ["new +5 -0", "old +0 -5"]);
+    let id = moved.to_string();
+    let mut listed = git_core::diff::commit_files(&repo, &id).unwrap();
+    listed.sort();
+    assert_eq!(listed, ["new", "old"]);
+}
+
+#[test]
+fn commit_stats_count_a_binary_file_but_no_lines() {
+    let (_dir, repo) = init_repo();
+    let base = commit_tree(&repo, &[("bin", "a\0b\n", BLOB)], &[], "base");
+    let next = commit_tree(
+        &repo,
+        &[("bin", "a\0c\n", BLOB), ("t", "text\n", BLOB)],
+        &[base],
+        "binary edit",
+    );
+
+    let stats = stats_of(&repo, next);
+
+    assert_eq!(totals(&stats), (2, 1, 0));
+    assert_eq!(file_counts(&stats), ["bin +0 -0 (binary)", "t +1 -0"]);
+}
+
+#[test]
+fn commit_stats_of_a_merge_compare_it_with_its_first_parent() {
+    let (_dir, repo) = init_repo();
+    let base = commit_tree(&repo, &[("base", "x\n", BLOB)], &[], "base");
+    let ours = commit_tree(
+        &repo,
+        &[("base", "x\n", BLOB), ("a", "a\n", BLOB)],
+        &[base],
+        "ours",
+    );
+    let theirs = commit_tree(
+        &repo,
+        &[("base", "x\n", BLOB), ("b", "b\nb\nb\n", BLOB)],
+        &[base],
+        "theirs",
+    );
+    let merge = commit_tree(
+        &repo,
+        &[
+            ("base", "x\n", BLOB),
+            ("a", "a\n", BLOB),
+            ("b", "b\nb\nb\n", BLOB),
+        ],
+        &[ours, theirs],
+        "merge",
+    );
+
+    let stats = stats_of(&repo, merge);
+
+    assert_eq!(totals(&stats), (1, 3, 0));
+    assert_eq!(file_counts(&stats), ["b +3 -0"]);
+}
+
+#[test]
+fn commit_stats_without_files_keep_only_the_totals() {
+    let (_dir, repo) = init_repo();
+    let root = commit_tree(&repo, &[("a", "one\n", BLOB)], &[], "root");
+
+    let stats = commit_stats(&repo, &root.to_string(), false, 100, None)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(totals(&stats), (1, 1, 0));
+    assert!(stats.files.is_empty());
+}
+
+#[test]
+fn commit_stats_over_the_cap_are_not_counted() {
+    let (_dir, repo) = init_repo();
+    let root = commit_tree(
+        &repo,
+        &[("a.txt", "one\n", BLOB), ("b.txt", "two\n", BLOB)],
+        &[],
+        "root",
+    );
+    let id = root.to_string();
+    let past = Some(Instant::now());
+
+    // More files than `max_files`, exactly `max_files`, and past the deadline.
+    assert!(commit_stats(&repo, &id, false, 1, None).unwrap().is_none());
+    assert!(commit_stats(&repo, &id, false, 2, None).unwrap().is_some());
+    assert!(commit_stats(&repo, &id, false, 2, past).unwrap().is_none());
+}
+
+#[test]
+fn commit_stats_batch_answers_in_order_and_stops_at_the_request_budget() {
+    let (_dir, repo) = init_repo();
+    let root = commit_tree(&repo, &[("a", "1\n", BLOB)], &[], "root");
+    let next = commit_tree(&repo, &[("a", "1\n2\n", BLOB)], &[root], "next");
+    // A commit that isn't there (gone after a force push) is answered with no stats.
+    let ids = [next.to_string(), "0".repeat(40), root.to_string()];
+    let roomy = StatsBudget {
+        request: Duration::from_secs(60),
+        ..StatsBudget::default()
+    };
+    let hurried = StatsBudget {
+        request: Duration::ZERO,
+        ..roomy
+    };
+
+    let all = commit_stats_batch(&repo, &ids, false, roomy);
+    let first_only = commit_stats_batch(&repo, &ids, false, hurried);
+
+    let mut answered = Vec::new();
+    for (id, stats) in &all {
+        answered.push((id.as_str(), stats.as_ref().map(|s| s.insertions)));
+    }
+    assert_eq!(
+        answered,
+        [
+            (ids[0].as_str(), Some(1)),
+            (ids[1].as_str(), None),
+            (ids[2].as_str(), Some(1))
+        ]
+    );
+    assert_eq!(first_only.len(), 1);
+    assert_eq!(first_only[0].0, ids[0]);
 }
