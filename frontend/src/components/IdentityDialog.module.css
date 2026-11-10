@@ -1,0 +1,40 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.intro {
+  margin: 0;
+}
+
+.scope {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.scope legend {
+  padding: 0;
+  margin-bottom: var(--space-1);
+}
+
+.choice {
+  flex-direction: row;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.problem {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+}

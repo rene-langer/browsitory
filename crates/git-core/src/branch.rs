@@ -30,6 +30,15 @@ pub enum BranchError {
     /// The branch is being rebased in a terminal, in this or another worktree (#263).
     #[error(transparent)]
     BeingRebased(#[from] crate::repo::BranchBeingRebased),
+    /// The switch's safe checkout would overwrite local changes (or untracked files) that differ
+    /// from the target; nothing changed. [`switch_conflicts`] names the files (#653).
+    #[error(
+        "Your local changes would be overwritten by switching to {0}. Commit or stash them first."
+    )]
+    LocalChanges(String),
+    /// Stashing the local changes for [`stash_and_switch`] failed, or putting them back did.
+    #[error(transparent)]
+    Stash(#[from] crate::stash::StashError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +90,18 @@ fn resolve_start_point<'repo>(
     }
 }
 
+/// Creates `name` at `start_point` without checking it out, like `git branch <name> <start>`.
+pub fn create_branch_only(
+    repo: &Repository,
+    name: &str,
+    start_point: &str,
+) -> Result<(), BranchError> {
+    let commit = resolve_start_point(repo, start_point)?;
+    repo.branch(name, &commit, false)?;
+    Ok(())
+}
+
+/// Creates `name` at `start_point` and switches to it, like `git switch -c <name> <start>`.
 pub fn create_branch(repo: &Repository, name: &str, start_point: &str) -> Result<(), BranchError> {
     let commit = resolve_start_point(repo, start_point)?;
     // Before the branch is created: a start point whose tree brings in a case pair would only
@@ -142,14 +163,133 @@ pub fn switch_branch(repo: &Repository, name: &str) -> Result<(), BranchError> {
     // A file with other hard links gets a name of its own before it is written (#420).
     let mut checkout = git2::build::CheckoutBuilder::new();
     crate::hardlink::on_checkout(repo, &mut checkout);
-    // A file another program holds open: say so, not libgit2's raw error (#303).
+    // A file another program holds open: say so, not libgit2's raw error (#303). Local changes
+    // in the way are their own error, so the app can offer to stash them (#653).
     repo.checkout_tree(target.as_object(), Some(&mut checkout))
-        .map_err(crate::worktree_guard::held_open::<BranchError>(
-            repo.workdir(),
-            crate::HeldDuring::Switch,
-        ))?;
+        .map_err(|error| {
+            if error.code() == git2::ErrorCode::Conflict {
+                BranchError::LocalChanges(name.to_string())
+            } else {
+                crate::worktree_guard::held_open::<BranchError>(
+                    repo.workdir(),
+                    crate::HeldDuring::Switch,
+                )(error)
+            }
+        })?;
     repo.set_head(&branch_ref)?;
     Ok(())
+}
+
+/// The files whose local changes (or untracked files) keep a switch to `name` from running: every
+/// changed, staged or untracked path that the switch would change too (HEAD's tree and the
+/// target's differ there), which is what the safe checkout refuses to overwrite. Reads only.
+/// Empty when no local change is in the way.
+pub fn switch_conflicts(repo: &Repository, name: &str) -> Result<Vec<String>, BranchError> {
+    let target = repo
+        .find_reference(&format!("refs/heads/{name}"))?
+        .peel_to_tree()?;
+    let head = repo.head().and_then(|head| head.peel_to_tree()).ok();
+    let diff = repo.diff_tree_to_tree(head.as_ref(), Some(&target), None)?;
+    let mut switched = std::collections::BTreeSet::new();
+    for delta in diff.deltas() {
+        for path in [delta.old_file().path(), delta.new_file().path()]
+            .into_iter()
+            .flatten()
+        {
+            switched.insert(path.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let mut paths = Vec::new();
+    for entry in repo.statuses(Some(&mut options))?.iter() {
+        let Ok(path) = entry.path() else { continue };
+        if switched.contains(path) {
+            paths.push(path.to_string());
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+/// What [`stash_and_switch`] did with the stashed changes once on the new branch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StashSwitchOutcome {
+    /// Left in the stash list, as asked (`stash@{0}`).
+    Stashed,
+    /// Applied on the new branch and dropped from the stash list.
+    Reapplied,
+    /// Applied with conflicts; the stash stays in the list, like `git stash pop`.
+    Conflicted { files: Vec<String> },
+    /// Couldn't be applied on the new branch (the text says why); the stash stays in the list.
+    NotReapplied { reason: String },
+}
+
+/// "Stash and switch" (#653): stashes every local change (untracked files too), switches to
+/// `name`, then, with `reapply`, pops the stash onto the new branch. A switch that is refused
+/// after the stash was saved puts the changes back before returning its error, so a failure
+/// leaves the repository as it was.
+pub fn stash_and_switch(
+    repo: &mut Repository,
+    name: &str,
+    reapply: bool,
+) -> Result<StashSwitchOutcome, BranchError> {
+    // The refusals that don't depend on the work tree, before anything is stashed.
+    crate::repo::check_branch_not_rebased_elsewhere(repo, name)?;
+    if let Some(held) = crate::repo::branch_held(
+        repo,
+        name,
+        crate::repo::HoldRule::CheckOut {
+            include_this: false,
+        },
+    )? {
+        return Err(held.into());
+    }
+    repo.find_reference(&format!("refs/heads/{name}"))?;
+    let from = repo
+        .head()
+        .ok()
+        .and_then(|head| head.shorthand().ok().map(str::to_string))
+        .unwrap_or_else(|| "HEAD".to_string());
+    let options = crate::stash::StashOptions {
+        message: Some(format!("Changes on {from} before switching to {name}")),
+        keep_index: false,
+        include_untracked: true,
+        paths: Vec::new(),
+    };
+    crate::stash::save_stash(repo, &options)?;
+    let stash_id = crate::stash::list_stashes(repo)?
+        .into_iter()
+        .next()
+        .map(|entry| entry.commit_id);
+    if let Err(error) = switch_branch(repo, name) {
+        // Back to how it was: the switch moved nothing, so the stash applies cleanly.
+        crate::stash::pop_stash(repo, 0, stash_id.as_deref(), true)?;
+        return Err(error);
+    }
+    if !reapply {
+        return Ok(StashSwitchOutcome::Stashed);
+    }
+    let popped = match crate::stash::pop_stash(repo, 0, stash_id.as_deref(), true) {
+        // The staged part doesn't fit the new branch's index: apply it all unstaged instead.
+        Err(crate::stash::StashError::IndexConflict) => {
+            crate::stash::pop_stash(repo, 0, stash_id.as_deref(), false)
+        }
+        other => other,
+    };
+    Ok(match popped {
+        Ok(crate::stash::StashApplyOutcome::Applied) => StashSwitchOutcome::Reapplied,
+        Ok(crate::stash::StashApplyOutcome::Conflicted { files }) => {
+            StashSwitchOutcome::Conflicted { files }
+        }
+        Err(error) => StashSwitchOutcome::NotReapplied {
+            reason: error.to_string(),
+        },
+    })
 }
 
 /// Checks out `commit_id` as a detached HEAD. Same refuse-before-move ordering as

@@ -321,10 +321,38 @@ pub(crate) enum Command {
     ListBranches {
         reply: Sender<Result<Vec<BranchInfo>, ErrorDto>>,
     },
+    /// `checkout`: switch to the new branch too (`git switch -c`), else only create it (#656).
     CreateBranch {
         name: String,
         start_point: String,
+        checkout: bool,
         reply: Sender<Result<(), ErrorDto>>,
+    },
+    /// The files whose local changes keep a switch to `name` from running (#653).
+    GetSwitchConflicts {
+        name: String,
+        reply: Sender<Result<Vec<String>, ErrorDto>>,
+    },
+    /// Stashes the local changes, switches to `name` and, with `reapply`, pops them there (#653).
+    /// `operation_id` and `events` as for `SwitchBranch`.
+    StashAndSwitch {
+        name: String,
+        reapply: bool,
+        operation_id: cancel::OperationId,
+        events: Sender<HookEvent>,
+        reply: Sender<Result<git_core::branch::StashSwitchOutcome, ErrorDto>>,
+    },
+    /// Sets `user.name`/`user.email` in the repository's config, or with `global` the user's
+    /// global git config (#689).
+    SetIdentity {
+        name: String,
+        email: String,
+        global: bool,
+        reply: Sender<Result<(), ErrorDto>>,
+    },
+    /// The pull strategy the current branch's git config sets, if any (#652).
+    GetPullDefaults {
+        reply: Sender<Result<Option<git_core::remote::PullStrategy>, ErrorDto>>,
     },
     /// `operation_id` (`switch-<n>`) is what `cancel_transfer` stops; `events` reports
     /// `post-checkout` (#185).

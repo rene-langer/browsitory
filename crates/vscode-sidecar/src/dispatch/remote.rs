@@ -1,6 +1,7 @@
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
-    transfer_progress_dto, PullOutcomeDto, RemoteAuthModeDto, RemoteInfoDto, UpstreamInfoDto,
+    transfer_progress_dto, PullOutcomeDto, PullStrategyDto, RemoteAuthModeDto, RemoteInfoDto,
+    UpstreamInfoDto,
 };
 use repo_service::worker::TransferEvent;
 use serde::Deserialize;
@@ -485,6 +486,38 @@ pub(super) fn push_tags(
         event_tx,
     )?;
     Ok(Value::String(operation_id))
+}
+
+/// The pull strategy for a diverged pull (#652): the one remembered for this repository, else
+/// its git config's, else `null` (ask).
+pub(super) fn get_pull_strategy(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    let strategy: Option<PullStrategyDto> =
+        match config::get_pull_preference(std::path::Path::new(&params.repo_path))
+            .map_err(ErrorDto::from_error)?
+        {
+            Some(strategy) => Some(strategy.into()),
+            None => worker_handle(repos, &params.repo_path)?
+                .pull_defaults()?
+                .map(PullStrategyDto::from),
+        };
+    serde_json::to_value(strategy).map_err(ErrorDto::from_error)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SetPullStrategyParams {
+    repo_path: String,
+    strategy: PullStrategyDto,
+}
+
+/// Remembers the pull strategy for this repository (#652).
+pub(super) fn set_pull_strategy(params: SetPullStrategyParams) -> Result<Value, ErrorDto> {
+    config::set_pull_preference(
+        std::path::Path::new(&params.repo_path),
+        params.strategy.into(),
+    )
+    .map_err(ErrorDto::from_error)?;
+    Ok(Value::Null)
 }
 
 pub(super) fn pull_current_upstream(

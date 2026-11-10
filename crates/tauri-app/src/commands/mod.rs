@@ -37,7 +37,10 @@ mod undo;
 mod wire_snapshots;
 mod worktree;
 
-pub use branch::{create_branch, delete_branch, list_branches, rename_branch, switch_branch};
+pub use branch::{
+    create_branch, delete_branch, get_switch_conflicts, list_branches, rename_branch,
+    stash_and_switch, switch_branch,
+};
 pub use clone::{cancel_clone, clone_repo, init_repo, CloneState};
 pub use compare::{
     get_branch_compare_range, get_range_diff, get_range_files, get_working_tree_compare_diff,
@@ -73,8 +76,8 @@ pub use status::{
     get_commit_rename_diff, get_commit_signature, get_commit_stats, get_file_history,
     get_graph_branch_selection, get_graph_remote_branch_selection, get_line_history, get_status,
     get_working_diff, ignore_path, locate_commit, set_graph_branch_selection,
-    set_graph_remote_branch_selection, stage_file, stage_hunk, stage_lines, unstage_file,
-    unstage_hunk, unstage_lines,
+    set_graph_remote_branch_selection, set_identity, stage_file, stage_hunk, stage_lines,
+    unstage_file, unstage_hunk, unstage_lines,
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};

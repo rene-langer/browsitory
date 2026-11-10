@@ -17,12 +17,13 @@ use repo_service::wire::{
     FetchSettingsDto, FileContentDto, FileHistoryEntryDto, FileSidesDto, ForgeRepositoryDto,
     GitToolsDto, GraphCommitDto, HeadInfoDto, LineHistoryDto, MarkResolvedOutcomeDto,
     MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto,
-    PullRequestDto, PullRequestListDto, RebaseAbortDto, RebaseInfoDto, RebasePlanCommitDto,
-    RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto, SearchPageDto, SequenceAbortDto,
-    SequenceOutcomeDto, SequenceProgressDto, SignatureInputDto, StashApplyOutcomeDto,
-    StashEntryDto, StashFilesDto, StatusEntryDto, SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto,
-    TerminalSequenceDto, TreeListingDto, UndoOutcomeDto, UndoStateDto, UpdateSettingsDto,
-    UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
+    PullRequestDto, PullRequestListDto, PullStrategyDto, RebaseAbortDto, RebaseInfoDto,
+    RebasePlanCommitDto, RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto, SearchPageDto,
+    SequenceAbortDto, SequenceOutcomeDto, SequenceProgressDto, SignatureInputDto,
+    StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StashSwitchOutcomeDto, StatusEntryDto,
+    SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto, TerminalSequenceDto, TreeListingDto,
+    UndoOutcomeDto, UndoStateDto, UpdateSettingsDto, UpstreamInfoDto, WorkspaceDto,
+    WorktreeInfoDto,
 };
 
 #[path = "../../../test-support/wire_fixtures.rs"]
@@ -260,6 +261,16 @@ fn snapshots() -> Vec<(String, String)> {
         "StashApplyOutcome",
         fixtures::stash_apply_outcomes(),
         StashApplyOutcomeDto::from,
+    );
+    s.add(
+        "StashSwitchOutcome",
+        fixtures::stash_switch_outcomes(),
+        StashSwitchOutcomeDto::from,
+    );
+    s.add(
+        "PullStrategy",
+        fixtures::pull_strategies(),
+        PullStrategyDto::from,
     );
     s.add("StashFiles", fixtures::stash_files(), StashFilesDto::from);
     s.add("BlameLine", fixtures::blame_lines(), BlameLineDto::from);

@@ -111,7 +111,9 @@ describe("working-tree view (#639)", () => {
     rerender(<Pane client={client} status={[entry("b.txt", false), entry("a.txt", true), entry("c.txt", true, "New")]} />);
 
     expect(await within(viewer()).findByText("unstaged b.txt")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /b\.txt/ })).toHaveAttribute("aria-selected", "true");
+    // The diff's lines are options too (#668): look in the file list.
+    const unstaged = screen.getByRole("listbox", { name: "Unstaged changes" });
+    expect(within(unstaged).getByRole("option", { name: /b\.txt/ })).toHaveAttribute("aria-selected", "true");
   });
 
   it("moves to the other group when the current file's group empties", async () => {

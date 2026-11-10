@@ -168,6 +168,19 @@ working tree, commits, stashes and compares. In the working tree the whole file 
 A file longer than 10,000 lines is too long to show whole: a note says so and the diff keeps the
 normal context.
 
+**Large and generated diffs** start collapsed, so opening one never stalls the pane: a diff with
+more than 1,000 lines (context included), or of a file that tools write, shows **Load diff (N
+lines)** instead. Generated files are lockfiles (such as `Cargo.lock`, `package-lock.json`,
+`pnpm-lock.yaml`, `yarn.lock`, `go.sum` or `poetry.lock`), minified code (`.min.js`,
+`.min.css`) and source maps (`.map`). A loaded diff stays loaded for that file, also after you
+stage part of it. A loaded diff shows its first 2,000 lines; **Show 2,000 more** and **Show all**
+below it show the rest. `]` and `↓` move past the last shown line and show more on their own.
+
+With a screen reader, each line of a diff is read with what it is and its line number, such as
+"Added line 12", "Removed line 7" or "Unchanged line 3", before its text; the `+`/`−` markers
+and the line-number columns are not read. Where lines can be selected, each hunk's lines are a
+list: the line cursor is read as you move it, with whether the line is selected.
+
 The command palette also has **Toggle wrap lines** and **Toggle show whole file**, which change
 the same options. **Toggle wrap lines** turns wrapping on or off depending on what the current
 diff shows: the one you last clicked or moved the focus into, or the working tree's current file.

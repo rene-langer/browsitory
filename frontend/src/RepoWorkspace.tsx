@@ -47,6 +47,9 @@ import { CopyToClipboardContext, useClipboardFeedback } from "./state/useCopyToC
 import { useCommitDraftActions } from "./state/useCommitDraftActions";
 import { useCommitFlow } from "./state/useCommitFlow";
 import { useNarrowLayout } from "./state/useNarrowLayout";
+import { useRemoteBranchList } from "./state/useRemoteBranchList";
+import { usePullStrategy } from "./state/usePullStrategy";
+import { useStashSwitchToasts } from "./state/useStashSwitchToasts";
 import { useOutcomeToasts } from "./state/useOutcomeToasts";
 import { useSequenceActions } from "./state/useSequenceActions";
 import { useUndoRedoActions } from "./state/useUndoRedoActions";
@@ -287,6 +290,10 @@ export function RepoWorkspace({
   // The toolbar's branch chip opens the palette straight into "Switch branch…" (#638).
   const [paletteInitialPicker, setPaletteInitialPicker] = useState<string | null>(null);
   if (!paletteOpen && paletteInitialPicker !== null) setPaletteInitialPicker(null);
+  // The toolbar's Pull menu (#652).
+  const pullStrategy = usePullStrategy(appState);
+  // The switcher's remote-only branches (#726), read while the palette is open.
+  const remoteBranches = useRemoteBranchList(client, repoPath, appState.state.remotes, paletteOpen);
   const openBranchSwitcher = () => {
     setPaletteInitialPicker(SWITCH_BRANCH_PICKER_ID);
     setPaletteOpen(true);
@@ -404,6 +411,7 @@ export function RepoWorkspace({
     else void pullCurrentUpstream();
   }, [pullCurrentUpstream, pushToast]);
   useOutcomeToasts(appState.state, pushToast, undoToastAction, pullFromToast);
+  useStashSwitchToasts(appState.state, pushToast, undoToastAction);
 
   // The palette's commands, built only while it is open.
   const paletteCommands = () =>
@@ -436,15 +444,32 @@ export function RepoWorkspace({
           recordRecentBranch(repoPath, name);
           void announce("Switched branch", appState.switchBranch)(name);
         },
+        remoteBranches,
+        // Like the Branches tree's remote Checkout: a local branch from the remote one, then
+        // its upstream (#726).
+        onCheckoutRemoteBranch: (remoteName, branchName) =>
+          void (async () => {
+            const failure = await announce(`Switched to ${branchName}, tracking ${remoteName}/${branchName}`, appState.createBranch, {
+              undoable: true,
+            })(branchName, `${remoteName}/${branchName}`, true);
+            if (failure !== null) {
+              pushToast(failure);
+              return;
+            }
+            await appState.setCurrentUpstream(remoteName, branchName);
+            recordRecentBranch(repoPath, branchName);
+          })(),
+        // One step that creates and checks out (#656), so one Undo takes it back.
         onCreateAndSwitch: (name) =>
           void (async () => {
-            const failure = await appState.createBranch(name, "HEAD");
+            const failure = await announce(`Created and switched to ${name}`, appState.createBranch, {
+              undoable: true,
+            })(name, "HEAD", true);
             if (failure !== null) {
               pushToast(failure);
               return;
             }
             recordRecentBranch(repoPath, name);
-            await announce(`Created and switched to ${name}`, appState.switchBranch)(name);
           })(),
       },
       diff: {
@@ -751,6 +776,7 @@ export function RepoWorkspace({
           onFetch: appState.fetchRemote,
           onPull: appState.pullCurrentUpstream,
           pullPending: appState.state.pendingPull !== null,
+          pullStrategy,
           onPush: appState.pushCurrentBranch,
           prune: effectiveFetchPrune(appState.state.fetchPrune, appState.state.remotes, appState.state.upstream),
           onFetchAll: appState.fetchAllRemotes,

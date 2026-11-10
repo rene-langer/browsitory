@@ -262,7 +262,7 @@ fn create_then_switch_branch_round_trips_through_the_worker() {
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
     handle
-        .create_branch("feature".into(), "HEAD".into())
+        .create_branch("feature".into(), "HEAD".into(), true)
         .unwrap();
 
     let branches = handle.list_branches().unwrap();
@@ -316,7 +316,7 @@ fn delete_branch_with_force_round_trips_through_the_worker() {
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
     handle
-        .create_branch("feature".into(), "HEAD".into())
+        .create_branch("feature".into(), "HEAD".into(), true)
         .unwrap();
     let initial_branch_name = handle
         .list_branches()

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { BranchInfo } from "../ipc/RepoClient";
+import { readCheckoutNewBranch, writeCheckoutNewBranch } from "../lib/checkoutNewBranch";
 import { branchNameProblem } from "../lib/refName";
 import formStyles from "./primitives/FormDialog.module.css";
 import { InlineError } from "./primitives/InlineError";
@@ -16,7 +17,6 @@ export function NewBranchForm({
   operationDisabled,
   busyReason,
   onCreateBranch,
-  onSwitchBranch,
   onClose,
 }: {
   draft: { startPoint: string } | null;
@@ -26,12 +26,12 @@ export function NewBranchForm({
   /** Why the form can't act now, shown in it; `null` when nothing blocks. */
   busyReason: string | null;
   // `null` = created; a string = the failure message to show inline. See `useAppState.ts`'s
-  // `createBranch` (issue #30/UX-002).
-  onCreateBranch: (name: string, startPoint: string) => Promise<string | null>;
-  onSwitchBranch: (name: string) => void;
+  // `createBranch` (issue #30/UX-002). `checkout`: switch to it too, one undo step (#656).
+  onCreateBranch: (name: string, startPoint: string, checkout: boolean) => Promise<string | null>;
   onClose: () => void;
 }) {
-  const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(false);
+  // On by default and remembered (#656).
+  const [checkoutAfterCreate, setCheckoutAfterCreate] = useState(readCheckoutNewBranch);
   const [newBranchName, setNewBranchName] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -46,14 +46,13 @@ export function NewBranchForm({
   const submitCreate = async () => {
     // Re-checked: the repository can become busy while the form is open (#561).
     if (newBranchName.trim() === "" || operationDisabled) return;
-    const failure = await onCreateBranch(newBranchName.trim(), draft.startPoint);
+    const failure = await onCreateBranch(newBranchName.trim(), draft.startPoint, checkoutAfterCreate);
     if (failure !== null) {
       setCreateError(failure);
       return;
     }
     setNewBranchName("");
     setCreateError(null);
-    if (checkoutAfterCreate) await onSwitchBranch(newBranchName.trim());
   };
 
   const close = () => {
@@ -100,7 +99,10 @@ export function NewBranchForm({
         <input
           type="checkbox"
           checked={checkoutAfterCreate}
-          onChange={(event) => setCheckoutAfterCreate(event.target.checked)}
+          onChange={(event) => {
+            setCheckoutAfterCreate(event.target.checked);
+            writeCheckoutNewBranch(event.target.checked);
+          }}
         />
         Check out after creating
       </label>

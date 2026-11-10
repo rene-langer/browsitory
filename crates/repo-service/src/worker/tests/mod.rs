@@ -21,6 +21,7 @@ mod branch;
 mod cancel;
 mod commit;
 mod forge;
+mod git_defaults;
 mod history;
 #[cfg(unix)]
 mod hooks;

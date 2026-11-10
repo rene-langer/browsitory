@@ -17,9 +17,10 @@ Pointing at a command with the mouse picks it too.
 The palette has almost every action in Browsitory, grouped like this:
 
 - **Branches:** switch to a branch, **Switch branch…** (the list the toolbar's branch button
-  opens, see [The main window](main-window.md)), merge a branch into the current one, and
-  create, check out or delete a tag.
-- **Remotes:** fetch one or all remotes, pull, push, **Push branch to…**, **Force push current
+  opens, see [The main window](main-window.md)), **Create branch…** (the New branch form),
+  merge a branch into the current one, and create, check out or delete a tag.
+- **Remotes:** fetch one or all remotes, pull, **Pull with merge**, **Pull with rebase** and
+  **Pull, fast-forward only** (each also remembered for the repository), push, **Push branch to…**, **Force push current
   branch…**, push all tags, **Browse branches on ⟨remote⟩**, add, edit or remove a remote,
   manage its credentials, delete a remote branch, and delete a tag on a remote.
 - **Stash:** stash all, **Stash…**, stash the current file or the selected files, and show,

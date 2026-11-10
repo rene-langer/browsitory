@@ -595,7 +595,9 @@ fn undo_replies_busy_while_another_holder_keeps_the_lock() {
     commit_all(&repo, "a");
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
-    handle.create_branch("x".into(), "HEAD".into()).unwrap();
+    handle
+        .create_branch("x".into(), "HEAD".into(), true)
+        .unwrap();
 
     let guard = hold(&repo);
     assert_eq!(handle.undo(), Err(crate::wire::ErrorDto::from(UNDO_BUSY)));

@@ -81,7 +81,7 @@ export type DiffSettings = { ignoreWhitespace: boolean, contextLines: number, sy
 
 export type DiffSource = { "kind": "Unstaged" } | { "kind": "Staged", oldPath: string | null, } | { "kind": "Commit", commitId: string, oldPath: string | null, } | { "kind": "Range", fromId: string, toId: string | null, oldPath: string | null, };
 
-export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied";
+export type ErrorKind = "Other" | "WorkerStopped" | "CredentialStoreFailure" | "DirtyWorktree" | "PullFailed" | "Cancelled" | "AddDeleteConflict" | "InvalidSearchQuery" | "PermissionDenied" | "LocalChanges" | "MissingIdentity";
 
 export type ExternalToolSettings = { editor: string | null, terminal: string | null, };
 
@@ -199,6 +199,8 @@ export type PullRequest = { id: string, number: number, title: string, url: stri
 
 export type PullRequestList = { pullRequests: Array<PullRequest>, truncated: boolean, };
 
+export type PullStrategy = "Merge" | "Rebase" | "FastForwardOnly";
+
 export type RebaseAbort = { restored: boolean, };
 
 export type RebaseAction = { "kind": "Pick" } | { "kind": "Reword", message: string, } | { "kind": "Edit" } | { "kind": "Squash" } | { "kind": "Fixup" } | { "kind": "Drop" };
@@ -254,6 +256,8 @@ export type StashEntry = { index: number, message: string, commitId: string, };
 export type StashFiles = { tracked: Array<string>, untracked: Array<string>, untrackedCommitId: string | null, };
 
 export type StashOptions = { message: string | null, keepIndex: boolean, includeUntracked: boolean, paths: Array<string>, };
+
+export type StashSwitchOutcome = { "kind": "Stashed" } | { "kind": "Reapplied" } | { "kind": "Conflicted", files: Array<string>, } | { "kind": "NotReapplied", reason: string, };
 
 export type StatusEntry = { path: string, 
 /**

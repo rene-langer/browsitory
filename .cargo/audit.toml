@@ -1,4 +1,4 @@
-# cargo-audit configuration (read by `cargo audit` and rustsec/audit-check in CI).
+# cargo-audit configuration (read by `cargo audit`, which CI's `audit` job runs).
 #
 # Advisory checks live here, not in deny.toml: cargo-deny only checks licences (#273).
 # Add an ignore only with a written justification and a tracking issue, and drop it in the

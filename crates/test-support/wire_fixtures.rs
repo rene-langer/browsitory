@@ -169,6 +169,16 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
                 "Permission denied",
             ))),
         ),
+        case(
+            "LocalChanges",
+            ErrorDto::from_error(git_core::branch::BranchError::LocalChanges(
+                "feature".into(),
+            )),
+        ),
+        case(
+            "MissingIdentity",
+            ErrorDto::from_error(git_core::commit::CommitError::MissingIdentity),
+        ),
     ];
     assert_every_variant!(
         cases
@@ -185,6 +195,8 @@ pub fn errors() -> Cases<repo_service::wire::ErrorDto> {
         ErrorKind::AddDeleteConflict,
         ErrorKind::InvalidSearchQuery,
         ErrorKind::PermissionDenied,
+        ErrorKind::LocalChanges,
+        ErrorKind::MissingIdentity,
     );
     cases
 }
@@ -1664,6 +1676,50 @@ pub fn stash_apply_outcomes() -> Cases<git_core::stash::StashApplyOutcome> {
         cases.iter().map(|(_, outcome)| outcome),
         StashApplyOutcome::Applied,
         StashApplyOutcome::Conflicted { .. },
+    );
+    cases
+}
+
+pub fn stash_switch_outcomes() -> Cases<git_core::branch::StashSwitchOutcome> {
+    use git_core::branch::StashSwitchOutcome;
+    let cases = vec![
+        case("Stashed", StashSwitchOutcome::Stashed),
+        case("Reapplied", StashSwitchOutcome::Reapplied),
+        case(
+            "Conflicted",
+            StashSwitchOutcome::Conflicted {
+                files: strings(&["a.txt"]),
+            },
+        ),
+        case(
+            "NotReapplied",
+            StashSwitchOutcome::NotReapplied {
+                reason: "The stash list changed; refresh and try again.".to_string(),
+            },
+        ),
+    ];
+    assert_every_variant!(
+        cases.iter().map(|(_, outcome)| outcome),
+        StashSwitchOutcome::Stashed,
+        StashSwitchOutcome::Reapplied,
+        StashSwitchOutcome::Conflicted { .. },
+        StashSwitchOutcome::NotReapplied { .. },
+    );
+    cases
+}
+
+pub fn pull_strategies() -> Cases<git_core::remote::PullStrategy> {
+    use git_core::remote::PullStrategy;
+    let cases = vec![
+        case("Merge", PullStrategy::Merge),
+        case("Rebase", PullStrategy::Rebase),
+        case("FastForwardOnly", PullStrategy::FastForwardOnly),
+    ];
+    assert_every_variant!(
+        cases.iter().map(|(_, strategy)| strategy),
+        PullStrategy::Merge,
+        PullStrategy::Rebase,
+        PullStrategy::FastForwardOnly,
     );
     cases
 }

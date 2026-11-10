@@ -12,13 +12,18 @@ window has three columns:
 
 - the sidebar button (**Ctrl+Alt+B**, **⌘⌥B** on macOS) hides or shows the sidebar;
 - the current branch and the remote branch it tracks ("main → origin/main"). Click it to
-  switch branch: type to filter the list, which starts with the branches you used last, and
-  press Enter. A name that isn't a branch yet offers **Create branch ⟨name⟩ from ⟨current⟩**,
-  which creates it at your current commit and switches to it. The command palette's **Switch
-  branch…** opens the same list;
+  switch branch: type to filter the list, which starts with the branches you used last, then
+  the other local branches, then the remote branches that have no local branch yet
+  (`origin/feature`), and press Enter. A remote branch is checked out as a new local branch of
+  the same name that tracks it. A name that isn't a branch yet offers **Create branch ⟨name⟩
+  from ⟨current⟩**, which creates it at your current commit and switches to it in one step (one
+  **Undo** takes it back); with nothing typed, **Create branch…** opens the New branch form. The
+  command palette's **Switch branch…** opens the same list;
 - **Back** and **Forward** through the commits you selected (see [History](history.md));
 - **Fetch**, **Pull** and **Push**, with `↑n` (commits to push) and `↓m` (commits to pull) for
-  the current branch (see [Branches and remotes](branches-and-remotes.md));
+  the current branch (see [Branches and remotes](branches-and-remotes.md)). Pull's menu chooses
+  how a pull combines diverged branches: **Pull with merge**, **Pull with rebase** or **Pull,
+  fast-forward only** (see [Pulling](branches-and-remotes.md#pulling));
 - what is running: a fetch, pull or push by name ("Pushing main to origin/main") with a progress
   bar and **Cancel**, or, when another action takes more than a moment, "Working…";
 - **Stash** (see [Stashes](stashes.md)), **Apply patch…** (see [Patches](patches.md#apply-a-patch-file)),

@@ -444,6 +444,21 @@ pub async fn ignore_path(
         .await
 }
 
+/// Sets the git identity commits are made with (#689): in the repository's config, or with
+/// `global` in the user's global git config.
+#[tauri::command]
+pub async fn set_identity(
+    repo_path: String,
+    name: String,
+    email: String,
+    global: bool,
+    state: State<'_, AppState>,
+) -> Result<(), ErrorDto> {
+    repo_worker(&state, &repo_path)?
+        .call(move |w| w.set_identity(name, email, global))
+        .await
+}
+
 /// `trailers` (absent: none) are appended before the hooks run.
 #[tauri::command]
 pub async fn commit(

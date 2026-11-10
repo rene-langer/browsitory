@@ -40,6 +40,10 @@ use commands::{
     start_rebase, switch_branch, undo_last, unstage_file, unstage_hunk, unstage_lines,
     update_remote_urls, update_submodule, update_workspace, AppState, CloneState,
 };
+// Git defaults: pull strategy, stash and switch, identity (#652, #653, #689).
+use commands::{
+    get_pull_strategy, get_switch_conflicts, set_identity, set_pull_strategy, stash_and_switch,
+};
 // The repository tab names (#625).
 use commands::{list_repo_aliases, set_repo_alias};
 // Open or create .gitignore and .gitattributes (#624).
@@ -118,6 +122,7 @@ commands![
     get_diff_settings,
     set_diff_settings,
     commit,
+    set_identity,
     pick_repo_folder,
     list_recent_repos,
     get_last_seen_version,
@@ -135,6 +140,8 @@ commands![
     list_branches,
     create_branch,
     switch_branch,
+    get_switch_conflicts,
+    stash_and_switch,
     delete_branch,
     rename_branch,
     list_worktrees,
@@ -186,6 +193,8 @@ commands![
     checkout_commit,
     push_tags,
     pull_current_upstream,
+    get_pull_strategy,
+    set_pull_strategy,
     list_stashes,
     save_stash,
     apply_stash,

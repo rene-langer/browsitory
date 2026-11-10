@@ -394,6 +394,74 @@ impl From<git_core::remote::PullOutcome> for PullOutcomeDto {
     }
 }
 
+/// How a diverged pull reconciles (#652): what `get_pull_strategy` answers (the choice
+/// remembered for the repository, else its git config, else `null`) and `set_pull_strategy`
+/// takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PullStrategy"))]
+pub enum PullStrategyDto {
+    Merge,
+    Rebase,
+    FastForwardOnly,
+}
+
+impl From<git_core::remote::PullStrategy> for PullStrategyDto {
+    fn from(strategy: git_core::remote::PullStrategy) -> Self {
+        use git_core::remote::PullStrategy;
+        match strategy {
+            PullStrategy::Merge => Self::Merge,
+            PullStrategy::Rebase => Self::Rebase,
+            PullStrategy::FastForwardOnly => Self::FastForwardOnly,
+        }
+    }
+}
+
+impl From<config::PullStrategyPreference> for PullStrategyDto {
+    fn from(strategy: config::PullStrategyPreference) -> Self {
+        use config::PullStrategyPreference;
+        match strategy {
+            PullStrategyPreference::Merge => Self::Merge,
+            PullStrategyPreference::Rebase => Self::Rebase,
+            PullStrategyPreference::FastForwardOnly => Self::FastForwardOnly,
+        }
+    }
+}
+
+impl From<PullStrategyDto> for config::PullStrategyPreference {
+    fn from(strategy: PullStrategyDto) -> Self {
+        match strategy {
+            PullStrategyDto::Merge => Self::Merge,
+            PullStrategyDto::Rebase => Self::Rebase,
+            PullStrategyDto::FastForwardOnly => Self::FastForwardOnly,
+        }
+    }
+}
+
+/// What "Stash and switch" did with the stashed changes (#653).
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "StashSwitchOutcome"))]
+#[serde(tag = "kind")]
+pub enum StashSwitchOutcomeDto {
+    Stashed,
+    Reapplied,
+    Conflicted { files: Vec<String> },
+    NotReapplied { reason: String },
+}
+
+impl From<git_core::branch::StashSwitchOutcome> for StashSwitchOutcomeDto {
+    fn from(outcome: git_core::branch::StashSwitchOutcome) -> Self {
+        use git_core::branch::StashSwitchOutcome;
+        match outcome {
+            StashSwitchOutcome::Stashed => Self::Stashed,
+            StashSwitchOutcome::Reapplied => Self::Reapplied,
+            StashSwitchOutcome::Conflicted { files } => Self::Conflicted { files },
+            StashSwitchOutcome::NotReapplied { reason } => Self::NotReapplied { reason },
+        }
+    }
+}
+
 impl From<git_core::remote::UpstreamInfo> for UpstreamInfoDto {
     fn from(upstream: git_core::remote::UpstreamInfo) -> Self {
         Self {
@@ -2701,6 +2769,13 @@ pub enum ErrorKind {
     InvalidSearchQuery,
     /// The operating system refused a file access for lack of permission (#527).
     PermissionDenied,
+    /// A switch (or a create-and-switch) refused because its checkout would overwrite local
+    /// changes; `get_switch_conflicts` names the files and `stash_and_switch` offers a way on
+    /// (#653).
+    LocalChanges,
+    /// A commit or amend refused because git has no `user.name`/`user.email`; `set_identity`
+    /// sets them (#689).
+    MissingIdentity,
 }
 
 impl ErrorKind {
@@ -2723,10 +2798,16 @@ impl ErrorKind {
 
     fn of_one(error: &(dyn std::error::Error + 'static)) -> Option<Self> {
         use crate::credentials::CredentialStoreError;
+        use git_core::branch::BranchError;
+        use git_core::commit::CommitError;
         use git_core::merge::MergeError;
         use git_core::remote::RemoteError;
         use git_core::search::SearchError;
-        if let Some(error) = error.downcast_ref::<RemoteError>() {
+        if let Some(BranchError::LocalChanges(_)) = error.downcast_ref::<BranchError>() {
+            Some(Self::LocalChanges)
+        } else if let Some(CommitError::MissingIdentity) = error.downcast_ref::<CommitError>() {
+            Some(Self::MissingIdentity)
+        } else if let Some(error) = error.downcast_ref::<RemoteError>() {
             match error {
                 RemoteError::DirtyWorktree => Some(Self::DirtyWorktree),
                 RemoteError::Cancelled => Some(Self::Cancelled),
@@ -2871,6 +2952,8 @@ mod ts_bindings {
             TagInfoDto,
             UpstreamInfoDto,
             PullOutcomeDto,
+            PullStrategyDto,
+            StashSwitchOutcomeDto,
             StashEntryDto,
             BlameLineDto,
             GraphCommitDto,
@@ -3117,6 +3200,14 @@ mod error_kinds {
             (
                 ErrorDto::from_error(MergeError::Io(permission)),
                 ErrorKind::PermissionDenied,
+            ),
+            (
+                ErrorDto::from_error(git_core::branch::BranchError::LocalChanges("x".into())),
+                ErrorKind::LocalChanges,
+            ),
+            (
+                ErrorDto::from_error(git_core::commit::CommitError::MissingIdentity),
+                ErrorKind::MissingIdentity,
             ),
         ];
         for (error, kind) in cases {
