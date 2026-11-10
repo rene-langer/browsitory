@@ -1,26 +1,15 @@
 use crate::wire::ErrorDto;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 
-use git_core::remote::{PullOutcome, RemoteInfo, TransferOperation, UpstreamInfo};
+use git_core::remote::{
+    CredentialProvider, PullOutcome, RemoteError, RemoteInfo, TransferOperation, TransferReporter,
+    UpstreamInfo,
+};
 
+use super::transfer_thread::{self, Wait};
 use super::{Command, TransferEvent, WorkerHandle};
 use crate::credentials::{CredentialService, CredentialStore};
-
-struct ChannelReporter {
-    events: Sender<TransferEvent>,
-    operation_id: String,
-}
-
-impl git_core::remote::TransferReporter for ChannelReporter {
-    fn report(&mut self, progress: git_core::remote::TransferProgress) {
-        let _ = self.events.send(TransferEvent::Progress(
-            git_core::remote::TransferProgress {
-                operation_id: self.operation_id.clone(),
-                ..progress
-            },
-        ));
-    }
-}
 
 pub(super) fn list(repo: &git2::Repository, reply: Sender<Result<Vec<RemoteInfo>, ErrorDto>>) {
     let _ = reply.send(git_core::remote::list_remotes(repo).map_err(ErrorDto::from_error));
@@ -228,6 +217,38 @@ impl TransferOp {
     }
 }
 
+/// Runs a transfer the user started against `remote_name` on a helper thread, which the worker
+/// gives up on when the user cancels while it is still connecting (`transfer_thread`, #547). Its
+/// progress is sent as `op`'s.
+fn on_helper<S, T, F>(
+    repo: &git2::Repository,
+    credentials: &Arc<CredentialService<S>>,
+    remote_name: &str,
+    op: &TransferOp,
+    events: &Sender<TransferEvent>,
+    transfer: F,
+) -> Result<T, RemoteError>
+where
+    S: CredentialStore + Send + Sync + 'static,
+    T: Send + 'static,
+    F: FnOnce(
+            &git2::Repository,
+            &mut dyn CredentialProvider,
+            &mut dyn TransferReporter,
+            &dyn Fn() -> bool,
+        ) -> Result<T, RemoteError>
+        + Send
+        + 'static,
+{
+    let wait = Wait {
+        op,
+        events,
+        connect_limit: None,
+        prompt: true,
+    };
+    transfer_thread::run(repo, credentials, remote_name, wait, transfer)
+}
+
 fn complete(
     events: &Sender<TransferEvent>,
     op: TransferOp,
@@ -249,9 +270,9 @@ fn complete(
     });
 }
 #[allow(clippy::too_many_arguments)]
-pub(super) fn fetch<S: CredentialStore>(
+pub(super) fn fetch<S: CredentialStore + Send + Sync + 'static>(
     repo: &git2::Repository,
-    credentials: &CredentialService<S>,
+    credentials: &Arc<CredentialService<S>>,
     background: &super::background_fetch::Memory,
     remote_name: String,
     prune: Option<bool>,
@@ -264,31 +285,34 @@ pub(super) fn fetch<S: CredentialStore>(
         operation: TransferOperation::Fetch,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    let mut reporter = ChannelReporter {
-        events: events.clone(),
-        operation_id: op.id.clone(),
-    };
-    let cancel = op.cancel_check();
-    let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
-        let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
-        git_core::remote::fetch_remote(
-            repo,
-            &remote_name,
-            prune,
-            op.id.clone(),
-            &mut provider,
-            &mut reporter,
-            &cancel,
-        )
-    });
+    let name = remote_name.clone();
+    let operation_id = op.id.clone();
+    let result = on_helper(
+        repo,
+        credentials,
+        &remote_name,
+        &op,
+        &events,
+        move |repo, provider, reporter, cancel| {
+            git_core::remote::fetch_remote(
+                repo,
+                &name,
+                prune,
+                operation_id,
+                provider,
+                reporter,
+                cancel,
+            )
+        },
+    );
     if result.is_ok() {
         background.reachable(&remote_name);
     }
     complete(&events, op, TransferOperation::Fetch, result);
 }
-pub(super) fn pull<S: CredentialStore>(
+pub(super) fn pull<S: CredentialStore + Send + Sync + 'static>(
     repo: &git2::Repository,
-    credentials: &CredentialService<S>,
+    credentials: &Arc<CredentialService<S>>,
     op: TransferOp,
     events: Sender<TransferEvent>,
     reply: Sender<Result<PullOutcome, ErrorDto>>,
@@ -301,20 +325,27 @@ pub(super) fn pull<S: CredentialStore>(
     let result = (|| -> Result<PullOutcome, git_core::remote::RemoteError> {
         let upstream = git_core::remote::current_upstream(repo)?
             .ok_or(git_core::remote::RemoteError::NoUpstream)?;
-        let mut reporter = ChannelReporter {
-            events: events.clone(),
-            operation_id: op.id.clone(),
-        };
-        let profile = git_core::remote::remote_auth_profile(repo, &upstream.remote_name)?;
-        let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
-        git_core::remote::fetch_remote(
+        // The fetch runs on a helper thread a cancel abandons while it connects (#547); the
+        // merge then runs here, on the worker, as before.
+        let name = upstream.remote_name.clone();
+        let operation_id = op.id.clone();
+        on_helper(
             repo,
+            credentials,
             &upstream.remote_name,
-            None,
-            op.id.clone(),
-            &mut provider,
-            &mut reporter,
-            &cancel,
+            &op,
+            &events,
+            move |repo, provider, reporter, cancel| {
+                git_core::remote::fetch_remote(
+                    repo,
+                    &name,
+                    None,
+                    operation_id,
+                    provider,
+                    reporter,
+                    cancel,
+                )
+            },
         )?;
         let upstream = git_core::remote::current_upstream(repo)?
             .ok_or(git_core::remote::RemoteError::NoUpstream)?;
@@ -405,9 +436,9 @@ fn unresolved_push_target(repo: &git2::Repository, remote_name: &str) -> Option<
         _ => None,
     }
 }
-pub(super) fn push_current<S: CredentialStore>(
+pub(super) fn push_current<S: CredentialStore + Send + Sync + 'static>(
     repo: &git2::Repository,
-    credentials: &CredentialService<S>,
+    credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     no_verify: bool,
     op: TransferOp,
@@ -424,28 +455,25 @@ pub(super) fn push_current<S: CredentialStore>(
         operation: TransferOperation::PushBranch,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    let mut reporter = ChannelReporter {
-        events: events.clone(),
-        operation_id: op.id.clone(),
-    };
     super::hooks::log_skipped_pre_push(repo, no_verify);
-    let cancel = op.cancel_check();
-    let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
-        let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
-        git_core::remote::push_current_branch(
-            repo,
-            &remote_name,
-            no_verify,
-            &mut provider,
-            &mut reporter,
-            &cancel,
-        )
-    });
+    let name = remote_name.clone();
+    let result = on_helper(
+        repo,
+        credentials,
+        &remote_name,
+        &op,
+        &events,
+        move |repo, provider, reporter, cancel| {
+            git_core::remote::push_current_branch(
+                repo, &name, no_verify, provider, reporter, cancel,
+            )
+        },
+    );
     complete(&events, op, TransferOperation::PushBranch, result);
 }
-pub(super) fn force_push_branch<S: CredentialStore>(
+pub(super) fn force_push_branch<S: CredentialStore + Send + Sync + 'static>(
     repo: &git2::Repository,
-    credentials: &CredentialService<S>,
+    credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     no_verify: bool,
     op: TransferOp,
@@ -462,29 +490,26 @@ pub(super) fn force_push_branch<S: CredentialStore>(
         operation: TransferOperation::ForcePushBranch,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    let mut reporter = ChannelReporter {
-        events: events.clone(),
-        operation_id: op.id.clone(),
-    };
     super::hooks::log_skipped_pre_push(repo, no_verify);
-    let cancel = op.cancel_check();
-    let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
-        let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
-        git_core::remote::force_push_current_branch(
-            repo,
-            &remote_name,
-            no_verify,
-            &mut provider,
-            &mut reporter,
-            &cancel,
-        )
-    });
+    let name = remote_name.clone();
+    let result = on_helper(
+        repo,
+        credentials,
+        &remote_name,
+        &op,
+        &events,
+        move |repo, provider, reporter, cancel| {
+            git_core::remote::force_push_current_branch(
+                repo, &name, no_verify, provider, reporter, cancel,
+            )
+        },
+    );
     complete(&events, op, TransferOperation::ForcePushBranch, result);
 }
 #[allow(clippy::too_many_arguments)]
-pub(super) fn push_tags<S: CredentialStore>(
+pub(super) fn push_tags<S: CredentialStore + Send + Sync + 'static>(
     repo: &git2::Repository,
-    credentials: &CredentialService<S>,
+    credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     names: Vec<String>,
     no_verify: bool,
@@ -497,24 +522,18 @@ pub(super) fn push_tags<S: CredentialStore>(
         operation: TransferOperation::PushTags,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    let mut reporter = ChannelReporter {
-        events: events.clone(),
-        operation_id: op.id.clone(),
-    };
     super::hooks::log_skipped_pre_push(repo, no_verify);
-    let cancel = op.cancel_check();
-    let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
-        let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
-        git_core::remote::push_tags(
-            repo,
-            &remote_name,
-            &names,
-            no_verify,
-            &mut provider,
-            &mut reporter,
-            &cancel,
-        )
-    });
+    let name = remote_name.clone();
+    let result = on_helper(
+        repo,
+        credentials,
+        &remote_name,
+        &op,
+        &events,
+        move |repo, provider, reporter, cancel| {
+            git_core::remote::push_tags(repo, &name, &names, no_verify, provider, reporter, cancel)
+        },
+    );
     complete(&events, op, TransferOperation::PushTags, result);
 }
 
@@ -527,72 +546,9 @@ pub(super) struct PushTarget {
     pub(super) no_verify: bool,
 }
 
-pub(super) fn fetch_all<S: CredentialStore>(
+pub(super) fn push_branch<S: CredentialStore + Send + Sync + 'static>(
     repo: &git2::Repository,
-    credentials: &CredentialService<S>,
-    background: &super::background_fetch::Memory,
-    prune: Option<bool>,
-    op: TransferOp,
-    events: Sender<TransferEvent>,
-    reply: Sender<Result<String, ErrorDto>>,
-) {
-    const OPERATION: TransferOperation = TransferOperation::FetchAll;
-    let _ = events.send(TransferEvent::Started {
-        operation_id: op.id.clone(),
-        operation: OPERATION,
-    });
-    let _ = reply.send(Ok(op.id.clone()));
-    let mut reporter = ChannelReporter {
-        events: events.clone(),
-        operation_id: op.id.clone(),
-    };
-    let cancel = op.cancel_check();
-    let result = git_core::remote::fetch_all(
-        repo,
-        prune,
-        op.id.clone(),
-        &mut |remote_name| {
-            let profile = git_core::remote::remote_auth_profile(repo, remote_name)?;
-            let provider: git_core::remote::BoxedCredentialProvider<'_> = Box::new(
-                crate::credentials::RemoteCredentialProvider::new(credentials, profile),
-            );
-            Ok(provider)
-        },
-        &mut reporter,
-        &cancel,
-    );
-    let error = match &result {
-        Ok(outcome) => {
-            for remote_name in &outcome.fetched {
-                background.reachable(remote_name);
-            }
-            for (remote_name, kind) in &outcome.failed {
-                let _ = events.send(TransferEvent::RemoteFailed {
-                    operation_id: op.id.clone(),
-                    operation: OPERATION,
-                    remote_name: remote_name.clone(),
-                    error: *kind,
-                });
-            }
-            // Only a Fetch all where nothing succeeded fails as a whole.
-            if outcome.fetched.is_empty() {
-                outcome.failed.first().map(|(_, kind)| *kind)
-            } else {
-                None
-            }
-        }
-        Err(error) => Some(error.transfer_error_kind()),
-    };
-    let _ = events.send(TransferEvent::Completed {
-        operation_id: op.finish(),
-        operation: OPERATION,
-        error,
-        hook_output: None,
-    });
-}
-pub(super) fn push_branch<S: CredentialStore>(
-    repo: &git2::Repository,
-    credentials: &CredentialService<S>,
+    credentials: &Arc<CredentialService<S>>,
     target: PushTarget,
     op: TransferOp,
     events: Sender<TransferEvent>,
@@ -603,16 +559,15 @@ pub(super) fn push_branch<S: CredentialStore>(
         operation: TransferOperation::PushBranch,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    let mut reporter = ChannelReporter {
-        events: events.clone(),
-        operation_id: op.id.clone(),
-    };
     super::hooks::log_skipped_pre_push(repo, target.no_verify);
-    let cancel = op.cancel_check();
-    let result =
-        git_core::remote::remote_auth_profile(repo, &target.remote_name).and_then(|profile| {
-            let mut provider =
-                crate::credentials::RemoteCredentialProvider::new(credentials, profile);
+    let remote_name = target.remote_name.clone();
+    let result = on_helper(
+        repo,
+        credentials,
+        &remote_name,
+        &op,
+        &events,
+        move |repo, provider, reporter, cancel| {
             git_core::remote::push_branch(
                 repo,
                 &target.remote_name,
@@ -620,17 +575,18 @@ pub(super) fn push_branch<S: CredentialStore>(
                 &target.remote_branch,
                 target.set_upstream,
                 target.no_verify,
-                &mut provider,
-                &mut reporter,
-                &cancel,
+                provider,
+                reporter,
+                cancel,
             )
-        });
+        },
+    );
     complete(&events, op, TransferOperation::PushBranch, result);
 }
 #[allow(clippy::too_many_arguments)]
-pub(super) fn delete_remote_branch<S: CredentialStore>(
+pub(super) fn delete_remote_branch<S: CredentialStore + Send + Sync + 'static>(
     repo: &git2::Repository,
-    credentials: &CredentialService<S>,
+    credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     branch_name: String,
     no_verify: bool,
@@ -643,30 +599,32 @@ pub(super) fn delete_remote_branch<S: CredentialStore>(
         operation: TransferOperation::DeleteRemoteBranch,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    let mut reporter = ChannelReporter {
-        events: events.clone(),
-        operation_id: op.id.clone(),
-    };
     super::hooks::log_skipped_pre_push(repo, no_verify);
-    let cancel = op.cancel_check();
-    let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
-        let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
-        git_core::remote::delete_remote_branch(
-            repo,
-            &remote_name,
-            &branch_name,
-            no_verify,
-            &mut provider,
-            &mut reporter,
-            &cancel,
-        )
-    });
+    let name = remote_name.clone();
+    let result = on_helper(
+        repo,
+        credentials,
+        &remote_name,
+        &op,
+        &events,
+        move |repo, provider, reporter, cancel| {
+            git_core::remote::delete_remote_branch(
+                repo,
+                &name,
+                &branch_name,
+                no_verify,
+                provider,
+                reporter,
+                cancel,
+            )
+        },
+    );
     complete(&events, op, TransferOperation::DeleteRemoteBranch, result);
 }
 #[allow(clippy::too_many_arguments)]
-pub(super) fn delete_remote_tag<S: CredentialStore>(
+pub(super) fn delete_remote_tag<S: CredentialStore + Send + Sync + 'static>(
     repo: &git2::Repository,
-    credentials: &CredentialService<S>,
+    credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     tag_name: String,
     no_verify: bool,
@@ -679,24 +637,20 @@ pub(super) fn delete_remote_tag<S: CredentialStore>(
         operation: TransferOperation::DeleteRemoteTag,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    let mut reporter = ChannelReporter {
-        events: events.clone(),
-        operation_id: op.id.clone(),
-    };
     super::hooks::log_skipped_pre_push(repo, no_verify);
-    let cancel = op.cancel_check();
-    let result = git_core::remote::remote_auth_profile(repo, &remote_name).and_then(|profile| {
-        let mut provider = crate::credentials::RemoteCredentialProvider::new(credentials, profile);
-        git_core::remote::delete_remote_tag(
-            repo,
-            &remote_name,
-            &tag_name,
-            no_verify,
-            &mut provider,
-            &mut reporter,
-            &cancel,
-        )
-    });
+    let name = remote_name.clone();
+    let result = on_helper(
+        repo,
+        credentials,
+        &remote_name,
+        &op,
+        &events,
+        move |repo, provider, reporter, cancel| {
+            git_core::remote::delete_remote_tag(
+                repo, &name, &tag_name, no_verify, provider, reporter, cancel,
+            )
+        },
+    );
     complete(&events, op, TransferOperation::DeleteRemoteTag, result);
 }
 

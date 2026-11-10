@@ -18,7 +18,11 @@ e2e/screenshots/capture.sh --no-build   # reuse an E2E build you already have
 The build is the E2E build from `AGENTS.md`: the frontend with `VITE_E2E_REPO_PATH`, then
 `cargo build` with the `custom-protocol` and `forge-fixture-override` features. The capture runs
 `pnpm screenshots` in `e2e/` under `dbus-run-session -- xvfb-run`, on a 24-bit virtual screen,
-so the window never opens on your desktop. When it exits, the script removes
+so the window never opens on your desktop. Only the capture runs with `TMPDIR=/tmp`, because
+the E2E build bakes `/tmp` paths into the app and `demoRepo.ts` uses `os.tmpdir()`; the build
+keeps your own `TMPDIR`, so a small tmpfs `/tmp` doesn't fill up with compiler temp files. The
+E2E build never checks for updates, so no "Update ready" banner lands in the shots and the
+capture needs no network. When it exits, the script removes
 `/tmp/browsitory-screenshots` (the demo repository and the temp HOME); run it with `KEEP=1` to
 keep that folder.
 

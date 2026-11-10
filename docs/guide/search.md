@@ -48,6 +48,20 @@ Press ↓ in the field to move into the results.
 - Esc or × goes back to the graph and the previous selection.
 - File history opened from a result returns to the results when closed.
 
+## Recent searches
+
+Click the empty search field (or focus it with **Ctrl+F**) and it lists your last 10 searches
+in this repository, newest first. Press ↓ and ↑ to move through them and Enter to run one, or
+click it. Delete removes the highlighted search from the list, as does the × next to it. Esc
+closes the list; ↓ opens it again. With text in the field, ↓ still moves into the results.
+
+- A search counts once you've stopped typing and it has run. Editing it before you clear the
+  field updates that one entry rather than adding a new one.
+- A search that can't be read (the message under the field says why) isn't remembered.
+- Running a search that's already in the list moves it to the top.
+- The list is kept on this computer, separately for each repository, like the commit box's
+  recent messages.
+
 ## Combining terms
 
 `and`, `or` and `not` are operators when they stand alone as words, in any case (`OR` works

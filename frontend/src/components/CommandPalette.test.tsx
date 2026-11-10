@@ -5,9 +5,9 @@ import type { Command } from "../lib/commands";
 
 function makeCommands(): Command[] {
   return [
-    { id: "switch-main", label: "Switch to main", keywords: ["branch"], run: vi.fn() },
-    { id: "switch-feature", label: "Switch to feature", keywords: ["branch"], run: vi.fn() },
-    { id: "fetch-origin", label: "Fetch origin", keywords: ["remote"], run: vi.fn() },
+    { id: "switch-main", label: "Switch to main", keywords: ["branch"], run: vi.fn(), group: "General" },
+    { id: "switch-feature", label: "Switch to feature", keywords: ["branch"], run: vi.fn(), group: "General" },
+    { id: "fetch-origin", label: "Fetch origin", keywords: ["remote"], run: vi.fn(), group: "General" },
   ];
 }
 
@@ -105,10 +105,10 @@ describe("CommandPalette", () => {
 
   describe("grouping and hints", () => {
     const grouped = (): Command[] => [
-      { id: "fetch-remote:origin", label: "Fetch origin", keywords: [], run: vi.fn() },
-      { id: "switch-branch:dev", label: "Switch to dev", keywords: [], run: vi.fn() },
-      { id: "go-to:Tags", label: "Go to Tags", keywords: [], run: vi.fn() },
-      { id: "apply-stash:0", label: "Apply stash: wip", keywords: [], run: vi.fn() },
+      { id: "fetch-remote:origin", label: "Fetch origin", keywords: [], run: vi.fn(), group: "Remotes" },
+      { id: "switch-branch:dev", label: "Switch to dev", keywords: [], run: vi.fn(), group: "Branches" },
+      { id: "go-to:Tags", label: "Go to Tags", keywords: [], run: vi.fn(), group: "Go to" },
+      { id: "apply-stash:0", label: "Apply stash: wip", keywords: [], run: vi.fn(), group: "Stash" },
     ];
 
     it("groups commands under kind headings when the query is empty", () => {
@@ -150,13 +150,14 @@ describe("CommandPalette", () => {
           label: "Go to branch…",
           keywords: [],
           run: pickerRun,
+          group: "Go to",
           picker: {
             placeholder: "Branch name…",
             emptyText: "No matching branches",
             items: (query) => items.filter((item) => item.label.includes(query)),
           },
         },
-        { id: "fetch-origin", label: "Fetch origin", keywords: [], run: vi.fn() },
+        { id: "fetch-origin", label: "Fetch origin", keywords: [], run: vi.fn(), group: "General" },
       ];
       return { commands, goMain, goFeature, pickerRun };
     }

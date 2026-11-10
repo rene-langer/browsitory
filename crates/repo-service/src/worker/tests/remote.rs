@@ -1119,3 +1119,222 @@ fn a_background_fetch_starts_as_soon_as_the_previous_transfer_reported_completed
         until_completed(&event_rx);
     }
 }
+
+/// #547: a transfer the user started that is still connecting (a server that accepts and never
+/// answers) holds the worker only until Cancel: waits for the connect, checks the worker keeps
+/// waiting meanwhile, cancels `operation_id`, and checks that a status read answers at once.
+/// Returns every event of the operation.
+fn cancel_while_connecting(
+    handle: &super::super::WorkerHandle,
+    server: &SilentServer,
+    operation_id: &str,
+    event_rx: &mpsc::Receiver<TransferEvent>,
+) -> Vec<TransferEvent> {
+    server
+        .accepted
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the transfer connects to the silent server");
+    thread::sleep(Duration::from_millis(300));
+    let mut events: Vec<_> = event_rx.try_iter().collect();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, TransferEvent::Completed { .. })),
+        "{events:?}"
+    );
+
+    let started = std::time::Instant::now();
+    handle.cancel_transfer(operation_id);
+    handle.get_status().expect("status");
+
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the worker waited {:?} for a transfer that was still connecting",
+        started.elapsed()
+    );
+    events.extend(event_rx.iter());
+    assert_eq!(handle.cancelled.len(), 0);
+    events
+}
+
+/// A local repository with one commit on its current branch, `origin` (fetched) as its upstream
+/// and a `silent` remote that accepts and never answers. Returns the branch name too.
+fn repo_with_a_silent_remote() -> (TempDir, TempDir, TempDir, SilentServer, String) {
+    let (source_dir, remote_dir, local_dir) = local_and_bare_remote();
+    let server = SilentServer::start();
+    let local = Repository::open(local_dir.path()).expect("open local");
+    local
+        .find_remote("origin")
+        .expect("origin")
+        .fetch(&[] as &[&str], None, None)
+        .expect("fetch origin");
+    let fetched = local
+        .references_glob("refs/remotes/origin/*")
+        .expect("references")
+        .flatten()
+        .find_map(|reference| reference.target())
+        .expect("a fetched branch");
+    let commit = local.find_commit(fetched).expect("commit");
+    let head = local.find_reference("HEAD").expect("HEAD");
+    let branch = String::from_utf8_lossy(head.symbolic_target_bytes().expect("unborn branch"))
+        .trim_start_matches("refs/heads/")
+        .to_string();
+    drop(head);
+    local.branch(&branch, &commit, true).expect("branch");
+    local
+        .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
+        .expect("checkout");
+    {
+        let mut config = local.config().expect("config");
+        config
+            .set_str(&format!("branch.{branch}.remote"), "origin")
+            .expect("upstream remote");
+        config
+            .set_str(
+                &format!("branch.{branch}.merge"),
+                &format!("refs/heads/{branch}"),
+            )
+            .expect("upstream branch");
+    }
+    local
+        .remote("silent", &server.url)
+        .expect("add silent remote");
+    (source_dir, remote_dir, local_dir, server, branch)
+}
+
+fn silent_refs(local_dir: &TempDir) -> usize {
+    Repository::open(local_dir.path())
+        .expect("reopen local")
+        .references_glob("refs/remotes/silent/*")
+        .expect("references")
+        .count()
+}
+
+#[test]
+fn a_cancel_stops_a_fetch_that_is_still_connecting() {
+    let (_source_dir, _remote_dir, local_dir, server, _branch) = repo_with_a_silent_remote();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let operation_id = handle
+        .fetch_remote("silent".into(), None, event_tx)
+        .expect("start fetch");
+    let events = cancel_while_connecting(&handle, &server, &operation_id, &event_rx);
+
+    assert_eq!(
+        completed(&events),
+        (TransferOperation::Fetch, Some(TransferErrorKind::Cancelled))
+    );
+    assert_eq!(silent_refs(&local_dir), 0);
+}
+
+#[test]
+fn a_cancel_stops_a_fetch_all_whose_remote_is_still_connecting() {
+    let (_source_dir, _remote_dir, local_dir, server, _branch) = repo_with_a_silent_remote();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let operation_id = handle
+        .fetch_all_remotes(None, event_tx)
+        .expect("start fetch all");
+    let events = cancel_while_connecting(&handle, &server, &operation_id, &event_rx);
+
+    assert_eq!(
+        completed(&events),
+        (
+            TransferOperation::FetchAll,
+            Some(TransferErrorKind::Cancelled)
+        )
+    );
+    assert!(remote_failures(&events).is_empty(), "{events:?}");
+    assert_eq!(silent_refs(&local_dir), 0);
+}
+
+#[test]
+fn a_cancel_stops_a_pull_whose_fetch_is_still_connecting() {
+    let (_source_dir, _remote_dir, local_dir, server, branch) = repo_with_a_silent_remote();
+    Repository::open(local_dir.path())
+        .expect("open local")
+        .config()
+        .expect("config")
+        .set_str(&format!("branch.{branch}.remote"), "silent")
+        .expect("upstream on the silent remote");
+    let head_before = Repository::open(local_dir.path())
+        .expect("open local")
+        .head()
+        .expect("head")
+        .target();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let pulling = {
+        let handle = handle.clone();
+        thread::spawn(move || handle.pull_current_upstream(event_tx))
+    };
+    let operation_id = match event_rx
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the pull starts")
+    {
+        TransferEvent::Started { operation_id, .. } => operation_id,
+        other => panic!("expected Started first, got {other:?}"),
+    };
+    let events = cancel_while_connecting(&handle, &server, &operation_id, &event_rx);
+
+    assert_eq!(
+        completed(&events),
+        (TransferOperation::Pull, Some(TransferErrorKind::Cancelled))
+    );
+    let error = pulling
+        .join()
+        .expect("pull thread")
+        .expect_err("a cancelled pull fails");
+    assert_eq!(error.kind, crate::wire::ErrorKind::Cancelled);
+    assert_eq!(silent_refs(&local_dir), 0);
+    let local = Repository::open(local_dir.path()).expect("reopen local");
+    assert_eq!(local.head().expect("head").target(), head_before);
+}
+
+#[test]
+fn a_cancel_stops_a_push_that_is_still_connecting() {
+    let (_source_dir, _remote_dir, local_dir, server, branch) = repo_with_a_silent_remote();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let (event_tx, event_rx) = mpsc::channel();
+
+    let operation_id = handle
+        .push_branch(
+            "silent".into(),
+            branch.clone(),
+            branch.clone(),
+            true,
+            false,
+            event_tx,
+        )
+        .expect("start push");
+    let events = cancel_while_connecting(&handle, &server, &operation_id, &event_rx);
+
+    assert_eq!(
+        completed(&events),
+        (
+            TransferOperation::PushBranch,
+            Some(TransferErrorKind::Cancelled)
+        )
+    );
+    assert_eq!(silent_refs(&local_dir), 0);
+    // The push would have made `silent` the upstream (`set_upstream`); it wrote nothing.
+    let config = Repository::open(local_dir.path())
+        .expect("reopen local")
+        .config()
+        .expect("config")
+        .snapshot()
+        .expect("snapshot");
+    assert_eq!(
+        config
+            .get_str(&format!("branch.{branch}.remote"))
+            .expect("upstream remote"),
+        "origin"
+    );
+}
