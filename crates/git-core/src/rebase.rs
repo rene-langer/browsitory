@@ -761,8 +761,9 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
             )],
         )?;
         // libgit2 can miss a file/folder conflict and would land the step without one of them
-        // (#410). After the link check, whose refusal is the more specific one for a link.
-        crate::file_folder::refuse_file_folder_conflict(&merged)?;
+        // (#410): the step stops at git's conflict instead (#416), after the link check, whose
+        // refusal is the more specific one for a link.
+        let colliding = crate::file_folder::find_file_folder_conflict(&merged).is_some();
         // libgit2's ignore-case index would keep one name of a case pair the step brings in, and
         // the step would be committed without the other (#522). Nothing is written yet: the
         // step stops as an error (Continue tries it again, Abort goes back to the branch), or
@@ -772,6 +773,9 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
             &crate::worktree_guard::GuardSource::Index(&merged),
             Some(&head_commit.tree()?),
         )?;
+        if colliding {
+            return stop_at_file_folder_conflict(repo, state, merged, &commit);
+        }
         // A checkout that stops part-way (a file another program holds open, a read-only file,
         // a full disk) is rolled back, like `pick::apply`'s (#329): the step is then as if never
         // started, HEAD stays at `expected_head`, and Continue applies it again. libgit2's own
@@ -811,6 +815,33 @@ fn advance(repo: &Repository, state: &mut RebaseState) -> Result<RebaseStepResul
         land_current_step(repo, state)?;
         state.cursor += 1;
     }
+}
+
+/// The step's merge holds a file and a folder of the same name that libgit2 didn't see as a
+/// conflict (#410). Stops at git's conflict like at one libgit2 finds (#416):
+/// `file_folder::check_out_as_conflicts` (onto's file becomes `c~HEAD`, the step's file
+/// `c~<short id> (<subject>)`), then `CHERRY_PICK_HEAD` and `MERGE_MSG` as libgit2's pick leaves
+/// them, so Continue lands the resolved step and Abort goes back to the branch. A checkout that
+/// stops part-way is rolled back and the step stops as an error, as in `advance`.
+fn stop_at_file_folder_conflict(
+    repo: &Repository,
+    state: &mut RebaseState,
+    merged: git2::Index,
+    commit: &git2::Commit<'_>,
+) -> Result<RebaseStepResult, RebaseError> {
+    let label = crate::file_folder::commit_label(commit)?;
+    let index = crate::file_folder::check_out_as_conflicts::<RebaseError>(
+        repo,
+        merged,
+        "HEAD",
+        &label,
+        None,
+    )?;
+    let files = crate::file_folder::conflicted_files(&index)?;
+    let message = String::from_utf8_lossy(commit.message_bytes());
+    crate::file_folder::write_step_state(repo, "CHERRY_PICK_HEAD", commit.id(), &message, &files)?;
+    state.stop = RebaseStop::Conflict;
+    Ok(RebaseStepResult::Conflicted { files })
 }
 
 /// The action of the nearest entry strictly after `index` that isn't itself `Drop` — `Drop`

@@ -194,8 +194,13 @@ fn merge_with_file_folder_conflict(
     merge_head: Option<(git2::Oid, &str)>,
     their_label: &str,
 ) -> Result<Vec<String>, MergeError> {
-    let index =
-        crate::file_folder::check_out_as_conflicts::<MergeError>(repo, merged, their_label)?;
+    let index = crate::file_folder::check_out_as_conflicts::<MergeError>(
+        repo,
+        merged,
+        "HEAD",
+        their_label,
+        None,
+    )?;
     let files = conflicted_files(&index)?;
     if let Some((their_id, label)) = merge_head {
         let git_dir = repo.path();

@@ -10,7 +10,9 @@
 //! leaves the file `c` in the work tree without `c/g`, and the tree written from it drops one of
 //! the two, so the commit a cherry-pick, revert or rebase step makes from it silently loses a
 //! file. Every operation that writes a libgit2 merge checks the merged index first, before
-//! anything is written, and refuses.
+//! anything is written, and writes git's conflict itself instead (#416,
+//! [`check_out_as_conflicts`]). Only a stash apply that restores the index, or whose untracked
+//! files meet the merge, refuses.
 
 use std::collections::HashSet;
 
@@ -52,26 +54,18 @@ pub(crate) fn find_file_folder_conflict(index: &git2::Index) -> Option<FileFolde
     })
 }
 
-/// Refuses a merge result libgit2 can't write without losing a file (see the module docs).
-/// Call it on the in-memory merge (`merge_commits`, `cherrypick_commit`, `revert_commit`,
-/// `merge_trees`) before the operation writes anything.
-pub(crate) fn refuse_file_folder_conflict(index: &git2::Index) -> Result<(), FileFolderConflict> {
-    match find_file_folder_conflict(index) {
-        Some(conflict) => Err(conflict),
-        None => Ok(()),
-    }
-}
-
 /// Rewrites `index` (a merge result) into git's outcome for a file/folder conflict: each
 /// colliding file `p` leaves stage 0 and becomes a conflict entry at the path git moves it to,
-/// `p~HEAD` at stage 2 ("added by us") when it is HEAD's file (`ours` has it with that id),
-/// else `p~<their_label>` at stage 3 ("added by them"). The entries below `p/` stay merged, so
-/// the checkout writes the folder's files and the moved file. A name already taken gets `_0`,
-/// `_1`... after it, as git does. Returns the moved files' old names (`p`), in index order;
-/// nothing when there is no collision.
+/// `p~<our_label>` at stage 2 ("added by us") when it is the file of `ours` (which has it with
+/// that id), else `p~<their_label>` at stage 3 ("added by them"). A `/` in a label becomes `_`,
+/// as git flattens it (`c~origin_side`). The entries below `p/` stay merged, so the checkout
+/// writes the folder's files and the moved file. A name already taken gets `_0`, `_1`... after
+/// it, as git does. Returns the moved files' old names (`p`), in index order; nothing when
+/// there is no collision.
 pub(crate) fn record_as_conflicts(
     index: &mut git2::Index,
     ours: &git2::Tree<'_>,
+    our_label: &str,
     their_label: &str,
 ) -> Result<Vec<String>, git2::Error> {
     let mut files = Vec::new();
@@ -86,10 +80,11 @@ pub(crate) fn record_as_conflicts(
             .map(|found| found.id() == entry.id)
             .unwrap_or(false);
         let (stage, label) = if is_ours {
-            (2, "HEAD")
+            (2, our_label)
         } else {
             (3, their_label)
         };
+        let label = label.replace('/', "_");
         let mut moved = format!("{}~{label}", conflict.file);
         let mut counter = 0;
         while index.iter().any(|other| other.path == moved.as_bytes())
@@ -108,20 +103,28 @@ pub(crate) fn record_as_conflicts(
 
 /// Writes a merge result holding a file/folder collision as git's conflict (see
 /// [`record_as_conflicts`]): the repository's index becomes the rewritten `merged`, and a safe
-/// checkout with conflicts allowed writes it (HEAD's file becomes `c~HEAD`, the folder's files
-/// appear), rolled back when it stops part-way (#321). HEAD is the "ours" side. The operation's
-/// own state files (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, the message) are the caller's. Returns
-/// the repository's index, written.
+/// checkout with conflicts allowed writes it (HEAD's file becomes `c~<our_label>`, the
+/// folder's files appear), rolled back when it stops part-way (#321). HEAD is the "ours" side.
+/// The files of `untracked` (a stash's untracked files) are checked out with it, rolled back
+/// with it, and left out of the index; the caller makes sure `merged` holds none of their
+/// paths. The operation's own state files (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, the message) are
+/// the caller's. Returns the repository's index, written.
 pub(crate) fn check_out_as_conflicts<E>(
     repo: &git2::Repository,
     mut merged: git2::Index,
+    our_label: &str,
     their_label: &str,
+    untracked: Option<&git2::Tree<'_>>,
 ) -> Result<git2::Index, E>
 where
     E: From<git2::Error> + From<crate::HeldOpen>,
 {
     let ours = repo.head()?.peel_to_commit()?.tree()?;
-    record_as_conflicts(&mut merged, &ours, their_label)?;
+    record_as_conflicts(&mut merged, &ours, our_label, their_label)?;
+    let mut untracked_files = git2::Index::new()?;
+    if let Some(tree) = untracked {
+        untracked_files.read_tree(tree)?;
+    }
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.safe().allow_conflicts(true);
@@ -130,7 +133,7 @@ where
     written.expect_conflicts(repo, &merged);
     let mut index = repo.index()?;
     index.clear()?;
-    for entry in merged.iter() {
+    for entry in merged.iter().chain(untracked_files.iter()) {
         index.add(&entry)?;
     }
     if let Err(error) = repo.checkout_index(Some(&mut index), Some(&mut checkout)) {
@@ -142,8 +145,63 @@ where
             error,
         ));
     }
+    if !untracked_files.is_empty() {
+        let untracked: HashSet<Vec<u8>> = untracked_files.iter().map(|entry| entry.path).collect();
+        let tracked: Vec<_> = index
+            .iter()
+            .filter(|entry| !untracked.contains(&entry.path))
+            .collect();
+        index.clear()?;
+        for entry in &tracked {
+            index.add(entry)?;
+        }
+    }
     index.write()?;
     Ok(index)
+}
+
+/// The conflicted paths of `index` (each conflict once, by its first side's path), sorted.
+pub(crate) fn conflicted_files(index: &git2::Index) -> Result<Vec<String>, git2::Error> {
+    let mut files: Vec<String> = index
+        .conflicts()?
+        .filter_map(|conflict| conflict.ok())
+        .filter_map(|conflict| conflict.our.or(conflict.their).or(conflict.ancestor))
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .collect();
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+/// git's label for the commit a cherry-pick or rebase step applies, `<short id> (<subject>)`
+/// (a revert's is `parent of ` and that).
+pub(crate) fn commit_label(commit: &git2::Commit<'_>) -> Result<String, git2::Error> {
+    let short = commit.as_object().short_id()?;
+    let summary = commit.summary().ok().flatten().unwrap_or("");
+    Ok(format!("{} ({summary})", short.as_str().unwrap_or_default()))
+}
+
+/// Pauses a cherry-pick, revert or rebase step at its file/folder conflict as libgit2's pick
+/// pauses at a conflict: `head_file` (`CHERRY_PICK_HEAD`/`REVERT_HEAD`) names `target`, and
+/// `MERGE_MSG` holds `message` with git's list of the conflicted `files`.
+pub(crate) fn write_step_state(
+    repo: &git2::Repository,
+    head_file: &str,
+    target: git2::Oid,
+    message: &str,
+    files: &[String],
+) -> std::io::Result<()> {
+    let mut message = message.to_string();
+    if !message.ends_with('\n') {
+        message.push('\n');
+    }
+    message.push_str("\n# Conflicts:\n");
+    for file in files {
+        message.push_str(&format!("#\t{file}\n"));
+    }
+    let git_dir = repo.path();
+    std::fs::write(git_dir.join(head_file), format!("{target}\n"))?;
+    std::fs::write(git_dir.join("MERGE_MSG"), message)
 }
 
 fn stage(entry: &git2::IndexEntry) -> u16 {
