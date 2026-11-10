@@ -386,7 +386,7 @@ describe("App", () => {
     it("opens the file confirm without discarding, then cancels and confirms", async () => {
       const client = discardClient();
       render(<App client={client} />);
-      fireEvent.click(await screen.findByText("a.txt (Modified)"));
+      fireEvent.click(await screen.findByRole("option", { name: /^a\.txt ?\(Modified\)/ }));
 
       await runPaletteCommand("Discard changes in current file");
       expect(await screen.findByText("Discard changes to a.txt? This can't be undone.")).toBeInTheDocument();
@@ -405,7 +405,7 @@ describe("App", () => {
     it("opens the discard-all confirm without discarding, then cancels and confirms", async () => {
       const client = discardClient();
       render(<App client={client} />);
-      await screen.findByText("a.txt (Modified)");
+      await screen.findByRole("option", { name: /^a\.txt ?\(Modified\)/ });
 
       await runPaletteCommand("Discard all unstaged changes");
       expect(await screen.findByText("Discard changes to 1 file? This can't be undone.")).toBeInTheDocument();
@@ -426,7 +426,7 @@ describe("App", () => {
     it("discards during a merge, which blocks other repository operations (#521)", async () => {
       const client = discardClient({ getMergeMessage: async () => "Merge branch 'x'" });
       render(<App client={client} />);
-      await screen.findByText("a.txt (Modified)");
+      await screen.findByRole("option", { name: /^a\.txt ?\(Modified\)/ });
 
       await runPaletteCommand("Discard all unstaged changes");
       const confirm = await screen.findByRole("button", { name: "Discard all" });
@@ -1556,7 +1556,7 @@ describe("App", () => {
         />,
       );
       fireEvent.click(await screen.findByRole("button", { name: "History of a.txt" }));
-      expect(await screen.findByRole("option", { selected: true })).toHaveTextContent("merge older");
+      expect(await screen.findByRole("option", { selected: true, name: /merge older/ })).toHaveTextContent("merge older");
 
       await runPaletteCommand("Revert m0", "Revert m0…");
       const dialog = await screen.findByRole("dialog", { name: "Choose parent", hidden: true });
