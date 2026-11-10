@@ -1,6 +1,7 @@
 .segment {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--code-font-size, var(--text-sm));
+  tab-size: var(--tab-size);
   white-space: pre-wrap;
   padding: var(--space-1) var(--space-2);
   margin-bottom: var(--space-2);

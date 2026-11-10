@@ -2331,6 +2331,70 @@ impl From<FetchSettingsDto> for config::FetchSettings {
     }
 }
 
+/// The `[appearance]` preferences (#615): `codeFont` and `codeFontSize` are `null` for the
+/// built-in look; `codeFontSize` and `tabSize` are clamped to `CODE_FONT_SIZES` and `TAB_SIZES`.
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "AppearanceSettings"))]
+#[serde(rename_all = "camelCase")]
+pub struct AppearanceSettingsDto {
+    pub code_font: Option<String>,
+    pub code_font_size: Option<u32>,
+    pub ui_size: UiSizeDto,
+    pub tab_size: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "UiSize"))]
+pub enum UiSizeDto {
+    Small,
+    Normal,
+    Large,
+}
+
+impl From<config::UiSize> for UiSizeDto {
+    fn from(s: config::UiSize) -> Self {
+        match s {
+            config::UiSize::Small => UiSizeDto::Small,
+            config::UiSize::Normal => UiSizeDto::Normal,
+            config::UiSize::Large => UiSizeDto::Large,
+        }
+    }
+}
+
+impl From<UiSizeDto> for config::UiSize {
+    fn from(s: UiSizeDto) -> Self {
+        match s {
+            UiSizeDto::Small => config::UiSize::Small,
+            UiSizeDto::Normal => config::UiSize::Normal,
+            UiSizeDto::Large => config::UiSize::Large,
+        }
+    }
+}
+
+impl From<config::AppearanceSettings> for AppearanceSettingsDto {
+    fn from(s: config::AppearanceSettings) -> Self {
+        Self {
+            code_font: s.code_font,
+            code_font_size: s.code_font_size,
+            ui_size: s.ui_size.into(),
+            tab_size: s.tab_size,
+        }
+    }
+}
+
+impl From<AppearanceSettingsDto> for config::AppearanceSettings {
+    fn from(d: AppearanceSettingsDto) -> Self {
+        Self {
+            code_font: d.code_font,
+            code_font_size: d.code_font_size,
+            ui_size: d.ui_size.into(),
+            tab_size: d.tab_size,
+        }
+    }
+}
+
 /// The payload of a transfer event: the desktop app's `transfer-progress`/`transfer-complete`
 /// events and the sidecar's `transferProgress` notification. `phase` adds `Starting`,
 /// `RemoteFailed`, `Completed` and `Failed` to the `TransferPhase` names.
@@ -2679,6 +2743,8 @@ mod ts_bindings {
             WordWrapDto,
             CommitMessageSettingsDto,
             FetchSettingsDto,
+            AppearanceSettingsDto,
+            UiSizeDto,
         );
         test_support::assert_generated_file(
             &test_support::repo_root().join("frontend/src/ipc/generated/wire-dto.ts"),
@@ -2698,10 +2764,12 @@ mod ts_bindings {
             serde_json::to_string(&value).unwrap()
         }
         let columns = config::COMMIT_MESSAGE_COLUMNS;
+        let font_sizes = config::CODE_FONT_SIZES;
+        let tab_sizes = config::TAB_SIZES;
         let lines = [
             "// Generated from the backend's limits and defaults (crates/repo-service/src/wire.rs).".to_string(),
             "// Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current".to_string(),
-            "import type { CommitMessageSettings, DiffSettings, FetchSettings } from \"./wire-dto\";".to_string(),
+            "import type { AppearanceSettings, CommitMessageSettings, DiffSettings, FetchSettings } from \"./wire-dto\";".to_string(),
             String::new(),
             "/** `git_core::diff::MAX_CONTEXT_LINES`: more context is clamped to it. */".to_string(),
             format!(
@@ -2735,6 +2803,25 @@ mod ts_bindings {
             format!(
                 "export const DEFAULT_FETCH_SETTINGS: FetchSettings = {};",
                 json(FetchSettingsDto::from(config::FetchSettings::default()))
+            ),
+            "/** `config::AppearanceSettings::default()`. */".to_string(),
+            format!(
+                "export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {};",
+                json(AppearanceSettingsDto::from(
+                    config::AppearanceSettings::default()
+                ))
+            ),
+            "/** `config::CODE_FONT_SIZES`: the range the code font size is clamped to, in px. */".to_string(),
+            format!(
+                "export const CODE_FONT_SIZES = {{ min: {}, max: {} }} as const;",
+                font_sizes.start(),
+                font_sizes.end()
+            ),
+            "/** `config::TAB_SIZES`: the range the tab size is clamped to, in columns. */".to_string(),
+            format!(
+                "export const TAB_SIZES = {{ min: {}, max: {} }} as const;",
+                tab_sizes.start(),
+                tab_sizes.end()
             ),
             "/** `git_core::search::KEYS`: the keys a commit search `key:value` term can use. */".to_string(),
             format!(

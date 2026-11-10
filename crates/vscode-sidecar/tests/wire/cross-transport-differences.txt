@@ -2,6 +2,9 @@
 # VSCode sidecar (#306). `key-order`: same JSON value, fields in another order.
 # `value`: a different JSON value.
 # Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p vscode-sidecar wire_snapshots
+AppearanceSettings/default key-order
+AppearanceSettings/set key-order
+AppearanceSettings/small key-order
 BlameLine/plain key-order
 BranchInfo/local-only key-order
 BranchInfo/tracking key-order

@@ -56,7 +56,13 @@
 
   /* Typography */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, "JetBrains Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace;
+  --font-mono-default: ui-monospace, "SF Mono", Menlo, "JetBrains Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace;
+  /* Preferences > Appearance (#615, `lib/appearance.ts`) sets `--font-mono` (the code font
+     first, this stack after it), `--code-font-size` and `--tab-size` inline on the root, and
+     `data-ui-size` for the `--text-*` scale below. Unset, file content keeps each view's own
+     size (`var(--code-font-size, …)`) and tabs are 4 columns. */
+  --font-mono: var(--font-mono-default);
+  --tab-size: 4;
   --text-xs: 11px;
   --text-sm: 13px;
   --text-md: 14px;
@@ -81,6 +87,23 @@
   --motion-duration-fast: 100ms;
   --motion-duration-base: 150ms;
   --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Preferences > Appearance > Interface size: the `--text-*` scale ("normal" is the one above). */
+:root[data-ui-size="small"] {
+  --text-xs: 10px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+}
+
+:root[data-ui-size="large"] {
+  --text-xs: 12px;
+  --text-sm: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
 }
 
 @media (prefers-color-scheme: dark) {

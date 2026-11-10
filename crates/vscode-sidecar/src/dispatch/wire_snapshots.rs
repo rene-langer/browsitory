@@ -15,17 +15,17 @@ use serde::Serialize;
 
 use super::*;
 use repo_service::wire::{
-    transfer_progress_dto, BlameLineDto, BranchInfoDto, ChangedFileDto, CommitLocationDto,
-    CommitMessageSettingsDto, CommitOutcomeDto, CommitSignatureDto, CompareRangeDto,
-    ConflictSegmentDto, DiffHunkDto, DiffSettingsDto, ExternalToolSettingsDto, FetchSettingsDto,
-    FileContentDto, FileHistoryEntryDto, FileSidesDto, ForgeRepositoryDto, GitToolsDto,
-    GraphCommitDto, HeadInfoDto, LineHistoryDto, MarkResolvedOutcomeDto, MergeOptionsDto,
-    MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto, PullRequestDto,
-    PullRequestListDto, RebaseAbortDto, RebaseInfoDto, RebasePlanCommitDto, RebaseStepResultDto,
-    ReflogEntryDto, RemoteInfoDto, SearchPageDto, SequenceAbortDto, SequenceOutcomeDto,
-    SequenceProgressDto, StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StatusEntryDto,
-    SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto, TerminalSequenceDto, TreeListingDto,
-    UndoOutcomeDto, UndoStateDto, UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
+    transfer_progress_dto, AppearanceSettingsDto, BlameLineDto, BranchInfoDto, ChangedFileDto,
+    CommitLocationDto, CommitMessageSettingsDto, CommitOutcomeDto, CommitSignatureDto,
+    CompareRangeDto, ConflictSegmentDto, DiffHunkDto, DiffSettingsDto, ExternalToolSettingsDto,
+    FetchSettingsDto, FileContentDto, FileHistoryEntryDto, FileSidesDto, ForgeRepositoryDto,
+    GitToolsDto, GraphCommitDto, HeadInfoDto, LineHistoryDto, MarkResolvedOutcomeDto,
+    MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto,
+    PullRequestDto, PullRequestListDto, RebaseAbortDto, RebaseInfoDto, RebasePlanCommitDto,
+    RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto, SearchPageDto, SequenceAbortDto,
+    SequenceOutcomeDto, SequenceProgressDto, StashApplyOutcomeDto, StashEntryDto, StashFilesDto,
+    StatusEntryDto, SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto, TerminalSequenceDto,
+    TreeListingDto, UndoOutcomeDto, UndoStateDto, UpstreamInfoDto, WorkspaceDto, WorktreeInfoDto,
 };
 
 #[path = "../../../test-support/wire_fixtures.rs"]
@@ -121,6 +121,11 @@ fn snapshots() -> Vec<(String, String)> {
         "FetchSettings",
         fixtures::fetch_settings(),
         FetchSettingsDto::from,
+    );
+    s.add(
+        "AppearanceSettings",
+        fixtures::appearance_settings(),
+        AppearanceSettingsDto::from,
     );
     s.add("GitTools", fixtures::git_tools(), GitToolsDto::from);
     s.add(

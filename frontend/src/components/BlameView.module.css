@@ -2,7 +2,8 @@
   width: 100%;
   border-collapse: collapse;
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--code-font-size, var(--text-sm));
+  tab-size: var(--tab-size);
 }
 
 .row {
