@@ -1083,3 +1083,39 @@ fn remote_management_round_trips_through_the_worker() {
     handle.clear_current_upstream().unwrap();
     assert_eq!(handle.get_current_upstream().unwrap(), None);
 }
+
+/// Receives events until the operation's `Completed`, without waiting for the channel to close.
+fn until_completed(event_rx: &mpsc::Receiver<TransferEvent>) {
+    loop {
+        let event = event_rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the operation completes");
+        if matches!(event, TransferEvent::Completed { .. }) {
+            return;
+        }
+    }
+}
+
+#[test]
+fn a_background_fetch_starts_as_soon_as_the_previous_transfer_reported_completed() {
+    let (_source_dir, _remote_dir, local_dir) = local_and_bare_remote();
+    let worker = Worker::spawn(local_dir.path().to_path_buf()).expect("spawn worker");
+    let handle = worker.handle();
+    let options = background_options(Duration::from_secs(30));
+
+    // The app starts the next tick as soon as it sees `Completed` (a tick overdue while the
+    // user's own fetch ran, #567): the finished operation must not still count as running.
+    let (event_tx, event_rx) = mpsc::channel();
+    handle
+        .fetch_all_remotes(None, event_tx)
+        .expect("start fetch all");
+    until_completed(&event_rx);
+    for _ in 0..3 {
+        let (event_tx, event_rx) = mpsc::channel();
+        handle
+            .background_fetch_with(options, event_tx)
+            .expect("start")
+            .expect("the previous transfer completed, so the tick starts");
+        until_completed(&event_rx);
+    }
+}

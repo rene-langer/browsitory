@@ -285,9 +285,8 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
             error = failed.first().map(|(_, kind)| *kind);
         }
     }
-    op.clear();
     let _ = events.send(TransferEvent::Completed {
-        operation_id: op.id,
+        operation_id: op.finish(),
         operation: OPERATION,
         error,
         hook_output: None,
