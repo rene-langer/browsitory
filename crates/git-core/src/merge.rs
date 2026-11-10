@@ -140,13 +140,13 @@ impl NotStagedReason {
 /// Refuses while a symlink stands where HEAD, the index or the merge's outcome has a folder: a
 /// fast-forward checks out `theirs`' tree, any other merge writes the merged index. A merged
 /// index that holds a file and a folder of the same name libgit2 didn't see as a conflict is
-/// refused too (#410), and so is an outcome (merged index or fast-forward tree) holding a case
+/// returned (#410, #416: `merge_with_file_folder_conflict` writes it), and an outcome (merged index or fast-forward tree) holding a case
 /// pair HEAD doesn't, while `core.ignorecase` is on (#522).
 fn refuse_unsafe_merge(
     repo: &Repository,
     theirs: &git2::Commit,
     fast_forward: bool,
-) -> Result<(), MergeError> {
+) -> Result<Option<git2::Index>, MergeError> {
     use crate::worktree_guard::{GuardSource, Incoming};
     let ours = repo.head()?.peel_to_commit()?;
     let our_tree = ours.tree()?;
@@ -158,11 +158,12 @@ fn refuse_unsafe_merge(
         )?;
         // libgit2's ignore-case index keeps one name of a case pair the checkout brings in and
         // doesn't write the other's file (#522).
-        return crate::worktree_guard::refuse_case_pair_brought_in(
+        crate::worktree_guard::refuse_case_pair_brought_in::<MergeError>(
             repo,
             &GuardSource::Tree(&tree),
             Some(&our_tree),
-        );
+        )?;
+        return Ok(None);
     }
     let merged = repo.merge_commits(&ours, theirs, None)?;
     // The link check first: its refusal is the more specific one when the "file" is a link.
@@ -170,14 +171,64 @@ fn refuse_unsafe_merge(
         repo,
         &[Incoming::Merge(GuardSource::Index(&merged))],
     )?;
-    crate::file_folder::refuse_file_folder_conflict(&merged)?;
     // libgit2's ignore-case index would keep one name of a case pair the merge brings in, and
     // the merge would be committed without the other (#522).
-    crate::worktree_guard::refuse_case_pair_brought_in(
+    crate::worktree_guard::refuse_case_pair_brought_in::<MergeError>(
         repo,
         &GuardSource::Index(&merged),
         Some(&our_tree),
-    )
+    )?;
+    Ok(crate::file_folder::find_file_folder_conflict(&merged).map(|_| merged))
+}
+
+/// A merge (or squash, when `merge_head` is `None`) whose result holds a file and a folder of
+/// the same name, which libgit2 merges without a conflict and can't check out (#410). Does what
+/// git does: `merged` is rewritten into libgit2's own file/folder conflict shape
+/// (`file_folder::record_as_conflicts`), written as the index and checked out (HEAD's file
+/// becomes `c~HEAD`, the folder's files are written), and the merge state is left as
+/// libgit2's `merge` does. Returns the conflicted files.
+fn merge_with_file_folder_conflict(
+    repo: &Repository,
+    mut merged: git2::Index,
+    merge_head: Option<(git2::Oid, &str)>,
+    their_label: &str,
+) -> Result<Vec<String>, MergeError> {
+    let ours = repo.head()?.peel_to_commit()?.tree()?;
+    crate::file_folder::record_as_conflicts(&mut merged, &ours, their_label)?;
+    let written = crate::partial_checkout::Written::default();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.safe().allow_conflicts(true);
+    crate::hardlink::on_checkout(repo, &mut checkout);
+    written.record(repo, &mut checkout);
+    written.expect_conflicts(repo, &merged);
+    let mut index = repo.index()?;
+    index.clear()?;
+    for entry in merged.iter() {
+        index.add(&entry)?;
+    }
+    if let Err(error) = repo.checkout_index(Some(&mut index), Some(&mut checkout)) {
+        let restored = crate::partial_checkout::roll_back(repo, &written);
+        return Err(crate::partial_checkout::report::<MergeError>(
+            repo,
+            restored,
+            crate::HeldDuring::RolledBack,
+            error,
+        ));
+    }
+    index.write()?;
+    let files = conflicted_files(&index)?;
+    if let Some((their_id, label)) = merge_head {
+        let git_dir = repo.path();
+        std::fs::write(git_dir.join("MERGE_HEAD"), format!("{their_id}\n"))?;
+        std::fs::write(git_dir.join("MERGE_MODE"), "")?;
+        let mut message = format!("{label}\n");
+        message.push_str("\n# Conflicts:\n");
+        for file in &files {
+            message.push_str(&format!("#\t{file}\n"));
+        }
+        std::fs::write(git_dir.join("MERGE_MSG"), message)?;
+    }
+    Ok(files)
 }
 
 /// Refuses a path whose existing parent folders include a symlink, so a resolution can never
@@ -265,13 +316,13 @@ pub fn start_merge(
 
     // Safe checkouts create files through a symlinked folder (#114); libgit2 can miss a
     // file/folder conflict (#410).
-    refuse_unsafe_merge(
+    let colliding = refuse_unsafe_merge(
         repo,
         &their_commit,
         analysis.is_fast_forward() && !opts.squash && opts.fast_forward != FastForward::Never,
     )?;
     if opts.squash {
-        return squash_merge(repo, &their_annotated, their_commit.id());
+        return squash_merge(repo, &their_annotated, their_commit.id(), colliding, short_ref_name(target));
     }
 
     if analysis.is_fast_forward() && opts.fast_forward != FastForward::Never {
@@ -297,6 +348,13 @@ pub fn start_merge(
         ));
     }
 
+    if let Some(merged) = colliding {
+        let label = merge_subject(target);
+        let files =
+            merge_with_file_folder_conflict(repo, merged, Some((their_commit.id(), &label)), short_ref_name(target))?;
+        return Ok(MergeOutcome::Conflicted { files });
+    }
+
     // libgit2's default strategy for a merge (safe); with our callbacks (#420).
     let mut checkout = git2::build::CheckoutBuilder::new();
     crate::hardlink::on_checkout(repo, &mut checkout);
@@ -318,13 +376,20 @@ fn squash_merge(
     repo: &Repository,
     their_annotated: &git2::AnnotatedCommit<'_>,
     their_id: git2::Oid,
+    colliding: Option<git2::Index>,
+    their_label: &str,
 ) -> Result<MergeOutcome, MergeError> {
     // Built before `repo.merge` so a failure here leaves the repository untouched.
     let message = build_squash_message(repo, their_id)?;
-    let mut checkout = git2::build::CheckoutBuilder::new();
-    crate::hardlink::on_checkout(repo, &mut checkout);
-    repo.merge(&[their_annotated], None, Some(&mut checkout))?;
-    let files = conflicted_files(&repo.index()?)?;
+    let files = match colliding {
+        Some(merged) => merge_with_file_folder_conflict(repo, merged, None, their_label)?,
+        None => {
+            let mut checkout = git2::build::CheckoutBuilder::new();
+            crate::hardlink::on_checkout(repo, &mut checkout);
+            repo.merge(&[their_annotated], None, Some(&mut checkout))?;
+            conflicted_files(&repo.index()?)?
+        }
+    };
     std::fs::write(repo.path().join("SQUASH_MSG"), message)?;
     crate::commit::clear_commit_state(repo)?;
     if files.is_empty() {
@@ -390,6 +455,16 @@ pub(crate) fn clear_squash_message(repo: &Repository) -> std::io::Result<()> {
     match std::fs::remove_file(repo.path().join("SQUASH_MSG")) {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
         _ => Ok(()),
+    }
+}
+
+/// The subject of a merge commit, as git's: `Merge branch 'x'`, `Merge remote-tracking branch
+/// 'origin/x'`.
+fn merge_subject(target: &str) -> String {
+    if target.starts_with("refs/remotes/") {
+        format!("Merge remote-tracking branch '{}'", short_ref_name(target))
+    } else {
+        format!("Merge branch '{}'", short_ref_name(target))
     }
 }
 

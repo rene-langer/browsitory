@@ -62,6 +62,50 @@ pub(crate) fn refuse_file_folder_conflict(index: &git2::Index) -> Result<(), Fil
     }
 }
 
+/// Rewrites `index` (a merge result) into git's outcome for a file/folder conflict: each
+/// colliding file `p` leaves stage 0 and becomes a conflict entry at the path git moves it to,
+/// `p~HEAD` at stage 2 ("added by us") when it is HEAD's file (`ours` has it with that id),
+/// else `p~<their_label>` at stage 3 ("added by them"). The entries below `p/` stay merged, so
+/// the checkout writes the folder's files and the moved file. A name already taken gets `_0`,
+/// `_1`... after it, as git does. Returns the moved files' old names (`p`), in index order;
+/// nothing when there is no collision.
+pub(crate) fn record_as_conflicts(
+    index: &mut git2::Index,
+    ours: &git2::Tree<'_>,
+    their_label: &str,
+) -> Result<Vec<String>, git2::Error> {
+    let mut files = Vec::new();
+    while let Some(conflict) = find_file_folder_conflict(index) {
+        let path = std::path::Path::new(&conflict.file);
+        let Some(mut entry) = index.get_path(path, 0) else {
+            break;
+        };
+        index.remove(path, 0)?;
+        let is_ours = ours
+            .get_path(path)
+            .map(|found| found.id() == entry.id)
+            .unwrap_or(false);
+        let (stage, label) = if is_ours {
+            (2, "HEAD")
+        } else {
+            (3, their_label)
+        };
+        let mut moved = format!("{}~{label}", conflict.file);
+        let mut counter = 0;
+        while index.iter().any(|other| other.path == moved.as_bytes())
+            || ours.get_path(std::path::Path::new(&moved)).is_ok()
+        {
+            moved = format!("{}~{label}_{counter}", conflict.file);
+            counter += 1;
+        }
+        entry.path = moved.into_bytes();
+        entry.flags = (entry.flags & !(0x3 << 12)) | (stage << 12);
+        index.add(&entry)?;
+        files.push(conflict.file);
+    }
+    Ok(files)
+}
+
 fn stage(entry: &git2::IndexEntry) -> u16 {
     (entry.flags >> 12) & 0x3
 }
