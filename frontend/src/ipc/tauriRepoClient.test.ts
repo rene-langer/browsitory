@@ -365,6 +365,12 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("get_fetch_settings", undefined);
     await tauriRepoClient.setFetchSettings({ autoFetchMinutes: 30 });
     expect(invoke).toHaveBeenLastCalledWith("set_fetch_settings", { settings: { autoFetchMinutes: 30 } });
+    await tauriRepoClient.getAppearanceSettings();
+    expect(invoke).toHaveBeenLastCalledWith("get_appearance_settings", undefined);
+    await tauriRepoClient.setAppearanceSettings({ codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2 });
+    expect(invoke).toHaveBeenLastCalledWith("set_appearance_settings", {
+      settings: { codeFont: "Mono", codeFontSize: 14, uiSize: "Large", tabSize: 2 },
+    });
     await tauriRepoClient.setCommitMessageSettings({ summaryLimit: 60, bodyRuler: 80, showRuler: false });
     expect(invoke).toHaveBeenLastCalledWith("set_commit_message_settings", {
       settings: { summaryLimit: 60, bodyRuler: 80, showRuler: false },

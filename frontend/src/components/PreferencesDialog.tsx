@@ -1,15 +1,20 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
+  CODE_FONT_SIZES,
   COMMIT_MESSAGE_COLUMNS,
   DIFF_ALGORITHM_VALUES,
+  TAB_SIZES,
+  UI_SIZE_VALUES,
   WORD_WRAP_VALUES,
   type DiffAlgorithm,
   type GitConfigSource,
   type GitToolInfo,
   type GitTools,
   type RepoClient,
+  type UiSize,
   type WordWrap,
 } from "../ipc/RepoClient";
+import { useAppearanceSettingsContext } from "../state/useAppearanceSettings";
 import { useCommitMessageSettingsContext } from "../state/useCommitMessageSettings";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useExternalToolSettings } from "../state/useExternalToolSettings";
@@ -240,6 +245,125 @@ export function FetchSection({ repoPath }: { repoPath: string | null }) {
       <p className={styles.hint}>
         Fetches all remotes in the background while Browsitory is visible and no other action runs, using
         each repository's Prune choice. A remote that would need you to sign in is skipped and named once.
+      </p>
+      {error !== null && (
+        <p role="alert" className={styles.problem}>
+          {error}{" "}
+          <button type="button" onClick={dismissError}>
+            Dismiss
+          </button>
+        </p>
+      )}
+    </PreferencesSection>
+  );
+}
+
+/**
+ * A text or number field that saves on blur (or Enter), for settings a keystroke must not save.
+ * `onCommit` gets the trimmed text, `""` when cleared.
+ */
+function CommitOnBlurField({
+  label,
+  value,
+  onCommit,
+  ...input
+}: {
+  label: string;
+  value: string;
+  onCommit: (value: string) => void;
+  type: "text" | "number";
+  placeholder?: string;
+  min?: number;
+  max?: number;
+}) {
+  // Local text while typing; `null` shows the saved value.
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    setDraft(null);
+    if (draft.trim() !== value) onCommit(draft.trim());
+  };
+  return (
+    <Field label={label}>
+      {(props) => (
+        <input
+          {...props}
+          {...input}
+          step={input.type === "number" ? 1 : undefined}
+          spellCheck={false}
+          className={input.type === "number" ? styles.number : undefined}
+          value={draft ?? value}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") commit();
+          }}
+        />
+      )}
+    </Field>
+  );
+}
+
+const UI_SIZE_LABEL: Record<UiSize, string> = { Small: "Small", Normal: "Normal", Large: "Large" };
+
+/**
+ * "Appearance" (#615): the code font, its size and the tab size of file content, and the
+ * interface text size. Applied at once by `AppearanceSettingsProvider`.
+ */
+export function AppearanceSection() {
+  const { settings, update, error, dismissError } = useAppearanceSettingsContext();
+  return (
+    <PreferencesSection title="Appearance">
+      <CommitOnBlurField
+        label="Code font"
+        type="text"
+        placeholder="Default monospace font"
+        value={settings.codeFont ?? ""}
+        onCommit={(text) => update({ codeFont: text === "" ? null : text })}
+      />
+      <CommitOnBlurField
+        label="Code font size (px)"
+        type="number"
+        min={CODE_FONT_SIZES.min}
+        max={CODE_FONT_SIZES.max}
+        placeholder="Default"
+        value={settings.codeFontSize === null ? "" : String(settings.codeFontSize)}
+        onCommit={(text) => {
+          const size = Number(text);
+          if (text === "") update({ codeFontSize: null });
+          else if (Number.isFinite(size)) update({ codeFontSize: size });
+        }}
+      />
+      <Field label="Interface size">
+        {(props) => (
+          <select
+            {...props}
+            value={settings.uiSize}
+            onChange={(event) => update({ uiSize: event.target.value as UiSize })}
+          >
+            {UI_SIZE_VALUES.map((value) => (
+              <option key={value} value={value}>
+                {UI_SIZE_LABEL[value]}
+              </option>
+            ))}
+          </select>
+        )}
+      </Field>
+      <CommitOnBlurField
+        label="Tab size"
+        type="number"
+        min={TAB_SIZES.min}
+        max={TAB_SIZES.max}
+        value={String(settings.tabSize)}
+        onCommit={(text) => {
+          const size = Number(text);
+          if (text !== "" && Number.isFinite(size)) update({ tabSize: size });
+        }}
+      />
+      <p className={styles.hint}>
+        The code font and its size apply to diffs, blame, the file viewer and conflicts; a font that
+        is not installed falls back to the default. Leave them empty for the defaults. The tab size
+        is in columns.
       </p>
       {error !== null && (
         <p role="alert" className={styles.problem}>

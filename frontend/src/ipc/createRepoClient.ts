@@ -1,5 +1,6 @@
 import type {
   AmendOptions,
+  AppearanceSettings,
   CommitChangeRequest,
   HunkOptions,
   PatchContent,
@@ -335,6 +336,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<void>("set_commit_message_settings", { settings }),
     getFetchSettings: () => call<FetchSettings>("get_fetch_settings"),
     setFetchSettings: (settings: FetchSettings) => call<void>("set_fetch_settings", { settings }),
+    getAppearanceSettings: () => call<AppearanceSettings>("get_appearance_settings"),
+    setAppearanceSettings: (settings: AppearanceSettings) => call<void>("set_appearance_settings", { settings }),
     getUndoState: (repoPath: string) => call<UndoState>("get_undo_state", { repoPath }),
     undo: (repoPath: string) => call<UndoOutcome>("undo_last", { repoPath }),
     redo: (repoPath: string) => call<UndoOutcome>("redo_last", { repoPath }),

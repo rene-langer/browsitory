@@ -220,6 +220,68 @@ pub struct FetchSettings {
 /// The longest "Fetch automatically" interval `set_fetch_settings_at` keeps (a day).
 pub const MAX_AUTO_FETCH_MINUTES: u32 = 24 * 60;
 
+/// Appearance preferences, persisted as the `[appearance]` TOML table (#615). `code_font` is a
+/// font family tried before the default monospace stack, and `code_font_size` the pixel size of
+/// file content; `None` keeps the built-in look for both. `tab_size` is the width of a tab in
+/// columns. Out-of-range values are clamped both on read and on write
+/// (`AppearanceSettings::clamped`), so a hand-edited file can't break the views.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AppearanceSettings {
+    pub code_font: Option<String>,
+    pub code_font_size: Option<u32>,
+    pub ui_size: UiSize,
+    pub tab_size: u32,
+}
+
+/// The interface text scale: each maps the `--text-*` sizes. Stored as `"small"`, `"normal"`
+/// or `"large"`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UiSize {
+    Small,
+    #[default]
+    Normal,
+    Large,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            code_font: None,
+            code_font_size: None,
+            ui_size: UiSize::Normal,
+            tab_size: 4,
+        }
+    }
+}
+
+/// The range `code_font_size` is clamped to, in pixels.
+pub const CODE_FONT_SIZES: std::ops::RangeInclusive<u32> = 10..=24;
+/// The range `tab_size` is clamped to, in columns.
+pub const TAB_SIZES: std::ops::RangeInclusive<u32> = 1..=16;
+
+impl AppearanceSettings {
+    /// The settings with the font family trimmed (blank is unset) and both sizes clamped to
+    /// `CODE_FONT_SIZES` and `TAB_SIZES`.
+    pub fn clamped(&self) -> Self {
+        let clamp = |n: u32, range: &std::ops::RangeInclusive<u32>| {
+            n.clamp(*range.start(), *range.end())
+        };
+        Self {
+            code_font: self
+                .code_font
+                .as_deref()
+                .map(str::trim)
+                .filter(|f| !f.is_empty())
+                .map(str::to_string),
+            code_font_size: self.code_font_size.map(|n| clamp(n, &CODE_FONT_SIZES)),
+            ui_size: self.ui_size,
+            tab_size: clamp(self.tab_size, &TAB_SIZES),
+        }
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct ConfigFile {
     #[serde(default)]
@@ -242,6 +304,8 @@ struct ConfigFile {
     commit_message: CommitMessageSettings,
     #[serde(default)]
     fetch: FetchSettings,
+    #[serde(default)]
+    appearance: AppearanceSettings,
     #[serde(default, deserialize_with = "deserialize_open_repos")]
     open_repos: Vec<OpenRepoEntry>,
     #[serde(default)]
@@ -407,6 +471,29 @@ pub fn set_fetch_settings_at(
     config.fetch = FetchSettings {
         auto_fetch_minutes: settings.auto_fetch_minutes.min(MAX_AUTO_FETCH_MINUTES),
     };
+    write_config(config_file, &config)
+}
+
+pub fn get_appearance_settings() -> Result<AppearanceSettings, ConfigError> {
+    get_appearance_settings_at(&config_file_path()?)
+}
+
+pub fn set_appearance_settings(settings: &AppearanceSettings) -> Result<(), ConfigError> {
+    set_appearance_settings_at(&config_file_path()?, settings)
+}
+
+/// The stored settings, clamped (see `AppearanceSettings::clamped`).
+pub fn get_appearance_settings_at(config_file: &Path) -> Result<AppearanceSettings, ConfigError> {
+    Ok(read_config(config_file)?.appearance.clamped())
+}
+
+/// Persists `settings`, clamped (see `AppearanceSettings::clamped`).
+pub fn set_appearance_settings_at(
+    config_file: &Path,
+    settings: &AppearanceSettings,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.appearance = settings.clamped();
     write_config(config_file, &config)
 }
 

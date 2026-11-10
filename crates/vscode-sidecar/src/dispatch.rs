@@ -179,6 +179,8 @@ methods!(|params, repos, stdout| {
     "set_commit_message_settings" => set_commit_message_settings(SetCommitMessageSettingsParams),
     "get_fetch_settings" => get_fetch_settings(),
     "set_fetch_settings" => set_fetch_settings(SetFetchSettingsParams),
+    "get_appearance_settings" => get_appearance_settings(),
+    "set_appearance_settings" => set_appearance_settings(SetAppearanceSettingsParams),
     "mark_resolved" => mark_resolved(MarkResolvedParams, repos),
     "resolve_whole_file" => resolve_whole_file(ResolveWholeFileParams, repos),
     "read_file_version" => read_file_version(ReadFileVersionParams, repos),

@@ -84,8 +84,9 @@
 .line {
   display: flex;
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: var(--code-font-size, 12.5px);
   line-height: var(--leading-normal);
+  tab-size: var(--tab-size);
   padding-right: var(--space-2);
 }
 

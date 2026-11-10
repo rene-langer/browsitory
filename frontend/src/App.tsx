@@ -15,10 +15,18 @@ import { Overlay } from "./components/primitives/Overlay";
 import type { RepoClient } from "./ipc/RepoClient";
 import { subscribeTransportStatus } from "./ipc/transportStatus";
 import type { AppCommands } from "./lib/commands";
-import { CommitMessageSection, DiffSection, ExternalToolsSection, FetchSection, PreferencesDialog } from "./components/PreferencesDialog";
+import {
+  AppearanceSection,
+  CommitMessageSection,
+  DiffSection,
+  ExternalToolsSection,
+  FetchSection,
+  PreferencesDialog,
+} from "./components/PreferencesDialog";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
 import { repoNameOf } from "./lib/repoName";
 import { persistTheme } from "./lib/theme";
+import { AppearanceSettingsProvider } from "./state/AppearanceSettingsProvider";
 import { CommitMessageSettingsProvider } from "./state/CommitMessageSettingsProvider";
 import { FetchSettingsProvider } from "./state/FetchSettingsProvider";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
@@ -44,7 +52,9 @@ export default function App(props: {
     <DiffSettingsProvider client={props.client}>
       <CommitMessageSettingsProvider client={props.client}>
         <FetchSettingsProvider client={props.client}>
-          <AppContent {...props} />
+          <AppearanceSettingsProvider client={props.client}>
+            <AppContent {...props} />
+          </AppearanceSettingsProvider>
         </FetchSettingsProvider>
       </CommitMessageSettingsProvider>
     </DiffSettingsProvider>
@@ -252,6 +262,7 @@ function AppContent({
           <CommitMessageSection />
           <FetchSection repoPath={openRepos.activePath} />
           <DiffSection />
+          <AppearanceSection />
         </PreferencesDialog>
       )}
       {(transportError !== null || openError !== null) && (
