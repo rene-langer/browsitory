@@ -22,7 +22,9 @@ function clamp(settings: DiffSettings): DiffSettings {
   const algorithm = DIFF_ALGORITHM_VALUES.includes(settings.algorithm)
     ? settings.algorithm
     : DEFAULT_DIFF_SETTINGS.algorithm;
-  return { ...settings, contextLines, wordWrap, algorithm };
+  // An older backend leaves `showWhitespace` out: off.
+  const showWhitespace = settings.showWhitespace === true;
+  return { ...settings, contextLines, wordWrap, algorithm, showWhitespace };
 }
 
 export function useDiffSettings(client: RepoClient): DiffSettingsApi {

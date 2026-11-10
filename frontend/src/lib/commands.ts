@@ -858,6 +858,12 @@ function diffCommands({ appState, state, diff, tools }: FamilyContext): Command[
     run: () => update({ ignoreWhitespace: !settings.ignoreWhitespace }),
   });
   add({
+    id: "toggle-show-whitespace",
+    label: "Toggle whitespace",
+    keywords: ["diff", "whitespace", "show", "spaces", "tabs", "markers", "trailing"],
+    run: () => update({ showWhitespace: !settings.showWhitespace }),
+  });
+  add({
     id: "increase-context-lines",
     label: "Increase context lines",
     keywords: ["diff", "context", "lines", "more"],

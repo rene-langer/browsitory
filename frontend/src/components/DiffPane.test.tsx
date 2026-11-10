@@ -1622,7 +1622,7 @@ describe("DiffPane line staging", () => {
   const TestDiffSettings = ({ ignoreWhitespace, children }: { ignoreWhitespace: boolean; children: ReactNode }) => (
     <DiffSettingsContext.Provider
       value={{
-        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
+        settings: { ignoreWhitespace, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false },
         update: () => {},
         error: null,
         dismissError: () => {},
@@ -1780,7 +1780,7 @@ describe("DiffPane diff options contract", () => {
   ) {
     return (
       <DiffSettingsContext.Provider
-        value={{ settings: { algorithm: "Default", ...settings, syntaxHighlight: false, wordWrap: "Auto" }, update: () => {}, error: null, dismissError: () => {} }}
+        value={{ settings: { algorithm: "Default", ...settings, syntaxHighlight: false, wordWrap: "Auto", showWhitespace: false }, update: () => {}, error: null, dismissError: () => {} }}
       >
         <DiffPane
           repoPath={TEST_REPO_PATH}
