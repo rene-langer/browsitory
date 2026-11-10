@@ -117,6 +117,37 @@ describe("Browsitory keyboard context menus", () => {
     expect(await browser.execute((el) => document.activeElement === (el as Element), actions)).toBe(true);
   });
 
+  // #614: the copy items are ordinary menu items, reachable by arrow keys and run with Enter.
+  it("copies a tag's name from its menu with the keyboard", async () => {
+    await expandSidebarSection("Tags");
+    const actions = await $(`button[aria-label="Actions for ${TAG_NAME}"]`);
+    await actions.waitForExist();
+    await browser.execute((el) => (el as HTMLElement).focus(), actions);
+
+    await browser.keys(["Shift", "F10"]);
+    await (await $("[role='menu']")).waitForExist();
+    const focusedLabel = () => browser.execute(() => document.activeElement?.textContent ?? null);
+    for (let step = 0; step < 10 && (await focusedLabel()) !== "Copy tag name"; step += 1) {
+      await browser.keys(["ArrowDown"]);
+    }
+    expect(await focusedLabel()).toBe("Copy tag name");
+
+    await browser.keys(["Enter"]);
+    await waitUntilGoneInPage("[role='menu']");
+    // Either outcome shows: the toast, or the error banner when the test display has no clipboard.
+    await browser.waitUntil(
+      async () =>
+        await browser.execute(() => {
+          const toasts = document.querySelector("[aria-label='Notifications']")?.textContent ?? "";
+          return toasts.includes("Copied tag name") || document.body.textContent!.includes("Couldn't copy the tag name");
+        }),
+      { timeoutMsg: "expected copying the tag name to be confirmed or to report an error" },
+    );
+    expect(await browser.execute(() => document.activeElement?.getAttribute("aria-label"))).toBe(
+      `Actions for ${TAG_NAME}`,
+    );
+  });
+
   it("opens Edit remote from the palette", async () => {
     await runPaletteCommand(`Edit remote ${REMOTE_NAME}…`);
     const dialog = await $(`dialog[aria-label='Edit ${REMOTE_NAME}']`);

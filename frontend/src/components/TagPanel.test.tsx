@@ -110,6 +110,7 @@ describe("TagPanel", () => {
       "Push v1.0.0 to backup",
       "Branch from tag",
       "Checkout (detached)",
+      "Copy tag name",
       "Delete from remote…",
       "Delete tag…",
     ]);
@@ -127,6 +128,19 @@ describe("TagPanel", () => {
     openMenu("v1.0.0");
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete from remote…" }));
     expect(p.onDeleteFromRemote).toHaveBeenCalledWith("v1.0.0");
+  });
+
+  it("copies the tag name, even while an operation runs (#614)", () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderPanel({ pushDisabled: true, operationDisabledReason: "A transfer is in progress." });
+
+    openMenu("v1.0.0");
+    const item = screen.getByRole("menuitem", { name: "Copy tag name" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+
+    expect(writeText).toHaveBeenCalledWith("v1.0.0");
   });
 
   it("leaves out the commit actions for a tag that doesn't point at a commit", () => {

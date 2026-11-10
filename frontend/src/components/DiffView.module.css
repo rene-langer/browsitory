@@ -161,6 +161,56 @@
   color: inherit;
 }
 
+/* Show whitespace (#616). Each span keeps its original character (a space, a tab or a carriage
+   return), so the text, its width, its wrapping and what a copy gives are unchanged; the marker
+   is an absolutely positioned pseudo-element over it: no width, not selectable, never copied. */
+.wsSpace,
+.wsTab,
+.wsCr {
+  position: relative;
+}
+
+.wsSpace::before,
+.wsTab::before,
+.wsTab::after,
+.wsCr::before {
+  position: absolute;
+  left: 0;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  pointer-events: none;
+  user-select: none;
+}
+
+.wsSpace::before {
+  content: "·";
+  right: 0;
+  text-align: center;
+}
+
+/* A tab is as wide as the tab size makes it: a shaft across that width ending in an arrowhead. */
+.wsTab::before {
+  content: "";
+  left: 0.15ch;
+  right: 0.5ch;
+  top: 50%;
+  border-top: 1px solid currentColor;
+}
+
+.wsTab::after {
+  content: "→";
+  left: auto;
+  right: 0;
+}
+
+.wsCr::before {
+  content: "↵";
+}
+
+.wsTrailing {
+  background: color-mix(in srgb, var(--color-danger-text) 30%, transparent);
+}
+
 .splitRow {
   display: flex;
   align-items: stretch;

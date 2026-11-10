@@ -4,6 +4,7 @@ import { NO_HEAD_INFO, withBlockedReason, type DiscardRequest, type SelectionAct
 import { stashBlockReason } from "../lib/operationStatus";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import type { GraphCommit, HeadInfo, HunkOptions, RepoClient, StatusEntry } from "../ipc/RepoClient";
+import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import type { CommitDraft } from "./CommitBox";
 import { CollapseAllToggle } from "./CollapseToggle";
@@ -113,7 +114,15 @@ export function UncommittedDiffPane({
   // always part of it; a plain click or arrow key makes it the only one.
   const [selection, setSelection] = useState<FileSelection>(EMPTY_FILE_SELECTION);
   const rowIdPrefix = useId();
-  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
+  // The files the user collapsed (`true`) or expanded (`false`), by `entryKey`, for as long as the
+  // pane is open; a file without an entry takes its default (`startsCollapsed`). Kept across
+  // status refreshes, so an untracked file the user expanded stays expanded (#623).
+  const [collapseOverrides, setCollapseOverrides] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const { expandUntracked } = useDiffSettingsContext().settings;
+  // With "Expand untracked files" off (#623), untracked files start collapsed, so they fetch
+  // nothing until expanded; tracked changes always start expanded.
+  const startsCollapsed = (entry: StatusEntry) => !expandUntracked && isUntracked(entry);
+  const isCollapsed = (entry: StatusEntry) => collapseOverrides.get(entryKey(entry)) ?? startsCollapsed(entry);
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Per-`entryKey` version counters: the per-path half of each section's staleness signal (the
   // other half is `refreshGeneration`, see `staleness` below). A hunk stage/unstage/discard bumps
@@ -180,7 +189,7 @@ export function UncommittedDiffPane({
 
   const allEntries = [...unstagedEntries, ...stagedEntries];
   const allKeys = allEntries.map(entryKey);
-  const allCollapsed = allKeys.length > 0 && allKeys.every((key) => collapsedKeys.has(key));
+  const allCollapsed = allEntries.length > 0 && allEntries.every(isCollapsed);
 
   const isEntryCurrent = (entry: StatusEntry) =>
     current !== null && current.path === entry.path && current.staged === entry.staged;
@@ -242,20 +251,19 @@ export function UncommittedDiffPane({
   const unstagedSummary = summaryOf(false);
   const stagedSummary = summaryOf(true);
 
-  const toggleCollapse = (key: string) => {
-    setCollapsedKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
+  const toggleCollapse = (entry: StatusEntry) => {
+    const collapsed = isCollapsed(entry);
+    setCollapseOverrides((prev) => new Map(prev).set(entryKey(entry), !collapsed));
   };
 
+  // Records every listed file, so a file listed later still takes its own default.
   const toggleCollapseAll = () => {
-    setCollapsedKeys(allCollapsed ? new Set() : new Set(allKeys));
+    const collapse = !allCollapsed;
+    setCollapseOverrides((prev) => {
+      const next = new Map(prev);
+      for (const key of allKeys) next.set(key, collapse);
+      return next;
+    });
   };
 
   // Shift+arrow (`extend`) moves the current file and selects the range from the anchor to it.
@@ -515,9 +523,9 @@ export function UncommittedDiffPane({
         isCurrent={isEntryCurrent(entry)}
         selected={isEntrySelected(entry)}
         rowId={`${rowIdPrefix}-${entry.staged ? "staged" : "unstaged"}-${index}`}
-        collapsed={collapsedKeys.has(key)}
+        collapsed={isCollapsed(entry)}
         diffVersion={staleness(key)}
-        onToggleCollapse={() => toggleCollapse(key)}
+        onToggleCollapse={() => toggleCollapse(entry)}
         onSelect={handleRowClick(entry)}
         selectionSummary={summary}
         onSelectionAction={(kind) => runSelectionAction(entry.staged, kind)}

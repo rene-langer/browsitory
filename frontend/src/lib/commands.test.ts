@@ -841,7 +841,7 @@ describe("buildCommands", () => {
       ],
     ])("omits the stash commands while %s, like DiffPane's Stash button", (_label, overrides) => {
       const ids = commandsFor(makeAppState(overrides), { diff: {
-        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
+        settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
         update: vi.fn(),
         currentFile: "a.txt",
         requestDiscardCurrentFile: vi.fn(),
@@ -1081,6 +1081,68 @@ describe("history commands", () => {
     expect(appState.resetToCommit).not.toHaveBeenCalled();
   });
 
+  // #515: a commit the search results or file history list, beyond the loaded graph.
+  describe("a listed commit outside the loaded graph (#515)", () => {
+    const listed = { ...graphCommit("old", []), shortId: "old1234" };
+    const listedState: Partial<AppState> = { ...historyState, selectedRow: { commitId: "old" } };
+    const withListed = (appState: UseAppStateResult, commitCommands = makeCommitCommands()) =>
+      commandsFor(appState, { commit: { ...commitCommands, listedCommits: [listed] } });
+
+    it("offers the commit menu's actions from the listed commit's own data, and runs them", () => {
+      const commitCommands = makeCommitCommands();
+      const commands = withListed(makeAppState(listedState), commitCommands);
+      const label = (id: string) => commands.find((c) => c.id === id)?.label;
+      expect(label("cherry-pick-selected")).toBe("Cherry-pick old1234");
+      expect(label("revert-selected")).toBe("Revert old1234");
+      expect(label("reset-selected")).toBe("Reset to old1234…");
+      expect(label("checkout-selected")).toBe("Checkout old1234 (detached)");
+      expect(label("create-tag-selected")).toBe("Create tag at old1234…");
+      commands.find((c) => c.id === "cherry-pick-selected")!.run();
+      commands.find((c) => c.id === "revert-selected")!.run();
+      commands.find((c) => c.id === "reset-selected")!.run();
+      expect(commitCommands.onCherryPick).toHaveBeenCalledWith("old");
+      expect(commitCommands.onRevert).toHaveBeenCalledWith("old");
+      expect(commitCommands.onReset).toHaveBeenCalledWith("old");
+    });
+
+    it("asks for the parent of a listed merge commit", () => {
+      const merge = { ...graphCommit("m9", ["p1", "p2"]), shortId: "m9" };
+      const commitCommands = makeCommitCommands();
+      const commands = commandsFor(makeAppState({ ...historyState, selectedRow: { commitId: "m9" } }), {
+        commit: { ...commitCommands, listedCommits: [merge] },
+      });
+      expect(commands.find((c) => c.id === "revert-selected")?.label).toBe("Revert m9…");
+      commands.find((c) => c.id === "revert-selected")!.run();
+      expect(commitCommands.onChooseParent).toHaveBeenCalledWith("Revert", "m9");
+    });
+
+    it("follows the commit menu's availability: none while blocked, no reset on a detached HEAD", () => {
+      const blockedIds = withListed(makeAppState({ ...listedState, mergeMessage: "Merge x" })).map((c) => c.id);
+      for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected", "checkout-selected"]) {
+        expect(blockedIds).not.toContain(id);
+      }
+      const detached = withListed(makeAppState({ ...listedState, branches: [] })).map((c) => c.id);
+      expect(detached).toContain("cherry-pick-selected");
+      expect(detached).not.toContain("reset-selected");
+    });
+
+    it("leaves out the history edits, which need the commit's ancestry in the graph", () => {
+      const ids = withListed(makeAppState(listedState)).map((c) => c.id);
+      for (const id of ["reword-selected", "squash-selected", "fixup-selected", "drop-selected", "move-up-selected"]) {
+        expect(ids).not.toContain(id);
+      }
+    });
+
+    it("offers nothing for a selected commit neither the graph nor a list has", () => {
+      const ids = commandsFor(makeAppState({ ...historyState, selectedRow: { commitId: "gone" } }), {
+        commit: { ...makeCommitCommands(), listedCommits: [listed] },
+      }).map((c) => c.id);
+      for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected", "checkout-selected"]) {
+        expect(ids).not.toContain(id);
+      }
+    });
+  });
+
   it("leaves out cherry-pick, revert and reset without the commit actions to run them", () => {
     const ids = commandsFor(makeAppState(historyState)).map((c) => c.id);
     for (const id of ["cherry-pick-selected", "revert-selected", "reset-selected"]) expect(ids).not.toContain(id);
@@ -1272,7 +1334,7 @@ describe("history commands", () => {
 });
 
 describe("diff option and discard commands", () => {
-  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const };
+  const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true };
   const build = (state: ReturnType<typeof makeAppState>, extra: Record<string, unknown> = {}) => {
     const diffCommands = {
       settings,
@@ -1316,6 +1378,8 @@ describe("diff option and discard commands", () => {
     const { commands, diffCommands } = build(makeAppState());
     commands.find((c) => c.id === "toggle-ignore-whitespace")!.run();
     expect(diffCommands.update).toHaveBeenCalledWith({ ignoreWhitespace: true });
+    commands.find((c) => c.id === "toggle-show-whitespace")!.run();
+    expect(diffCommands.update).toHaveBeenCalledWith({ showWhitespace: true });
     commands.find((c) => c.id === "increase-context-lines")!.run();
     expect(diffCommands.update).toHaveBeenCalledWith({ contextLines: 4 });
     commands.find((c) => c.id === "decrease-context-lines")!.run();
@@ -1524,7 +1588,7 @@ describe("preferences and external tool commands", () => {
     onOpenCurrentFileInDiffTool: vi.fn(),
   });
   const diffCommands = (currentFile: string | null) => ({
-    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const },
+    settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Default" as const, showWhitespace: false, expandUntracked: true },
     update: vi.fn(),
     currentFile,
     requestDiscardCurrentFile: vi.fn(),
@@ -2079,7 +2143,7 @@ const allFamilies = (appState: UseAppStateResult) =>
     tabs: tabs({ otherOpenRepos: [{ path: "/other", displayName: "other" } as OpenRepo] }),
     sidebar: sidebar(),
     diff: {
-      settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" },
+      settings: { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true },
       update: noop,
       currentFile: "b.txt",
       requestDiscardCurrentFile: noop,
@@ -2188,6 +2252,7 @@ describe("command ids and groups", () => {
       ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2238,6 +2303,7 @@ describe("command ids and groups", () => {
       ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2286,6 +2352,7 @@ describe("command ids and groups", () => {
       ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2337,6 +2404,7 @@ describe("command ids and groups", () => {
       ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],
@@ -2408,6 +2476,7 @@ describe("command ids and groups", () => {
       ["switch-to-tab", "Repositories"],
       ["third-party-licences", "General"],
       ["toggle-ignore-whitespace", "Diff"],
+      ["toggle-show-whitespace", "Diff"],
       ["toggle-show-whole-file", "Diff"],
       ["toggle-skip-hooks", "General"],
       ["toggle-syntax-highlighting", "Diff"],

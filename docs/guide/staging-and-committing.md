@@ -12,6 +12,12 @@ type changes) and leaves the untracked files where they are, like `git add -u`. 
 stages the untracked files too. Both leave conflicted files alone, and each is one undo step. The
 command palette has the same action as **Stage modified files (tracked only)**.
 
+Each file's arrow collapses its diff to the header row (path, status and actions); **Collapse
+all** above the groups closes every file at once. To keep large new or generated files out of the
+way, turn off **Preferences → Diff → Expand untracked files**: untracked files then start
+collapsed in **Changes** and load nothing until you expand them, while changes to tracked files
+still start expanded. A file you expand or collapse stays that way when the list refreshes.
+
 Each hunk header has **Stage hunk** (or **Unstage hunk**) and **Discard hunk**. Discard asks once
 more: the button turns into **Confirm discard**, and a second click discards the hunk.
 

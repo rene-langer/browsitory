@@ -360,7 +360,7 @@ describe("App", () => {
         getCommitGraph: async () => [],
         listBranches: async () => [],
         listStashes: async () => [],
-        getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default" }),
+        getDiffSettings: async () => ({ ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto", algorithm: "Default", showWhitespace: false, expandUntracked: true }),
         discardFile: vi.fn().mockResolvedValue(undefined),
         discardAllUnstaged: vi.fn().mockResolvedValue(undefined),
         ...overrides,
@@ -1499,6 +1499,61 @@ describe("App", () => {
       } finally {
         Element.prototype.scrollIntoView = original;
       }
+    });
+
+    // #515: a search result beyond the loaded history gets the commit actions from its own data.
+    it("the palette offers and runs a search result's commit actions when the loaded graph lacks it (#515)", async () => {
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = () => {};
+      try {
+        const old = { ...graph[1], id: "c0", shortId: "c0", summary: "one older", timestamp: 0 };
+        const cherryPick = vi.fn<RepoClient["cherryPick"]>().mockResolvedValue({ kind: "Committed", commitId: "c5" });
+        const revertCommit = vi.fn<RepoClient["revertCommit"]>().mockResolvedValue({ kind: "Committed", commitId: "c6" });
+        const resetToCommit = vi.fn<RepoClient["resetToCommit"]>().mockResolvedValue(undefined);
+        const searchCommits = vi.fn(async () => ({ commits: [old], nextCursor: null, scanned: 3 }));
+        render(
+          <App client={pickClient({ cherryPick, revertCommit, resetToCommit, searchCommits, cancelSearch: async () => {} })} />,
+        );
+        const results = await showSearchResults();
+        expect(await within(results).findByRole("option", { selected: true })).toHaveTextContent("one older");
+
+        await runPaletteCommand("Cherry-pick c0", "Cherry-pick c0");
+        await waitFor(() => expect(cherryPick).toHaveBeenCalledWith("/repos/a", "c0", null));
+        expect(await screen.findByText("Cherry-picked")).toBeInTheDocument();
+
+        await runPaletteCommand("Revert c0", "Revert c0");
+        await waitFor(() => expect(revertCommit).toHaveBeenCalledWith("/repos/a", "c0", null));
+
+        await runPaletteCommand("Reset to c0", "Reset to c0…");
+        const dialog = await screen.findByRole("dialog", { name: "Reset branch", hidden: true });
+        fireEvent.click(within(dialog).getByRole("button", { name: "Reset", hidden: true }));
+        await waitFor(() => expect(resetToCommit).toHaveBeenCalledWith("/repos/a", "c0", "mixed"));
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    // #515: the same for a file history commit, a merge asking for its parent.
+    it("the palette's Revert of a file history merge outside the loaded graph asks for the parent (#515)", async () => {
+      const merge = { ...graph[1], id: "m0", shortId: "m0", summary: "merge older", timestamp: 0, parentIds: ["p1", "p2"] };
+      const revertCommit = vi.fn<RepoClient["revertCommit"]>().mockResolvedValue({ kind: "Committed", commitId: "c6" });
+      render(
+        <App
+          client={pickClient({
+            getStatus: async () => [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }],
+            getFileHistory: async () => [{ commit: merge, path: "a.txt", oldPath: null }],
+            revertCommit,
+          })}
+        />,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "History of a.txt" }));
+      expect(await screen.findByRole("option", { selected: true })).toHaveTextContent("merge older");
+
+      await runPaletteCommand("Revert m0", "Revert m0…");
+      const dialog = await screen.findByRole("dialog", { name: "Choose parent", hidden: true });
+      fireEvent.click(within(dialog).getByRole("radio", { name: /Parent 2/, hidden: true }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Revert", hidden: true }));
+      await waitFor(() => expect(revertCommit).toHaveBeenCalledWith("/repos/a", "m0", 2));
     });
 
     // #508: a dialog opened before a sequence starts (e.g. in a terminal, picked up by a refresh)

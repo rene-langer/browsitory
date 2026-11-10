@@ -1319,3 +1319,67 @@ describe("BranchTree — remote dialogs belong to the owner", () => {
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
   });
 });
+
+// #614: always enabled, last before the destructive item, writing plain text.
+describe("BranchTree — copy items (#614)", () => {
+  let writeText: ReturnType<typeof vi.fn>;
+  beforeEach(() => {
+    localStorage.clear();
+    writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  });
+
+  const busy = { operationDisabled: true, operationDisabledReason: "A transfer is in progress." };
+  const menuNames = () => screen.getAllByRole("menuitem").map((item) => item.textContent);
+
+  it("copies a local branch's full name, even while an operation runs", () => {
+    renderTree(busy);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "foo" }));
+    expect(menuNames().slice(-2)).toEqual(["Copy branch name", "Delete"]);
+    const item = screen.getByRole("menuitem", { name: "Copy branch name" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+    expect(writeText).toHaveBeenCalledWith("feat/foo");
+  });
+
+  it("copies a remote branch's name as remote/branch", async () => {
+    renderTree({ ...busy, remotes: originOnly, onListRemoteBranches: vi.fn().mockResolvedValue(["topic"]) });
+    fireEvent.click(screen.getByRole("button", { name: "origin" }));
+    const row = (await screen.findByRole("button", { name: "Show origin/topic in graph" })).closest("li")!;
+    fireEvent.contextMenu(row);
+    expect(menuNames().slice(-2)).toEqual(["Copy branch name", "Delete origin/topic…"]);
+    const item = screen.getByRole("menuitem", { name: "Copy branch name" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+    expect(writeText).toHaveBeenCalledWith("origin/topic");
+  });
+
+  it.each([
+    ["no push URL", null],
+    ["the same push URL", "https://example.com/r.git"],
+  ])("copies a remote's fetch URL and offers no push URL with %s", (_label, pushUrl) => {
+    const remote = { name: "origin", fetchUrl: "https://example.com/r.git", pushUrl, authMode: null, authUsername: null };
+    renderTree({ ...busy, remotes: [remote] });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
+    expect(screen.queryByRole("menuitem", { name: "Copy push URL" })).toBeNull();
+    const item = screen.getByRole("menuitem", { name: "Copy fetch URL" });
+    expect(item).toBeEnabled();
+    fireEvent.click(item);
+    expect(writeText).toHaveBeenCalledWith("https://example.com/r.git");
+  });
+
+  it("offers Copy push URL when the push URL differs", () => {
+    const remote = {
+      name: "origin",
+      fetchUrl: "https://example.com/r.git",
+      pushUrl: "git@example.com:r.git",
+      authMode: null,
+      authUsername: null,
+    };
+    renderTree({ remotes: [remote] });
+    fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
+    expect(menuNames().slice(-3)).toEqual(["Copy fetch URL", "Copy push URL", "Remove remote"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy push URL" }));
+    expect(writeText).toHaveBeenCalledWith("git@example.com:r.git");
+  });
+});

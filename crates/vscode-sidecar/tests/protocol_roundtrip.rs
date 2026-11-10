@@ -2378,14 +2378,14 @@ fn diff_settings_round_trip_through_the_sidecar() {
         1,
         "set_diff_settings",
         serde_json::json!({
-            "settings": {"ignoreWhitespace": true, "contextLines": 6, "algorithm": "Default", "syntaxHighlight": false, "wordWrap": "Off"}
+            "settings": {"ignoreWhitespace": true, "contextLines": 6, "algorithm": "Default", "syntaxHighlight": false, "wordWrap": "Off", "showWhitespace": true, "expandUntracked": false}
         }),
     );
     assert_eq!(set["result"], serde_json::Value::Null, "{set}");
     let got = sidecar.call(2, "get_diff_settings", serde_json::json!({}));
     assert_eq!(
         got["result"],
-        serde_json::json!({"ignoreWhitespace": true, "contextLines": 6, "algorithm": "Default", "syntaxHighlight": false, "wordWrap": "Off"})
+        serde_json::json!({"ignoreWhitespace": true, "contextLines": 6, "algorithm": "Default", "syntaxHighlight": false, "wordWrap": "Off", "showWhitespace": true, "expandUntracked": false})
     );
 }
 

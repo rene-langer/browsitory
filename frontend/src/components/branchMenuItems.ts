@@ -3,12 +3,16 @@ import { menuItem } from "../lib/actions/action";
 import { branchActions, remoteBranchActions } from "../lib/actions/branchActions";
 import { addRemoteAction, remoteActions } from "../lib/actions/remoteActions";
 import type { OperationBlockers } from "../lib/operationStatus";
+import type { CopyToClipboard } from "../state/useCopyToClipboard";
 import type { ContextMenuItem } from "./primitives/ContextMenu";
 
 /**
  * The context menus of the Branches section (`BranchTree`), like `tagMenuItems.ts` for tags. The
  * items' availability and labels come from the shared action rules (#509), like the palette's;
  * these functions only add the handlers and the items that have no shared rule.
+ *
+ * The "Copy …" items (#614) sit last, before the destructive item, and are never disabled:
+ * copying is not a Git operation, so the busy rule doesn't apply.
  */
 
 /**
@@ -60,6 +64,7 @@ export function localBranchMenuItems({
   onOpenSetUpstream,
   onOpenPushDialog,
   onIsolateGraphBranch,
+  onCopy,
   onDelete,
 }: {
   branch: BranchInfo;
@@ -75,6 +80,7 @@ export function localBranchMenuItems({
   onOpenSetUpstream: () => void;
   onOpenPushDialog: (localBranch: string) => void;
   onIsolateGraphBranch: (kind: "local" | "remote", name: string) => void;
+  onCopy: CopyToClipboard;
   /** A soft delete that fails asks to force delete. */
   onDelete: (name: string) => void;
 }): ContextMenuItem[] {
@@ -108,26 +114,34 @@ export function localBranchMenuItems({
     title: "Show only this branch in the commit graph",
     onSelect: () => onIsolateGraphBranch("local", branch.name),
   });
+  items.push({ label: "Copy branch name", onSelect: () => onCopy(branch.name, "branch name") });
   items.push({ ...menuItem(actions.delete, () => onDelete(branch.name)), destructive: true });
   return items;
 }
 
-/** The menu of a remote folder header. */
+/** The menu of a remote folder header. "Copy push URL" only when it differs from the fetch URL. */
 export function remoteFolderMenuItems({
   remoteName,
+  fetchUrl,
+  pushUrl,
   blockers,
   onFetch,
   onPushCurrentBranch,
   onEdit,
   onCredentials,
+  onCopy,
   onRemove,
 }: {
   remoteName: string;
+  fetchUrl: string;
+  /** `null`: pushes go to the fetch URL. */
+  pushUrl: string | null;
   blockers: OperationBlockers;
   onFetch: () => void;
   onPushCurrentBranch: () => void;
   onEdit: () => void;
   onCredentials: () => void;
+  onCopy: CopyToClipboard;
   onRemove: () => void;
 }): ContextMenuItem[] {
   const actions = remoteActions(blockers, remoteName);
@@ -136,6 +150,10 @@ export function remoteFolderMenuItems({
     menuItem(actions.pushCurrentBranch, onPushCurrentBranch),
     menuItem(actions.edit, onEdit),
     menuItem(actions.credentials, onCredentials),
+    { label: "Copy fetch URL", onSelect: () => onCopy(fetchUrl, "fetch URL") },
+    ...(pushUrl !== null && pushUrl !== fetchUrl
+      ? [{ label: "Copy push URL", onSelect: () => onCopy(pushUrl, "push URL") }]
+      : []),
     { ...menuItem(actions.remove, onRemove), destructive: true },
   ];
 }
@@ -150,6 +168,7 @@ export function remoteBranchMenuItems({
   onSetUpstream,
   onCompareBranch,
   onIsolateGraphBranch,
+  onCopy,
   onOpenDeleteRemoteBranch,
 }: {
   remoteName: string;
@@ -160,6 +179,7 @@ export function remoteBranchMenuItems({
   onSetUpstream: (remoteName: string, remoteBranch: string) => Promise<void>;
   onCompareBranch?: (refName: string, label: string) => void;
   onIsolateGraphBranch: (kind: "local" | "remote", name: string) => void;
+  onCopy: CopyToClipboard;
   onOpenDeleteRemoteBranch: (remoteName: string, branchName: string) => void;
 }): ContextMenuItem[] {
   const actions = remoteBranchActions(blockers, remoteName, branchName);
@@ -179,6 +199,7 @@ export function remoteBranchMenuItems({
       title: "Show only this branch in the commit graph",
       onSelect: () => onIsolateGraphBranch("remote", `${remoteName}/${branchName}`),
     },
+    { label: "Copy branch name", onSelect: () => onCopy(`${remoteName}/${branchName}`, "branch name") },
     { ...menuItem(actions.delete, () => onOpenDeleteRemoteBranch(remoteName, branchName)), destructive: true },
   ];
 }

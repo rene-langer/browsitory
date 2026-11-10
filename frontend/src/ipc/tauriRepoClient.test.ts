@@ -656,7 +656,7 @@ describe("tauriRepoClient diff pane commands", () => {
     expect(invoke).toHaveBeenLastCalledWith("create_root_file", { repoPath: "/repo", name: ".gitignore" });
     await tauriRepoClient.getDiffSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_diff_settings", undefined);
-    const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Minimal" as const };
+    const settings = { ignoreWhitespace: false, contextLines: 3, syntaxHighlight: true, wordWrap: "Auto" as const, algorithm: "Minimal" as const, showWhitespace: false, expandUntracked: true };
     await tauriRepoClient.setDiffSettings(settings);
     expect(invoke).toHaveBeenLastCalledWith("set_diff_settings", { settings });
   });
