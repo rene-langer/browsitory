@@ -166,7 +166,9 @@ needs a fallback for it. A dispatched run has no labels, so `changelog` ignores
 `docs/guide/privacy.md` lists every connection the app makes and the data it keeps. CI's `audit`
 job runs `scripts/check-privacy-hosts.py`, which fails when non-test code (or the updater
 config) names a host missing from its allow-list or from that page: a new outbound host needs
-both, and a removed one leaves both.
+both, and a removed one leaves both. It scans comments too: a host the app never contacts
+(a docs link, an XML namespace) goes on its `NON_NETWORK_HOSTS`, and a URL built without a
+literal host (`format!("https://{host}")`) on its `DYNAMIC_URLS`, each with the reason.
 
 ## Versioning & releases
 
