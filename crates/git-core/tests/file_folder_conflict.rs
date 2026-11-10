@@ -640,6 +640,32 @@ fn stash_apply_refuses_an_untracked_file_in_the_way() {
     assert_eq!(stash_count(&mut f.repo), 1);
 }
 
+/// Staged changes: libgit2's apply refuses before its merge (`StagedChanges`), so the
+/// file/folder path, which merges against HEAD's tree, must not run either; nothing written.
+#[test]
+fn stash_apply_with_staged_changes_is_refused_before_the_file_folder_path() {
+    let mut f = stashed_fixture();
+    write_file(f.dir.path(), "new.txt", "staged\n");
+    let mut index = f.repo.index().unwrap();
+    index.add_path(Path::new("new.txt")).unwrap();
+    index.write().unwrap();
+    let error = git_core::stash::apply_stash(&mut f.repo, 0, None, false).unwrap_err();
+    assert!(matches!(error, StashError::StagedChanges), "{error}");
+    assert_eq!(read(f.dir.path(), "c"), "file\n");
+    assert!(!f.dir.path().join("c/g").exists());
+    assert!(!f.dir.path().join("c~Updated upstream").exists());
+    assert_eq!(
+        index_entries(&f.repo),
+        [
+            ("a.txt".to_string(), 0),
+            ("c".to_string(), 0),
+            ("c.txt".to_string(), 0),
+            ("new.txt".to_string(), 0)
+        ]
+    );
+    assert_eq!(stash_count(&mut f.repo), 1);
+}
+
 /// A local change to a file the stash changes too: refused (the safe checkout would overwrite
 /// it), nothing written.
 #[test]
