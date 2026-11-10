@@ -187,7 +187,7 @@ describe("Browsitory interactive rebase", () => {
     const rebasePanel = await $("h2*=Rebase in progress");
     await rebasePanel.waitForExist();
 
-    const conflictedRow = await $("span*=rebase-conflict-resume.txt (Conflicted)");
+    const conflictedRow = await $("span=rebase-conflict-resume.txt (Conflicted)");
     await conflictedRow.waitForExist();
     await conflictedRow.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
@@ -255,7 +255,7 @@ describe("Browsitory interactive rebase", () => {
 
     const rebasePanel = await $("h2*=Rebase in progress");
     await rebasePanel.waitForExist();
-    const conflictedRow = await $("span*=rebase-conflict-abort.txt (Conflicted)");
+    const conflictedRow = await $("span=rebase-conflict-abort.txt (Conflicted)");
     await conflictedRow.waitForExist();
 
     // The operation status strip has an "Abort rebase" button too; this is the panel's. Clicked

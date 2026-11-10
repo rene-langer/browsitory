@@ -83,7 +83,7 @@ describe("Browsitory merge with conflict resolution", () => {
     // a `<span>{path} ({kind})</span>` plus icon-only stage/unstage controls — there is no
     // per-file `<button>` carrying the path text any more. Clicking the span still selects the
     // row: the click bubbles to the `<li>`'s own onClick (see `DiffPane.tsx`'s `FileListRow`).
-    const conflictedRow = await $("span*=shared.txt (Conflicted)");
+    const conflictedRow = await $("span=shared.txt (Conflicted)");
     await conflictedRow.waitForExist();
     await conflictedRow.scrollIntoView({ block: "center" });
 
@@ -153,7 +153,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await confirmMergeDialog("e2e-merge-adddelete-feature");
 
     // See the first test: the row's path text lives in a `<span>` inside `<li role="option">`.
-    const conflictedRow = await $("span*=adddelete.txt (Conflicted)");
+    const conflictedRow = await $("span=adddelete.txt (Conflicted)");
     await conflictedRow.waitForExist();
     await conflictedRow.scrollIntoView({ block: "center" });
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
@@ -208,7 +208,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await mergeButton.click();
     await confirmMergeDialog("e2e-merge-abort-feature");
 
-    const conflictedRow = await $("span*=abort.txt (Conflicted)");
+    const conflictedRow = await $("span=abort.txt (Conflicted)");
     await conflictedRow.waitForExist();
 
     // The commit box offers "Abort merge" too; this is the operation status strip's.
