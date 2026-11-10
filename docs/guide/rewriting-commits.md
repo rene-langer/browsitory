@@ -55,7 +55,8 @@ The edits only change messages and the order of commits. To change the files of 
 commit, use **Rebase onto here…** with an **Edit** step.
 
 **Amend last commit.** Tick **Amend last commit** under the commit message. The message fills
-with the last commit's, and the **Commit** button becomes **Amend**: anything staged is folded
+with the last commit's, and the **Commit** button becomes **Amend** (the commit button's arrow has
+**Amend last commit** too): anything staged is folded
 into that commit (or just reword it). If that commit is already on the upstream, a warning reads
 "Already pushed — you'll need to force push." Whatever you had half-typed is kept and comes back
 when you untick amend or after a successful amend.
