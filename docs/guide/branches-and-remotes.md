@@ -67,8 +67,17 @@ remote. The toggle is remembered per repository; until you set it, your git conf
 all (unreachable, missing credentials), the others are still fetched and the error names the
 ones that failed.
 
-**Cancelling a fetch, pull or push.** While one runs, a progress panel shows it, with
-**Cancel**. While it is still connecting (a server that doesn't answer, a VPN that is down),
+**While a fetch, pull or push runs.** The repository toolbar names it ("Pushing main to
+origin/main"), with a progress bar, the objects and bytes sent or received, and **Cancel**. The
+window stays usable: you can scroll the history, look at what is already shown and open the
+sidebar. Anything Browsitory still has to read from the repository, such as the files of a
+commit you haven't opened yet, shows once the transfer ends. Actions that change the repository
+wait too, and their buttons say why. When it is done, a notification says what happened:
+"Pushed 2 commits to origin/main", "Fetched from origin. main is 3 commits behind origin/main."
+(with **Pull**), or "Nothing to push" when the remote already had everything.
+
+**Cancelling a fetch, pull or push.** Click **Cancel** next to its progress. While it is still
+connecting (a server that doesn't answer, a VPN that is down),
 Cancel stops it at once and you can go on working: nothing has been fetched or sent, and the
 repository is unchanged. Once data is flowing, a fetch stops at its next progress step; a pull
 cancelled during its fetch doesn't merge. A push can be cancelled until it starts
@@ -84,7 +93,7 @@ repository; **In <repository>** below it overrides it for the open repository al
 example, off for a slow server, or more often for a busy project). Choose **Use the app
 setting** to follow the app-wide choice again.
 
-A background fetch fetches all remotes, quietly: no progress panel, no "Fetch complete" toast,
+A background fetch fetches all remotes, quietly: no progress in the toolbar, no notification,
 nothing to undo, and the window keeps its focus. It uses the repository's **Prune** choice like
 **Fetch all remotes**, and the history, branches and ahead/behind counts refresh when it is done.
 

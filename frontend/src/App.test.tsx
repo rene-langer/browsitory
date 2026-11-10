@@ -1151,6 +1151,121 @@ describe("App", () => {
     expect(screen.queryByRole("dialog", { name: "Push main" })).toBeNull();
   });
 
+  it("shows a running push in the toolbar, not a modal: browsing goes on, Cancel works, the toast names it (#659, #661)", async () => {
+    // Every subscriber hears each event (the tab's transfers and "Fetch automatically" both listen).
+    const listeners = new Set<(progress: import("./ipc/RepoClient").TransferProgress) => void>();
+    const emit = (progress: import("./ipc/RepoClient").TransferProgress) => listeners.forEach((listener) => listener(progress));
+    const cancelTransfer = vi.fn(async () => {});
+    const event = (phase: "Starting" | "Receiving" | "Completed", current = 0, total = 0) => ({
+      operationId: "push-1", operation: "PushBranch" as const, phase, errorKind: null, current, total, receivedBytes: 512, message: null, hookOutput: null,
+    });
+    const upstream = { localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 2, behind: 0 };
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [{ name: "main", isCurrent: true, upstream: null, ahead: null, behind: null }],
+      listStashes: async () => [],
+      listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false }],
+      getCurrentUpstream: async () => upstream,
+      subscribeTransferProgress: (next) => {
+        listeners.add(next);
+        return () => listeners.delete(next);
+      },
+      pushCurrentBranch: async () => {
+        emit(event("Starting"));
+        return "push-1";
+      },
+      cancelTransfer,
+    });
+    render(<App client={client} />);
+
+    const push = await screen.findByRole("button", { name: "Push" });
+    await waitFor(() => expect(push).toBeEnabled());
+    fireEvent.click(push);
+
+    const activity = await screen.findByRole("group", { name: "Pushing main to origin/main" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => emit(event("Receiving", 3, 4)));
+    expect(within(activity).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "75");
+    // Repository actions wait, and say what for; browsing (the sidebar toggle) stays available.
+    expect(push).toBeDisabled();
+    expect(push).toHaveAttribute("title", "Pushing main to origin/main. Wait for it to finish, or cancel it.");
+    expect(screen.getByRole("button", { name: "Sidebar" })).toBeEnabled();
+
+    fireEvent.click(within(activity).getByRole("button", { name: "Cancel" }));
+    expect(cancelTransfer).toHaveBeenCalledWith("/repos/a", "push-1");
+
+    await act(async () => emit(event("Completed")));
+    expect(await screen.findByText("Pushed 2 commits to origin/main.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("group", { name: "Pushing main to origin/main" })).toBeNull());
+  });
+
+  it("offers Pull in the toast of a fetch that left the branch behind (#661)", async () => {
+    // Every subscriber hears each event (the tab's transfers and "Fetch automatically" both listen).
+    const listeners = new Set<(progress: import("./ipc/RepoClient").TransferProgress) => void>();
+    const emit = (progress: import("./ipc/RepoClient").TransferProgress) => listeners.forEach((listener) => listener(progress));
+    let behind = 0;
+    const pullCurrentUpstream = vi.fn(async () => ({ kind: "UpToDate" as const }));
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [],
+      getCommitGraph: async () => [],
+      listBranches: async () => [{ name: "main", isCurrent: true, upstream: null, ahead: null, behind: null }],
+      listStashes: async () => [],
+      listRemotes: async () => [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false }],
+      getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 0, behind }),
+      subscribeTransferProgress: (next) => {
+        listeners.add(next);
+        return () => listeners.delete(next);
+      },
+      fetchRemote: async () => {
+        behind = 3;
+        emit({ operationId: "fetch-1", operation: "Fetch", phase: "Starting", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+        emit({ operationId: "fetch-1", operation: "Fetch", phase: "Completed", errorKind: null, current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null });
+        return "fetch-1";
+      },
+      pullCurrentUpstream,
+    });
+    render(<App client={client} />);
+
+    const fetch = await screen.findByRole("button", { name: "Fetch" });
+    await waitFor(() => expect(fetch).toBeEnabled());
+    fireEvent.click(fetch);
+
+    await screen.findByText("Fetched from origin. main is 3 commits behind origin/main.");
+    fireEvent.click(within(screen.getByRole("status", { name: "Notifications" })).getByRole("button", { name: "Pull" }));
+    await waitFor(() => expect(pullCurrentUpstream).toHaveBeenCalledWith("/repos/a"));
+  });
+
+  it("shows placeholder rows until the first reads answer (#660)", async () => {
+    let answer: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => (answer = resolve));
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => {
+        await gate;
+        return [];
+      },
+      getCommitGraph: async () => [],
+      listBranches: async () => [{ name: "main", isCurrent: true }],
+      listStashes: async () => [],
+    });
+    render(<App client={client} />);
+
+    expect(await screen.findByRole("status", { name: "Loading history…" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("status", { name: "Loading branches…" })).toBeInTheDocument();
+    await act(async () => answer?.());
+    await waitFor(() => expect(screen.queryByRole("status", { name: "Loading history…" })).toBeNull());
+    expect(screen.queryByRole("status", { name: "Loading branches…" })).toBeNull();
+  });
+
   it("renames a branch inline with the name trimmed, and an unchanged name never reaches the client (#418)", async () => {
     localStorage.clear();
     const renameBranch = vi.fn(async () => {});

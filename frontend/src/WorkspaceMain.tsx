@@ -7,6 +7,7 @@ import { CompareDiffPane } from "./components/CompareDiffPane";
 import { DiffPane, type DiscardRequest } from "./components/DiffPane";
 import { FileHistoryList } from "./components/FileHistoryList";
 import { GoToNotice } from "./components/GoToNotice";
+import { SkeletonRows } from "./components/primitives/SkeletonRows";
 import { SplitView } from "./components/primitives/SplitView";
 import type { RepoClient } from "./ipc/RepoClient";
 import { issueForgeRepository } from "./lib/messageLinks";
@@ -164,6 +165,9 @@ export function WorkspaceMain({
                 onRequestSearch={requestSearchFocus}
                 listRef={searchResultsRef}
               />
+            ) : !appState.state.loaded ? (
+              // The first reads are still out (#660): placeholder rows, not an empty history.
+              <SkeletonRows label="Loading history…" rows={12} />
             ) : (
               <CommitGraph
                 onRequestSearch={requestSearchFocus}
@@ -208,7 +212,7 @@ export function WorkspaceMain({
                 onRewordCommit={(commitId, onto) => appState.openDialog({ kind: "reword", commitId, onto })}
                 graphRemoteBranchSelection={appState.state.graphSelection.remote}
                 remotes={appState.state.remotes}
-                onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
+                onPushTag={(remoteName, tag) => void appState.pushTags(remoteName, [tag])}
                 onDeleteTag={appState.deleteTag}
                 onCreateTag={(commitId) => appState.openDialog({ kind: "createTag", commitId })}
                 onDeleteTagFromRemote={(tagName) => appState.openDialog({ kind: "deleteRemoteTag", tagName })}

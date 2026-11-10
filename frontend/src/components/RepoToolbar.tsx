@@ -13,7 +13,8 @@ export const SIDEBAR_SHORTCUT_LABEL = "Ctrl/Cmd+Alt+B";
 /**
  * The one repository toolbar above the sidebar, graph and diff (#637): the sidebar toggle (a
  * drawer in a narrow layout, #635), the current branch, which opens the branch switcher (#638),
- * Back/Forward, Fetch/Pull/Push with the ahead/behind counts, Stash, Undo/Redo and Refresh.
+ * Back/Forward, Fetch/Pull/Push with the ahead/behind counts, what is running (a transfer's
+ * progress and Cancel, #659), Stash, Undo/Redo and Refresh.
  */
 export function RepoToolbar({
   sidebar,
@@ -32,6 +33,7 @@ export function RepoToolbar({
     onOpenSwitcher: () => void;
   };
   navigation: ComponentProps<typeof NavigationButtons>;
+  /** Includes `activity`, the running transfer or action (#659, #660). */
   sync: Omit<ComponentProps<typeof SyncBar>, "leading" | "trailing" | "ariaLabel">;
   undo: ComponentProps<typeof UndoRedoButtons>;
   onRefresh: () => void;

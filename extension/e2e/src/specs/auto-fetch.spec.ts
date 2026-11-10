@@ -88,10 +88,10 @@ describe("Browsitory VSCode extension fetch automatically", () => {
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      // The sync bar says when, quietly: no "Fetch complete" toast.
+      // The sync bar says when, quietly: no "Fetched from …" toast.
       await webview.waitForText("span", "Fetched just now", 15000);
       const text = await webview.bodyText();
-      if (text.includes("Fetch complete")) throw new Error("a background fetch showed the manual fetch's toast");
+      if (text.includes("Fetched from")) throw new Error("a background fetch showed the manual fetch's toast");
     } finally {
       await webview.close();
       await vscode.commands.executeCommand("workbench.action.closeAllEditors");
