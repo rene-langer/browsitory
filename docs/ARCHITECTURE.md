@@ -404,16 +404,27 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
   and leaves HEAD's file as the conflict `c~HEAD`. With libgit2 a cherry-pick, revert or rebase
   step committed a tree without the file `c` while the work tree kept `c` and never got `c/g`;
   a merge (squash, a diverged pull's merge) and a stash apply stopped part-way with "failed to
-  make directory 'c': directory exists". Every operation that writes a libgit2 merge (merge,
-  squash, cherry-pick, revert, each rebase step, stash apply and pop) runs
-  `file_folder::refuse_file_folder_conflict` on its in-memory merge (`merge_commits`,
-  `cherrypick_commit`, `revert_commit`; for a stash `merge_trees` redoing `git_stash_apply`'s
-  merges against HEAD's tree) before anything is written, and refuses with
-  `FileFolderConflict` (a stage-0 entry `p` while another entry lives below `p/`; libgit2's own
-  conflict entry `p` next to `p/…` is left alone). Producing git's outcome instead would mean
-  rewriting the index into git's `c~HEAD` conflict and doing the checkout and the operation's
-  state files ourselves for five operations, where libgit2's checkout of such an index fails; a
-  refusal keeps the user's work safe and points them to git. The test
+  make directory 'c': directory exists". Every operation that writes a libgit2 merge checks its
+  in-memory merge (`merge_commits`, `cherrypick_commit`, `revert_commit`; for a stash
+  `merge_trees` redoing `git_stash_apply`'s merges against HEAD's tree) before anything is
+  written. `file_folder::find_file_folder_conflict` finds a stage-0 entry `p` while another entry
+  lives below `p/` (libgit2's own conflict entry `p` next to `p/…` is left alone).
+  - **Merge, squash, cherry-pick and revert (#416)** produce git's outcome themselves, without
+    libgit2's `merge`/`cherrypick`/`revert`, whose checkout of such an index fails.
+    `file_folder::check_out_as_conflicts` rewrites the merged index (`record_as_conflicts`: the
+    stage-0 `c` becomes `c~HEAD` at stage 2, "added by us", or `c~<their label>` at stage 3 when
+    the file comes from the other side; a taken name gets `_0`...), makes it the repository's
+    index and checks it out with a safe, conflict-allowing checkout (`c/g` is written, HEAD's file
+    moves to `c~HEAD`), rolled back by `partial_checkout` when it stops part-way (#321/#329). The
+    caller then writes the operation's state files as libgit2 would (`MERGE_HEAD`/`MERGE_MODE`/
+    `MERGE_MSG`, or `CHERRY_PICK_HEAD`/`REVERT_HEAD`/`MERGE_MSG`; a squash only `SQUASH_MSG`), so
+    Abort (`reset --merge` semantics, via the index diff) works as for any other conflict. The
+    conflict is a stage-2-only (or stage-3-only) entry, "added by us/them" like git's own.
+  - **Rebase steps and stash apply/pop** still refuse with `FileFolderConflict` and say to use
+    git: libgit2's `rebase.next()` and `stash_apply` merge and check out internally, so the
+    same rewrite would mean redoing their state (`rebase-merge/`, the stash's index and
+    untracked-file handling, `--index`) ourselves.
+  The test
   `libgit2_still_merges_a_file_and_a_folder_without_a_conflict` (`tests/file_folder_conflict.rs`)
   pins the libgit2 behaviour: when a libgit2 update fixes it, that test fails and the guard can
   give way to libgit2's conflict.
