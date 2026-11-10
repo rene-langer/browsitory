@@ -22,8 +22,8 @@ happens when the graph doesn't show the commit). To share tags, pick the remote 
 tags**, tick the tags you want and choose **Push selected tags**, or choose **Push all tags**. A
 tag's other actions are in its menu: the **…** button (it appears when you point at or tab into
 the row), a right-click, or the Menu key or Shift+F10 on the row, its checkbox or its **…**. The menu has the same items as the tag's
-badge in the graph: push to a remote, **Branch from tag**, **Checkout (detached)**, **Delete
-from remote…** and **Delete tag…** (the local tag, after a confirmation).
+badge in the graph: push to a remote, **Branch from tag**, **Checkout (detached)**, **Copy tag
+name**, **Delete from remote…** and **Delete tag…** (the local tag, after a confirmation).
 
 ## Delete a tag on a remote
 

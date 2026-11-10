@@ -108,6 +108,16 @@ describe("CommitHeader", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(FULL_ID));
   });
 
+  it("says so when the SHA can't be copied (#614)", async () => {
+    const writeText = vi.fn(async () => Promise.reject(new Error("Write permission denied.")));
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderHeader();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy full SHA" }));
+
+    expect(await screen.findByText("Couldn't copy the SHA: Write permission denied.")).toBeInTheDocument();
+  });
+
   describe("signature row", () => {
     it("is hidden for an unsigned commit", async () => {
       renderHeader();

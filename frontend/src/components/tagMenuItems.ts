@@ -1,11 +1,13 @@
 import type { RemoteInfo } from "../ipc/RepoClient";
+import type { CopyToClipboard } from "../state/useCopyToClipboard";
 import type { ContextMenuItem } from "./primitives/ContextMenu";
 
 /**
  * The actions on one tag, shared by the tag badge menu in the graph (`CommitGraph`) and the
  * Tags panel's row menu (`TagPanel`), so both offer the same items in the same order. An action
  * whose handler is missing is left out; `commitId` `null` (a tag of a tree or blob) leaves out
- * the actions that need a commit.
+ * the actions that need a commit. "Copy tag name" (#614) sits before the destructive items and is
+ * never disabled (copying is not a Git operation).
  */
 export function tagMenuItems({
   tag,
@@ -17,6 +19,7 @@ export function tagMenuItems({
   onBranchFromCommit,
   onCheckoutCommit,
   onDeleteFromRemote,
+  onCopy,
   onDelete,
 }: {
   tag: string;
@@ -29,6 +32,7 @@ export function tagMenuItems({
   onBranchFromCommit?: (commitId: string) => void;
   onCheckoutCommit?: (commitId: string) => void;
   onDeleteFromRemote?: (tag: string) => void;
+  onCopy?: CopyToClipboard;
   /** Opens the local-delete confirmation. */
   onDelete?: (tag: string) => void;
 }): ContextMenuItem[] {
@@ -54,6 +58,9 @@ export function tagMenuItems({
   }
   if (commitId !== null && onCheckoutCommit !== undefined) {
     items.push({ label: "Checkout (detached)", onSelect: () => onCheckoutCommit(commitId), disabled, title: busyTitle });
+  }
+  if (onCopy !== undefined) {
+    items.push({ label: "Copy tag name", onSelect: () => onCopy(tag, "tag name") });
   }
   if (onDeleteFromRemote !== undefined) {
     items.push({
