@@ -265,9 +265,8 @@ impl AppearanceSettings {
     /// The settings with the font family trimmed (blank is unset) and both sizes clamped to
     /// `CODE_FONT_SIZES` and `TAB_SIZES`.
     pub fn clamped(&self) -> Self {
-        let clamp = |n: u32, range: &std::ops::RangeInclusive<u32>| {
-            n.clamp(*range.start(), *range.end())
-        };
+        let clamp =
+            |n: u32, range: &std::ops::RangeInclusive<u32>| n.clamp(*range.start(), *range.end());
         Self {
             code_font: self
                 .code_font
