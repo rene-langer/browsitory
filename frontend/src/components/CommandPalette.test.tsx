@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
-import type { Command } from "../lib/commands";
+import { recordCommandUsed, type Command } from "../lib/commands";
 
 function makeCommands(): Command[] {
   return [
@@ -26,7 +26,7 @@ describe("CommandPalette", () => {
   it("filters as the user types", () => {
     render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "fetch" } });
-    expect(screen.getByText("Fetch origin")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Fetch origin" })).toBeInTheDocument();
     expect(screen.queryByText("Switch to main")).not.toBeInTheDocument();
   });
 
@@ -203,6 +203,112 @@ describe("CommandPalette", () => {
       render(<CommandPalette commands={commands} onRun={vi.fn()} />);
       fireEvent.click(screen.getByText("Go to branch…"));
       expect(JSON.parse(localStorage.getItem("command-palette-recent") ?? "[]")).toEqual(["go-to-branch"]);
+    });
+  });
+  describe("keeping the highlight in view (#643)", () => {
+    const many = (): Command[] =>
+      Array.from({ length: 30 }, (_, i) => ({
+        id: `cmd-${i}`,
+        label: `Command ${String(i).padStart(2, "0")}`,
+        keywords: [],
+        run: vi.fn(),
+        group: "General" as const,
+      }));
+    let scrollIntoView: ReturnType<typeof vi.fn>;
+    beforeEach(() => {
+      scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView as unknown as Element["scrollIntoView"];
+    });
+    afterEach(() => {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    });
+
+    const active = () => {
+      const id = screen.getByRole("combobox").getAttribute("aria-activedescendant");
+      return id === null ? null : document.getElementById(id);
+    };
+
+    it("scrolls the highlighted row into view as it moves", () => {
+      render(<CommandPalette commands={many()} onRun={vi.fn()} />);
+      fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowDown" });
+      expect(active()).toHaveTextContent("Command 01");
+      expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(active());
+    });
+
+    it("pages with PageDown/PageUp and jumps with Ctrl+End/Ctrl+Home", () => {
+      render(<CommandPalette commands={many()} onRun={vi.fn()} />);
+      const input = screen.getByRole("combobox");
+      fireEvent.keyDown(input, { key: "PageDown" });
+      expect(active()).toHaveTextContent("Command 10");
+      fireEvent.keyDown(input, { key: "PageUp" });
+      expect(active()).toHaveTextContent("Command 00");
+      fireEvent.keyDown(input, { key: "End", ctrlKey: true });
+      expect(active()).toHaveTextContent("Command 29");
+      fireEvent.keyDown(input, { key: "Home", ctrlKey: true });
+      expect(active()).toHaveTextContent("Command 00");
+    });
+
+    it("jumps with plain Home/End only while the query is empty, leaving the caret keys to the text", () => {
+      render(<CommandPalette commands={many()} onRun={vi.fn()} />);
+      const input = screen.getByRole("combobox");
+      fireEvent.keyDown(input, { key: "End" });
+      expect(active()).toHaveTextContent("Command 29");
+
+      fireEvent.change(input, { target: { value: "command" } });
+      const endEvent = fireEvent.keyDown(input, { key: "End" });
+      expect(endEvent).toBe(true); // not prevented: the caret moves
+      expect(active()).toHaveTextContent("Command 00");
+    });
+
+    it("moves the highlight to the row under the pointer", () => {
+      render(<CommandPalette commands={many()} onRun={vi.fn()} />);
+      fireEvent.mouseMove(screen.getByText("Command 05"));
+      expect(active()).toHaveTextContent("Command 05");
+      fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowDown" });
+      expect(active()).toHaveTextContent("Command 06");
+    });
+  });
+
+  describe("browsing and matching (#644)", () => {
+    it("lists every command with an empty query, beyond the filtered cap", () => {
+      const commands: Command[] = Array.from({ length: 70 }, (_, i) => ({
+        id: `cmd-${i}`,
+        label: `Command ${i}`,
+        keywords: [],
+        run: vi.fn(),
+        group: "General",
+      }));
+      render(<CommandPalette commands={commands} onRun={vi.fn()} />);
+      expect(screen.getAllByRole("option")).toHaveLength(70);
+    });
+
+    it("lists recently used commands first, under their own heading, and only once", () => {
+      recordCommandUsed("fetch-origin");
+      recordCommandUsed("switch-feature");
+      render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
+      const listbox = screen.getByRole("listbox");
+      const items = Array.from(listbox.children).map((li) => li.textContent);
+      expect(items).toEqual(["Recent", "Switch to feature", "Fetch origin", "General", "Switch to main"]);
+      expect(screen.getByRole("combobox")).toHaveAttribute(
+        "aria-activedescendant",
+        screen.getByText("Switch to feature").closest("li")!.id,
+      );
+    });
+
+    it("skips recent ids that no longer name a command", () => {
+      recordCommandUsed("gone");
+      render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
+      expect(screen.queryByText("Recent")).not.toBeInTheDocument();
+    });
+
+    it("matches the words in any order and highlights the matched letters", () => {
+      render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "main sw" } });
+      const options = screen.getAllByRole("option");
+      expect(options).toHaveLength(1);
+      expect(options[0]).toHaveTextContent("Switch to main");
+      expect(Array.from(options[0].querySelectorAll("mark")).map((mark) => mark.textContent)).toEqual(["Sw", "main"]);
     });
   });
 });

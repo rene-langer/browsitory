@@ -10,6 +10,7 @@ import { busyReason, operationBlockers, stashBlockReason, type OperationBlockers
 import { stageModifiedPaths, untrackedPaths } from "./stagePaths";
 import type { AppState, UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
+import { matchItem } from "./fuzzyMatch";
 import { repoNameOf } from "./repoName";
 import type { RootFileItem } from "./rootFiles";
 import type { SidebarPanelId } from "../state/useSidebarPanelVisibility";
@@ -1264,37 +1265,27 @@ export function commitPickerItems(commits: GraphCommit[], query: string, goTo: G
   return items;
 }
 
-/** Picker items matching `query` (best match first, else in the given order). */
+/** Picker items matching `query` (best match first, else in the given order; `matchItem`). */
 export function filterPickerItems(items: PickerItem[], query: string): PickerItem[] {
   const scored: { item: PickerItem; score: number; index: number }[] = [];
   items.forEach((item, index) => {
-    const score = scoreCommand(item, query);
-    if (score !== null) scored.push({ item, score, index });
+    const match = matchItem(item, query);
+    if (match !== null) scored.push({ item, score: match.score, index });
   });
   scored.sort((a, b) => b.score - a.score || a.index - b.index);
   return scored.slice(0, RESULT_LIMIT).map((entry) => entry.item);
 }
 
-
-function scoreCommand(command: PickerItem, query: string): number | null {
-  const q = query.trim().toLowerCase();
-  if (q === "") return 0;
-  const label = command.label.toLowerCase();
-  // The whole label typed ("go to branch" for "Go to branch…") beats a longer label that merely
-  // starts with it ("Go to Branches").
-  if (label === q || label.replace(/…$/, "") === q) return 4;
-  if (label.startsWith(q)) return 3;
-  if (command.keywords.some((keyword) => keyword.toLowerCase().startsWith(q))) return 2;
-  if (label.includes(q) || command.keywords.some((keyword) => keyword.toLowerCase().includes(q))) return 1;
-  return null;
-}
-
+/**
+ * Commands matching `query`, best first; ties go to the recently used, then by label. Fuzzy and
+ * in any word order (`matchItem`, #644).
+ */
 export function filterAndSortCommands<T extends PickerItem>(commands: T[], query: string): T[] {
   const recent = loadRecentCommandIds();
   const scored: { command: T; score: number }[] = [];
   for (const command of commands) {
-    const score = scoreCommand(command, query);
-    if (score !== null) scored.push({ command, score });
+    const match = matchItem(command, query);
+    if (match !== null) scored.push({ command, score: match.score });
   }
   scored.sort((a, b) => {
     if (a.score !== b.score) return b.score - a.score;
@@ -1307,7 +1298,9 @@ export function filterAndSortCommands<T extends PickerItem>(commands: T[], query
     }
     return a.command.label.localeCompare(b.command.label);
   });
-  return scored.slice(0, RESULT_LIMIT).map((entry) => entry.command);
+  // The empty query lists every command, grouped by the palette (#644); a filtered list is capped.
+  const kept = query.trim() === "" ? scored : scored.slice(0, RESULT_LIMIT);
+  return kept.map((entry) => entry.command);
 }
 
 export function loadRecentCommandIds(): string[] {

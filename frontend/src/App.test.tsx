@@ -359,6 +359,55 @@ describe("App", () => {
     expect(openExternalUrl).toHaveBeenCalledWith("https://rene-langer.github.io/browsitory/");
   });
 
+  describe("the header's palette button and Help menu (#647)", () => {
+    it("opens the command palette from the Commands button, and closes it again", async () => {
+      const { container } = render(<App client={guideClient(vi.fn().mockResolvedValue(undefined))} />);
+      await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+
+      const button = screen.getByRole("button", { name: /^Commands/ });
+      expect(button).toHaveAttribute("aria-keyshortcuts", "Control+K");
+      fireEvent.click(button);
+      expect(await screen.findByRole("combobox", { name: "Command palette" })).toBeInTheDocument();
+      fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+      await waitFor(() => expect(screen.queryByRole("combobox", { name: "Command palette" })).not.toBeInTheDocument());
+    });
+
+    it("opens the user guide, the keyboard shortcuts and what's new from the Help menu", async () => {
+      const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+      const { container } = render(<App client={guideClient(openExternalUrl)} />);
+      await waitFor(() => expect(container.querySelector('[data-active-repo="true"]')).not.toBeNull());
+
+      const help = screen.getByRole("button", { name: "Help" });
+      expect(help).toHaveAttribute("aria-haspopup", "menu");
+      fireEvent.click(help);
+      fireEvent.click(await screen.findByRole("menuitem", { name: "User guide" }));
+      await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith("https://rene-langer.github.io/browsitory/"));
+
+      fireEvent.click(help);
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Keyboard shortcuts" }));
+      expect(await screen.findByRole("heading", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(screen.queryByRole("heading", { name: "Keyboard shortcuts" })).not.toBeInTheDocument());
+
+      fireEvent.click(help);
+      fireEvent.click(await screen.findByRole("menuitem", { name: "What’s new" }));
+      expect(await screen.findByRole("button", { name: "User guide" })).toBeInTheDocument();
+    });
+
+    it("offers the Help menu, without the shortcuts, before any repository is open", async () => {
+      const client = fakeClient({
+        listOpenRepos: async () => ({ entries: [], activePath: null }),
+        persistOpenRepos: async () => {},
+      });
+      render(<App client={client} />);
+      const help = await screen.findByRole("button", { name: "Help" });
+      expect(screen.queryByRole("button", { name: /^Commands/ })).not.toBeInTheDocument();
+      fireEvent.click(help);
+      expect(await screen.findByRole("menuitem", { name: "User guide" })).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Keyboard shortcuts" })).not.toBeInTheDocument();
+    });
+  });
+
   describe("palette discard commands", () => {
     function discardClient(overrides: Partial<RepoClient> = {}) {
       return fakeClient({

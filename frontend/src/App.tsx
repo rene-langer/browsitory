@@ -1,7 +1,8 @@
 import { USER_GUIDE_URL } from "./lib/links";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Moon, Settings, Sparkles, Sun } from "lucide-react";
-import { ShortcutHint } from "./components/ShortcutHint";
+import { CommandsButton } from "./components/CommandsButton";
+import { HelpMenuButton } from "./components/HelpMenuButton";
 import { RepoPicker } from "./components/RepoPicker";
 import { RepoTabs } from "./components/RepoTabs";
 import { RenameTabDialog } from "./components/RenameTabDialog";
@@ -345,7 +346,7 @@ function AppContent({
           onRenameTab={setRenamingTab}
         />
         {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}
-        {openRepos.openRepos.length > 0 && <ShortcutHint />}
+        {openRepos.openRepos.length > 0 && <CommandsButton />}
         {themeToggle}
         <button
           type="button"
@@ -365,6 +366,12 @@ function AppContent({
         >
           <Sparkles size={16} aria-hidden="true" />
         </button>
+        <HelpMenuButton
+          className={styles.iconButton}
+          shortcuts={openRepos.openRepos.length > 0}
+          onOpenUserGuide={openUserGuide}
+          onShowReleaseNotes={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
+        />
       </header>
       {openRepos.restoreError !== null && (
         <div className={styles.errorLayer}>

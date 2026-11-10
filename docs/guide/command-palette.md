@@ -2,9 +2,15 @@
 
 ## Command palette
 
-Press **Ctrl+K** (**Cmd+K** on macOS) anywhere to open the command palette. The header shows
-the shortcut as a reminder. Type to filter the list, use ↑/↓ to pick a command and Enter to run it. The
-commands you used last come first.
+Press **Ctrl+K** (**Cmd+K** on macOS) anywhere to open the command palette, or click
+**Commands** in the header. Before you type, it lists every command it can run now: the ones you
+used last under **Recent**, then the rest in their groups. Type to filter the list. The words you
+type can come in any order and can be shortened: `sw main` finds **Switch to main**, and `ftch`
+finds **Fetch origin**. The best match comes first, and the letters that matched are marked.
+
+Use ↑/↓ to pick a command and Enter to run it, or click one. PageUp/PageDown move a page at a
+time, and Ctrl+Home/Ctrl+End (or Home/End before you type) go to the first or last command.
+Pointing at a command with the mouse picks it too.
 
 ![The command palette, filtered to "branch"](assets/command-palette.png)
 
@@ -62,7 +68,8 @@ adds that branch to the graph), it is on a side branch of the one branch the gra
 
 ## Keyboard shortcuts
 
-Press **?** (outside a text field) for the full list of shortcuts. The most useful ones:
+Press **?** (outside a text field), or choose **Keyboard shortcuts** in the header's **Help**
+menu, for the full list of shortcuts. The most useful ones:
 
 | Keys | What they do |
 |---|---|

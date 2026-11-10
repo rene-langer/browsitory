@@ -999,6 +999,22 @@ describe("filterAndSortCommands", () => {
     const results = filterAndSortCommands(commands, "zzz-no-match");
     expect(results).toHaveLength(0);
   });
+
+  it("matches the words in any order, and letters in order (#644)", () => {
+    expect(filterAndSortCommands(commands, "main sw").map((c) => c.id)).toEqual(["a"]);
+    expect(filterAndSortCommands(commands, "ftch").map((c) => c.id)).toEqual(["c"]);
+  });
+
+  it("caps a filtered list but not the empty query's full list (#644)", () => {
+    const many: PickerItem[] = Array.from({ length: 80 }, (_, i) => ({
+      id: `cmd-${i}`,
+      label: `Command ${i}`,
+      keywords: [],
+      run: vi.fn(),
+    }));
+    expect(filterAndSortCommands(many, "")).toHaveLength(80);
+    expect(filterAndSortCommands(many, "command")).toHaveLength(50);
+  });
 });
 
 describe("recordCommandUsed / loadRecentCommandIds", () => {

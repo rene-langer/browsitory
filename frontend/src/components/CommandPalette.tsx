@@ -1,14 +1,33 @@
-import { Fragment, useId, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import {
+  Fragment,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import { ListRow } from "./primitives/ListRow";
 import {
   COMMAND_GROUPS,
   filterAndSortCommands,
+  loadRecentCommandIds,
   recordCommandUsed,
   type Command,
-  type CommandGroup,
-  type PickerItem,
+    type PickerItem,
 } from "../lib/commands";
+import { matchItem, type MatchRange } from "../lib/fuzzyMatch";
 import styles from "./CommandPalette.module.css";
+
+/** How many recently used commands head the unfiltered list (#644). */
+const RECENT_SHOWN = 5;
+/** PageUp/PageDown's step when the rows have no measured height (jsdom). */
+const FALLBACK_PAGE = 10;
+const RECENT_HEADING = "Recent";
+
+type PaletteItem = Command | PickerItem;
 
 export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun: () => void }) {
   const [query, setQuery] = useState("");
@@ -22,20 +41,74 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
   const picker = pickerCommand?.picker;
 
   const grouped = picker === undefined && query.trim() === "";
-  // Unfiltered: reorder into kind groups (stable within a group). Filtered: keep relevance order.
-  // Keyboard order always equals displayed order, so the highlight index is over this list.
-  const results = useMemo((): readonly (Command | PickerItem)[] => {
+  // Unfiltered (#644): the recently used commands, then every other command under its kind
+  // group (stable within a group). Filtered: one list in relevance order. Keyboard order always
+  // equals displayed order, so the highlight index is over `results`; `headings` maps the index
+  // of a group's first row to its heading.
+  const { results, headings } = useMemo((): {
+    results: readonly PaletteItem[];
+    headings: ReadonlyMap<number, string>;
+  } => {
     const items = commands.find((command) => command.id === pickerId)?.picker?.items;
-    if (items !== undefined) return items(query);
+    if (items !== undefined) return { results: items(query), headings: new Map() };
     const ranked = filterAndSortCommands(commands, query);
-    if (query.trim() !== "") return ranked;
-    return COMMAND_GROUPS.flatMap((group) => ranked.filter((command) => command.group === group));
+    if (query.trim() !== "") return { results: ranked, headings: new Map() };
+    const byId = new Map(ranked.map((command) => [command.id, command]));
+    const recent = loadRecentCommandIds()
+      .map((id) => byId.get(id))
+      .filter((command): command is Command => command !== undefined)
+      .slice(0, RECENT_SHOWN);
+    const recentIds = new Set(recent.map((command) => command.id));
+    const sections: { heading: string; commands: Command[] }[] = [
+      { heading: RECENT_HEADING, commands: recent },
+      ...COMMAND_GROUPS.map((group) => ({
+        heading: group,
+        commands: ranked.filter((command) => command.group === group && !recentIds.has(command.id)),
+      })),
+    ];
+    const flat: Command[] = [];
+    const starts = new Map<number, string>();
+    for (const section of sections) {
+      if (section.commands.length === 0) continue;
+      starts.set(flat.length, section.heading);
+      flat.push(...section.commands);
+    }
+    return { results: flat, headings: starts };
   }, [commands, query, pickerId]);
   const clampedIndex = results.length === 0 ? 0 : Math.min(highlightedIndex, results.length - 1);
   const activeDescendantId =
     results.length === 0 ? undefined : `${listboxId}-option-${clampedIndex}`;
 
-  function runCommand(command: Command | PickerItem) {
+  // Keep the highlighted row visible as the keys, paging or a new query move it (#643).
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (activeDescendantId === undefined) return;
+    document.getElementById(activeDescendantId)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeDescendantId, results]);
+
+  /** Rows per PageUp/PageDown: as many as the list shows at once. */
+  function pageSize(): number {
+    const list = listRef.current;
+    const row = list?.querySelector<HTMLElement>('[role="option"]');
+    if (list == null || row == null || row.offsetHeight === 0) return FALLBACK_PAGE;
+    return Math.max(1, Math.floor(list.clientHeight / row.offsetHeight) - 1);
+  }
+
+  function moveHighlight(to: number) {
+    setHighlightedIndex(Math.max(0, Math.min(to, results.length - 1)));
+  }
+
+  // The pointer moves the highlight (#643); a move, not an enter, so a row scrolling under a
+  // resting pointer leaves the keyboard's highlight alone.
+  function handleMouseMove(event: ReactMouseEvent<HTMLUListElement>) {
+    const option = (event.target as Element).closest('[role="option"]');
+    const prefix = `${listboxId}-option-`;
+    if (option === null || !option.id.startsWith(prefix)) return;
+    const index = Number(option.id.slice(prefix.length));
+    if (index !== clampedIndex) setHighlightedIndex(index);
+  }
+
+  function runCommand(command: PaletteItem) {
     if (picker === undefined) recordCommandUsed(command.id);
     if (picker === undefined && "picker" in command && command.picker !== undefined) {
       setPickerId(command.id);
@@ -48,12 +121,20 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
   }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    // Home/End belong to the text's caret once something is typed; Ctrl+Home/End always jump.
+    const jumpKey = (event.key === "Home" || event.key === "End") && (event.ctrlKey || event.metaKey || query === "");
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setHighlightedIndex((prev) => Math.min(prev + 1, Math.max(results.length - 1, 0)));
+      moveHighlight(clampedIndex + 1);
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setHighlightedIndex((prev) => Math.max(prev - 1, 0));
+      moveHighlight(clampedIndex - 1);
+    } else if (event.key === "PageDown" || event.key === "PageUp") {
+      event.preventDefault();
+      moveHighlight(clampedIndex + (event.key === "PageDown" ? pageSize() : -pageSize()));
+    } else if (jumpKey) {
+      event.preventDefault();
+      moveHighlight(event.key === "Home" ? 0 : results.length - 1);
     } else if (event.key === "Enter") {
       event.preventDefault();
       const command = results[clampedIndex];
@@ -85,15 +166,19 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
         aria-controls={listboxId}
         aria-activedescendant={activeDescendantId}
       />
-      <ul className={styles.list} id={listboxId} role="listbox" aria-label={picker === undefined ? "Command results" : "Results"}>
+      <ul
+        ref={listRef}
+        className={styles.list}
+        id={listboxId}
+        role="listbox"
+        onMouseMove={handleMouseMove} aria-label={picker === undefined ? "Command results" : "Results"}>
         {results.map((command, index) => {
-          const group = groupOf(command);
-          const startsGroup = grouped && (index === 0 || groupOf(results[index - 1]) !== group);
+          const heading = headings.get(index);
           return (
             <Fragment key={command.id}>
-              {startsGroup && (
+              {heading !== undefined && (
                 <li role="presentation" className={styles.groupHeading}>
-                  {group}
+                  {heading}
                 </li>
               )}
               <ListRow
@@ -102,7 +187,7 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
                 selected={index === clampedIndex}
                 onClick={() => runCommand(command)}
               >
-                {command.label}
+                <HighlightedLabel label={command.label} ranges={grouped ? [] : (matchItem(command, query)?.ranges ?? [])} />
               </ListRow>
             </Fragment>
           );
@@ -120,7 +205,20 @@ export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun
   );
 }
 
-/** A command's group; a picker's items have none. */
-function groupOf(item: Command | PickerItem): CommandGroup | undefined {
-  return "group" in item ? item.group : undefined;
+/** `label` with the matched `ranges` marked (#644). */
+function HighlightedLabel({ label, ranges }: { label: string; ranges: readonly MatchRange[] }) {
+  if (ranges.length === 0) return <>{label}</>;
+  const parts: ReactNode[] = [];
+  let position = 0;
+  for (const [start, end] of ranges) {
+    if (start > position) parts.push(label.slice(position, start));
+    parts.push(
+      <mark key={start} className={styles.match}>
+        {label.slice(start, end)}
+      </mark>,
+    );
+    position = end;
+  }
+  if (position < label.length) parts.push(label.slice(position));
+  return <>{parts}</>;
 }

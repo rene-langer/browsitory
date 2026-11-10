@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { navigationKeyDirection } from "../lib/navigationKeys";
+import { onWorkspaceRequest } from "../lib/workspaceRequests";
 import type { AppState } from "./useAppState";
 
 /**
  * `RepoWorkspace`'s window-level keyboard shortcuts: the command palette (Ctrl/Cmd+K), the
  * shortcut sheet (?), Undo/Redo, closing and reopening the tab, and Back/Forward through the
  * visited commits (keys and the mouse's back/forward buttons). Owns the palette's and the
- * sheet's open state.
+ * sheet's open state, which the header's Commands button and Help menu open too (#647).
  */
 export function useWorkspaceShortcuts({
   active,
@@ -37,6 +38,14 @@ export function useWorkspaceShortcuts({
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!active) return;
+    return onWorkspaceRequest((request) => {
+      if (request === "palette") setPaletteOpen(true);
+      else setShortcutsOpen(true);
+    });
+  }, [active]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
