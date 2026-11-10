@@ -4,8 +4,9 @@
 //! whether it aborts a paused operation.
 //!
 //! [`of`] names every `Command` variant (no catch-all), so a new command doesn't compile until it
-//! is given a policy. The worker loop, `undo` and `gate` only read the result; the typed reply
-//! each of them answers or holds is reached through [`reply_of`], which also names every variant.
+//! is given a policy, nor until `policy_tests.rs` pins that policy in a table row (#518). The
+//! worker loop, `undo` and `gate` only read the result; the typed reply each of them answers or
+//! holds is reached through [`reply_of`], which also names every variant.
 use crate::wire::ErrorDto;
 use std::sync::mpsc::Sender;
 
