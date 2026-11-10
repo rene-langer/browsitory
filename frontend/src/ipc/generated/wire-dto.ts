@@ -195,6 +195,8 @@ export type RemoteInfo = { name: string, fetchUrl: string, pushUrl: string | nul
  */
 prune: boolean, };
 
+export type RepoAlias = { repoPath: string, alias: string, };
+
 export type RepoErrorPayload = { kind: ErrorKind, message: string, };
 
 export type ResetMode = "soft" | "mixed" | "hard";

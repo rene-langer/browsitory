@@ -505,6 +505,16 @@ pub fn workspaces() -> Cases<config::Workspace> {
     ]
 }
 
+pub fn repo_aliases() -> Cases<config::RepoAlias> {
+    vec![case(
+        "plain",
+        config::RepoAlias {
+            repo_path: "/repos/app".into(),
+            alias: "app (review)".to_string(),
+        },
+    )]
+}
+
 pub fn diff_settings() -> Cases<config::DiffSettings> {
     let mut cases = vec![case(
         "plain",

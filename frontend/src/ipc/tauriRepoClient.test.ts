@@ -359,6 +359,10 @@ describe("tauriRepoClient transfer progress subscription", () => {
     expect(invoke).toHaveBeenLastCalledWith("restore_file_version", { repoPath: "/r", commitId: "c", path: "a.txt" });
     await tauriRepoClient.listRecentAuthors("/r");
     expect(invoke).toHaveBeenLastCalledWith("list_recent_authors", { repoPath: "/r" });
+    await tauriRepoClient.listRepoAliases();
+    expect(invoke).toHaveBeenLastCalledWith("list_repo_aliases", undefined);
+    await tauriRepoClient.setRepoAlias("/r", null);
+    expect(invoke).toHaveBeenLastCalledWith("set_repo_alias", { repoPath: "/r", alias: null });
     await tauriRepoClient.getCommitMessageSettings();
     expect(invoke).toHaveBeenLastCalledWith("get_commit_message_settings", undefined);
     await tauriRepoClient.getFetchSettings();

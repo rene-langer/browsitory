@@ -197,6 +197,25 @@ pub struct OpenRepoEntryInput {
     pub workspace_id: Option<String>,
 }
 
+/// A repository's custom tab name (#625), from `config::RepoAlias`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "RepoAlias"))]
+#[serde(rename_all = "camelCase")]
+pub struct RepoAliasDto {
+    pub repo_path: String,
+    pub alias: String,
+}
+
+impl From<config::RepoAlias> for RepoAliasDto {
+    fn from(alias: config::RepoAlias) -> Self {
+        Self {
+            repo_path: alias.repo_path.to_string_lossy().into_owned(),
+            alias: alias.alias,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "SubmoduleInfo"))]
@@ -2662,6 +2681,7 @@ mod ts_bindings {
             WorkspaceDto,
             OpenRepoEntryDto,
             OpenRepoEntryInput,
+            RepoAliasDto,
             SubmoduleInfoDto,
             ReflogEntryDto,
             RemoteInfoDto,

@@ -1,9 +1,10 @@
 import { useRef, useState, type KeyboardEvent } from "react";
-import { X, Plus } from "lucide-react";
+import { ChevronDown, X, Plus } from "lucide-react";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor, rectAnchor } from "../lib/menuKeys";
 import { repoPanelId, repoTabId } from "./repoTabIds";
+import { TabList } from "./TabList";
 import styles from "./RepoTabs.module.css";
 
 interface TabGroup {
@@ -37,6 +38,7 @@ export function RepoTabs({
   onAddTab,
   tabMenuItems,
   changedPaths,
+  onRenameTab,
 }: {
   openRepos: OpenRepo[];
   activePath: string | null;
@@ -50,9 +52,13 @@ export function RepoTabs({
   tabMenuItems?: (path: string) => ContextMenuItem[];
   /** Repositories with uncommitted changes: their tabs show a marker (#613). */
   changedPaths?: ReadonlySet<string>;
+  /** Opens the rename dialog of a tab (F2 on the focused tab, #625); omitted, F2 does nothing. */
+  onRenameTab?: (path: string) => void;
 }) {
   const tablistRef = useRef<HTMLDivElement>(null);
+  const listButtonRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  const [tabList, setTabList] = useState<{ x: number; y: number } | null>(null);
   if (openRepos.length === 0) return null;
 
   // Roving tabindex: only the selected tab (or the first, when none is) is a tab stop; arrow keys
@@ -73,6 +79,11 @@ export function RepoTabs({
     // (`useWorkspaceShortcuts.ts`) can be swallowed by the Tauri/VSCode host first. Focus moves to the tab that takes
     // this one's place (the next, else the previous) — the same neighbour `useOpenRepos.closeRepo`
     // activates when the closed tab was the active one — so it isn't dropped to <body>.
+    if (event.key === "F2" && onRenameTab !== undefined) {
+      event.preventDefault();
+      onRenameTab(path);
+      return;
+    }
     if (event.key === "Delete") {
       event.preventDefault();
       if (busy) return;
@@ -107,7 +118,7 @@ export function RepoTabs({
           aria-selected={selected}
           aria-controls={repoPanelId(repo.path)}
           tabIndex={repo.path === tabStopPath ? 0 : -1}
-          aria-keyshortcuts="Delete"
+          aria-keyshortcuts={onRenameTab !== undefined ? "Delete F2" : "Delete"}
           aria-describedby={changed ? changesId : undefined}
           aria-haspopup={tabMenuItems !== undefined ? "menu" : undefined}
           onKeyDown={(event) => handleTabKeyDown(event, repo.path, busy)}
@@ -186,6 +197,39 @@ export function RepoTabs({
       <button type="button" className={styles.addButton} aria-label="Open another repository" title="Open another repository" onClick={onAddTab}>
         <Plus size={14} aria-hidden="true" />
       </button>
+      {/* Every open tab in one list with a filter (#625), also the ones scrolled out of view. */}
+      <button
+        ref={listButtonRef}
+        type="button"
+        className={styles.addButton}
+        aria-label="List open tabs"
+        title="List open tabs"
+        aria-haspopup="dialog"
+        aria-expanded={tabList !== null}
+        onClick={(event) => {
+          if (tabList !== null) {
+            setTabList(null);
+            return;
+          }
+          const rect = event.currentTarget.getBoundingClientRect();
+          setTabList({ x: rect.right, y: rect.bottom });
+        }}
+      >
+        <ChevronDown size={14} aria-hidden="true" />
+      </button>
+      {tabList !== null && (
+        <TabList
+          x={tabList.x}
+          y={tabList.y}
+          openRepos={openRepos}
+          activePath={activePath}
+          workspaceNames={workspaceNames}
+          changedPaths={changedPaths}
+          onSwitchTo={onSwitchTo}
+          onClose={() => setTabList(null)}
+          trigger={listButtonRef}
+        />
+      )}
       {/* Outside the tablist: a tablist may only own tabs. */}
       {menu !== null && tabMenuItems !== undefined && (
         <ContextMenu x={menu.x} y={menu.y} items={tabMenuItems(menu.path)} onClose={() => setMenu(null)} />
