@@ -239,7 +239,8 @@ li.fileRow.current {
   align-items: center;
   justify-content: center;
   padding: var(--space-1);
-  opacity: 0;
+  /* Always there, muted (#648): full strength on the hovered, focused or current row. */
+  opacity: 0.55;
   transition: opacity var(--motion-duration-fast) var(--motion-easing-standard);
 }
 

@@ -449,17 +449,22 @@ export function DiffView({
                 {hasActions && (
                   <Toolbar>
                     {stage && (
-                      <button tabIndex={-1} onClick={stage.run}>
+                      <button tabIndex={-1} title={`${stage.label} (s)`} onClick={stage.run}>
                         {stage.label}
                       </button>
                     )}
                     {unstage && (
-                      <button tabIndex={-1} onClick={unstage.run}>
+                      <button tabIndex={-1} title={`${unstage.label} (s)`} onClick={unstage.run}>
                         {unstage.label}
                       </button>
                     )}
                     {discard && (
-                      <button tabIndex={-1} onClick={discard.run}>
+                      <button
+                        tabIndex={-1}
+                        data-tone="danger"
+                        title={`${discard.label} (d). Undo brings it back.`}
+                        onClick={discard.run}
+                      >
                         {discard.label}
                       </button>
                     )}

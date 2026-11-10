@@ -139,14 +139,14 @@
   border-radius: var(--radius-sm);
 }
 
-/* Fixed footprint so a truncated label's ellipsis never jitters against the "x". The "x" only
-   shows on the active or hovered tab, keeping the strip calm. */
+/* Fixed footprint so a truncated label's ellipsis never jitters against the "x". The "x" is
+   always shown (#648), muted on the other tabs to keep the strip calm. */
 .closeButton {
   flex: 0 0 auto;
   width: var(--size-target-min);
   height: var(--size-target-min);
   padding: 0;
-  opacity: 0;
+  opacity: 0.45;
 }
 
 .tab.active .closeButton,

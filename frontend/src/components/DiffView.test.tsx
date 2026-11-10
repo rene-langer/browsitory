@@ -213,6 +213,17 @@ describe("DiffView", () => {
     expect(onDiscardHunk).toHaveBeenCalledExactlyOnceWith(5, 7);
   });
 
+  it("marks Discard hunk with the danger tone and names each hunk action's key (#648)", () => {
+    const hunks: DiffHunk[] = [{ oldStart: 5, oldLines: 2, newStart: 7, newLines: 3, lines: [] }];
+    render(<DiffView hunks={hunks} onStageHunk={vi.fn()} onDiscardHunk={vi.fn()} />);
+    const stage = screen.getByText("Stage hunk");
+    const discard = screen.getByText("Discard hunk");
+    expect(discard).toHaveAttribute("data-tone", "danger");
+    expect(stage).not.toHaveAttribute("data-tone");
+    expect(stage).toHaveAttribute("title", "Stage hunk (s)");
+    expect(discard).toHaveAttribute("title", "Discard hunk (d). Undo brings it back.");
+  });
+
   it("highlights only the changed word in a Remove/Add line pair", () => {
     const hunks: DiffHunk[] = [
       {

@@ -19,18 +19,41 @@
   margin-bottom: var(--space-1);
 }
 
-.viewOptions button,
-.hunkHeader button {
+.viewOptions button {
   padding: 1px var(--space-2);
   font-size: var(--text-xs);
   background: transparent;
   color: var(--color-text-muted);
 }
 
-.viewOptions button:hover:not(:disabled),
-.hunkHeader button:hover:not(:disabled) {
+.viewOptions button:hover:not(:disabled) {
   background: var(--color-control);
   color: var(--color-text);
+}
+
+/* Hunk actions are buttons, not text (#648): a filled control with an outline, so Stage, Unstage
+   and Discard read as things to press. Discard is in the danger tone. */
+.hunkHeader button {
+  padding: 1px var(--space-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  background: var(--color-control);
+  border-color: var(--color-border);
+  color: var(--color-control-text);
+}
+
+.hunkHeader button:hover:not(:disabled) {
+  background: var(--color-control-hover);
+}
+
+.hunkHeader button[data-tone="danger"] {
+  color: var(--color-danger-text);
+  border-color: var(--color-danger-tint);
+  background: transparent;
+}
+
+.hunkHeader button[data-tone="danger"]:hover:not(:disabled) {
+  background: var(--color-danger-bg);
 }
 
 .viewOptions button[aria-pressed="true"] {
