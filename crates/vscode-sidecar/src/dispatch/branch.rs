@@ -1,17 +1,18 @@
 use repo_service::wire::BranchInfoDto;
+use repo_service::wire::ErrorDto;
 use serde::Deserialize;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 
 use super::{hook_relay, worker_handle, RepoPathParams, Repos};
 
-pub(super) fn list_branches(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn list_branches(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let branches: Vec<BranchInfoDto> = worker_handle(repos, &params.repo_path)?
         .list_branches()?
         .into_iter()
         .map(BranchInfoDto::from)
         .collect();
-    serde_json::to_value(branches).map_err(|error| error.to_string())
+    serde_json::to_value(branches).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -22,7 +23,7 @@ pub(super) struct CreateBranchParams {
     start_point: String,
 }
 
-pub(super) fn create_branch(params: CreateBranchParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn create_branch(params: CreateBranchParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.create_branch(params.name, params.start_point)?;
     Ok(Value::Null)
 }
@@ -39,7 +40,7 @@ pub(super) fn switch_branch<W: std::io::Write + Send + 'static>(
     params: SwitchBranchParams,
     repos: &Repos,
     out: &Arc<Mutex<W>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let events = hook_relay(&params.repo_path, out);
     worker_handle(repos, &params.repo_path)?.switch_branch(params.name, events)?;
     Ok(Value::Null)
@@ -53,7 +54,7 @@ pub(super) struct DeleteBranchParams {
     force: bool,
 }
 
-pub(super) fn delete_branch(params: DeleteBranchParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn delete_branch(params: DeleteBranchParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.delete_branch(params.name, params.force)?;
     Ok(Value::Null)
 }
@@ -66,7 +67,7 @@ pub(super) struct RenameBranchParams {
     new_name: String,
 }
 
-pub(super) fn rename_branch(params: RenameBranchParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn rename_branch(params: RenameBranchParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.rename_branch(params.old_name, params.new_name)?;
     Ok(Value::Null)
 }

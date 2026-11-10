@@ -404,7 +404,8 @@ export type ErrorKind =
   | "PullFailed"
   | "Cancelled"
   | "AddDeleteConflict"
-  | "InvalidSearchQuery";
+  | "InvalidSearchQuery"
+  | "PermissionDenied";
 
 /** A rejected request as the backend sends it (`repo_service::wire::ErrorDto`). */
 export interface RepoErrorPayload {
@@ -448,11 +449,18 @@ const ERROR_KINDS: ReadonlySet<string> = new Set<ErrorKind>([
   "Cancelled",
   "AddDeleteConflict",
   "InvalidSearchQuery",
+  "PermissionDenied",
 ]);
 
 /**
  * Reads a backend rejection: a `RepoErrorPayload`, or a bare string (an error Tauri raises
  * itself, such as a bad argument). A kind this frontend doesn't know reads as `"Other"`.
+ *
+ * The bare strings stay `"Other"` here (#527): Tauri raises them before any command runs (an
+ * argument its generated wrapper can't deserialise, an unknown command, an ACL refusal) and
+ * sends them through its own `InvokeResolver`, whose responder an app can't wrap, so the
+ * backend can't put them in the envelope. They mean the frontend and backend disagree about a
+ * command, which no kind-specific remediation fixes.
  */
 export function toRepoError(raw: unknown): RepoError {
   if (raw instanceof RepoError) return raw;

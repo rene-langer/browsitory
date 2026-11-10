@@ -86,7 +86,9 @@ fn closing_one_spelling_keeps_the_other_open() {
 
     assert!(get_status(params!({ "repoPath": plain }), &repos).is_ok());
     assert_eq!(
-        get_status(params!({ "repoPath": sub }), &repos).unwrap_err(),
+        get_status(params!({ "repoPath": sub }), &repos)
+            .unwrap_err()
+            .message,
         format!("repo not open: {sub}")
     );
     close_repo(params!({ "repoPath": plain }), &repos).unwrap();

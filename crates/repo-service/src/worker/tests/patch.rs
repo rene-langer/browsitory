@@ -76,7 +76,10 @@ fn a_patch_that_does_not_apply_records_nothing() {
 
     // The working tree already holds the change: the patch doesn't apply.
     let error = handle.apply_patch(patch.clone()).unwrap_err();
-    assert!(error.starts_with("The patch doesn't apply"), "{error}");
+    assert!(
+        error.message.starts_with("The patch doesn't apply"),
+        "{error}"
+    );
     assert_eq!(handle.get_undo_state().unwrap().undo, None);
 
     // Reverted first, it applies, and Undo takes it back.

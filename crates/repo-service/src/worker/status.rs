@@ -1,34 +1,36 @@
 use super::{Command, WorkerHandle};
+use crate::wire::ErrorDto;
 use git_core::blame::BlameLine;
 use git_core::diff::DiffHunk;
 use git_core::graph::{GraphCommit, GraphSelection};
 use git_core::status::StatusEntry;
 use std::sync::mpsc::Sender;
 
-pub(super) fn get_status(repo: &git2::Repository, reply: Sender<Result<Vec<StatusEntry>, String>>) {
-    let _ = reply.send(git_core::status::status(repo).map_err(|error| error.to_string()));
+pub(super) fn get_status(
+    repo: &git2::Repository,
+    reply: Sender<Result<Vec<StatusEntry>, ErrorDto>>,
+) {
+    let _ = reply.send(git_core::status::status(repo).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_commit_graph(
     repo: &git2::Repository,
     limit: usize,
     selection: GraphSelection,
-    reply: Sender<Result<Vec<GraphCommit>, String>>,
+    reply: Sender<Result<Vec<GraphCommit>, ErrorDto>>,
 ) {
-    let _ = reply.send(
-        git_core::graph::graph_log(repo, limit, &selection).map_err(|error| error.to_string()),
-    );
+    let _ = reply
+        .send(git_core::graph::graph_log(repo, limit, &selection).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn locate_commit(
     repo: &git2::Repository,
     revision: String,
     selection: GraphSelection,
-    reply: Sender<Result<Option<git_core::locate::CommitLocation>, String>>,
+    reply: Sender<Result<Option<git_core::locate::CommitLocation>, ErrorDto>>,
 ) {
     let _ = reply.send(
-        git_core::locate::locate_commit(repo, &revision, &selection)
-            .map_err(|error| error.to_string()),
+        git_core::locate::locate_commit(repo, &revision, &selection).map_err(ErrorDto::from_error),
     );
 }
 
@@ -40,13 +42,13 @@ pub(super) fn get_working_diff(
     staged: bool,
     opts: git_core::diff::DiffOptions,
     old_path: Option<String>,
-    reply: Sender<Result<Vec<DiffHunk>, String>>,
+    reply: Sender<Result<Vec<DiffHunk>, ErrorDto>>,
 ) {
     let result = match old_path.filter(|_| staged) {
         Some(old_path) => git_core::diff::staged_rename_diff(repo, &old_path, &path, &opts),
         None => git_core::diff::working_diff(repo, &path, staged, &opts),
     };
-    let _ = reply.send(result.map_err(|error| error.to_string()));
+    let _ = reply.send(result.map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_commit_diff(
@@ -54,62 +56,58 @@ pub(super) fn get_commit_diff(
     commit_id: String,
     path: String,
     opts: git_core::diff::DiffOptions,
-    reply: Sender<Result<Vec<DiffHunk>, String>>,
+    reply: Sender<Result<Vec<DiffHunk>, ErrorDto>>,
 ) {
     let _ = reply.send(
-        git_core::diff::commit_diff(repo, &commit_id, &path, &opts)
-            .map_err(|error| error.to_string()),
+        git_core::diff::commit_diff(repo, &commit_id, &path, &opts).map_err(ErrorDto::from_error),
     );
 }
 
 pub(super) fn get_commit_files(
     repo: &git2::Repository,
     commit_id: String,
-    reply: Sender<Result<Vec<String>, String>>,
+    reply: Sender<Result<Vec<String>, ErrorDto>>,
 ) {
-    let _ = reply
-        .send(git_core::diff::commit_files(repo, &commit_id).map_err(|error| error.to_string()));
+    let _ =
+        reply.send(git_core::diff::commit_files(repo, &commit_id).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_commit_signature(
     repo: &git2::Repository,
     commit_id: String,
-    reply: Sender<Result<git_core::signing::CommitSignature, String>>,
+    reply: Sender<Result<git_core::signing::CommitSignature, ErrorDto>>,
 ) {
-    let _ = reply.send(
-        git_core::signing::verify_commit(repo, &commit_id).map_err(|error| error.to_string()),
-    );
+    let _ = reply
+        .send(git_core::signing::verify_commit(repo, &commit_id).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_commit_message(
     repo: &git2::Repository,
     commit_id: String,
-    reply: Sender<Result<String, String>>,
+    reply: Sender<Result<String, ErrorDto>>,
 ) {
-    let _ = reply
-        .send(git_core::graph::commit_message(repo, &commit_id).map_err(|error| error.to_string()));
+    let _ =
+        reply.send(git_core::graph::commit_message(repo, &commit_id).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_blame(
     repo: &git2::Repository,
     commit_id: String,
     path: String,
-    reply: Sender<Result<Vec<BlameLine>, String>>,
+    reply: Sender<Result<Vec<BlameLine>, ErrorDto>>,
 ) {
-    let _ = reply.send(
-        git_core::blame::blame_file(repo, &commit_id, &path).map_err(|error| error.to_string()),
-    );
+    let _ = reply
+        .send(git_core::blame::blame_file(repo, &commit_id, &path).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_file_history(
     repo: &git2::Repository,
     path: String,
     limit: usize,
-    reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, String>>,
+    reply: Sender<Result<Vec<git_core::history::FileHistoryEntry>, ErrorDto>>,
 ) {
-    let _ = reply.send(
-        git_core::history::file_history(repo, &path, limit).map_err(|error| error.to_string()),
-    );
+    let _ = reply
+        .send(git_core::history::file_history(repo, &path, limit).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn get_line_history(
@@ -119,7 +117,7 @@ pub(super) fn get_line_history(
     start_line: usize,
     end_line: usize,
     limit: usize,
-    reply: Sender<Result<git_core::line_history::LineHistory, String>>,
+    reply: Sender<Result<git_core::line_history::LineHistory, ErrorDto>>,
 ) {
     let lines = git_core::line_history::LineRange {
         start: start_line,
@@ -127,7 +125,7 @@ pub(super) fn get_line_history(
     };
     let _ = reply.send(
         git_core::line_history::line_history(repo, &revision, &path, lines, limit)
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
 
@@ -137,25 +135,28 @@ pub(super) fn get_commit_rename_diff(
     old_path: String,
     new_path: String,
     opts: git_core::diff::DiffOptions,
-    reply: Sender<Result<Vec<DiffHunk>, String>>,
+    reply: Sender<Result<Vec<DiffHunk>, ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::diff::commit_rename_diff(repo, &commit_id, &old_path, &new_path, &opts)
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
 
-pub(super) fn stage_file(repo: &git2::Repository, path: String, reply: Sender<Result<(), String>>) {
-    let _ = reply.send(git_core::stage::stage_file(repo, &path).map_err(|error| error.to_string()));
+pub(super) fn stage_file(
+    repo: &git2::Repository,
+    path: String,
+    reply: Sender<Result<(), ErrorDto>>,
+) {
+    let _ = reply.send(git_core::stage::stage_file(repo, &path).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn unstage_file(
     repo: &git2::Repository,
     path: String,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
-    let _ =
-        reply.send(git_core::stage::unstage_file(repo, &path).map_err(|error| error.to_string()));
+    let _ = reply.send(git_core::stage::unstage_file(repo, &path).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn stage_hunk(
@@ -164,11 +165,11 @@ pub(super) fn stage_hunk(
     old_start: u32,
     new_start: u32,
     hunk: git_core::diff::HunkOptions,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::stage::stage_hunk(repo, &path, old_start, new_start, hunk)
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
 
@@ -178,11 +179,11 @@ pub(super) fn unstage_hunk(
     old_start: u32,
     new_start: u32,
     hunk: git_core::diff::HunkOptions,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::stage::unstage_hunk(repo, &path, old_start, new_start, hunk)
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
 
@@ -192,11 +193,11 @@ pub(super) fn discard_hunk(
     old_start: u32,
     new_start: u32,
     hunk: git_core::diff::HunkOptions,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::stage::discard_hunk(repo, &path, old_start, new_start, hunk)
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
 
@@ -210,7 +211,7 @@ pub(super) fn stage_lines(
     hunk: git_core::diff::HunkOptions,
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::stage::stage_lines(
@@ -222,7 +223,7 @@ pub(super) fn stage_lines(
             &line_indices,
             &expected_lines,
         )
-        .map_err(|error| error.to_string()),
+        .map_err(ErrorDto::from_error),
     );
 }
 
@@ -236,7 +237,7 @@ pub(super) fn unstage_lines(
     hunk: git_core::diff::HunkOptions,
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::stage::unstage_lines(
@@ -248,7 +249,7 @@ pub(super) fn unstage_lines(
             &line_indices,
             &expected_lines,
         )
-        .map_err(|error| error.to_string()),
+        .map_err(ErrorDto::from_error),
     );
 }
 
@@ -262,7 +263,7 @@ pub(super) fn discard_lines(
     hunk: git_core::diff::HunkOptions,
     line_indices: Vec<u32>,
     expected_lines: Vec<String>,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::stage::discard_lines(
@@ -274,50 +275,47 @@ pub(super) fn discard_lines(
             &line_indices,
             &expected_lines,
         )
-        .map_err(|error| error.to_string()),
+        .map_err(ErrorDto::from_error),
     );
 }
 
 pub(super) fn discard_file(
     repo: &git2::Repository,
     path: String,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
-    let _ =
-        reply.send(git_core::stage::discard_file(repo, &path).map_err(|error| error.to_string()));
+    let _ = reply.send(git_core::stage::discard_file(repo, &path).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn discard_all_unstaged(
     repo: &git2::Repository,
     paths: Vec<String>,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
-    let _ = reply.send(
-        git_core::stage::discard_all_unstaged(repo, &paths).map_err(|error| error.to_string()),
-    );
+    let _ = reply
+        .send(git_core::stage::discard_all_unstaged(repo, &paths).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn ignore_path(
     repo: &git2::Repository,
     pattern: String,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
-    let _ =
-        reply.send(git_core::stage::ignore_path(repo, &pattern).map_err(|error| error.to_string()));
+    let _ = reply.send(git_core::stage::ignore_path(repo, &pattern).map_err(ErrorDto::from_error));
 }
 
 /// The reply both commit and amend send: a hook failure is an outcome the UI renders, every
 /// other failure stays an error message.
 pub(super) fn commit_reply(
     result: Result<String, git_core::commit::CommitError>,
-) -> Result<git_core::commit::CommitOutcome, String> {
+) -> Result<git_core::commit::CommitOutcome, ErrorDto> {
     use git_core::commit::{CommitError, CommitOutcome};
     match result {
         Ok(commit_id) => Ok(CommitOutcome::Committed { commit_id }),
         Err(CommitError::HookFailed { hook, output }) => {
             Ok(CommitOutcome::HookFailed { hook, output })
         }
-        Err(error) => Err(error.to_string()),
+        Err(error) => Err(ErrorDto::from_error(error)),
     }
 }
 
@@ -337,7 +335,7 @@ pub(super) fn commit(
     set: git_core::commit::CommitHookSet,
     op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
-    reply: Sender<Result<git_core::commit::CommitOutcome, String>>,
+    reply: Sender<Result<git_core::commit::CommitOutcome, ErrorDto>>,
 ) -> bool {
     let cancel = op.cancel_check();
     let mut reporter = super::hooks::ChannelHookReporter {
@@ -382,30 +380,20 @@ pub(super) fn commit(
 }
 
 impl WorkerHandle {
-    pub fn get_status(&self) -> Result<Vec<StatusEntry>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetStatus { reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn get_status(&self) -> Result<Vec<StatusEntry>, ErrorDto> {
+        self.request(|tx| Command::GetStatus { reply: tx })
     }
 
     pub fn get_commit_graph(
         &self,
         limit: usize,
         selection: GraphSelection,
-    ) -> Result<Vec<GraphCommit>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetCommitGraph {
-                limit,
-                selection,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<Vec<GraphCommit>, ErrorDto> {
+        self.request(|tx| Command::GetCommitGraph {
+            limit,
+            selection,
+            reply: tx,
+        })
     }
 
     /// Where `revision`'s commit sits in the graph of `selection` (#441).
@@ -413,17 +401,12 @@ impl WorkerHandle {
         &self,
         revision: String,
         selection: GraphSelection,
-    ) -> Result<Option<git_core::locate::CommitLocation>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::LocateCommit {
-                revision,
-                selection,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<Option<git_core::locate::CommitLocation>, ErrorDto> {
+        self.request(|tx| Command::LocateCommit {
+            revision,
+            selection,
+            reply: tx,
+        })
     }
 
     /// `old_path`: a staged rename's old path (see `status::get_working_diff`).
@@ -433,19 +416,14 @@ impl WorkerHandle {
         staged: bool,
         opts: git_core::diff::DiffOptions,
         old_path: Option<String>,
-    ) -> Result<Vec<DiffHunk>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetWorkingDiff {
-                path,
-                staged,
-                opts,
-                old_path,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<Vec<DiffHunk>, ErrorDto> {
+        self.request(|tx| Command::GetWorkingDiff {
+            path,
+            staged,
+            opts,
+            old_path,
+            reply: tx,
+        })
     }
 
     pub fn get_commit_diff(
@@ -453,87 +431,57 @@ impl WorkerHandle {
         commit_id: String,
         path: String,
         opts: git_core::diff::DiffOptions,
-    ) -> Result<Vec<DiffHunk>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetCommitDiff {
-                commit_id,
-                path,
-                opts,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<Vec<DiffHunk>, ErrorDto> {
+        self.request(|tx| Command::GetCommitDiff {
+            commit_id,
+            path,
+            opts,
+            reply: tx,
+        })
     }
 
-    pub fn get_commit_files(&self, commit_id: String) -> Result<Vec<String>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetCommitFiles {
-                commit_id,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn get_commit_files(&self, commit_id: String) -> Result<Vec<String>, ErrorDto> {
+        self.request(|tx| Command::GetCommitFiles {
+            commit_id,
+            reply: tx,
+        })
     }
 
-    pub fn get_commit_message(&self, commit_id: String) -> Result<String, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetCommitMessage {
-                commit_id,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn get_commit_message(&self, commit_id: String) -> Result<String, ErrorDto> {
+        self.request(|tx| Command::GetCommitMessage {
+            commit_id,
+            reply: tx,
+        })
     }
 
     pub fn get_commit_signature(
         &self,
         commit_id: String,
-    ) -> Result<git_core::signing::CommitSignature, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetCommitSignature {
-                commit_id,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<git_core::signing::CommitSignature, ErrorDto> {
+        self.request(|tx| Command::GetCommitSignature {
+            commit_id,
+            reply: tx,
+        })
     }
 
-    pub fn get_blame(&self, commit_id: String, path: String) -> Result<Vec<BlameLine>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetBlame {
-                commit_id,
-                path,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn get_blame(&self, commit_id: String, path: String) -> Result<Vec<BlameLine>, ErrorDto> {
+        self.request(|tx| Command::GetBlame {
+            commit_id,
+            path,
+            reply: tx,
+        })
     }
 
     pub fn get_file_history(
         &self,
         path: String,
         limit: usize,
-    ) -> Result<Vec<git_core::history::FileHistoryEntry>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetFileHistory {
-                path,
-                limit,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<Vec<git_core::history::FileHistoryEntry>, ErrorDto> {
+        self.request(|tx| Command::GetFileHistory {
+            path,
+            limit,
+            reply: tx,
+        })
     }
 
     pub fn get_line_history(
@@ -543,20 +491,15 @@ impl WorkerHandle {
         start_line: usize,
         end_line: usize,
         limit: usize,
-    ) -> Result<git_core::line_history::LineHistory, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetLineHistory {
-                revision,
-                path,
-                start_line,
-                end_line,
-                limit,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<git_core::line_history::LineHistory, ErrorDto> {
+        self.request(|tx| Command::GetLineHistory {
+            revision,
+            path,
+            start_line,
+            end_line,
+            limit,
+            reply: tx,
+        })
     }
 
     pub fn get_commit_rename_diff(
@@ -565,37 +508,22 @@ impl WorkerHandle {
         old_path: String,
         new_path: String,
         opts: git_core::diff::DiffOptions,
-    ) -> Result<Vec<DiffHunk>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetCommitRenameDiff {
-                commit_id,
-                old_path,
-                new_path,
-                opts,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<Vec<DiffHunk>, ErrorDto> {
+        self.request(|tx| Command::GetCommitRenameDiff {
+            commit_id,
+            old_path,
+            new_path,
+            opts,
+            reply: tx,
+        })
     }
 
-    pub fn stage_file(&self, path: String) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::StageFile { path, reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn stage_file(&self, path: String) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::StageFile { path, reply: tx })
     }
 
-    pub fn unstage_file(&self, path: String) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::UnstageFile { path, reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn unstage_file(&self, path: String) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::UnstageFile { path, reply: tx })
     }
 
     pub fn stage_hunk(
@@ -604,19 +532,14 @@ impl WorkerHandle {
         old_start: u32,
         new_start: u32,
         hunk: git_core::diff::HunkOptions,
-    ) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::StageHunk {
-                path,
-                old_start,
-                new_start,
-                hunk,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::StageHunk {
+            path,
+            old_start,
+            new_start,
+            hunk,
+            reply: tx,
+        })
     }
 
     pub fn unstage_hunk(
@@ -625,19 +548,14 @@ impl WorkerHandle {
         old_start: u32,
         new_start: u32,
         hunk: git_core::diff::HunkOptions,
-    ) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::UnstageHunk {
-                path,
-                old_start,
-                new_start,
-                hunk,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::UnstageHunk {
+            path,
+            old_start,
+            new_start,
+            hunk,
+            reply: tx,
+        })
     }
 
     pub fn discard_hunk(
@@ -646,19 +564,14 @@ impl WorkerHandle {
         old_start: u32,
         new_start: u32,
         hunk: git_core::diff::HunkOptions,
-    ) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::DiscardHunk {
-                path,
-                old_start,
-                new_start,
-                hunk,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::DiscardHunk {
+            path,
+            old_start,
+            new_start,
+            hunk,
+            reply: tx,
+        })
     }
 
     pub fn stage_lines(
@@ -669,21 +582,16 @@ impl WorkerHandle {
         hunk: git_core::diff::HunkOptions,
         line_indices: Vec<u32>,
         expected_lines: Vec<String>,
-    ) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::StageLines {
-                path,
-                old_start,
-                new_start,
-                hunk,
-                line_indices,
-                expected_lines,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::StageLines {
+            path,
+            old_start,
+            new_start,
+            hunk,
+            line_indices,
+            expected_lines,
+            reply: tx,
+        })
     }
 
     pub fn unstage_lines(
@@ -694,21 +602,16 @@ impl WorkerHandle {
         hunk: git_core::diff::HunkOptions,
         line_indices: Vec<u32>,
         expected_lines: Vec<String>,
-    ) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::UnstageLines {
-                path,
-                old_start,
-                new_start,
-                hunk,
-                line_indices,
-                expected_lines,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::UnstageLines {
+            path,
+            old_start,
+            new_start,
+            hunk,
+            line_indices,
+            expected_lines,
+            reply: tx,
+        })
     }
 
     pub fn discard_lines(
@@ -719,49 +622,29 @@ impl WorkerHandle {
         hunk: git_core::diff::HunkOptions,
         line_indices: Vec<u32>,
         expected_lines: Vec<String>,
-    ) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::DiscardLines {
-                path,
-                old_start,
-                new_start,
-                hunk,
-                line_indices,
-                expected_lines,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::DiscardLines {
+            path,
+            old_start,
+            new_start,
+            hunk,
+            line_indices,
+            expected_lines,
+            reply: tx,
+        })
     }
 
-    pub fn discard_file(&self, path: String) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::DiscardFile { path, reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn discard_file(&self, path: String) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::DiscardFile { path, reply: tx })
     }
 
     /// Discards exactly `paths` (the list the user confirmed), never a fresh status read.
-    pub fn discard_all_unstaged(&self, paths: Vec<String>) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::DiscardAllUnstaged { paths, reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn discard_all_unstaged(&self, paths: Vec<String>) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::DiscardAllUnstaged { paths, reply: tx })
     }
 
-    pub fn ignore_path(&self, pattern: String) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::IgnorePath { pattern, reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn ignore_path(&self, pattern: String) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::IgnorePath { pattern, reply: tx })
     }
 
     /// Commits the index, running the commit hooks (`pre-commit` and `commit-msg` skipped with
@@ -773,19 +656,14 @@ impl WorkerHandle {
         no_verify: bool,
         trailers: Vec<git_core::commit::Trailer>,
         events: Sender<super::HookEvent>,
-    ) -> Result<git_core::commit::CommitOutcome, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::Commit {
-                message,
-                no_verify,
-                trailers,
-                operation_id: self.cancelled.allocate("commit"),
-                events,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<git_core::commit::CommitOutcome, ErrorDto> {
+        self.request(|tx| Command::Commit {
+            message,
+            no_verify,
+            trailers,
+            operation_id: self.cancelled.allocate("commit"),
+            events,
+            reply: tx,
+        })
     }
 }

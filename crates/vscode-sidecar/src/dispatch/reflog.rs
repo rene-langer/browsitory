@@ -1,12 +1,13 @@
+use repo_service::wire::ErrorDto;
 use repo_service::wire::ReflogEntryDto;
 use serde::Deserialize;
 use serde_json::Value;
 
 use super::{worker_handle, RepoPathParams, Repos};
 
-pub(super) fn list_reflog_refs(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn list_reflog_refs(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let refs = worker_handle(repos, &params.repo_path)?.list_reflog_refs()?;
-    serde_json::to_value(refs).map_err(|error| error.to_string())
+    serde_json::to_value(refs).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -16,13 +17,13 @@ pub(super) struct GetReflogParams {
     reference: String,
 }
 
-pub(super) fn get_reflog(params: GetReflogParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn get_reflog(params: GetReflogParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let entries: Vec<ReflogEntryDto> = worker_handle(repos, &params.repo_path)?
         .get_reflog(params.reference)?
         .into_iter()
         .map(ReflogEntryDto::from)
         .collect();
-    serde_json::to_value(entries).map_err(|error| error.to_string())
+    serde_json::to_value(entries).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -36,7 +37,7 @@ pub(super) struct RestoreReflogEntryParams {
 pub(super) fn restore_reflog_entry(
     params: RestoreReflogEntryParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?
         .restore_reflog_entry(params.reference, params.new_id)?;
     Ok(Value::Null)

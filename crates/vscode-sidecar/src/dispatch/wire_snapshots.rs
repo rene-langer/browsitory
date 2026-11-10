@@ -284,8 +284,8 @@ fn snapshots() -> Vec<(String, String)> {
         wire(&OpenReposDto::from((Vec::new(), None))),
     ));
     // Every method's error, as the JSON-RPC error's `data` (#496).
-    s.add("RepoErrorPayload", fixtures::error_messages(), |message| {
-        crate::protocol::JsonRpcResponse::err(1, message)
+    s.add("RepoErrorPayload", fixtures::errors(), |error| {
+        crate::protocol::JsonRpcResponse::err(1, error)
             .error
             .expect("an error response")
             .data

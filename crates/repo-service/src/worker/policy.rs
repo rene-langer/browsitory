@@ -6,6 +6,7 @@
 //! [`of`] names every `Command` variant (no catch-all), so a new command doesn't compile until it
 //! is given a policy. The worker loop, `undo` and `gate` only read the result; the typed reply
 //! each of them answers or holds is reached through [`reply_of`], which also names every variant.
+use crate::wire::ErrorDto;
 use std::sync::mpsc::Sender;
 
 use git_core::reset::ResetMode;
@@ -407,16 +408,16 @@ pub(super) trait Reply {
     /// Swaps the reply for a proxy and keeps the original in `held` (see [`HeldReplies`]).
     fn hold(&mut self, held: &mut HeldReplies);
     /// Replies with an error.
-    fn refuse(&self, message: &str);
+    fn refuse(&self, error: ErrorDto);
 }
 
-impl<T: 'static> Reply for Sender<Result<T, String>> {
+impl<T: 'static> Reply for Sender<Result<T, ErrorDto>> {
     fn hold(&mut self, held: &mut HeldReplies) {
         held.hold(self);
     }
 
-    fn refuse(&self, message: &str) {
-        let _ = self.send(Err(message.to_string()));
+    fn refuse(&self, error: ErrorDto) {
+        let _ = self.send(Err(error));
     }
 }
 

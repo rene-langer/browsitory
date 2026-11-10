@@ -1,16 +1,17 @@
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StashOptionsDto};
 use serde::Deserialize;
 use serde_json::Value;
 
 use super::{worker_handle, RepoPathParams, Repos};
 
-pub(super) fn list_stashes(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn list_stashes(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let stashes: Vec<StashEntryDto> = worker_handle(repos, &params.repo_path)?
         .list_stashes()?
         .into_iter()
         .map(StashEntryDto::from)
         .collect();
-    serde_json::to_value(stashes).map_err(|error| error.to_string())
+    serde_json::to_value(stashes).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -20,7 +21,7 @@ pub(super) struct SaveStashParams {
     options: StashOptionsDto,
 }
 
-pub(super) fn save_stash(params: SaveStashParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn save_stash(params: SaveStashParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.save_stash(params.options.into())?;
     Ok(Value::Null)
 }
@@ -44,22 +45,22 @@ pub(super) struct StashApplyParams {
     restore_index: bool,
 }
 
-pub(super) fn apply_stash(params: StashApplyParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn apply_stash(params: StashApplyParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let outcome = worker_handle(repos, &params.repo_path)?.apply_stash(
         params.index,
         params.commit_id,
         params.restore_index,
     )?;
-    serde_json::to_value(StashApplyOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+    serde_json::to_value(StashApplyOutcomeDto::from(outcome)).map_err(ErrorDto::from_error)
 }
 
-pub(super) fn pop_stash(params: StashApplyParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn pop_stash(params: StashApplyParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let outcome = worker_handle(repos, &params.repo_path)?.pop_stash(
         params.index,
         params.commit_id,
         params.restore_index,
     )?;
-    serde_json::to_value(StashApplyOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+    serde_json::to_value(StashApplyOutcomeDto::from(outcome)).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -69,12 +70,12 @@ pub(super) struct StashFilesParams {
     commit_id: String,
 }
 
-pub(super) fn get_stash_files(params: StashFilesParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn get_stash_files(params: StashFilesParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let files = worker_handle(repos, &params.repo_path)?.get_stash_files(params.commit_id)?;
-    serde_json::to_value(StashFilesDto::from(files)).map_err(|error| error.to_string())
+    serde_json::to_value(StashFilesDto::from(files)).map_err(ErrorDto::from_error)
 }
 
-pub(super) fn drop_stash(params: StashIndexParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn drop_stash(params: StashIndexParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.drop_stash(params.index, params.commit_id)?;
     Ok(Value::Null)
 }

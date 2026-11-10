@@ -15,6 +15,7 @@ export interface DescribedError {
 
 const HINTS: Partial<Record<RepoErrorKind, string>> = {
   TransportLost: "The connection to the backend was lost. Retry, or reopen the repository.",
+  PermissionDenied: "File permissions blocked this. Check that you can read and write the file or folder.",
 };
 
 export function describeError(err: unknown): DescribedError {

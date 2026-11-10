@@ -2,6 +2,7 @@
 //! live in one file per feature under `dispatch/`, mirroring `crates/tauri-app/src/commands/`;
 //! params types shared by several features and the hook relay stay here.
 
+use repo_service::wire::ErrorDto;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
@@ -103,11 +104,11 @@ macro_rules! methods {
             $params: Value,
             $repos: &Repos,
             $stdout: &Arc<Mutex<std::io::Stdout>>,
-        ) -> Result<Value, String> {
+        ) -> Result<Value, ErrorDto> {
             test_delay_before_dispatch(method);
             match method {
                 $($name => call_handler!($params, $handler($($args)*)),)*
-                other => Err(format!("unknown method: {other}")),
+                other => Err(format!("unknown method: {other}").into()),
             }
         }
 
@@ -126,7 +127,7 @@ macro_rules! call_handler {
     };
     ($params:ident, $handler:ident($params_type:ty $(, $arg:ident)*)) => {
         $handler(
-            serde_json::from_value::<$params_type>($params).map_err(|error| error.to_string())?
+            serde_json::from_value::<$params_type>($params).map_err(ErrorDto::from_error)?
             $(, $arg)*
         )
     };

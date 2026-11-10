@@ -1,6 +1,7 @@
 use super::gate::RebaseMemory;
 use super::rebase_store::RebaseStore;
 use super::{Command, WorkerHandle};
+use crate::wire::ErrorDto;
 use git_core::rebase::{
     RebaseAbort, RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult,
 };
@@ -29,10 +30,9 @@ pub enum HistoryEditKind {
 pub(super) fn commits_since(
     repo: &git2::Repository,
     onto: String,
-    reply: Sender<Result<Vec<RebasePlanCommit>, String>>,
+    reply: Sender<Result<Vec<RebasePlanCommit>, ErrorDto>>,
 ) {
-    let _ =
-        reply.send(git_core::rebase::commits_since(repo, &onto).map_err(|error| error.to_string()));
+    let _ = reply.send(git_core::rebase::commits_since(repo, &onto).map_err(ErrorDto::from_error));
 }
 
 const NO_REBASE: &str = "no rebase is currently in progress";
@@ -53,7 +53,7 @@ impl RebaseSlot<'_> {
 
     /// Forgets the rebase. When its file can't be deleted, whatever it still holds is
     /// remembered as ended for this session.
-    fn forget(&mut self, repo: &git2::Repository) -> Result<(), String> {
+    fn forget(&mut self, repo: &git2::Repository) -> Result<(), ErrorDto> {
         self.memory.fallback = None;
         match self.store.clear() {
             Ok(()) => {
@@ -63,7 +63,7 @@ impl RebaseSlot<'_> {
             Err(error) => {
                 eprintln!("browsitory: could not remove the ended rebase's state: {error}");
                 self.memory.forgotten = self.store.load(repo);
-                Err(error)
+                Err(error.into())
             }
         }
     }
@@ -75,8 +75,8 @@ impl RebaseSlot<'_> {
         &mut self,
         repo: &git2::Repository,
         state: Option<&RebaseState>,
-        outcome: Result<RebaseStepResult, String>,
-    ) -> Result<RebaseStepResult, String> {
+        outcome: Result<RebaseStepResult, ErrorDto>,
+    ) -> Result<RebaseStepResult, ErrorDto> {
         let Some(state) = state else {
             // The rebase is over: a file that can't be deleted is remembered as ended.
             let _ = self.forget(repo);
@@ -97,9 +97,11 @@ impl RebaseSlot<'_> {
                     .original_branch_ref
                     .strip_prefix("refs/heads/")
                     .unwrap_or(&state.original_branch_ref)
-            )),
-            Err(error) => Err(format!(
-                "{error} (its progress could not be saved: {store_error})"
+            )
+            .into()),
+            Err(error) => Err(ErrorDto::new(
+                error.kind,
+                format!("{error} (its progress could not be saved: {store_error})"),
             )),
         }
     }
@@ -110,26 +112,26 @@ pub(super) fn start(
     onto: &str,
     plan: Vec<RebasePlanEntry>,
     mut slot: RebaseSlot<'_>,
-) -> Result<RebaseStepResult, String> {
+) -> Result<RebaseStepResult, ErrorDto> {
     match git_core::rebase::start_rebase(repo, onto, plan) {
         // Nothing to keep: the rebase finished in one go.
         Ok((_, RebaseStepResult::Done)) => slot.persist(repo, None, Ok(RebaseStepResult::Done)),
         Ok((state, step)) => slot.persist(repo, Some(&state), Ok(step)),
         // `start_rebase` rolled back: there is no rebase to keep.
-        Err(error) => Err(error.to_string()),
+        Err(error) => Err(ErrorDto::from_error(error)),
     }
 }
 
 pub(super) fn continue_rebase(
     repo: &git2::Repository,
     mut slot: RebaseSlot<'_>,
-    reply: Sender<Result<RebaseStepResult, String>>,
+    reply: Sender<Result<RebaseStepResult, ErrorDto>>,
 ) {
     let result = match slot.load(repo) {
         Some(loaded) => {
             let mut state = loaded.clone();
-            let outcome = git_core::rebase::rebase_continue(repo, &mut state)
-                .map_err(|error| error.to_string());
+            let outcome =
+                git_core::rebase::rebase_continue(repo, &mut state).map_err(ErrorDto::from_error);
             if matches!(outcome, Ok(RebaseStepResult::Done)) {
                 slot.persist(repo, None, outcome)
             } else if state == loaded || (outcome.is_err() && lost_head(repo, &state)) {
@@ -141,7 +143,7 @@ pub(super) fn continue_rebase(
                 slot.persist(repo, Some(&state), outcome)
             }
         }
-        None => Err(NO_REBASE.to_string()),
+        None => Err(NO_REBASE.into()),
     };
     let _ = reply.send(result);
 }
@@ -161,12 +163,11 @@ fn lost_head(repo: &git2::Repository, state: &RebaseState) -> bool {
 pub(super) fn abort(
     repo: &git2::Repository,
     mut slot: RebaseSlot<'_>,
-    reply: Sender<Result<RebaseAbort, String>>,
+    reply: Sender<Result<RebaseAbort, ErrorDto>>,
 ) {
     let result = (|| {
         let state = slot.load(repo).ok_or(NO_REBASE)?;
-        let abort =
-            git_core::rebase::abort_rebase(repo, &state).map_err(|error| error.to_string())?;
+        let abort = git_core::rebase::abort_rebase(repo, &state).map_err(ErrorDto::from_error)?;
         let _ = slot.forget(repo);
         Ok(abort)
     })();
@@ -175,13 +176,8 @@ pub(super) fn abort(
 
 impl WorkerHandle {
     #[allow(dead_code)]
-    pub fn commits_since(&self, onto: String) -> Result<Vec<RebasePlanCommit>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::CommitsSince { onto, reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn commits_since(&self, onto: String) -> Result<Vec<RebasePlanCommit>, ErrorDto> {
+        self.request(|tx| Command::CommitsSince { onto, reply: tx })
     }
 
     #[allow(dead_code)]
@@ -190,37 +186,22 @@ impl WorkerHandle {
         onto: String,
         plan: Vec<RebasePlanEntry>,
         edit: Option<HistoryEdit>,
-    ) -> Result<RebaseStepResult, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::StartRebase {
-                onto,
-                plan,
-                edit,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<RebaseStepResult, ErrorDto> {
+        self.request(|tx| Command::StartRebase {
+            onto,
+            plan,
+            edit,
+            reply: tx,
+        })
     }
 
     #[allow(dead_code)]
-    pub fn rebase_continue(&self) -> Result<RebaseStepResult, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::RebaseContinue { reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn rebase_continue(&self) -> Result<RebaseStepResult, ErrorDto> {
+        self.request(|tx| Command::RebaseContinue { reply: tx })
     }
 
     #[allow(dead_code)]
-    pub fn abort_rebase(&self) -> Result<RebaseAbort, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::AbortRebase { reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn abort_rebase(&self) -> Result<RebaseAbort, ErrorDto> {
+        self.request(|tx| Command::AbortRebase { reply: tx })
     }
 }

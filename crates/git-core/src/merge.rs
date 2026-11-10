@@ -81,7 +81,7 @@ pub enum MergeError {
     /// Abort reset the files but couldn't remove one of git's merge/cherry-pick/revert state
     /// files (`commit::clear_operation_files`).
     #[error("Couldn't remove git's merge state: {0}")]
-    StateFiles(std::io::Error),
+    StateFiles(#[source] std::io::Error),
     /// Abort during a `git rebase` or `git am` started in a terminal: the paused step is the
     /// rebase's, which only the terminal ends (#263). Nothing was changed.
     #[error(transparent)]

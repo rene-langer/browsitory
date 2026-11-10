@@ -1,3 +1,4 @@
+use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     transfer_progress_dto, PullOutcomeDto, RemoteAuthModeDto, RemoteInfoDto, UpstreamInfoDto,
 };
@@ -8,9 +9,9 @@ use std::sync::{mpsc, Arc, Mutex};
 
 use super::{worker_handle, RepoPathParams, Repos};
 
-pub(super) fn list_remotes(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn list_remotes(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let worker = worker_handle(repos, &params.repo_path)?;
-    let remotes: Result<Vec<RemoteInfoDto>, String> = worker
+    let remotes: Result<Vec<RemoteInfoDto>, ErrorDto> = worker
         .list_remotes()?
         .into_iter()
         .map(|remote| {
@@ -18,7 +19,7 @@ pub(super) fn list_remotes(params: RepoPathParams, repos: &Repos) -> Result<Valu
             Ok(RemoteInfoDto::from((remote, profile)))
         })
         .collect();
-    serde_json::to_value(remotes?).map_err(|error| error.to_string())
+    serde_json::to_value(remotes?).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -31,17 +32,20 @@ pub(super) struct RemoteNameParams {
 pub(super) fn list_remote_branches(
     params: RemoteNameParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let branches =
         worker_handle(repos, &params.repo_path)?.list_remote_branches(params.remote_name)?;
-    serde_json::to_value(branches).map_err(|error| error.to_string())
+    serde_json::to_value(branches).map_err(ErrorDto::from_error)
 }
 
-pub(super) fn get_current_upstream(params: RepoPathParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn get_current_upstream(
+    params: RepoPathParams,
+    repos: &Repos,
+) -> Result<Value, ErrorDto> {
     let upstream = worker_handle(repos, &params.repo_path)?
         .get_current_upstream()?
         .map(UpstreamInfoDto::from);
-    serde_json::to_value(upstream).map_err(|error| error.to_string())
+    serde_json::to_value(upstream).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -54,13 +58,13 @@ pub(super) struct GetRemoteUpstreamsParams {
 pub(super) fn get_remote_upstreams(
     params: GetRemoteUpstreamsParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let upstreams: Vec<UpstreamInfoDto> = worker_handle(repos, &params.repo_path)?
         .get_remote_upstreams(params.name)?
         .into_iter()
         .map(UpstreamInfoDto::from)
         .collect();
-    serde_json::to_value(upstreams).map_err(|error| error.to_string())
+    serde_json::to_value(upstreams).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
@@ -72,7 +76,7 @@ pub(super) struct AddRemoteParams {
     push_url: Option<String>,
 }
 
-pub(super) fn add_remote(params: AddRemoteParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn add_remote(params: AddRemoteParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.add_remote(
         params.name,
         params.fetch_url,
@@ -89,7 +93,7 @@ pub(super) struct RenameRemoteParams {
     new_name: String,
 }
 
-pub(super) fn rename_remote(params: RenameRemoteParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn rename_remote(params: RenameRemoteParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.rename_remote(params.old_name, params.new_name)?;
     Ok(Value::Null)
 }
@@ -106,7 +110,7 @@ pub(super) struct UpdateRemoteUrlsParams {
 pub(super) fn update_remote_urls(
     params: UpdateRemoteUrlsParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.update_remote_urls(
         params.name,
         params.fetch_url,
@@ -123,7 +127,7 @@ pub(super) struct RemoveRemoteParams {
     clear_upstreams: bool,
 }
 
-pub(super) fn remove_remote(params: RemoveRemoteParams, repos: &Repos) -> Result<Value, String> {
+pub(super) fn remove_remote(params: RemoveRemoteParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.remove_remote(params.name, params.clear_upstreams)?;
     Ok(Value::Null)
 }
@@ -140,7 +144,7 @@ pub(super) struct SaveHttpsCredentialParams {
 pub(super) fn save_https_credential(
     params: SaveHttpsCredentialParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.save_https_credential(
         params.remote_name,
         params.username,
@@ -152,7 +156,7 @@ pub(super) fn save_https_credential(
 pub(super) fn forget_https_credential(
     params: RemoteNameParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.forget_https_credential(params.remote_name)?;
     Ok(Value::Null)
 }
@@ -169,7 +173,7 @@ pub(super) struct SetRemoteAuthModeParams {
 pub(super) fn set_remote_auth_mode(
     params: SetRemoteAuthModeParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let mode = match params.mode {
         RemoteAuthModeDto::HttpsToken => git_core::remote::RemoteAuthMode::HttpsToken {
             username: params
@@ -194,7 +198,7 @@ pub(super) struct SetCurrentUpstreamParams {
 pub(super) fn set_current_upstream(
     params: SetCurrentUpstreamParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?
         .set_current_upstream(params.remote_name, params.remote_branch)?;
     Ok(Value::Null)
@@ -203,7 +207,7 @@ pub(super) fn set_current_upstream(
 pub(super) fn clear_current_upstream(
     params: RepoPathParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.clear_current_upstream()?;
     Ok(Value::Null)
 }
@@ -256,7 +260,7 @@ pub(super) fn fetch_remote(
     params: FetchRemoteParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.fetch_remote(
@@ -289,7 +293,7 @@ pub(super) fn fetch_all_remotes(
     params: FetchAllRemotesParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id =
@@ -303,7 +307,7 @@ pub(super) fn background_fetch(
     params: BackgroundFetchParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.background_fetch(
@@ -330,7 +334,7 @@ pub(super) fn push_branch(
     params: PushBranchParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.push_branch(
@@ -358,7 +362,7 @@ pub(super) fn delete_remote_branch(
     params: DeleteRemoteBranchParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.delete_remote_branch(
@@ -384,7 +388,7 @@ pub(super) fn delete_remote_tag(
     params: DeleteRemoteTagParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.delete_remote_tag(
@@ -412,7 +416,7 @@ pub(super) struct CancelTransferParams {
 pub(super) fn cancel_transfer(
     params: CancelTransferParams,
     repos: &Repos,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.cancel_transfer(&params.operation_id);
     Ok(Value::Null)
 }
@@ -431,7 +435,7 @@ pub(super) fn push_current_branch(
     params: PushParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.push_current_branch(
@@ -446,7 +450,7 @@ pub(super) fn force_push_current_branch(
     params: PushParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.force_push_current_branch(
@@ -471,7 +475,7 @@ pub(super) fn push_tags(
     params: PushTagsParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let operation_id = worker_handle(repos, &params.repo_path)?.push_tags(
@@ -487,9 +491,9 @@ pub(super) fn pull_current_upstream(
     params: RepoPathParams,
     repos: &Repos,
     stdout: &Arc<Mutex<std::io::Stdout>>,
-) -> Result<Value, String> {
+) -> Result<Value, ErrorDto> {
     let (event_tx, event_rx) = mpsc::channel();
     spawn_progress_relay(event_rx, Arc::clone(stdout));
     let outcome = worker_handle(repos, &params.repo_path)?.pull_current_upstream(event_tx)?;
-    serde_json::to_value(PullOutcomeDto::from(outcome)).map_err(|error| error.to_string())
+    serde_json::to_value(PullOutcomeDto::from(outcome)).map_err(ErrorDto::from_error)
 }

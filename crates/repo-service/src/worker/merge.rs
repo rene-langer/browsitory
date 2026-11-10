@@ -1,4 +1,5 @@
 use super::{Command, WorkerHandle};
+use crate::wire::ErrorDto;
 use git_core::merge::{
     ConflictSegment, ConflictSide, FileConflictChoice, MarkResolvedOutcome, MergeOptions,
     MergeOutcome,
@@ -59,10 +60,10 @@ pub(super) fn start(
     options: MergeOptions,
     op: super::remote::TransferOp,
     events: Sender<super::HookEvent>,
-    reply: Sender<Result<MergeOutcome, String>>,
-) -> Result<MergeOutcome, String> {
-    let result = git_core::merge::start_merge(repo, &branch_name, options)
-        .map_err(|error| error.to_string());
+    reply: Sender<Result<MergeOutcome, ErrorDto>>,
+) -> Result<MergeOutcome, ErrorDto> {
+    let result =
+        git_core::merge::start_merge(repo, &branch_name, options).map_err(ErrorDto::from_error);
     // git runs post-merge after a merge that completed (or a squash, with "1"); not after a
     // conflicted or no-op one. A clean non-fast-forward merge (`Merged`) is only staged here:
     // its post-merge runs after the commit that concludes it (`status::commit`).
@@ -85,93 +86,84 @@ pub(super) fn start(
     let _ = reply.send(result.clone());
     result
 }
-pub(super) fn defaults(repo: &git2::Repository, reply: Sender<Result<MergeOptions, String>>) {
+pub(super) fn defaults(repo: &git2::Repository, reply: Sender<Result<MergeOptions, ErrorDto>>) {
     let _ = reply.send(Ok(git_core::merge::merge_defaults(repo)));
 }
 pub(super) fn conflict_hunks(
     repo: &git2::Repository,
     path: String,
-    reply: Sender<Result<Vec<ConflictSegment>, String>>,
+    reply: Sender<Result<Vec<ConflictSegment>, ErrorDto>>,
 ) {
-    let _ =
-        reply.send(git_core::merge::conflict_hunks(repo, &path).map_err(|error| error.to_string()));
+    let _ = reply.send(git_core::merge::conflict_hunks(repo, &path).map_err(ErrorDto::from_error));
 }
 pub(super) fn resolve(
     repo: &git2::Repository,
     path: String,
     resolved_content: String,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::merge::resolve_conflict(repo, &path, &resolved_content)
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
-pub(super) fn abort(repo: &git2::Repository, reply: Sender<Result<(), String>>) {
-    let _ = reply.send(git_core::merge::abort_merge(repo).map_err(|error| error.to_string()));
+pub(super) fn abort(repo: &git2::Repository, reply: Sender<Result<(), ErrorDto>>) {
+    let _ = reply.send(git_core::merge::abort_merge(repo).map_err(ErrorDto::from_error));
 }
-pub(super) fn message(repo: &git2::Repository, reply: Sender<Result<Option<String>, String>>) {
+pub(super) fn message(repo: &git2::Repository, reply: Sender<Result<Option<String>, ErrorDto>>) {
     let _ = reply.send(Ok(git_core::merge::merge_message(repo)));
 }
 pub(super) fn resolve_add_delete(
     repo: &git2::Repository,
     path: String,
     choice: FileConflictChoice,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
     let _ = reply.send(
         git_core::merge::resolve_add_delete_conflict(repo, &path, choice)
-            .map_err(|error| error.to_string()),
+            .map_err(ErrorDto::from_error),
     );
 }
 pub(super) fn mark_resolved(
     repo: &git2::Repository,
     path: String,
     force: bool,
-    reply: Sender<Result<MarkResolvedOutcome, String>>,
+    reply: Sender<Result<MarkResolvedOutcome, ErrorDto>>,
 ) {
-    let _ = reply.send(
-        git_core::merge::mark_resolved(repo, &path, force).map_err(|error| error.to_string()),
-    );
+    let _ = reply
+        .send(git_core::merge::mark_resolved(repo, &path, force).map_err(ErrorDto::from_error));
 }
 pub(super) fn resolve_whole_file(
     repo: &git2::Repository,
     path: String,
     side: ConflictSide,
-    reply: Sender<Result<(), String>>,
+    reply: Sender<Result<(), ErrorDto>>,
 ) {
-    let _ = reply.send(
-        git_core::merge::resolve_whole_file(repo, &path, side).map_err(|error| error.to_string()),
-    );
+    let _ = reply
+        .send(git_core::merge::resolve_whole_file(repo, &path, side).map_err(ErrorDto::from_error));
 }
 impl WorkerHandle {
     /// Resolves a conflicted file by taking one side's whole file (`git checkout --ours/--theirs`
     /// + `git add`).
-    pub fn resolve_whole_file(&self, path: String, side: ConflictSide) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::ResolveWholeFile {
-                path,
-                side,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn resolve_whole_file(&self, path: String, side: ConflictSide) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::ResolveWholeFile {
+            path,
+            side,
+            reply: tx,
+        })
     }
 
     /// Stages a conflicted file; without `force`, reports leftover conflict markers instead.
-    pub fn mark_resolved(&self, path: String, force: bool) -> Result<MarkResolvedOutcome, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::MarkResolved {
-                path,
-                force,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn mark_resolved(
+        &self,
+        path: String,
+        force: bool,
+    ) -> Result<MarkResolvedOutcome, ErrorDto> {
+        self.request(|tx| Command::MarkResolved {
+            path,
+            force,
+            reply: tx,
+        })
     }
 
     /// Merges `branch_name` (a local branch name or a full ref) with `options`. The
@@ -182,83 +174,48 @@ impl WorkerHandle {
         branch_name: String,
         options: MergeOptions,
         events: Sender<super::HookEvent>,
-    ) -> Result<MergeOutcome, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::StartMerge {
-                branch_name,
-                options,
-                operation_id: self.cancelled.allocate("merge"),
-                events,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<MergeOutcome, ErrorDto> {
+        self.request(|tx| Command::StartMerge {
+            branch_name,
+            options,
+            operation_id: self.cancelled.allocate("merge"),
+            events,
+            reply: tx,
+        })
     }
     /// The merge dialog's default options, from `merge.ff`.
-    pub fn merge_defaults(&self) -> Result<MergeOptions, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetMergeDefaults { reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn merge_defaults(&self) -> Result<MergeOptions, ErrorDto> {
+        self.request(|tx| Command::GetMergeDefaults { reply: tx })
     }
     #[allow(dead_code)]
-    pub fn get_conflict_hunks(&self, path: String) -> Result<Vec<ConflictSegment>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetConflictHunks { path, reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn get_conflict_hunks(&self, path: String) -> Result<Vec<ConflictSegment>, ErrorDto> {
+        self.request(|tx| Command::GetConflictHunks { path, reply: tx })
     }
     #[allow(dead_code)]
-    pub fn resolve_conflict(&self, path: String, resolved_content: String) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::ResolveConflict {
-                path,
-                resolved_content,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn resolve_conflict(&self, path: String, resolved_content: String) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::ResolveConflict {
+            path,
+            resolved_content,
+            reply: tx,
+        })
     }
     #[allow(dead_code)]
-    pub fn abort_merge(&self) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::AbortMerge { reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn abort_merge(&self) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::AbortMerge { reply: tx })
     }
     #[allow(dead_code)]
-    pub fn get_merge_message(&self) -> Result<Option<String>, String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::GetMergeMessage { reply: tx })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    pub fn get_merge_message(&self) -> Result<Option<String>, ErrorDto> {
+        self.request(|tx| Command::GetMergeMessage { reply: tx })
     }
     pub fn resolve_add_delete_conflict(
         &self,
         path: String,
         choice: FileConflictChoice,
-    ) -> Result<(), String> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.tx
-            .send(Command::ResolveAddDeleteConflict {
-                path,
-                choice,
-                reply: tx,
-            })
-            .map_err(|_| "worker thread stopped".to_string())?;
-        rx.recv()
-            .map_err(|_| "worker thread stopped before replying".to_string())?
+    ) -> Result<(), ErrorDto> {
+        self.request(|tx| Command::ResolveAddDeleteConflict {
+            path,
+            choice,
+            reply: tx,
+        })
     }
 }

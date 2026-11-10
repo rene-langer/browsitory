@@ -26,7 +26,7 @@ fn failed_signing_replies_err_and_records_no_undo_entry() {
 
     assert_eq!(
         result.unwrap_err(),
-        "Signing program 'browsitory-no-such-gpg' was not found."
+        crate::wire::ErrorDto::from("Signing program 'browsitory-no-such-gpg' was not found.")
     );
     assert_eq!(handle.get_undo_state().unwrap().undo, undo_before);
 }
@@ -194,7 +194,7 @@ fn line_and_file_commands_round_trip_through_the_worker() {
         vec![4],
         vec!["not what is on disk\n".into()],
     );
-    assert!(stale.unwrap_err().contains("hunk not found"));
+    assert!(stale.unwrap_err().message.contains("hunk not found"));
     assert!(handle
         .get_working_diff("f.txt".into(), true, opts, None)
         .unwrap()
@@ -273,4 +273,42 @@ fn line_and_file_commands_round_trip_through_the_worker() {
         handle.get_status().is_ok(),
         "worker survives a failed command"
     );
+}
+
+/// #527: the operating system refusing a file access reaches the transports as
+/// `ErrorKind::PermissionDenied`, decided from libgit2's typed error in the worker. Skipped
+/// where the permission bits don't bind (running as root).
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_answers_permission_denied() {
+    use crate::wire::ErrorKind;
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a");
+    commit_all(&repo, "base");
+    write_file(dir.path(), "secret.txt", "secret");
+    let path = dir.path().join("secret.txt");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&path).is_ok() {
+        return;
+    }
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let staged = handle.stage_file("secret.txt".into());
+    let diff = handle.get_working_diff(
+        "secret.txt".into(),
+        false,
+        git_core::diff::DiffOptions::default(),
+        None,
+    );
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let error = staged.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::PermissionDenied, "{}", error.message);
+    let error = diff.unwrap_err();
+    assert_eq!(error.kind, ErrorKind::PermissionDenied, "{}", error.message);
+    // Another failure keeps `Other`.
+    let error = handle.stage_file("../outside.txt".into()).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::Other, "{}", error.message);
 }

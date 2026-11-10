@@ -512,7 +512,7 @@ fn push_and_force_push_refuse_up_front_when_push_default_needs_a_choice() {
 
     for result in [pushed, forced] {
         let message = result.expect_err("must not start a transfer");
-        assert!(message.contains("Push to…"), "{message}");
+        assert!(message.message.contains("Push to…"), "{message}");
     }
     assert_eq!(bare_main(), before);
     let upstream = handle
@@ -627,12 +627,8 @@ fn pull_fetch_failure_returns_only_a_sanitized_error() {
         .pull_current_upstream(event_tx)
         .expect_err("pull should fail while fetching");
 
-    assert_eq!(error, "pull failed");
-    assert!(!error.contains("alice-secret"));
-    assert_eq!(
-        crate::wire::ErrorKind::of(&error),
-        crate::wire::ErrorKind::PullFailed
-    );
+    assert_eq!(error, crate::wire::ErrorDto::pull_failed());
+    assert!(!error.message.contains("alice-secret"));
 }
 
 #[test]
@@ -665,11 +661,8 @@ fn pull_with_untracked_file_reports_dirty_worktree() {
         .pull_current_upstream(event_tx)
         .expect_err("pull should refuse a dirty worktree");
 
-    assert_eq!(error, "cannot pull with a dirty worktree");
-    assert_eq!(
-        crate::wire::ErrorKind::of(&error),
-        crate::wire::ErrorKind::DirtyWorktree
-    );
+    assert_eq!(error.message, "cannot pull with a dirty worktree");
+    assert_eq!(error.kind, crate::wire::ErrorKind::DirtyWorktree);
 }
 
 #[test]

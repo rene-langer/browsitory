@@ -98,7 +98,10 @@ fn detecting_an_ambiguous_remote_declines_rather_than_erroring_or_requesting() {
     let error = handle
         .list_pull_requests("origin".to_string(), "rene".to_string())
         .expect_err("an ambiguous remote must not be treated as a supported repository");
-    assert_eq!(error, "this remote is not a supported forge repository");
+    assert_eq!(
+        error,
+        crate::wire::ErrorDto::from("this remote is not a supported forge repository")
+    );
 }
 
 #[test]
@@ -133,7 +136,10 @@ fn saved_forge_token_is_looked_up_inside_rust_and_never_exposed_in_the_result() 
     let before = handle
         .list_pull_requests("origin".to_string(), "rene".to_string())
         .expect_err("a missing token must be rejected before any request");
-    assert_eq!(before, "a provider token is required for this action");
+    assert_eq!(
+        before,
+        crate::wire::ErrorDto::from("a provider token is required for this action")
+    );
     assert!(api.requests().is_empty());
 
     handle
@@ -168,7 +174,10 @@ fn saved_forge_token_is_looked_up_inside_rust_and_never_exposed_in_the_result() 
     let after_forget = handle
         .list_pull_requests("origin".to_string(), "rene".to_string())
         .expect_err("a forgotten token must not still be usable");
-    assert_eq!(after_forget, "a provider token is required for this action");
+    assert_eq!(
+        after_forget,
+        crate::wire::ErrorDto::from("a provider token is required for this action")
+    );
 }
 
 #[test]
@@ -214,4 +223,48 @@ fn create_pull_request_round_trips_through_the_worker_without_exposing_the_token
 
     assert_eq!(created.number, 8);
     assert!(!format!("{created:?}").contains(token));
+}
+
+/// A keychain that refuses everything, as a locked operating-system credential store does.
+struct LockedCredentialStore;
+
+impl CredentialStore for LockedCredentialStore {
+    fn get(&self, _: &CredentialKey) -> Result<Option<String>, CredentialStoreError> {
+        Err(CredentialStoreError::Keychain("locked".into()))
+    }
+
+    fn set(&self, _: &CredentialKey, _: &str) -> Result<(), CredentialStoreError> {
+        Err(CredentialStoreError::Keychain("locked".into()))
+    }
+
+    fn delete(&self, _: &CredentialKey) -> Result<(), CredentialStoreError> {
+        Err(CredentialStoreError::Keychain("locked".into()))
+    }
+}
+
+/// #527: a forge token's keychain failure is `CredentialStoreFailure`, with the same text as a
+/// remote's HTTPS token, so the frontend shows the same remediation.
+#[test]
+fn a_forge_token_keychain_failure_is_a_credential_store_failure() {
+    use crate::wire::{ErrorDto, ErrorKind};
+    let (dir, repo) = init_repo();
+    repo.remote("origin", "https://github.com/acme/widget.git")
+        .unwrap();
+    let worker = Worker::spawn_with(
+        dir.path().to_path_buf(),
+        LockedCredentialStore,
+        FakeForgeApi::queue(vec![]),
+    )
+    .unwrap();
+    let handle = worker.handle();
+    let expected = ErrorDto::from(CredentialStoreError::Keychain("locked".into()));
+    assert_eq!(expected.kind, ErrorKind::CredentialStoreFailure);
+
+    let saved = handle.save_forge_token(ForgeProvider::GitHub, "rene".to_string(), "t".to_string());
+    let forgotten = handle.forget_forge_token(ForgeProvider::GitHub, "rene".to_string());
+    let listed = handle.list_pull_requests("origin".to_string(), "rene".to_string());
+
+    assert_eq!(saved, Err(expected.clone()));
+    assert_eq!(forgotten, Err(expected.clone()));
+    assert_eq!(listed.unwrap_err(), expected);
 }
