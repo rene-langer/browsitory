@@ -230,6 +230,22 @@ mod tests {
     }
 
     #[test]
+    fn a_helpers_reporter_lets_the_transfer_go_on_only_if_not_abandoned() {
+        let (messages, _rx) = mpsc::channel::<HelperMessage<()>>();
+        let mut connecting = HelperReporter {
+            messages: messages.clone(),
+            phase: phase(Phase::Connecting(Instant::now())),
+        };
+        assert!(connecting.connected());
+        assert_eq!(*connecting.phase.lock(), Phase::Transferring);
+        let mut abandoned = HelperReporter {
+            messages,
+            phase: phase(Phase::Abandoned),
+        };
+        assert!(!abandoned.connected());
+    }
+
+    #[test]
     fn a_helper_stops_when_abandoned_or_cancelled() {
         let transferring = phase(Phase::Transferring);
         assert!(!helper_cancelled(&transferring, &|| false));

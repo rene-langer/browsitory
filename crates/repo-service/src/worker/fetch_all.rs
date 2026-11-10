@@ -90,11 +90,7 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
                         break;
                     }
                     Err(remote_error) => {
-                        if !matches!(remote_error, RemoteError::Unreachable(_)) {
-                            memory.reachable(&name);
-                        } else if let Mode::Background(options) = mode {
-                            memory.unreachable(&name, tick, options.interval);
-                        }
+                        remember_failure(memory, mode, &name, &remote_error, tick);
                         failed.push((name, remote_error.transfer_error_kind()));
                     }
                 }
@@ -122,6 +118,23 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
         error,
         hook_output: None,
     });
+}
+
+/// What a failed fetch of `remote_name` says about reaching it: a remote that answered (the
+/// fetch failed later, e.g. on credentials) ends its backoff; one that could not be reached
+/// starts or lengthens it, but only for a background fetch.
+fn remember_failure(
+    memory: &Memory,
+    mode: Mode,
+    remote_name: &str,
+    error: &RemoteError,
+    tick: Instant,
+) {
+    if !matches!(error, RemoteError::Unreachable(_)) {
+        memory.reachable(remote_name);
+    } else if let Mode::Background(options) = mode {
+        memory.unreachable(remote_name, tick, options.interval);
+    }
 }
 
 /// Fetches one remote on a helper thread and waits for it (`transfer_thread::run`).
@@ -171,4 +184,50 @@ fn fetch_one<S: CredentialStore + Send + Sync + 'static>(
             )
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn background() -> Mode {
+        Mode::Background(BackgroundFetchOptions::new(None, 5))
+    }
+
+    fn unreachable() -> RemoteError {
+        RemoteError::Unreachable(git2::Error::from_str("failed to connect to example.com"))
+    }
+
+    #[test]
+    fn a_background_fetch_backs_off_a_remote_it_could_not_reach() {
+        let memory = Memory::default();
+        let tick = Instant::now();
+        remember_failure(&memory, background(), "origin", &unreachable(), tick);
+        assert!(!memory.may_try("origin", tick + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn a_manual_fetch_all_starts_no_backoff() {
+        let memory = Memory::default();
+        let tick = Instant::now();
+        remember_failure(
+            &memory,
+            Mode::Manual { prune: None },
+            "origin",
+            &unreachable(),
+            tick,
+        );
+        assert!(memory.may_try("origin", tick + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn a_remote_that_answered_but_failed_ends_its_backoff() {
+        let memory = Memory::default();
+        let tick = Instant::now();
+        memory.unreachable("origin", tick, Duration::from_secs(300));
+        let answered = RemoteError::Git(git2::Error::from_str("authentication failed"));
+        remember_failure(&memory, background(), "origin", &answered, tick);
+        assert!(memory.may_try("origin", tick + Duration::from_secs(60)));
+    }
 }
