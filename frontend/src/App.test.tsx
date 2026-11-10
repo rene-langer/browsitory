@@ -723,7 +723,7 @@ describe("App", () => {
 
     const box = await screen.findByRole("textbox", { name: "Commit message" });
     fireEvent.change(box, { target: { value: "feat: hooked" } });
-    const commitButton = screen.getByRole("button", { name: "Commit" });
+    const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
     await waitFor(() => expect(commitButton).toBeEnabled());
     fireEvent.click(commitButton);
 
@@ -786,7 +786,7 @@ describe("App", () => {
       render(<App client={client} />);
       const box = await screen.findByRole("textbox", { name: "Commit message" });
       fireEvent.change(box, { target: { value: "feat: remembered\n\nwith a body" } });
-      const commitButton = screen.getByRole("button", { name: "Commit" });
+      const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
       await waitFor(() => expect(commitButton).toBeEnabled());
       fireEvent.click(commitButton);
       await waitFor(() => expect(box).toHaveValue(""));
@@ -891,7 +891,7 @@ describe("App", () => {
     fireEvent.change(box, { target: { value: "feat: pair" } });
     fireEvent.click(screen.getByRole("button", { name: "Add co-author" }));
     fireEvent.click(await screen.findByRole("option", { name: "Ada <ada@x.org>" }));
-    const commitButton = screen.getByRole("button", { name: "Commit" });
+    const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
     await waitFor(() => expect(commitButton).toBeEnabled());
     fireEvent.click(commitButton);
     const ada = { key: "Co-authored-by", value: "Ada <ada@x.org>" };
@@ -948,7 +948,7 @@ describe("App", () => {
     const box = screen.getByRole("textbox", { name: "Commit message" });
     await waitFor(() => expect(box).toHaveValue("Merge branch 'x'"));
     expect(screen.queryByRole("button", { name: "Add co-author" })).toBeNull();
-    const commitButton = screen.getByRole("button", { name: "Commit" });
+    const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
     await waitFor(() => expect(commitButton).toBeEnabled());
     fireEvent.click(commitButton);
     const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
@@ -982,7 +982,7 @@ describe("App", () => {
     fireEvent.change(await screen.findByRole("textbox", { name: "Commit message" }), {
       target: { value: "feat: in flight" },
     });
-    const commitButton = screen.getByRole("button", { name: "Commit" });
+    const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
     await waitFor(() => expect(commitButton).toBeEnabled());
     fireEvent.click(commitButton);
     await waitFor(() => expect(commit).toHaveBeenCalled());
@@ -1014,7 +1014,7 @@ describe("App", () => {
     render(<App client={client} />);
     const box = await screen.findByRole("textbox", { name: "Commit message" });
     fireEvent.change(box, { target: { value: "feat: a very long subject" } });
-    const commitButton = screen.getByRole("button", { name: "Commit" });
+    const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
     await waitFor(() => expect(commitButton).toBeEnabled());
     fireEvent.click(commitButton);
     const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
@@ -1050,7 +1050,7 @@ describe("App", () => {
     render(<App client={client} />);
     const box = await screen.findByRole("textbox", { name: "Commit message" });
     fireEvent.change(box, { target: { value: "feat: new work" } });
-    const commitButton = screen.getByRole("button", { name: "Commit" });
+    const commitButton = screen.getByRole("button", { name: "Commit 1 file" });
     await waitFor(() => expect(commitButton).toBeEnabled());
     fireEvent.click(commitButton);
     const dialog = await screen.findByRole("dialog", { name: "pre-commit hook failed" });
@@ -3101,5 +3101,142 @@ describe("App back and forward through the selected commits (#618)", () => {
     const search = screen.getByRole("combobox", { name: "Search commits" });
     fireEvent.keyDown(search, { key: "ArrowLeft", altKey: true });
     expect(isSelected(/c2 two/)).toBe(true);
+  });
+});
+
+describe("commit flow (#651)", () => {
+  const COMMIT_ID = "abcdef1234567890abcdef1234567890abcdef12";
+  const headInfo = (headId: string) => ({
+    headId,
+    detachedAt: null,
+    headPushed: false,
+    operation: null,
+    operationLeftover: false,
+    squashMessage: null,
+    commitHooks: [],
+    sequence: null,
+    rebase: null,
+    bisect: null,
+    terminalSequence: null,
+    terminalRebase: null,
+  });
+  const origin = { name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null, prune: false };
+  function flowClient(overrides: Partial<RepoClient> = {}) {
+    return fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getStatus: async () => [
+        { path: "a.txt", oldPath: null, staged: true, kind: "Modified" },
+        { path: "b.txt", oldPath: null, staged: true, kind: "New" },
+      ],
+      getCommitGraph: async () => [],
+      listBranches: async () => [{ name: "main", isCurrent: true, upstream: null, ahead: null, behind: null }],
+      listStashes: async () => [],
+      getHeadInfo: async () => headInfo(COMMIT_ID),
+      commit: vi.fn(async () => ({ kind: "Committed" as const, commitId: COMMIT_ID })),
+      ...overrides,
+    });
+  }
+  async function typeAndFind() {
+    const box = await screen.findByRole("textbox", { name: "Commit message" });
+    fireEvent.change(box, { target: { value: "feat: flow" } });
+    const button = await screen.findByRole("button", { name: "Commit 2 files to main" });
+    await waitFor(() => expect(button).toBeEnabled());
+    return { box, button };
+  }
+  const notifications = () => within(screen.getByRole("status", { name: "Notifications" }));
+
+  it("names the commit and the branch in the toast and offers Push to the upstream", async () => {
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    render(
+      <App
+        client={flowClient({
+          listRemotes: async () => [origin],
+          getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 0, behind: 0, pushBranch: "main" }),
+          pushCurrentBranch,
+        })}
+      />,
+    );
+    const { button } = await typeAndFind();
+    fireEvent.click(button);
+
+    expect(await notifications().findByText("Committed abcdef1 to main")).toBeInTheDocument();
+    fireEvent.click(notifications().getByRole("button", { name: "Push" }));
+    await waitFor(() => expect(pushCurrentBranch).toHaveBeenCalledWith("/repos/a", "origin", false));
+  });
+
+  it("offers Undo when there is nowhere to push, and undoes the commit", async () => {
+    const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Commit" }));
+    render(<App client={flowClient({ listRemotes: async () => [], getUndoState: async () => ({ undo: "Commit", redo: null }), undo })} />);
+    const { button } = await typeAndFind();
+    fireEvent.click(button);
+
+    await notifications().findByText("Committed abcdef1 to main");
+    fireEvent.click(notifications().getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(undo).toHaveBeenCalledWith("/repos/a"));
+  });
+
+  it("the toast's Undo does nothing once HEAD is another commit", async () => {
+    const undo = vi.fn(async () => ({ kind: "Done" as const, label: "Commit" }));
+    // HEAD as the refresh after the commit reads it: something else landed on top already.
+    render(
+      <App
+        client={flowClient({
+          listRemotes: async () => [],
+          getHeadInfo: async () => headInfo("9999999999999999999999999999999999999999"),
+          getUndoState: async () => ({ undo: "Commit", redo: null }),
+          undo,
+        })}
+      />,
+    );
+    const { button } = await typeAndFind();
+    fireEvent.click(button);
+    await notifications().findByText("Committed abcdef1 to main");
+
+    fireEvent.click(notifications().getByRole("button", { name: "Undo" }));
+    expect(undo).not.toHaveBeenCalled();
+  });
+
+  it("commits and pushes from the commit button's menu", async () => {
+    const commit = vi.fn(async () => ({ kind: "Committed" as const, commitId: COMMIT_ID }));
+    const pushCurrentBranch = vi.fn(async () => "push-1");
+    render(
+      <App
+        client={flowClient({
+          commit,
+          listRemotes: async () => [origin],
+          getCurrentUpstream: async () => ({ localBranch: "main", remoteName: "origin", remoteBranch: "main", ahead: 1, behind: 0, pushBranch: "main" }),
+          pushCurrentBranch,
+        })}
+      />,
+    );
+    const { box } = await typeAndFind();
+    fireEvent.click(screen.getByRole("button", { name: "More commit options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Commit and push" }));
+
+    await waitFor(() => expect(pushCurrentBranch).toHaveBeenCalledWith("/repos/a", "origin", false));
+    expect(commit).toHaveBeenCalledWith("/repos/a", "feat: flow", false, []);
+    expect(await notifications().findByText("Committed abcdef1 to main")).toBeInTheDocument();
+    expect(notifications().queryByRole("button", { name: "Push" })).toBeNull();
+    await waitFor(() => expect(box).toHaveValue(""));
+  });
+
+  it("publishes the branch through the Push dialog when it has no upstream", async () => {
+    render(<App client={flowClient({ listRemotes: async () => [origin], getCurrentUpstream: async () => null })} />);
+    await typeAndFind();
+    fireEvent.click(screen.getByRole("button", { name: "More commit options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Commit and push" }));
+
+    expect(await screen.findByRole("dialog", { name: "Push main" })).toBeInTheDocument();
+  });
+
+  it("says why Commit and push is unavailable without a remote", async () => {
+    render(<App client={flowClient({ listRemotes: async () => [] })} />);
+    await typeAndFind();
+    fireEvent.click(screen.getByRole("button", { name: "More commit options" }));
+    const item = screen.getByRole("menuitem", { name: "Commit and push" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "No remote configured.");
   });
 });

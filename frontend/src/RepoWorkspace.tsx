@@ -41,6 +41,7 @@ import styles from "./App.module.css";
 import { useAnnounce } from "./state/useAnnounce";
 import { CopyToClipboardContext, useClipboardFeedback } from "./state/useCopyToClipboard";
 import { useCommitDraftActions } from "./state/useCommitDraftActions";
+import { useCommitFlow } from "./state/useCommitFlow";
 import { useNarrowLayout } from "./state/useNarrowLayout";
 import { useOutcomeToasts } from "./state/useOutcomeToasts";
 import { useSequenceActions } from "./state/useSequenceActions";
@@ -230,6 +231,7 @@ export function RepoWorkspace({
     onSavePatch: (source, suggestedName) => void appState.savePatch(source, suggestedName),
   };
   const { mounted, handleUndo, handleRedo } = useUndoRedoActions(appState, active, pushToast);
+  const { onCommit: commitWithToast, commitFlow } = useCommitFlow(appState, commitAndClearDraft, pushToast, handleUndo);
 
   const { paletteOpen, setPaletteOpen, shortcutsOpen, setShortcutsOpen } = useWorkspaceShortcuts({
     active,
@@ -457,7 +459,8 @@ export function RepoWorkspace({
     onResolveAddDeleteConflict: appState.resolveAddDeleteConflict,
     onMarkResolved: appState.markResolved,
     onResolveWholeFile: (path, side) => void appState.resolveWholeFile(path, side),
-    onCommit: (message, trailers) => announce("Committed", commitAndClearDraft)(message, appState.state.skipHooks, trailers),
+    onCommit: commitWithToast,
+    commitFlow,
     onAmendCommit: (message, options) => announce("Amended commit", amendAndRecord)(message, appState.state.skipHooks, options),
     onSetAmendMode: appState.setAmendMode,
     onAbortMerge: abortMergeOrSequence,

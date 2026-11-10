@@ -43,7 +43,7 @@ describe("Browsitory first flow", () => {
     // Wait for the row to move under Staged before committing (#697).
     await waitUntilInPage('button[aria-label="Unstage first-flow-fixture.txt"]');
     await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: first commit"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
-    await clickInPage("button", "Commit");
+    await clickInPage('button[data-action="commit"]');
 
     // The new commit should now appear in the history list.
     const historyEntry = await $("li*=e2e: first commit");

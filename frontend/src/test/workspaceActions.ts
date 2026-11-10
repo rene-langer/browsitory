@@ -67,6 +67,7 @@ const ACTION_KEYS: Record<keyof WorkspaceActions, true> = {
   onCommit: true,
   onAmendCommit: true,
   onSetAmendMode: true,
+  commitFlow: true,
   onAbortMerge: true,
   onSaveStash: true,
   onOpenStashDialog: true,

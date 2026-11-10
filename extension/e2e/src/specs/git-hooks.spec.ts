@@ -73,7 +73,7 @@ describe("Browsitory VSCode extension git hooks", () => {
       await webview.waitForText("span", `${file} (New)`, 15000);
       await webview.clickByText("button", "Stage all");
       await webview.fill('textarea[aria-label="Commit message"]', summary);
-      await webview.clickByText("button", "Commit");
+      await webview.clickBySelector('button[data-action="commit"]');
       // `hookProgress` while the hook sleeps.
       await webview.waitForText("p", "Running pre-commit hook", 15000);
       // `CommitOutcome::HookFailed` over the sidecar.
@@ -100,7 +100,7 @@ describe("Browsitory VSCode extension git hooks", () => {
       await webview.waitForText("span", `${file} (New)`, 15000);
       await webview.clickByText("button", "Stage all");
       await webview.fill('textarea[aria-label="Commit message"]', summary);
-      await webview.clickByText("button", "Commit");
+      await webview.clickBySelector('button[data-action="commit"]');
       await webview.waitForText('p[role="status"]', "Running pre-commit hook", 15000);
       const cancelledAt = Date.now();
       // `cancel_transfer` over the sidecar, through the running hook's own Cancel button (other

@@ -36,7 +36,7 @@ describe("Browsitory VSCode extension undo", () => {
       await webview.waitForText("span", `${file} (New)`, 15000);
       await webview.clickByText("button", "Stage all");
       await webview.fill('textarea[aria-label="Commit message"]', summary);
-      await webview.clickByText("button", "Commit");
+      await webview.clickBySelector('button[data-action="commit"]');
       await waitUntil(() => git("log", "-1", "--format=%s") === summary, "commit did not land");
 
       // The label can show while a mutation is still pending, and a click on the then disabled

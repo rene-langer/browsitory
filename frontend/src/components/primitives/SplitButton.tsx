@@ -17,7 +17,10 @@ export function SplitButton({
   menuLabel,
   menuTitle,
   items,
+  className,
   chevronClassName,
+  describedBy,
+  action,
 }: {
   label: string;
   onClick: () => void;
@@ -26,13 +29,27 @@ export function SplitButton({
   menuLabel: string;
   menuTitle?: string;
   items: ContextMenuItem[];
+  /** Class for the main button (the commit dock's primary style). */
+  className?: string;
   /** Extra class for the chevron, for callers whose own button styles need overriding. */
   chevronClassName?: string;
+  /** `aria-describedby` of the main button: the visible reason it is disabled. */
+  describedBy?: string;
+  /** `data-action` of the main button, a stable hook for the end-to-end tests. */
+  action?: string;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo: HTMLElement } | null>(null);
   return (
     <span className={styles.group}>
-      <button type="button" disabled={disabled} title={title} onClick={() => onClick()}>
+      <button
+        type="button"
+        className={className}
+        disabled={disabled}
+        title={title}
+        aria-describedby={describedBy}
+        data-action={action}
+        onClick={() => onClick()}
+      >
         {label}
       </button>
       <button
