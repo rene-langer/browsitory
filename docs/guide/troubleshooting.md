@@ -31,3 +31,13 @@ stash still works. The error names the setting, for example "Can't read core.ign
 the Git config: failed to parse 'maybe' as a boolean." Set it to true or false, or remove it
 (`git config --unset core.ignorecase`),
 then try again.
+
+## Files whose names differ only in case
+
+On Linux, with `core.ignorecase` on, Git keeps only one of two files whose names differ only in
+case, such as `A` and `a`. Browsitory therefore refuses, before it changes anything, the actions
+that would lose one of them: switching to a branch or checking out a commit, tag or remote branch
+that has such a pair the current commit doesn't, adding such a worktree, a merge, pull, rebase
+step, cherry-pick, revert or stash apply that brings one in, a hard reset, starting a rebase and
+discarding one file of the pair. The error names both files. Rename one of them in a commit, then
+try again. Aborting a rebase, cherry-pick or revert always works, even with such a pair.
