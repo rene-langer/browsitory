@@ -25,8 +25,21 @@ the right:
   your system's setting.
 - The gear button opens **Preferences**: the commit message settings, **Fetch automatically**
   (see [Branches and remotes](branches-and-remotes.md#fetching-automatically)), diff word wrap
-  and diff algorithm (see [Diff options](history.md#diff-options)), and your editor, terminal and diff tools (see
-  [External tools](external-tools.md)).
+  and diff algorithm (see [Diff options](history.md#diff-options)), your editor, terminal and diff tools (see
+  [External tools](external-tools.md)), and the **Appearance** settings below.
+
+**Appearance.** The Appearance section of Preferences changes how text looks. Each change shows at
+once, without a restart:
+
+- **Code font**: the font for file content and commit IDs: diffs, blame, the file viewer,
+  conflicts, and the commit message field while its ruler is shown. Type a font family name, or
+  several separated by commas. A font that isn't installed falls back to the default monospace
+  font; leave the field empty to use the default.
+- **Code font size (px)**: the size of file content in diffs, blame, the file viewer and
+  conflicts, from 10 to 24 pixels. Empty keeps each view's built-in size.
+- **Interface size**: Small, Normal or Large text for the rest of the window.
+- **Tab size**: how many columns a tab character takes in file content, from 1 to 16 (4 at
+  first).
 - The sparkle button (**What's new**) opens the **Release notes**: what changed in each version. They also open
   by themselves the first time you start a new version. The buttons at the bottom stay in view
   while you scroll: **Close** (or Escape, or a click outside the dialog) closes them, and

@@ -2190,8 +2190,9 @@ only `error`.
   name is generated in two files.
   - Limits and defaults (#497): `wire_bindings_are_current` also writes
     `frontend/src/ipc/generated/wire-constants.ts`: `MAX_CONTEXT_LINES`,
-    `WHOLE_FILE_CONTEXT_LINES`, `COMMIT_MESSAGE_COLUMNS`, the `Default` of `config`'s
-    `DiffSettings`, `CommitMessageSettings` and `FetchSettings` serialized as their DTOs, and the
+    `WHOLE_FILE_CONTEXT_LINES`, `COMMIT_MESSAGE_COLUMNS`, `CODE_FONT_SIZES`, `TAB_SIZES`, the
+    `Default` of `config`'s `DiffSettings`, `CommitMessageSettings`, `FetchSettings` and
+    `AppearanceSettings` (#615) serialized as their DTOs, and the
     commit search keys (`git_core::search::KEYS`). `RepoClient.ts` re-exports them; the frontend
     declares none of these values itself. `searchSyntax.test.ts` checks the search help's keys
     against `SEARCH_KEYS`.
