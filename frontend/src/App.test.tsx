@@ -1311,7 +1311,7 @@ describe("App", () => {
       const graphList = await screen.findByRole("listbox", { name: "Commit history" });
       graphList.focus();
       fireEvent.keyDown(graphList, { key: "f", ctrlKey: true });
-      fireEvent.change(screen.getByRole("searchbox", { name: "Search commits" }), { target: { value: "one" } });
+      fireEvent.change(screen.getByRole("combobox", { name: "Search commits" }), { target: { value: "one" } });
       const results = await screen.findByRole("listbox", { name: "Search results" }, { timeout: 2000 });
       expect(screen.queryByRole("listbox", { name: "Commit history" })).toBeNull();
       return results;
@@ -2104,7 +2104,7 @@ describe("App", () => {
     const graph = await screen.findByRole("listbox", { name: "Commit history" });
     graph.focus();
     fireEvent.keyDown(graph, { key: "f", ctrlKey: true });
-    const input = screen.getByRole("searchbox", { name: "Search commits" });
+    const input = screen.getByRole("combobox", { name: "Search commits" });
     await waitFor(() => expect(input).toHaveFocus());
 
     fireEvent.change(input, { target: { value: "author:searchy" } });
@@ -2115,7 +2115,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Close search" }));
     expect(await screen.findByRole("listbox", { name: "Commit history" })).toBeInTheDocument();
-    expect(screen.getByRole("searchbox", { name: "Search commits" })).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "Search commits" })).toHaveValue("");
   });
 
   it("compares two selected commits in place of the diff pane, and × restores the commit view", async () => {
