@@ -7,7 +7,12 @@ the **Changes** group. The group shows a badge such as **1 conflict**, and each 
 ![A merge stopped on a conflict, with the resolve controls](assets/conflict.png)
 
 - For text conflicts, choose **Accept ours**, **Accept theirs** or **Accept both** for each
-  conflicting block, then **Save resolution**.
+  conflicting block, then **Save resolution**. Every block starts unresolved: the pressed button
+  shows your choice, **Result** under the block shows the text it gives, and a counter such as
+  "1 of 3 resolved" shows how far you are. **Save resolution** is enabled once every block has a
+  choice. The sides are labelled with what they are, for example "Ours (main)" and
+  "Theirs (feature)" for a merge. **Previous conflict** and **Next conflict** move between the
+  blocks.
 - **Use ours (whole file)** keeps your current branch's version (HEAD) of the whole file and
   **Use theirs (whole file)** takes the incoming version: the commit being merged, cherry-picked
   or reverted, or the stash. During a rebase "ours" is the branch you are rebasing onto and

@@ -18,7 +18,7 @@ describe("ResetDialog", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Hard/ }));
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(onReset).not.toHaveBeenCalled();
-    expect(screen.getByText("Discards all uncommitted changes. Cannot be undone.")).toBeInTheDocument();
+    expect(screen.getByText("Discards all uncommitted changes. Undo can bring them back.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Reset hard" }));
     expect(onReset).toHaveBeenCalledWith("hard");
   });

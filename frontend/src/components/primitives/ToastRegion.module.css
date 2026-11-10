@@ -6,21 +6,75 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  max-width: min(32rem, calc(100vw - 2 * var(--space-4)));
   pointer-events: none;
 }
 
+/* One colour pair per tone; the icon and (for warnings and errors) the hidden prefix say it too. */
 .toast {
+  --toast-bg: var(--color-success-bg);
+  --toast-text: var(--color-success-text);
   pointer-events: auto;
   display: flex;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
-  background: var(--color-success-bg);
-  color: var(--color-success-text);
-  border: 1px solid var(--color-success-text);
+  background: var(--toast-bg);
+  color: var(--toast-text);
+  border: 1px solid var(--toast-text);
   box-shadow: var(--shadow-md);
   font-size: var(--text-sm);
+}
+
+.success {
+  --toast-bg: var(--color-success-bg);
+  --toast-text: var(--color-success-text);
+}
+
+.info {
+  --toast-bg: var(--color-info-bg);
+  --toast-text: var(--color-info-text);
+}
+
+.warning {
+  --toast-bg: var(--color-warning-bg);
+  --toast-text: var(--color-warning-text);
+}
+
+.error {
+  --toast-bg: var(--color-danger-bg);
+  --toast-text: var(--color-danger-text);
+}
+
+.icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25em;
+  height: 1.25em;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.success .icon::before {
+  content: "✓";
+}
+
+.info .icon::before {
+  content: "i";
+}
+
+.warning .icon::before {
+  content: "!";
+}
+
+.error .icon::before {
+  content: "×";
 }
 
 .toast button {
@@ -28,12 +82,27 @@
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: var(--text-lg);
   line-height: 1;
+}
+
+.toast button.dismiss {
+  font-size: var(--text-lg);
 }
 
 .toast button.action {
   font-size: var(--text-sm);
   font-weight: 600;
   text-decoration: underline;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

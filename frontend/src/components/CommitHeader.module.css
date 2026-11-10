@@ -52,7 +52,7 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--color-accent, inherit);
+  color: var(--color-accent-fg);
   font: inherit;
   font-family: var(--font-mono);
   text-decoration: underline;
@@ -104,12 +104,12 @@
 
 /* A URL or issue reference in the message (#612); a span, so copying stays plain text. */
 .messageLink {
-  color: var(--color-accent, inherit);
+  color: var(--color-accent-fg);
   text-decoration: underline;
   cursor: pointer;
 }
 
 .messageLink:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-focus-ring);
   outline-offset: 1px;
 }

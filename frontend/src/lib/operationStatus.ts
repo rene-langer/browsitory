@@ -71,9 +71,12 @@ function pastTense(kind: SequenceKind): string {
   return kind === "CherryPick" ? "Cherry-picked" : "Reverted";
 }
 
-/** Success toast for a single pick; `null` for a conflict (the status strip says it). */
-export function pickToast(kind: SequenceKind, outcome: PickOutcome): string | null {
-  return outcome.kind === "Committed" ? pastTense(kind) : null;
+/**
+ * Success toast for a single pick of `commitId` ("Cherry-picked 1234567"); `null` for a conflict
+ * (the status strip says it).
+ */
+export function pickToast(kind: SequenceKind, outcome: PickOutcome, commitId: string): string | null {
+  return outcome.kind === "Committed" ? `${pastTense(kind)} ${commitId.slice(0, 7)}` : null;
 }
 
 /**
@@ -92,6 +95,11 @@ export function sequenceToast(kind: SequenceKind, outcome: SequenceOutcome): str
   }
   const suffix = skipped > 0 ? `, skipped ${skipped} with no changes` : "";
   return `${pastTense(kind)} ${count(outcome.applied)}${suffix}`;
+}
+
+/** A finished sequence that committed something is one undo step, so its toast offers Undo. */
+export function sequenceUndoable(outcome: SequenceOutcome): boolean {
+  return outcome.kind === "Completed" && outcome.applied > 0;
 }
 
 export function abortToast(kind: SequenceKind, abort: SequenceAbort): string {

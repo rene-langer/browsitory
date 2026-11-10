@@ -8,12 +8,9 @@ import { DiffPane, type DiscardRequest } from "./components/DiffPane";
 import { FileHistoryList } from "./components/FileHistoryList";
 import { GoToNotice } from "./components/GoToNotice";
 import { SplitView } from "./components/primitives/SplitView";
-import { SyncBar } from "./components/SyncBar";
-import { UndoRedoButtons } from "./components/UndoRedoButtons";
 import type { RepoClient } from "./ipc/RepoClient";
-import { effectiveFetchPrune } from "./lib/fetchPrune";
 import { issueForgeRepository } from "./lib/messageLinks";
-import { sequenceToast } from "./lib/operationStatus";
+import { sequenceToast, sequenceUndoable } from "./lib/operationStatus";
 import type { useAnnounce } from "./state/useAnnounce";
 import type { SelectedRow, UseAppStateResult } from "./state/useAppState";
 import type { UseCommitSearchResult } from "./state/useCommitSearch";
@@ -21,17 +18,15 @@ import type { UseCompareResult } from "./state/useCompare";
 import type { ExternalToolsApi } from "./state/useExternalTools";
 import type { UseFileHistoryResult } from "./state/useFileHistory";
 import type { UseGoToResult } from "./state/useGoTo";
-import type { CommitNavigation } from "./state/useCommitNavigation";
 import type { VisitKind } from "./lib/navigationHistory";
-import { NavigationButtons } from "./components/NavigationButtons";
 import { commitsPatchName } from "./state/usePatchActions";
 import type { useSequenceActions } from "./state/useSequenceActions";
 import { useCommitLineStats } from "./state/useCommitLineStats";
 import { useShowLineStats, writeShowLineStats } from "./lib/lineStatsPreference";
 
 /**
- * `RepoWorkspace`'s main area (#491): the sync bar and the commit list (the graph, search results
- * or a file's history) beside the diff pane (or a compare). The diff pane's actions come from
+ * `RepoWorkspace`'s main area (#491): the commit list (the graph, search results or a file's
+ * history) beside the diff pane (or a compare). The sync actions are in `RepoToolbar` (#637). The diff pane's actions come from
  * `WorkspaceActionsContext`.
  */
 export function WorkspaceMain({
@@ -41,12 +36,7 @@ export function WorkspaceMain({
   announce,
   operationDisabled: repositoryOperationDisabled,
   operationDisabledReason,
-  lastFetchedAt,
-  autoFetchMinutes,
-  onUndo: handleUndo,
-  onRedo: handleRedo,
   goTo,
-  navigation,
   fileHistory,
   commitSearch,
   compare,
@@ -75,13 +65,7 @@ export function WorkspaceMain({
   // The one "repository busy" rule and its reason (`operationBlockers`, #495).
   operationDisabled: boolean;
   operationDisabledReason: string | null;
-  lastFetchedAt: number | null;
-  autoFetchMinutes: number;
-  onUndo: () => void;
-  onRedo: () => void;
   goTo: UseGoToResult;
-  // Back/Forward through the visited commits (#618).
-  navigation: CommitNavigation;
   fileHistory: UseFileHistoryResult;
   commitSearch: UseCommitSearchResult;
   compare: UseCompareResult;
@@ -113,7 +97,6 @@ export function WorkspaceMain({
   // #620: the commit list's lines-changed badges, counted as rows come into view.
   const showLineStats = useShowLineStats();
   const lineStats = useCommitLineStats(client, repoPath);
-  const { pending, transfer } = appState.state;
   const selectedRow = appState.state.selectedRow;
   const historyEntry =
     fileHistory.history !== null && typeof selectedRow === "object"
@@ -143,43 +126,6 @@ export function WorkspaceMain({
       label="History and diff width"
       left={
         <>
-        <SyncBar
-          remotes={appState.state.remotes}
-          upstream={appState.state.upstream}
-          detachedAt={appState.state.headInfo.detachedAt}
-          operationDisabled={repositoryOperationDisabled}
-          operationDisabledReason={operationDisabledReason}
-          onFetch={appState.fetchRemote}
-          onPull={appState.pullCurrentUpstream}
-          onPush={appState.pushCurrentBranch}
-          prune={effectiveFetchPrune(appState.state.fetchPrune, appState.state.remotes, appState.state.upstream)}
-          onFetchAll={announce("Fetch complete", appState.fetchAllRemotes)}
-          onTogglePrune={appState.setFetchPrune}
-          lastFetchedAt={lastFetchedAt}
-          autoFetchMinutes={autoFetchMinutes}
-          onPublish={() => {
-            const current = appState.state.branches.find((branch) => branch.isCurrent);
-            if (current !== undefined) appState.openDialog({ kind: "push", localBranch: current.name });
-          }}
-          leading={
-            <>
-              <NavigationButtons
-                canGoBack={navigation.canGoBack}
-                canGoForward={navigation.canGoForward}
-                onGoBack={navigation.goBack}
-                onGoForward={navigation.goForward}
-              />
-              <UndoRedoButtons
-                undoLabel={appState.state.undoState.undo}
-                redoLabel={appState.state.undoState.redo}
-                disabled={pending || transfer !== null}
-                disabledReason={operationDisabledReason}
-                onUndo={handleUndo}
-                onRedo={handleRedo}
-              />
-            </>
-          }
-        />
         {goTo.notice !== null && <GoToNotice notice={goTo.notice} onDismiss={goTo.dismissNotice} />}
         {fileHistory.history !== null ? (
           <FileHistoryList
@@ -244,15 +190,17 @@ export function WorkspaceMain({
                   void runPickAction(
                     () => appState.cherryPickMany(ids),
                     (outcome) => sequenceToast("CherryPick", outcome),
+                    sequenceUndoable,
                   )
                 }
                 onRevertMany={(ids) =>
                   void runPickAction(
                     () => appState.revertMany(ids),
                     (outcome) => sequenceToast("Revert", outcome),
+                    sequenceUndoable,
                   )
                 }
-                onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
+                onCheckoutCommit={announce((commitId) => `Checked out ${commitId.slice(0, 7)}`, appState.checkoutCommit, { undoable: true })}
                 onChooseParent={openCommitDialog}
                 onRequestReset={(commitId, returnFocusTo) => openCommitDialog("Reset", commitId, returnFocusTo)}
                 onEditHeadMessage={onEditHeadMessage}

@@ -14,15 +14,17 @@
 }
 
 .interactive:hover {
-  background: color-mix(in srgb, var(--color-selected-bg) 55%, transparent);
+  background: var(--color-hover-bg);
 }
 
 .interactive:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-focus-ring);
   outline-offset: -2px;
 }
 
 /* Declared after `.interactive:hover` (same specificity) so the selected tint wins on hover. */
 .row[aria-selected="true"] {
   background: var(--color-selected-bg);
+  color: var(--color-selected-text);
+  box-shadow: inset 2px 0 0 var(--color-selected-marker);
 }

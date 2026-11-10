@@ -60,9 +60,9 @@ export function WorkspaceSidebar({
       <BranchTree
         branches={appState.state.branches}
         createBranchDraft={appState.state.createBranchDraft}
-        onSwitchBranch={announce("Switched branch", appState.switchBranch)}
+        onSwitchBranch={announce((name) => `Switched to ${name}`, appState.switchBranch, { undoable: true })}
         onCreateBranch={appState.createBranch}
-        onDeleteBranch={announce("Deleted branch", appState.deleteBranch)}
+        onDeleteBranch={announce((...[name]) => `Deleted branch ${name}`, appState.deleteBranch, { undoable: true })}
         onRenameBranch={appState.renameBranch}
         onOpenCreateBranchDraft={appState.openCreateBranchDraft}
         onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
@@ -85,18 +85,6 @@ export function WorkspaceSidebar({
         onListRemoteBranches={appState.listRemoteBranches}
         onFetchRemote={announce("Fetch complete", appState.fetchRemote)}
         onPushCurrentBranch={announce("Push complete", appState.pushCurrentBranch)}
-        onPull={appState.pullCurrentUpstream}
-        pendingPull={appState.state.pendingPull}
-        pullOutcome={appState.state.pullOutcome}
-        onMergePull={async (upstreamRef) => {
-          appState.clearPendingPull();
-          await appState.mergePull(upstreamRef);
-        }}
-        onRebasePull={(upstreamRef) => {
-          appState.clearPendingPull();
-          appState.openRebasePlanner(upstreamRef);
-        }}
-        onCancelPull={appState.clearPendingPull}
         addRemoteDraftOpen={appState.state.addRemoteDraftOpen}
         onOpenAddRemoteDraft={appState.openAddRemoteDraft}
         onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
@@ -165,7 +153,7 @@ export function WorkspaceSidebar({
           onPush={appState.pushTags}
           onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
           onBranchFromCommit={appState.openCreateBranchDraft}
-          onCheckoutCommit={announce("Checked out commit", appState.checkoutCommit)}
+          onCheckoutCommit={announce((commitId) => `Checked out ${commitId.slice(0, 7)}`, appState.checkoutCommit, { undoable: true })}
           onGoToTag={(tag) => void goTo.goToTag(tag.name, tag.commitId)}
           pushDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}

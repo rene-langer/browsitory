@@ -62,4 +62,13 @@ describe("renderWebviewHtml", () => {
     expect(first).toContain(`nonce="${firstNonce}"`);
     expect(second).toContain(`nonce="${secondNonce}"`);
   });
+
+  it("marks the root as the VSCode host before any script runs, so the editor's theme colours the first paint (#676)", () => {
+    const html = renderWebviewHtml(fakeWebview(), {
+      script: fakeUri("/a/vscode-main.js"),
+      style: fakeUri("/a/vscode-main.css"),
+    });
+
+    expect(html).toContain('<html lang="en" data-host="vscode">');
+  });
 });

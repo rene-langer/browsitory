@@ -29,7 +29,7 @@
 
 /* A checkerboard behind the image so transparency is visible in either theme. */
 .frame {
-  --checker: color-mix(in srgb, var(--color-border) 55%, transparent);
+  --checker: var(--color-checker);
   display: flex;
   justify-content: center;
   align-items: center;

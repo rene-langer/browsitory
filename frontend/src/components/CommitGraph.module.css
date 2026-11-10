@@ -31,8 +31,8 @@
   line-height: 1.5;
   padding: 0 6px;
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
-  color: var(--color-accent);
+  background: var(--color-accent-tint);
+  color: var(--color-accent-fg);
   flex-shrink: 0;
 }
 

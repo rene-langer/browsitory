@@ -343,4 +343,94 @@ describe("SplitView", () => {
       screen.getByRole("separator").nextElementSibling,
     );
   });
+
+  describe("the drawer of a pane hidden for lack of room (#635)", () => {
+    const leftPane = () => screen.getByText("left").parentElement as HTMLElement;
+
+    it("opens from the divider over the right pane, and reports the width it shows", () => {
+      const onLeftStateChange = vi.fn();
+      render(
+        <SplitView left={<button>left</button>} right={<div>right</div>} collapsible forceCollapsed defaultWidth={260} onLeftStateChange={onLeftStateChange} />,
+      );
+      const divider = screen.getByRole("separator");
+      expect(divider).toHaveAttribute("aria-valuenow", "0");
+      expect(onLeftStateChange).toHaveBeenLastCalledWith("collapsed");
+      fireEvent.doubleClick(divider);
+      expect(leftPane()).not.toHaveAttribute("hidden");
+      expect(leftPane()).toHaveAttribute("data-overlay", "true");
+      expect(leftPane()).toHaveStyle({ width: "260px" });
+      expect(divider).toHaveAttribute("aria-valuenow", "260");
+      expect(onLeftStateChange).toHaveBeenLastCalledWith("overlay");
+      expect(leftPane()).toHaveFocus();
+      // The stored width is untouched: the drawer is not a docked expand.
+      expect(localStorage.length).toBe(0);
+    });
+
+    it("closes with Escape, returning focus, and with a click beside it", () => {
+      render(<SplitView left={<button>left</button>} right={<div>right</div>} collapsible forceCollapsed />);
+      const divider = screen.getByRole("separator");
+      divider.focus();
+      fireEvent.keyDown(divider, { key: "ArrowRight" });
+      expect(leftPane()).toHaveAttribute("data-overlay", "true");
+      fireEvent.keyDown(screen.getByRole("button", { name: "left" }), { key: "Escape" });
+      expect(leftPane()).toHaveAttribute("hidden");
+      expect(divider).toHaveFocus();
+
+      fireEvent.doubleClick(divider);
+      const backdrop = document.querySelector("[data-split-backdrop]") as HTMLElement;
+      fireEvent.click(backdrop);
+      expect(leftPane()).toHaveAttribute("hidden");
+    });
+
+    it("ignores a drag while hidden", () => {
+      render(<SplitView left={<div>left</div>} right={<div>right</div>} collapsible forceCollapsed />);
+      const divider = screen.getByRole("separator");
+      fireEvent.pointerDown(divider, { clientX: 0 });
+      fireEvent.pointerMove(window, { clientX: 200 });
+      fireEvent.pointerUp(window);
+      expect(leftPane()).toHaveAttribute("hidden");
+      expect(localStorage.length).toBe(0);
+    });
+
+    it("docks again once there is room, without reopening the drawer later", () => {
+      const view = render(<SplitView left={<div>left</div>} right={<div>right</div>} collapsible forceCollapsed />);
+      fireEvent.doubleClick(screen.getByRole("separator"));
+      view.rerender(<SplitView left={<div>left</div>} right={<div>right</div>} collapsible forceCollapsed={false} />);
+      expect(leftPane()).not.toHaveAttribute("data-overlay");
+      expect(leftPane()).not.toHaveAttribute("hidden");
+      view.rerender(<SplitView left={<div>left</div>} right={<div>right</div>} collapsible forceCollapsed />);
+      expect(leftPane()).toHaveAttribute("hidden");
+    });
+  });
+
+  describe("requests (#635)", () => {
+    const leftPane = () => screen.getByText("left").parentElement as HTMLElement;
+    const view = (props: Partial<Parameters<typeof SplitView>[0]>) => (
+      <SplitView left={<div>left</div>} right={<div>right</div>} collapsible storageKey="w" {...props} />
+    );
+
+    it("toggles a docked pane collapsed and back, and ignores the request it mounts with", () => {
+      const { rerender } = render(view({ request: { kind: "toggle", nonce: 1 } }));
+      expect(leftPane()).not.toHaveAttribute("hidden");
+      rerender(view({ request: { kind: "toggle", nonce: 2 } }));
+      expect(leftPane()).toHaveAttribute("hidden");
+      expect(localStorage.getItem("w")).toBe("0");
+      rerender(view({ request: { kind: "toggle", nonce: 3 } }));
+      expect(leftPane()).not.toHaveAttribute("hidden");
+      // "show" leaves a shown pane alone.
+      rerender(view({ request: { kind: "show", nonce: 4 } }));
+      expect(leftPane()).not.toHaveAttribute("hidden");
+    });
+
+    it("opens and closes the drawer while hidden for lack of room", () => {
+      const { rerender } = render(view({ forceCollapsed: true }));
+      rerender(view({ forceCollapsed: true, request: { kind: "toggle", nonce: 1 } }));
+      expect(leftPane()).toHaveAttribute("data-overlay", "true");
+      rerender(view({ forceCollapsed: true, request: { kind: "show", nonce: 2 } }));
+      expect(leftPane()).toHaveAttribute("data-overlay", "true");
+      rerender(view({ forceCollapsed: true, request: { kind: "toggle", nonce: 3 } }));
+      expect(leftPane()).toHaveAttribute("hidden");
+      expect(localStorage.getItem("w")).toBeNull();
+    });
+  });
 });

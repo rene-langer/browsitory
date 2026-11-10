@@ -4,11 +4,14 @@ import { folderSearchQuery } from "./lib/folderHistory";
 import { repoPanelId, repoTabId } from "./components/repoTabIds";
 import { OperationStatusStrip } from "./components/OperationStatusStrip";
 import { HookRunStrip } from "./components/HookRunStrip";
-import type { ToastAction } from "./state/useToasts";
+import type { PushToast } from "./state/useToasts";
 import { InlineError } from "./components/primitives/InlineError";
-import { SplitView } from "./components/primitives/SplitView";
+import { SplitView, type SplitViewLeftState, type SplitViewRequest } from "./components/primitives/SplitView";
+import { RepoToolbar } from "./components/RepoToolbar";
 import type { GraphCommit, RepoClient, StatusEntry } from "./ipc/RepoClient";
-import { buildCommands, type AppCommands, type CommitCommands } from "./lib/commands";
+import { buildCommands, SWITCH_BRANCH_PICKER_ID, type AppCommands, type CommitCommands } from "./lib/commands";
+import { effectiveFetchPrune } from "./lib/fetchPrune";
+import { readRecentBranches, recordRecentBranch } from "./lib/recentBranches";
 import { useExternalTools } from "./state/useExternalTools";
 import { useRootFiles } from "./state/useRootFiles";
 import { rootFileItems } from "./lib/rootFiles";
@@ -23,7 +26,7 @@ import { useAutoFetch } from "./state/useAutoFetch";
 import { useFetchSettingsContext } from "./state/useFetchSettings";
 import { useAppState } from "./state/useAppState";
 import { useFileHistory } from "./state/useFileHistory";
-import { busyReason, operationBlockers, pickToast } from "./lib/operationStatus";
+import { busyReason, operationBlockers, pickToast, stashBlockReason } from "./lib/operationStatus";
 import { stashBlockers } from "./lib/actions/stashActions";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
@@ -86,7 +89,7 @@ export function RepoWorkspace({
   onCommitDraftChange: (repoPath: string, draft: CommitDraft) => void;
   appCommands?: AppCommands;
   // The single app-level toast stack (`App` owns the one `ToastRegion`).
-  pushToast: (message: string, action?: ToastAction) => void;
+  pushToast: PushToast;
   // The live status, for the tab strip's "uncommitted changes" marker (#613).
   onStatusChange?: (repoPath: string, status: StatusEntry[]) => void;
 }) {
@@ -193,7 +196,38 @@ export function RepoWorkspace({
   const diffSettings = useDiffSettingsContext();
   // The tab's diff views, for the palette's "Wrap lines" / "Show whole file" (#469).
   const currentDiff = useCurrentDiffRegistry();
-  const narrow = useNarrowLayout();
+  // The toolbar and the panes below it; its width, not the window's, decides the narrow layout.
+  const [bodyElement, setBodyElement] = useState<HTMLDivElement | null>(null);
+  const narrow = useNarrowLayout(bodyElement);
+  const sidebarId = `${repoPanelId(repoPath)}-sidebar`;
+  // The sidebar toggle (toolbar, shortcut, palette): docked collapse/expand, or the drawer while
+  // there is no room for it (#635).
+  const [sidebarState, setSidebarState] = useState<SplitViewLeftState>("docked");
+  const [sidebarRequest, setSidebarRequest] = useState<SplitViewRequest | undefined>(undefined);
+  const requestSidebar = useCallback(
+    (kind: SplitViewRequest["kind"], returnFocusTo?: HTMLElement) =>
+      setSidebarRequest((prev) => ({ kind, nonce: (prev?.nonce ?? 0) + 1, returnFocusTo })),
+    [],
+  );
+  const toggleSidebar = useCallback((returnFocusTo?: HTMLElement) => requestSidebar("toggle", returnFocusTo), [requestSidebar]);
+  // The inline New branch and Add remote forms live in the sidebar: opening one shows it.
+  const sidebarDraftOpen = appState.state.createBranchDraft !== null || appState.state.addRemoteDraftOpen;
+  const [seenSidebarDraftOpen, setSeenSidebarDraftOpen] = useState(sidebarDraftOpen);
+  if (sidebarDraftOpen !== seenSidebarDraftOpen) {
+    setSeenSidebarDraftOpen(sidebarDraftOpen);
+    if (sidebarDraftOpen) requestSidebar("show");
+  }
+  // The recent branches the switcher lists first (#638): every change of the current branch,
+  // wherever it came from, puts the old and the new one in front.
+  const currentBranch = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null;
+  const previousBranch = useRef(currentBranch);
+  useEffect(() => {
+    const previous = previousBranch.current;
+    previousBranch.current = currentBranch;
+    if (previous === null || currentBranch === null || previous === currentBranch) return;
+    recordRecentBranch(repoPath, previous);
+    recordRecentBranch(repoPath, currentBranch);
+  }, [currentBranch, repoPath]);
 
   // Populate this tab's state as soon as it mounts. `useAppState` no longer fetches anything on
   // its own — its old `openRepo` method (removed when repo-opening moved out to `useOpenRepos`)
@@ -229,10 +263,11 @@ export function RepoWorkspace({
     onApplyCommitChange: (change) => void appState.applyCommitChange(change),
     onSavePatch: (source, suggestedName) => void appState.savePatch(source, suggestedName),
   };
-  const { mounted, handleUndo, handleRedo } = useUndoRedoActions(appState, active, pushToast);
+  const { mounted, handleUndo, handleRedo, undoToastAction } = useUndoRedoActions(appState, active, pushToast);
 
   const { paletteOpen, setPaletteOpen, shortcutsOpen, setShortcutsOpen } = useWorkspaceShortcuts({
     active,
+    onToggleSidebar: toggleSidebar,
     repositoryOperationDisabled,
     onCloseRepoTab,
     onReopenClosedTab: appCommands?.onReopenClosedTab,
@@ -245,11 +280,19 @@ export function RepoWorkspace({
     transfer,
   });
 
+  // The toolbar's branch chip opens the palette straight into "Switch branch…" (#638).
+  const [paletteInitialPicker, setPaletteInitialPicker] = useState<string | null>(null);
+  if (!paletteOpen && paletteInitialPicker !== null) setPaletteInitialPicker(null);
+  const openBranchSwitcher = () => {
+    setPaletteInitialPicker(SWITCH_BRANCH_PICKER_ID);
+    setPaletteOpen(true);
+  };
+
   // A stored stash's Apply/Pop and Drop rules, shared by the stash list, the stash view and the
   // palette (#509).
   const storedStashBlockers = stashBlockers(appState.state);
 
-  const announce = useAnnounce(appState, pushToast);
+  const announce = useAnnounce(appState, pushToast, undoToastAction);
   // The context menus' "Copy …" items (#614).
   const clipboard = useClipboardFeedback(pushToast);
 
@@ -287,20 +330,27 @@ export function RepoWorkspace({
     abortMergeOrSequence,
     paletteAbortSequence,
     paletteAbortMerge,
-  } = useSequenceActions(appState, pushToast, mounted, announce);
+  } = useSequenceActions(appState, pushToast, mounted, announce, undoToastAction);
   // Cherry-pick, revert and reset of one commit, shared by the commit menu and the palette
   // (#507): the toast comes from the outcome (#107).
   const cherryPickCommit = (commitId: string, mainline: number | null) =>
     void runPickAction(
       () => appState.cherryPick(commitId, mainline),
-      (outcome) => pickToast("CherryPick", outcome),
+      (outcome) => pickToast("CherryPick", outcome, commitId),
+      (outcome) => outcome.kind === "Committed",
     );
   const revertCommit = (commitId: string, mainline: number | null) =>
     void runPickAction(
       () => appState.revertCommit(commitId, mainline),
-      (outcome) => pickToast("Revert", outcome),
+      (outcome) => pickToast("Revert", outcome, commitId),
+      (outcome) => outcome.kind === "Committed",
     );
-  const resetToCommit = announce("Reset branch", appState.resetToCommit);
+  const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? "HEAD";
+  const resetToCommit = announce(
+    (...[commitId]) => `Reset ${currentBranchName} to ${commitId.slice(0, 7)}`,
+    appState.resetToCommit,
+    { undoable: true },
+  );
   // The commits the open search results or file history list, which the loaded graph may lack
   // (#515): the palette offers their commit actions too.
   const listedCommits = (): GraphCommit[] => [
@@ -334,7 +384,7 @@ export function RepoWorkspace({
     onChooseParent: (action, commitId) => openCommitDialog(action, commitId),
     onReset: (commitId) => openCommitDialog("Reset", commitId),
   };
-  useOutcomeToasts(appState.state, pushToast);
+  useOutcomeToasts(appState.state, pushToast, undoToastAction);
 
   // The palette's commands, built only while it is open.
   const paletteCommands = () =>
@@ -350,8 +400,33 @@ export function RepoWorkspace({
       },
       sidebar: {
         panelVisibility: panelVisibility.visibility,
-        revealSection: sidebarReveal.revealSection,
-        revealRemote: sidebarReveal.revealRemote,
+        // A section or remote the palette goes to shows the sidebar (a drawer when narrow).
+        revealSection: (section) => {
+          requestSidebar("show");
+          sidebarReveal.revealSection(section);
+        },
+        revealRemote: (remoteName) => {
+          requestSidebar("show");
+          sidebarReveal.revealRemote(remoteName);
+        },
+        toggle: { shown: sidebarState !== "collapsed", run: () => toggleSidebar() },
+      },
+      branchSwitch: {
+        recentBranches: readRecentBranches(repoPath),
+        onSwitchBranch: (name) => {
+          recordRecentBranch(repoPath, name);
+          void announce("Switched branch", appState.switchBranch)(name);
+        },
+        onCreateAndSwitch: (name) =>
+          void (async () => {
+            const failure = await appState.createBranch(name, "HEAD");
+            if (failure !== null) {
+              pushToast(failure);
+              return;
+            }
+            recordRecentBranch(repoPath, name);
+            await announce(`Created and switched to ${name}`, appState.switchBranch)(name);
+          })(),
       },
       diff: {
         settings: diffSettings.settings,
@@ -429,36 +504,45 @@ export function RepoWorkspace({
     onUnstageAllFiles: appState.unstageAllFiles,
     onStageHunk: appState.stageHunk,
     onUnstageHunk: appState.unstageHunk,
-    onDiscardHunk: appState.discardHunk,
-    onStageLines: (p, o, n, c, idx, shown) => announce(linesToast("Staged", idx.length), appState.stageLines)(p, o, n, c, idx, shown),
-    onUnstageLines: (p, o, n, c, idx, shown) => announce(linesToast("Unstaged", idx.length), appState.unstageLines)(p, o, n, c, idx, shown),
-    onDiscardLines: (p, o, n, c, idx, shown) => announce(linesToast("Discarded", idx.length), appState.discardLines)(p, o, n, c, idx, shown),
+    // One press, like every undoable action: the toast offers Undo (#662).
+    onDiscardHunk: (path, oldStart, newStart, hunk) =>
+      announce(`Discarded a hunk in ${path}`, appState.discardHunk, { undoable: true })(path, oldStart, newStart, hunk),
+    onStageLines: (p, o, n, c, idx, shown) =>
+      announce(linesToast("Staged", idx.length), appState.stageLines, { undoable: true })(p, o, n, c, idx, shown),
+    onUnstageLines: (p, o, n, c, idx, shown) =>
+      announce(linesToast("Unstaged", idx.length), appState.unstageLines, { undoable: true })(p, o, n, c, idx, shown),
+    onDiscardLines: (p, o, n, c, idx, shown) =>
+      announce(linesToast("Discarded", idx.length), appState.discardLines, { undoable: true })(p, o, n, c, idx, shown),
     // Re-checked: the repository can become busy while a confirmation is open (#521).
     onDiscardFile: (path) =>
       discardDropBlockedReason !== null
         ? undefined
-        : announce(`Discarded changes to ${path}`, appState.discardFile)(path),
+        : announce(`Discarded changes to ${path}`, appState.discardFile, { undoable: true })(path),
     onDiscardAllUnstaged: (paths) => {
-      if (discardDropBlockedReason === null) void announce("Discarded all unstaged changes", appState.discardAllUnstaged)(paths);
+      if (discardDropBlockedReason === null) void announce("Discarded all unstaged changes", appState.discardAllUnstaged, { undoable: true })(paths);
     },
     onDiscardFiles: (paths) => {
       if (discardDropBlockedReason !== null) return;
-      void announce(`Discarded changes to ${paths.length} ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged)(paths);
+      void announce(`Discarded changes to ${paths.length} ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged, {
+        undoable: true,
+      })(paths);
     },
     // `discardAllUnstaged` deletes the untracked paths it is given (#622).
     onDeleteUntracked: (paths) => {
       if (discardDropBlockedReason !== null) return;
-      void announce(`Deleted ${paths.length} untracked ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged)(paths);
+      void announce(`Deleted ${paths.length} untracked ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged, {
+        undoable: true,
+      })(paths);
     },
-    onIgnorePath: (pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern),
+    onIgnorePath: (pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath, { undoable: true })(pattern),
     onIgnorePaths: (patterns) =>
       announce(`Added ${patterns.length} ${patterns.length === 1 ? "pattern" : "patterns"} to .gitignore`, appState.ignorePaths)(patterns),
     onResolveConflict: appState.resolveConflict,
     onResolveAddDeleteConflict: appState.resolveAddDeleteConflict,
     onMarkResolved: appState.markResolved,
     onResolveWholeFile: (path, side) => void appState.resolveWholeFile(path, side),
-    onCommit: (message, trailers) => announce("Committed", commitAndClearDraft)(message, appState.state.skipHooks, trailers),
-    onAmendCommit: (message, options) => announce("Amended commit", amendAndRecord)(message, appState.state.skipHooks, options),
+    onCommit: (message, trailers) => announce("Committed", commitAndClearDraft, { undoable: true })(message, appState.state.skipHooks, trailers),
+    onAmendCommit: (message, options) => announce("Amended commit", amendAndRecord, { undoable: true })(message, appState.state.skipHooks, options),
     onSetAmendMode: appState.setAmendMode,
     onAbortMerge: abortMergeOrSequence,
     onSaveStash: announce("Changes stashed", () => appState.saveStash()),
@@ -483,7 +567,7 @@ export function RepoWorkspace({
     onOpenFolderHistory: openFolderHistory,
     externalTools,
     onRestoreFileVersion: (commitId, path) =>
-      announce(`Restored ${path} from ${commitId.slice(0, 7)}`, appState.restoreFileVersion)(commitId, path),
+      announce(`Restored ${path} from ${commitId.slice(0, 7)}`, appState.restoreFileVersion, { undoable: true })(commitId, path),
     patchActions: diffPanePatchActions,
     stashActions: {
       onApply: appState.applyStash,
@@ -600,8 +684,58 @@ export function RepoWorkspace({
         paletteOpen={paletteOpen}
         onPaletteOpenChange={setPaletteOpen}
         paletteCommands={paletteCommands}
+        paletteInitialPicker={paletteInitialPicker}
         shortcutsOpen={shortcutsOpen}
         onShortcutsOpenChange={setShortcutsOpen}
+      />
+      <div ref={setBodyElement} className={styles.workspaceBody}>
+      <RepoToolbar
+        sidebar={{ state: sidebarState, controls: sidebarId, onToggle: toggleSidebar }}
+        branch={{
+          current: currentBranch,
+          detachedAt: appState.state.headInfo.detachedAt,
+          upstream: appState.state.upstream,
+          onOpenSwitcher: openBranchSwitcher,
+        }}
+        navigation={{
+          canGoBack: navigation.canGoBack,
+          canGoForward: navigation.canGoForward,
+          onGoBack: navigation.goBack,
+          onGoForward: navigation.goForward,
+        }}
+        sync={{
+          remotes: appState.state.remotes,
+          upstream: appState.state.upstream,
+          detachedAt: appState.state.headInfo.detachedAt,
+          operationDisabled: repositoryOperationDisabled,
+          operationDisabledReason,
+          onFetch: appState.fetchRemote,
+          onPull: appState.pullCurrentUpstream,
+          pullPending: appState.state.pendingPull !== null,
+          onPush: appState.pushCurrentBranch,
+          prune: effectiveFetchPrune(appState.state.fetchPrune, appState.state.remotes, appState.state.upstream),
+          onFetchAll: announce("Fetch complete", appState.fetchAllRemotes),
+          onTogglePrune: appState.setFetchPrune,
+          lastFetchedAt,
+          autoFetchMinutes,
+          onPublish: () => {
+            if (currentBranch !== null) openDialog({ kind: "push", localBranch: currentBranch });
+          },
+          stash: {
+            reason: stashBlockReason(appState.state),
+            onStash: announce("Changes stashed", () => appState.saveStash()),
+            onStashWithOptions: () => openDialog({ kind: "stash", paths: [] }),
+          },
+        }}
+        undo={{
+          undoLabel: appState.state.undoState.undo,
+          redoLabel: appState.state.undoState.redo,
+          disabled: pending || transfer !== null,
+          disabledReason: operationDisabledReason,
+          onUndo: handleUndo,
+          onRedo: handleRedo,
+        }}
+        onRefresh={() => void appState.refresh()}
       />
       <SplitView
         storageKey="sidebar-width"
@@ -611,6 +745,9 @@ export function RepoWorkspace({
         collapsible
         forceCollapsed={narrow}
         label="Sidebar width"
+        leftId={sidebarId}
+        request={sidebarRequest}
+        onLeftStateChange={setSidebarState}
         left={
           <WorkspaceSidebar
             appState={appState}
@@ -635,12 +772,7 @@ export function RepoWorkspace({
             announce={announce}
             operationDisabled={repositoryOperationDisabled}
             operationDisabledReason={operationDisabledReason}
-            lastFetchedAt={lastFetchedAt}
-            autoFetchMinutes={autoFetchMinutes}
-            onUndo={handleUndo}
-            onRedo={handleRedo}
             goTo={goTo}
-            navigation={navigation}
             fileHistory={fileHistory}
             commitSearch={commitSearch}
             compare={compare}
@@ -668,6 +800,7 @@ export function RepoWorkspace({
           />
         }
       />
+      </div>
     </div>
     </CopyToClipboardContext.Provider>
     </WorkspaceActionsContext.Provider>

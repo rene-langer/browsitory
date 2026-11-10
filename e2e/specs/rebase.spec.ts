@@ -107,14 +107,14 @@ describe("Browsitory interactive rebase", () => {
 
     // Mark "rebase commit b (to drop)" as Drop.
     const dropRowSelect = await $(
-      "//li[contains(., 'rebase commit b (to drop)')]//select[@aria-label='Action']",
+      "//li[contains(., 'rebase commit b (to drop)')]//select[starts-with(@aria-label, 'Action for ')]",
     );
     await dropRowSelect.waitForExist();
     await dropRowSelect.selectByVisibleText("Drop");
 
     // Mark "rebase commit c (squash target)" as Squash.
     const squashRowSelect = await $(
-      "//li[contains(., 'rebase commit c (squash target)')]//select[@aria-label='Action']",
+      "//li[contains(., 'rebase commit c (squash target)')]//select[starts-with(@aria-label, 'Action for ')]",
     );
     await squashRowSelect.selectByVisibleText("Squash");
 
@@ -176,7 +176,7 @@ describe("Browsitory interactive rebase", () => {
     // Drop "change on top" so replaying "conflicting change" lands on `onto`'s original content
     // instead of the edit it actually followed — the same file, same context lines, real conflict.
     const dropRowSelect = await $(
-      "//li[contains(., 'e2e: conflict-resume change on top')]//select[@aria-label='Action']",
+      "//li[contains(., 'e2e: conflict-resume change on top')]//select[starts-with(@aria-label, 'Action for ')]",
     );
     await dropRowSelect.waitForExist();
     await dropRowSelect.selectByVisibleText("Drop");
@@ -245,7 +245,7 @@ describe("Browsitory interactive rebase", () => {
     await rebaseButton.click();
 
     const dropRowSelect = await $(
-      "//li[contains(., 'e2e: conflict-abort change on top')]//select[@aria-label='Action']",
+      "//li[contains(., 'e2e: conflict-abort change on top')]//select[starts-with(@aria-label, 'Action for ')]",
     );
     await dropRowSelect.waitForExist();
     await dropRowSelect.selectByVisibleText("Drop");
@@ -302,7 +302,7 @@ describe("Browsitory interactive rebase", () => {
       const rebaseButton = await $("button*=Rebase onto here");
       await rebaseButton.waitForExist();
       await rebaseButton.click();
-      await $("//li[contains(., 'e2e: dirty tracked file')]//select[@aria-label='Action']").waitForExist();
+      await $("//li[contains(., 'e2e: dirty tracked file')]//select[starts-with(@aria-label, 'Action for ')]").waitForExist();
 
       await (await $("button=Start rebase")).click();
 
@@ -352,12 +352,12 @@ describe("Browsitory interactive rebase", () => {
     await dropButton.click();
 
     // The planner lists the whole span; only the two selected commits are pre-marked Drop.
-    const dropRow1 = await $("//li[contains(., 'multi 1 (drop)')]//select[@aria-label='Action']");
+    const dropRow1 = await $("//li[contains(., 'multi 1 (drop)')]//select[starts-with(@aria-label, 'Action for ')]");
     await dropRow1.waitForExist();
     await expect(dropRow1).toHaveValue("Drop");
-    const keepRow = await $("//li[contains(., 'multi 2 (keep)')]//select[@aria-label='Action']");
+    const keepRow = await $("//li[contains(., 'multi 2 (keep)')]//select[starts-with(@aria-label, 'Action for ')]");
     await expect(keepRow).toHaveValue("Pick");
-    const dropRow3 = await $("//li[contains(., 'multi 3 (drop)')]//select[@aria-label='Action']");
+    const dropRow3 = await $("//li[contains(., 'multi 3 (drop)')]//select[starts-with(@aria-label, 'Action for ')]");
     await expect(dropRow3).toHaveValue("Drop");
 
     await $("button=Start rebase").click();

@@ -1,9 +1,9 @@
 import { type RefObject, useCallback, useState } from "react";
 import type { ConfirmedAbort, TerminalSequence } from "../ipc/RepoClient";
-import { abortToast, rebaseAbortSwitchTarget, rebaseAbortToast, sequenceToast } from "../lib/operationStatus";
+import { abortToast, rebaseAbortSwitchTarget, rebaseAbortToast, sequenceToast, sequenceUndoable } from "../lib/operationStatus";
 import type { useAnnounce } from "./useAnnounce";
 import type { UseAppStateResult } from "./useAppState";
-import type { ToastAction } from "./useToasts";
+import type { PushToast, ToastAction } from "./useToasts";
 
 /**
  * `RepoWorkspace`'s cherry-pick/revert toasts and the Continue/Abort routes of a stopped
@@ -12,9 +12,10 @@ import type { ToastAction } from "./useToasts";
  */
 export function useSequenceActions(
   appState: UseAppStateResult,
-  pushToast: (message: string, action?: ToastAction) => void,
+  pushToast: PushToast,
   mounted: RefObject<boolean>,
   announce: ReturnType<typeof useAnnounce>,
+  undoToastAction: () => ToastAction,
 ) {
   const { dismissError } = appState;
   // Abort of a terminal cherry-pick that removes its commits waits for this confirmation (#253).
@@ -23,16 +24,21 @@ export function useSequenceActions(
     headId: string | null;
   } | null>(null);
   // Cherry-pick/revert toasts come from the outcome, not from "no error": a pick that stopped on
-  // a conflict succeeded as a call but must not say "Cherry-picked" (#107).
+  // a conflict succeeded as a call but must not say "Cherry-picked" (#107). `undoable`: the
+  // result finished the operation, so it is one undo step and the toast offers Undo (#662).
   const runPickAction = useCallback(
-    async <T,>(action: () => Promise<T | null>, toast: (result: T) => string | null) => {
+    async <T,>(
+      action: () => Promise<T | null>,
+      toast: (result: T) => string | null,
+      undoable: (result: T) => boolean = () => false,
+    ) => {
       dismissError();
       const result = await action();
       if (result === null || !mounted.current) return;
       const message = toast(result);
-      if (message !== null) pushToast(message);
+      if (message !== null) pushToast(message, undoable(result) ? { action: undoToastAction() } : undefined);
     },
-    [dismissError, pushToast, mounted],
+    [dismissError, pushToast, mounted, undoToastAction],
   );
   // A stopped multi-commit cherry-pick/revert: Continue and Abort from the strip, the commit
   // dock and the palette. Every Abort goes through `abortSequence` while one is stored, so the
@@ -47,6 +53,7 @@ export function useSequenceActions(
       void runPickAction(
         () => continueStoredSequence(noVerify),
         (outcome) => sequenceToast(sequenceKind, outcome),
+        sequenceUndoable,
       );
     },
     [continueStoredSequence, runPickAction, sequenceKind],
@@ -76,9 +83,11 @@ export function useSequenceActions(
       target === null
         ? undefined
         : {
-            label: `Switch to ${target}`,
-            run: () => {
-              if (mounted.current) void announce("Switched branch", switchToBranch)(target);
+            action: {
+              label: `Switch to ${target}`,
+              run: () => {
+                if (mounted.current) void announce(`Switched to ${target}`, switchToBranch, { undoable: true })(target);
+              },
             },
           },
     );

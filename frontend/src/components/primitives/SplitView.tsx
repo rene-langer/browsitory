@@ -24,6 +24,18 @@ const DIVIDER_WIDTH = 1;
  */
 const ReportRequiredWidth = createContext<((width: number) => void) | null>(null);
 
+/** How a collapsible left pane shows: at its width, hidden, or over the right pane (#635). */
+export type SplitViewLeftState = "docked" | "collapsed" | "overlay";
+
+/** A request from outside (a toolbar button, a shortcut) to toggle or show the left pane. */
+export interface SplitViewRequest {
+  kind: "toggle" | "show";
+  /** A new value is a new request; the one the view mounts with is not. */
+  nonce: number;
+  /** Where focus returns when a drawer this opens closes; else where focus was. */
+  returnFocusTo?: HTMLElement | null;
+}
+
 function loadWidth(
   storageKey: string | undefined,
   defaultWidth: number,
@@ -62,6 +74,10 @@ function loadExpandedWidth(
  * left pane plus the right pane's minimum (including a nested SplitView's fixed
  * pane), a collapsible left pane hides; its width is kept and comes back once
  * there is room again.
+ *
+ * While a collapsible pane is hidden for lack of room, an explicit expand (double-click or an
+ * arrow key on the divider, or a `request`) shows it as an overlay drawer over the right pane
+ * instead of squeezing it; Escape or a click beside it closes the drawer (#635).
  */
 export function SplitView({
   left,
@@ -73,6 +89,9 @@ export function SplitView({
   collapsible = false,
   forceCollapsed = false,
   label = "Resize",
+  leftId,
+  request,
+  onLeftStateChange,
 }: {
   left: ReactNode;
   right: ReactNode;
@@ -84,6 +103,11 @@ export function SplitView({
   /** Hides the left pane regardless of the stored width (adaptive narrow layouts); stored width is untouched. */
   forceCollapsed?: boolean;
   label?: string;
+  /** The left pane's id, for a toggle's `aria-controls`. */
+  leftId?: string;
+  request?: SplitViewRequest;
+  /** Reports how the left pane shows, for a toggle's `aria-expanded`. */
+  onLeftStateChange?: (state: SplitViewLeftState) => void;
 }) {
   const [width, setWidth] = useState(() =>
     loadWidth(storageKey, defaultWidth, minWidth, maxWidth, collapsible),
@@ -98,6 +122,12 @@ export function SplitView({
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
   const [nestedRequiredWidth, setNestedRequiredWidth] = useState(0);
   const reportRequiredWidth = useContext(ReportRequiredWidth);
+  const leftRef = useRef<HTMLDivElement>(null);
+  // The drawer's width while it is open, else `null`: the pane's width, or the last one it had open.
+  const [overlayWidth, setOverlayWidth] = useState<number | null>(null);
+  const overlayOpen = overlayWidth !== null;
+  // Where focus was when the drawer opened, to return it there when the drawer closes.
+  const overlayOpener = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -124,6 +154,8 @@ export function SplitView({
   }
 
   function handlePointerDown(event: ReactPointerEvent) {
+    // A pane hidden for lack of room can't be dragged open; double-click opens the drawer.
+    if (hiddenForSpace) return;
     dragState.current = { startX: event.clientX, startWidth: width };
   }
 
@@ -152,6 +184,11 @@ export function SplitView({
 
   function handleKeyDown(event: ReactKeyboardEvent) {
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    if (hiddenForSpace) {
+      if (event.key === "ArrowRight") openOverlay();
+      else closeOverlay();
+      return;
+    }
     // From a collapsed (0) width, clamp() snaps anything below minWidth / 2
     // straight back to 0, so stepping alone can never re-expand the pane.
     // Treat either arrow key as an explicit expand instead.
@@ -171,14 +208,23 @@ export function SplitView({
     persist(next);
   }
 
+  function collapse() {
+    setWidth(0);
+    persist(0);
+  }
+
   function handleDoubleClick() {
     if (!collapsible) return;
+    if (hiddenForSpace) {
+      if (overlayOpen) closeOverlay();
+      else openOverlay();
+      return;
+    }
     if (width === 0) {
       expand();
       return;
     }
-    setWidth(0);
-    persist(0);
+    collapse();
   }
 
   const rightRequiredWidth = Math.max(RIGHT_MIN_WIDTH, nestedRequiredWidth);
@@ -186,7 +232,53 @@ export function SplitView({
     collapsible &&
     containerWidth !== null &&
     containerWidth < width + DIVIDER_WIDTH + rightRequiredWidth;
-  const shownWidth = forceCollapsed || tooNarrow ? 0 : width;
+  const hiddenForSpace = forceCollapsed || tooNarrow;
+  // Room came back: the pane docks again, and the drawer is not reopened by itself later.
+  if (!hiddenForSpace && overlayOpen) setOverlayWidth(null);
+  const overlay = hiddenForSpace && overlayOpen;
+  const shownWidth = overlay ? overlayWidth : hiddenForSpace ? 0 : width;
+  const leftState: SplitViewLeftState = overlay ? "overlay" : shownWidth === 0 ? "collapsed" : "docked";
+
+  function openOverlay(returnFocusTo?: HTMLElement | null) {
+    const active = document.activeElement;
+    overlayOpener.current = returnFocusTo ?? (active instanceof HTMLElement && active !== document.body ? active : null);
+    setOverlayWidth(width > 0 ? width : (expandedWidth.current ?? defaultWidth));
+  }
+
+  function closeOverlay() {
+    setOverlayWidth(null);
+    // Only when focus was in the drawer: a click elsewhere keeps its own focus.
+    if (leftRef.current?.contains(document.activeElement) === true || document.activeElement === document.body) {
+      overlayOpener.current?.focus({ preventScroll: true });
+    }
+  }
+
+  // A toolbar toggle or a shortcut. Only a new nonce is a request. An effect, not render-time
+  // state: answering it writes the stored width and moves focus.
+  const handledRequest = useRef(request?.nonce);
+  /* eslint-disable react-hooks/set-state-in-effect -- the request is an event from outside */
+  useEffect(() => {
+    if (request === undefined || request.nonce === handledRequest.current) return;
+    handledRequest.current = request.nonce;
+    if (!collapsible) return;
+    if (hiddenForSpace) {
+      if (request.kind === "show" || !overlayOpen) openOverlay(request.returnFocusTo);
+      else closeOverlay();
+    } else if (width === 0) expand();
+    else if (request.kind === "toggle") collapse();
+    // Only a new request triggers this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Move focus into the drawer when it opens, so Tab and Escape work from there.
+  useEffect(() => {
+    if (overlay) leftRef.current?.focus({ preventScroll: true });
+  }, [overlay]);
+
+  useEffect(() => {
+    onLeftStateChange?.(leftState);
+  }, [onLeftStateChange, leftState]);
   // A collapsible pane gives way when space runs out, so only a fixed one counts.
   const requiredWidth = (collapsible ? 0 : shownWidth) + DIVIDER_WIDTH + rightRequiredWidth;
 
@@ -203,8 +295,23 @@ export function SplitView({
       {/* `hidden` keeps a collapsed pane mounted (no remount cost when it is
           re-expanded) while removing it from the tab order and a11y tree. */}
       <div
-        className={styles.left}
+        ref={leftRef}
+        id={leftId}
+        className={overlay ? `${styles.left} ${styles.overlay}` : styles.left}
         hidden={shownWidth === 0}
+        data-overlay={overlay ? "true" : undefined}
+        tabIndex={overlay ? -1 : undefined}
+        onKeyDown={
+          overlay
+            ? (event) => {
+                if (event.key !== "Escape" || event.defaultPrevented) return;
+                // A dialog opened from the drawer closes itself first.
+                if (event.target instanceof Element && event.target.closest("dialog") !== null) return;
+                event.stopPropagation();
+                closeOverlay();
+              }
+            : undefined
+        }
         style={{ width: `${shownWidth}px`, minWidth: `${Math.min(shownWidth, minWidth)}px` }}
       >
         {left}
@@ -214,7 +321,7 @@ export function SplitView({
         role="separator"
         aria-orientation="vertical"
         aria-label={label}
-        aria-valuenow={width}
+        aria-valuenow={shownWidth}
         aria-valuemin={minWidth}
         aria-valuemax={maxWidth}
         tabIndex={0}
@@ -227,6 +334,9 @@ export function SplitView({
           <ReportRequiredWidth.Provider value={setNestedRequiredWidth}>{right}</ReportRequiredWidth.Provider>
         </div>
       </div>
+      {/* A click beside the drawer closes it, as Escape does. Last, so the divider stays the
+          left pane's next sibling. */}
+      {overlay && <div className={styles.backdrop} data-split-backdrop aria-hidden="true" onClick={closeOverlay} />}
     </div>
   );
 }

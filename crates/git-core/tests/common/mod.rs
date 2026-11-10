@@ -180,6 +180,23 @@ pub fn commit_tree(
         .unwrap()
 }
 
+/// Commits an empty tree with `parents`, authored and committed at `seconds` after the epoch,
+/// without touching HEAD. For tests whose result depends on commit time order.
+#[allow(dead_code)]
+pub fn commit_at(repo: &Repository, parents: &[Oid], message: &str, seconds: i64) -> Oid {
+    let tree_id = git2::Index::new().unwrap().write_tree_to(repo).unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let time = git2::Time::new(seconds, 0);
+    let sig = git2::Signature::new("Test User", "test@example.com", &time).unwrap();
+    let parents: Vec<git2::Commit> = parents
+        .iter()
+        .map(|id| repo.find_commit(*id).unwrap())
+        .collect();
+    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+    repo.commit(None, &sig, &sig, message, &tree, &parent_refs)
+        .unwrap()
+}
+
 /// A directory outside any repository holding `target.txt` and `f`, both "OUTSIDE\n".
 #[allow(dead_code)]
 pub fn outside_dir() -> TempDir {

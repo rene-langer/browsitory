@@ -1,17 +1,39 @@
 # The main window
 
-Once a repository is open, the window has three columns:
+Once a repository is open, the **repository toolbar** runs across the top, and below it the
+window has three columns:
 
 - the **sidebar**, with the sections Branches, Stashes, Worktrees, Submodules, Reflog, Tags and
   Pull requests. Branches is open at first; the others start closed.
 - the **commit graph**: your history, newest first, with **Uncommitted changes** at the top.
 - the **diff pane** on the right: your working tree, or the commit you selected.
 
+**Repository toolbar.** From the left:
+
+- the sidebar button (**Ctrl+Alt+B**, **⌘⌥B** on macOS) hides or shows the sidebar;
+- the current branch and the remote branch it tracks ("main → origin/main"). Click it to
+  switch branch: type to filter the list, which starts with the branches you used last, and
+  press Enter. A name that isn't a branch yet offers **Create branch ⟨name⟩ from ⟨current⟩**,
+  which creates it at your current commit and switches to it. The command palette's **Switch
+  branch…** opens the same list;
+- **Back** and **Forward** through the commits you selected (see [History](history.md));
+- **Fetch**, **Pull** and **Push**, with `↑n` (commits to push) and `↓m` (commits to pull) for
+  the current branch (see [Branches and remotes](branches-and-remotes.md));
+- **Stash** (see [Stashes](stashes.md)), **Undo** and **Redo** (see [Undo and redo](undo-redo.md)), and
+  **Refresh**, which reloads the repository's state;
+- when the repository was last fetched.
+
 Drag the dividers between the columns to resize them. Double-click a divider to collapse the
 sidebar, and again to bring it back at its width. With a divider focused, the arrow keys resize
 too. The sidebar and the commit graph keep their width when you resize the window; only the
-diff pane grows or shrinks. In a window too narrow for all three, the sidebar collapses by
-itself and comes back once there is room.
+diff pane grows or shrinks.
+
+**Narrow windows.** When the window (or, in VSCode, the editor group) is narrower than 900
+pixels, or too narrow for all three columns, the sidebar hides by itself and comes back once
+there is room. While it is hidden, the sidebar button, its shortcut, **Show sidebar** in the
+command palette, or a double-click on the divider open it as a drawer over the graph. Escape,
+the sidebar button again, or a click beside the drawer closes it. Commands that lead to the
+sidebar (**Go to Tags**, **New branch…** and the like) open the drawer by themselves.
 
 **Sidebar sections.** Click a section's header to open or close it. The buttons at the top of
 the sidebar open every section (**Expand all sections**) or close them all (**Collapse all
@@ -24,16 +46,23 @@ the right:
 - **Ctrl+K** (**⌘K** on macOS) reminds you of the [command palette](command-palette.md) shortcut.
 - The moon or sun button switches between the light and dark theme (**Switch to dark theme** /
   **Switch to light theme**). Browsitory remembers your choice. Until you pick one, it follows
-  your system's setting.
+  your system's setting; **Theme** under **Appearance** in **Preferences** goes back to that. In
+  VSCode the button isn't there: the panel takes the colours and fonts of VSCode's own theme
+  (light, dark or high contrast) and changes with it.
 - The gear button opens **Preferences**: the commit message settings, **Fetch automatically**
   (see [Branches and remotes](branches-and-remotes.md#fetching-automatically)), diff word wrap
   and diff algorithm (see [Diff options](history.md#diff-options)), your editor, terminal and diff tools (see
   [External tools](external-tools.md)), the **Appearance** settings below and, in the desktop
   app, **Updates** (see below).
 
-**Appearance.** The Appearance section of Preferences changes how text looks. Each change shows at
-once, without a restart:
+**Appearance.** The Appearance section of Preferences changes how the window and its text look.
+Each change shows at once, without a restart:
 
+- **Theme** (desktop app): **System** (the default) follows your system's light or dark setting,
+  also when it changes while Browsitory runs; **Light** and **Dark** keep that theme. Both themes
+  meet the WCAG 2.2 AA contrast levels. With a high-contrast or forced-colours setting in your
+  system (such as a Windows contrast theme), Browsitory uses the system's colours, and the focus
+  and the selection stay marked.
 - **Code font**: the font for file content and commit IDs: diffs, blame, the file viewer,
   conflicts, and the commit message field while its ruler is shown. Type a font family name, or
   several separated by commas. A font that isn't installed falls back to the default monospace
@@ -60,6 +89,13 @@ Browsitory then contacts the update server only when you ask: click **Check for 
 that section, or run **Check for updates** from the command palette. It tells you whether you
 are up to date; a new version downloads and shows the same banner.
 The VSCode extension updates through VSCode instead and has neither setting nor command.
+
+**Notifications.** A finished action shows a short notification in the bottom-right corner:
+green for done, blue for information, amber for a warning, red for an error, each with its own
+icon. It closes by itself after 5 to 15 seconds, depending on its length; one with a button
+(such as **Undo**) stays at least 10 seconds, and an error stays until you close it. While the
+pointer is over a notification or focus is on one of its buttons, none of them close. They never
+take focus: reach their buttons with Tab. Screen readers announce them without interrupting.
 
 ![The main window: sidebar, commit graph and diff pane](assets/overview.png)
 
