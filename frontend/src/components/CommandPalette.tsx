@@ -16,7 +16,7 @@ import {
   loadRecentCommandIds,
   recordCommandUsed,
   type Command,
-    type PickerItem,
+  type PickerItem,
 } from "../lib/commands";
 import { matchItem, type MatchRange } from "../lib/fuzzyMatch";
 import styles from "./CommandPalette.module.css";
@@ -29,12 +29,21 @@ const RECENT_HEADING = "Recent";
 
 type PaletteItem = Command | PickerItem;
 
-export function CommandPalette({ commands, onRun }: { commands: Command[]; onRun: () => void }) {
+export function CommandPalette({
+  commands,
+  onRun,
+  initialPickerId = null,
+}: {
+  commands: Command[];
+  onRun: () => void;
+  /** Opens straight into this picker ("Switch branch…" from the toolbar's branch chip, #638). */
+  initialPickerId?: string | null;
+}) {
   const [query, setQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   // The picker command whose items are listed ("Go to branch…", #441), by id so it follows the
   // rebuilt `commands`; `null` lists the commands themselves.
-  const [pickerId, setPickerId] = useState<string | null>(null);
+  const [pickerId, setPickerId] = useState<string | null>(initialPickerId);
   const listboxId = useId();
 
   const pickerCommand = pickerId === null ? undefined : commands.find((command) => command.id === pickerId);

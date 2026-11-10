@@ -6,11 +6,13 @@ import type { AppState } from "./useAppState";
 /**
  * `RepoWorkspace`'s window-level keyboard shortcuts: the command palette (Ctrl/Cmd+K), the
  * shortcut sheet (?), Undo/Redo, closing and reopening the tab, and Back/Forward through the
- * visited commits (keys and the mouse's back/forward buttons). Owns the palette's and the
- * sheet's open state, which the header's Commands button and Help menu open too (#647).
+ * visited commits (keys and the mouse's back/forward buttons), and the sidebar toggle. Owns the
+ * palette's and the sheet's open state, which the header's Commands button and Help menu open
+ * too (#647).
  */
 export function useWorkspaceShortcuts({
   active,
+  onToggleSidebar,
   repositoryOperationDisabled,
   onCloseRepoTab,
   onReopenClosedTab,
@@ -23,6 +25,8 @@ export function useWorkspaceShortcuts({
   transfer,
 }: {
   active: boolean;
+  /** Ctrl/Cmd+Alt+B (#635): shows or hides the sidebar, a drawer in a narrow layout. */
+  onToggleSidebar?: () => void;
   repositoryOperationDisabled: boolean;
   onCloseRepoTab: (path: string) => void;
   /** Ctrl/Cmd+Shift+T; absent when no tab was closed. */
@@ -53,6 +57,15 @@ export function useWorkspaceShortcuts({
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPaletteOpen((prev) => !prev);
+        return;
+      }
+      // Best-effort like Ctrl/Cmd+W: a host may claim the key first; the toolbar button and the
+      // palette's "Show sidebar" / "Hide sidebar" do the same. `code`, because Alt changes `key`
+      // on macOS.
+      if ((event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey && (event.code === "KeyB" || event.key.toLowerCase() === "b")) {
+        if (onToggleSidebar === undefined) return;
+        event.preventDefault();
+        onToggleSidebar();
         return;
       }
       if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -127,7 +140,7 @@ export function useWorkspaceShortcuts({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [active, repositoryOperationDisabled, onCloseRepoTab, onReopenClosedTab, onNavigateBack, onNavigateForward, repoPath, handleUndo, handleRedo, pending, transfer]);
+  }, [active, onToggleSidebar, repositoryOperationDisabled, onCloseRepoTab, onReopenClosedTab, onNavigateBack, onNavigateForward, repoPath, handleUndo, handleRedo, pending, transfer]);
 
   return { paletteOpen, setPaletteOpen, shortcutsOpen, setShortcutsOpen };
 }

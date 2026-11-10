@@ -4,7 +4,7 @@ Select **Uncommitted changes** at the top of the commit graph to see your workin
 right-hand pane. It has two groups, **Changes** and **Staged**, each with **Stage all** or
 **Unstage all**. Every file shows its diff. Hover a file to show its stage or unstage button, or
 use **Blame** to see who last changed each line. Type a commit message and click **Commit**.
-**Stash** sets the current changes aside; see [Stashes](stashes.md).
+**Stash** in the repository toolbar sets the current changes aside; see [Stashes](stashes.md).
 
 When **Changes** holds both changes to tracked files and untracked (new) files, **Stage
 modified** sits next to **Stage all**: it stages the tracked files' changes (edits, deletions,
@@ -18,8 +18,9 @@ way, turn off **Preferences → Diff → Expand untracked files**: untracked fil
 collapsed in **Changes** and load nothing until you expand them, while changes to tracked files
 still start expanded. A file you expand or collapse stays that way when the list refreshes.
 
-Each hunk header has **Stage hunk** (or **Unstage hunk**) and **Discard hunk**. Discard asks once
-more: the button turns into **Confirm discard**, and a second click discards the hunk.
+Each hunk header has **Stage hunk** (or **Unstage hunk**) and **Discard hunk**. Discard doesn't
+ask: the hunk goes at once, and the notification that says so has an **Undo** button
+(Ctrl/Cmd+Z works too).
 
 A rename you staged (`git mv`, or staging both the deletion and the new file) is one **Staged**
 row under the new name with "Renamed from …": its diff shows only the edits, an image previews
@@ -80,7 +81,7 @@ In a diff, select lines by clicking one, Shift+clicking to extend, Ctrl/Cmd+clic
 or remove one, or dragging across several. Then use **Stage lines**, **Unstage lines** or
 **Discard lines** in the hunk header. With the keyboard, `↑`/`↓` move a line cursor inside the
 active hunk and select that line, `Shift+↑`/`Shift+↓` extend the selection, and `[` / `]` jump
-to the previous or next hunk (which clears the selection). `s` stages or unstages and `d` `d`
+to the previous or next hunk (which clears the selection). `s` stages or unstages and `d`
 discards the selection, or the whole hunk when nothing is selected.
 
 If the file changed since its diff was shown (for example you edited it in another editor),

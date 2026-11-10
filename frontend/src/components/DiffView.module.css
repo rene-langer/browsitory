@@ -70,12 +70,6 @@
   white-space: nowrap;
 }
 
-.hunkHeader button.armedDiscard,
-.armedDiscard {
-  background: var(--color-danger-text);
-  color: var(--color-bg);
-}
-
 .lines {
   margin: 0;
   overflow-x: auto;

@@ -9,6 +9,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: "Global",
     shortcuts: [
       { keys: "Ctrl/Cmd+K", description: "Open the command palette" },
+      { keys: "Ctrl/Cmd+Alt+B", description: "Show or hide the sidebar (where the host doesn't claim it)" },
       { keys: "Ctrl/Cmd+Z", description: "Undo the last Git operation" },
       { keys: "Ctrl/Cmd+Shift+Z / Ctrl+Y", description: "Redo" },
       { keys: "Ctrl/Cmd+W", description: "Close the active tab (where the host doesn't claim it)" },
@@ -85,7 +86,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: "↑ / ↓", description: "Move line cursor" },
       { keys: "Shift+↑ / Shift+↓", description: "Extend line selection" },
       { keys: "s", description: "Stage or unstage the selected lines or hunk" },
-      { keys: "d", description: "Discard the selected lines or hunk (press twice to confirm)" },
+      { keys: "d", description: "Discard the selected lines or hunk (Undo brings them back)" },
       { keys: "[ / ]", description: "Previous / next hunk" },
     ],
   },

@@ -773,10 +773,10 @@ describe("BranchTree — remotes", () => {
     expect(onOpenAddRemoteDraft).toHaveBeenCalledOnce();
   });
 
-  it("shows the current branch's upstream status and a Pull button", () => {
+  it("shows the current branch's upstream status, with no Pull of its own (#637)", () => {
     renderTree({ upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" } });
     expect(screen.getByText(/main tracks origin\/main/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Pull" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Pull" })).toBeNull();
   });
 
   it("does not offer Set upstream… or Push to <upstream remote> on a non-current branch's context menu", () => {
@@ -794,11 +794,6 @@ describe("BranchTree — remotes", () => {
     fireEvent.contextMenu(screen.getByText(/main.*\(current\)/));
     fireEvent.click(screen.getByRole("menuitem", { name: "Push to origin" }));
     expect(onPushCurrentBranch).toHaveBeenCalledWith("origin");
-  });
-
-  it("offers merge or rebase only after a divergent pull, unchanged from RemotePanel", () => {
-    renderTree({ pendingPull: { upstreamRef: "origin/main" } });
-    expect(screen.getByRole("dialog", { name: "Pull has diverged" })).toBeInTheDocument();
   });
 
   // ---- Ported from RemotePanel.test.tsx below, using the transformation demonstrated above:
@@ -850,38 +845,6 @@ describe("BranchTree — remotes", () => {
       "A rebase is in progress.",
     );
     expect(screen.getByRole("button", { name: "Add remote" })).toHaveAttribute("title", "A rebase is in progress.");
-  });
-
-  it("keeps Pull disabled while a reconciliation choice is open and focuses Cancel", async () => {
-    renderTree({
-      upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" },
-      pendingPull: { upstreamRef: "origin/main" },
-    });
-    expect(screen.getByRole("button", { name: "Pull" })).toBeDisabled();
-    const dialog = screen.getByRole("dialog", { name: "Pull has diverged" });
-    await waitFor(() => {
-      expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
-    });
-  });
-
-  it("disables divergent pull choices while another repository operation is active", () => {
-    renderTree({
-      upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" },
-      operationDisabled: true,
-      pendingPull: { upstreamRef: "origin/main" },
-    });
-    const dialog = screen.getByRole("dialog", { name: "Pull has diverged" });
-    expect(within(dialog).getByRole("button", { name: "Merge" })).toBeDisabled();
-    expect(within(dialog).getByRole("button", { name: "Rebase" })).toBeDisabled();
-    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled();
-  });
-
-  it("renders a successful up-to-date pull outcome", () => {
-    renderTree({
-      upstream: { localBranch: "main", remoteName: "origin", remoteBranch: "main" },
-      pullOutcome: { kind: "UpToDate" },
-    });
-    expect(screen.getByRole("status")).toHaveTextContent("Already up to date.");
   });
 
   it("requires upstream discovery in both the client and RemoteDialogs contracts", () => {
@@ -1041,14 +1004,6 @@ describe("BranchTree — remote list states and upstream block", () => {
     localStorage.clear();
   });
   const up = { localBranch: "main", remoteName: "origin", remoteBranch: "main" };
-
-  it("explains the disabled Pull button when there is no upstream", () => {
-    renderTree();
-    expect(screen.getByRole("button", { name: "Pull" })).toHaveAttribute(
-      "title",
-      "No upstream set for the current branch.",
-    );
-  });
 
   it("asks for confirmation before clearing the upstream", async () => {
     const { props } = renderTree({ upstream: up });

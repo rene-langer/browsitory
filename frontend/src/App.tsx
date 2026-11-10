@@ -186,10 +186,10 @@ function AppContent({
     () =>
       updaterAvailable
         ? () => {
-            pushAppToast("Checking for updates…");
+            pushAppToast("Checking for updates…", { tone: "info" });
             void runUpdateCheck().then((outcome) => {
-              if (outcome.kind === "none") pushAppToast("Browsitory is up to date");
-              else if (outcome.kind === "ready") pushAppToast(`Update v${outcome.version} is ready: restart to update`);
+              if (outcome.kind === "none") pushAppToast("Browsitory is up to date", { tone: "info" });
+              else if (outcome.kind === "ready") pushAppToast(`Update v${outcome.version} is ready: restart to update`, { tone: "info" });
               else setTabToolError(`Couldn't check for updates: ${outcome.message}`);
             });
           }
@@ -486,7 +486,8 @@ function AppContent({
             onCloned={(outcome, name) => {
               setCloning(false);
               void openRepoTab(outcome.path);
-              pushAppToast(cloneToastMessage(outcome, name));
+              const incomplete = outcome.submoduleFailures.length > 0 || outcome.credentialSaveFailed;
+              pushAppToast(cloneToastMessage(outcome, name), { tone: incomplete ? "warning" : "success" });
             }}
           />
         </Overlay>
@@ -503,7 +504,7 @@ function AppContent({
           onCancel={() => setExistingRepoPrompt(null)}
         />
       )}
-      <ToastRegion toasts={appToasts.toasts} onDismiss={appToasts.dismiss} />
+      <ToastRegion toasts={appToasts.toasts} onDismiss={appToasts.dismiss} onPauseChange={appToasts.setPaused} />
       {openRepos.openRepos.length === 0 ? (
         <RepoPicker
           client={client}

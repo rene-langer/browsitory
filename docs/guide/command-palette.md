@@ -16,8 +16,9 @@ Pointing at a command with the mouse picks it too.
 
 The palette has almost every action in Browsitory, grouped like this:
 
-- **Branches:** switch to a branch, merge a branch into the current one, and create, check out
-  or delete a tag.
+- **Branches:** switch to a branch, **Switch branch…** (the list the toolbar's branch button
+  opens, see [The main window](main-window.md)), merge a branch into the current one, and
+  create, check out or delete a tag.
 - **Remotes:** fetch one or all remotes, pull, push, **Push branch to…**, **Force push current
   branch…**, push all tags, **Browse branches on ⟨remote⟩**, add, edit or remove a remote,
   manage its credentials, delete a remote branch, and delete a tag on a remote.
@@ -30,7 +31,8 @@ The palette has almost every action in Browsitory, grouped like this:
   patch…** and **Save staged changes as patch…** (see [Patches and partial
   reverts](patches.md)).
 - **Go to:** **Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** (see
-  below), and open a sidebar section and move to it, for example **Go to Tags**.
+  below), open a sidebar section and move to it, for example **Go to Tags**, and **Show
+  sidebar** or **Hide sidebar**.
 - **Repositories:** switch to another tab (one command per tab, or **Switch to tab…** to pick
   one by name, folder name or path), **Rename tab…**, close the tab, open a terminal, reveal the
   repository in the file manager (see [Multiple repositories](tabs.md)).
@@ -74,6 +76,7 @@ menu, for the full list of shortcuts. The most useful ones:
 | Keys | What they do |
 |---|---|
 | Ctrl/Cmd+K | Open the command palette |
+| Ctrl/Cmd+Alt+B | Show or hide the sidebar (where the host doesn't use it) |
 | Ctrl/Cmd+Z | Undo the last Git operation |
 | Ctrl/Cmd+Shift+Z or Ctrl+Y | Redo |
 | Ctrl/Cmd+W | Close the active tab (in VSCode only where VSCode doesn't use it) |

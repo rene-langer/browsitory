@@ -204,8 +204,8 @@ describe("Browsitory remote transfer", () => {
     await upstreamBranch.setValue("main");
     await (await upstreamDialog.$("button=Set upstream")).click();
 
-    // The sidebar's Upstream Pull, next to the upstream just set; the sync bar has one too.
-    const pullButton = await $("div[aria-label='Upstream actions']").$("button=Pull");
+    // The repository toolbar's Pull (#637): the sidebar no longer has one of its own.
+    const pullButton = await $("div[aria-label='Repository']").$("button=Pull");
     await pullButton.waitForEnabled();
     await pullButton.click();
 

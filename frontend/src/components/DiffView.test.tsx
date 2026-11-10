@@ -139,31 +139,15 @@ describe("DiffView", () => {
     expect(onStageHunk).toHaveBeenLastCalledWith(9, 11);
   });
 
-  it("d arms discard, Escape disarms, second d discards", () => {
+  it("d discards the active hunk at once: Undo brings it back (#662)", () => {
     const hunks: DiffHunk[] = [{ oldStart: 5, oldLines: 1, newStart: 7, newLines: 1, lines: [] }];
     const onDiscardHunk = vi.fn();
     render(<DiffView hunks={hunks} onDiscardHunk={onDiscardHunk} />);
     const group = screen.getByRole("group", { name: "Diff hunks" });
 
     fireEvent.keyDown(group, { key: "d" });
-    expect(screen.getByText("Confirm discard")).toBeInTheDocument();
-    fireEvent.keyDown(group, { key: "Escape" });
-    expect(screen.getByText("Discard hunk")).toBeInTheDocument();
-    expect(onDiscardHunk).not.toHaveBeenCalled();
-
-    fireEvent.keyDown(group, { key: "d" });
-    fireEvent.keyDown(group, { key: "d" });
-    expect(onDiscardHunk).toHaveBeenCalledWith(5, 7);
-  });
-
-  it("armed discard disarms on blur", () => {
-    const hunks: DiffHunk[] = [{ oldStart: 5, oldLines: 1, newStart: 7, newLines: 1, lines: [] }];
-    render(<DiffView hunks={hunks} onDiscardHunk={vi.fn()} />);
-
-    fireEvent.click(screen.getByText("Discard hunk"));
-    fireEvent.blur(screen.getByText("Confirm discard"));
-
-    expect(screen.getByText("Discard hunk")).toBeInTheDocument();
+    expect(onDiscardHunk).toHaveBeenCalledExactlyOnceWith(5, 7);
+    expect(screen.queryByText("Confirm discard")).not.toBeInTheDocument();
   });
 
   it("renders no action buttons when no hunk callbacks are passed", () => {
@@ -202,7 +186,7 @@ describe("DiffView", () => {
     expect(onUnstageHunk).toHaveBeenCalledWith(5, 7);
   });
 
-  it("Discard Hunk requires a second click (Confirm Discard) before calling onDiscardHunk", () => {
+  it("clicking Discard hunk calls onDiscardHunk at once, with no second confirmation", () => {
     const hunks: DiffHunk[] = [
       { oldStart: 5, oldLines: 2, newStart: 7, newLines: 3, lines: [] },
     ];
@@ -211,12 +195,7 @@ describe("DiffView", () => {
     render(<DiffView hunks={hunks} onDiscardHunk={onDiscardHunk} />);
     fireEvent.click(screen.getByText("Discard hunk"));
 
-    expect(onDiscardHunk).not.toHaveBeenCalled();
-    expect(screen.getByText("Confirm discard")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Confirm discard"));
-
-    expect(onDiscardHunk).toHaveBeenCalledWith(5, 7);
+    expect(onDiscardHunk).toHaveBeenCalledExactlyOnceWith(5, 7);
   });
 
   it("highlights only the changed word in a Remove/Add line pair", () => {
@@ -339,25 +318,6 @@ describe("DiffView", () => {
     fireEvent.keyDown(group, { key: "]" });
     fireEvent.keyDown(group, { key: "s" });
     expect(onStageHunk).toHaveBeenLastCalledWith(9, 11);
-  });
-
-  it("switching to a different hunks array resets any pending discard confirmation", () => {
-    const hunks: DiffHunk[] = [
-      { oldStart: 5, oldLines: 2, newStart: 7, newLines: 3, lines: [] },
-    ];
-    const onDiscardHunk = vi.fn();
-
-    const { rerender } = render(<DiffView hunks={hunks} onDiscardHunk={onDiscardHunk} />);
-    fireEvent.click(screen.getByText("Discard hunk"));
-    expect(screen.getByText("Confirm discard")).toBeInTheDocument();
-
-    const otherHunks: DiffHunk[] = [
-      { oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: [] },
-    ];
-    rerender(<DiffView hunks={otherHunks} onDiscardHunk={onDiscardHunk} />);
-
-    expect(screen.getByText("Discard hunk")).toBeInTheDocument();
-    expect(screen.queryByText("Confirm discard")).not.toBeInTheDocument();
   });
 });
 

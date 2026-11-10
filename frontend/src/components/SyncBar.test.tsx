@@ -188,4 +188,29 @@ describe("SyncBar leading slot", () => {
     renderBar({ leading: <span>lead</span> });
     expect(screen.getByText("lead")).toBeInTheDocument();
   });
+
+  it("disables Pull while a diverged pull waits for an answer (#636)", () => {
+    renderBar({ pullPending: true });
+    const pull = screen.getByRole("button", { name: "Pull" });
+    expect(pull).toBeDisabled();
+    expect(pull).toHaveAttribute("title", "Choose how to finish the diverged pull first.");
+  });
+
+  it("stashes all, or opens the stash dialog, and follows the stash rule (#637)", () => {
+    const stash = { reason: null, onStash: vi.fn(), onStashWithOptions: vi.fn() };
+    renderBar({ stash });
+    fireEvent.click(screen.getByRole("button", { name: "Stash" }));
+    expect(stash.onStash).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "More stash options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Stash…" }));
+    expect(stash.onStashWithOptions).toHaveBeenCalledOnce();
+  });
+
+  it("disables Stash and its menu with the reason", () => {
+    renderBar({ stash: { reason: "A rebase is in progress.", onStash: vi.fn(), onStashWithOptions: vi.fn() } });
+    const stash = screen.getByRole("button", { name: "Stash" });
+    expect(stash).toBeDisabled();
+    expect(stash).toHaveAttribute("title", "A rebase is in progress.");
+    expect(screen.getByRole("button", { name: "More stash options" })).toBeDisabled();
+  });
 });
