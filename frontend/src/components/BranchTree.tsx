@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { GitBranch, Plus } from "lucide-react";
 import type {
   BranchInfo,
@@ -9,6 +9,8 @@ import type {
 import { rectAnchor } from "../lib/menuKeys";
 import type { OperationBlockers } from "../lib/operationStatus";
 import { branchNameProblem } from "../lib/refName";
+import { scrollBehavior } from "../lib/scrollBehavior";
+import type { SidebarRevealRequest } from "../state/useSidebarReveal";
 import type { RemoteDialog } from "../state/workspaceDialog";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { FormDialog } from "./primitives/FormDialog";
@@ -81,6 +83,7 @@ export function BranchTree({
   onGoToBranch,
   refreshGeneration,
   onOpenRemoteDialog,
+  revealRequest,
 }: {
   branches: BranchInfo[];
   createBranchDraft: { startPoint: string } | null;
@@ -170,6 +173,12 @@ export function BranchTree({
    * but `hidden` while collapsed (a modal there would be invisible).
    */
   onOpenRemoteDialog: (dialog: RemoteDialog) => void;
+  /**
+   * A reveal request for the Branches section (`useSidebarReveal`, #494): expands and scrolls to
+   * the section, or with `remote` to that remote's folder, expanded so its branch rows can be
+   * reached by Tab. The value it mounts with is not a request.
+   */
+  revealRequest?: Pick<SidebarRevealRequest, "nonce" | "remote">;
 }) {
   const [pendingForceFor, setPendingForceFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -181,6 +190,28 @@ export function BranchTree({
   const remoteCache = useRemoteBranchCache({ remotes, listRemoteBranches: onListRemoteBranches, refreshGeneration });
   // The menus' availability and labels come from the shared action rules (#509), like the palette's.
   const blockers: OperationBlockers = { blocked: operationDisabled, reason: operationDisabledReason };
+
+  // A remote's reveal request opens its folder during render (not in an effect, which
+  // `react-hooks/set-state-in-effect` forbids), so the folder's header is there for the effect
+  // below to scroll to, even when the section itself was collapsed until this render.
+  const [seenRevealRequest, setSeenRevealRequest] = useState(revealRequest?.nonce);
+  if (revealRequest?.nonce !== seenRevealRequest) {
+    setSeenRevealRequest(revealRequest?.nonce);
+    const remote = revealRequest?.remote;
+    if (remote !== undefined) remoteCache.markOpen(remote);
+  }
+  const remoteHeaders = useRef(new Map<string, HTMLButtonElement>());
+  const handledRevealRequest = useRef(revealRequest?.nonce);
+  useEffect(() => {
+    if (revealRequest === undefined || revealRequest.nonce === handledRevealRequest.current) return;
+    handledRevealRequest.current = revealRequest.nonce;
+    const remote = revealRequest.remote;
+    if (remote === undefined) return;
+    remoteCache.persistOpenAndLoad(remote);
+    remoteHeaders.current.get(remote)?.scrollIntoView?.({ behavior: scrollBehavior(), block: "nearest" });
+    // Only a new request triggers this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealRequest]);
 
   const checkoutRemoteBranch = async (remoteName: string, branchName: string) => {
     const existingLocal = branches.find((b) => b.name === branchName);
@@ -265,6 +296,7 @@ export function BranchTree({
       <AccordionSection
         title="Branches"
         storageKey="sidebar-branches"
+        revealRequest={revealRequest?.nonce}
         icon={GitBranch}
         count={branches.length}
         defaultOpen
@@ -313,6 +345,7 @@ export function BranchTree({
           onSetGraphRemoteBranchSelection={onSetGraphRemoteBranchSelection}
           remoteBranchesInGraph={remoteBranchesInGraph}
           remoteCache={remoteCache}
+          remoteHeaders={remoteHeaders}
           rename={rename}
           rowMenu={rowMenu}
           onOpenRowMenu={openRowMenu}

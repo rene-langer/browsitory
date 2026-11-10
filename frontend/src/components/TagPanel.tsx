@@ -36,6 +36,7 @@ export function TagPanel({
   onGoToTag,
   pushDisabled,
   operationDisabledReason,
+  revealRequest,
 }: {
   tags: TagInfo[];
   remotes: RemoteInfo[];
@@ -54,6 +55,8 @@ export function TagPanel({
   // Human-readable reason `pushDisabled` is true, shown as a `title` on the buttons it disables
   // (issue #31/UX-003). `null` when nothing is blocking.
   operationDisabledReason: string | null;
+  /** Expands and scrolls to the section (`useSidebarReveal`, #494). */
+  revealRequest?: number;
 }) {
   const [remoteName, setRemoteName] = useState(remotes[0]?.name ?? "");
   const [selected, setSelected] = useState<string[]>([]);
@@ -99,7 +102,13 @@ export function TagPanel({
   const disabledTitle = pushDisabled ? (operationDisabledReason ?? undefined) : undefined;
 
   return (
-    <AccordionSection title="Tags" storageKey="sidebar-tags" icon={Tag} count={tags.length}>
+    <AccordionSection
+      title="Tags"
+      storageKey="sidebar-tags"
+      icon={Tag}
+      count={tags.length}
+      revealRequest={revealRequest}
+    >
       {tags.length === 0 ? (
         <p className={styles.empty}>
           No local tags. To tag a commit, choose Create tag… in its menu in the graph, or Create tag at HEAD… in the

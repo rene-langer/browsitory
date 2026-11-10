@@ -22,7 +22,7 @@ import type {
   WorktreeInfo,
 } from "../ipc/RepoClient";
 import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
-import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
+import { failureError, useMutationRunner, withoutStaleErrorHint } from "./useMutationRunner";
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
 import type { HookFailure, HookRetry } from "../lib/hookFailure";
@@ -143,6 +143,9 @@ export interface AppState {
   stashOutcome: { action: "apply" | "pop"; outcome: StashApplyOutcome } | null;
   transfer: TransferProgress | null;
   error: string | null;
+  // A plain-language next step for `error`, from its kind (`failureError`, #573); shown under it in
+  // the banner. Dropped whenever `error` changes without a new one (`withoutStaleErrorHint`).
+  errorHint: string | null;
   // True only while a `runMutation` call is in flight (from just before its `mutate()` call
   // through the trailing `refresh()`). Lets callers (e.g. `HistoryList`'s Apply/Drop buttons)
   // disable themselves so a rapid double-click can't fire the same index-based mutation twice
@@ -268,6 +271,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     stashOutcome: null,
     transfer: null,
     error: null,
+    errorHint: null,
     pending: false,
     refreshGeneration: 0,
     undoState: { undo: null, redo: null },
@@ -283,10 +287,10 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const refreshError = useOwnError();
   const forgeError = useOwnError();
   // Every update goes through this, so a read's remembered error never outlives it on screen.
-  const setState = useMemo(
-    () => forgettingStaleOwnErrors(setRawState, [refreshError, reflogError, forgeError]),
-    [refreshError, reflogError, forgeError],
-  );
+  const setState = useMemo(() => {
+    const set = forgettingStaleOwnErrors(setRawState, [refreshError, reflogError, forgeError]);
+    return (updater: (prev: AppState) => AppState) => set((prev) => withoutStaleErrorHint(prev, updater(prev)));
+  }, [refreshError, reflogError, forgeError]);
   // Replies don't arrive in the order their requests were sent: the VSCode sidecar answers each
   // request on its own thread, Tauri runs commands concurrently. So a read sent before a
   // mutation landed can answer after a later read that already shows it, and its stale result
@@ -387,11 +391,11 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1 }));
         return;
       }
-      const message = credentialFailureMessage(err);
-      refreshError.set(message);
+      const failure = failureError(err);
+      refreshError.set(failure.error);
       setState((prev) => ({
         ...prev,
-        error: message,
+        ...failure,
         refreshGeneration: prev.refreshGeneration + 1,
       }));
     }
@@ -426,14 +430,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     [refresh],
   );
 
-  const {
-    runMutation,
-    runMutationWithOutcome,
-    runMutationWithMessage,
-    runOptimisticMutation,
-    runOptimisticMutationWithMessage,
-    runOptimisticMutationWithOutcome,
-  } = useMutationRunner(refresh, setState);
+  const mutationRunner = useMutationRunner(refresh, setState);
+  const { runMutation, runMutationWithOutcome, runOptimisticMutation, runOptimisticMutationWithMessage } =
+    mutationRunner;
 
   const dialogs = useDialogActions(setState);
   const staging = useStagingActions(client, repoPath, runMutation, runMutationWithOutcome, runOptimisticMutation, setState);
@@ -474,23 +473,20 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     reflogError,
   );
 
-  const remoteTransfer = useRemoteTransferActions(
+  const remoteTransfer = useRemoteTransferActions({
     client,
     repoPath,
     refresh,
-    runMutation,
-    runMutationWithMessage,
-    runMutationWithOutcome,
-    runOptimisticMutation,
-    runOptimisticMutationWithMessage,
-    runOptimisticMutationWithOutcome,
+    runners: mutationRunner,
     setState,
-    state.upstream,
-    state.fetchPrune,
-    currentBranch,
-    state.remotes,
-    state.tags,
-  );
+    snapshot: {
+      upstream: state.upstream,
+      fetchPrune: state.fetchPrune,
+      currentBranch,
+      remotes: state.remotes,
+      tags: state.tags,
+    },
+  });
 
   const stash = useStashActions(
     client,

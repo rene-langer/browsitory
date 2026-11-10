@@ -1,6 +1,7 @@
 import { ChevronRight, type LucideIcon } from "lucide-react";
 import { createElement, useEffect, useRef, useState, type ReactNode } from "react";
 import { loadPersistedOpen, persistOpen } from "../../lib/persistedOpenState";
+import { scrollBehavior } from "../../lib/scrollBehavior";
 import { useAccordionGroup } from "./AccordionGroup";
 import styles from "./AccordionSection.module.css";
 
@@ -12,6 +13,7 @@ export function AccordionSection({
   count,
   headingLevel = 2,
   actions,
+  revealRequest,
   children,
 }: {
   title: string;
@@ -22,10 +24,31 @@ export function AccordionSection({
   headingLevel?: 2 | 3;
   /** Controls shown at the right of the header row, beside (not inside) the toggle button. */
   actions?: ReactNode;
+  /**
+   * A reveal request (`useSidebarReveal`, #494): each new value expands the section and scrolls it
+   * into view. The value it mounts with is not a request.
+   */
+  revealRequest?: number;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(() => loadPersistedOpen(storageKey, defaultOpen));
   const headerRef = useRef<HTMLButtonElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+
+  // Opened during render (not in an effect, which `react-hooks/set-state-in-effect` forbids), so
+  // the body is there when an owner reveals something inside it in the same commit.
+  const [seenRevealRequest, setSeenRevealRequest] = useState(revealRequest);
+  if (revealRequest !== seenRevealRequest) {
+    setSeenRevealRequest(revealRequest);
+    if (revealRequest !== undefined) setOpen(true);
+  }
+  const scrolledRevealRequest = useRef(revealRequest);
+  useEffect(() => {
+    if (revealRequest === undefined || revealRequest === scrolledRevealRequest.current) return;
+    scrolledRevealRequest.current = revealRequest;
+    persistOpen(storageKey, true);
+    sectionRef.current?.scrollIntoView?.({ behavior: scrollBehavior(), block: "nearest" });
+  }, [revealRequest, storageKey]);
   const group = useAccordionGroup();
 
   function setOpenState(next: boolean) {
@@ -48,7 +71,7 @@ export function AccordionSection({
   const headerTabIndex = group === null ? 0 : group.isActive(headerRef) ? 0 : -1;
 
   return (
-    <section className={styles.section} data-open={open} aria-label={title}>
+    <section ref={sectionRef} className={styles.section} data-open={open} aria-label={title}>
       {/* WAI-ARIA APG accordion pattern: a heading wrapping the trigger button (so the section
           carries the heading role), plus roving-tabindex keyboard nav across sibling headers via
           `AccordionGroup`. Open state itself is independent per section by design (not mutual
