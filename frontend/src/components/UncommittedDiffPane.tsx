@@ -9,6 +9,8 @@ import type { CommitDraft } from "./CommitBox";
 import { CollapseAllToggle } from "./CollapseToggle";
 import styles from "./DiffPane.module.css";
 import {
+  DELETE_UNTRACKED_PREVIEW,
+  deleteUntrackedConfirmMessage,
   discardAllConfirmMessage,
   discardConfirmMessage,
   isUntracked,
@@ -26,7 +28,7 @@ import {
 } from "../lib/fileSelection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { isMenuKey } from "../lib/menuKeys";
-import { stageAllPaths, stageModifiedPaths } from "../lib/stagePaths";
+import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "../lib/stagePaths";
 
 // The change lists' keys (#449): arrows/j/k move, Shift extends, Ctrl/Cmd+A selects the group,
 // Escape keeps only the current file, `s` stages or unstages, the Menu key opens the menu.
@@ -104,6 +106,7 @@ export function UncommittedDiffPane({
     patchActions,
   } = actions;
   const onDiscardFiles = actions.onDiscardFiles ?? onDiscardAllUnstaged;
+  const onDeleteUntracked = actions.onDeleteUntracked ?? onDiscardFiles;
   const onIgnorePaths = actions.onIgnorePaths ?? ((patterns: string[]) => patterns.forEach(actions.onIgnorePath));
   const [current, setCurrent] = useState<{ path: string; staged: boolean } | null>(null);
   // The files selected for a multi-file action (#449), within one group. The current file is
@@ -170,7 +173,9 @@ export function UncommittedDiffPane({
   // what "Stage all" does.
   const allStagePaths = stageAllPaths(status);
   const modifiedStagePaths = stageModifiedPaths(status);
-  const untrackedCount = unstagedEntries.filter(isUntracked).length;
+  // "Delete untracked…" (#622) deletes exactly these: tracked changes and conflicts stay.
+  const deletableUntrackedPaths = untrackedPaths(status);
+  const untrackedCount = deletableUntrackedPaths.length;
   const showStageModified = untrackedCount > 0 && unstagedEntries.some((entry) => entry.kind !== "New");
 
   const allEntries = [...unstagedEntries, ...stagedEntries];
@@ -397,9 +402,11 @@ export function UncommittedDiffPane({
     discardRequest !== null &&
     (discardRequest.kind === "all"
       ? discardableEntries.length === 0
-      : discardRequest.kind === "files"
-        ? discardFilesEntries.length === 0
-        : discardFileEntry === undefined);
+      : discardRequest.kind === "untracked"
+        ? deletableUntrackedPaths.length === 0
+        : discardRequest.kind === "files"
+          ? discardFilesEntries.length === 0
+          : discardFileEntry === undefined);
   useEffect(() => {
     if (requestTargetGone) setDiscardRequest(null);
   }, [requestTargetGone, setDiscardRequest]);
@@ -581,6 +588,15 @@ export function UncommittedDiffPane({
             >
               Discard all…
             </button>
+            {untrackedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setDiscardRequest({ kind: "untracked" })}
+                title={`Delete the ${untrackedCount} untracked ${untrackedCount === 1 ? "file" : "files"} and keep the changes to tracked files`}
+              >
+                Delete untracked…
+              </button>
+            )}
           </div>
           {unstagedSummary !== null && renderSelectionBar(unstagedSummary)}
           <ul
@@ -626,7 +642,7 @@ export function UncommittedDiffPane({
       {discardRequest?.kind === "all" && discardableEntries.length > 0 && (
         <ConfirmDialog
           ariaLabel="Discard all changes"
-          message={withBlockedReason(discardAllConfirmMessage(discardableEntries), discardBlockedReason)}
+          message={withBlockedReason(discardAllConfirmMessage(discardableEntries, true), discardBlockedReason)}
           confirmLabel="Discard all"
           confirmDisabled={discardBlockedReason !== null}
           confirmTitle={discardBlockedReason ?? undefined}
@@ -634,6 +650,34 @@ export function UncommittedDiffPane({
             if (discardBlockedReason !== null) return;
             setDiscardRequest(null);
             onDiscardAllUnstaged(discardableEntries.map((e) => e.path));
+          }}
+          onCancel={() => setDiscardRequest(null)}
+        />
+      )}
+      {discardRequest?.kind === "untracked" && untrackedCount > 0 && (
+        <ConfirmDialog
+          ariaLabel="Delete untracked files"
+          message={withBlockedReason(
+            <>
+              <p>{deleteUntrackedConfirmMessage(deletableUntrackedPaths)}</p>
+              <ul aria-label="Untracked files to delete">
+                {deletableUntrackedPaths.slice(0, DELETE_UNTRACKED_PREVIEW).map((path) => (
+                  <li key={path}>{path}</li>
+                ))}
+                {untrackedCount > DELETE_UNTRACKED_PREVIEW && (
+                  <li>and {untrackedCount - DELETE_UNTRACKED_PREVIEW} more</li>
+                )}
+              </ul>
+            </>,
+            discardBlockedReason,
+          )}
+          confirmLabel={`Delete ${untrackedCount} ${untrackedCount === 1 ? "file" : "files"}`}
+          confirmDisabled={discardBlockedReason !== null}
+          confirmTitle={discardBlockedReason ?? undefined}
+          onConfirm={() => {
+            if (discardBlockedReason !== null) return;
+            setDiscardRequest(null);
+            onDeleteUntracked(deletableUntrackedPaths);
           }}
           onCancel={() => setDiscardRequest(null)}
         />

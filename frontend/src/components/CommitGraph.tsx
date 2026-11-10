@@ -16,6 +16,7 @@ import {
 } from "../lib/rebaseSelection";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "../lib/historyEdits";
 import { commitActions } from "../lib/actions/commitActions";
+import type { VisitKind } from "../lib/navigationHistory";
 import { rowsEqual, type SelectedRow } from "../state/useAppState";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
@@ -37,6 +38,7 @@ export function CommitGraph({
   operationsBlocked,
   operationsBlockedReason = null,
   onSelectRow,
+  onGoToCommit,
   onBranchFromCommit,
   onRebaseFromCommit,
   onRebaseSelection,
@@ -74,7 +76,10 @@ export function CommitGraph({
   operationsBlocked: boolean;
   /** `operationBlockers`' reason, the title of the entries `operationsBlocked` disables. */
   operationsBlockedReason?: string | null;
-  onSelectRow: (row: SelectedRow) => void;
+  /** `kind` `"step"` for a keyboard move by row (Back/Forward merge those, #618). */
+  onSelectRow: (row: SelectedRow, kind?: VisitKind) => void;
+  /** Selects a parent outside the loaded history, as Go to does (#618). */
+  onGoToCommit?: (commitId: string) => void;
   onBranchFromCommit: (commitId: string) => void;
   onRebaseFromCommit: (commitId: string) => void;
   // Called when the user acts on a multi-commit selection (Interactive rebase…, Squash, Fixup,
@@ -152,6 +157,11 @@ export function CommitGraph({
   } | null>(null);
   const [tagMenu, setTagMenu] = useState<{ tag: string; commitId: string; x: number; y: number } | null>(null);
   const [tagToDelete, setTagToDelete] = useState<string | null>(null);
+  // The parent or child picker of the parent/child keys (#618).
+  const [navigationPicker, setNavigationPicker] = useState<{ items: ContextMenuItem[]; x: number; y: number } | null>(
+    null,
+  );
+  const commitLayouts = useMemo(() => assignLanes(commits), [commits]);
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
   // `focusId` is the last focus the graph itself reported through `onSelectRow`. A focus that
   // differs from it came from outside (search, sidebar, refresh) and drops the multi-selection.
@@ -182,9 +192,10 @@ export function CommitGraph({
     return { ids, anchorId };
   })();
 
-  const setSelection = (next: CommitSelection, row: SelectedRow) => {
+  const setSelection = (next: CommitSelection, row: SelectedRow, kind?: VisitKind) => {
     setGraphSelection({ selection: next, focusId: typeof row === "object" ? row.commitId : null });
-    onSelectRow(row);
+    if (kind === undefined) onSelectRow(row);
+    else onSelectRow(row, kind);
   };
 
   const listRef = useRef<HTMLUListElement>(null);
@@ -299,13 +310,66 @@ export function CommitGraph({
     if (nextIndex > rows.length - 1 && hasMore) onLoadMore?.();
     const next = Math.max(0, Math.min(nextIndex, rows.length - 1));
     if (next < 1) {
-      setSelection(EMPTY_SELECTION, rows[next]);
+      setSelection(EMPTY_SELECTION, rows[next], "step");
     } else if (extendRange) {
       // Row 0 is "Uncommitted changes"; commit rows are offset by one.
-      setSelection(extendSelection(effectiveSelection, commits, commits[next - 1].id), rows[next]);
+      setSelection(extendSelection(effectiveSelection, commits, commits[next - 1].id), rows[next], "step");
     } else {
-      setSelection(selectOnly(commits[next - 1].id), rows[next]);
+      setSelection(selectOnly(commits[next - 1].id), rows[next], "step");
     }
+  };
+
+  // Parent and child keys (#618). A loaded commit is selected here; a parent outside the loaded
+  // history is found as Go to does.
+  const goToCommit = (commitId: string) => {
+    if (commits.some((commit) => commit.id === commitId)) setSelection(selectOnly(commitId), { commitId });
+    else onGoToCommit?.(commitId);
+  };
+  const describeCommit = (commitId: string) => {
+    const commit = commits.find((candidate) => candidate.id === commitId);
+    return commit === undefined ? commitId.slice(0, 7) : `${commit.shortId} ${commit.summary}`;
+  };
+  const openPicker = (list: HTMLUListElement, items: ContextMenuItem[]) => {
+    const rect = (list.children[selectedIndex] as HTMLElement | undefined)?.getBoundingClientRect();
+    setNavigationPicker({ items, x: rect?.left ?? 0, y: rect?.bottom ?? 0 });
+  };
+  // `[`: the first parent; Shift+`[` on a merge commit: a picker of its parents.
+  const goToParent = (list: HTMLUListElement, choose: boolean) => {
+    if (selectedIndex < 1) return;
+    const { parentIds } = commits[selectedIndex - 1];
+    if (parentIds.length === 0) return;
+    if (!choose || parentIds.length === 1) {
+      goToCommit(parentIds[0]);
+      return;
+    }
+    openPicker(
+      list,
+      parentIds.map((parentId, index) => ({
+        label: `Parent ${index + 1}: ${describeCommit(parentId)}`,
+        onSelect: () => goToCommit(parentId),
+      })),
+    );
+  };
+  // `]`: the loaded child; of several, the one on the same lane, else a picker.
+  const goToChild = (list: HTMLUListElement) => {
+    if (selectedIndex < 1) return;
+    const commitId = commits[selectedIndex - 1].id;
+    const lane = commitLayouts[selectedIndex - 1].lane;
+    const children = commits.flatMap((commit, index) => (commit.parentIds.includes(commitId) ? [index] : []));
+    if (children.length === 0) return;
+    const sameLane = children.filter((index) => commitLayouts[index].lane === lane);
+    const only = children.length === 1 ? children[0] : sameLane.length === 1 ? sameLane[0] : null;
+    if (only !== null) {
+      goToCommit(commits[only].id);
+      return;
+    }
+    openPicker(
+      list,
+      children.map((index) => ({
+        label: describeCommit(commits[index].id),
+        onSelect: () => goToCommit(commits[index].id),
+      })),
+    );
   };
 
   const openMenuForSelected = (list: HTMLUListElement) => {
@@ -325,6 +389,19 @@ export function CommitGraph({
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f" && onRequestSearch) {
       event.preventDefault();
       onRequestSearch();
+      return;
+    }
+    // Cmd+[ / Cmd+] are Back/Forward on macOS (`useWorkspaceShortcuts`); AltGr (Ctrl+Alt) types
+    // the brackets on some layouts.
+    const bracketKey = !event.metaKey && !(event.ctrlKey && !event.altKey);
+    if (bracketKey && (event.key === "[" || event.key === "{")) {
+      event.preventDefault();
+      goToParent(event.currentTarget, event.key === "{" || event.shiftKey);
+      return;
+    }
+    if (bracketKey && event.key === "]") {
+      event.preventDefault();
+      goToChild(event.currentTarget);
       return;
     }
     const extend = event.shiftKey;
@@ -495,7 +572,6 @@ export function CommitGraph({
     ...(savePatchItem === null ? [] : [savePatchItem]),
   ];
 
-  const commitLayouts = useMemo(() => assignLanes(commits), [commits]);
   // `null` means "show every remote badge" — skip building the membership set entirely in that
   // case rather than deriving one from `commits` just to have every `.includes()` check pass.
   const shownRemoteBranches = graphRemoteBranchSelection === null ? null : new Set(graphRemoteBranchSelection);
@@ -517,7 +593,7 @@ export function CommitGraph({
       role="listbox"
       aria-multiselectable="true"
       aria-label="Commit history"
-      aria-keyshortcuts="ArrowUp ArrowDown Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F"
+      aria-keyshortcuts="ArrowUp ArrowDown Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F [ ] Shift+["
     >
       <ListRow
         className={styles.uncommittedRow}
@@ -604,6 +680,18 @@ export function CommitGraph({
             listRef.current?.focus();
           }}
           items={tagItems(tagMenu.tag, tagMenu.commitId)}
+        />
+      )}
+      {navigationPicker !== null && (
+        <ContextMenu
+          returnFocusTo={listElement}
+          x={navigationPicker.x}
+          y={navigationPicker.y}
+          onClose={() => {
+            setNavigationPicker(null);
+            listRef.current?.focus();
+          }}
+          items={navigationPicker.items}
         />
       )}
     </ul>

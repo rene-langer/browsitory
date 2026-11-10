@@ -58,6 +58,9 @@ export interface WorkspaceActions {
   // A multi-file selection's discard (#449): exactly the confirmed paths, one undo step.
   // Defaults to `onDiscardAllUnstaged`.
   onDiscardFiles?: (paths: string[]) => void;
+  // "Delete untracked…" (#622): exactly the confirmed untracked paths. Defaults to
+  // `onDiscardFiles`.
+  onDeleteUntracked?: (paths: string[]) => void;
   onIgnorePath: (pattern: string) => void;
   // A multi-file selection's "Ignore": one `/path` pattern per untracked file. Defaults to one
   // `onIgnorePath` per pattern.

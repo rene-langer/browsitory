@@ -4,6 +4,62 @@ import type { CommitOutcome, TransferProgress } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 
+describe("back and forward through the selected rows (#618)", () => {
+  const always = () => true;
+  const selected = (result: { current: ReturnType<typeof useAppState> }) => result.current.state.selectedRow;
+
+  it("goes back and forward through the selections, merging keyboard moves", () => {
+    const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
+    act(() => result.current.selectRow({ commitId: "a" }));
+    act(() => result.current.selectRow({ commitId: "b" }, "step"));
+    act(() => result.current.selectRow({ commitId: "c" }, "step"));
+    act(() => result.current.selectRow({ commitId: "d" }));
+
+    let row: unknown;
+    act(() => {
+      row = result.current.stepNavigation(-1, always);
+    });
+    expect(row).toEqual({ commitId: "c" });
+    expect(selected(result)).toEqual({ commitId: "c" });
+    act(() => {
+      result.current.stepNavigation(-1, always);
+    });
+    expect(selected(result)).toEqual({ commitId: "a" });
+    act(() => {
+      result.current.stepNavigation(-1, always);
+    });
+    expect(selected(result)).toBe("uncommitted");
+    act(() => {
+      row = result.current.stepNavigation(-1, always);
+    });
+    expect(row).toBeNull();
+    act(() => {
+      result.current.stepNavigation(1, always);
+    });
+    act(() => {
+      result.current.stepNavigation(1, always);
+    });
+    expect(selected(result)).toEqual({ commitId: "c" });
+    // Selecting the row Back landed on is no new entry: Forward still leads to d.
+    act(() => result.current.selectRow({ commitId: "c" }));
+    act(() => {
+      result.current.stepNavigation(1, always);
+    });
+    expect(selected(result)).toEqual({ commitId: "d" });
+  });
+
+  it("skips a commit that is no longer available", () => {
+    const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
+    act(() => result.current.selectRow({ commitId: "a" }));
+    act(() => result.current.selectRow({ commitId: "gone" }));
+    act(() => result.current.selectRow({ commitId: "c" }));
+    act(() => {
+      result.current.stepNavigation(-1, (row) => row === "uncommitted" || row.commitId !== "gone");
+    });
+    expect(selected(result)).toEqual({ commitId: "a" });
+  });
+});
+
 describe("history actions", () => {
   it("loads headInfo on refresh", async () => {
     const info = { headId: "h1", detachedAt: null, headPushed: true, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null };

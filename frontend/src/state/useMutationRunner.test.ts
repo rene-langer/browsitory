@@ -9,6 +9,7 @@ import { credentialFailureMessage, failureError, useMutationRunner, withoutStale
 const BASE_STATE: AppState = {
   repoPath: "/repo",
   selectedRow: "uncommitted",
+  navigation: { entries: ["uncommitted"], index: 0, merging: false },
   status: [],
   commits: [],
   graphLimit: 300,

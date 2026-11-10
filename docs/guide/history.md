@@ -4,8 +4,8 @@ Click a commit in the graph to see the files it changed and their diffs. **Blame
 shows who last changed each line. **All files** above the list browses every file of the commit
 instead (see [Files at a commit](files-at-a-commit.md)). Each row shows the branches and tags that point at the commit,
 and the author and date (they hide when the pane is narrow). Selecting a commit shows its full
-message, author, date, full SHA (**Copy** copies it) and parents above the file list; click a
-parent to jump to it. Web links (`http://` and `https://`) in the message open in your browser
+message, author, date, full SHA (**Copy** copies it), parents and children (the loaded commits
+it is a parent of) above the file list; click a parent or child to jump to it. Web links (`http://` and `https://`) in the message open in your browser
 when you click them or press Enter on them; the link's tooltip shows where it goes. When the
 repository has a supported forge remote, issue references such as `#123` and `owner/repo#123`
 are links to that issue too (on the forge of the remote the current branch tracks, else
@@ -21,6 +21,24 @@ see [Patches and partial reverts](patches.md).
 The bar above the graph has **Fetch**, **Pull** and **Push** buttons for the
 current branch's upstream, with ahead/behind counts (for example `↑2 ↓1`)
 based on the last fetch.
+
+## Parent, child, back and forward
+
+With the commit list focused, `[` selects the commit's first parent and `]` its child. When the
+parent is older than the loaded history, the graph loads up to it, as **Go to commit…** does.
+On a merge commit, Shift+`[` lists all its parents to choose from. When a commit has several
+loaded children, `]` takes the one drawn on the same lane, or lists them when none is.
+
+Each tab remembers the commits you select (by clicking, with the keys, a parent or child link,
+Go to, a search result or a file's history), so you can go back to where you were. Moving
+through the list with the arrow keys counts as one step. Go back and forward with the **←** and
+**→** buttons left of the undo buttons, Alt+Left and Alt+Right (Cmd+[ and Cmd+] on macOS), your
+mouse's back and forward buttons, or **Back to previous commit** and **Forward to next commit**
+in the command palette. A commit that is no longer in the list, for example after a rebase
+rewrote it or when its branch is now hidden, is skipped. The keys do nothing in a text field,
+and where the host uses them for its own navigation (in VSCode on Windows, Alt+Left is its own
+Go Back), use the buttons or the palette. The list starts afresh when you
+switch to another tab and back, like the selection.
 
 ![A commit from history with its diff](assets/commit-diff.png)
 

@@ -64,6 +64,11 @@ export function CommitDiffPane({
     patchActions,
   } = useWorkspaceActions();
   const knownCommitIds = useMemo(() => new Set((commits ?? []).map((c) => c.id)), [commits]);
+  // The loaded commits with this one as a parent (#618).
+  const childIds = useMemo(
+    () => (commits ?? []).filter((c) => c.parentIds.includes(commitId)).map((c) => c.id),
+    [commits, commitId],
+  );
   const fetchCommitDiff = (path: string, oldPath: string | null) => (opts: DiffOptions) =>
     oldPath != null
       ? client.getCommitRenameDiff(repoPath, commitId, oldPath, path, opts)
@@ -139,6 +144,7 @@ export function CommitDiffPane({
         commitId={commitId}
         commit={commits?.find((c) => c.id === commitId)}
         knownCommitIds={knownCommitIds}
+        childIds={childIds}
         onSelectRow={onSelectRow}
         issueForge={issueForge}
       />

@@ -79,6 +79,25 @@ describe("CommitHeader", () => {
     expect(screen.getByText(PARENT_ID.slice(0, 7))).toBeInTheDocument();
   });
 
+  it("links the loaded children and selects one on click (#618)", () => {
+    const onSelectRow = vi.fn();
+    const children = ["1111111aaaa", "2222222bbbb"];
+    renderHeader({ childIds: children, onSelectRow });
+
+    expect(screen.getByText("Children")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Go to child 2222222" }));
+    expect(onSelectRow).toHaveBeenCalledWith({ commitId: "2222222bbbb" });
+    expect(screen.getByRole("button", { name: "Go to child 1111111" })).toBeInTheDocument();
+  });
+
+  it("names a single child, and shows no row without children (#618)", () => {
+    const { unmount } = renderHeader({ childIds: ["1111111aaaa"] });
+    expect(screen.getByText("Child")).toBeInTheDocument();
+    unmount();
+    renderHeader();
+    expect(screen.queryByText(/^Child/)).toBeNull();
+  });
+
   it("copies the full SHA", async () => {
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
