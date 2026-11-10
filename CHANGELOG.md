@@ -6,6 +6,197 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-10
+
+Revert or apply a single file or hunk of a commit and save and apply patches, the history of a
+range of lines or a folder, a commit's whole file tree, several changed files selected at once,
+`or`, `not` and parentheses in commit search, a choice of diff algorithm, steadier background
+fetching and updates, and files whose names differ only in case kept intact on Linux.
+
+### Patches and partial reverts
+
+- Added: a commit's file menu has **Revert this file**, **Apply this file to the working tree**
+  and **Save file as patch…**; each hunk of a commit's diff has **Revert hunk** and **Apply
+  hunk**. The result lands as unstaged changes, never as a commit; a change that no longer
+  applies leaves the working tree unchanged, like a failed `git apply`, and every revert or
+  apply can be undone (#448).
+- Added: **Save as patch…** for a commit, for several selected commits (`git format-patch`
+  mails, oldest first) and for the staged changes, and **Apply patch…** in the command palette,
+  which applies a patch file to the working tree, all of it or nothing (#448).
+
+### History of lines and folders
+
+- Added: select lines in a commit's diff, its Blame view, a comparison or a file under All files
+  and click **History of lines N–M** to list the commits that changed them, following the lines
+  back through earlier edits and renames like `git log -L` (#447).
+- Added: the `line:PATH:FROM-TO` search key finds the same commits and combines with other
+  terms (#447).
+- Added: **Folder history** in a file's header, and on each folder under All files, searches
+  for the commits that changed anything in that folder (#447).
+
+### Files at a commit
+
+- Added: a commit's details switch between **Changes** and **All files**. All files browses the
+  commit's whole tree (folders load as you open them, a filter searches every path) and shows a
+  file's content at that commit read-only, with syntax highlighting; images are shown, binary
+  and large files get a notice. A file's actions open its history, compare it with the working
+  tree, save a copy elsewhere, or restore it to the working tree, one undo step (#446).
+
+### Selecting several changed files
+
+- Added: the Changes and Staged lists select several files: Ctrl/Cmd+click adds or removes one,
+  Shift+click and Shift+↑/↓ select a range, Ctrl/Cmd+A the whole list, Esc keeps only the
+  current file. With two or more selected, a bar above the list, a selected file's menu, `s` and
+  the command palette stage, unstage, discard (one confirmation, one undo step), ignore or stash
+  them together; conflicted files are left out. The lists are announced as multi-selectable and
+  screen readers hear how many files are selected (#449).
+
+### Search: or, not, parentheses and merge filters
+
+- Added: commit search understands `or`, `not` (or a leading `-`) and parentheses between terms;
+  terms side by side still all have to match (#450).
+- Added: `merges:only` and `merges:none` list only merge commits or leave them out (#450).
+- Changed: a search that can't be read shows why under the search field, which is marked
+  invalid, instead of in place of the results (#450).
+- Internal: a new `InvalidSearchQuery` error kind tells an invalid query apart from other
+  search failures (#450).
+
+### Diff
+
+- Added: **Preferences → Diff → Diff algorithm** chooses Default (Myers), Patience or Minimal
+  for every diff. Staging, unstaging and discarding hunks or lines, and reverting or applying a
+  commit's hunk, find the hunk with the algorithm the diff was shown with, so they act on the
+  lines you see (#469).
+- Added: **Toggle wrap lines** and **Toggle show whole file** in the command palette act on the
+  current diff (#469).
+
+### One-click history edits
+
+- Fixed: the Undo entry of Reword, Squash, Fixup, Move up, Move down and Drop from the commit
+  menu read "Rebase onto <id>"; it now names the edit, for example "Drop 1a2b3c4" or "Squash
+  1a2b3c4 into its parent", also after a paused edit is continued (#473).
+
+### Fetch automatically
+
+- Fixed: a background fetch to a server that doesn't answer (VPN down, captive portal, server
+  offline) no longer delays the action you start until the connection times out; the action
+  runs at once, and a remote that doesn't answer within 30 seconds is given up on for that fetch
+  while the other remotes are still fetched (#462).
+- Changed: a remote that couldn't be reached is fetched in the background less often, at twice
+  the interval, then four times, up to once an hour, until a fetch gets through again (#462).
+- Fixed: a background fetch that was due while another fetch, pull or push ran could be skipped
+  until the next interval, when it started the moment that operation finished: the finished
+  operation still counted as running for a moment after it reported its end. This also made a
+  repo-service test fail now and then on Windows (#567).
+
+### Updates
+
+- Fixed: when an update check or download failed (for example while the release download host
+  answered with an error), the app waited 6 hours before checking again. It now retries after
+  10 minutes, doubling the wait up to 3 hours, and goes back to the 6-hour interval once a check
+  succeeds (#477).
+- Added: a second update endpoint. The app reads the update manifest from the user guide site
+  when the release download URL fails; the docs workflow publishes there a checked copy of the
+  latest published release's manifest (#477).
+
+### Files that differ only in case
+
+On Linux with `core.ignorecase` on, the operations that could lose one of two files whose names
+differ only in case (`A` and `a`) now refuse before anything is written and name both files, and
+aborting no longer gets stuck on such a pair.
+
+- Fixed: with two committed files whose names differ only in case, Reset (hard) and aborting a
+  rebase kept only one of them in the index and could delete the other's file, and discarding
+  one of them left a broken index. Hard reset, starting a rebase, discarding one of the pair and
+  the other operations that overwrite files with it now refuse; Undo writes such files directly
+  and keeps both (#403).
+- Fixed: a rebase whose picked commit added a file whose name differs only in case from an
+  existing one couldn't be aborted: Abort refused with the case-pair message. Aborting a
+  cherry-pick or revert in that state refused, saying it would discard a change. Abort now
+  always restores the branch, writing such files directly, and keeps a file you wrote there
+  yourself (#511).
+- Fixed: a rebase step, cherry-pick, revert, merge, pull or stash apply that added a file whose
+  name differs only in case from an existing one silently kept only one of the two in the
+  commit and the index. It is now refused; a rebase or a cherry-pick of several commits stops
+  at that step and can be aborted. Aborting a cherry-pick of several commits after such a step
+  had landed outside Browsitory now goes back to where it started (#522).
+- Fixed: switching to a branch, creating a branch from one, checking out a commit, tag or remote
+  branch, or adding a worktree, whose files include such a pair that the current commit
+  doesn't, kept only one of the two in the index and didn't write the other's file, so the next
+  commit dropped it. It is now refused (#532).
+
+### Actions that can't run now
+
+- Fixed: while a rebase or `git am` started in a terminal was paused between steps, the command
+  palette still offered Cherry-pick, Revert, Checkout, Reset, switching branches and other
+  repository actions that the menus disable (#503).
+- Fixed: the command palette offered **Stash all changes** and **Stash…**, and a file's menu
+  offered **Stash file…**, during a rebase or a cherry-pick/revert, when the Stash button is
+  disabled because stashing then loses the paused step's changes (#495).
+- Fixed: the Reset dialog, the parent picker of a merge commit's Cherry-pick and Revert, the
+  Merge dialog, **Push branch to…**, **Delete remote branch…** and the force push confirmation
+  still ran their operation when the repository became busy while they were open (for example a
+  rebase started in a terminal, picked up by a refresh); their confirm button is now disabled
+  with the reason (#514).
+- Fixed: the Stash dialog still stashed when a rebase or a cherry-pick/revert sequence started
+  while it was open (for example in a terminal); its Stash button is now disabled with the
+  reason (#508).
+- Changed: **Create tag at …** stays in the command palette while another operation runs, like
+  the commit menu's **Create tag…**; the dialog says why it can't create the tag yet (#495).
+- Changed: disabled commit menu items say why they are disabled (#495).
+- Internal: menus, buttons and the command palette decide availability with one shared rule
+  (`operationBlockers`, `stashBlockReason`, `commitActions`) (#495).
+
+### Command palette commit actions
+
+- Fixed: Cherry-pick and Revert from the command palette showed no "Cherry-picked" or "Reverted"
+  toast, unlike the commit menu; they now run the menu's own action (#507).
+- Fixed: the command palette's **Reset to …** and a merge commit's Cherry-pick and Revert did
+  nothing while search results or a file's history replaced the graph; they now open the reset
+  dialog or the parent picker directly (#507).
+- Changed: the command palette offers Cherry-pick and Revert for a merge commit too; they ask
+  which parent to use first, like the commit menu (#495, #507).
+
+### Error messages
+
+- Fixed: a pull you cancel says "Pull cancelled." again, not "the transfer was cancelled"
+  (#496).
+- Fixed: when a repository's worker has stopped, starting a fetch, push or pull says to close
+  and reopen the repository, as every other action does, instead of "worker thread stopped"
+  (#496).
+- Fixed: in the VSCode extension, the errors of a pull, a fetch or push that can't start, an
+  unreadable conflict and the repository and workspace pickers no longer start with "Error: "
+  (#496).
+- Internal: a failed request now answers `{ kind, message }` (`repo_service::wire::ErrorDto`,
+  generated to TypeScript) on both transports: the Tauri command's error, and the sidecar's
+  JSON-RPC error `data`. `RepoClient` methods reject with `RepoError`, and the frontend switches
+  on its `kind` instead of searching the message text. Removed the checks that matched no
+  backend text: a direct fetch's "Fetch failed" rejection (gone since fetches report failures
+  only through their terminal event), the "Transport failed", "failed to read working diff" and
+  "permission denied" hints, and the "missing credential" and "SSH agent failure" rejections
+  (#496).
+
+### Internal: worker command policy
+
+- Changed: each worker command's policy (the undo entry it records, whether it takes the state
+  lock, is refused while that lock stays busy, has its reply held until its undo entry is
+  recorded, is refused while a rebase or cherry-pick/revert sequence is stored, and aborts a
+  paused operation) is stated in one place, `worker::policy::of`, which names every command, so
+  a new command no longer compiles without one. A table test pins every command's policy.
+  Behaviour is unchanged (#485).
+
+### Internal: tests and CI
+
+- Changed: the Tauri E2E specs run the git CLI through one helper, `e2e/support/git.ts`
+  (`git`, `gitIn`, `gitWith`), instead of 13 local helpers and about 170 direct calls (#500).
+- Changed: `wdio.conf.ts` sets a 10 s `waitforTimeout` (`UI_TIMEOUT` in
+  `e2e/support/timeouts.ts`); waits no longer repeat it, and longer ones use named constants
+  (#500).
+- Changed: `waitForAppReady` and the retrying `openPalette` live in `e2e/support/app.ts`, and
+  both E2E suites create their fixture repository with one shared `initFixtureRepo` (#500).
+- Changed: CI's mutation-testing job posts its findings as one pull request comment, updated on
+  re-runs, instead of only in the job summary (#548).
+
 ## [0.5.0] - 2026-11-09
 
 Tags at any commit and on remotes, go-to pickers, one-click history edits from the commit menu,
