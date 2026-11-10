@@ -1,15 +1,17 @@
 import { render } from "@testing-library/react";
 import { createElement } from "react";
 import { vi } from "vitest";
-import { BranchTree } from "../components/BranchTree";
+import { BranchTreeWithDialogs, type BranchTreeProps } from "./BranchTreeWithDialogs";
+
+export type { BranchTreeProps };
 
 /**
  * Props and a render helper for the `BranchTree` tests, which are split by job like the component
  * (`BranchTree.test.tsx`, `NewBranchForm.test.tsx`, `AddRemoteForm.test.tsx`,
  * `SetUpstreamDialog.test.tsx`, `useRemoteBranchCache.test.tsx`). They all render the whole
- * `BranchTree`, so they guard its props API too.
+ * `BranchTree`, so they guard its props API too. `renderTree` renders it with the remote dialogs it
+ * opens (`BranchTreeWithDialogs`), as the workspace does.
  */
-export type BranchTreeProps = Parameters<typeof BranchTree>[0];
 
 export const baseBranches = [
   { name: "main", isCurrent: true },
@@ -18,7 +20,7 @@ export const baseBranches = [
 
 export function renderTree(overrides: Partial<BranchTreeProps> = {}) {
   const props = treeProps(overrides);
-  return { ...render(createElement(BranchTree, props)), props };
+  return { ...render(createElement(BranchTreeWithDialogs, props)), props };
 }
 
 export function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps {
@@ -69,6 +71,7 @@ export function treeProps(overrides: Partial<BranchTreeProps>): BranchTreeProps 
     onOpenPushDialog: vi.fn(),
     onOpenDeleteRemoteBranch: vi.fn(),
     refreshGeneration: 0,
+    onOpenRemoteDialog: vi.fn(),
     ...overrides,
   };
 }

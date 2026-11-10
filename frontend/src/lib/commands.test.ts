@@ -65,12 +65,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       stashes: [{ index: 0, message: "WIP", commitId: "ccc" }],
       mergeMessage: null,
       forcePushOffer: null,
-      forcePushConfirm: null,
       fetchPrune: null,
-      pushDialog: null,
-      deleteRemoteBranchDialog: null,
-      createTagDialog: null,
-      deleteRemoteTagDialog: null,
       headInfo: { headId: null, detachedAt: null, headPushed: false, operation: null, operationLeftover: false, squashMessage: null, commitHooks: [], sequence: null, rebase: null, bisect: null, terminalSequence: null, terminalRebase: null },
       amendMode: false,
       skipHooks: false,
@@ -80,21 +75,18 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       rebaseProgress: null,
       rebaseOnto: null,
       rebasePreset: null,
-      rewordDialog: null,
       historyEditOutcome: null,
       patchOutcome: null,
       pendingPull: null,
       pullOutcome: null,
-      mergeDialog: null,
       mergeOutcome: null,
-      stashDialog: null,
       stashRestoreIndex: true,
       stashOutcome: null,
       transfer: null,
       error: null,
       pending: false,
       addRemoteDraftOpen: false,
-      remoteDialog: null,
+      dialog: null,
       refreshGeneration: 0,
       undoState: { undo: null, redo: null },
       ...overrides,
@@ -139,8 +131,8 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     listRemoteBranches: vi.fn(),
     fetchRemote: vi.fn(),
     createTag: vi.fn(),
-    openCreateTagDialog: vi.fn(),
-    closeCreateTagDialog: vi.fn(),
+    openDialog: vi.fn(),
+    closeDialog: vi.fn(),
     deleteTag: vi.fn(),
     pushCurrentBranch: vi.fn(),
     pushTags: vi.fn(),
@@ -149,10 +141,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     openCreateBranchDraft: vi.fn(),
     closeCreateBranchDraft: vi.fn(),
     openAddRemoteDraft: vi.fn(),
-    openRemoteDialog: vi.fn(),
-    closeRemoteDialog: vi.fn(),
     closeAddRemoteDraft: vi.fn(),
-    requestForcePush: vi.fn(),
     cherryPick: vi.fn(),
     revertCommit: vi.fn(),
     cherryPickMany: vi.fn(),
@@ -168,23 +157,13 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     fetchAllRemotes: vi.fn(),
     setFetchPrune: vi.fn(),
     pushBranch: vi.fn(),
-    openPushDialog: vi.fn(),
-    closePushDialog: vi.fn(),
     deleteRemoteBranch: vi.fn(),
-    openDeleteRemoteBranchDialog: vi.fn(),
-    closeDeleteRemoteBranchDialog: vi.fn(),
     deleteRemoteTag: vi.fn(),
-    openDeleteRemoteTagDialog: vi.fn(),
-    closeDeleteRemoteTagDialog: vi.fn(),
     saveStash: vi.fn(),
-    openStashDialog: vi.fn(),
-    closeStashDialog: vi.fn(),
     applyStash: vi.fn(),
     popStash: vi.fn(),
     setStashRestoreIndex: vi.fn(),
     dropStash: vi.fn(),
-    openMergeDialog: vi.fn(),
-    closeMergeDialog: vi.fn(),
     getMergeOptions: vi.fn(),
     mergeBranch: vi.fn(),
     mergePull: vi.fn(),
@@ -198,8 +177,6 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     closeRebasePlanner: vi.fn(),
     startRebase: vi.fn(),
     editHistory: vi.fn(),
-    openRewordDialog: vi.fn(),
-    closeRewordDialog: vi.fn(),
     rebaseContinue: vi.fn(),
     abortRebase: vi.fn(),
     listPullRequests: vi.fn(),
@@ -266,8 +243,8 @@ describe("buildCommands", () => {
     commands.find((command) => command.label === "Push branch to…")!.run();
     commands.find((command) => command.label === "Delete remote branch…")!.run();
     expect(appState.fetchAllRemotes).toHaveBeenCalled();
-    expect(appState.openPushDialog).toHaveBeenCalledWith("main");
-    expect(appState.openDeleteRemoteBranchDialog).toHaveBeenCalledWith(null, null);
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "push", localBranch: "main" });
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "deleteRemoteBranch", remoteName: null, branchName: null });
   });
 
   it("hides the new remote commands without a remote, and Push branch to… on a detached HEAD", () => {
@@ -591,7 +568,7 @@ describe("buildCommands", () => {
     expect(merge?.label).toBe("Merge feature into current branch…");
     expect(commands.some((c) => c.id === "merge-branch:main")).toBe(false);
     merge?.run();
-    expect(appState.openMergeDialog).toHaveBeenCalledWith("feature");
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "merge", branchName: "feature" });
 
     const merging = buildCommands(makeAppState({ mergeMessage: "Merge branch" }));
     expect(merging.some((c) => c.id.startsWith("merge-branch:"))).toBe(false);
@@ -607,7 +584,7 @@ describe("buildCommands", () => {
     const withOptions = commands.find((c) => c.id === "stash-with-options");
     expect(withOptions?.label).toBe("Stash…");
     withOptions?.run();
-    expect(appState.openStashDialog).toHaveBeenCalledWith([]);
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "stash", paths: [] });
   });
 
   it("offers show and pop per stash", () => {
@@ -1281,14 +1258,13 @@ describe("history commands", () => {
   });
 
   it("runs cherry-pick on the selected commit and force push through the confirm", () => {
-    const requestForcePush = vi.fn();
-    const appState = { ...makeAppState(historyState), requestForcePush };
+    const appState = makeAppState(historyState);
     const commitCommands = makeCommitCommands();
     const commands = buildWithCommitCommands(appState, commitCommands);
     commands.find((command) => command.id === "cherry-pick-selected")!.run();
     commands.find((command) => command.id === "force-push")!.run();
     expect(commitCommands.onCherryPick).toHaveBeenCalledWith("c2");
-    expect(requestForcePush).toHaveBeenCalledWith("origin");
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "forcePush", remoteName: "origin" });
   });
 
   it("opens the create-tag dialog at the selected commit or at HEAD", () => {
@@ -1297,11 +1273,11 @@ describe("history commands", () => {
     const selected = commands.find((command) => command.id === "create-tag-selected")!;
     expect(selected.label).toBe("Create tag at c2…");
     selected.run();
-    expect(appState.openCreateTagDialog).toHaveBeenLastCalledWith("c2");
+    expect(appState.openDialog).toHaveBeenLastCalledWith({ kind: "createTag", commitId: "c2" });
     const head = commands.find((command) => command.id === "create-tag-head")!;
     expect(head.label).toBe("Create tag at HEAD…");
     head.run();
-    expect(appState.openCreateTagDialog).toHaveBeenLastCalledWith("c1");
+    expect(appState.openDialog).toHaveBeenLastCalledWith({ kind: "createTag", commitId: "c1" });
   });
 
   it("offers Create tag at HEAD… only once HEAD has a commit", () => {
@@ -1357,7 +1333,7 @@ describe("history commands", () => {
       byId("drop-selected").run();
       expect(appState.editHistory).toHaveBeenLastCalledWith("c2", "c3", { kind: "Drop" });
       byId("reword-selected").run();
-      expect(appState.openRewordDialog).toHaveBeenCalledWith("c2", "c3");
+      expect(appState.openDialog).toHaveBeenCalledWith({ kind: "reword", commitId: "c2", onto: "c3" });
     });
 
     it("leaves out edits the menu disables", () => {
@@ -1398,7 +1374,7 @@ describe("diff option and discard commands", () => {
     const command = commands.find((c) => c.id === "stash-current-file");
     expect(command?.label).toBe("Stash src/a.ts…");
     command!.run();
-    expect(state.openStashDialog).toHaveBeenCalledWith(["src/a.ts"]);
+    expect(state.openDialog).toHaveBeenCalledWith({ kind: "stash", paths: ["src/a.ts"] });
   });
 
   it("offers file history of the current file, even while an operation is running", () => {
@@ -1504,7 +1480,7 @@ describe("diff option and discard commands", () => {
     commands.find((c) => c.id === "discard-selected-files")!.run();
     expect(requestDiscardSelection).toHaveBeenCalled();
     commands.find((c) => c.id === "stash-selected-files")!.run();
-    expect(state.openStashDialog).toHaveBeenCalledWith(["a.txt", "b.txt"]);
+    expect(state.openDialog).toHaveBeenCalledWith({ kind: "stash", paths: ["a.txt", "b.txt"] });
 
     expect(build(state).commands.some((c) => c.id.endsWith("-selected-files"))).toBe(false);
   });
@@ -1673,7 +1649,7 @@ describe("remote and tag palette entries", () => {
     const command = buildCommands(appState).find((c) => c.id === id);
     expect(command?.label).toBe(label);
     command?.run();
-    expect(appState.openRemoteDialog).toHaveBeenCalledWith(kind, "fork");
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "remote", action: kind, remoteName: "fork" });
     expect(commandGroup(id)).toBe("Remotes");
   });
 
@@ -1707,7 +1683,7 @@ describe("remote and tag palette entries", () => {
     const command = buildCommands(appState).find((c) => c.id === "delete-remote-tag:v1");
     expect(command?.label).toBe("Delete tag v1 from remote…");
     command?.run();
-    expect(appState.openDeleteRemoteTagDialog).toHaveBeenCalledWith("v1");
+    expect(appState.openDialog).toHaveBeenCalledWith({ kind: "deleteRemoteTag", tagName: "v1" });
 
     const ids = buildCommands(makeAppState({ tags, remotes: [] })).map((c) => c.id);
     expect(ids).not.toContain("delete-remote-tag:v1");
@@ -1899,14 +1875,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       remoteBranchesInGraph: [],
       remotes: state.remotes,
       upstream: state.upstream,
-      remoteUpstreams: {},
       onAddRemote: vi.fn().mockResolvedValue(null),
-      onRenameRemote: vi.fn().mockResolvedValue(true),
-      onUpdateRemoteUrls: vi.fn().mockResolvedValue(undefined),
-      onRemoveRemote: vi.fn().mockResolvedValue(undefined),
-      onSaveHttpsCredential: vi.fn().mockResolvedValue(undefined),
-      onForgetHttpsCredential: vi.fn().mockResolvedValue(undefined),
-      onSetRemoteAuthMode: vi.fn().mockResolvedValue(true),
       onSetUpstream: vi.fn().mockResolvedValue(undefined),
       onClearUpstream: vi.fn().mockResolvedValue(undefined),
       onListRemoteBranches: vi.fn().mockResolvedValue([]),
@@ -1924,6 +1893,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       onOpenPushDialog: fn(),
       onOpenDeleteRemoteBranch: fn(),
       refreshGeneration: 0,
+      onOpenRemoteDialog: fn(),
     });
   }
 

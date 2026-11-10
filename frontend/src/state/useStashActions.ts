@@ -2,17 +2,18 @@ import { useCallback } from "react";
 import type { RepoClient, StashEntry, StashOptions } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunOptimisticMutation } from "./useMutationRunner";
+import { withoutDialog } from "./workspaceDialog";
 
 export const STASH_LIST_CHANGED = "The stash list changed; refresh and try again.";
 
 const STASH_EVERYTHING: StashOptions = { message: null, keepIndex: false, includeUntracked: true, paths: [] };
 
 export interface StashActions {
-  /** Stashes with `options`; without them, everything (tracked and untracked, no message). */
+  /**
+   * Stashes with `options`; without them, everything (tracked and untracked, no message). Closes
+   * the stash dialog (`dialog` kind "stash") if open.
+   */
   saveStash(options?: StashOptions): Promise<void>;
-  /** Opens the stash options dialog; `paths` non-empty for "Stash file…". */
-  openStashDialog(paths: string[]): void;
-  closeStashDialog(): void;
   /** Apply/Pop use `state.stashRestoreIndex` and record `state.stashOutcome` for the toast. */
   applyStash(index: number): Promise<void>;
   popStash(index: number): Promise<void>;
@@ -32,18 +33,10 @@ export function useStashActions(
   const saveStash = useCallback(
     (options: StashOptions = STASH_EVERYTHING) =>
       runMutation(async () => {
-        setState((prev) => ({ ...prev, stashDialog: null }));
+        setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "stash") }));
         await client.saveStash(repoPath, options);
       }),
     [client, runMutation, repoPath, setState],
-  );
-  const openStashDialog = useCallback(
-    (paths: string[]) => setState((prev) => ({ ...prev, stashDialog: { paths } })),
-    [setState],
-  );
-  const closeStashDialog = useCallback(
-    () => setState((prev) => ({ ...prev, stashDialog: null })),
-    [setState],
   );
   const setStashRestoreIndex = useCallback(
     (on: boolean) => setState((prev) => ({ ...prev, stashRestoreIndex: on })),
@@ -118,8 +111,6 @@ export function useStashActions(
 
   return {
     saveStash,
-    openStashDialog,
-    closeStashDialog,
     applyStash,
     popStash,
     setStashRestoreIndex,

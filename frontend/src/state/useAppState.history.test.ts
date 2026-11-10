@@ -89,10 +89,10 @@ describe("history actions", () => {
 
     it("opens and closes the Reword dialog", () => {
       const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
-      act(() => result.current.openRewordDialog("c", "p"));
-      expect(result.current.state.rewordDialog).toEqual({ commitId: "c", onto: "p" });
-      act(() => result.current.closeRewordDialog());
-      expect(result.current.state.rewordDialog).toBeNull();
+      act(() => result.current.openDialog({ kind: "reword", commitId: "c", onto: "p" }));
+      expect(result.current.state.dialog).toEqual({ kind: "reword", commitId: "c", onto: "p" });
+      act(() => result.current.closeDialog("reword"));
+      expect(result.current.state.dialog).toBeNull();
     });
   });
 
@@ -202,20 +202,20 @@ describe("history actions", () => {
     act(() => listener!({ operationId: "push-1", operation: "PushBranch", phase: "Failed", errorKind: "NonFastForward", current: 0, total: 0, receivedBytes: 0, message: null, hookOutput: null }));
     expect(result.current.state.forcePushOffer).toEqual({ remoteName: "origin" });
 
-    act(() => result.current.requestForcePush("origin"));
-    expect(result.current.state.forcePushConfirm).toEqual({ remoteName: "origin" });
+    act(() => result.current.openDialog({ kind: "forcePush", remoteName: "origin" }));
+    expect(result.current.state.dialog).toEqual({ kind: "forcePush", remoteName: "origin" });
 
     await act(() => result.current.forcePushCurrentBranch("origin"));
     expect(forcePushCurrentBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "origin", false);
     expect(result.current.state.forcePushOffer).toBeNull();
-    expect(result.current.state.forcePushConfirm).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
   });
 
   it("cancelForcePush clears both the offer and the confirm", () => {
     const { result } = renderHook(() => useAppState(transferClient({}), TEST_REPO_PATH));
-    act(() => result.current.requestForcePush("origin"));
+    act(() => result.current.openDialog({ kind: "forcePush", remoteName: "origin" }));
     act(() => result.current.cancelForcePush());
-    expect(result.current.state.forcePushConfirm).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
     expect(result.current.state.forcePushOffer).toBeNull();
   });
 

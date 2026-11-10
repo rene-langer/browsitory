@@ -232,10 +232,10 @@ export function RepoWorkspace({
   const autoFetchOverride = useSyncExternalStore(subscribeAutoFetchOverride, () => readAutoFetchOverride(repoPath));
   const autoFetchMinutes = effectiveAutoFetchMinutes(autoFetchOverride, fetchSettings.settings.autoFetchMinutes);
   const lastFetchedAt = useSyncExternalStore(subscribeLastFetch, () => lastFetchAt(repoPath));
-  const openRemoteDialog = appState.openRemoteDialog;
+  const { openDialog } = appState;
   const openCredentials = useCallback(
-    (remoteName: string) => openRemoteDialog("credentials", remoteName),
-    [openRemoteDialog],
+    (remoteName: string) => openDialog({ kind: "remote", action: "credentials", remoteName }),
+    [openDialog],
   );
   useAutoFetch({
     client,
@@ -410,7 +410,7 @@ export function RepoWorkspace({
     onSetAmendMode: appState.setAmendMode,
     onAbortMerge: abortMergeOrSequence,
     onSaveStash: announce("Changes stashed", () => appState.saveStash()),
-    onOpenStashDialog: appState.openStashDialog,
+    onOpenStashDialog: (paths) => openDialog({ kind: "stash", paths }),
     onRebaseContinue: appState.rebaseContinue,
     onRebaseAbort: () => void abortRebase(),
     onSequenceContinue: continueSequence,
@@ -502,8 +502,11 @@ export function RepoWorkspace({
       {appState.state.error !== null && (
         <div className={styles.errorLayer}>
           <InlineError message={appState.state.error} onDismiss={appState.dismissError} />
-          {appState.state.forcePushOffer !== null && appState.state.forcePushConfirm === null && (
-            <button type="button" onClick={() => appState.requestForcePush(appState.state.forcePushOffer!.remoteName)}>
+          {appState.state.forcePushOffer !== null && appState.state.dialog?.kind !== "forcePush" && (
+            <button
+              type="button"
+              onClick={() => openDialog({ kind: "forcePush", remoteName: appState.state.forcePushOffer!.remoteName })}
+            >
               Force push (with lease)…
             </button>
           )}

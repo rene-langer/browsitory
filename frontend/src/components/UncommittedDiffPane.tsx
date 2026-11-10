@@ -50,8 +50,8 @@ export function UncommittedDiffPane({
   rebaseProgress,
   sequencePending = false,
   refreshGeneration,
-  discardRequest: discardRequestProp,
-  onDiscardRequestChange,
+  discardRequest,
+  onDiscardRequestChange: setDiscardRequest,
   initialCommitDraft,
   selectionBusyReason,
   discardBlockedReason,
@@ -62,8 +62,10 @@ export function UncommittedDiffPane({
   client: RepoClient;
   status: StatusEntry[];
   refreshGeneration: number;
-  discardRequest?: DiscardRequest | null;
-  onDiscardRequestChange?: (request: DiscardRequest | null) => void;
+  // The open discard confirmation, owned by `RepoWorkspace` so the palette opens the same ones
+  // (#493).
+  discardRequest: DiscardRequest | null;
+  onDiscardRequestChange: (request: DiscardRequest | null) => void;
   initialCommitDraft?: CommitDraft;
   /** The loaded history (may be a file history or search results); stands in for
    * `branchCommits` when that is absent. */
@@ -375,9 +377,6 @@ export function UncommittedDiffPane({
     }
   };
 
-  const [localDiscardRequest, setLocalDiscardRequest] = useState<DiscardRequest | null>(null);
-  const discardRequest = onDiscardRequestChange !== undefined ? (discardRequestProp ?? null) : localDiscardRequest;
-  const setDiscardRequest = onDiscardRequestChange ?? setLocalDiscardRequest;
   const discardableEntries = unstagedEntries.filter((entry) => entry.kind !== "Conflicted");
   // The selection's discard also follows the selection's own busy rule.
   const discardFilesBlockedReason = discardBlockedReason ?? selectionBusyReason;

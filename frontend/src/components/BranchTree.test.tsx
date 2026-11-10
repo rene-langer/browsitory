@@ -1,8 +1,10 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { RepoClient } from "../ipc/RepoClient";
 import { BranchTree } from "./BranchTree";
-import { baseBranches, renderTree, type BranchTreeProps } from "../test/branchTreeProps";
+import { baseBranches, renderTree, treeProps } from "../test/branchTreeProps";
+import { BranchTreeWithDialogs } from "../test/BranchTreeWithDialogs";
+import type { RemoteDialogs } from "./RemoteDialogs";
 
 // The tree, its menus, inline rename and the remote dialogs. The forms, the upstream dialog and
 // the lazy remote branch lists have their own test files, like their components (#492).
@@ -88,7 +90,7 @@ describe("BranchTree — local branches", () => {
     await Promise.resolve();
 
     // Simulate the optimistic removal: re-render with the deleted branch gone from `branches`.
-    rerender(<BranchTree {...props} branches={baseBranches.filter((b) => b.name !== "feat/foo")} />);
+    rerender(<BranchTreeWithDialogs {...props} branches={baseBranches.filter((b) => b.name !== "feat/foo")} />);
 
     expect(screen.queryByRole("dialog", { name: "Force delete feat/foo" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Force delete" })).not.toBeInTheDocument();
@@ -147,7 +149,7 @@ describe("BranchTree — local branches", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     await screen.findByRole("dialog", { name: "Force delete feat/foo" });
 
-    rerender(<BranchTree {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
+    rerender(<BranchTreeWithDialogs {...props} operationDisabled operationDisabledReason="A transfer is in progress." />);
     const dialog = screen.getByRole("dialog", { name: "Force delete feat/foo" });
     expect(dialog).toHaveTextContent("A transfer is in progress.");
     const confirm = within(dialog).getByRole("button", { name: "Force delete" });
@@ -228,7 +230,7 @@ describe("BranchTree — local branches", () => {
     expect(screen.getByRole("menuitem", { name: "Show all branches" })).toBeDisabled();
 
     // The open menu follows the new props.
-    rerender(<BranchTree {...props} graphBranchSelection={["feat/foo"]} />);
+    rerender(<BranchTreeWithDialogs {...props} graphBranchSelection={["feat/foo"]} />);
     fireEvent.click(screen.getByRole("menuitem", { name: "Show all branches" }));
     // #402: forgets the selection rather than saving today's branch names.
     expect(props.onShowAllGraphBranches).toHaveBeenCalledTimes(1);
@@ -307,7 +309,7 @@ describe("BranchTree — local branches", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show main in graph" }));
     expect(props.onSetGraphBranchSelection).toHaveBeenCalledWith([]);
 
-    rerender(<BranchTree {...props} graphBranchSelection={[]} />);
+    rerender(<BranchTreeWithDialogs {...props} graphBranchSelection={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Show main in graph" }));
     expect(props.onClearGraphBranchSelection).toHaveBeenCalledTimes(1);
     expect(props.onSetGraphBranchSelection).toHaveBeenCalledTimes(1);
@@ -843,9 +845,9 @@ describe("BranchTree — remotes", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Already up to date.");
   });
 
-  it("requires upstream discovery in both the client and BranchTree contracts", () => {
+  it("requires upstream discovery in both the client and RemoteDialogs contracts", () => {
     expectTypeOf<IsOptional<RepoClient, "getRemoteUpstreams">>().toEqualTypeOf<false>();
-    expectTypeOf<IsOptional<BranchTreeProps, "remoteUpstreams">>().toEqualTypeOf<false>();
+    expectTypeOf<IsOptional<Parameters<typeof RemoteDialogs>[0], "remoteUpstreams">>().toEqualTypeOf<false>();
   });
 
   it("shows all affected branches when clearing upstreams for a remote with multiple, and removes with clearUpstreams=true", async () => {
@@ -1259,22 +1261,22 @@ describe("BranchTree — keyboard menus", () => {
   });
 });
 
-describe("BranchTree — controlled remote dialogs", () => {
+// #493: the tree holds no remote dialog state; it asks its owner to open one, and the owner
+// (`WorkspaceDialogs`) renders it outside the sidebar, which is `hidden` while collapsed.
+describe("BranchTree — remote dialogs belong to the owner", () => {
   const origin = { name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null };
   beforeEach(() => localStorage.clear());
 
-  it("menu items report the dialog through onRemoteDialogChange when controlled", () => {
-    const onRemoteDialogChange = vi.fn();
-    renderTree({ remotes: [origin], remoteDialog: null, onRemoteDialogChange });
+  it.each([
+    ["Edit remote", "edit"],
+    ["Manage credentials", "credentials"],
+    ["Remove remote", "remove"],
+  ] as const)("%s asks onOpenRemoteDialog for the %s dialog and renders none itself", (item, action) => {
+    const onOpenRemoteDialog = vi.fn();
+    render(<BranchTree {...treeProps({ remotes: [origin], onOpenRemoteDialog })} />);
     fireEvent.contextMenu(screen.getByRole("button", { name: "origin" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Manage credentials" }));
-    expect(onRemoteDialogChange).toHaveBeenCalledWith({ kind: "credentials", remoteName: "origin" });
-    expect(screen.queryByRole("dialog", { name: "Credentials for origin", hidden: true })).toBeNull();
-  });
-
-  // The owner (`App`) renders them outside the sidebar, which is `hidden` while collapsed.
-  it.each(["edit", "credentials", "remove"] as const)("leaves the controlled %s dialog to its owner", (kind) => {
-    renderTree({ remotes: [origin], remoteDialog: { kind, remoteName: "origin" }, onRemoteDialogChange: vi.fn() });
+    fireEvent.click(screen.getByRole("menuitem", { name: item }));
+    expect(onOpenRemoteDialog).toHaveBeenCalledWith({ kind: "remote", action, remoteName: "origin" });
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
   });
 });

@@ -428,7 +428,7 @@ export function buildCommands(
       id: "stash-with-options",
       label: "Stash…",
       keywords: ["stash", "save", "message", "untracked", "keep", "index", "options"],
-      run: () => appState.openStashDialog([]),
+      run: () => appState.openDialog({ kind: "stash", paths: [] }),
     });
   }
   const stashFile = diffCommands?.currentFile ?? null;
@@ -437,7 +437,7 @@ export function buildCommands(
       id: "stash-current-file",
       label: `Stash ${stashFile}…`,
       keywords: ["stash", "file", "save", stashFile],
-      run: () => appState.openStashDialog([stashFile]),
+      run: () => appState.openDialog({ kind: "stash", paths: [stashFile] }),
     });
   }
   const fileSelection = diffCommands?.selection ?? null;
@@ -446,7 +446,7 @@ export function buildCommands(
       id: "stash-selected-files",
       label: `Stash ${selectedFiles(fileSelection.paths.length)}…`,
       keywords: ["stash", "selected", "files", "save"],
-      run: () => appState.openStashDialog(fileSelection.paths),
+      run: () => appState.openDialog({ kind: "stash", paths: fileSelection.paths }),
     });
   }
   const prune = pruneWorktreesAction(blockers);
@@ -537,7 +537,7 @@ export function buildCommands(
     // The keyboard path for the commit menu's "Create tag…" (#438). Only opens the dialog, whose
     // Create button carries the busy rule, so it is offered while an operation runs.
     offer("create-tag-selected", actions.createTag, ["tag", "create", "new", "release", "commit"], () =>
-      appState.openCreateTagDialog(commitId),
+      appState.openDialog({ kind: "createTag", commitId }),
     );
     // Reset asks for the mode in its dialog.
     if (commitCommands !== undefined) {
@@ -550,7 +550,7 @@ export function buildCommands(
       id: "create-tag-head",
       label: "Create tag at HEAD…",
       keywords: ["tag", "create", "new", "release", "head"],
-      run: () => appState.openCreateTagDialog(headId),
+      run: () => appState.openDialog({ kind: "createTag", commitId: headId }),
     });
   }
 
@@ -573,7 +573,7 @@ export function buildCommands(
       const edit = (request: HistoryEditRequest) => (onto: string) => void appState.editHistory(commitId, onto, request);
       const edits: [string, string, HistoryEditCheck, string[], (onto: string) => void][] = [
         ["reword-selected", `Reword ${short}…`, isHead ? { ok: false, reason: "" } : checks.Reword, ["reword", "message"],
-          (onto) => appState.openRewordDialog(commitId, onto)],
+          (onto) => appState.openDialog({ kind: "reword", commitId, onto })],
         ["squash-selected", `Squash ${short} with parent`, checks.Squash, ["squash", "combine", "parent"], edit({ kind: "Squash" })],
         ["fixup-selected", `Fixup ${short} into parent`, checks.Fixup, ["fixup", "squash", "parent"], edit({ kind: "Fixup" })],
         ["move-up-selected", `Move ${short} up`, checks.MoveUp, ["move", "up", "reorder"], edit({ kind: "MoveUp" })],
@@ -593,7 +593,7 @@ export function buildCommands(
           id: `delete-remote-tag:${tag.name}`,
           label: `Delete tag ${tag.name} from remote…`,
           keywords: ["tag", "delete", "remove", "remote", tag.name],
-          run: () => appState.openDeleteRemoteTagDialog(tag.name),
+          run: () => appState.openDialog({ kind: "deleteRemoteTag", tagName: tag.name }),
         });
       }
     }
@@ -614,7 +614,7 @@ export function buildCommands(
         id: "force-push",
         label: "Force push current branch…",
         keywords: ["force", "push", "lease"],
-        run: () => appState.requestForcePush(remoteName),
+        run: () => appState.openDialog({ kind: "forcePush", remoteName }),
       });
     }
   }
@@ -641,7 +641,7 @@ export function buildCommands(
       void appState.switchBranch(branch.name),
     );
     offer(`merge-branch:${branch.name}`, actions.merge, ["branch", "merge", "squash", branch.name], () =>
-      appState.openMergeDialog(branch.name),
+      appState.openDialog({ kind: "merge", branchName: branch.name }),
     );
   }
 
@@ -660,7 +660,7 @@ export function buildCommands(
         "push-branch-to",
         branchActions(branchContext, current).pushTo,
         ["push", "publish", "upstream", "remote", "branch"],
-        () => appState.openPushDialog(current.name),
+        () => appState.openDialog({ kind: "push", localBranch: current.name }),
       );
     }
     if (!repositoryOperationDisabled) {
@@ -668,7 +668,7 @@ export function buildCommands(
         id: "delete-remote-branch",
         label: "Delete remote branch…",
         keywords: ["delete", "remove", "remote", "branch"],
-        run: () => appState.openDeleteRemoteBranchDialog(null, null),
+        run: () => appState.openDialog({ kind: "deleteRemoteBranch", remoteName: null, branchName: null }),
       });
     }
   }
@@ -701,17 +701,17 @@ export function buildCommands(
       });
     }
     offer(`edit-remote:${remote.name}`, actions.edit, ["remote", "edit", "url", "rename", remote.name], () =>
-      appState.openRemoteDialog("edit", remote.name),
+      appState.openDialog({ kind: "remote", action: "edit", remoteName: remote.name }),
     );
     offer(
       `manage-credentials:${remote.name}`,
       actions.credentials,
       ["remote", "credentials", "token", "ssh", "https", "auth", "password", remote.name],
-      () => appState.openRemoteDialog("credentials", remote.name),
+      () => appState.openDialog({ kind: "remote", action: "credentials", remoteName: remote.name }),
     );
     // Opens the same confirmation as the remote's menu; never removes directly.
     offer(`remove-remote:${remote.name}`, actions.remove, ["remote", "remove", "delete", remote.name], () =>
-      appState.openRemoteDialog("remove", remote.name),
+      appState.openDialog({ kind: "remote", action: "remove", remoteName: remote.name }),
     );
   }
 

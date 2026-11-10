@@ -22,16 +22,14 @@ import { logFailure } from "../lib/logger";
 import type { PresetAction } from "../lib/rebaseSelection";
 import type { AppState } from "./useAppState";
 import type { RunMutation } from "./useMutationRunner";
+import { withoutDialog } from "./workspaceDialog";
 
 export interface MergeRebaseActions {
-  /** Opens the merge options dialog for `branchName` (BranchTree menu, palette). */
-  openMergeDialog(branchName: string): void;
-  closeMergeDialog(): void;
   /** The dialog's preselection: remembered per repo, else from `merge.ff`. */
   getMergeOptions(): Promise<MergeOptions>;
   /**
-   * Remembers `options` for this repo, closes the dialog and merges `branchName` with them,
-   * recording the outcome in `state.mergeOutcome` for the toast.
+   * Remembers `options` for this repo, closes the merge dialog (`dialog` kind "merge") and merges
+   * `branchName` with them, recording the outcome in `state.mergeOutcome` for the toast.
    */
   mergeBranch(branchName: string, options: MergeOptions): Promise<void>;
   /** "Pull has diverged → Merge": merges the upstream ref, allowing fast-forward, no dialog. */
@@ -56,8 +54,6 @@ export interface MergeRebaseActions {
    * step result (`Done`, or a pause), or `null` when it failed (the error is in `state.error`).
    */
   editHistory(commitId: string, onto: string, request: HistoryEditRequest): Promise<RebaseStepResult | null>;
-  openRewordDialog(commitId: string, onto: string): void;
-  closeRewordDialog(): void;
   rebaseContinue(): Promise<void>;
   /** The abort's outcome, or `null` when it failed (the error is in `state.error`). */
   abortRebase(): Promise<RebaseAbort | null>;
@@ -69,20 +65,11 @@ export function useMergeRebaseActions(
   runMutation: RunMutation,
   setState: (updater: (prev: AppState) => AppState) => void,
 ): MergeRebaseActions {
-  const openMergeDialog = useCallback(
-    (branchName: string) => {
-      setState((prev) => ({ ...prev, mergeDialog: { branchName }, mergeOutcome: null }));
-    },
-    [setState],
-  );
-  const closeMergeDialog = useCallback(() => {
-    setState((prev) => ({ ...prev, mergeDialog: null }));
-  }, [setState]);
   const getMergeOptions = useCallback(() => client.getMergeOptions(repoPath), [client, repoPath]);
   const runMerge = useCallback(
     (branchName: string, options: MergeOptions): Promise<void> =>
       runMutation(async () => {
-        setState((prev) => ({ ...prev, mergeDialog: null, mergeOutcome: null }));
+        setState((prev) => ({ ...prev, dialog: withoutDialog(prev.dialog, "merge"), mergeOutcome: null }));
         const outcome: MergeOutcome = await client.mergeBranch(repoPath, branchName, options);
         setState((prev) => ({ ...prev, mergeOutcome: { branchName, outcome } }));
       }),
@@ -191,15 +178,6 @@ export function useMergeRebaseActions(
     },
     [client, runMutation, repoPath, setState],
   );
-  const openRewordDialog = useCallback(
-    (commitId: string, onto: string) => {
-      setState((prev) => ({ ...prev, rewordDialog: { commitId, onto } }));
-    },
-    [setState],
-  );
-  const closeRewordDialog = useCallback(() => {
-    setState((prev) => ({ ...prev, rewordDialog: null }));
-  }, [setState]);
   const rebaseContinue = useCallback(
     (): Promise<void> =>
       runMutation(async () => {
@@ -220,8 +198,6 @@ export function useMergeRebaseActions(
   );
 
   return {
-    openMergeDialog,
-    closeMergeDialog,
     getMergeOptions,
     mergeBranch,
     mergePull,
@@ -235,8 +211,6 @@ export function useMergeRebaseActions(
     closeRebasePlanner,
     startRebase,
     editHistory,
-    openRewordDialog,
-    closeRewordDialog,
     rebaseContinue,
     abortRebase,
   };

@@ -1,7 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BranchTree } from "./BranchTree";
 import { renderTree } from "../test/branchTreeProps";
+import { BranchTreeWithDialogs } from "../test/BranchTreeWithDialogs";
 
 const oneRemote = [{ name: "origin", fetchUrl: "git@github.com:user/repo.git", pushUrl: null, authMode: null, authUsername: null }];
 const originOnly = [{ name: "origin", fetchUrl: "x", pushUrl: null, authMode: null, authUsername: null }];
@@ -85,7 +85,7 @@ describe("useRemoteBranchCache (in BranchTree)", () => {
     fireEvent.click(screen.getByRole("button", { name: "origin" }));
     expect(await screen.findByRole("button", { name: "Show origin/topic in graph" })).toBeInTheDocument();
 
-    rerender(<BranchTree {...props} refreshGeneration={1} />);
+    rerender(<BranchTreeWithDialogs {...props} refreshGeneration={1} />);
 
     // No "Loading…" flash: the old list stays until the new one lands.
     expect(screen.queryByText("Loading…")).toBeNull();
@@ -101,7 +101,7 @@ describe("useRemoteBranchCache (in BranchTree)", () => {
     await screen.findByRole("button", { name: "Show origin/main in graph" });
     fireEvent.click(screen.getByRole("button", { name: "origin" })); // collapse
 
-    rerender(<BranchTree {...props} refreshGeneration={1} />);
+    rerender(<BranchTreeWithDialogs {...props} refreshGeneration={1} />);
     expect(onListRemoteBranches).toHaveBeenCalledOnce(); // closed folders are not reloaded eagerly
     fireEvent.click(screen.getByRole("button", { name: "origin" })); // expand again
 

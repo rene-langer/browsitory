@@ -65,11 +65,11 @@ export function DiffPane({
   // (not just a hunk action taken in this pane) invalidates every open working-tree diff. Optional
   // only so tests that don't exercise refreshes needn't pass it.
   refreshGeneration?: number;
-  // Discard confirmation state, lifted so the command palette can open the same dialogs as the
-  // file menu and "Discard all…". Optional: when `onDiscardRequestChange` is absent the pane keeps
-  // the state itself.
-  discardRequest?: DiscardRequest | null;
-  onDiscardRequestChange?: (request: DiscardRequest | null) => void;
+  // Discard confirmation state, owned by `RepoWorkspace` so the command palette opens the same
+  // dialogs as the file menu and "Discard all…" (#493). Always controlled: tests hold it in a
+  // small wrapper.
+  discardRequest: DiscardRequest | null;
+  onDiscardRequestChange: (request: DiscardRequest | null) => void;
   // Passed straight through to `CommitBox` — see its `initialDraft`.
   initialCommitDraft?: CommitDraft;
   // Loaded history, used for the selected commit's header (author, date, parents).

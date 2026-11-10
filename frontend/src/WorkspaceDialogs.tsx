@@ -25,6 +25,7 @@ import type { useAnnounce } from "./state/useAnnounce";
 import type { UseAppStateResult } from "./state/useAppState";
 import type { useCommitDraftActions } from "./state/useCommitDraftActions";
 import type { useSequenceActions } from "./state/useSequenceActions";
+import { dialogOf } from "./state/workspaceDialog";
 
 /** The parent picker or reset dialog of one commit (#507, #514). */
 export interface CommitDialogRequest {
@@ -36,9 +37,10 @@ export interface CommitDialogRequest {
 type SequenceActions = ReturnType<typeof useSequenceActions>;
 
 /**
- * `RepoWorkspace`'s dialogs and overlays (#491). Each opens from its own state: mostly an
- * `appState.state.*Dialog` field, else one of the workspace's own (`commitDialog`, the palette,
- * the shortcut sheet).
+ * `RepoWorkspace`'s dialogs and overlays (#491). Each opens from its own state: mostly
+ * `appState.state.dialog` (#493, one at a time), else one of the workspace's own (`commitDialog`,
+ * the palette, the shortcut sheet) or another `AppState` field (hook failure, transfer, rebase
+ * planner).
  */
 export function WorkspaceDialogs({
   active,
@@ -92,7 +94,8 @@ export function WorkspaceDialogs({
   shortcutsOpen: boolean;
   onShortcutsOpenChange: (open: boolean) => void;
 }) {
-  const { dismissError } = appState;
+  const { dismissError, closeDialog } = appState;
+  const dialog = appState.state.dialog;
   const currentBranchName = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? appState.state.upstream?.remoteBranch ?? "";
   const currentLocalBranch = appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null;
   // #508: the stash dialog re-checks this while open; a rebase or sequence can start meanwhile.
@@ -102,13 +105,20 @@ export function WorkspaceDialogs({
   const forcePushTargetBranch = (remoteName: string) =>
     (appState.state.upstream?.remoteName === remoteName ? upstreamPushBranch(appState.state.upstream) : null) ??
     currentBranchName;
-  const pushDialogBranch = appState.state.pushDialog?.localBranch ?? null;
-  const createTagDialog = appState.state.createTagDialog;
+  const forcePushConfirm = dialogOf(dialog, "forcePush");
+  const pushDialogBranch = dialogOf(dialog, "push")?.localBranch ?? null;
+  const createTagDialog = dialogOf(dialog, "createTag");
   const createTagCommit =
     createTagDialog === null ? undefined : appState.state.commits.find((commit) => commit.id === createTagDialog.commitId);
-  const mergeDialogBranch = appState.state.mergeDialog?.branchName ?? null;
-  const rewordDialog = appState.state.rewordDialog;
-  const rewordCommitId = rewordDialog?.commitId ?? null;
+  const mergeDialogBranch = dialogOf(dialog, "merge")?.branchName ?? null;
+  const stashDialog = dialogOf(dialog, "stash");
+  const deleteRemoteBranchDialog = dialogOf(dialog, "deleteRemoteBranch");
+  const deleteRemoteTagDialog = dialogOf(dialog, "deleteRemoteTag");
+  const remoteDialog = dialogOf(dialog, "remote");
+  const rewordDialog = dialogOf(dialog, "reword");
+  // Read from `dialog` itself, not `rewordDialog`: the React Compiler cannot keep the memoization
+  // below on a value a helper call returned.
+  const rewordCommitId = dialog?.kind === "reword" ? dialog.commitId : null;
   const loadRewordMessage = useCallback(
     () => (rewordCommitId === null ? Promise.resolve("") : client.getCommitMessage(repoPath, rewordCommitId)),
     [client, repoPath, rewordCommitId],
@@ -132,14 +142,14 @@ export function WorkspaceDialogs({
           onClose={appState.closeHookFailure}
         />
       )}
-      {active && appState.state.forcePushConfirm !== null && (
+      {active && forcePushConfirm !== null && (
         <ConfirmDialog
           ariaLabel="Confirm force push"
           message={
             <>
               <p>
-                Overwrites {appState.state.forcePushConfirm.remoteName}/
-                {forcePushTargetBranch(appState.state.forcePushConfirm.remoteName)} with your local branch.
+                Overwrites {forcePushConfirm.remoteName}/{forcePushTargetBranch(forcePushConfirm.remoteName)} with
+                your local branch.
               </p>
               {/* #514: the repository can become busy while the confirmation is open. */}
               {operationDisabledReason !== null && <p>{operationDisabledReason}</p>}
@@ -150,7 +160,7 @@ export function WorkspaceDialogs({
           confirmTitle={operationDisabledReason ?? undefined}
           onConfirm={() => {
             if (repositoryOperationDisabled) return;
-            void announce("Force pushed", appState.forcePushCurrentBranch)(appState.state.forcePushConfirm!.remoteName);
+            void announce("Force pushed", appState.forcePushCurrentBranch)(forcePushConfirm.remoteName);
           }}
           onCancel={appState.cancelForcePush}
         />
@@ -185,15 +195,15 @@ export function WorkspaceDialogs({
             if (repositoryOperationDisabled) return;
             void appState.mergeBranch(mergeDialogBranch, options);
           }}
-          onCancel={appState.closeMergeDialog}
+          onCancel={() => closeDialog("merge")}
         />
       )}
-      {active && appState.state.stashDialog !== null && (
+      {active && stashDialog !== null && (
         <StashDialog
-          paths={appState.state.stashDialog.paths}
+          paths={stashDialog.paths}
           untrackedOnly={
-            appState.state.stashDialog.paths.length > 0 &&
-            appState.state.stashDialog.paths.every((path) =>
+            stashDialog.paths.length > 0 &&
+            stashDialog.paths.every((path) =>
               appState.state.status.some((entry) => entry.path === path && !entry.staged && entry.kind === "New"),
             )
           }
@@ -202,7 +212,7 @@ export function WorkspaceDialogs({
             if (stashBlocked !== null) return;
             void announce("Changes stashed", appState.saveStash)(options);
           }}
-          onCancel={appState.closeStashDialog}
+          onCancel={() => closeDialog("stash")}
         />
       )}
       {active && commitDialog !== null && commitDialog.kind !== "Reset" && (
@@ -246,13 +256,13 @@ export function WorkspaceDialogs({
             if (repositoryOperationDisabled) return;
             void announce("Push complete", appState.pushBranch)(remoteName, pushDialogBranch, remoteBranch, setUpstream);
           }}
-          onCancel={appState.closePushDialog}
+          onCancel={() => closeDialog("push")}
         />
       )}
       {active && (
         // Here, not in `BranchTree`: the sidebar stays mounted but `hidden` while collapsed.
         <RemoteDialogs
-          remoteDialog={appState.state.remoteDialog}
+          remoteDialog={remoteDialog}
           remotes={appState.state.remotes}
           remoteUpstreams={appState.state.remoteUpstreams}
           blockedReason={operationDisabledReason}
@@ -262,22 +272,22 @@ export function WorkspaceDialogs({
           onSaveHttpsCredential={appState.saveHttpsCredential}
           onForgetHttpsCredential={appState.forgetHttpsCredential}
           onSetRemoteAuthMode={appState.setRemoteAuthMode}
-          onClose={appState.closeRemoteDialog}
+          onClose={() => closeDialog("remote")}
           onRemoteGone={(name) => pushToast(`Remote ${name} was removed or renamed.`)}
         />
       )}
-      {active && appState.state.deleteRemoteBranchDialog !== null && (
+      {active && deleteRemoteBranchDialog !== null && (
         <DeleteRemoteBranchDialog
           remotes={appState.state.remotes}
-          initialRemote={appState.state.deleteRemoteBranchDialog.remoteName}
-          initialBranch={appState.state.deleteRemoteBranchDialog.branchName}
+          initialRemote={deleteRemoteBranchDialog.remoteName}
+          initialBranch={deleteRemoteBranchDialog.branchName}
           onListRemoteBranches={appState.listRemoteBranches}
           blockedReason={operationDisabledReason}
           onDelete={(remoteName, branchName) => {
             if (repositoryOperationDisabled) return;
             void announce("Remote branch deleted", appState.deleteRemoteBranch)(remoteName, branchName);
           }}
-          onCancel={appState.closeDeleteRemoteBranchDialog}
+          onCancel={() => closeDialog("deleteRemoteBranch")}
         />
       )}
       {active && createTagDialog !== null && (
@@ -294,11 +304,11 @@ export function WorkspaceDialogs({
             const create = pushTo === null ? announce("Tag created", appState.createTag) : appState.createTag;
             const failure = await create(name, message, createTagDialog.commitId);
             if (failure !== null) return failure;
-            appState.closeCreateTagDialog();
+            closeDialog("createTag");
             if (pushTo !== null) void announce("Push complete", appState.pushTags)(pushTo, [name]);
             return null;
           }}
-          onCancel={appState.closeCreateTagDialog}
+          onCancel={() => closeDialog("createTag")}
         />
       )}
       {active && rewordDialog !== null && (
@@ -313,26 +323,26 @@ export function WorkspaceDialogs({
           disabledReason={operationDisabledReason}
           onReword={(message) => {
             const { commitId, onto } = rewordDialog;
-            appState.closeRewordDialog();
+            closeDialog("reword");
             void appState.editHistory(commitId, onto, { kind: "Reword", message });
           }}
-          onCancel={appState.closeRewordDialog}
+          onCancel={() => closeDialog("reword")}
         />
       )}
-      {active && appState.state.deleteRemoteTagDialog !== null && (
+      {active && deleteRemoteTagDialog !== null && (
         <DeleteRemoteTagDialog
-          tagName={appState.state.deleteRemoteTagDialog.tagName}
+          tagName={deleteRemoteTagDialog.tagName}
           remotes={appState.state.remotes}
           disabled={repositoryOperationDisabled}
           disabledReason={operationDisabledReason}
           onDelete={(remoteName, deleteLocal) =>
             void announce("Remote tag deleted", appState.deleteRemoteTag)(
               remoteName,
-              appState.state.deleteRemoteTagDialog?.tagName ?? "",
+              deleteRemoteTagDialog.tagName,
               deleteLocal,
             )
           }
-          onCancel={appState.closeDeleteRemoteTagDialog}
+          onCancel={() => closeDialog("deleteRemoteTag")}
         />
       )}
       {/* Every `Overlay` below is gated on `active` as well as its own open-state. `Overlay`

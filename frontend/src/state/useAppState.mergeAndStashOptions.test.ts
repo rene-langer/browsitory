@@ -19,14 +19,14 @@ describe("useAppState merge and stash options", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     const options = { fastForward: "Never", squash: false } as const;
 
-    act(() => result.current.openMergeDialog("feature"));
-    expect(result.current.state.mergeDialog).toEqual({ branchName: "feature" });
+    act(() => result.current.openDialog({ kind: "merge", branchName: "feature" }));
+    expect(result.current.state.dialog).toEqual({ kind: "merge", branchName: "feature" });
     await act(() => result.current.mergeBranch("feature", options));
 
     expect(setMergeOptions).toHaveBeenCalledWith(TEST_REPO_PATH, options);
     expect(mergeBranch).toHaveBeenCalledWith(TEST_REPO_PATH, "feature", options);
     expect(calls).toEqual(["set", "merge"]);
-    expect(result.current.state.mergeDialog).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
     expect(result.current.state.mergeOutcome).toEqual({ branchName: "feature", outcome: { kind: "Merged" } });
   });
 
@@ -55,24 +55,24 @@ describe("useAppState merge and stash options", () => {
       },
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
-    act(() => result.current.openMergeDialog("feature"));
+    act(() => result.current.openDialog({ kind: "merge", branchName: "feature" }));
 
     await act(() => result.current.mergeBranch("feature", { fastForward: "Only", squash: false }));
 
     expect(result.current.state.mergeOutcome).toBeNull();
-    expect(result.current.state.mergeDialog).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
     expect(result.current.state.error).toBe("Can't fast-forward: 'feature' has diverged from the current branch.");
   });
 
-  it("closeMergeDialog closes it and getMergeOptions reads the client", async () => {
+  it("closeDialog closes the merge dialog and getMergeOptions reads the client", async () => {
     const options = { fastForward: "Only", squash: false } as const;
     const client = transferClient({ getMergeOptions: async () => options });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
 
-    act(() => result.current.openMergeDialog("feature"));
-    act(() => result.current.closeMergeDialog());
+    act(() => result.current.openDialog({ kind: "merge", branchName: "feature" }));
+    act(() => result.current.closeDialog("merge"));
 
-    expect(result.current.state.mergeDialog).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
     await expect(result.current.getMergeOptions()).resolves.toEqual(options);
   });
 
@@ -107,15 +107,15 @@ describe("useAppState merge and stash options", () => {
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     const options = { message: "wip", keepIndex: true, includeUntracked: false, paths: ["a.txt"] };
 
-    act(() => result.current.openStashDialog(["a.txt"]));
-    expect(result.current.state.stashDialog).toEqual({ paths: ["a.txt"] });
+    act(() => result.current.openDialog({ kind: "stash", paths: ["a.txt"] }));
+    expect(result.current.state.dialog).toEqual({ kind: "stash", paths: ["a.txt"] });
     await act(() => result.current.saveStash(options));
 
     expect(saveStash).toHaveBeenCalledWith(TEST_REPO_PATH, options);
-    expect(result.current.state.stashDialog).toBeNull();
-    act(() => result.current.openStashDialog([]));
-    act(() => result.current.closeStashDialog());
-    expect(result.current.state.stashDialog).toBeNull();
+    expect(result.current.state.dialog).toBeNull();
+    act(() => result.current.openDialog({ kind: "stash", paths: [] }));
+    act(() => result.current.closeDialog("stash"));
+    expect(result.current.state.dialog).toBeNull();
   });
 
   it("pop uses the restore-index setting and resets a popped selected stash", async () => {

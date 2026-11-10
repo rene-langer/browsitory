@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import type { RemoteAuthMode, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
-import type { RemoteDialog } from "../state/useAppState";
+import type { RemoteDialog } from "../state/workspaceDialog";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { EditRemoteDialog } from "./EditRemoteDialog";
 import { RemoteCredentialsDialog } from "./RemoteCredentialsDialog";
 import formStyles from "./primitives/FormDialog.module.css";
 
 /**
- * The remote folder menu's dialogs (Edit / Credentials / Remove), driven by `AppState.remoteDialog`.
- * `App` renders this at its own level, not inside the sidebar: a collapsed sidebar stays mounted
- * but `hidden`, and `showModal()` on a dialog in a `display: none` subtree opens a 0×0 modal that
- * leaves the whole page inert.
+ * The remote folder menu's dialogs (Edit / Credentials / Remove), driven by `AppState.dialog` (kind
+ * "remote"). `WorkspaceDialogs` renders this, not the sidebar's `BranchTree`: a collapsed sidebar
+ * stays mounted but `hidden`, and `showModal()` on a dialog in a `display: none` subtree opens a
+ * 0×0 modal that leaves the whole page inert.
  *
  * When the dialog's remote disappears from `remotes` (removed or renamed by something else, seen on
  * a refresh) the dialog closes and `onRemoteGone` reports it — except while the dialog's own rename
@@ -84,7 +84,7 @@ export function RemoteDialogs({
   const dialog = remoteDialog;
   const blocked = blockedReason !== null;
 
-  if (dialog.kind === "remove") {
+  if (dialog.action === "remove") {
     // Computed now, not when the menu item was clicked: upstreams may change meanwhile.
     const affected = remoteUpstreams[remote.name] ?? [];
     const clearUpstreams = affected.length > 0;
@@ -115,7 +115,7 @@ export function RemoteDialogs({
       />
     );
   }
-  if (dialog.kind === "edit") {
+  if (dialog.action === "edit") {
     return (
       <EditRemoteDialog
         key={dialog.remoteName}

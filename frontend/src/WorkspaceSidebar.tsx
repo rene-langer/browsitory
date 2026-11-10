@@ -41,6 +41,7 @@ export function WorkspaceSidebar({
   stashBlockers: StashBlockers;
   onOpenRepoTab: (path: string) => Promise<void>;
 }) {
+  const { openDialog } = appState;
   return (
     <Sidebar
       panelToggles={[
@@ -61,7 +62,7 @@ export function WorkspaceSidebar({
         onRenameBranch={appState.renameBranch}
         onOpenCreateBranchDraft={appState.openCreateBranchDraft}
         onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
-        onMergeBranch={appState.openMergeDialog}
+        onMergeBranch={(branchName) => openDialog({ kind: "merge", branchName })}
         operationDisabled={repositoryOperationDisabled}
         operationDisabledReason={operationDisabledReason}
         graphBranchSelection={appState.state.graphSelection.local}
@@ -74,14 +75,7 @@ export function WorkspaceSidebar({
         remoteBranchesInGraph={Array.from(new Set(appState.state.commits.flatMap((c) => c.remoteBranchRefs)))}
         remotes={appState.state.remotes}
         upstream={appState.state.upstream}
-        remoteUpstreams={appState.state.remoteUpstreams}
         onAddRemote={appState.addRemote}
-        onRenameRemote={appState.renameRemote}
-        onUpdateRemoteUrls={appState.updateRemoteUrls}
-        onRemoveRemote={appState.removeRemote}
-        onSaveHttpsCredential={appState.saveHttpsCredential}
-        onForgetHttpsCredential={appState.forgetHttpsCredential}
-        onSetRemoteAuthMode={appState.setRemoteAuthMode}
         onSetUpstream={appState.setCurrentUpstream}
         onClearUpstream={appState.clearCurrentUpstream}
         onListRemoteBranches={appState.listRemoteBranches}
@@ -102,15 +96,12 @@ export function WorkspaceSidebar({
         addRemoteDraftOpen={appState.state.addRemoteDraftOpen}
         onOpenAddRemoteDraft={appState.openAddRemoteDraft}
         onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
-        onOpenPushDialog={appState.openPushDialog}
-        onOpenDeleteRemoteBranch={appState.openDeleteRemoteBranchDialog}
+        onOpenPushDialog={(localBranch) => openDialog({ kind: "push", localBranch })}
+        onOpenDeleteRemoteBranch={(remoteName, branchName) => openDialog({ kind: "deleteRemoteBranch", remoteName, branchName })}
         onCompareBranch={compare.compareBranch}
         onGoToBranch={(kind, name) => void goTo.goToBranch(kind, name)}
         refreshGeneration={appState.state.refreshGeneration}
-        remoteDialog={appState.state.remoteDialog}
-        onRemoteDialogChange={(dialog) =>
-          dialog === null ? appState.closeRemoteDialog() : appState.openRemoteDialog(dialog.kind, dialog.remoteName)
-        }
+        onOpenRemoteDialog={openDialog}
       />
       {panelVisibility.visibility.stash && (
         <StashPanel
@@ -161,7 +152,7 @@ export function WorkspaceSidebar({
           tags={appState.state.tags}
           remotes={appState.state.remotes}
           onDelete={appState.deleteTag}
-          onDeleteFromRemote={appState.openDeleteRemoteTagDialog}
+          onDeleteFromRemote={(tagName) => openDialog({ kind: "deleteRemoteTag", tagName })}
           onPush={appState.pushTags}
           onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
           onBranchFromCommit={appState.openCreateBranchDraft}
