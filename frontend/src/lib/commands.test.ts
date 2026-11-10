@@ -1877,6 +1877,13 @@ describe("Switch branch… (#638)", () => {
     expect(command.group).toBe("Branches");
   });
 
+  it("is in the palette's full list and found by fuzzy words (#644)", () => {
+    const handlers = { recentBranches: [], onSwitchBranch: vi.fn(), onCreateAndSwitch: vi.fn() };
+    const commands = commandsFor(makeAppState({ branches }), { branchSwitch: handlers });
+    expect(filterAndSortCommands(commands, "").some((c) => c.id === SWITCH_BRANCH_PICKER_ID)).toBe(true);
+    expect(filterAndSortCommands(commands, "br sw")[0]?.id).toBe(SWITCH_BRANCH_PICKER_ID);
+  });
+
   it("lists the recent branches first, then the other local ones, never the current one", () => {
     const { labels } = switcher({}, ["old", "gone", "main"]);
     expect(labels("")).toEqual(["old", "feature", "fix/login"]);
