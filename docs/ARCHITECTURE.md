@@ -716,9 +716,10 @@ certificate.
   branch is walked when selected). The search cursor's fingerprint covers it, as it covers every
   start oid. The frontend marks the row with a HEAD badge from `HeadInfo` (`headId` +
   `detachedAt`); `GraphCommit` carries no HEAD flag. File history already walks from HEAD.
-  Both selections are required parameters of `get_commit_graph` and
-  `search_commits` on both transports (`remoteBranches` has no default), so a caller can't drop
-  the remote one by leaving it out.
+  The selection is one `selection` parameter (`GraphSelectionDto`, `{ local, remote }`, #498) of
+  `get_commit_graph`, `locate_commit` and `search_commits` on both transports; `remote` has no
+  default, so a caller can't drop it by leaving it out. The saved-selection setters name their
+  list `local` / `remote` the same way.
 - Exactly one branch in the graph selection, local and remote together (what "Isolate branch"
   sets), makes both `graph::graph_log` and `search_commits` (without a `branch:` term) walk
   first parents only (`GraphSelection::walks_first_parent`, #380): the branch's own commits and

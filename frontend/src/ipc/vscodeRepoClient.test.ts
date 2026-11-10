@@ -398,7 +398,7 @@ describe("vscodeRepoClient", () => {
       jsonrpc: "2.0",
       id: 2,
       method: "set_graph_branch_selection",
-      params: { repoPath: "/repo", selectedBranches: ["main", "feature"] },
+      params: { repoPath: "/repo", local: ["main", "feature"] },
     });
     respond(2, null);
     await expect(setPromise).resolves.toBeNull();
@@ -420,7 +420,7 @@ describe("vscodeRepoClient", () => {
       jsonrpc: "2.0",
       id: 2,
       method: "set_graph_remote_branch_selection",
-      params: { repoPath: "/repo", selectedBranches: ["origin/main"] },
+      params: { repoPath: "/repo", remote: ["origin/main"] },
     });
     respond(2, null);
     await expect(setPromise).resolves.toBeNull();
@@ -505,12 +505,12 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires locateCommit (#441)", async () => {
-    const promise = vscodeRepoClient.locateCommit("/repo", "v1.0", null, []);
+    const promise = vscodeRepoClient.locateCommit("/repo", "v1.0", { local: null, remote: [] });
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "locate_commit",
-      params: { repoPath: "/repo", revision: "v1.0", selectedBranches: null, remoteBranches: [] },
+      params: { repoPath: "/repo", revision: "v1.0", selection: { local: null, remote: [] } },
     });
     respond(1, null);
     await expect(promise).resolves.toBeNull();
@@ -1376,24 +1376,24 @@ describe("vscodeRepoClient", () => {
   });
 
   it("wires getCommitGraph with the local and the remote selection", async () => {
-    const promise = vscodeRepoClient.getCommitGraph("/repo", 50, null, ["origin/feature"]);
+    const promise = vscodeRepoClient.getCommitGraph("/repo", 50, { local: null, remote: ["origin/feature"] });
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "get_commit_graph",
-      params: { repoPath: "/repo", limit: 50, selectedBranches: null, remoteBranches: ["origin/feature"] },
+      params: { repoPath: "/repo", limit: 50, selection: { local: null, remote: ["origin/feature"] } },
     });
     respond(1, []);
     await expect(promise).resolves.toEqual([]);
   });
 
   it("wires searchCommits and cancelSearch", async () => {
-    const promise = vscodeRepoClient.searchCommits("/repo", "fix", ["main"], ["origin/x"], null);
+    const promise = vscodeRepoClient.searchCommits("/repo", "fix", { local: ["main"], remote: ["origin/x"] }, null);
     expect(postMessage).toHaveBeenCalledWith({
       jsonrpc: "2.0",
       id: 1,
       method: "search_commits",
-      params: { repoPath: "/repo", query: "fix", refs: ["main"], remoteBranches: ["origin/x"], cursor: null },
+      params: { repoPath: "/repo", query: "fix", selection: { local: ["main"], remote: ["origin/x"] }, cursor: null },
     });
     const page = { commits: [], nextCursor: null, scanned: 3 };
     respond(1, page);

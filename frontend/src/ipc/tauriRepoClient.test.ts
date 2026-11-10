@@ -656,25 +656,23 @@ describe("tauriRepoClient commit search", () => {
 
   it("invokes get_commit_graph with the local and the remote selection", async () => {
     vi.mocked(invoke).mockResolvedValueOnce([]);
-    await tauriRepoClient.getCommitGraph("/repo", 50, [], ["origin/feature"]);
+    await tauriRepoClient.getCommitGraph("/repo", 50, { local: [], remote: ["origin/feature"] });
     expect(invoke).toHaveBeenLastCalledWith("get_commit_graph", {
       repoPath: "/repo",
       limit: 50,
-      selectedBranches: [],
-      remoteBranches: ["origin/feature"],
+      selection: { local: [], remote: ["origin/feature"] },
     });
   });
 
   it("invokes search_commits without logging its errors, and cancel_search", async () => {
     vi.mocked(invoke).mockRejectedValueOnce({ kind: "Other", message: "Search cancelled." });
-    await expect(tauriRepoClient.searchCommits("/repo", "author:ada", null, ["origin/x"], "100:abc")).rejects.toEqual(
+    await expect(tauriRepoClient.searchCommits("/repo", "author:ada", { local: null, remote: ["origin/x"] }, "100:abc")).rejects.toEqual(
       new RepoError("Other", "Search cancelled."),
     );
     expect(invoke).toHaveBeenLastCalledWith("search_commits", {
       repoPath: "/repo",
       query: "author:ada",
-      refs: null,
-      remoteBranches: ["origin/x"],
+      selection: { local: null, remote: ["origin/x"] },
       cursor: "100:abc",
     });
     expect(logError).not.toHaveBeenCalled();
@@ -719,12 +717,11 @@ describe("tauriRepoClient commit search", () => {
   it("wires locateCommit (#441)", async () => {
     const location = { commitId: "c", position: null, branches: ["feature"], remoteBranches: [] };
     vi.mocked(invoke).mockResolvedValue(location);
-    await expect(tauriRepoClient.locateCommit("/repo", "abc1234", ["main"], ["origin/main"])).resolves.toEqual(location);
+    await expect(tauriRepoClient.locateCommit("/repo", "abc1234", { local: ["main"], remote: ["origin/main"] })).resolves.toEqual(location);
     expect(invoke).toHaveBeenLastCalledWith("locate_commit", {
       repoPath: "/repo",
       revision: "abc1234",
-      selectedBranches: ["main"],
-      remoteBranches: ["origin/main"],
+      selection: { local: ["main"], remote: ["origin/main"] },
     });
   });
 });

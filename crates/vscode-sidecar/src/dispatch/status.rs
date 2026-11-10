@@ -1,8 +1,8 @@
-use git_core::graph::GraphSelection;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, LineHistoryDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, GraphSelectionDto,
+    LineHistoryDto,
     StatusEntryDto,
 };
 use serde::Deserialize;
@@ -29,10 +29,9 @@ pub(super) fn get_status(params: RepoPathParams, repos: &Repos) -> Result<Value,
 pub(super) struct GetCommitGraphParams {
     repo_path: String,
     limit: usize,
-    selected_branches: Option<Vec<String>>,
-    /// Required, so a caller that doesn't know about remote branches fails loudly instead of
-    /// silently dropping them from the graph (#385).
-    remote_branches: Vec<String>,
+    /// `selection.remote` is required, so a caller that doesn't know about remote branches
+    /// fails loudly instead of silently dropping them from the graph (#385).
+    selection: GraphSelectionDto,
 }
 
 pub(super) fn get_commit_graph(
@@ -40,13 +39,7 @@ pub(super) fn get_commit_graph(
     repos: &Repos,
 ) -> Result<Value, ErrorDto> {
     let commits: Vec<GraphCommitDto> = worker_handle(repos, &params.repo_path)?
-        .get_commit_graph(
-            params.limit,
-            GraphSelection {
-                local: params.selected_branches,
-                remote: params.remote_branches,
-            },
-        )?
+        .get_commit_graph(params.limit, params.selection.into())?
         .into_iter()
         .map(GraphCommitDto::from)
         .collect();
@@ -58,21 +51,13 @@ pub(super) fn get_commit_graph(
 pub(super) struct LocateCommitParams {
     repo_path: String,
     revision: String,
-    selected_branches: Option<Vec<String>>,
-    /// Required, like `GetCommitGraphParams::remote_branches`.
-    remote_branches: Vec<String>,
+    selection: GraphSelectionDto,
 }
 
 /// Where `revision`'s commit sits in the graph of the given selection (#441).
 pub(super) fn locate_commit(params: LocateCommitParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let location = worker_handle(repos, &params.repo_path)?
-        .locate_commit(
-            params.revision,
-            GraphSelection {
-                local: params.selected_branches,
-                remote: params.remote_branches,
-            },
-        )?
+        .locate_commit(params.revision, params.selection.into())?
         .map(CommitLocationDto::from);
     serde_json::to_value(location).map_err(ErrorDto::from_error)
 }
@@ -211,13 +196,13 @@ pub(super) fn get_graph_branch_selection(params: RepoPathParams) -> Result<Value
 #[serde(rename_all = "camelCase")]
 pub(super) struct SetGraphBranchSelectionParams {
     repo_path: String,
-    selected_branches: Vec<String>,
+    local: Vec<String>,
 }
 
 pub(super) fn set_graph_branch_selection(
     params: SetGraphBranchSelectionParams,
 ) -> Result<Value, ErrorDto> {
-    config::set_graph_branch_selection(Path::new(&params.repo_path), &params.selected_branches)
+    config::set_graph_branch_selection(Path::new(&params.repo_path), &params.local)
         .map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }
@@ -239,16 +224,13 @@ pub(super) fn get_graph_remote_branch_selection(params: RepoPathParams) -> Resul
 #[serde(rename_all = "camelCase")]
 pub(super) struct SetGraphRemoteBranchSelectionParams {
     repo_path: String,
-    selected_branches: Vec<String>,
+    remote: Vec<String>,
 }
 
 pub(super) fn set_graph_remote_branch_selection(
     params: SetGraphRemoteBranchSelectionParams,
 ) -> Result<Value, ErrorDto> {
-    config::set_graph_remote_branch_selection(
-        Path::new(&params.repo_path),
-        &params.selected_branches,
-    )
+    config::set_graph_remote_branch_selection(Path::new(&params.repo_path), &params.remote)
     .map_err(ErrorDto::from_error)?;
     Ok(Value::Null)
 }

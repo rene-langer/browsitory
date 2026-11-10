@@ -536,9 +536,9 @@ pub fn get_graph_branch_selection(repo_path: &Path) -> Result<Option<Vec<String>
 
 pub fn set_graph_branch_selection(
     repo_path: &Path,
-    selected_branches: &[String],
+    local: &[String],
 ) -> Result<(), ConfigError> {
-    set_graph_branch_selection_at(&config_file_path()?, repo_path, selected_branches)
+    set_graph_branch_selection_at(&config_file_path()?, repo_path, local)
 }
 
 pub fn get_graph_branch_selection_at(
@@ -556,7 +556,7 @@ pub fn get_graph_branch_selection_at(
 pub fn set_graph_branch_selection_at(
     config_file: &Path,
     repo_path: &Path,
-    selected_branches: &[String],
+    local: &[String],
 ) -> Result<(), ConfigError> {
     let mut config = read_config(config_file)?;
     config
@@ -564,7 +564,7 @@ pub fn set_graph_branch_selection_at(
         .retain(|s| s.repo_path != repo_path);
     config.graph_branch_selections.push(GraphBranchSelection {
         repo_path: repo_path.to_path_buf(),
-        selected_branches: selected_branches.to_vec(),
+        selected_branches: local.to_vec(),
     });
     write_config(config_file, &config)
 }
@@ -595,9 +595,9 @@ pub fn get_graph_remote_branch_selection(
 
 pub fn set_graph_remote_branch_selection(
     repo_path: &Path,
-    selected_branches: &[String],
+    remote: &[String],
 ) -> Result<(), ConfigError> {
-    set_graph_remote_branch_selection_at(&config_file_path()?, repo_path, selected_branches)
+    set_graph_remote_branch_selection_at(&config_file_path()?, repo_path, remote)
 }
 
 pub fn get_graph_remote_branch_selection_at(
@@ -615,7 +615,7 @@ pub fn get_graph_remote_branch_selection_at(
 pub fn set_graph_remote_branch_selection_at(
     config_file: &Path,
     repo_path: &Path,
-    selected_branches: &[String],
+    remote: &[String],
 ) -> Result<(), ConfigError> {
     let mut config = read_config(config_file)?;
     config
@@ -625,7 +625,7 @@ pub fn set_graph_remote_branch_selection_at(
         .graph_remote_branch_selections
         .push(GraphRemoteBranchSelection {
             repo_path: repo_path.to_path_buf(),
-            selected_branches: selected_branches.to_vec(),
+            selected_branches: remote.to_vec(),
         });
     write_config(config_file, &config)
 }

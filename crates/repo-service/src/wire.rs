@@ -605,6 +605,27 @@ impl From<git_core::diff::CompareRange> for CompareRangeDto {
     }
 }
 
+/// The branches the commit graph walks, passed as one `selection` argument to `getCommitGraph`,
+/// `locateCommit` and `searchCommits` (#498): see `git_core::graph::GraphSelection`.
+#[derive(Deserialize, Clone)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "GraphSelection"))]
+pub struct GraphSelectionDto {
+    /// Local branch names: `null` walks every local branch, `[]` none of them.
+    pub local: Option<Vec<String>>,
+    /// Remote-tracking branches as `<remote>/<branch>`; required, `[]` walks no remote branch.
+    pub remote: Vec<String>,
+}
+
+impl From<GraphSelectionDto> for git_core::graph::GraphSelection {
+    fn from(dto: GraphSelectionDto) -> Self {
+        git_core::graph::GraphSelection {
+            local: dto.local,
+            remote: dto.remote,
+        }
+    }
+}
+
 /// "Go to commit" (#441): see `git_core::locate::CommitLocation`.
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
@@ -2648,6 +2669,7 @@ mod ts_bindings {
             PullRequestListDto,
             CreatePullRequestDto,
             DiffOptionsDto,
+            GraphSelectionDto,
             DiffAlgorithmDto,
             CommitHunkDto,
             CommitChangeRequestDto,

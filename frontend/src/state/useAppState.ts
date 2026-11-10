@@ -21,6 +21,7 @@ import type {
   UpstreamInfo,
   WorktreeInfo,
 } from "../ipc/RepoClient";
+import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
@@ -65,14 +66,14 @@ export interface AppState {
   // history probably exists beyond what is shown).
   graphLimit: number;
   hasMoreHistory: boolean;
-  // `null` means "no filter saved" — every local branch is walked (see `graph_log` in
-  // `git-core`). Non-null is the persisted subset CommitGraph currently shows.
-  graphBranchSelection: string[] | null;
-  // `<remote>/<branch>` names. `null` means "no remote selection saved": no remote branch is
-  // walked and CommitGraph shows every remote-branch badge on the commits it has. Non-null: these
-  // remote branches' commits join the walk (#385) and only their badges show. Together with
-  // graphBranchSelection, exactly one branch in total makes the graph first-parent only.
-  graphRemoteBranchSelection: string[] | null;
+  // The persisted branch selection. `local` `null` means "no filter saved" — every local branch
+  // is walked (see `graph_log` in `git-core`); non-null is the subset CommitGraph currently
+  // shows. `remote` holds `<remote>/<branch>` names; `null` means "no remote selection saved": no
+  // remote branch is walked and CommitGraph shows every remote-branch badge on the commits it
+  // has. Non-null: these remote branches' commits join the walk (#385) and only their badges
+  // show. Together, exactly one branch in total makes the graph first-parent only. The client
+  // takes the same pair as a `GraphSelection`, with a saved `null` remote sent as `[]`.
+  graphSelection: SavedGraphSelection;
   branches: BranchInfo[];
   worktrees: WorktreeInfo[];
   submodules: SubmoduleInfo[];
@@ -240,8 +241,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     commits: [],
     graphLimit: GRAPH_PAGE_SIZE,
     hasMoreHistory: false,
-    graphBranchSelection: null,
-    graphRemoteBranchSelection: null,
+    graphSelection: { local: null, remote: null },
     worktrees: [],
     submodules: [],
     reflogRefs: [],
@@ -317,7 +317,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const refresh = useCallback(async () => {
     let ticket = 0;
     try {
-      const [graphBranchSelection, graphRemoteBranchSelection] = await Promise.all([
+      const [local, remote] = await Promise.all([
         client.getGraphBranchSelection(repoPath),
         client.getGraphRemoteBranchSelection(repoPath),
       ]);
@@ -326,7 +326,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const [status, commits, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, forgeRepositories, headInfo, undoState] =
         await Promise.all([
           client.getStatus(repoPath),
-          client.getCommitGraph(repoPath, limit, graphBranchSelection, graphRemoteBranchSelection ?? []),
+          client.getCommitGraph(repoPath, limit, toGraphSelection({ local, remote })),
           client.listBranches(repoPath),
           client.listWorktrees(repoPath),
           client.listSubmodules(repoPath),
@@ -369,8 +369,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         commits,
         graphLimit: limit,
         hasMoreHistory: commits.length >= limit,
-        graphBranchSelection,
-        graphRemoteBranchSelection,
+        graphSelection: { local, remote },
         branches,
         worktrees,
         submodules,
@@ -468,8 +467,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     runOptimisticMutation,
     runOptimisticMutationWithMessage,
     setState,
-    state.graphBranchSelection,
-    state.graphRemoteBranchSelection,
+    state.graphSelection,
     branchNames,
   );
   const worktrees = useWorktreeActions(
