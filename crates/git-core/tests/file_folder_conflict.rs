@@ -960,7 +960,10 @@ fn revert_moves_the_file_coming_in_over_a_folder_like_git() {
     assert_eq!(f.repo.state(), git2::RepositoryState::Revert);
     let message = std::fs::read_to_string(f.repo.path().join("MERGE_MSG")).unwrap();
     assert!(message.starts_with("Revert \"drop c\"\n"), "{message}");
-    assert!(message.ends_with(&format!("\n# Conflicts:\n#\t{moved}\n")), "{message}");
+    assert!(
+        message.ends_with(&format!("\n# Conflicts:\n#\t{moved}\n")),
+        "{message}"
+    );
 }
 
 #[test]

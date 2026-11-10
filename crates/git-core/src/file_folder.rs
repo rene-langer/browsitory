@@ -332,7 +332,12 @@ mod tests {
         assert_eq!(moved, ["c"]);
         let entries: Vec<(String, u16)> = index
             .iter()
-            .map(|entry| (String::from_utf8_lossy(&entry.path).into_owned(), stage(&entry)))
+            .map(|entry| {
+                (
+                    String::from_utf8_lossy(&entry.path).into_owned(),
+                    stage(&entry),
+                )
+            })
             .collect();
         assert_eq!(
             entries,
