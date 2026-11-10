@@ -5,7 +5,8 @@ repository from your disk, and the list below it reopens one you used recently. 
 has **Clone…**, **New repository…** and your [workspaces](workspaces.md).
 
 Browsitory reopens the tabs you had open last time. To open another repository next to them,
-click **+** at the end of the tab bar.
+click **+** at the end of the tab bar. In the desktop app you can also drag a repository's folder
+from your file manager onto the window.
 
 ## Cloning and creating repositories
 

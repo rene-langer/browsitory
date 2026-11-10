@@ -6,7 +6,7 @@ right-hand pane. At the top is a compact list of the changed files in two groups
 scrolls on its own when it holds many files, and an empty one says so. Each row shows a status
 letter (**M** modified, **A** added, **U** untracked, **D** deleted, **R** renamed, **T** type
 changed, **C** conflicted; hover it for the word), the path, a **⋯** menu and a stage or unstage
-button.
+button. The two buttons are always there, dimmed until you point at the row or select it.
 
 Below the list, one diff viewer shows the current file: the first one when you open the view, or
 the one you click. Its header names the file and has **Blame** (who last changed each line) and
@@ -39,9 +39,9 @@ The options above the viewer (**Unified view** / **Split view**, **Wrap lines**,
 file**, **Ignore whitespace**, **Show whitespace**, **Syntax highlighting** and the context
 lines) apply to every file and are remembered; see [Diff options](history.md#diff-options).
 
-Each hunk header has **Stage hunk** (or **Unstage hunk**) and **Discard hunk**. Discard doesn't
-ask: the hunk goes at once, and the notification that says so has an **Undo** button
-(Ctrl/Cmd+Z works too).
+Each hunk header has the buttons **Stage hunk** (or **Unstage hunk**) and **Discard hunk**, which
+is red; their keys are `s` and `d`. Discard doesn't ask: the hunk goes at once, and the
+notification that says so has an **Undo** button (Ctrl/Cmd+Z works too).
 
 A rename you staged (`git mv`, or staging both the deletion and the new file) is one **Staged**
 row under the new name with "Renamed from …": its diff shows only the edits, an image previews

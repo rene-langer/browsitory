@@ -44,8 +44,10 @@ commit). Binary files are included.
 
 ## Apply a patch file
 
-**Apply patch…** in the [command palette](command-palette.md) asks for a patch file (a plain diff
-or `git format-patch` mails) and applies it to the working tree. A file with several mails is
+**Apply patch…** in the repository toolbar or the [command palette](command-palette.md) asks for a
+patch file (a plain diff or `git format-patch` mails) and applies it to the working tree. In the
+desktop app you can also drop a `.patch`, `.diff` or `.mbox` file from your file manager onto the
+window; each dropped file is one undo step. A file with several mails is
 applied in order, all or nothing: when one of them doesn't apply, the changes of the ones before
 it are put back too and the working tree is left as it was. Applying a patch never commits and is
 one step in [Undo](undo-redo.md) ("Apply patch").

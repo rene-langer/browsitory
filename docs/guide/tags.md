@@ -7,8 +7,8 @@ Shift+F10) and choose **Create tag…**. The dialog shows the commit the tag goe
 a name (a name git can't use, or one another tag already has, is pointed out under the field), pick
 **Lightweight tag** or **Annotated tag** (an annotated tag needs a message), and
 tick **Push the tag after creating it** to send it to a remote right away (pick the remote when
-there are several). In the command palette, **Create tag at HEAD…** tags the commit you have
-checked out, and **Create tag at ⟨commit⟩…** tags the commit selected in the graph. Undo removes
+there are several). The **+** button in the Tags panel's header and **Create tag at HEAD…** in
+the command palette tag the commit you have checked out, and **Create tag at ⟨commit⟩…** tags the commit selected in the graph. Undo removes
 a tag you just created.
 
 ## The Tags panel
