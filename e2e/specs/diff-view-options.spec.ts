@@ -6,6 +6,8 @@ import { clickInPage, waitUntilInPage } from "../support/dom";
 import { gitIn } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
+// The suite's config.toml (`wdio.conf.ts`, BROWSITORY_CONFIG_DIR), shared by every spec.
+const CONFIG_FILE = path.join(os.tmpdir(), "browsitory-e2e-config", "config.toml");
 const FILE = "wrap-fixture.rs";
 // Long, but under the 300 characters at which word wrap Auto wraps code anyway.
 const LONG = `let long = ${"x".repeat(200)};`;
@@ -27,6 +29,11 @@ describe("Browsitory diff word wrap and whole file", () => {
   after(() => {
     git("reset", "-q", "--", FILE);
     git("checkout", "--", FILE);
+    // Back to the built-in look for the specs after this one.
+    if (fs.existsSync(CONFIG_FILE)) {
+      const text = fs.readFileSync(CONFIG_FILE, "utf8");
+      fs.writeFileSync(CONFIG_FILE, text.replace(/\[appearance\]\n(?:[^[\n][^\n]*\n)*/, ""));
+    }
   });
 
   it("wraps long lines on demand and keeps their line numbers", async () => {
@@ -65,6 +72,33 @@ describe("Browsitory diff word wrap and whole file", () => {
     expect(wrapped.scrolls).toBe(false);
     expect(wrapped.lineNumber).toBe("5");
     expect(wrapped.height).toBeGreaterThan(unwrapped.height);
+  });
+
+  it("applies the code font size from Preferences to the diff at once (#615)", async () => {
+    const row = await $(`span=${FILE} (Modified)`);
+    await row.waitForExist();
+    await browser.execute((el) => (el as HTMLElement).click(), row);
+    await waitUntilInPage(".diff-line-add");
+    const fontSize = () =>
+      browser.execute(() => getComputedStyle(document.querySelector<HTMLElement>(".diff-line-add")!).fontSize);
+    expect(await fontSize()).toBe("12.5px");
+
+    const preferences = await $("header button[aria-label='Preferences']");
+    await preferences.waitForClickable();
+    await preferences.click();
+    const size = await $("//input[@id=//label[normalize-space(.)='Code font size (px)']/@for]");
+    await size.waitForExist();
+    expect(await size.getValue()).toBe("");
+    await size.setValue("18");
+    await browser.keys("Enter");
+
+    await browser.waitUntil(async () => (await fontSize()) === "18px", {
+      timeoutMsg: "the diff did not take the new code font size",
+    });
+    await browser.waitUntil(() => /\[appearance\]\n(?:.*\n)*code_font_size = 18\n/.test(fs.readFileSync(CONFIG_FILE, "utf8")), {
+      timeoutMsg: "the code font size did not reach config.toml",
+    });
+    await (await $("button=Close")).click();
   });
 
   it("shows the whole file and stages one selected change of it", async () => {

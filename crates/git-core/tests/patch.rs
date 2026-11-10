@@ -723,3 +723,406 @@ fn a_failed_series_puts_back_a_folder_an_earlier_mail_replaced_with_a_file() {
     assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
     assert_eq!(read(dir.path(), "foo/bar.txt"), "bar\n");
 }
+
+/// #563: patches that change, delete or rename a symbolic link apply to the link itself, as
+/// `git apply` does, never to the file it points to.
+#[cfg(unix)]
+mod links {
+    use super::*;
+    use std::path::Path;
+
+    fn link(dir: &Path, name: &str, target: &str) {
+        let at = dir.join(name);
+        if at.symlink_metadata().is_ok() {
+            std::fs::remove_file(&at).unwrap();
+        }
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(target, at).unwrap();
+    }
+
+    fn target(dir: &Path, name: &str) -> String {
+        let at = dir.join(name);
+        assert!(common::is_link(dir, name), "{name} is not a link");
+        std::fs::read_link(at)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn commit_everything(repo: &Repository, message: &str) {
+        let mut index = repo.index().unwrap();
+        index.update_all(["*"].iter(), None).unwrap();
+        index.write().unwrap();
+        commit_all(repo, message);
+    }
+
+    fn reset_to(repo: &Repository, id: &str) {
+        let commit = repo.find_commit(git2::Oid::from_str(id).unwrap()).unwrap();
+        repo.reset(commit.as_object(), git2::ResetType::Hard, None)
+            .unwrap();
+    }
+
+    /// `f.txt`, `h.txt` and `l -> f.txt` committed, then `change` committed; the working tree
+    /// is reset to the base. Returns the change's id and its patch.
+    fn link_change(change: impl Fn(&Path)) -> (tempfile::TempDir, Repository, String, Vec<u8>) {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "f.txt", "f\n");
+        write_file(dir.path(), "h.txt", "h\n");
+        link(dir.path(), "l", "f.txt");
+        commit_all(&repo, "base");
+        let base = head_id(&repo);
+        change(dir.path());
+        commit_everything(&repo, "change");
+        let id = head_id(&repo);
+        let patch = commits_patch(&repo, std::slice::from_ref(&id)).unwrap();
+        reset_to(&repo, &base);
+        (dir, repo, id, patch)
+    }
+
+    fn files_untouched(dir: &Path) {
+        assert_eq!(read(dir, "f.txt"), "f\n");
+        assert_eq!(read(dir, "h.txt"), "h\n");
+    }
+
+    #[test]
+    fn a_patch_retargets_a_link() {
+        let (dir, repo, _, patch) = link_change(|dir| link(dir, "l", "h.txt"));
+        apply_patch(&repo, &patch).unwrap();
+        assert_eq!(target(dir.path(), "l"), "h.txt");
+        files_untouched(dir.path());
+    }
+
+    #[test]
+    fn a_patch_deletes_a_link() {
+        let (dir, repo, _, patch) = link_change(|dir| std::fs::remove_file(dir.join("l")).unwrap());
+        apply_patch(&repo, &patch).unwrap();
+        assert!(dir.path().join("l").symlink_metadata().is_err());
+        files_untouched(dir.path());
+    }
+
+    #[test]
+    fn a_patch_renames_a_link() {
+        let (dir, repo, _, patch) = link_change(|dir| {
+            std::fs::remove_file(dir.join("l")).unwrap();
+            link(dir, "sub/m", "../f.txt");
+        });
+        // A folder for the new name, a new target: shown as a delete and an add.
+        apply_patch(&repo, &patch).unwrap();
+        assert!(dir.path().join("l").symlink_metadata().is_err());
+        assert_eq!(target(dir.path(), "sub/m"), "../f.txt");
+        files_untouched(dir.path());
+    }
+
+    #[test]
+    fn a_patch_renames_a_link_it_keeps_pointing_the_same_way() {
+        let (dir, repo, _, patch) = link_change(|dir| {
+            std::fs::remove_file(dir.join("l")).unwrap();
+            link(dir, "m", "f.txt");
+        });
+        apply_patch(&repo, &patch).unwrap();
+        assert!(dir.path().join("l").symlink_metadata().is_err());
+        assert_eq!(target(dir.path(), "m"), "f.txt");
+        files_untouched(dir.path());
+    }
+
+    #[test]
+    fn a_patch_changes_a_link_and_a_file_together() {
+        let (dir, repo, _, patch) = link_change(|dir| {
+            link(dir, "l", "h.txt");
+            write_file(dir, "h.txt", "h2\n");
+        });
+        apply_patch(&repo, &patch).unwrap();
+        assert_eq!(target(dir.path(), "l"), "h.txt");
+        assert_eq!(read(dir.path(), "h.txt"), "h2\n");
+        assert_eq!(read(dir.path(), "f.txt"), "f\n");
+    }
+
+    #[test]
+    fn a_link_pointing_elsewhere_now_refuses_the_whole_patch() {
+        let (dir, repo, _, patch) = link_change(|dir| {
+            link(dir, "l", "h.txt");
+            write_file(dir, "h.txt", "h2\n");
+        });
+        link(dir.path(), "l", "other.txt");
+        let err = apply_patch(&repo, &patch).unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(target(dir.path(), "l"), "other.txt");
+        files_untouched(dir.path());
+    }
+
+    #[test]
+    fn a_link_patch_refuses_a_file_standing_where_the_link_was() {
+        let (dir, repo, _, patch) = link_change(|dir| link(dir, "l", "h.txt"));
+        std::fs::remove_file(dir.path().join("l")).unwrap();
+        // The link's target as a plain file: still not a link.
+        write_file(dir.path(), "l", "f.txt");
+        let err = apply_patch(&repo, &patch).unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(read(dir.path(), "l"), "f.txt");
+    }
+
+    #[test]
+    fn a_patch_deleting_a_missing_link_does_not_apply() {
+        let (dir, repo, _, patch) = link_change(|dir| std::fs::remove_file(dir.join("l")).unwrap());
+        std::fs::remove_file(dir.path().join("l")).unwrap();
+        let err = apply_patch(&repo, &patch).unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+    }
+
+    #[test]
+    fn a_patch_adding_a_link_over_an_untracked_one_names_it() {
+        let (dir, repo, _, patch) = link_change(|dir| link(dir, "m", "h.txt"));
+        link(dir.path(), "m", "f.txt");
+        let err = apply_patch(&repo, &patch).unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(target(dir.path(), "m"), "f.txt");
+    }
+
+    #[test]
+    fn reverting_and_applying_a_commits_link_change() {
+        let (dir, repo, id, _) = link_change(|dir| link(dir, "l", "h.txt"));
+        apply_commit_change(&repo, &id, "l", None, None, false, ApplyTarget::WorkTree).unwrap();
+        assert_eq!(target(dir.path(), "l"), "h.txt");
+        apply_commit_change(&repo, &id, "l", None, None, true, ApplyTarget::WorkTree).unwrap();
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+        files_untouched(dir.path());
+    }
+
+    #[test]
+    fn reverting_a_commits_link_hunk() {
+        let (dir, repo, id, _) = link_change(|dir| link(dir, "l", "h.txt"));
+        reset_to(&repo, &id);
+        let only = hunk(&repo, &id, "l", 0, 3);
+        apply_commit_change(
+            &repo,
+            &id,
+            "l",
+            None,
+            Some(only),
+            true,
+            ApplyTarget::WorkTree,
+        )
+        .unwrap();
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+    }
+
+    #[test]
+    fn reverting_a_commits_link_deletion_brings_the_link_back() {
+        let (dir, repo, id, _) = link_change(|dir| std::fs::remove_file(dir.join("l")).unwrap());
+        reset_to(&repo, &id);
+        apply_commit_change(&repo, &id, "l", None, None, true, ApplyTarget::WorkTree).unwrap();
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+    }
+
+    #[test]
+    fn applying_a_link_change_with_the_index_stages_it() {
+        let (dir, repo, id, _) = link_change(|dir| {
+            link(dir, "l", "h.txt");
+            std::fs::remove_file(dir.join("f.txt")).unwrap();
+        });
+        apply_commit_change(
+            &repo,
+            &id,
+            "l",
+            None,
+            None,
+            false,
+            ApplyTarget::WorkTreeAndIndex,
+        )
+        .unwrap();
+        assert_eq!(target(dir.path(), "l"), "h.txt");
+        let entries = git_core::status::status(&repo).unwrap();
+        assert!(
+            !entries.is_empty() && entries.iter().all(|e| e.staged && e.path == "l"),
+            "{entries:?}"
+        );
+        let index = repo.index().unwrap();
+        let entry = index.get_path(Path::new("l"), 0).unwrap();
+        assert_eq!(entry.mode, 0o120000);
+        assert_eq!(repo.find_blob(entry.id).unwrap().content(), b"h.txt");
+        // The file the change deleted is not part of it.
+        assert_eq!(read(dir.path(), "f.txt"), "f\n");
+    }
+
+    #[test]
+    fn applying_a_link_deletion_with_the_index_stages_it() {
+        let (dir, repo, id, _) = link_change(|dir| std::fs::remove_file(dir.join("l")).unwrap());
+        apply_commit_change(
+            &repo,
+            &id,
+            "l",
+            None,
+            None,
+            false,
+            ApplyTarget::WorkTreeAndIndex,
+        )
+        .unwrap();
+        assert!(dir.path().join("l").symlink_metadata().is_err());
+        let index = repo.index().unwrap();
+        assert!(index.get_path(Path::new("l"), 0).is_none());
+    }
+
+    #[test]
+    fn applying_with_the_index_refuses_a_link_with_unstaged_changes() {
+        let (dir, repo, id, _) = link_change(|dir| link(dir, "l", "h.txt"));
+        // Staged l -> other.txt, then the working tree put back: the index no longer matches.
+        link(dir.path(), "l", "other.txt");
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("l")).unwrap();
+        index.write().unwrap();
+        link(dir.path(), "l", "f.txt");
+        let err = apply_commit_change(
+            &repo,
+            &id,
+            "l",
+            None,
+            None,
+            false,
+            ApplyTarget::WorkTreeAndIndex,
+        )
+        .unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+    }
+
+    #[test]
+    fn a_patch_turning_a_file_into_a_link_in_one_change_does_not_apply() {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "f.txt", "f\n");
+        commit_all(&repo, "base");
+        let patch = "diff --git a/f.txt b/f.txt\nold mode 100644\nnew mode 120000\nindex 6a69f92..b6fc4c6\n--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-f\n+h.txt\n\\ No newline at end of file\n";
+        let err = apply_patch(&repo, patch.as_bytes()).unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(read(dir.path(), "f.txt"), "f\n");
+    }
+
+    #[test]
+    fn a_link_added_with_the_index_over_a_staged_name_does_not_apply() {
+        let (dir, repo, id, _) = link_change(|dir| link(dir, "m", "h.txt"));
+        // `m` staged, then removed from the working tree only.
+        write_file(dir.path(), "m", "mine\n");
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("m")).unwrap();
+        index.write().unwrap();
+        std::fs::remove_file(dir.path().join("m")).unwrap();
+        let err = apply_commit_change(
+            &repo,
+            &id,
+            "m",
+            None,
+            None,
+            false,
+            ApplyTarget::WorkTreeAndIndex,
+        )
+        .unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert!(dir.path().join("m").symlink_metadata().is_err());
+    }
+
+    #[test]
+    fn a_link_renamed_with_the_index_onto_a_staged_name_does_not_apply() {
+        let (dir, repo, id, _) = link_change(|dir| {
+            std::fs::remove_file(dir.join("l")).unwrap();
+            link(dir, "m", "f.txt");
+        });
+        write_file(dir.path(), "m", "mine\n");
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("m")).unwrap();
+        index.write().unwrap();
+        std::fs::remove_file(dir.path().join("m")).unwrap();
+        let err = apply_commit_change(
+            &repo,
+            &id,
+            "m",
+            Some("l"),
+            None,
+            false,
+            ApplyTarget::WorkTreeAndIndex,
+        )
+        .unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+        assert!(dir.path().join("m").symlink_metadata().is_err());
+    }
+
+    #[test]
+    fn a_link_renamed_with_the_index_is_staged() {
+        let (dir, repo, id, _) = link_change(|dir| {
+            std::fs::remove_file(dir.join("l")).unwrap();
+            link(dir, "m", "f.txt");
+        });
+        apply_commit_change(
+            &repo,
+            &id,
+            "m",
+            Some("l"),
+            None,
+            false,
+            ApplyTarget::WorkTreeAndIndex,
+        )
+        .unwrap();
+        assert_eq!(target(dir.path(), "m"), "f.txt");
+        let index = repo.index().unwrap();
+        assert!(index.get_path(Path::new("l"), 0).is_none());
+        assert_eq!(index.get_path(Path::new("m"), 0).unwrap().mode, 0o120000);
+    }
+
+    #[test]
+    fn a_patch_renaming_a_link_into_a_file_does_not_apply() {
+        let (dir, repo, _, _) = link_change(|dir| write_file(dir, "h.txt", "h2\n"));
+        let patch = "diff --git a/l b/m\nold mode 120000\nnew mode 100644\nsimilarity index 50%\nrename from l\nrename to m\nindex 6a69f92..b6fc4c6\n--- a/l\n+++ b/m\n@@ -1 +1 @@\n-f.txt\n\\ No newline at end of file\n+text\n";
+        let err = apply_patch(&repo, patch.as_bytes()).unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+        assert!(dir.path().join("m").symlink_metadata().is_err());
+    }
+
+    #[test]
+    fn a_link_added_with_the_index_is_staged() {
+        let (dir, repo, id, _) = link_change(|dir| link(dir, "m", "h.txt"));
+        apply_commit_change(
+            &repo,
+            &id,
+            "m",
+            None,
+            None,
+            false,
+            ApplyTarget::WorkTreeAndIndex,
+        )
+        .unwrap();
+        assert_eq!(target(dir.path(), "m"), "h.txt");
+        let index = repo.index().unwrap();
+        let entry = index.get_path(Path::new("m"), 0).unwrap();
+        assert_eq!(entry.mode, 0o120000);
+    }
+
+    #[test]
+    fn a_failed_series_puts_back_a_link_an_earlier_mail_retargeted() {
+        let (dir, repo, series) = failing_series(
+            |dir| {
+                write_file(dir, "f.txt", "f\n");
+                write_file(dir, "h.txt", "h\n");
+                link(dir, "l", "f.txt");
+            },
+            |dir| link(dir, "l", "h.txt"),
+        );
+        let err = apply_patch(&repo, &series).unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+        files_untouched(dir.path());
+    }
+
+    #[test]
+    fn a_failed_series_puts_back_a_link_an_earlier_mail_deleted() {
+        let (dir, repo, series) = failing_series(
+            |dir| {
+                write_file(dir, "f.txt", "f\n");
+                link(dir, "l", "f.txt");
+            },
+            |dir| std::fs::remove_file(dir.join("l")).unwrap(),
+        );
+        let err = apply_patch(&repo, &series).unwrap_err();
+        assert!(matches!(err, PatchError::DoesNotApply(_)), "{err:?}");
+        assert_eq!(target(dir.path(), "l"), "f.txt");
+    }
+}

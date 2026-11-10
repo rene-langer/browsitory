@@ -57,12 +57,15 @@ export interface DiffSettings extends DiffOptions {
 // the file in one hunk. Any other value above `MAX_CONTEXT_LINES` is clamped to it. Hunk and line
 // actions on such a diff pass the same value, as they do for any other context.
 export {
+  CODE_FONT_SIZES,
   COMMIT_MESSAGE_COLUMNS,
+  DEFAULT_APPEARANCE_SETTINGS,
   DEFAULT_COMMIT_MESSAGE_SETTINGS,
   DEFAULT_DIFF_SETTINGS,
   DEFAULT_FETCH_SETTINGS,
   MAX_CONTEXT_LINES,
   SEARCH_KEYS,
+  TAB_SIZES,
   WHOLE_FILE_CONTEXT_LINES,
 } from "./generated/wire-constants";
 export const DEFAULT_DIFF_OPTIONS: DiffOptions = {
@@ -83,6 +86,22 @@ export interface CommitMessageSettings {
 /** Fetch settings (`[fetch]`): the app-wide "Fetch automatically" interval, 0 for off. */
 export interface FetchSettings {
   autoFetchMinutes: number;
+}
+
+/** The interface text scale (`--text-*`, see `styles/tokens.css`). */
+export type UiSize = "Small" | "Normal" | "Large";
+export const UI_SIZE_VALUES: readonly UiSize[] = ["Small", "Normal", "Large"];
+
+/**
+ * Appearance settings (`[appearance]`, #615): `codeFont` and `codeFontSize` are `null` for the
+ * built-in look; sizes are clamped to `CODE_FONT_SIZES` and `TAB_SIZES`. Applied by
+ * `lib/appearance.ts`.
+ */
+export interface AppearanceSettings {
+  codeFont: string | null;
+  codeFontSize: number | null;
+  uiSize: UiSize;
+  tabSize: number;
 }
 
 /** A `Key: value` line for a commit message's trailer block, e.g. `Co-authored-by`. */
@@ -1120,6 +1139,8 @@ export interface RepoClient {
   setCommitMessageSettings(settings: CommitMessageSettings): Promise<void>;
   getFetchSettings(): Promise<FetchSettings>;
   setFetchSettings(settings: FetchSettings): Promise<void>;
+  getAppearanceSettings(): Promise<AppearanceSettings>;
+  setAppearanceSettings(settings: AppearanceSettings): Promise<void>;
   /** Labels of the next undo/redo step for this repo; `null` when the stack is empty. */
   getUndoState(repoPath: string): Promise<UndoState>;
   /** Refusals (`Nothing`, `RepositoryChanged`, `BranchHeld`, `OperationInProgress`) resolve; only real failures reject. */

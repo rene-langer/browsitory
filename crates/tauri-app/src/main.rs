@@ -12,8 +12,8 @@ use commands::{
     create_worktree, delete_branch, delete_remote_branch, delete_remote_tag, delete_tag,
     delete_workspace, detect_forge_repository, discard_all_unstaged, discard_file, discard_hunk,
     discard_lines, drop_stash, fetch_all_remotes, fetch_remote, force_push_current_branch,
-    forget_forge_token, forget_https_credential, get_app_version, get_blame,
-    get_branch_compare_range, get_commit_diff, get_commit_files, get_commit_graph,
+    forget_forge_token, forget_https_credential, get_app_version, get_appearance_settings,
+    get_blame, get_branch_compare_range, get_commit_diff, get_commit_files, get_commit_graph,
     get_commit_message, get_commit_message_settings, get_commit_rename_diff, get_commit_signature,
     get_commit_tree, get_conflict_hunks, get_current_upstream, get_diff_settings,
     get_external_tool_settings, get_fetch_settings, get_file_at_commit, get_file_history,
@@ -32,7 +32,7 @@ use commands::{
     resolve_whole_file, restore_file_version, restore_reflog_entry, reveal_in_file_manager,
     revert_commit, revert_many, save_file_version, save_forge_token, save_https_credential,
     save_patch_file, save_stash, save_workspace, scan_repos_in_root, search_commits,
-    set_commit_message_settings, set_current_upstream, set_diff_settings,
+    set_appearance_settings, set_commit_message_settings, set_current_upstream, set_diff_settings,
     set_external_tool_settings, set_fetch_settings, set_graph_branch_selection,
     set_graph_remote_branch_selection, set_last_seen_version, set_merge_options,
     set_remote_auth_mode, stage_file, stage_hunk, stage_lines, start_merge, start_rebase,
@@ -218,6 +218,8 @@ commands![
     set_commit_message_settings,
     get_fetch_settings,
     set_fetch_settings,
+    get_appearance_settings,
+    set_appearance_settings,
     background_fetch,
 ];
 

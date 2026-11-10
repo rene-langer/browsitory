@@ -3,7 +3,7 @@ import type { AmendOptions, ConfirmedAbort, PickOutcome, RepoClient, ResetMode, 
 import type { AppState } from "./useAppState";
 import type { RunMutation, RunMutationWithOutcome } from "./useMutationRunner";
 import { hookFailedMessage, type HookRetry } from "../lib/hookFailure";
-import { credentialFailureMessage } from "./useMutationRunner";
+import { failureError } from "./useMutationRunner";
 
 const NO_AMEND_OPTIONS: AmendOptions = { author: null, trailers: [] };
 
@@ -78,7 +78,7 @@ export function useHistoryActions(
       });
       setState((prev) => ({ ...prev, hookRun: null }));
       if (failed) {
-        setState((prev) => ({ ...prev, error: credentialFailureMessage(failure) }));
+        setState((prev) => ({ ...prev, ...failureError(failure) }));
         return null;
       }
       const settled = outcome as T | null;

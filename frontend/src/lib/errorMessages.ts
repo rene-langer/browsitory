@@ -23,3 +23,15 @@ export function describeError(err: unknown): DescribedError {
   const hint = HINTS[errorKind(err)];
   return hint === undefined ? { message } : { message, hint };
 }
+
+/** What to do about a credential failure a transfer reported (`TransferProgress.errorKind`). */
+export function credentialRemediation(kind: "MissingCredential" | "CredentialStoreFailure" | "SshAgentFailure"): string {
+  switch (kind) {
+    case "MissingCredential":
+      return "Save an HTTPS token for this remote before retrying.";
+    case "CredentialStoreFailure":
+      return "The operating-system credential store is unavailable. Unlock it and try again.";
+    case "SshAgentFailure":
+      return "Load a key into your SSH agent and try again.";
+  }
+}

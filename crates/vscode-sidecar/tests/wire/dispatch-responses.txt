@@ -126,6 +126,9 @@ forget_forge_token/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"messag
 forget_https_credential/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RemoteNameParams","data":{"kind":"Other","message":"invalid type: null, expected struct RemoteNameParams"}}}
 forget_https_credential/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 forget_https_credential/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RemoteNameParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RemoteNameParams"}}}
+get_appearance_settings/absent {"jsonrpc":"2.0","id":7,"result":{"codeFont":null,"codeFontSize":null,"tabSize":4,"uiSize":"Normal"}}
+get_appearance_settings/empty {"jsonrpc":"2.0","id":7,"result":{"codeFont":null,"codeFontSize":null,"tabSize":4,"uiSize":"Normal"}}
+get_appearance_settings/string {"jsonrpc":"2.0","id":7,"result":{"codeFont":null,"codeFontSize":null,"tabSize":4,"uiSize":"Normal"}}
 get_blame/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct GetBlameParams","data":{"kind":"Other","message":"invalid type: null, expected struct GetBlameParams"}}}
 get_blame/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 get_blame/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct GetBlameParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct GetBlameParams"}}}
@@ -378,6 +381,9 @@ scan_repos_in_root/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"messag
 search_commits/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SearchCommitsParams","data":{"kind":"Other","message":"invalid type: null, expected struct SearchCommitsParams"}}}
 search_commits/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 search_commits/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SearchCommitsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SearchCommitsParams"}}}
+set_appearance_settings/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetAppearanceSettingsParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetAppearanceSettingsParams"}}}
+set_appearance_settings/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `settings`","data":{"kind":"Other","message":"missing field `settings`"}}}
+set_appearance_settings/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetAppearanceSettingsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetAppearanceSettingsParams"}}}
 set_commit_message_settings/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct SetCommitMessageSettingsParams","data":{"kind":"Other","message":"invalid type: null, expected struct SetCommitMessageSettingsParams"}}}
 set_commit_message_settings/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `settings`","data":{"kind":"Other","message":"missing field `settings`"}}}
 set_commit_message_settings/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct SetCommitMessageSettingsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct SetCommitMessageSettingsParams"}}}

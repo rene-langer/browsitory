@@ -8,8 +8,9 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
 use repo_service::wire::{
-    hook_progress_dto, transfer_progress_dto, CommitMessageSettingsDto, DiffSettingsDto, ErrorDto,
-    FetchSettingsDto, OpenRepoEntryDto, OpenRepoEntryInput, TransferProgressDto, WorkspaceDto,
+    hook_progress_dto, transfer_progress_dto, AppearanceSettingsDto, CommitMessageSettingsDto,
+    DiffSettingsDto, ErrorDto, FetchSettingsDto, OpenRepoEntryDto, OpenRepoEntryInput,
+    TransferProgressDto, WorkspaceDto,
 };
 use repo_service::worker::{HookEvent, TransferEvent, WorkerHandle, WorkerRegistry};
 
@@ -360,6 +361,18 @@ pub fn get_fetch_settings() -> Result<FetchSettingsDto, ErrorDto> {
 #[tauri::command]
 pub fn set_fetch_settings(settings: FetchSettingsDto) -> Result<(), ErrorDto> {
     config::set_fetch_settings(&settings.into()).map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
+pub fn get_appearance_settings() -> Result<AppearanceSettingsDto, ErrorDto> {
+    config::get_appearance_settings()
+        .map(AppearanceSettingsDto::from)
+        .map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
+pub fn set_appearance_settings(settings: AppearanceSettingsDto) -> Result<(), ErrorDto> {
+    config::set_appearance_settings(&settings.into()).map_err(ErrorDto::from_error)
 }
 
 #[tauri::command]

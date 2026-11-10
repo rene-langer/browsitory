@@ -161,6 +161,13 @@ above. Keep `ci.yml` working on `workflow_dispatch`: a job that reads pull reque
 needs a fallback for it. A dispatched run has no labels, so `changelog` ignores
 `skip-changelog` there (Renovate PRs don't need it).
 
+## Privacy notice
+
+`docs/guide/privacy.md` lists every connection the app makes and the data it keeps. CI's `audit`
+job runs `scripts/check-privacy-hosts.py`, which fails when non-test code (or the updater
+config) names a host missing from its allow-list or from that page: a new outbound host needs
+both, and a removed one leaves both.
+
 ## Versioning & releases
 
 Semantic versioning; a `release/MAJOR.MINOR.PATCH` tag (no `v` prefix) triggers

@@ -1,6 +1,8 @@
 // Generated from the shared wire DTOs (crates/repo-service/src/wire.rs) by ts-rs.
 // Do not edit. Regenerate: UPDATE_TRANSPORT_METHODS=1 cargo test -p repo-service wire_bindings_are_current
 
+export type AppearanceSettings = { codeFont: string | null, codeFontSize: number | null, uiSize: UiSize, tabSize: number, };
+
 export type BisectInfo = { 
 /**
  * A branch name, or a commit id when the bisect started on a detached HEAD.
@@ -270,6 +272,8 @@ export type TreeEntry = { path: string, name: string, kind: TreeEntryKind, size:
 export type TreeEntryKind = "Folder" | "File" | "Executable" | "Symlink" | "Submodule";
 
 export type TreeListing = { entries: Array<TreeEntry>, truncated: boolean, };
+
+export type UiSize = "Small" | "Normal" | "Large";
 
 export type UndoOutcome = { "kind": "Done", label: string, } | { "kind": "Nothing" } | { "kind": "RepositoryChanged", label: string, } | { "kind": "BranchHeld", label: string, message: string, } | { "kind": "OperationInProgress" };
 

@@ -1,85 +1,30 @@
 //! Persists a stopped multi-commit cherry-pick/revert (`git_core::pick::SequenceState`) to
 //! `<gitdir>/browsitory/sequence.json` (format: `git_core::sequence_file`), so Continue/Abort
-//! survive an app restart. Written atomically (temp file + `sync_all` + `rename`, like
-//! `undo.json`). A file that is unreadable, malformed, of another version, or that doesn't
-//! describe commits of this repository is ignored (logged once), never fatal: a corrupt file
-//! must not wedge the repository.
-use super::atomic_file::write_atomically;
-use std::cell::RefCell;
-use std::fs;
-use std::path::PathBuf;
+//! survive an app restart. Loading, the "ignore a bad file, log once" rule and the atomic write
+//! are [`StateFile`]'s. Every id must be a commit in the repository; whether HEAD or git's own
+//! paused state still match is `continue_sequence`/`abort_sequence`'s job. Other worktrees load
+//! the file too, to protect its branch (#293).
+use super::state_file::{StateCodec, StateFile};
+use std::path::{Path, PathBuf};
 
 use git2::Repository;
 use git_core::pick::SequenceState;
 
-pub(super) struct SequenceStore {
-    file: PathBuf,
-    /// The last "ignoring" message logged, so a bad file is reported once, not on every command.
-    last_warning: RefCell<Option<String>>,
-}
+pub(super) type SequenceStore = StateFile<SequenceCodec>;
 
-impl SequenceStore {
-    /// `repo.path()` is the worktree's own git dir, so every worktree has its own sequence. Other
-    /// worktrees load it too, to protect its branch (#293).
-    pub fn open(repo: &Repository) -> Self {
-        Self {
-            file: git_core::sequence_file::file(repo.path()),
-            last_warning: RefCell::new(None),
-        }
+pub(super) struct SequenceCodec;
+
+impl StateCodec for SequenceCodec {
+    type State = SequenceState;
+    const WHAT: &'static str = "sequence";
+    fn file(git_dir: &Path) -> PathBuf {
+        git_core::sequence_file::file(git_dir)
     }
-
-    /// The stored sequence, or `None` when there is none or the file can't be used. The state
-    /// is checked against `repo`: every id must be a commit there. Whether HEAD or git's own
-    /// paused state still match is `continue_sequence`/`abort_sequence`'s job: a stale but
-    /// well-formed sequence is still reported, so the user can see it and abort it.
-    pub fn load(&self, repo: &Repository) -> Option<SequenceState> {
-        let bytes = match fs::read(&self.file) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                self.last_warning.replace(None);
-                return None;
-            }
-            Err(error) => return self.ignore(format!("can't read it: {error}")),
-        };
-        match git_core::sequence_file::decode(&bytes, repo) {
-            Ok(state) => {
-                self.last_warning.replace(None);
-                Some(state)
-            }
-            Err(reason) => self.ignore(reason),
-        }
+    fn encode(state: &SequenceState) -> Result<Vec<u8>, String> {
+        git_core::sequence_file::encode(state)
     }
-
-    fn ignore(&self, reason: String) -> Option<SequenceState> {
-        let message = format!(
-            "browsitory: ignoring sequence state {}: {reason}",
-            self.file.display()
-        );
-        if self.last_warning.borrow().as_deref() != Some(message.as_str()) {
-            eprintln!("{message}");
-            self.last_warning.replace(Some(message));
-        }
-        None
-    }
-
-    pub fn save(&self, state: &SequenceState) -> Result<(), String> {
-        let json = git_core::sequence_file::encode(state)?;
-        let dir = self.file.parent().expect("sequence file has a parent");
-        fs::create_dir_all(dir).map_err(|error| error.to_string())?;
-        write_atomically(&self.file, &json).map_err(|error| error.to_string())?;
-        self.last_warning.replace(None);
-        Ok(())
-    }
-
-    /// Deletes the file; a missing file is fine.
-    pub fn clear(&self) -> Result<(), String> {
-        match fs::remove_file(&self.file) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
-            _ => {
-                self.last_warning.replace(None);
-                Ok(())
-            }
-        }
+    fn decode(bytes: &[u8], repo: &Repository) -> Result<SequenceState, String> {
+        git_core::sequence_file::decode(bytes, repo)
     }
 }
 
@@ -88,6 +33,7 @@ mod tests {
     use super::*;
     use git2::Oid;
     use git_core::pick::{OriginalRef, SequenceKind};
+    use std::fs;
 
     /// A repo with three commits; returns their ids oldest-first.
     fn repo_with_commits() -> (tempfile::TempDir, Repository, Vec<String>) {

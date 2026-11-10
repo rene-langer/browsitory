@@ -3,13 +3,12 @@ mod common;
 use git_core::remote::{
     add_remote, clear_current_upstream, clear_remote_auth_profile, create_tag, current_upstream,
     delete_remote_branch, delete_remote_tag, delete_tag, fetch_all, fetch_all_as, fetch_remote,
-    fetch_remote_watched, force_push_current_branch, list_remote_branches, list_remotes, list_tags,
+    fetch_remote_as, force_push_current_branch, list_remote_branches, list_remotes, list_tags,
     pull_after_fetch, push_branch, push_current_branch, push_tags, push_target, remote_upstreams,
     remove_remote, remove_remote_and_clear_upstreams, rename_remote, resolve_push_target,
     set_branch_upstream, set_current_upstream, set_remote_auth_profile, update_remote_urls,
-    ConnectWatch, CredentialProvider, FetchAllOutcome, PullOutcome, PushTarget, RemoteAuthMode,
-    RemoteError, TransferErrorKind, TransferOperation, TransferPhase, TransferProgress,
-    TransferReporter,
+    CredentialProvider, FetchAllOutcome, PullOutcome, PushTarget, RemoteAuthMode, RemoteError,
+    TransferErrorKind, TransferOperation, TransferPhase, TransferProgress, TransferReporter,
 };
 
 #[derive(Default)]
@@ -691,18 +690,19 @@ fn a_push_cancelled_after_negotiation_completes_and_reports_its_real_outcome() {
     let polls = std::sync::atomic::AtomicUsize::new(0);
     let mut reporter = VecReporter::default();
 
-    // Not cancelled on the first poll (negotiation), cancelled on every poll after it.
+    // Not cancelled on the first two polls (once connected, then negotiation), cancelled on
+    // every poll after them.
     let result = push_current_branch(
         &fixture.local,
         "origin",
         false,
         &mut NoCredentials,
         &mut reporter,
-        &|| polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1,
+        &|| polls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 2,
     );
 
     assert!(result.is_ok(), "late cancel must not fail a landed push");
-    assert!(polls.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+    assert!(polls.load(std::sync::atomic::Ordering::SeqCst) >= 2);
     let remote_repo = git2::Repository::open_bare(fixture.remote_dir.path()).unwrap();
     assert_eq!(
         remote_repo
@@ -2562,42 +2562,57 @@ fn at_sign_and_refs_prefixed_names_are_rejected_before_connecting() {
     assert!(fixture.bare_tip("main").is_some());
 }
 
-/// A `ConnectWatch` that answers `allow` and counts its calls.
+/// A reporter whose `connected` answers `allow`, counting its calls and the progress reported.
 struct Watch {
     allow: bool,
-    calls: std::cell::Cell<usize>,
+    calls: usize,
+    events: Vec<TransferProgress>,
 }
 
-impl ConnectWatch for Watch {
-    fn connected(&self) -> bool {
-        self.calls.set(self.calls.get() + 1);
+impl Watch {
+    fn new(allow: bool) -> Self {
+        Self {
+            allow,
+            calls: 0,
+            events: Vec::new(),
+        }
+    }
+}
+
+impl TransferReporter for Watch {
+    fn report(&mut self, event: TransferProgress) {
+        self.events.push(event);
+    }
+
+    fn connected(&mut self) -> bool {
+        self.calls += 1;
         self.allow
     }
 }
 
 #[test]
-fn a_watched_fetch_tells_the_watch_once_connected_and_fetches() {
+fn a_fetch_tells_the_reporter_once_connected_and_fetches() {
     let fixture = local_and_bare_remote();
     fixture.remote_commit_without_fetch("only on the remote");
-    let watch = Watch {
-        allow: true,
-        calls: 0.into(),
-    };
+    let mut watch = Watch::new(true);
 
-    fetch_remote_watched(
+    fetch_remote_as(
         TransferOperation::BackgroundFetch,
         &fixture.local,
         "origin",
         None,
         "background-fetch-1",
         &mut NoCredentials,
-        &mut VecReporter::default(),
+        &mut watch,
         &|| false,
-        &watch,
     )
     .unwrap();
 
-    assert_eq!(watch.calls.get(), 1);
+    assert_eq!(watch.calls, 1);
+    assert!(watch
+        .events
+        .iter()
+        .all(|event| event.operation == TransferOperation::BackgroundFetch));
     assert_eq!(
         fixture
             .local
@@ -2609,7 +2624,7 @@ fn a_watched_fetch_tells_the_watch_once_connected_and_fetches() {
 }
 
 #[test]
-fn a_watched_fetch_that_the_watch_stops_once_connected_writes_nothing() {
+fn a_fetch_that_the_reporter_stops_once_connected_writes_nothing() {
     let fixture = local_and_bare_remote();
     fixture.remote_commit_without_fetch("only on the remote");
     let before = fixture
@@ -2617,25 +2632,21 @@ fn a_watched_fetch_that_the_watch_stops_once_connected_writes_nothing() {
         .find_reference("refs/remotes/origin/main")
         .unwrap()
         .target();
-    let watch = Watch {
-        allow: false,
-        calls: 0.into(),
-    };
-    let mut reporter = VecReporter::default();
+    let mut watch = Watch::new(false);
 
-    let result = fetch_remote_watched(
+    let result = fetch_remote_as(
         TransferOperation::BackgroundFetch,
         &fixture.local,
         "origin",
         None,
         "background-fetch-1",
         &mut NoCredentials,
-        &mut reporter,
+        &mut watch,
         &|| false,
-        &watch,
     );
 
     assert!(matches!(result, Err(RemoteError::Cancelled)));
+    assert_eq!(watch.calls, 1);
     assert_eq!(
         fixture
             .local
@@ -2644,7 +2655,97 @@ fn a_watched_fetch_that_the_watch_stops_once_connected_writes_nothing() {
             .target(),
         before
     );
-    assert!(reporter.events.is_empty());
+    assert!(watch.events.is_empty());
+}
+
+#[test]
+fn a_push_tells_the_reporter_once_connected_and_pushes() {
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local work");
+    let mut watch = Watch::new(true);
+
+    push_current_branch(
+        &fixture.local,
+        "origin",
+        false,
+        &mut NoCredentials,
+        &mut watch,
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(watch.calls, 1);
+    assert_eq!(
+        fixture.bare_tip("main"),
+        fixture.local.head().unwrap().target()
+    );
+}
+
+/// #547: a push the caller gave up on while it connected sends nothing and writes nothing, not
+/// even the local tracking ref or the upstream a push with `set_upstream` would record.
+#[test]
+fn a_push_that_the_reporter_stops_once_connected_sends_and_writes_nothing() {
+    let fixture = local_and_bare_remote();
+    fixture.local_commit("local work");
+    let before = fixture.bare_tip("main");
+    let mut watch = Watch::new(false);
+
+    let result = push_branch(
+        &fixture.local,
+        "origin",
+        "main",
+        "published",
+        true,
+        false,
+        &mut NoCredentials,
+        &mut watch,
+        &|| false,
+    );
+
+    assert!(matches!(result, Err(RemoteError::Cancelled)), "{result:?}");
+    assert_eq!(watch.calls, 1);
+    assert!(watch.events.is_empty());
+    assert_eq!(fixture.bare_tip("main"), before);
+    assert_eq!(fixture.bare_tip("published"), None);
+    assert!(fixture
+        .local
+        .find_reference("refs/remotes/origin/published")
+        .is_err());
+    assert!(fixture
+        .local
+        .config()
+        .unwrap()
+        .get_string("branch.main.merge")
+        .is_ok_and(|merge| merge == "refs/heads/main"));
+}
+
+#[test]
+fn a_push_whose_connection_is_refused_is_unreachable() {
+    let fixture = local_and_bare_remote();
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    fixture
+        .local
+        .remote("closed", &format!("http://127.0.0.1:{port}/repo.git"))
+        .unwrap();
+
+    let result = push_branch(
+        &fixture.local,
+        "closed",
+        "main",
+        "main",
+        false,
+        false,
+        &mut NoCredentials,
+        &mut VecReporter::default(),
+        &|| false,
+    );
+
+    let error = result.unwrap_err();
+    assert!(matches!(error, RemoteError::Unreachable(_)), "{error:?}");
 }
 
 #[test]

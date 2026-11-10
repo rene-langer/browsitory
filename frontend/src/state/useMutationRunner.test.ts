@@ -3,7 +3,8 @@ import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import type { AppState } from "./useAppState";
 import { RepoError } from "../ipc/RepoClient";
-import { credentialFailureMessage, credentialRemediation, useMutationRunner } from "./useMutationRunner";
+import { credentialRemediation } from "../lib/errorMessages";
+import { credentialFailureMessage, failureError, useMutationRunner, withoutStaleErrorHint } from "./useMutationRunner";
 
 const BASE_STATE: AppState = {
   repoPath: "/repo",
@@ -40,6 +41,7 @@ const BASE_STATE: AppState = {
   stashOutcome: null,
   transfer: null,
   error: null,
+  errorHint: null,
   pending: false,
   addRemoteDraftOpen: false,
   dialog: null,
@@ -236,5 +238,43 @@ describe("useMutationRunner clears a previous error when a mutation starts", () 
     );
     expect(result.current.state.error).toBe("new");
     expect(result.current.state.branches).toEqual([]);
+  });
+});
+
+// #573: a failed request's banner text and the hint for its kind.
+describe("failureError", () => {
+  it("pairs the message with describeError's hint for the kind", () => {
+    expect(failureError(new RepoError("PermissionDenied", "Permission denied"))).toEqual({
+      error: "Permission denied",
+      errorHint: "File permissions blocked this. Check that you can read and write the file or folder.",
+    });
+  });
+
+  it("has no hint for a kind without one, or a plain error", () => {
+    expect(failureError(new RepoError("CredentialStoreFailure", "locked"))).toEqual({
+      error: credentialRemediation("CredentialStoreFailure"),
+      errorHint: null,
+    });
+    expect(failureError(new Error("boom"))).toEqual({ error: "boom", errorHint: null });
+  });
+});
+
+describe("withoutStaleErrorHint", () => {
+  const failed = { ...BASE_STATE, error: "Permission denied", errorHint: "hint" };
+
+  it("drops the hint when error changes without a new hint", () => {
+    expect(withoutStaleErrorHint(failed, { ...failed, error: null }).errorHint).toBeNull();
+    expect(withoutStaleErrorHint(failed, { ...failed, error: "other" }).errorHint).toBeNull();
+  });
+
+  it("keeps a hint set with its error, and one whose error is unchanged", () => {
+    expect(withoutStaleErrorHint(BASE_STATE, failed)).toBe(failed);
+    const next = { ...failed, pending: true };
+    expect(withoutStaleErrorHint(failed, next)).toBe(next);
+  });
+
+  it("keeps the hint when the message is only prefixed, as Undo does", () => {
+    const prefixed = { ...failed, error: "Undo failed: Permission denied" };
+    expect(withoutStaleErrorHint(failed, prefixed)).toBe(prefixed);
   });
 });

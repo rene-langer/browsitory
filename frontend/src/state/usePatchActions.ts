@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { CommitChangeRequest, GraphCommit, PatchSource, RepoClient } from "../ipc/RepoClient";
 import type { AppState } from "./useAppState";
-import { credentialFailureMessage, type RunMutationWithOutcome } from "./useMutationRunner";
+import { failureError, type RunMutationWithOutcome } from "./useMutationRunner";
 
 /**
  * A commit's file or hunk reverted or applied in the working tree, "Save as patch…" and "Apply
@@ -69,7 +69,7 @@ export function usePatchActions(
         const saved = await client.savePatchFile(suggestedName, content);
         if (saved !== null) setState((prev) => ({ ...prev, patchOutcome: { message: `Saved patch to ${saved}` } }));
       } catch (err) {
-        setState((prev) => ({ ...prev, error: credentialFailureMessage(err) }));
+        setState((prev) => ({ ...prev, ...failureError(err) }));
       }
     },
     [client, repoPath, setState],
@@ -81,7 +81,7 @@ export function usePatchActions(
     try {
       content = await client.openPatchFile();
     } catch (err) {
-      setState((prev) => ({ ...prev, error: credentialFailureMessage(err) }));
+      setState((prev) => ({ ...prev, ...failureError(err) }));
       return;
     }
     if (content === null) return;

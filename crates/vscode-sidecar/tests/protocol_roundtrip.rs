@@ -2390,6 +2390,30 @@ fn diff_settings_round_trip_through_the_sidecar() {
 }
 
 #[test]
+fn appearance_settings_round_trip_through_the_sidecar_clamped() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    let unset = sidecar.call(1, "get_appearance_settings", serde_json::json!({}));
+    assert_eq!(
+        unset["result"],
+        serde_json::json!({"codeFont": null, "codeFontSize": null, "uiSize": "Normal", "tabSize": 4})
+    );
+    let set = sidecar.call(
+        2,
+        "set_appearance_settings",
+        serde_json::json!({
+            "settings": {"codeFont": " Example Mono ", "codeFontSize": 99, "uiSize": "Large", "tabSize": 2}
+        }),
+    );
+    assert_eq!(set["result"], serde_json::Value::Null, "{set}");
+    let got = sidecar.call(3, "get_appearance_settings", serde_json::json!({}));
+    assert_eq!(
+        got["result"],
+        serde_json::json!({"codeFont": "Example Mono", "codeFontSize": 24, "uiSize": "Large", "tabSize": 2})
+    );
+}
+
+#[test]
 fn file_history_and_rename_diff_round_trip_through_the_sidecar() {
     let (_guard, config_dir) = ConfigDirGuard::new();
     let (dir, repo) = init_repo();

@@ -601,6 +601,28 @@ pub fn fetch_settings() -> Cases<config::FetchSettings> {
     ]
 }
 
+pub fn appearance_settings() -> Cases<config::AppearanceSettings> {
+    vec![
+        case("default", config::AppearanceSettings::default()),
+        case(
+            "set",
+            config::AppearanceSettings {
+                code_font: some("Example Mono"),
+                code_font_size: Some(15),
+                ui_size: config::UiSize::Large,
+                tab_size: 8,
+            },
+        ),
+        case(
+            "small",
+            config::AppearanceSettings {
+                ui_size: config::UiSize::Small,
+                ..config::AppearanceSettings::default()
+            },
+        ),
+    ]
+}
+
 fn git_tool(source: ConfigSource) -> git_core::tools::GitToolInfo {
     git_core::tools::GitToolInfo {
         name: "meld".to_string(),

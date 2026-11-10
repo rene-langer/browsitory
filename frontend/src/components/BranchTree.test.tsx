@@ -463,6 +463,45 @@ describe("BranchTree — remotes", () => {
     }
   });
 
+  // #494: the palette's "Browse branches on origin" asks through state; before, it clicked the
+  // section and folder headers it found by their text.
+  describe("reveal requests (#494)", () => {
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    afterEach(() => {
+      Element.prototype.scrollIntoView = originalScrollIntoView;
+    });
+
+    it("expands a collapsed section and the remote's folder, loads its branches and scrolls to it", async () => {
+      localStorage.setItem("sidebar-branches", "closed");
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      const onListRemoteBranches = vi.fn().mockResolvedValue(["develop"]);
+      const props = treeProps({ remotes: oneRemote, onListRemoteBranches });
+      const { rerender } = render(<BranchTree {...props} />);
+      expect(screen.queryByRole("button", { name: "origin" })).not.toBeInTheDocument();
+
+      rerender(<BranchTree {...props} revealRequest={{ nonce: 1, remote: "origin" }} />);
+      const folder = screen.getByRole("button", { name: "origin" });
+      expect(folder).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("button", { name: "Branches" })).toHaveAttribute("aria-expanded", "true");
+      expect(onListRemoteBranches).toHaveBeenCalledWith("origin");
+      expect(localStorage.getItem("sidebar-branches")).toBe("open");
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(folder);
+      expect(await within(folder.closest("li")!).findByText("develop")).toBeInTheDocument();
+    });
+
+    it("keeps an open folder open and reveals it again on the next request", () => {
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      const props = treeProps({ remotes: oneRemote });
+      const { rerender } = render(<BranchTree {...props} revealRequest={{ nonce: 1 }} />);
+      fireEvent.click(screen.getByRole("button", { name: "origin" }));
+      rerender(<BranchTree {...props} revealRequest={{ nonce: 2, remote: "origin" }} />);
+      expect(screen.getByRole("button", { name: "origin" })).toHaveAttribute("aria-expanded", "true");
+      expect(scrollIntoView).toHaveBeenCalledTimes(2); // the section, then the folder
+    });
+  });
+
   // With no saved remote selection, every remote branch present in the commit graph
   // (`remoteBranchesInGraph`, NOT the lazy per-remote-folder fetch cache) has its swatch pressed
   // (shown) by default — mirroring the local-branch swatch's default (see "with no saved graph
