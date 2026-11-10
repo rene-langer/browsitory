@@ -36,4 +36,11 @@ describe("ShortcutSheet", () => {
     expect(screen.getByText("Close the menu and return to where it opened")).toBeInTheDocument();
     expect(screen.getByText("Open the selected file's menu")).toBeInTheDocument();
   });
+
+  it("lists the command palette keys (#643)", () => {
+    render(<ShortcutSheet onClose={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Command palette" })).toBeInTheDocument();
+    expect(screen.getByText("Move the highlight by a page")).toBeInTheDocument();
+    expect(screen.getByText(/^First \/ last command/)).toBeInTheDocument();
+  });
 });

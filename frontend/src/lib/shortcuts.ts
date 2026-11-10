@@ -47,6 +47,16 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "Command palette",
+    shortcuts: [
+      { keys: "Up / Down", description: "Move the highlight" },
+      { keys: "PageUp / PageDown", description: "Move the highlight by a page" },
+      { keys: "Ctrl+Home / Ctrl+End", description: "First / last command (Home / End before you type)" },
+      { keys: "Enter", description: "Run the highlighted command" },
+      { keys: "Backspace", description: "Back from a list such as Go to branch… (with nothing typed)" },
+    ],
+  },
+  {
     title: "Context menus",
     shortcuts: [
       { keys: "Menu / Shift+F10", description: "Open the focused item's menu" },
