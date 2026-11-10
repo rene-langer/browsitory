@@ -106,6 +106,46 @@ pub(crate) fn record_as_conflicts(
     Ok(files)
 }
 
+/// Writes a merge result holding a file/folder collision as git's conflict (see
+/// [`record_as_conflicts`]): the repository's index becomes the rewritten `merged`, and a safe
+/// checkout with conflicts allowed writes it (HEAD's file becomes `c~HEAD`, the folder's files
+/// appear), rolled back when it stops part-way (#321). HEAD is the "ours" side. The operation's
+/// own state files (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, the message) are the caller's. Returns
+/// the repository's index, written.
+pub(crate) fn check_out_as_conflicts<E>(
+    repo: &git2::Repository,
+    mut merged: git2::Index,
+    their_label: &str,
+) -> Result<git2::Index, E>
+where
+    E: From<git2::Error> + From<crate::HeldOpen>,
+{
+    let ours = repo.head()?.peel_to_commit()?.tree()?;
+    record_as_conflicts(&mut merged, &ours, their_label)?;
+    let written = crate::partial_checkout::Written::default();
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    checkout.safe().allow_conflicts(true);
+    crate::hardlink::on_checkout(repo, &mut checkout);
+    written.record(repo, &mut checkout);
+    written.expect_conflicts(repo, &merged);
+    let mut index = repo.index()?;
+    index.clear()?;
+    for entry in merged.iter() {
+        index.add(&entry)?;
+    }
+    if let Err(error) = repo.checkout_index(Some(&mut index), Some(&mut checkout)) {
+        let restored = crate::partial_checkout::roll_back(repo, &written);
+        return Err(crate::partial_checkout::report::<E>(
+            repo,
+            restored,
+            crate::HeldDuring::RolledBack,
+            error,
+        ));
+    }
+    index.write()?;
+    Ok(index)
+}
+
 fn stage(entry: &git2::IndexEntry) -> u16 {
     (entry.flags >> 12) & 0x3
 }

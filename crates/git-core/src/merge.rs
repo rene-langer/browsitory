@@ -189,33 +189,11 @@ fn refuse_unsafe_merge(
 /// libgit2's `merge` does. Returns the conflicted files.
 fn merge_with_file_folder_conflict(
     repo: &Repository,
-    mut merged: git2::Index,
+    merged: git2::Index,
     merge_head: Option<(git2::Oid, &str)>,
     their_label: &str,
 ) -> Result<Vec<String>, MergeError> {
-    let ours = repo.head()?.peel_to_commit()?.tree()?;
-    crate::file_folder::record_as_conflicts(&mut merged, &ours, their_label)?;
-    let written = crate::partial_checkout::Written::default();
-    let mut checkout = git2::build::CheckoutBuilder::new();
-    checkout.safe().allow_conflicts(true);
-    crate::hardlink::on_checkout(repo, &mut checkout);
-    written.record(repo, &mut checkout);
-    written.expect_conflicts(repo, &merged);
-    let mut index = repo.index()?;
-    index.clear()?;
-    for entry in merged.iter() {
-        index.add(&entry)?;
-    }
-    if let Err(error) = repo.checkout_index(Some(&mut index), Some(&mut checkout)) {
-        let restored = crate::partial_checkout::roll_back(repo, &written);
-        return Err(crate::partial_checkout::report::<MergeError>(
-            repo,
-            restored,
-            crate::HeldDuring::RolledBack,
-            error,
-        ));
-    }
-    index.write()?;
+    let index = crate::file_folder::check_out_as_conflicts::<MergeError>(repo, merged, their_label)?;
     let files = conflicted_files(&index)?;
     if let Some((their_id, label)) = merge_head {
         let git_dir = repo.path();
