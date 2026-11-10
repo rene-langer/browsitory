@@ -235,6 +235,8 @@ fn stash_and_switch_to_a_missing_branch_stashes_nothing() {
     assert!(git_core::stash::list_stashes(&mut repo).unwrap().is_empty());
 }
 
+// Needs a case-sensitive drive to commit both names of the case pair.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_switch_refused_after_stashing_puts_the_changes_back() {
     let (dir, mut repo) = init_repo();
