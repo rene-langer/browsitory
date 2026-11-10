@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorKind, type GraphCommit, type RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
+import { readRecentSearches, withRecentSearch, writeRecentSearches } from "../lib/recentSearches";
 import type { SelectedRow } from "./useAppState";
 
 /** Quiet time after the last keystroke before a search starts. */
@@ -30,6 +31,11 @@ export interface UseCommitSearchResult {
   loadMore(): void;
   retry(): void;
   close(): void;
+  /** This repository's recent searches, newest first (#540): queries that ran without an
+   *  `InvalidSearchQuery` error, one per search (the last query that ran before the field was
+   *  cleared). */
+  recentSearches: string[];
+  removeRecentSearch(query: string): void;
 }
 
 function rowKey(row: SelectedRow): string {
@@ -74,6 +80,36 @@ export function useCommitSearch(
     remoteRefsRef.current = remoteRefs;
   }, [refs, remoteRefs]);
 
+  const [recent, setRecent] = useState(() => ({ repoPath, searches: readRecentSearches(repoPath) }));
+  if (recent.repoPath !== repoPath) setRecent({ repoPath, searches: readRecentSearches(repoPath) });
+  // The list as it was when the current search started (`null` while the graph shows). Each
+  // query that runs replaces the search's entry, so typing "author:ada" leaves one entry, not
+  // one per debounced prefix.
+  const recentBeforeSearch = useRef<string[] | null>(null);
+
+  const recordSearch = useCallback(
+    (q: string) => {
+      const base = recentBeforeSearch.current ?? readRecentSearches(repoPath);
+      recentBeforeSearch.current = base;
+      const searches = withRecentSearch(base, q);
+      writeRecentSearches(repoPath, searches);
+      setRecent({ repoPath, searches });
+    },
+    [repoPath],
+  );
+
+  const removeRecentSearch = useCallback(
+    (q: string) => {
+      const searches = readRecentSearches(repoPath).filter((s) => s !== q);
+      if (recentBeforeSearch.current !== null) {
+        recentBeforeSearch.current = recentBeforeSearch.current.filter((s) => s !== q);
+      }
+      writeRecentSearches(repoPath, searches);
+      setRecent({ repoPath, searches });
+    },
+    [repoPath],
+  );
+
   const clearTimer = () => {
     if (timer.current !== null) {
       clearTimeout(timer.current);
@@ -94,6 +130,8 @@ export function useCommitSearch(
         do {
           const page = await client.searchCommits(repoPath, q, refsRef.current, remoteRefsRef.current ?? [], cursor);
           if (gen !== generation.current) return;
+          // The query parsed and ran: remember it (a "load more" round already has).
+          if (from === null && cursor === null) recordSearch(q);
           found += page.commits.length;
           cursor = page.nextCursor;
           setResults(
@@ -125,7 +163,7 @@ export function useCommitSearch(
         }
       }
     },
-    [client, repoPath, selectRow],
+    [client, repoPath, selectRow, recordSearch],
   );
 
   const start = useCallback(
@@ -148,6 +186,7 @@ export function useCommitSearch(
       void client.cancelSearch(repoPath).catch(() => {});
     }
     activeQuery.current = null;
+    recentBeforeSearch.current = null;
     setResults(null);
     const prev = previousRow.current;
     previousRow.current = null;
@@ -213,5 +252,5 @@ export function useCommitSearch(
     [client, repoPath],
   );
 
-  return { query, results, setQuery, loadMore, retry, close };
+  return { query, results, setQuery, loadMore, retry, close, recentSearches: recent.searches, removeRecentSearch };
 }

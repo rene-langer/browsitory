@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RepoError, type GraphCommit, type RepoClient, type SearchPage } from "../ipc/RepoClient";
+import { RECENT_SEARCH_LIMIT } from "../lib/recentSearches";
 import type { SelectedRow } from "./useAppState";
 import { SEARCH_DEBOUNCE_MS, SEARCH_ROUND_SIZE, useCommitSearch } from "./useCommitSearch";
 import { fakeRepoClient } from "../test/fakeRepoClient";
@@ -223,5 +224,66 @@ describe("useCommitSearch", () => {
     await act(async () => second.resolve(page(["c1"], null, 500)));
     expect(result.current.results?.commits.map((c) => c.id)).toEqual(["c1"]);
     expect(selectRow).not.toHaveBeenCalled();
+  });
+});
+
+describe("useCommitSearch recent searches (#540)", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("remembers the last query that ran per search, newest first, per repository", async () => {
+    localStorage.setItem("commit-searches:/repo", JSON.stringify(["older"]));
+    localStorage.setItem("commit-searches:/other", JSON.stringify(["elsewhere"]));
+    const searchCommits = vi.fn(async () => page(["c1"], null, 1));
+    const { result } = setup(searchCommits);
+    expect(result.current.recentSearches).toEqual(["older"]);
+
+    // Two queries in one search (typing on): one entry, the later query.
+    act(() => result.current.setQuery("auth"));
+    await waitFor(() => expect(result.current.recentSearches).toEqual(["auth", "older"]));
+    act(() => result.current.setQuery("author:ada"));
+    await waitFor(() => expect(result.current.recentSearches).toEqual(["author:ada", "older"]));
+
+    // A new search after clearing the field adds an entry.
+    act(() => result.current.setQuery(""));
+    act(() => result.current.setQuery("  fix  "));
+    await waitFor(() => expect(result.current.recentSearches).toEqual(["fix", "author:ada", "older"]));
+    expect(JSON.parse(localStorage.getItem("commit-searches:/repo") ?? "[]")).toEqual(["fix", "author:ada", "older"]);
+    expect(JSON.parse(localStorage.getItem("commit-searches:/other") ?? "[]")).toEqual(["elsewhere"]);
+  });
+
+  it("moves a repeated search to the front and keeps RECENT_SEARCH_LIMIT", async () => {
+    const stored = Array.from({ length: RECENT_SEARCH_LIMIT }, (_, i) => `q${i}`);
+    localStorage.setItem("commit-searches:/repo", JSON.stringify(stored));
+    const searchCommits = vi.fn(async () => page([], null, 1));
+    const { result } = setup(searchCommits);
+
+    act(() => result.current.setQuery("q5"));
+    await waitFor(() => expect(result.current.recentSearches[0]).toBe("q5"));
+    expect(result.current.recentSearches).toEqual(["q5", ...stored.filter((q) => q !== "q5")]);
+
+    act(() => result.current.close());
+    act(() => result.current.setQuery("new"));
+    await waitFor(() => expect(result.current.recentSearches[0]).toBe("new"));
+    expect(result.current.recentSearches).toHaveLength(RECENT_SEARCH_LIMIT);
+    expect(result.current.recentSearches).not.toContain("q9");
+  });
+
+  it("does not remember an invalid query", async () => {
+    const searchCommits = vi.fn().mockRejectedValue(new RepoError("InvalidSearchQuery", "Invalid search: oops."));
+    const { result } = setup(searchCommits);
+
+    act(() => result.current.setQuery("(a"));
+    await waitFor(() => expect(result.current.results?.queryError).toBe("Invalid search: oops."));
+    expect(result.current.recentSearches).toEqual([]);
+    expect(localStorage.getItem("commit-searches:/repo")).toBeNull();
+  });
+
+  it("removes one search", () => {
+    localStorage.setItem("commit-searches:/repo", JSON.stringify(["a", "b"]));
+    const { result } = setup(vi.fn(async () => page([], null, 0)));
+
+    act(() => result.current.removeRecentSearch("a"));
+    expect(result.current.recentSearches).toEqual(["b"]);
+    expect(JSON.parse(localStorage.getItem("commit-searches:/repo") ?? "[]")).toEqual(["b"]);
   });
 });
