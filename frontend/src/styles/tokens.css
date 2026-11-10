@@ -6,34 +6,90 @@
      override, so the in-app theme toggle moves native surfaces too. */
   color-scheme: light;
 
-  /* Color — a quiet, warm-neutral light palette; one warm accent carries all emphasis. */
+  /* Colour. Every colour in the app comes from a token here (#666); components never write a
+     literal. The light and dark palettes below meet WCAG 2.2 AA: 4.5:1 for text, 3:1 for UI
+     parts and the focus ring. `tokens.contrast.test.ts` measures every pair that must, so a
+     change that breaks one fails the tests. `vscode-tokens.css` maps the same names to the
+     editor's `--vscode-*` colours in the VSCode webview (#676); forced colours are at the end.
+
+     A quiet, warm-neutral palette; one warm accent carries all emphasis. */
+
+  /* Surfaces */
   --color-bg: #fbfbf9;
   --color-bg-subtle: #f2f2ef;
   --color-surface: #ffffff;
   --color-chrome: #ecece8;
   --color-control: #e6e6e2;
   --color-control-hover: #dbdbd6;
-  --color-border: #e1e1dc;
+  /* A pointer over a list row. */
+  --color-hover-bg: color-mix(in srgb, var(--color-selected-bg) 55%, transparent);
+  /* A pointer over a repository tab in the tab strip. */
+  --color-tab-hover-bg: color-mix(in srgb, var(--color-bg) 50%, var(--color-chrome));
+
+  /* Text */
   --color-text: #2b2f36;
-  --color-text-muted: #6f747d;
-  --color-selected-bg: #e4e6ea;
-  --color-accent: #d97a1e;
+  --color-text-muted: #585d65;
+  --color-control-text: var(--color-text);
+
+  /* Inputs. The border marks the field, so it keeps 3:1. */
+  --color-input-bg: var(--color-bg-subtle);
+  --color-input-text: var(--color-text);
+  --color-input-border: #80858d;
+  --color-placeholder: var(--color-text-muted);
+
+  /* Separators between panes and sections. Decorative (a pane is known by its content, not
+     its outline), so they stay soft; a part whose outline is its only cue uses
+     `--color-input-border`. */
+  --color-border: #e1e1dc;
+
+  /* Accent. `--color-accent` fills (the Commit button, the HEAD badge, the active tab bar) and
+     marks UI parts; `--color-accent-text` is text on that fill; `--color-accent-fg` is the
+     accent as text or an icon on the neutral surfaces ("current", links, pressed toggles). */
+  --color-accent: #b35a0c;
+  --color-accent-hover: #9c4c06;
   --color-accent-text: #ffffff;
+  --color-accent-fg: #93470a;
+  --color-accent-tint: color-mix(in srgb, var(--color-accent) 14%, transparent);
+
+  /* Focus and selection. The selected row's tint alone is too faint to read as a state, so a
+     selected row also carries `--color-selected-marker` (an inset bar). */
+  --color-focus-ring: var(--color-accent);
+  --color-selected-bg: #e4e6ea;
+  --color-selected-text: var(--color-text);
+  --color-selected-marker: var(--color-accent);
+  --color-text-selection: color-mix(in srgb, var(--color-accent) 30%, transparent);
+
+  /* Diff lines */
   --color-diff-add-bg: #e8f5e4;
-  --color-diff-add-text: #2f7a1f;
+  --color-diff-add-text: #2a6e1b;
   --color-diff-remove-bg: #fbe9e7;
-  --color-diff-remove-text: #b3362b;
+  --color-diff-remove-text: #a8322a;
+  --color-diff-context-text: var(--color-text);
+
+  /* Tones (messages, toasts, banners): the text colour reads on its own background and on
+     the plain surfaces. */
   --color-danger: #fbe9e7;
-  --color-danger-text: #b3362b;
+  --color-danger-text: #a8322a;
   --color-danger-bg: var(--color-danger);
+  --color-danger-tint: color-mix(in srgb, var(--color-danger-text) 30%, transparent);
   --color-success-bg: #e8f5e4;
-  --color-success-text: #2f7a1f;
+  --color-success-text: #2a6e1b;
   --color-warning-bg: #fbf1d9;
-  --color-warning-text: #8a5a00;
+  --color-warning-text: #7d5100;
   --color-info-bg: #e6eff8;
   --color-info-text: #2f5f8f;
-  --color-diff-context-text: var(--color-text);
+
+  /* Branch lanes in the history graph and the branch swatches (`lib/laneColors.ts`). */
+  --color-lane-1: #c25e12;
+  --color-lane-2: #3f7f2a;
+  --color-lane-3: #3a6fb0;
+  --color-lane-4: #8f55a0;
+  --color-lane-5: #c13f3a;
+  --color-lane-6: #26807f;
+
+  /* Overlays */
   --color-scrim: rgba(20, 20, 18, 0.28);
+  --color-checker: color-mix(in srgb, var(--color-border) 55%, transparent);
 
   /* Spacing */
   --space-1: 4px;
@@ -53,6 +109,7 @@
   /* Elevation */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --shadow-popover: 0 4px 16px color-mix(in srgb, var(--color-text) 18%, transparent);
 
   /* Typography */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -73,15 +130,15 @@
 
   /* Syntax highlighting (Shiki css-variables theme) */
   --shiki-foreground: inherit;
-  --shiki-token-constant: #c76b1a;
-  --shiki-token-string: #4f8a3c;
-  --shiki-token-comment: #8e959e;
-  --shiki-token-keyword: #9a5ba8;
+  --shiki-token-constant: #9c4f0c;
+  --shiki-token-string: #3b6c2c;
+  --shiki-token-comment: #5e646d;
+  --shiki-token-keyword: #84479a;
   --shiki-token-parameter: #2b2f36;
-  --shiki-token-function: #3b6ea8;
-  --shiki-token-string-expression: #4f8a3c;
-  --shiki-token-punctuation: #5b616b;
-  --shiki-token-link: #2f8a8a;
+  --shiki-token-function: #305f96;
+  --shiki-token-string-expression: #3b6c2c;
+  --shiki-token-punctuation: #555b64;
+  --shiki-token-link: #1f6b6a;
 
   /* Motion */
   --motion-duration-fast: 100ms;
@@ -115,34 +172,43 @@
     --color-chrome: #1b1d22;
     --color-control: #31353d;
     --color-control-hover: #3b404a;
-    --color-border: #2f333a;
     --color-text: #d9dce1;
-    --color-text-muted: #8b919b;
-    --color-selected-bg: #343944;
+    --color-text-muted: #a8aeb8;
+    --color-input-border: #7c828c;
+    --color-border: #2f333a;
     --color-accent: #f2a23c;
+    --color-accent-hover: #f6b462;
     --color-accent-text: #1b1d22;
+    --color-accent-fg: #f2a23c;
+    --color-accent-tint: color-mix(in srgb, var(--color-accent) 16%, transparent);
+    --color-selected-bg: #353a45;
     --color-diff-add-bg: #233325;
     --color-diff-add-text: #9fd38a;
     --color-diff-remove-bg: #3a2427;
     --color-diff-remove-text: #f09389;
     --color-danger: #3a2427;
     --color-danger-text: #f09389;
-    --color-danger-bg: var(--color-danger);
     --color-success-bg: #233325;
     --color-success-text: #9fd38a;
     --color-warning-bg: #3a3122;
     --color-warning-text: #f2c66d;
     --color-info-bg: #22303e;
     --color-info-text: #8cc0ea;
+    --color-lane-1: #e8833a;
+    --color-lane-2: #6aa84f;
+    --color-lane-3: #5c93d3;
+    --color-lane-4: #b47fc3;
+    --color-lane-5: #e2655f;
+    --color-lane-6: #3fa5a5;
     --color-scrim: rgba(0, 0, 0, 0.45);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
     --shiki-token-constant: #f9ae58;
     --shiki-token-string: #99c794;
-    --shiki-token-comment: #7c8591;
-    --shiki-token-keyword: #c594c5;
+    --shiki-token-comment: #9ea7b2;
+    --shiki-token-keyword: #c99ac9;
     --shiki-token-parameter: #d9dce1;
-    --shiki-token-function: #6699cc;
+    --shiki-token-function: #7aa7d6;
     --shiki-token-string-expression: #99c794;
     --shiki-token-punctuation: #a8afba;
     --shiki-token-link: #5fb3b3;
@@ -157,35 +223,65 @@
   --color-chrome: #1b1d22;
   --color-control: #31353d;
   --color-control-hover: #3b404a;
-  --color-border: #2f333a;
   --color-text: #d9dce1;
-  --color-text-muted: #8b919b;
-  --color-selected-bg: #343944;
+  --color-text-muted: #a8aeb8;
+  --color-input-border: #7c828c;
+  --color-border: #2f333a;
   --color-accent: #f2a23c;
+  --color-accent-hover: #f6b462;
   --color-accent-text: #1b1d22;
+  --color-accent-fg: #f2a23c;
+  --color-accent-tint: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --color-selected-bg: #353a45;
   --color-diff-add-bg: #233325;
   --color-diff-add-text: #9fd38a;
   --color-diff-remove-bg: #3a2427;
   --color-diff-remove-text: #f09389;
   --color-danger: #3a2427;
   --color-danger-text: #f09389;
-  --color-danger-bg: var(--color-danger);
   --color-success-bg: #233325;
   --color-success-text: #9fd38a;
   --color-warning-bg: #3a3122;
   --color-warning-text: #f2c66d;
   --color-info-bg: #22303e;
   --color-info-text: #8cc0ea;
+  --color-lane-1: #e8833a;
+  --color-lane-2: #6aa84f;
+  --color-lane-3: #5c93d3;
+  --color-lane-4: #b47fc3;
+  --color-lane-5: #e2655f;
+  --color-lane-6: #3fa5a5;
   --color-scrim: rgba(0, 0, 0, 0.45);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
   --shiki-token-constant: #f9ae58;
   --shiki-token-string: #99c794;
-  --shiki-token-comment: #7c8591;
-  --shiki-token-keyword: #c594c5;
+  --shiki-token-comment: #9ea7b2;
+  --shiki-token-keyword: #c99ac9;
   --shiki-token-parameter: #d9dce1;
-  --shiki-token-function: #6699cc;
+  --shiki-token-function: #7aa7d6;
   --shiki-token-string-expression: #99c794;
   --shiki-token-punctuation: #a8afba;
   --shiki-token-link: #5fb3b3;
+}
+
+/* Forced colours (Windows contrast themes and the like, #671): the system palette replaces the
+   app's. Most colours are forced by the browser anyway; these name the system colour for the
+   parts that carry a state. Selection is `Highlight`; the focus ring is `CanvasText`, so a
+   focused row and a selected one stay apart. Box shadows are dropped in this mode, so
+   `index.css` turns the selected-row bar and the input focus ring into outlines. The extra
+   `:root`s outrank the theme blocks above and `vscode-tokens.css`. */
+@media (forced-colors: active) {
+  :root:root:root {
+    --color-focus-ring: CanvasText;
+    --color-selected-marker: Highlight;
+    --color-selected-bg: Canvas;
+    --color-selected-text: CanvasText;
+    --color-accent: Highlight;
+    --color-accent-hover: Highlight;
+    --color-accent-text: HighlightText;
+    --color-accent-fg: LinkText;
+    --color-input-border: CanvasText;
+    --color-border: GrayText;
+  }
 }

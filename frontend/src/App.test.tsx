@@ -2777,6 +2777,33 @@ describe("App external tools", () => {
     expect(screen.queryByLabelText("Editor command")).toBeNull();
   });
 
+  it("has no theme toggle or theme setting in VSCode, where the editor's theme decides (#676)", async () => {
+    render(<App client={toolsClient()} toolHost="vscode" />);
+    await screen.findByRole("tab", { name: "a" });
+    expect(screen.queryByRole("button", { name: /Switch to (light|dark) theme/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+    expect(screen.queryByRole("combobox", { name: "Theme" })).toBeNull();
+  });
+
+  it("switches the theme from the header and goes back to System in Preferences (#691)", async () => {
+    localStorage.removeItem("browsitory-theme");
+    try {
+      render(<App client={toolsClient()} />);
+      await screen.findByRole("tab", { name: "a" });
+      fireEvent.click(screen.getByRole("button", { name: "Switch to dark theme" }));
+      expect(document.documentElement.dataset.theme).toBe("dark");
+      fireEvent.click(screen.getByRole("button", { name: "Preferences" }));
+      const theme = screen.getByRole("combobox", { name: "Theme" });
+      expect(theme).toHaveValue("dark");
+      fireEvent.change(theme, { target: { value: "system" } });
+      expect(document.documentElement.dataset.theme).toBeUndefined();
+      expect(localStorage.getItem("browsitory-theme")).toBeNull();
+    } finally {
+      localStorage.removeItem("browsitory-theme");
+      delete document.documentElement.dataset.theme;
+    }
+  });
+
   it("the repo tab menu opens a terminal in that repo and reveals it", async () => {
     const openTerminal = vi.fn(async () => {});
     const revealInFileManager = vi.fn(async () => {});

@@ -1,0 +1,88 @@
+/* The VSCode webview only (#676; imported by `vscode-main.tsx`). The app's colour tokens take the
+   editor's theme colours, so the panel follows its light, dark and high-contrast themes; the
+   fonts follow the editor's too. VSCode sets the `--vscode-*` variables on the root and the
+   theme kind on the body; `lib/vscodeTheme.ts` copies that kind to `data-theme`, so the tokens
+   VSCode has no colour for (syntax highlighting, branch lanes, the scrim) use the app's light or
+   dark palette from `tokens.css`. The fallbacks only matter for a theme that leaves a colour
+   unset. `html:root[data-host]` outranks every theme block in `tokens.css`; the forced-colours
+   block there still outranks this. */
+html:root[data-host="vscode"] {
+  /* Surfaces */
+  --color-bg: var(--vscode-editor-background);
+  --color-surface: var(--vscode-editor-background);
+  --color-bg-subtle: var(--vscode-textBlockQuote-background, var(--vscode-sideBar-background, var(--vscode-editor-background)));
+  --color-chrome: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --color-control: var(--vscode-button-secondaryBackground, var(--vscode-editor-background));
+  --color-control-hover: var(--vscode-button-secondaryHoverBackground, var(--color-control));
+  --color-hover-bg: var(--vscode-list-hoverBackground, transparent);
+  --color-tab-hover-bg: var(--vscode-tab-hoverBackground, var(--color-hover-bg));
+
+  /* Text */
+  --color-text: var(--vscode-foreground);
+  --color-text-muted: var(--vscode-descriptionForeground, var(--vscode-foreground));
+  --color-control-text: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+
+  /* Inputs */
+  --color-input-bg: var(--vscode-input-background);
+  --color-input-text: var(--vscode-input-foreground, var(--vscode-foreground));
+  --color-input-border: var(--vscode-input-border, var(--vscode-contrastBorder, var(--vscode-panel-border, transparent)));
+  --color-placeholder: var(--vscode-input-placeholderForeground, var(--color-text-muted));
+
+  /* Separators: the high-contrast themes' border wherever there is one. */
+  --color-border: var(--vscode-contrastBorder, var(--vscode-panel-border, var(--vscode-widget-border, transparent)));
+
+  /* Accent: the primary button, links */
+  --color-accent: var(--vscode-button-background);
+  --color-accent-hover: var(--vscode-button-hoverBackground, var(--vscode-button-background));
+  --color-accent-text: var(--vscode-button-foreground);
+  --color-accent-fg: var(--vscode-textLink-foreground, var(--vscode-foreground));
+
+  /* Focus and selection */
+  --color-focus-ring: var(--vscode-focusBorder);
+  --color-selected-bg: var(--vscode-list-inactiveSelectionBackground, var(--vscode-list-hoverBackground));
+  --color-selected-text: var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground));
+  --color-selected-marker: var(--vscode-contrastActiveBorder, var(--vscode-focusBorder));
+  --color-text-selection: var(--vscode-editor-selectionBackground);
+
+  /* Diff lines */
+  --color-diff-add-bg: var(--vscode-diffEditor-insertedLineBackground, var(--vscode-diffEditor-insertedTextBackground));
+  --color-diff-add-text: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-foreground));
+  --color-diff-remove-bg: var(--vscode-diffEditor-removedLineBackground, var(--vscode-diffEditor-removedTextBackground));
+  --color-diff-remove-text: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-errorForeground));
+  --color-diff-context-text: var(--vscode-editor-foreground, var(--vscode-foreground));
+
+  /* Tones. The themes' warning and info foregrounds are made for icons and fail as text on
+     their own backgrounds, so those tones keep the plain foreground on their tinted background. */
+  --color-danger: var(--vscode-inputValidation-errorBackground, var(--vscode-editor-background));
+  --color-danger-text: var(--vscode-errorForeground);
+  --color-success-bg: var(--vscode-diffEditor-insertedLineBackground, var(--vscode-editor-background));
+  --color-success-text: var(--vscode-foreground);
+  --color-warning-bg: var(--vscode-inputValidation-warningBackground, var(--vscode-editor-background));
+  --color-warning-text: var(--vscode-foreground);
+  --color-info-bg: var(--vscode-inputValidation-infoBackground, var(--vscode-editor-background));
+  --color-info-text: var(--vscode-foreground);
+
+  --shadow-md: 0 0 8px 2px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+  --shadow-popover: var(--shadow-md);
+
+  /* Fonts: the workbench font for the interface, the editor font for code. */
+  --font-sans: var(--vscode-font-family, system-ui, sans-serif);
+  --font-mono-default: var(--vscode-editor-font-family, ui-monospace), ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --code-font-size: var(--vscode-editor-font-size);
+}
+
+/* High contrast (dark and light): the accent becomes the theme's active border colour, with the
+   editor background as its text, and controls get the theme's contrast border, as VSCode's own
+   buttons and inputs do (#671). */
+html:root[data-host="vscode"]:has(body.vscode-high-contrast) {
+  --color-accent: var(--vscode-contrastActiveBorder, var(--vscode-focusBorder));
+  --color-accent-hover: var(--color-accent);
+  --color-accent-text: var(--vscode-editor-background);
+}
+
+html[data-host="vscode"] body.vscode-high-contrast button,
+html[data-host="vscode"] body.vscode-high-contrast input:not([type="checkbox"]):not([type="radio"]),
+html[data-host="vscode"] body.vscode-high-contrast select,
+html[data-host="vscode"] body.vscode-high-contrast textarea {
+  border-color: var(--vscode-contrastBorder, currentColor);
+}

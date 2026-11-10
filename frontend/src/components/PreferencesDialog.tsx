@@ -29,6 +29,7 @@ import {
   writeAutoFetchOverride,
 } from "../lib/autoFetch";
 import { repoNameOf } from "../lib/repoName";
+import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
 import styles from "./PreferencesDialog.module.css";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
@@ -320,14 +321,39 @@ function CommitOnBlurField({
 
 const UI_SIZE_LABEL: Record<UiSize, string> = { Small: "Small", Normal: "Normal", Large: "Large" };
 
+const THEME_LABEL: Record<ThemePreference, string> = { system: "System", light: "Light", dark: "Dark" };
+
 /**
- * "Appearance" (#615): the code font, its size and the tab size of file content, and the
- * interface text size. Applied at once by `AppearanceSettingsProvider`.
+ * "Appearance" (#615): the theme (#691), the code font, its size and the tab size of file
+ * content, and the interface text size. Applied at once by `AppearanceSettingsProvider`; the
+ * theme by `useTheme`, stored in this webview, not in the config file. Without `theme` (VSCode,
+ * where the editor's theme decides, #676) there is no theme field.
  */
-export function AppearanceSection() {
+export function AppearanceSection({
+  theme,
+}: {
+  theme?: { preference: ThemePreference; onChange: (preference: ThemePreference) => void };
+} = {}) {
   const { settings, update, error, dismissError } = useAppearanceSettingsContext();
   return (
     <PreferencesSection title="Appearance">
+      {theme !== undefined && (
+        <Field label="Theme">
+          {(props) => (
+            <select
+              {...props}
+              value={theme.preference}
+              onChange={(event) => theme.onChange(event.target.value as ThemePreference)}
+            >
+              {THEME_PREFERENCES.map((value) => (
+                <option key={value} value={value}>
+                  {THEME_LABEL[value]}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      )}
       <CommitOnBlurField
         label="Code font"
         type="text"
@@ -375,6 +401,7 @@ export function AppearanceSection() {
         }}
       />
       <p className={styles.hint}>
+        {theme !== undefined && "System follows your operating system's light or dark setting. "}
         The code font and its size apply to diffs, blame, the file viewer and conflicts; a font that
         is not installed falls back to the default. Leave them empty for the defaults. The tab size
         is in columns.

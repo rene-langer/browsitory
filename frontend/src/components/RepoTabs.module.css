@@ -44,7 +44,7 @@
 }
 
 .tab:hover {
-  background: color-mix(in srgb, var(--color-bg) 50%, var(--color-chrome));
+  background: var(--color-tab-hover-bg);
 }
 
 .tab.active {
