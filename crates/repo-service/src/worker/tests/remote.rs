@@ -1019,8 +1019,8 @@ fn remote_management_round_trips_through_the_worker() {
     )
     .unwrap();
     let handle = worker.handle();
-    let first = "https://example.com/first.git";
-    let second = "https://example.com/second.git";
+    let first = "https://first.example.com/repo.git";
+    let second = "https://second.example.com/repo.git";
 
     handle
         .add_remote("origin".into(), first.into(), None)
@@ -1034,6 +1034,16 @@ fn remote_management_round_trips_through_the_worker() {
     let remotes = handle.list_remotes().unwrap();
     let names: Vec<_> = remotes.iter().map(|remote| remote.name.as_str()).collect();
     assert_eq!(names, ["origin", "second"]);
+    handle
+        .update_remote_urls("second".into(), second.into(), Some(first.into()))
+        .unwrap();
+    let pushes: Vec<_> = handle
+        .list_remotes()
+        .unwrap()
+        .into_iter()
+        .map(|remote| remote.push_url)
+        .collect();
+    assert_eq!(pushes, [None, Some(first.to_string())]);
     assert_eq!(handle.get_remote_auth_mode("second".into()).unwrap(), None);
 
     handle
