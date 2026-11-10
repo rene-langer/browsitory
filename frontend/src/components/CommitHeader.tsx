@@ -1,5 +1,13 @@
 import { Fragment, useEffect, useState, type KeyboardEvent } from "react";
-import type { CommitSignature, CommitStats, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import type {
+  CommitDetails,
+  CommitPerson,
+  CommitSignature,
+  CommitStats,
+  ForgeRepository,
+  GraphCommit,
+  RepoClient,
+} from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { copyText } from "../lib/clipboard";
 import { describeError, type DescribedError } from "../lib/errorMessages";
@@ -48,11 +56,61 @@ function MessageText({
   );
 }
 
+/** How many refs "Contained in" shows before "Show N more". */
+const REFS_SHOWN = 8;
+
+function DateTime({ timestamp }: { timestamp: number }) {
+  return (
+    <>
+      <time dateTime={new Date(timestamp * 1000).toISOString()}>{formatAbsoluteDate(timestamp)}</time>{" "}
+      <span className={styles.relative}>({formatRelativeDate(timestamp)})</span>
+    </>
+  );
+}
+
+const samePerson = (a: CommitPerson, b: CommitPerson) => a.name === b.name && a.email === b.email;
+
+/**
+ * "Contained in" (#641): the branches, remote branches and tags whose tip is or contains the
+ * commit, the first `REFS_SHOWN` and the rest on request.
+ */
+function ContainedIn({ details }: { details: CommitDetails }) {
+  const [expanded, setExpanded] = useState(false);
+  const refs = [
+    ...details.branches.map((name) => ({ name, kind: "branch" })),
+    ...details.remoteBranches.map((name) => ({ name, kind: "remote" })),
+    ...details.tags.map((name) => ({ name, kind: "tag" })),
+  ];
+  const shown = expanded ? refs : refs.slice(0, REFS_SHOWN);
+  const hidden = refs.length - shown.length;
+  return (
+    <>
+      {refs.length === 0 && details.complete && <span className={styles.relative}>No branch or tag</span>}
+      {shown.map((ref) => (
+        <span key={`${ref.kind}:${ref.name}`} className={styles.ref} data-kind={ref.kind} title={refTitle(ref.kind)}>
+          {ref.name}
+        </span>
+      ))}
+      {hidden > 0 && (
+        <button type="button" className={styles.linkButton} onClick={() => setExpanded(true)}>
+          Show {hidden} more
+        </button>
+      )}
+      {!details.complete && <span className={styles.relative}>Not every branch and tag was checked.</span>}
+    </>
+  );
+}
+
+function refTitle(kind: string): string {
+  return kind === "branch" ? "Local branch" : kind === "remote" ? "Remote branch" : "Tag";
+}
+
 /**
  * Metadata block at the top of a selected commit's diff pane: subject, body, author, date, full
  * SHA (copyable), parents and children (#618). Author/date/parents come from the already-loaded
  * `GraphCommit` and the children from the loaded history; only the full message body and the
- * signature status need a `RepoClient` round trip. URLs and, with `issueForge`, issue
+ * signature status need a `RepoClient` round trip, as do the committer and the branches and
+ * tags that contain the commit (#641). URLs and, with `issueForge`, issue
  * references in the subject and body are links (#612). `lineStats` adds the commit's totals
  * (#620).
  */
@@ -88,6 +146,8 @@ export function CommitHeader({
   const [signature, setSignature] = useState<CommitSignature | null | undefined>(undefined);
   const [copied, setCopied] = useState(false);
   const [openError, setOpenError] = useState<DescribedError | null>(null);
+  // null while loading or when it couldn't be read: the rows it adds are then left out.
+  const [details, setDetails] = useState<CommitDetails | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -112,10 +172,28 @@ export function CommitHeader({
         // Like the body: the header is complete without it.
         if (!ignore) setSignature(null);
       });
+    Promise.resolve()
+      .then(() => {
+        if (!ignore) setDetails(null);
+        return client.getCommitDetails(repoPath, commitId);
+      })
+      .then((next) => {
+        if (!ignore) setDetails(next);
+      })
+      .catch(() => {
+        // Like the signature: the header is complete without it.
+      });
     return () => {
       ignore = true;
     };
   }, [client, repoPath, commitId]);
+  // The graph's timestamp is the commit time; the details carry the author's own.
+  const authorTime = details?.author.timestamp ?? commit?.timestamp;
+  // A committer row only when it says something: another person (a patch applied, a
+  // cherry-pick) or the same person later (a rebase, an amend).
+  const committer = details?.committer ?? null;
+  const otherCommitter = details !== null && !samePerson(details.author, details.committer);
+  const laterCommit = details !== null && !otherCommitter && details.committer.timestamp !== details.author.timestamp;
 
   const subject = commit?.summary ?? message?.split("\n")[0] ?? "";
   const body = message === null ? "" : message.split("\n").slice(1).join("\n").trim();
@@ -168,10 +246,23 @@ export function CommitHeader({
             </dd>
             <dt>Date</dt>
             <dd>
-              <time dateTime={new Date(commit.timestamp * 1000).toISOString()}>
-                {formatAbsoluteDate(commit.timestamp)}
-              </time>{" "}
-              <span className={styles.relative}>({formatRelativeDate(commit.timestamp)})</span>
+              <DateTime timestamp={authorTime ?? commit.timestamp} />
+            </dd>
+          </>
+        )}
+        {otherCommitter && committer !== null && (
+          <>
+            <dt>Committer</dt>
+            <dd>
+              {committer.name} &lt;{committer.email}&gt;, <DateTime timestamp={committer.timestamp} />
+            </dd>
+          </>
+        )}
+        {laterCommit && committer !== null && (
+          <>
+            <dt>Committed</dt>
+            <dd>
+              <DateTime timestamp={committer.timestamp} />
             </dd>
           </>
         )}
@@ -204,6 +295,14 @@ export function CommitHeader({
             <dd>
               {filesChangedLabel(lineStats.filesChanged)},{" "}
               <LineStatsBadge insertions={lineStats.insertions} deletions={lineStats.deletions} />
+            </dd>
+          </>
+        )}
+        {details !== null && (
+          <>
+            <dt>Contained in</dt>
+            <dd className={styles.refs}>
+              <ContainedIn key={commitId} details={details} />
             </dd>
           </>
         )}
