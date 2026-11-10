@@ -733,7 +733,6 @@ export function UncommittedDiffPane({
         sequencePending={sequencePending}
         stagedCount={stagedCount}
         conflictCount={conflictCount}
-        stashReason={stashReason}
         initialCommitDraft={initialCommitDraft}
         focusCommitMessage={focusCommitMessage}
         clearCommitMessage={clearCommitMessage}

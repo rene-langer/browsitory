@@ -820,61 +820,12 @@ describe("DiffPane", () => {
       expect(screen.getByText("Commit")).not.toBeDisabled();
     });
 
-    it("renders a Stash button", () => {
+    it("has no Stash button of its own: Stash is in the repository toolbar (#637)", () => {
       renderUncommitted(fakeClient({}), status);
 
-      expect(screen.getByText("Stash")).toBeInTheDocument();
-    });
-
-    it("clicking Stash calls onSaveStash", () => {
-      const onSaveStash = vi.fn();
-      renderUncommitted(fakeClient({}), status, { onSaveStash });
-
-      fireEvent.click(screen.getByText("Stash"));
-
-      expect(onSaveStash).toHaveBeenCalled();
-    });
-
-    it("Stash button is disabled when the working tree is clean", () => {
-      renderUncommitted(fakeClient({}), []);
-
-      expect(screen.getByText("Stash")).toBeDisabled();
-    });
-
-    it("Stash button is enabled when there are changes", () => {
-      renderUncommitted(fakeClient({}), status);
-
-      expect(screen.getByText("Stash")).not.toBeDisabled();
-    });
-
-    it("Stash button is disabled while a rebase is in progress", () => {
-      // Stashing a paused rebase step's resolved/amended working tree away and then continuing
-      // lands an empty or wrong commit, with nothing in the rebase state that notices — so the
-      // action is off the table for the whole pause (see the backend's own HEAD-drift guard in
-      // `git-core::rebase::rebase_continue`).
-      renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
-
-      expect(screen.getByText("Stash")).toBeDisabled();
-    });
-
-    it("opens the stash dialog or stashes all from the Stash chevron menu", () => {
-      const onSaveStash = vi.fn();
-      const onOpenStashDialog = vi.fn();
-      renderUncommitted(fakeClient({}), status, { onSaveStash, onOpenStashDialog });
-
-      fireEvent.click(screen.getByRole("button", { name: "More stash options" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Stash…" }));
-      expect(onOpenStashDialog).toHaveBeenCalledWith([]);
-
-      fireEvent.click(screen.getByRole("button", { name: "More stash options" }));
-      fireEvent.click(screen.getByRole("menuitem", { name: "Stash all" }));
-      expect(onSaveStash).toHaveBeenCalled();
-    });
-
-    it("disables the Stash chevron with the main button", () => {
-      renderUncommitted(fakeClient({}), []);
-
-      expect(screen.getByRole("button", { name: "More stash options" })).toBeDisabled();
+      const dock = screen.getByRole("group", { name: "Commit actions" });
+      expect(within(dock).queryByRole("button", { name: "Stash" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "More stash options" })).toBeNull();
     });
 
     it("offers Stash file… on a staged row's actions menu", () => {
@@ -925,7 +876,7 @@ describe("DiffPane", () => {
       expect(screen.queryByLabelText("Amend last commit")).toBeNull();
     });
 
-    it("offers no Abort merge, amend or Stash during a rebase started in a terminal (#263)", () => {
+    it("offers no Abort merge or amend during a rebase started in a terminal (#263)", () => {
       // git wrote MERGE_MSG for the rebase's step; committing it stays possible, as with git commit.
       renderUncommitted(fakeClient({}), status, {
         mergeMessage: "M\n",
@@ -945,14 +896,12 @@ describe("DiffPane", () => {
       expect(screen.getByPlaceholderText("Commit message")).toHaveValue("M\n");
       expect(within(dock).queryByRole("button", { name: "Abort merge" })).toBeNull();
       expect(within(dock).queryByText(/amend/i)).toBeNull();
-      expect(within(dock).getByRole("button", { name: "Stash" })).toBeDisabled();
     });
 
     it("keeps the rebase actions in a pinned commit-actions group so they never scroll away with long diffs", () => {
       renderUncommitted(fakeClient({}), status, { rebaseProgress: { currentStep: 1, totalSteps: 3 } });
 
       const dock = screen.getByRole("group", { name: "Commit actions" });
-      expect(within(dock).getByText("Stash")).toBeInTheDocument();
       expect(within(dock).getByRole("button", { name: /abort rebase/i })).toBeInTheDocument();
     });
 
@@ -1008,7 +957,6 @@ describe("DiffPane", () => {
       expect(within(dock).getByText("Step 2 of 5")).toBeInTheDocument();
       expect(within(dock).getByRole("button", { name: "Continue cherry-pick" })).toBeDisabled();
       expect(within(dock).queryByRole("textbox", { name: "Commit message" })).toBeNull();
-      expect(within(dock).getByRole("button", { name: "Stash" })).toBeDisabled();
       fireEvent.click(within(dock).getByRole("button", { name: "Abort cherry-pick" }));
       expect(onSequenceAbort).toHaveBeenCalled();
       unmount();

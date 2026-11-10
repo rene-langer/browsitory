@@ -16,6 +16,28 @@ describe("CommandPalette", () => {
     localStorage.clear();
   });
 
+  it("opens straight into a picker, and Backspace still leads back to the commands (#638)", () => {
+    const pick = vi.fn();
+    const commands: Command[] = [
+      ...makeCommands(),
+      {
+        id: "switch-branch",
+        label: "Switch branch…",
+        keywords: [],
+        run: vi.fn(),
+        group: "Branches",
+        picker: { placeholder: "Branch…", emptyText: "None", items: () => [{ id: "b:dev", label: "dev", keywords: [], run: pick }] },
+      },
+    ];
+    const onRun = vi.fn();
+    render(<CommandPalette commands={commands} onRun={onRun} initialPickerId="switch-branch" />);
+    const input = screen.getByRole("combobox", { name: "Switch branch" });
+    expect(screen.getByRole("option", { name: "dev" })).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Backspace" });
+    expect(screen.getByRole("combobox", { name: "Command palette" })).toBeInTheDocument();
+    expect(screen.getByText("Fetch origin")).toBeInTheDocument();
+  });
+
   it("renders every command when the query is empty", () => {
     render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
     expect(screen.getByText("Switch to main")).toBeInTheDocument();

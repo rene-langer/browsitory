@@ -85,18 +85,6 @@ export function WorkspaceSidebar({
         onListRemoteBranches={appState.listRemoteBranches}
         onFetchRemote={announce("Fetch complete", appState.fetchRemote)}
         onPushCurrentBranch={announce("Push complete", appState.pushCurrentBranch)}
-        onPull={appState.pullCurrentUpstream}
-        pendingPull={appState.state.pendingPull}
-        pullOutcome={appState.state.pullOutcome}
-        onMergePull={async (upstreamRef) => {
-          appState.clearPendingPull();
-          await appState.mergePull(upstreamRef);
-        }}
-        onRebasePull={(upstreamRef) => {
-          appState.clearPendingPull();
-          appState.openRebasePlanner(upstreamRef);
-        }}
-        onCancelPull={appState.clearPendingPull}
         addRemoteDraftOpen={appState.state.addRemoteDraftOpen}
         onOpenAddRemoteDraft={appState.openAddRemoteDraft}
         onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
