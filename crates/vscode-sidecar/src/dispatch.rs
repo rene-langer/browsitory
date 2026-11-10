@@ -156,6 +156,8 @@ methods!(|params, repos, stdout| {
     "list_recent_repos" => list_recent_repos(),
     "list_open_repos" => list_open_repos_handler(),
     "persist_open_repos" => persist_open_repos(PersistOpenReposParams),
+    "list_repo_aliases" => list_repo_aliases(),
+    "set_repo_alias" => set_repo_alias(SetRepoAliasParams),
     "scan_repos_in_root" => scan_repos_in_root(ScanReposInRootParams),
     "list_workspaces" => list_workspaces_handler(),
     "save_workspace" => save_workspace(SaveWorkspaceParams),

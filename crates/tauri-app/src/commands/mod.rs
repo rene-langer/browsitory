@@ -223,6 +223,18 @@ pub fn persist_open_repos(
 }
 
 #[tauri::command]
+pub fn list_repo_aliases() -> Result<Vec<repo_service::wire::RepoAliasDto>, ErrorDto> {
+    let aliases = config::list_repo_aliases().map_err(ErrorDto::from_error)?;
+    Ok(aliases.into_iter().map(Into::into).collect())
+}
+
+/// `None` or a blank `alias` removes the repository's tab name (#625).
+#[tauri::command]
+pub fn set_repo_alias(repo_path: String, alias: Option<String>) -> Result<(), ErrorDto> {
+    config::set_repo_alias(Path::new(&repo_path), alias.as_deref()).map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
 pub async fn pick_repo_folder(app: tauri::AppHandle) -> Option<String> {
     app.dialog()
         .file()

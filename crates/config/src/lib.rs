@@ -62,6 +62,14 @@ pub struct MergePreference {
     pub squash: bool,
 }
 
+/// A custom tab name for one repository (#625). Kept by path, apart from the open tabs, so it
+/// survives closing the tab and a restart.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoAlias {
+    pub repo_path: PathBuf,
+    pub alias: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenRepoEntry {
     pub path: PathBuf,
@@ -252,6 +260,8 @@ struct ConfigFile {
     graph_remote_branch_selections: Vec<GraphRemoteBranchSelection>,
     #[serde(default)]
     merge_preferences: Vec<MergePreference>,
+    #[serde(default)]
+    repo_aliases: Vec<RepoAlias>,
 }
 
 fn config_file_path() -> Result<PathBuf, ConfigError> {
@@ -699,5 +709,35 @@ pub fn set_merge_preference_at(
         fast_forward,
         squash,
     });
+    write_config(config_file, &config)
+}
+
+pub fn list_repo_aliases() -> Result<Vec<RepoAlias>, ConfigError> {
+    list_repo_aliases_at(&config_file_path()?)
+}
+
+pub fn set_repo_alias(repo_path: &Path, alias: Option<&str>) -> Result<(), ConfigError> {
+    set_repo_alias_at(&config_file_path()?, repo_path, alias)
+}
+
+pub fn list_repo_aliases_at(config_file: &Path) -> Result<Vec<RepoAlias>, ConfigError> {
+    Ok(read_config(config_file)?.repo_aliases)
+}
+
+/// Stores `alias`, trimmed, as the tab name of `repo_path`. `None` or a blank alias removes it,
+/// so the tab shows the folder name again.
+pub fn set_repo_alias_at(
+    config_file: &Path,
+    repo_path: &Path,
+    alias: Option<&str>,
+) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.repo_aliases.retain(|a| a.repo_path != repo_path);
+    if let Some(alias) = alias.map(str::trim).filter(|a| !a.is_empty()) {
+        config.repo_aliases.push(RepoAlias {
+            repo_path: repo_path.to_path_buf(),
+            alias: alias.to_string(),
+        });
+    }
     write_config(config_file, &config)
 }

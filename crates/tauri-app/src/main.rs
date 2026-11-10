@@ -110,6 +110,8 @@ commands![
     get_app_version,
     list_open_repos,
     persist_open_repos,
+    list_repo_aliases,
+    set_repo_alias,
     scan_repos_in_root,
     list_workspaces,
     save_workspace,
