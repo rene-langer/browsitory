@@ -394,8 +394,9 @@ fn switch_branch_leaf_is_refused() {
     f.side_branch(&[("tc", "other\n")]);
     f.link_leaf();
     let result = git_core::branch::switch_branch(&f.repo, "other");
+    // The link is a local change in the way (#653).
     assert!(
-        matches!(&result, Err(BranchError::Git(e)) if is_checkout_conflict(e)),
+        matches!(&result, Err(BranchError::LocalChanges(name)) if name == "other"),
         "{result:?}"
     );
     f.untouched();

@@ -102,6 +102,7 @@ SequenceProgress/Revert key-order
 SignatureInput/plain key-order
 StashApplyOutcome/Conflicted key-order
 StashEntry/plain key-order
+StashSwitchOutcome/Conflicted key-order
 StatusEntry/Conflicted key-order
 StatusEntry/Deleted key-order
 StatusEntry/Modified key-order
