@@ -91,6 +91,16 @@ export type GitTools = { diffTool: GitToolInfo | null, mergeTool: GitToolInfo | 
 
 export type GraphCommit = { id: string, shortId: string, summary: string, authorName: string, authorEmail: string, timestamp: number, parentIds: Array<string>, branchRefs: Array<string>, remoteBranchRefs: Array<string>, tags: Array<string>, };
 
+export type GraphSelection = { 
+/**
+ * Local branch names: `null` walks every local branch, `[]` none of them.
+ */
+local: Array<string> | null, 
+/**
+ * Remote-tracking branches as `<remote>/<branch>`; required, `[]` walks no remote branch.
+ */
+remote: Array<string>, };
+
 export type HeadInfo = { headId: string | null, detachedAt: string | null, headPushed: boolean, operation: OperationKind | null, 
 /**
  * `operation`'s changes are already in HEAD; only git's state files are left (#240). The next

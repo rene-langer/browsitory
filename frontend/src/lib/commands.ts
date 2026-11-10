@@ -995,7 +995,7 @@ function goToPickers(appState: UseAppStateResult, goTo: GoToCommands): Command[]
 
   const remoteNames = new Set<string>();
   for (const branch of state.branches) if (branch.upstream != null) remoteNames.add(branch.upstream);
-  for (const name of state.graphRemoteBranchSelection ?? []) remoteNames.add(name);
+  for (const name of state.graphSelection.remote ?? []) remoteNames.add(name);
   for (const commit of state.commits) for (const name of commit.remoteBranchRefs) remoteNames.add(name);
   const branchItems: Command[] = [
     ...state.branches.map((branch) => ({

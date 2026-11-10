@@ -209,7 +209,7 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
     let graph = sidecar.call(
         2,
         "get_commit_graph",
-        serde_json::json!({"repoPath": repo_path, "limit": 10, "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path, "limit": 10, "selection": {"local": null, "remote": []}}),
     );
 
     let commits = graph["result"]
@@ -238,12 +238,12 @@ fn locate_commit_finds_a_commit_through_the_sidecar() {
     let found = sidecar.call(
         2,
         "locate_commit",
-        serde_json::json!({"repoPath": repo_path, "revision": &head[..7], "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path, "revision": &head[..7], "selection": {"local": null, "remote": []}}),
     );
     let missing = sidecar.call(
         3,
         "locate_commit",
-        serde_json::json!({"repoPath": repo_path, "revision": "no-such-branch", "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path, "revision": "no-such-branch", "selection": {"local": null, "remote": []}}),
     );
 
     assert_eq!(found["result"]["commitId"], head.as_str());
@@ -294,7 +294,7 @@ fn commit_graph_and_search_walk_the_selected_remote_branches_through_the_sidecar
         sidecar.call(
             id,
             "get_commit_graph",
-            serde_json::json!({"repoPath": repo_path, "limit": 10, "selectedBranches": null, "remoteBranches": remote}),
+            serde_json::json!({"repoPath": repo_path, "limit": 10, "selection": {"local": null, "remote": remote}}),
         )
     };
     assert_eq!(
@@ -312,7 +312,7 @@ fn commit_graph_and_search_walk_the_selected_remote_branches_through_the_sidecar
     let page = sidecar.call(
         4,
         "search_commits",
-        serde_json::json!({"repoPath": repo_path, "query": "remote", "refs": null, "remoteBranches": ["origin/feature"], "cursor": null}),
+        serde_json::json!({"repoPath": repo_path, "query": "remote", "selection": {"local": null, "remote": ["origin/feature"]}, "cursor": null}),
     );
     assert_eq!(summaries(&page, "commits"), ["remote only"]);
 }
@@ -332,7 +332,7 @@ fn search_commits_and_cancel_search_round_trip_through_the_sidecar() {
     let page = sidecar.call(
         2,
         "search_commits",
-        serde_json::json!({"repoPath": repo_path, "query": "beta", "refs": null, "remoteBranches": [], "cursor": null}),
+        serde_json::json!({"repoPath": repo_path, "query": "beta", "selection": {"local": null, "remote": []}, "cursor": null}),
     );
     let result = &page["result"];
     assert_eq!(result["commits"].as_array().unwrap().len(), 1);
@@ -343,7 +343,7 @@ fn search_commits_and_cancel_search_round_trip_through_the_sidecar() {
     let invalid = sidecar.call(
         3,
         "search_commits",
-        serde_json::json!({"repoPath": repo_path, "query": "feat: x", "refs": null, "remoteBranches": [], "cursor": null}),
+        serde_json::json!({"repoPath": repo_path, "query": "feat: x", "selection": {"local": null, "remote": []}, "cursor": null}),
     );
     assert!(invalid["error"]["message"]
         .as_str()
@@ -389,7 +389,7 @@ fn working_and_commit_diff_round_trip_through_the_sidecar() {
     let graph = sidecar.call(
         3,
         "get_commit_graph",
-        serde_json::json!({"repoPath": repo_path, "limit": 1, "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path, "limit": 1, "selection": {"local": null, "remote": []}}),
     );
     let head_id = graph["result"][0]["id"]
         .as_str()
@@ -674,7 +674,7 @@ fn graph_branch_selection_round_trips() {
     let set = sidecar.call(
         2,
         "set_graph_branch_selection",
-        serde_json::json!({"repoPath": repo_path, "selectedBranches": ["main", "feature"]}),
+        serde_json::json!({"repoPath": repo_path, "local": ["main", "feature"]}),
     );
     assert_eq!(set["result"], serde_json::Value::Null);
 
@@ -717,7 +717,7 @@ fn graph_remote_branch_selection_round_trips() {
     let set = sidecar.call(
         2,
         "set_graph_remote_branch_selection",
-        serde_json::json!({"repoPath": repo_path, "selectedBranches": ["origin/main"]}),
+        serde_json::json!({"repoPath": repo_path, "remote": ["origin/main"]}),
     );
     assert_eq!(set["result"], serde_json::Value::Null);
 
@@ -2142,7 +2142,7 @@ fn a_slow_request_on_one_repo_does_not_delay_a_fast_request_on_another() {
     sidecar.send(
         3,
         "get_commit_graph",
-        serde_json::json!({"repoPath": repo_path_a, "limit": 10, "selectedBranches": null, "remoteBranches": []}),
+        serde_json::json!({"repoPath": repo_path_a, "limit": 10, "selection": {"local": null, "remote": []}}),
     );
     // Fast request against the unrelated repo B, sent right behind it on the same stdin pipe.
     sidecar.send(

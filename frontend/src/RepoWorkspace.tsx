@@ -134,8 +134,7 @@ export function RepoWorkspace({
     client,
     repoPath,
     appState.state.refreshGeneration,
-    appState.state.graphBranchSelection,
-    appState.state.graphRemoteBranchSelection,
+    appState.state.graphSelection,
     appState.state.selectedRow,
     appState.selectRow,
   );
@@ -800,11 +799,11 @@ export function RepoWorkspace({
               onMergeBranch={appState.openMergeDialog}
               operationDisabled={repositoryOperationDisabled}
               operationDisabledReason={operationDisabledReason}
-              graphBranchSelection={appState.state.graphBranchSelection}
+              graphBranchSelection={appState.state.graphSelection.local}
               onSetGraphBranchSelection={appState.setGraphBranchSelection}
               onClearGraphBranchSelection={appState.clearGraphBranchSelection}
               onShowAllGraphBranches={appState.showAllGraphBranches}
-              graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
+              graphRemoteBranchSelection={appState.state.graphSelection.remote}
               onSetGraphRemoteBranchSelection={appState.setGraphRemoteBranchSelection}
               onIsolateGraphBranch={appState.isolateGraphBranch}
               remoteBranchesInGraph={Array.from(new Set(appState.state.commits.flatMap((c) => c.remoteBranchRefs)))}
@@ -1036,7 +1035,7 @@ export function RepoWorkspace({
                       }}
                       onEditHistory={(commitId, onto, request) => void appState.editHistory(commitId, onto, request)}
                       onRewordCommit={appState.openRewordDialog}
-                      graphRemoteBranchSelection={appState.state.graphRemoteBranchSelection}
+                      graphRemoteBranchSelection={appState.state.graphSelection.remote}
                       remotes={appState.state.remotes}
                       onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
                       onDeleteTag={appState.deleteTag}

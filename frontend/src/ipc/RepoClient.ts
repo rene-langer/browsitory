@@ -606,6 +606,16 @@ export interface ChangedFile {
   oldPath: string | null;
 }
 
+/**
+ * The branches the commit graph walks, passed as one `selection` to `getCommitGraph`,
+ * `locateCommit` and `searchCommits` (#498). `local`: `null` = every local branch, `[]` = none.
+ * `remote`: `<remote>/<branch>` names walked on top; `[]` = none (the default graph).
+ */
+export interface GraphSelection {
+  local: string[] | null;
+  remote: string[];
+}
+
 /** Where a revision's commit sits in the graph ("Go to commit", #441). */
 export interface CommitLocation {
   commitId: string;
@@ -882,33 +892,22 @@ export interface RepoClient {
   deleteWorkspace(id: string): Promise<void>;
   getStatus(repoPath: string): Promise<StatusEntry[]>;
   /**
-   * The commits of `selectedBranches` (`null` = every local branch, `[]` = none) plus those of
-   * `remoteBranches` (`<remote>/<branch>`; `[]` = none, the default graph). Exactly one branch
-   * in total walks first parents only. Missing branches are skipped.
+   * The commits of `selection.local` plus those of `selection.remote`. Exactly one branch in
+   * total walks first parents only. Missing branches are skipped.
    */
-  getCommitGraph(
-    repoPath: string,
-    limit: number,
-    selectedBranches: string[] | null,
-    remoteBranches: string[],
-  ): Promise<GraphCommit[]>;
+  getCommitGraph(repoPath: string, limit: number, selection: GraphSelection): Promise<GraphCommit[]>;
   /**
    * Resolves `revision` (SHA or prefix, branch, tag, any git revision) and finds its commit in
    * the graph `getCommitGraph` returns for the same selection. `null` when it names no commit;
    * rejects for an ambiguous SHA prefix.
    */
-  locateCommit(
-    repoPath: string,
-    revision: string,
-    selectedBranches: string[] | null,
-    remoteBranches: string[],
-  ): Promise<CommitLocation | null>;
+  locateCommit(repoPath: string, revision: string, selection: GraphSelection): Promise<CommitLocation | null>;
   getGraphBranchSelection(repoPath: string): Promise<string[] | null>;
-  setGraphBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
+  setGraphBranchSelection(repoPath: string, local: string[]): Promise<void>;
   /** Forgets the saved selection: back to every local branch, also ones created later (#402). */
   clearGraphBranchSelection(repoPath: string): Promise<void>;
   getGraphRemoteBranchSelection(repoPath: string): Promise<string[] | null>;
-  setGraphRemoteBranchSelection(repoPath: string, selectedBranches: string[]): Promise<void>;
+  setGraphRemoteBranchSelection(repoPath: string, remote: string[]): Promise<void>;
   /** Forgets the saved remote selection: no remote commits, every remote badge (#402). */
   clearGraphRemoteBranchSelection(repoPath: string): Promise<void>;
   /** `oldPath` (with `staged`): a staged rename's old path, so only its edits show. */
@@ -929,18 +928,15 @@ export interface RepoClient {
     limit: number,
   ): Promise<LineHistory>;
   /**
-   * One page of commits matching `query` (see the search syntax help). `refs` and
-   * `remoteBranches` mean what `getCommitGraph`'s `selectedBranches` and `remoteBranches` mean,
-   * so search walks the graph's commits; a `branch:` term overrides both. `cursor` is a
-   * previous page's `nextCursor`, or `null` for the
-   * first page. Rejects with the query error text, or "Search cancelled." when a newer search
+   * One page of commits matching `query` (see the search syntax help). `selection` is the one
+   * `getCommitGraph` takes, so search walks the graph's commits; a `branch:` term overrides it.
+   * `cursor` is a previous page's `nextCursor`, or `null` for the first page. Rejects with the query error text, or "Search cancelled." when a newer search
    * (or `cancelSearch`) superseded this one.
    */
   searchCommits(
     repoPath: string,
     query: string,
-    refs: string[] | null,
-    remoteBranches: string[],
+    selection: GraphSelection,
     cursor: string | null,
   ): Promise<SearchPage>;
   /** Stops the repo's in-flight search, if any. */

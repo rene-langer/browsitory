@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CommitLocation, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import type { CommitLocation, GraphCommit, GraphSelection, RepoClient } from "../ipc/RepoClient";
 import { useAppState, type SelectedRow } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 import { useGoTo } from "./useGoTo";
@@ -75,7 +75,7 @@ describe("useGoTo", () => {
 
     await act(() => result.current.goTo.goToRevision("bbbbbbb"));
 
-    expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "bbbbbbb", null, []);
+    expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "bbbbbbb", { local: null, remote: [] });
     expect(reveal).toHaveBeenCalledWith({ commitId: target });
     expect(limits).toEqual([300, 600]);
     expect(result.current.appState.state.selectedRow).toEqual({ commitId: target });
@@ -105,7 +105,7 @@ describe("useGoTo", () => {
   it("explains a commit only on a hidden branch and offers to show that branch", async () => {
     const target = "f".repeat(40);
     let selection: string[] | null = ["main"];
-    const locateCommit = vi.fn(async (_repoPath: string, _revision: string, local: string[] | null) =>
+    const locateCommit = vi.fn(async (_repoPath: string, _revision: string, { local }: GraphSelection) =>
       local !== null && local.includes("feature")
         ? { commitId: target, position: 1, branches: [], remoteBranches: [] }
         : hidden({ branches: ["feature"] }),
@@ -138,7 +138,7 @@ describe("useGoTo", () => {
     await act(async () => {});
 
     expect(setGraphBranchSelection).toHaveBeenCalledWith(TEST_REPO_PATH, ["main", "feature"]);
-    expect(locateCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, target, ["main", "feature"], []);
+    expect(locateCommit).toHaveBeenLastCalledWith(TEST_REPO_PATH, target, { local: ["main", "feature"], remote: [] });
     expect(result.current.goTo.notice).toBeNull();
     expect(result.current.appState.state.commits.map((c) => c.id)).toContain(target);
   });
@@ -200,7 +200,7 @@ describe("useGoTo", () => {
     await act(() => result.current.goTo.goToBranch("local", "gone"));
 
     expect(reveal).toHaveBeenCalledWith({ commitId: "a".repeat(40) });
-    expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "refs/heads/gone", null, []);
+    expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "refs/heads/gone", { local: null, remote: [] });
     expect(result.current.goTo.notice?.message).toBe("No commit matches “gone”.");
   });
 

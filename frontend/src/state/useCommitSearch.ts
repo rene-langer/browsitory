@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { errorKind, type GraphCommit, type RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
+import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
 import type { SelectedRow } from "./useAppState";
 
 /** Quiet time after the last keystroke before a search starts. */
@@ -40,9 +41,8 @@ export function useCommitSearch(
   client: RepoClient,
   repoPath: string,
   refreshGeneration: number,
-  refs: string[] | null,
-  // The graph's remote selection (`null` = none walked), so search walks the graph's commits.
-  remoteRefs: string[] | null,
+  // The graph's saved selection, so search walks the graph's commits.
+  selection: SavedGraphSelection,
   selectedRow: SelectedRow,
   selectRow: (row: SelectedRow) => void,
   options?: { debounceMs?: number },
@@ -61,8 +61,7 @@ export function useCommitSearch(
   const previousRow = useRef<SelectedRow | null>(null);
   const resultsRef = useRef(results);
   const selectedRowRef = useRef(selectedRow);
-  const refsRef = useRef(refs);
-  const remoteRefsRef = useRef(remoteRefs);
+  const selectionRef = useRef(selection);
   useEffect(() => {
     resultsRef.current = results;
   }, [results]);
@@ -70,9 +69,8 @@ export function useCommitSearch(
     selectedRowRef.current = selectedRow;
   }, [selectedRow]);
   useEffect(() => {
-    refsRef.current = refs;
-    remoteRefsRef.current = remoteRefs;
-  }, [refs, remoteRefs]);
+    selectionRef.current = selection;
+  }, [selection]);
 
   const clearTimer = () => {
     if (timer.current !== null) {
@@ -92,7 +90,7 @@ export function useCommitSearch(
       const rowAtStart = rowKey(selectedRowRef.current);
       try {
         do {
-          const page = await client.searchCommits(repoPath, q, refsRef.current, remoteRefsRef.current ?? [], cursor);
+          const page = await client.searchCommits(repoPath, q, toGraphSelection(selectionRef.current), cursor);
           if (gen !== generation.current) return;
           found += page.commits.length;
           cursor = page.nextCursor;
@@ -190,7 +188,7 @@ export function useCommitSearch(
 
   // A repo refresh (commit, fetch…) or a different graph branch selection can change the
   // matches: re-run from the first page, keeping the selection.
-  const refsKey = JSON.stringify(refs);
+  const selectionKey = JSON.stringify(selection);
   const mounted = useRef(false);
   useEffect(() => {
     if (!mounted.current) {
@@ -199,7 +197,7 @@ export function useCommitSearch(
     }
     if (activeQuery.current !== null) start(activeQuery.current, { selectFirst: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshGeneration, refsKey]);
+  }, [refreshGeneration, selectionKey]);
 
   useEffect(
     () => () => {

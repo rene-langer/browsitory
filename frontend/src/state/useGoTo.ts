@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommitLocation, RepoClient } from "../ipc/RepoClient";
+import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
 import type { SelectedRow, UseAppStateResult } from "./useAppState";
 
 /**
@@ -13,11 +14,7 @@ export interface GoToNotice {
   action: { label: string; run: () => void } | null;
 }
 
-/** The graph's branch selection, as `getCommitGraph` takes it. */
-interface Selection {
-  local: string[] | null;
-  remote: string[] | null;
-}
+type Selection = SavedGraphSelection;
 
 /** A notice as found: its action changes the graph's selection to `selection`, then goes again. */
 interface Explanation {
@@ -73,11 +70,10 @@ export function useGoTo(
         reveal({ commitId: revision });
         return;
       }
-      const local = selection === undefined ? state.graphBranchSelection : selection.local;
-      const remote = selection === undefined ? state.graphRemoteBranchSelection : selection.remote;
+      const { local, remote } = selection ?? state.graphSelection;
       let location: CommitLocation | null;
       try {
-        location = await client.locateCommit(repoPath, revision, local, remote ?? []);
+        location = await client.locateCommit(repoPath, revision, toGraphSelection({ local, remote }));
       } catch (error) {
         if (ticket !== generation.current) return;
         setNotice({ message: error instanceof Error ? error.message : String(error), commitId: null, label, action: null });

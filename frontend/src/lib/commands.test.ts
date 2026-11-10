@@ -28,8 +28,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       commits: [],
       graphLimit: 300,
       hasMoreHistory: false,
-      graphBranchSelection: null,
-      graphRemoteBranchSelection: null,
+      graphSelection: { local: null, remote: null },
       branches: [
         { name: "main", isCurrent: true },
         { name: "feature", isCurrent: false },
@@ -1776,7 +1775,7 @@ describe("Go to pickers (#441)", () => {
   });
 
   it("lists local branches, then remote ones the graph knows, and goes to the chosen one", () => {
-    const { picker, handlers } = pickers({ graphRemoteBranchSelection: ["upstream/dev"] });
+    const { picker, handlers } = pickers({ graphSelection: { local: null, remote: ["upstream/dev"] } });
     const items = picker("go-to-branch")!.picker!.items("");
     expect(items.map((i) => i.label)).toEqual(["main (current)", "feature", "origin/main", "upstream/dev"]);
 
