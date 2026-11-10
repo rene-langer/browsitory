@@ -7,7 +7,7 @@ import { addRemoteAction, remoteActions } from "./actions/remoteActions";
 import { stashActions, stashBlockers } from "./actions/stashActions";
 import { pruneWorktreesAction, worktreeActions } from "./actions/worktreeActions";
 import { busyReason, operationBlockers, stashBlockReason } from "./operationStatus";
-import { stageModifiedPaths } from "./stagePaths";
+import { stageModifiedPaths, untrackedPaths } from "./stagePaths";
 import type { UseAppStateResult } from "../state/useAppState";
 import type { OpenRepo } from "../state/useOpenRepos";
 import { SIDEBAR_PANEL_IDS, type SidebarPanelId } from "../state/useSidebarPanelVisibility";
@@ -197,6 +197,8 @@ export interface DiffCommands {
   requestDiscardCurrentFile(): void;
   /** Opens the discard-all confirm dialog; never discards directly. */
   requestDiscardAllUnstaged(): void;
+  /** Opens the "Delete untracked…" confirm dialog (#622); never deletes directly. */
+  requestDeleteUntracked?(): void;
   /** Opens the current file's history in place of the commit graph. */
   openCurrentFileHistory(): void;
   /** DiffPane's selection of two or more changed files (#449), if any. */
@@ -919,7 +921,7 @@ export function buildCommands(
         run: () => void appState.stageAllFiles(modifiedPaths),
       });
     }
-    // Both only open the confirm dialogs; staged and conflicted entries have no discard action.
+    // These only open the confirm dialogs; staged and conflicted entries have no discard action.
     // Like the diff pane's discard, allowed while resolving a merge or a paused step: only an
     // action in flight or a transfer blocks it (`busyReason`, #521).
     if (busyReason(state) === null) {
@@ -945,6 +947,14 @@ export function buildCommands(
           label: "Discard all unstaged changes",
           keywords: ["discard", "revert", "all", "unstaged"],
           run: diffCommands.requestDiscardAllUnstaged,
+        });
+      }
+      if (untrackedPaths(state.status).length > 0 && diffCommands.requestDeleteUntracked !== undefined) {
+        commands.push({
+          id: "delete-untracked-files",
+          label: "Delete untracked files…",
+          keywords: ["delete", "remove", "clean", "untracked", "new", "files"],
+          run: diffCommands.requestDeleteUntracked,
         });
       }
     }
@@ -1172,6 +1182,7 @@ export function commandGroup(id: string): CommandGroup {
     id === "toggle-syntax-highlighting" ||
     id === "discard-current-file" ||
     id === "discard-all-unstaged" ||
+    id === "delete-untracked-files" ||
     id === "stage-selected-files" ||
     id === "stage-modified-files" ||
     id === "unstage-selected-files" ||

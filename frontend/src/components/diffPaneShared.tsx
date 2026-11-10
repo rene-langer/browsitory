@@ -52,7 +52,12 @@ export function withBlockedReason(message: ReactNode, blockedReason: string | nu
 }
 
 /** What the discard confirm dialogs are currently asking about; null when none is open. */
-export type DiscardRequest = { kind: "file"; path: string } | { kind: "all" } | { kind: "files"; paths: string[] };
+// `untracked`: the Changes heading's "Delete untracked…" (#622), every untracked file.
+export type DiscardRequest =
+  | { kind: "file"; path: string }
+  | { kind: "all" }
+  | { kind: "files"; paths: string[] }
+  | { kind: "untracked" };
 
 /** The multi-file selection DiffPane reports to the command palette (two or more files). */
 export interface ReportedFileSelection {

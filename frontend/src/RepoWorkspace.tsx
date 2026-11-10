@@ -329,6 +329,10 @@ export function RepoWorkspace({
           appState.selectRow("uncommitted");
           setDiscardRequest({ kind: "all" });
         },
+        requestDeleteUntracked: () => {
+          appState.selectRow("uncommitted");
+          setDiscardRequest({ kind: "untracked" });
+        },
         currentDiff:
           currentDiff.current === null
             ? null
@@ -397,6 +401,11 @@ export function RepoWorkspace({
     onDiscardFiles: (paths) => {
       if (discardDropBlockedReason !== null) return;
       void announce(`Discarded changes to ${paths.length} ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged)(paths);
+    },
+    // `discardAllUnstaged` deletes the untracked paths it is given (#622).
+    onDeleteUntracked: (paths) => {
+      if (discardDropBlockedReason !== null) return;
+      void announce(`Deleted ${paths.length} untracked ${paths.length === 1 ? "file" : "files"}`, appState.discardAllUnstaged)(paths);
     },
     onIgnorePath: (pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath)(pattern),
     onIgnorePaths: (patterns) =>

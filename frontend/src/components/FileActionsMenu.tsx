@@ -196,10 +196,27 @@ export function discardConfirmMessage(entry: StatusEntry): string {
     : `Discard changes to ${entry.path}? This can't be undone.`;
 }
 
-export function discardAllConfirmMessage(entries: StatusEntry[]): string {
+/**
+ * `pointToDeleteUntracked`: the Changes heading's "Discard all…" names "Delete untracked…" (#622)
+ * when untracked files are included, for when only those were meant to go.
+ */
+export function discardAllConfirmMessage(entries: StatusEntry[], pointToDeleteUntracked = false): string {
   const n = entries.length;
   const m = entries.filter(isUntracked).length;
   const files = `${n} ${n === 1 ? "file" : "files"}`;
   const untracked = m > 0 ? ` (${m} untracked will be deleted)` : "";
-  return `Discard changes to ${files}${untracked}? This can't be undone.`;
+  const hint =
+    m > 0 && m < n && pointToDeleteUntracked
+      ? ' To delete only the untracked files and keep the other changes, use "Delete untracked…".'
+      : "";
+  return `Discard changes to ${files}${untracked}? This can't be undone.${hint}`;
+}
+
+/** How many paths the "Delete untracked…" confirmation lists before "and N more" (#622). */
+export const DELETE_UNTRACKED_PREVIEW = 5;
+
+/** The "Delete untracked…" confirmation's question (#622); the dialog lists the first paths. */
+export function deleteUntrackedConfirmMessage(paths: string[]): string {
+  const n = paths.length;
+  return `Delete ${n} untracked ${n === 1 ? "file" : "files"}? This can't be undone.`;
 }
