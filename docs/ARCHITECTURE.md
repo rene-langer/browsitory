@@ -125,6 +125,51 @@ The rule is enforced mechanically, not just by review: `frontend/eslint.config.j
 `frontend/src/components/**` and `frontend/src/state/**`, so a violation fails `pnpm lint`
 (and CI).
 
+## Frontend state
+
+Each open repository tab is one `RepoWorkspace` (`frontend/src/RepoWorkspace.tsx`). Its
+repository data and the actions on it come from `useAppState` (`frontend/src/state/useAppState.ts`,
+built from one action slice per domain); the views read the actions they need from
+`WorkspaceActionsContext` (`frontend/src/state/useWorkspaceActions.ts`, #491) and get their data
+as props. The workspace renders its dialogs in `WorkspaceDialogs`, outside the sidebar: a
+collapsed sidebar stays mounted but `hidden`, and a modal opened inside it would be invisible yet
+leave the page inert.
+
+### Who owns a dialog's open state
+
+Every dialog has exactly one owner, chosen by who opens and closes it (#493):
+
+- **`AppState.dialog`**, when more than one place opens it (a menu and the command palette) or a
+  `useAppState` action opens or closes it itself (a push that needs a target opens "Push to…", a
+  stash that landed closes the stash dialog). It is one `WorkspaceDialog | null` union
+  (`frontend/src/state/workspaceDialog.ts`): push, force push, delete remote branch, create tag,
+  delete remote tag, a remote's edit / credentials / remove, merge, reword and stash. There is one
+  `openDialog(dialog)` and one `closeDialog(kind?)`. Only one is open at a time: opening one
+  replaces the open one, which is what lets a single field hold them all. An action that finishes
+  closes only its own kind (`withoutDialog`), never a dialog opened meanwhile. Being in
+  `AppState`, the dialog survives a `refresh()` (the same object, so identity-keyed state such as
+  `RemoteDialogs`' snapshot keeps working).
+- **`RepoWorkspace` (or one of its hooks)**, when the palette and a view open it but nothing in
+  `useAppState` does: the discard confirmations (`discardRequest`), the cherry-pick/revert parent
+  picker and reset dialog (`commitDialog`, which carries the element to return focus to), the
+  terminal-abort confirmation, the palette and the shortcut sheet.
+- **The component itself**, when only that component opens it: `BranchTree`'s force delete, Set
+  upstream dialog, clear-upstream confirmation and inline rename, for example.
+
+A component whose dialog is owned higher up is always controlled: it takes the state and its
+setter (or just an open callback) as required props and keeps no local copy. There is no "local
+state unless a callback is passed" mode, so a test exercises the same state flow production uses;
+tests that render such a component alone hold the state in a small wrapper
+(`frontend/src/test/BranchTreeWithDialogs.tsx` for `BranchTree` and its remote dialogs, the
+`DiffPane` wrapper in `DiffPane.test.tsx` for the discard confirmations).
+
+Two kinds of UI state stay out of `dialog` on purpose. The sidebar's inline New branch and Add
+remote forms (`createBranchDraft`, `addRemoteDraftOpen`) are not modal: they can be open together
+and next to a dialog, so each keeps its own `AppState` field (the palette opens them too). And a
+prompt that an operation's state raises (the hook failure dialog, a diverged pull's choice, the
+transfer panel) stays with that state. The rebase planner (`rebaseOnto`/`rebasePreset`) predates
+the rule and still has its own fields.
+
 ## git2 API gotchas
 
 - `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return

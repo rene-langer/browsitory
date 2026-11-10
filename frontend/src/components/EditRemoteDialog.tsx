@@ -8,7 +8,7 @@ import styles from "./BranchTree.module.css";
 
 /**
  * Rename a remote and change its URLs. Opened from a remote folder's menu in `BranchTree` or the
- * palette's "Edit remote <name>…" (via `AppState.remoteDialog`). The fields start from `remote`
+ * palette's "Edit remote <name>…" (via `AppState.dialog`). The fields start from `remote`
  * when the dialog mounts. `blockedReason` (`operationBlockers`) disables Save while it applies:
  * the repository can become busy after the dialog opened (#561).
  */
