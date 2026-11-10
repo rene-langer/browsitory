@@ -2848,5 +2848,7 @@ mod error_kinds {
             serde_json::to_string(&error).unwrap(),
             r#"{"kind":"WorkerStopped","message":"worker thread stopped"}"#
         );
+        // Shown as its message alone, as the old `String` errors were.
+        assert_eq!(error.to_string(), WORKER_STOPPED);
     }
 }

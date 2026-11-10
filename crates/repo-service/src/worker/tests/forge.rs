@@ -35,13 +35,13 @@ impl CredentialStore for FakeCredentialStore {
 /// crosses the worker's background-thread boundary: a clone kept in the test can still
 /// inspect requests recorded by the clone moved into `Worker::spawn_with`.
 #[derive(Clone, Default)]
-struct FakeForgeApi {
+pub(super) struct FakeForgeApi {
     responses: Arc<Mutex<VecDeque<Result<ForgeHttpResponse, ForgeApiError>>>>,
     requests: Arc<Mutex<Vec<ForgeHttpRequest>>>,
 }
 
 impl FakeForgeApi {
-    fn queue(responses: Vec<Result<ForgeHttpResponse, ForgeApiError>>) -> Self {
+    pub(super) fn queue(responses: Vec<Result<ForgeHttpResponse, ForgeApiError>>) -> Self {
         Self {
             responses: Arc::new(Mutex::new(responses.into_iter().collect())),
             requests: Arc::new(Mutex::new(Vec::new())),
