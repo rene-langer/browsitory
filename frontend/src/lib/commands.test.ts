@@ -25,6 +25,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     state: {
       repoPath: "/repo",
       selectedRow: "uncommitted",
+      navigation: { entries: ["uncommitted"], index: 0, merging: false },
       status: [],
       commits: [],
       graphLimit: 300,
@@ -206,6 +207,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
     closeHookFailure: vi.fn(),
     clearCommitMessageHandled: vi.fn(),
     retryWithoutHooks: vi.fn(),
+    stepNavigation: vi.fn(() => null),
   };
 }
 

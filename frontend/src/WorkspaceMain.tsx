@@ -21,6 +21,9 @@ import type { UseCompareResult } from "./state/useCompare";
 import type { ExternalToolsApi } from "./state/useExternalTools";
 import type { UseFileHistoryResult } from "./state/useFileHistory";
 import type { UseGoToResult } from "./state/useGoTo";
+import type { CommitNavigation } from "./state/useCommitNavigation";
+import type { VisitKind } from "./lib/navigationHistory";
+import { NavigationButtons } from "./components/NavigationButtons";
 import { commitsPatchName } from "./state/usePatchActions";
 import type { useSequenceActions } from "./state/useSequenceActions";
 
@@ -41,6 +44,7 @@ export function WorkspaceMain({
   onUndo: handleUndo,
   onRedo: handleRedo,
   goTo,
+  navigation,
   fileHistory,
   commitSearch,
   compare,
@@ -74,6 +78,8 @@ export function WorkspaceMain({
   onUndo: () => void;
   onRedo: () => void;
   goTo: UseGoToResult;
+  // Back/Forward through the visited commits (#618).
+  navigation: CommitNavigation;
   fileHistory: UseFileHistoryResult;
   commitSearch: UseCommitSearchResult;
   compare: UseCompareResult;
@@ -81,8 +87,8 @@ export function WorkspaceMain({
   searchFocusRequested: boolean;
   onSearchFocusHandled: () => void;
   onRequestSearch: () => void;
-  // Selects a row, closing an open compare.
-  onSelectRow: (row: SelectedRow) => void;
+  // Selects a row, closing an open compare; `kind` as `selectRow`'s.
+  onSelectRow: (row: SelectedRow, kind?: VisitKind) => void;
   // "Go to" (#441): bumped to scroll the graph to the selected row.
   revealRequest: number;
   onCherryPick: (commitId: string, mainline: number | null) => void;
@@ -151,14 +157,22 @@ export function WorkspaceMain({
             if (current !== undefined) appState.openDialog({ kind: "push", localBranch: current.name });
           }}
           leading={
-            <UndoRedoButtons
-              undoLabel={appState.state.undoState.undo}
-              redoLabel={appState.state.undoState.redo}
-              disabled={pending || transfer !== null}
-              disabledReason={operationDisabledReason}
-              onUndo={handleUndo}
-              onRedo={handleRedo}
-            />
+            <>
+              <NavigationButtons
+                canGoBack={navigation.canGoBack}
+                canGoForward={navigation.canGoForward}
+                onGoBack={navigation.goBack}
+                onGoForward={navigation.goForward}
+              />
+              <UndoRedoButtons
+                undoLabel={appState.state.undoState.undo}
+                redoLabel={appState.state.undoState.redo}
+                disabled={pending || transfer !== null}
+                disabledReason={operationDisabledReason}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
+              />
+            </>
           }
         />
         {goTo.notice !== null && <GoToNotice notice={goTo.notice} onDismiss={goTo.dismissNotice} />}
@@ -207,6 +221,7 @@ export function WorkspaceMain({
                 operationsBlocked={repositoryOperationDisabled}
                 operationsBlockedReason={operationDisabledReason}
                 onSelectRow={selectRowClosingCompare}
+                onGoToCommit={(commitId) => void goTo.goToRevision(commitId)}
                 onBranchFromCommit={appState.openCreateBranchDraft}
                 onRebaseFromCommit={appState.openRebasePlanner}
                 onRebaseSelection={appState.openRebaseSelection}

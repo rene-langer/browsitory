@@ -27,6 +27,8 @@ import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import { CurrentDiffContext, useCurrentDiffRegistry } from "./state/useCurrentDiff";
 import { useGoTo } from "./state/useGoTo";
+import { useCommitNavigation } from "./state/useCommitNavigation";
+import type { VisitKind } from "./lib/navigationHistory";
 import type { SelectedRow } from "./state/useAppState";
 import { useDiffSettingsContext } from "./state/useDiffSettings";
 import type { DiffPanePatchActions, DiscardRequest, ReportedFileSelection } from "./components/DiffPane";
@@ -119,9 +121,9 @@ export function RepoWorkspace({
   const closeCompare = compare.close;
   const selectRow = appState.selectRow;
   const selectRowClosingCompare = useCallback(
-    (row: SelectedRow) => {
+    (row: SelectedRow, kind?: VisitKind) => {
       closeCompare();
-      selectRow(row);
+      selectRow(row, kind);
     },
     [closeCompare, selectRow],
   );
@@ -149,6 +151,8 @@ export function RepoWorkspace({
     [closeSearch, fileHistoryOpen, closeFileHistory, selectRowClosingCompare],
   );
   const goTo = useGoTo(client, repoPath, appState, reveal);
+  // Back/Forward through the visited commits (#618).
+  const navigation = useCommitNavigation(appState, fileHistory, commitSearch, reveal, selectRowClosingCompare);
   const setSearchQuery = commitSearch.setQuery;
   const searchHistory = useCallback(
     (query: string) => {
@@ -225,6 +229,8 @@ export function RepoWorkspace({
     repositoryOperationDisabled,
     onCloseRepoTab,
     onReopenClosedTab: appCommands?.onReopenClosedTab,
+    onNavigateBack: navigation.goBack,
+    onNavigateForward: navigation.goForward,
     repoPath,
     handleUndo,
     handleRedo,
@@ -379,6 +385,8 @@ export function RepoWorkspace({
         onGoToBranch: (kind, name) => void goTo.goToBranch(kind, name),
         onGoToTag: (name, commitId) => void goTo.goToTag(name, commitId),
         onGoToStash: (commitId) => reveal({ commitId }),
+        onGoBack: navigation.canGoBack ? navigation.goBack : undefined,
+        onGoForward: navigation.canGoForward ? navigation.goForward : undefined,
       },
       commitCommands,
     );
@@ -589,6 +597,7 @@ export function RepoWorkspace({
             onUndo={handleUndo}
             onRedo={handleRedo}
             goTo={goTo}
+            navigation={navigation}
             fileHistory={fileHistory}
             commitSearch={commitSearch}
             compare={compare}

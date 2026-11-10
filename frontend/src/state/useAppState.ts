@@ -25,6 +25,13 @@ import { type SavedGraphSelection, toGraphSelection } from "./graphSelection";
 import { credentialFailureMessage, useMutationRunner } from "./useMutationRunner";
 import { errorAfterOwnSuccess, forgettingStaleOwnErrors, useOwnError } from "./ownError";
 import { readFetchPrune } from "../lib/fetchPrune";
+import {
+  initialNavigationHistory,
+  moveToEntry,
+  navigationTarget,
+  recordVisit,
+  type NavigationHistory,
+} from "../lib/navigationHistory";
 import type { HookFailure, HookRetry } from "../lib/hookFailure";
 import type { PresetAction } from "../lib/rebaseSelection";
 import { type BranchActions, useBranchActions } from "./useBranchActions";
@@ -61,6 +68,8 @@ export function rowsEqual(a: SelectedRow, b: SelectedRow): boolean {
 export interface AppState {
   repoPath: string;
   selectedRow: SelectedRow;
+  // The rows this tab visited, for Back and Forward (#618); `selectRow` records them.
+  navigation: NavigationHistory;
   status: StatusEntry[];
   commits: GraphCommit[];
   // Limit the current `commits` were fetched with, and whether the graph filled it (so older
@@ -172,6 +181,10 @@ export interface AppStateOwnMembers {
   // Clears `state.error` without waiting for the next successful action of the same kind — the
   // global banner's dismiss control (issue #30/UX-002). See `RepoWorkspace.tsx`.
   dismissError(): void;
+  // Back (`-1`) or Forward (`1`) through `state.navigation` (#618): selects the nearest entry that
+  // way whose row `isAvailable`, skipping the others, and returns it; `null` at the end. A
+  // selection made without `selectRow` (one an action set) counts as the current entry.
+  stepNavigation(direction: -1 | 1, isAvailable: (row: SelectedRow) => boolean): SelectedRow | null;
 }
 
 // The members are documented on the slice interfaces, the one place each is declared.
@@ -226,6 +239,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   const [state, setRawState] = useState<AppState>({
     repoPath,
     selectedRow: "uncommitted",
+    navigation: initialNavigationHistory("uncommitted"),
     status: [],
     commits: [],
     graphLimit: GRAPH_PAGE_SIZE,
@@ -555,8 +569,22 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     }));
   }, [setState]);
 
+  const { navigation, selectedRow } = state;
+  const stepNavigation = useCallback(
+    (direction: -1 | 1, isAvailable: (row: SelectedRow) => boolean): SelectedRow | null => {
+      const synced = recordVisit(navigation, selectedRow, "jump");
+      const index = navigationTarget(synced, direction, isAvailable);
+      if (index === null) return null;
+      const row = synced.entries[index];
+      setState((prev) => ({ ...prev, selectedRow: row, navigation: moveToEntry(synced, index) }));
+      return row;
+    },
+    [navigation, selectedRow, setState],
+  );
+
   return {
     state,
+    stepNavigation,
     retryWithoutHooks,
     loadMoreHistory,
     loadHistoryThrough,

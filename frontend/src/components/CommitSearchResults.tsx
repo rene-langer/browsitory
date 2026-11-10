@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { KeyboardEvent, RefObject } from "react";
 import { formatShortDate } from "../lib/formatDate";
 import { searchStatusText } from "../lib/searchStatus";
+import type { VisitKind } from "../lib/navigationHistory";
 import type { SelectedRow } from "../state/useAppState";
 import type { CommitSearchResultsState } from "../state/useCommitSearch";
 import { InlineError } from "./primitives/InlineError";
@@ -23,7 +24,8 @@ export function CommitSearchResults({
 }: {
   results: CommitSearchResultsState;
   selectedRow: SelectedRow;
-  onSelectRow: (row: SelectedRow) => void;
+  /** `kind` `"step"` for a keyboard move by row (#618). */
+  onSelectRow: (row: SelectedRow, kind?: VisitKind) => void;
   onClose: () => void;
   onLoadMore: () => void;
   onRetry: () => void;
@@ -60,7 +62,7 @@ export function CommitSearchResults({
     event.preventDefault();
     const next =
       selectedIndex === -1 ? 0 : Math.min(Math.max(selectedIndex + step, 0), results.commits.length - 1);
-    onSelectRow({ commitId: results.commits[next].id });
+    onSelectRow({ commitId: results.commits[next].id }, "step");
   };
 
   return (
