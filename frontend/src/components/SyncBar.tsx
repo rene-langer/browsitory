@@ -15,7 +15,8 @@ import styles from "./SyncBar.module.css";
  * and the Prune toggle. Pull needs an upstream; Push without one opens the Push dialog to
  * publish the branch (`onPublish`). Push with an upstream goes where `push.default` resolves;
  * when it resolves nothing, `onPush` opens the Push dialog instead (see `pushCurrentBranch`).
- * Then Stash (`stash`), `trailing` (Undo/Redo, Refresh) and the last fetch. Pull waits while a
+ * Then what the repository is busy with (`activity`: a running transfer with Cancel, #659), Stash
+ * (`stash`), `trailing` (Undo/Redo, Refresh) and the last fetch. Pull waits while a
  * diverged pull's prompt is open (`pullPending`, #636).
  */
 export function SyncBar({
@@ -35,6 +36,7 @@ export function SyncBar({
   trailing,
   stash,
   pullPending = false,
+  activity,
   ariaLabel,
   lastFetchedAt = null,
   autoFetchMinutes = 0,
@@ -59,6 +61,8 @@ export function SyncBar({
   stash?: { reason: string | null; onStash: () => void; onStashWithOptions: () => void };
   /** A diverged pull waits for Merge, Rebase or Cancel: Pull is disabled meanwhile. */
   pullPending?: boolean;
+  /** What the repository is busy with (`RepoActivity`), after the counts (#659). */
+  activity?: ReactNode;
   /** Names the row as a group ("Repository"). */
   ariaLabel?: string;
   /** When this repository was last fetched in this session (ms since the epoch), if at all. */
@@ -142,6 +146,7 @@ export function SyncBar({
           <span title="Commits to pull">↓{upstream.behind}</span>
         </span>
       )}
+      {activity}
       {stash !== undefined && (
         // Stashing mid-rebase is destructive in a way nothing else undoes: a paused step's
         // resolved/amended content lives in the working tree, so stashing it away and continuing

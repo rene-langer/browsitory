@@ -19,9 +19,14 @@ window has three columns:
 - **Back** and **Forward** through the commits you selected (see [History](history.md));
 - **Fetch**, **Pull** and **Push**, with `↑n` (commits to push) and `↓m` (commits to pull) for
   the current branch (see [Branches and remotes](branches-and-remotes.md));
+- what is running: a fetch, pull or push by name ("Pushing main to origin/main") with a progress
+  bar and **Cancel**, or, when another action takes more than a moment, "Working…";
 - **Stash** (see [Stashes](stashes.md)), **Undo** and **Redo** (see [Undo and redo](undo-redo.md)), and
   **Refresh**, which reloads the repository's state;
 - when the repository was last fetched.
+
+While a repository opens, or after you switch tabs, the graph and the Branches section show grey
+placeholder rows until the repository has been read.
 
 Drag the dividers between the columns to resize them. Double-click a divider to collapse the
 sidebar, and again to bring it back at its width. With a divider focused, the arrow keys resize

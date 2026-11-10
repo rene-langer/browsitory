@@ -34,6 +34,7 @@ import {
   type NavigationHistory,
 } from "../lib/navigationHistory";
 import type { HookFailure, HookRetry } from "../lib/hookFailure";
+import type { TransferSubject } from "../lib/transferCopy";
 import type { PresetAction } from "../lib/rebaseSelection";
 import { type BranchActions, useBranchActions } from "./useBranchActions";
 import { type DialogActions, useDialogActions } from "./useDialogActions";
@@ -162,6 +163,11 @@ export interface AppState {
   // The last stash Apply/Pop result, for its toast.
   stashOutcome: { action: "apply" | "pop"; outcome: StashApplyOutcome } | null;
   transfer: TransferProgress | null;
+  // What the fetch, pull or push this tab started works on, from the request until it ends: the
+  // toolbar's running title and Cancel (#659), and the busy reason disabled controls show.
+  transferSubject: TransferSubject | null;
+  // The last transfer that completed, for its toast (#661). A new object each time.
+  transferOutcome: { subject: TransferSubject } | null;
   error: string | null;
   // A plain-language next step for `error`, from its kind (`failureError`, #573); shown under it in
   // the banner. Dropped whenever `error` changes without a new one (`withoutStaleErrorHint`).
@@ -176,6 +182,9 @@ export interface AppState {
   // trailing refresh, the palette's Refresh, a stash apply, a pull — refetches the diffs on
   // screen, even when the new `status` looks identical (hunk-level edits don't change it).
   refreshGeneration: number;
+  // False until this tab's first `refresh()` has answered (or failed): the graph and the sidebar
+  // show placeholder rows meanwhile instead of looking empty (#660).
+  loaded: boolean;
   undoState: UndoState;
 }
 
@@ -305,10 +314,13 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     stashRestoreIndex: true,
     stashOutcome: null,
     transfer: null,
+    transferSubject: null,
+    transferOutcome: null,
     error: null,
     errorHint: null,
     pending: false,
     refreshGeneration: 0,
+    loaded: false,
     undoState: { undo: null, redo: null },
   });
 
@@ -392,7 +404,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       const order = readOrder.current;
       if (ticket < order.refreshApplied) {
         // A refresh that sent its reads later has already landed: these results are older.
-        setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1 }));
+        setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1, loaded: true }));
         return;
       }
       order.refreshApplied = ticket;
@@ -440,6 +452,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
           undoState: undoIsNewest ? undoState : prev.undoState,
           error: errorAfterOwnSuccess(prev.error, own),
           refreshGeneration: prev.refreshGeneration + 1,
+          loaded: true,
         };
       });
     } catch (err) {
@@ -453,7 +466,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       // last fetched.
       if (ticket !== 0 && ticket < readOrder.current.refreshApplied) {
         // Superseded as above: a later refresh already succeeded.
-        setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1 }));
+        setState((prev) => ({ ...prev, refreshGeneration: prev.refreshGeneration + 1, loaded: true }));
         return;
       }
       const failure = failureError(err);
@@ -462,6 +475,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
         ...prev,
         ...failure,
         refreshGeneration: prev.refreshGeneration + 1,
+        loaded: true,
       }));
     }
   }, [client, repoPath, refreshError, setState, takeReadTicket]);

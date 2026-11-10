@@ -13,7 +13,7 @@ export function HookStatus({
   running: { operationId: string; hook: string };
   onCancel: () => void;
 }) {
-  // Keyed by operation id (like `TransferPanel`), so Cancel re-arms for the next hook run.
+  // Keyed by operation id (like `RepoActivity`'s Cancel), so Cancel re-arms for the next hook run.
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const cancelling = cancellingId === running.operationId;
   return (

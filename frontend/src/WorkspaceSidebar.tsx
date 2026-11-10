@@ -1,5 +1,6 @@
 import { BranchTree } from "./components/BranchTree";
 import { Sidebar } from "./components/primitives/Sidebar";
+import { SkeletonRows } from "./components/primitives/SkeletonRows";
 import { PullRequestPanel } from "./components/PullRequestPanel";
 import { ReflogPanel } from "./components/ReflogPanel";
 import { StashPanel } from "./components/StashPanel";
@@ -57,45 +58,50 @@ export function WorkspaceSidebar({
         { id: "pullRequests", label: "Pull requests", visible: panelVisibility.visibility.pullRequests, onToggle: (v) => panelVisibility.setPanelVisible("pullRequests", v) },
       ]}
     >
-      <BranchTree
-        branches={appState.state.branches}
-        createBranchDraft={appState.state.createBranchDraft}
-        onSwitchBranch={announce((name) => `Switched to ${name}`, appState.switchBranch, { undoable: true })}
-        onCreateBranch={appState.createBranch}
-        onDeleteBranch={announce((...[name]) => `Deleted branch ${name}`, appState.deleteBranch, { undoable: true })}
-        onRenameBranch={appState.renameBranch}
-        onOpenCreateBranchDraft={appState.openCreateBranchDraft}
-        onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
-        onMergeBranch={(branchName) => openDialog({ kind: "merge", branchName })}
-        operationDisabled={repositoryOperationDisabled}
-        operationDisabledReason={operationDisabledReason}
-        graphBranchSelection={appState.state.graphSelection.local}
-        onSetGraphBranchSelection={appState.setGraphBranchSelection}
-        onClearGraphBranchSelection={appState.clearGraphBranchSelection}
-        onShowAllGraphBranches={appState.showAllGraphBranches}
-        graphRemoteBranchSelection={appState.state.graphSelection.remote}
-        onSetGraphRemoteBranchSelection={appState.setGraphRemoteBranchSelection}
-        onIsolateGraphBranch={appState.isolateGraphBranch}
-        remoteBranchesInGraph={Array.from(new Set(appState.state.commits.flatMap((c) => c.remoteBranchRefs)))}
-        remotes={appState.state.remotes}
-        upstream={appState.state.upstream}
-        onAddRemote={appState.addRemote}
-        onSetUpstream={appState.setCurrentUpstream}
-        onClearUpstream={appState.clearCurrentUpstream}
-        onListRemoteBranches={appState.listRemoteBranches}
-        onFetchRemote={announce("Fetch complete", appState.fetchRemote)}
-        onPushCurrentBranch={announce("Push complete", appState.pushCurrentBranch)}
-        addRemoteDraftOpen={appState.state.addRemoteDraftOpen}
-        onOpenAddRemoteDraft={appState.openAddRemoteDraft}
-        onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
-        onOpenPushDialog={(localBranch) => openDialog({ kind: "push", localBranch })}
-        onOpenDeleteRemoteBranch={(remoteName, branchName) => openDialog({ kind: "deleteRemoteBranch", remoteName, branchName })}
-        onCompareBranch={compare.compareBranch}
-        onGoToBranch={(kind, name) => void goTo.goToBranch(kind, name)}
-        refreshGeneration={appState.state.refreshGeneration}
-        onOpenRemoteDialog={openDialog}
-        revealRequest={revealRequest?.section === "branches" ? revealRequest : undefined}
-      />
+      {!appState.state.loaded ? (
+        // The first reads are still out (#660): placeholder rows, not "no branches".
+        <SkeletonRows label="Loading branches…" rows={6} />
+      ) : (
+        <BranchTree
+          branches={appState.state.branches}
+          createBranchDraft={appState.state.createBranchDraft}
+          onSwitchBranch={announce((name) => `Switched to ${name}`, appState.switchBranch, { undoable: true })}
+          onCreateBranch={appState.createBranch}
+          onDeleteBranch={announce((...[name]) => `Deleted branch ${name}`, appState.deleteBranch, { undoable: true })}
+          onRenameBranch={appState.renameBranch}
+          onOpenCreateBranchDraft={appState.openCreateBranchDraft}
+          onCloseCreateBranchDraft={appState.closeCreateBranchDraft}
+          onMergeBranch={(branchName) => openDialog({ kind: "merge", branchName })}
+          operationDisabled={repositoryOperationDisabled}
+          operationDisabledReason={operationDisabledReason}
+          graphBranchSelection={appState.state.graphSelection.local}
+          onSetGraphBranchSelection={appState.setGraphBranchSelection}
+          onClearGraphBranchSelection={appState.clearGraphBranchSelection}
+          onShowAllGraphBranches={appState.showAllGraphBranches}
+          graphRemoteBranchSelection={appState.state.graphSelection.remote}
+          onSetGraphRemoteBranchSelection={appState.setGraphRemoteBranchSelection}
+          onIsolateGraphBranch={appState.isolateGraphBranch}
+          remoteBranchesInGraph={Array.from(new Set(appState.state.commits.flatMap((c) => c.remoteBranchRefs)))}
+          remotes={appState.state.remotes}
+          upstream={appState.state.upstream}
+          onAddRemote={appState.addRemote}
+          onSetUpstream={appState.setCurrentUpstream}
+          onClearUpstream={appState.clearCurrentUpstream}
+          onListRemoteBranches={appState.listRemoteBranches}
+          onFetchRemote={appState.fetchRemote}
+          onPushCurrentBranch={appState.pushCurrentBranch}
+          addRemoteDraftOpen={appState.state.addRemoteDraftOpen}
+          onOpenAddRemoteDraft={appState.openAddRemoteDraft}
+          onCloseAddRemoteDraft={appState.closeAddRemoteDraft}
+          onOpenPushDialog={(localBranch) => openDialog({ kind: "push", localBranch })}
+          onOpenDeleteRemoteBranch={(remoteName, branchName) => openDialog({ kind: "deleteRemoteBranch", remoteName, branchName })}
+          onCompareBranch={compare.compareBranch}
+          onGoToBranch={(kind, name) => void goTo.goToBranch(kind, name)}
+          refreshGeneration={appState.state.refreshGeneration}
+          onOpenRemoteDialog={openDialog}
+          revealRequest={revealRequest?.section === "branches" ? revealRequest : undefined}
+        />
+      )}
       {panelVisibility.visibility.stash && (
         <StashPanel
           stashes={appState.state.stashes}
@@ -151,7 +157,7 @@ export function WorkspaceSidebar({
           onDelete={appState.deleteTag}
           onDeleteFromRemote={(tagName) => openDialog({ kind: "deleteRemoteTag", tagName })}
           onPush={appState.pushTags}
-          onPushTag={(remoteName, tag) => void announce("Push complete", appState.pushTags)(remoteName, [tag])}
+          onPushTag={(remoteName, tag) => void appState.pushTags(remoteName, [tag])}
           onBranchFromCommit={appState.openCreateBranchDraft}
           onCheckoutCommit={announce((commitId) => `Checked out ${commitId.slice(0, 7)}`, appState.checkoutCommit, { undoable: true })}
           onGoToTag={(tag) => void goTo.goToTag(tag.name, tag.commitId)}

@@ -17,6 +17,7 @@ import type { TransferErrorKind, TransferOperation, TransferProgress, UpstreamIn
 import type { AppState } from "../state/useAppState";
 import { credentialRemediation } from "./errorMessages";
 import { hookFailedMessage, type PushRequest } from "./hookFailure";
+import type { TransferSubject } from "./transferCopy";
 
 /** One remote that failed during a Fetch all, as its `RemoteFailed` event reported it. */
 export interface FailedRemote {
@@ -27,6 +28,8 @@ export interface FailedRemote {
 /** What the user asked for, kept with the transfer so its terminal event can be reported. */
 export interface TransferRequest {
   operation: TransferOperation;
+  /** What it works on, for its running title and its closing toast (#659, #661). */
+  subject: TransferSubject | null;
   /** The request a failed `pre-push` hook replays without hooks; `null` for a fetch or pull. */
   push: PushRequest | null;
   /**
@@ -44,7 +47,7 @@ export function transferRequest(
   operation: TransferOperation,
   options: Partial<Omit<TransferRequest, "operation">> = {},
 ): TransferRequest {
-  return { operation, push: null, forcePushOfferRemote: null, forcePushTarget: null, deleteLocalTag: null, ...options };
+  return { operation, subject: null, push: null, forcePushOfferRemote: null, forcePushTarget: null, deleteLocalTag: null, ...options };
 }
 
 export type TransferSession =
@@ -58,7 +61,10 @@ export type TransferSession =
 export const IDLE_TRANSFER: TransferSession = { status: "idle" };
 
 /** What a terminal failure sets on the tab's state. */
-export type TransferFailurePatch = Pick<AppState, "transfer" | "error" | "pending" | "forcePushOffer" | "hookFailure">;
+export type TransferFailurePatch = Pick<
+  AppState,
+  "transfer" | "transferSubject" | "error" | "pending" | "forcePushOffer" | "hookFailure"
+>;
 
 export type TransferEffect =
   | { kind: "none" }
@@ -162,12 +168,12 @@ export function onTransferProgress(
 export function finishCompletedTransfer(
   session: TransferSession,
   operationId: string,
-): { session: TransferSession; finished: boolean; deleteLocalTag: string | null } {
+): { session: TransferSession; finished: boolean; deleteLocalTag: string | null; subject: TransferSubject | null } {
   if (session.status !== "completing" || session.operationId !== operationId) {
-    return { session, finished: false, deleteLocalTag: null };
+    return { session, finished: false, deleteLocalTag: null, subject: null };
   }
   const deleteLocalTag = session.request.operation === "DeleteRemoteTag" ? session.request.deleteLocalTag : null;
-  return { session: IDLE_TRANSFER, finished: true, deleteLocalTag };
+  return { session: IDLE_TRANSFER, finished: true, deleteLocalTag, subject: session.request.subject };
 }
 
 function failurePatch(
@@ -193,6 +199,7 @@ function failurePatch(
     request.forcePushOfferRemote !== null;
   return {
     transfer: null,
+    transferSubject: null,
     error,
     pending: false,
     forcePushOffer: offerForcePush ? { remoteName: request.forcePushOfferRemote as string } : null,

@@ -192,6 +192,15 @@ describe("transferSession completion", () => {
     expect(finishCompletedTransfer(session, "op-1")).toMatchObject({ finished: true, deleteLocalTag: "v1" });
   });
 
+  it("hands back the transfer's subject for its toast (#661)", () => {
+    const subject = { kind: "fetch" as const, remoteName: "origin" };
+    const { session } = feed(requestTransfer(transferRequest("Fetch", { subject })), [
+      event("op-1", "Fetch", "Starting"),
+      event("op-1", "Fetch", "Completed"),
+    ]);
+    expect(finishCompletedTransfer(session, "op-1")).toMatchObject({ finished: true, subject });
+  });
+
   it("does not finish a completed transfer a new request replaced during the refresh", () => {
     const { session } = feed(requestTransfer(transferRequest("Fetch")), [
       event("op-1", "Fetch", "Starting"),
@@ -200,7 +209,7 @@ describe("transferSession completion", () => {
     expect(session.status).toBe("completing");
     const replaced = requestTransfer(transferRequest("Fetch"));
     const finish = finishCompletedTransfer(replaced, "op-1");
-    expect(finish).toEqual({ session: replaced, finished: false, deleteLocalTag: null });
+    expect(finish).toEqual({ session: replaced, finished: false, deleteLocalTag: null, subject: null });
   });
 
   it("ignores further events of a transfer that is completing", () => {
@@ -235,7 +244,7 @@ describe("transferSession failure", () => {
     expect(session).toEqual(IDLE_TRANSFER);
     expect(effect).toEqual({
       kind: "failed",
-      patch: { transfer: null, error: "Fetch failed", pending: false, forcePushOffer: null, hookFailure: null },
+      patch: { transfer: null, transferSubject: null, error: "Fetch failed", pending: false, forcePushOffer: null, hookFailure: null },
     });
   });
 

@@ -91,9 +91,9 @@ describe("Browsitory fetch automatically", () => {
     await browser.waitUntil(async () => (await bodyText()).includes("Fetched just now"), {
       timeoutMsg: "the sync bar did not show the last fetch",
     });
-    // Quiet: no transfer panel, no "Fetch complete" toast, nothing to undo.
+    // Quiet: no progress in the toolbar, no "Fetched from …" toast, nothing to undo.
     const text = await bodyText();
-    expect(text).not.toContain("Fetch complete");
+    expect(text).not.toContain("Fetched from");
     expect(await $("button[aria-label^='Undo Fetch']").isExisting()).toBe(false);
   });
 });
