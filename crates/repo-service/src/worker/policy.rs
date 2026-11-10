@@ -161,6 +161,7 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         Command::GetStatus { .. }
         | Command::GetCommitGraph { .. }
         | Command::LocateCommit { .. }
+        | Command::GetMergedCommits { .. }
         | Command::GetWorkingDiff { .. }
         | Command::GetCommitDiff { .. }
         | Command::GetCommitFiles { .. }
@@ -441,6 +442,7 @@ pub(super) fn reply_of(command: &mut Command) -> Option<&mut dyn Reply> {
         GetStatus,
         GetCommitGraph,
         LocateCommit,
+        GetMergedCommits,
         GetWorkingDiff,
         GetCommitDiff,
         GetCommitFiles,

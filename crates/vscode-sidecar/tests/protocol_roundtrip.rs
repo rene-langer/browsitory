@@ -773,6 +773,76 @@ fn graph_remote_branch_selection_round_trips() {
 }
 
 #[test]
+fn graph_collapse_merges_round_trips() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, _repo) = init_repo();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    let params = serde_json::json!({"repoPath": repo_path});
+
+    let before = sidecar.call(1, "get_graph_collapse_merges", params.clone());
+    let set = sidecar.call(
+        2,
+        "set_graph_collapse_merges",
+        serde_json::json!({"repoPath": repo_path, "collapse": true}),
+    );
+    let after = sidecar.call(3, "get_graph_collapse_merges", params);
+
+    assert_eq!(before["result"], false, "{before}");
+    assert_eq!(set["result"], serde_json::Value::Null);
+    assert_eq!(after["result"], true, "{after}");
+}
+
+#[test]
+fn a_collapsed_merge_expands_through_the_sidecar() {
+    let (_guard, config_dir) = ConfigDirGuard::new();
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "hello");
+    commit_all(&repo, "initial commit");
+    let base = repo.head().unwrap().peel_to_commit().unwrap();
+    let tree = base.tree().unwrap();
+    let sig = repo.signature().unwrap();
+    let side_id = repo
+        .commit(None, &sig, &sig, "side work", &tree, &[&base])
+        .unwrap();
+    let side = repo.find_commit(side_id).unwrap();
+    let merge = repo
+        .commit(Some("HEAD"), &sig, &sig, "merge", &tree, &[&base, &side])
+        .unwrap()
+        .to_string();
+    let side_id = side_id.to_string();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn_with_config_dir(&config_dir);
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    let collapsed = serde_json::json!({"local": null, "remote": [], "firstParent": true});
+
+    let graph = sidecar.call(
+        2,
+        "get_commit_graph",
+        serde_json::json!({"repoPath": repo_path, "limit": 10, "selection": collapsed}),
+    );
+    let merged = sidecar.call(
+        3,
+        "get_merged_commits",
+        serde_json::json!({"repoPath": repo_path, "mergeId": merge, "limit": 10}),
+    );
+    let located = sidecar.call(
+        4,
+        "locate_commit",
+        serde_json::json!({"repoPath": repo_path, "revision": side_id, "selection": collapsed}),
+    );
+
+    assert_eq!(graph["result"][0]["mergedCount"], 1, "{graph}");
+    assert!(graph["result"][1].get("mergedCount").is_none(), "{graph}");
+    assert_eq!(merged["result"][0]["id"], side_id.as_str(), "{merged}");
+    assert_eq!(
+        located["result"]["merge"],
+        serde_json::json!({"mergeId": merge, "mergePosition": 0, "offset": 0}),
+        "{located}"
+    );
+}
+
+#[test]
 fn commit_stats_round_trip_through_the_sidecar() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "file.txt", "one\ntwo\n");

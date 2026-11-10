@@ -273,6 +273,7 @@ fn graph_commit(summary: &str) -> git_core::graph::GraphCommit {
         branch_refs: strings(&["main"]),
         remote_branch_refs: strings(&["origin/main"]),
         tags: strings(&["v1.0.0"]),
+        merged_count: None,
     }
 }
 
@@ -293,6 +294,18 @@ pub fn graph_commits() -> Cases<git_core::graph::GraphCommit> {
                 tags: Vec::new(),
                 timestamp: -1,
                 ..graph_commit("Initial commit")
+            },
+        ),
+        // A merge row of a first-parent graph (#617).
+        case(
+            "collapsed-merge",
+            git_core::graph::GraphCommit {
+                parent_ids: strings(&[
+                    "89abcdef0123456789abcdef0123456789abcdef",
+                    "fedcba9876543210fedcba9876543210fedcba98",
+                ]),
+                merged_count: Some(3),
+                ..graph_commit("Merge branch 'feature'")
             },
         ),
     ]
@@ -441,6 +454,7 @@ pub fn commit_locations() -> Cases<git_core::locate::CommitLocation> {
                 position: Some(42),
                 branches: Vec::new(),
                 remote_branches: Vec::new(),
+                merge: None,
             },
         ),
         case(
@@ -450,6 +464,22 @@ pub fn commit_locations() -> Cases<git_core::locate::CommitLocation> {
                 position: None,
                 branches: vec!["feature".to_string()],
                 remote_branches: vec!["origin/feature".to_string()],
+                merge: None,
+            },
+        ),
+        // Held by a collapsed merge (#617).
+        case(
+            "in-merge",
+            git_core::locate::CommitLocation {
+                commit_id: "3333333333333333333333333333333333333333".to_string(),
+                position: None,
+                branches: vec!["main".to_string()],
+                remote_branches: Vec::new(),
+                merge: Some(git_core::locate::CollapsedMerge {
+                    merge_id: "4444444444444444444444444444444444444444".to_string(),
+                    merge_position: 7,
+                    offset: 2,
+                }),
             },
         ),
     ]

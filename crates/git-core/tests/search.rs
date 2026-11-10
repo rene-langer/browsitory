@@ -55,6 +55,7 @@ fn local(names: &[String]) -> GraphSelection {
     GraphSelection {
         local: Some(names.to_vec()),
         remote: vec![],
+        first_parent: false,
     }
 }
 
@@ -69,6 +70,7 @@ fn search_with(
         &GraphSelection {
             local: refs.map(<[String]>::to_vec),
             remote: vec![],
+            first_parent: false,
         },
         None,
         NO_TIME_BUDGET,
@@ -415,6 +417,7 @@ fn with_remote(local: Option<&[&str]>, remote: &[&str]) -> GraphSelection {
     GraphSelection {
         local: local.map(|names| names.iter().map(|n| n.to_string()).collect()),
         remote: remote.iter().map(|n| n.to_string()).collect(),
+        first_parent: false,
     }
 }
 
@@ -497,6 +500,32 @@ fn one_selected_branch_searches_its_first_parent_line_like_the_graph() {
     assert_eq!(found("work", &["trunk", "side"]).len(), 5);
     assert_eq!(found("work branch:trunk", &["trunk"]).len(), 5);
     assert_eq!(summaries(&repo, "work").len(), 5);
+}
+
+#[test]
+fn collapse_merges_does_not_narrow_the_search() {
+    let (_dir, repo) = init_repo();
+    merged_side_branch(&repo);
+    let query = parse_query("side").unwrap();
+    // Two branches at the same tip: the graph is `trunk`'s first-parent line.
+    let selection = GraphSelection {
+        local: Some(vec!["trunk".to_string(), "trunk-alias".to_string()]),
+        remote: vec![],
+        first_parent: true,
+    };
+
+    let page = search_commits(&repo, &query, &selection, None, NO_TIME_BUDGET, &|| false);
+    let found: Vec<String> = page
+        .unwrap()
+        .commits
+        .into_iter()
+        .map(|c| c.summary)
+        .collect();
+    let graph = git_core::graph::graph_log(&repo, 50, &selection).unwrap();
+
+    // A commit a collapsed merge holds, found as without "Collapse merges" (#617).
+    assert_eq!(found, ["side work"]);
+    assert!(graph.iter().all(|c| c.summary != "side work"));
 }
 
 #[test]

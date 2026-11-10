@@ -119,6 +119,11 @@ pub(crate) enum Command {
         selection: GraphSelection,
         reply: Sender<Result<Option<git_core::locate::CommitLocation>, ErrorDto>>,
     },
+    GetMergedCommits {
+        merge_id: String,
+        limit: usize,
+        reply: Sender<Result<Vec<GraphCommit>, ErrorDto>>,
+    },
     GetWorkingDiff {
         path: String,
         staged: bool,

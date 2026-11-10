@@ -14,6 +14,7 @@ use serde_json::Value;
 mod branch;
 mod compare;
 mod forge;
+mod graph;
 mod history;
 mod merge;
 mod patch;
@@ -35,6 +36,7 @@ mod worktree;
 use branch::*;
 use compare::*;
 use forge::*;
+use graph::*;
 use history::*;
 use merge::*;
 use patch::*;
@@ -139,6 +141,9 @@ methods!(|params, repos, stdout| {
     "get_status" => get_status(RepoPathParams, repos),
     "get_commit_graph" => get_commit_graph(GetCommitGraphParams, repos),
     "locate_commit" => locate_commit(LocateCommitParams, repos),
+    "get_merged_commits" => get_merged_commits(GetMergedCommitsParams, repos),
+    "get_graph_collapse_merges" => get_graph_collapse_merges(RepoPathParams),
+    "set_graph_collapse_merges" => set_graph_collapse_merges(SetGraphCollapseMergesParams),
     "get_working_diff" => get_working_diff(GetWorkingDiffParams, repos),
     "get_commit_diff" => get_commit_diff(GetCommitDiffParams, repos),
     "get_file_history" => get_file_history(GetFileHistoryParams, repos),

@@ -13,6 +13,7 @@ fn graph_commit_dto_serializes_camel_case_fields() {
         branch_refs: vec!["main".into()],
         remote_branch_refs: vec!["origin/main".into()],
         tags: vec!["v1.0".into()],
+        merged_count: None,
     });
 
     assert_eq!(
@@ -45,6 +46,7 @@ fn file_history_entry_dto_serializes_camel_case_and_null_old_path() {
         branch_refs: vec![],
         remote_branch_refs: vec![],
         tags: vec![],
+        merged_count: None,
     };
     let plain = FileHistoryEntryDto::from(git_core::history::FileHistoryEntry {
         commit: commit.clone(),
@@ -78,6 +80,7 @@ fn search_page_dto_serializes_camel_case_and_null_cursor() {
         branch_refs: vec![],
         remote_branch_refs: vec![],
         tags: vec![],
+        merged_count: None,
     };
     let done = serde_json::to_value(SearchPageDto::from(git_core::search::SearchPage {
         commits: vec![commit.clone()],

@@ -37,6 +37,11 @@ where
                 selection,
                 reply,
             } => status::locate_commit(&self.repo, revision, selection, reply),
+            Command::GetMergedCommits {
+                merge_id,
+                limit,
+                reply,
+            } => status::get_merged_commits(&self.repo, merge_id, limit, reply),
             Command::GetWorkingDiff {
                 path,
                 staged,

@@ -35,6 +35,18 @@ pub(super) fn locate_commit(
     );
 }
 
+/// The commits merge `merge_id` brought in, at most `limit` (#617): a collapsed merge expanded.
+pub(super) fn get_merged_commits(
+    repo: &git2::Repository,
+    merge_id: String,
+    limit: usize,
+    reply: Sender<Result<Vec<GraphCommit>, ErrorDto>>,
+) {
+    let _ = reply.send(
+        git_core::graph::merged_commits(repo, &merge_id, limit).map_err(ErrorDto::from_error),
+    );
+}
+
 /// With `staged` and `old_path` (a staged rename), the HEAD → index diff of both paths with
 /// rename detection, so only the edits show (#137).
 pub(super) fn get_working_diff(
@@ -418,6 +430,19 @@ impl WorkerHandle {
         self.request(|tx| Command::LocateCommit {
             revision,
             selection,
+            reply: tx,
+        })
+    }
+
+    /// The commits merge `merge_id` brought in, at most `limit` (#617).
+    pub fn get_merged_commits(
+        &self,
+        merge_id: String,
+        limit: usize,
+    ) -> Result<Vec<GraphCommit>, ErrorDto> {
+        self.request(|tx| Command::GetMergedCommits {
+            merge_id,
+            limit,
             reply: tx,
         })
     }

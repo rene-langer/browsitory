@@ -480,6 +480,11 @@ pub struct GraphCommitDto {
     pub branch_refs: Vec<String>,
     pub remote_branch_refs: Vec<String>,
     pub tags: Vec<String>,
+    /// Only on a merge row of a first-parent graph (#617): the commits its other parents brought
+    /// in, which `getMergedCommits` lists. Left out everywhere else.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub merged_count: Option<usize>,
 }
 
 impl From<git_core::graph::GraphCommit> for GraphCommitDto {
@@ -495,6 +500,7 @@ impl From<git_core::graph::GraphCommit> for GraphCommitDto {
             branch_refs: c.branch_refs,
             remote_branch_refs: c.remote_branch_refs,
             tags: c.tags,
+            merged_count: c.merged_count,
         }
     }
 }
@@ -634,6 +640,11 @@ pub struct GraphSelectionDto {
     pub local: Option<Vec<String>>,
     /// Remote-tracking branches as `<remote>/<branch>`; required, `[]` walks no remote branch.
     pub remote: Vec<String>,
+    /// "Collapse merges" (#617): the graph and `locateCommit` follow first parents from every
+    /// selected tip; `searchCommits` ignores it. Absent is `false`.
+    #[serde(default, rename = "firstParent")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub first_parent: Option<bool>,
 }
 
 impl From<GraphSelectionDto> for git_core::graph::GraphSelection {
@@ -641,6 +652,7 @@ impl From<GraphSelectionDto> for git_core::graph::GraphSelection {
         git_core::graph::GraphSelection {
             local: dto.local,
             remote: dto.remote,
+            first_parent: dto.first_parent.unwrap_or(false),
         }
     }
 }
@@ -655,6 +667,10 @@ pub struct CommitLocationDto {
     pub position: Option<usize>,
     pub branches: Vec<String>,
     pub remote_branches: Vec<String>,
+    /// The collapsed merge that holds the commit (#617); left out when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(any(test, feature = "ts"), ts(optional))]
+    pub merge: Option<CollapsedMergeDto>,
 }
 
 impl From<git_core::locate::CommitLocation> for CommitLocationDto {
@@ -664,6 +680,28 @@ impl From<git_core::locate::CommitLocation> for CommitLocationDto {
             position: l.position,
             branches: l.branches,
             remote_branches: l.remote_branches,
+            merge: l.merge.map(CollapsedMergeDto::from),
+        }
+    }
+}
+
+/// See `git_core::locate::CollapsedMerge` (#617).
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CollapsedMerge"))]
+#[serde(rename_all = "camelCase")]
+pub struct CollapsedMergeDto {
+    pub merge_id: String,
+    pub merge_position: usize,
+    pub offset: usize,
+}
+
+impl From<git_core::locate::CollapsedMerge> for CollapsedMergeDto {
+    fn from(m: git_core::locate::CollapsedMerge) -> Self {
+        CollapsedMergeDto {
+            merge_id: m.merge_id,
+            merge_position: m.merge_position,
+            offset: m.offset,
         }
     }
 }
@@ -2769,6 +2807,7 @@ mod ts_bindings {
             ChangedFileDto,
             CompareRangeDto,
             CommitLocationDto,
+            CollapsedMergeDto,
             FileStatsDto,
             CommitStatsDto,
             CommitStatsEntryDto,
