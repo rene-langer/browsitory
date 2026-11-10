@@ -21,6 +21,13 @@ It reads only local files, so the caller downloads them first (release.yml's
     gh release view "$tag" --json assets > "$dir/assets.json"
     check-updater-manifest.py --version X.Y.Z --assets "$dir/assets.json" "$dir"
 
+With `--pages-copy FILE`, a manifest that passed the checks is also written to FILE with each
+`url` rewritten to the public download form,
+`https://github.com/<repo>/releases/download/release%2F<version>/<file>`. docs.yml publishes that
+copy on the Pages site, the app's second endpoint, so a client that reaches it can still fetch
+the bundle when api.github.com is the host that fails (#519). The signatures cover the bundle,
+not its URL, so they stay valid.
+
 Exit status: 0 when the manifest is right, 1 when it is not (every problem is printed), 2 on bad
 arguments.
 """
@@ -32,6 +39,7 @@ import json
 import pathlib
 import re
 import sys
+import urllib.parse
 
 DEFAULT_REPO = "rene-langer/browsitory"
 
@@ -125,6 +133,19 @@ def manifest_problems(
     return problems
 
 
+def pages_copy(manifest: dict, assets: list[dict], version: str, repo: str) -> dict:
+    """`manifest` with every bundle `url` as github.com/<repo>/releases/download/<tag>/<file>.
+
+    Only for a manifest that passed `manifest_problems`, so every url names an uploaded asset.
+    """
+    names = {a["apiUrl"]: a["name"] for a in assets if a.get("state") == "uploaded"}
+    base = f"https://github.com/{repo}/releases/download/release%2F{version}/"
+    copy = json.loads(json.dumps(manifest))
+    for entry in copy["platforms"].values():
+        entry["url"] = base + urllib.parse.quote(names[entry["url"]])
+    return copy
+
+
 def load_signatures(directory: pathlib.Path) -> dict[str, str]:
     return {p.name: p.read_text(encoding="utf-8") for p in directory.glob("*.sig") if p.is_file()}
 
@@ -140,6 +161,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--repo", default=DEFAULT_REPO, help=f"owner/name of the repository (default {DEFAULT_REPO})"
+    )
+    parser.add_argument(
+        "--pages-copy",
+        type=pathlib.Path,
+        metavar="FILE",
+        help="also write the checked manifest to FILE with github.com download URLs",
     )
     parser.add_argument(
         "directory",
@@ -174,6 +201,13 @@ def main(argv: list[str]) -> int:
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         return 1
+    if args.pages_copy is not None:
+        copy = pages_copy(manifest, assets, args.version, args.repo)
+        try:
+            args.pages_copy.write_text(json.dumps(copy, indent=2) + "\n", encoding="utf-8")
+        except OSError as err:
+            print(f"error: {err}", file=sys.stderr)
+            return 1
     print(
         f"latest.json of {args.version}: {len(manifest['platforms'])} platforms, "
         "each linked to an asset of this release and signed with its .sig"

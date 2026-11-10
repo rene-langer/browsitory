@@ -39,6 +39,10 @@ on:
   # A published release changes the latest.json the site carries; see redeploy-on-release.
   release:
     types: [published]
+  # Daily rebuild on main: a missing latest.json (the manifest step failed, e.g. a GitHub API
+  # outage right after a release) heals itself without anyone re-running the workflow (#519).
+  schedule:
+    - cron: "17 4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -72,6 +76,8 @@ jobs:
     runs-on: ubuntu-latest
     # Usually under a minute (#353).
     timeout-minutes: 10
+    outputs:
+      manifest: ${{ steps.manifest.outputs.manifest }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -94,6 +100,7 @@ jobs:
       # without a checked manifest the site goes out without latest.json, and the app's first
       # endpoint (the release download URL) still works as before.
       - name: Add the latest published release's updater manifest (latest.json)
+        id: manifest
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -110,13 +117,20 @@ jobs:
             rm -rf "$dir" && mkdir -p "$dir" || return 1
             gh release download "$tag" -D "$dir" -p latest.json -p '*.sig' || return 1
             gh release view "$tag" --json assets > "$dir/assets.json" || return 1
+            # The copy links each bundle on github.com/<repo>/releases/download/..., not the
+            # api.github.com asset URL of the release's own manifest, so a client that gets
+            # here because api.github.com fails can still download the bundle (#519).
             python3 -I scripts/check-updater-manifest.py --version "${tag#release/}" \
-              --assets "$dir/assets.json" "$dir" || return 1
-            cp "$dir/latest.json" site/latest.json || return 1
+              --assets "$dir/assets.json" --pages-copy "$dir/pages-latest.json" "$dir" \
+              || return 1
+            cp "$dir/pages-latest.json" site/latest.json || return 1
             echo "Site carries latest.json of $tag." >> "$GITHUB_STEP_SUMMARY"
           }
-          if ! add_manifest; then
+          if add_manifest; then
+            echo "manifest=ok" >> "$GITHUB_OUTPUT"
+          else
             rm -f site/latest.json
+            echo "manifest=missing" >> "$GITHUB_OUTPUT"
             echo "::warning title=Updater manifest::No checked latest.json of the latest release; the site goes out without it (see the log above). Re-run this workflow on main once that is fixed."
             echo "Site goes out WITHOUT latest.json (see the warning)." >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -125,6 +139,21 @@ jobs:
         uses: actions/upload-pages-artifact@v5
         with:
           path: site
+
+  # The site is published either way (deploy needs only a successful build). This job turns a
+  # missing latest.json into a failed run, which GitHub reports to whoever started it or last
+  # edited the schedule, and the daily `schedule` run retries it (#519).
+  manifest-missing:
+    needs: build
+    if: >-
+      github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      && needs.build.outputs.manifest == 'missing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "::error title=Updater manifest::The published site has no latest.json: the desktop app's second update endpoint answers 404. See the build job's warning, fix the cause, then re-run: gh workflow run docs.yml --ref main"
+          exit 1
 
   deploy:
     needs: build
