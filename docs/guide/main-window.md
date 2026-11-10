@@ -8,8 +8,10 @@ Once a repository is open, the window has three columns:
 - the **diff pane** on the right: your working tree, or the commit you selected.
 
 Drag the dividers between the columns to resize them. Double-click a divider to collapse the
-sidebar. With a divider focused, the arrow keys resize too. In a narrow window the sidebar
-collapses by itself.
+sidebar, and again to bring it back at its width. With a divider focused, the arrow keys resize
+too. The sidebar and the commit graph keep their width when you resize the window; only the
+diff pane grows or shrinks. In a window too narrow for all three, the sidebar collapses by
+itself and comes back once there is room.
 
 **Sidebar sections.** Click a section's header to open or close it. The buttons at the top of
 the sidebar open every section (**Expand all sections**) or close them all (**Collapse all
