@@ -61,6 +61,12 @@ also read it here in the repository: [docs/guide/](docs/guide/README.md).
 
 Want to build Browsitory yourself or help out? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Privacy
+
+Browsitory collects no data: no telemetry, no analytics, no crash reports. The desktop app looks
+for updates on GitHub; everything else it connects to is a server you chose. The
+[privacy notice](docs/guide/privacy.md) lists each connection and the data kept on your computer.
+
 ## Licence
 
 Browsitory is MIT-licensed; see [LICENSE](LICENSE). It includes libgit2 (GPL-2.0 with a linking

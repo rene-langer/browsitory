@@ -35,6 +35,9 @@ theme:
   # Zensical's Material-compatible look (fonts, layout); its default is "modern".
   variant: classic
   language: en
+  # No web fonts: the theme's default loads Roboto from Google Fonts, which hands every
+  # visitor's IP address to Google. System fonts instead (#627, docs/guide/privacy.md).
+  font: false
   icon:
     # The default repository icon is Font Awesome's (CC-BY-4.0, outside the licence policy);
     # Material Design Icons are Apache-2.0 (#423).
@@ -107,3 +110,4 @@ nav:
       - external-tools.md
       - command-palette.md
       - troubleshooting.md
+      - privacy.md

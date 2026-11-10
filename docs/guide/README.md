@@ -54,6 +54,7 @@ it. Open several repositories as tabs, and save groups of them as workspaces.
 - [External tools](external-tools.md)
 - [Command palette and shortcuts](command-palette.md)
 - [Troubleshooting](troubleshooting.md)
+- [Privacy](privacy.md)
 
 Found a problem, or a page that's wrong? Report it on
 [GitHub](https://github.com/rene-langer/browsitory/issues).
