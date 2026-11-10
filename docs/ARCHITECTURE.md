@@ -822,7 +822,8 @@ certificate.
     `confirmed` (HEAD id and the fields shown), after a confirmation when it `rewinds` and
     removes commits; the worker refuses a terminal abort without one. Not undoable; the commits
     stay in the reflog.
-- `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`) persists it as
+- `repo-service`'s `SequenceStore` (`worker/sequence_store.rs`, a `StateFile` over the
+  `sequence_file` codec, like `RebaseStore`) persists it as
   `<gitdir>/browsitory/sequence.json` (per worktree, versioned, temp file + `sync_all` + rename,
   like `undo.json`), written only when a sequence stops and deleted when it completes or is
   aborted. On load it must parse, have a known version (2; a version 1 file loads as an error
@@ -1027,7 +1028,7 @@ certificate.
   the repository and a `Reword` message non-empty; anything else is logged once and treated as
   absent. Versioning follows `sequence.json`: an additive change bumps the version and keeps
   reading the older one. When saving fails the worker keeps the state in memory for the session
-  (`rebase_fallback`, preferred over the file until the next successful save or clear) and
+  (`gate::RebaseMemory::fallback`, preferred over the file until the next successful save or clear) and
   reports the failure with the outcome.
 - **Health** (`rebase_health`, reported as `HeadInfo.rebase.health`; the first failing check
   decides): the branch is gone (`BranchMissing`); it isn't at `original_tip` (`BranchMoved`);
