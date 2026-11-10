@@ -719,6 +719,10 @@ pub fn commit_with(
 
         let mut parents: Vec<&git2::Commit> = head_parent.iter().collect();
         parents.extend(merge_parents.iter());
+        // `git commit` drops the parents another parent already contains (#227).
+        if is_merging && !merge_mode_no_ff(repo) {
+            parents = reduce_heads(repo, parents);
+        }
 
         create_commit_reporting(
             repo,
@@ -954,6 +958,38 @@ fn clear_leftover(repo: &git2::Repository) -> Result<bool, CommitError> {
     Ok(true)
 }
 
+/// `MERGE_MODE` says `no-ff` (`git merge --no-ff`): the commit keeps every parent, as with git.
+fn merge_mode_no_ff(repo: &git2::Repository) -> bool {
+    std::fs::read_to_string(repo.path().join("MERGE_MODE")).is_ok_and(|mode| mode == "no-ff")
+}
+
+/// git's `reduce_heads`: `parents` without repeats and without any commit another one of them
+/// already has in its history, in their order. An error while checking keeps the commit.
+fn reduce_heads<'a, 'r>(
+    repo: &git2::Repository,
+    parents: Vec<&'a git2::Commit<'r>>,
+) -> Vec<&'a git2::Commit<'r>> {
+    let mut unique: Vec<&git2::Commit> = Vec::with_capacity(parents.len());
+    for parent in parents {
+        if !unique.iter().any(|kept| kept.id() == parent.id()) {
+            unique.push(parent);
+        }
+    }
+    let contained = |commit: &git2::Commit| {
+        unique.iter().any(|other| {
+            other.id() != commit.id()
+                && repo
+                    .graph_descendant_of(other.id(), commit.id())
+                    .unwrap_or(false)
+        })
+    };
+    unique
+        .iter()
+        .copied()
+        .filter(|commit| !contained(commit))
+        .collect()
+}
+
 /// `MERGE_HEAD`'s commits, in order.
 fn merge_heads(repo: &mut git2::Repository) -> Result<Vec<git2::Oid>, git2::Error> {
     // A terminal `rebase --rebase-merges` writes MERGE_HEAD without a final newline, which
@@ -994,6 +1030,31 @@ pub(crate) fn create_commit_reporting(
     tree: &git2::Tree<'_>,
     parents: &[&git2::Commit<'_>],
 ) -> Result<git2::Oid, CommitError> {
+    Ok(create_signed_reporting(
+        repo,
+        hooks,
+        Some(head_update),
+        author,
+        committer,
+        message,
+        tree,
+        parents,
+    )?)
+}
+
+/// `create_commit_reporting` with the signing program's own error, for callers with an error
+/// type of their own (a rebase step, #151).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_signed_reporting(
+    repo: &git2::Repository,
+    hooks: &mut HookOptions<'_>,
+    head_update: Option<crate::signing::HeadUpdate<'_>>,
+    author: &git2::Signature<'_>,
+    committer: &git2::Signature<'_>,
+    message: &str,
+    tree: &git2::Tree<'_>,
+    parents: &[&git2::Commit<'_>],
+) -> Result<git2::Oid, crate::signing::SignError> {
     const SIGNING: &str = "signing";
     let signing = matches!(crate::signing::signing_config(repo), Ok(Some(_)));
     if signing {
@@ -1004,7 +1065,7 @@ pub(crate) fn create_commit_reporting(
     let never = || false;
     let result = crate::signing::create_commit_with(
         repo,
-        Some(head_update),
+        head_update,
         author,
         committer,
         message,
@@ -1020,7 +1081,7 @@ pub(crate) fn create_commit_reporting(
             reporter.finished(SIGNING, &Ok(hooks::HookOutcome::NotInstalled));
         }
     }
-    Ok(result?)
+    result
 }
 
 /// Rewrites HEAD's commit with the current index tree and `message`, keeping its parents and

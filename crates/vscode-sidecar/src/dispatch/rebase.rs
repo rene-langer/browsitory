@@ -6,7 +6,9 @@ use repo_service::wire::{
 use serde::Deserialize;
 use serde_json::Value;
 
-use super::{worker_handle, RepoPathParams, Repos};
+use std::sync::{Arc, Mutex};
+
+use super::{hook_relay, worker_handle, RepoPathParams, Repos};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,17 +36,31 @@ pub(super) struct StartRebaseParams {
     edit: Option<HistoryEditTargetDto>,
 }
 
-pub(super) fn start_rebase(params: StartRebaseParams, repos: &Repos) -> Result<Value, ErrorDto> {
-    let result = worker_handle(repos, &params.repo_path)?.start_rebase(
+/// A step's signing program is relayed as `hookProgress` (`hook: "signing"`, `source: "Pick"`),
+/// so the hook strip can cancel it (#151).
+pub(super) fn start_rebase<W: std::io::Write + Send + 'static>(
+    params: StartRebaseParams,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, ErrorDto> {
+    let events = hook_relay(&params.repo_path, out);
+    let result = worker_handle(repos, &params.repo_path)?.start_rebase_reporting(
         params.onto,
         params.plan.into_iter().map(Into::into).collect(),
         params.edit.map(Into::into),
+        events,
     )?;
     serde_json::to_value(RebaseStepResultDto::from(result)).map_err(ErrorDto::from_error)
 }
 
-pub(super) fn rebase_continue(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
-    let result = worker_handle(repos, &params.repo_path)?.rebase_continue()?;
+/// The signing program as for `start_rebase`.
+pub(super) fn rebase_continue<W: std::io::Write + Send + 'static>(
+    params: RepoPathParams,
+    repos: &Repos,
+    out: &Arc<Mutex<W>>,
+) -> Result<Value, ErrorDto> {
+    let events = hook_relay(&params.repo_path, out);
+    let result = worker_handle(repos, &params.repo_path)?.rebase_continue_reporting(events)?;
     serde_json::to_value(RebaseStepResultDto::from(result)).map_err(ErrorDto::from_error)
 }
 

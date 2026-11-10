@@ -441,15 +441,90 @@ pub(crate) fn case_pairs(sources: &[&GuardSource]) -> Result<Vec<BTreeSet<Vec<u8
         .collect())
 }
 
+/// [`case_pairs`] limited to the names a forced checkout of the literal `paths` selects
+/// (case-insensitively, as `core.ignorecase` makes it). A name of a pair is selected exactly
+/// when the other is, so only selected names are collected: the index is filtered, and a tree
+/// walk skips every folder that neither leads to nor lies below a selected path (#512). On
+/// 100,000 files, discarding one file no longer walks two whole trees.
+fn selected_case_pairs<P: AsRef<[u8]>>(
+    sources: &[&GuardSource],
+    paths: &[P],
+) -> Result<Vec<BTreeSet<Vec<u8>>>, git2::Error> {
+    let wanted: Vec<Vec<u8>> = paths
+        .iter()
+        .map(|path| {
+            let mut path = path.as_ref();
+            while let Some(rest) = path.strip_suffix(b"/") {
+                path = rest;
+            }
+            path.to_ascii_lowercase()
+        })
+        .collect();
+    // `folded` is selected: a wanted path or below one.
+    let inside = |folded: &[u8]| {
+        wanted.iter().any(|wanted| {
+            folded.starts_with(wanted)
+                && (folded.len() == wanted.len() || folded[wanted.len()] == b'/')
+        })
+    };
+    // `folded` is a folder on the way to a wanted path.
+    let on_the_way = |folded: &[u8]| {
+        wanted.iter().any(|wanted| {
+            wanted.starts_with(folded)
+                && wanted.len() > folded.len()
+                && wanted[folded.len()] == b'/'
+        })
+    };
+    let mut names = std::collections::BTreeMap::<Vec<u8>, BTreeSet<Vec<u8>>>::new();
+    let mut add = |path: Vec<u8>| {
+        names
+            .entry(path.to_ascii_lowercase())
+            .or_default()
+            .insert(path);
+    };
+    for source in sources {
+        match source {
+            GuardSource::Index(index) => index
+                .iter()
+                .filter(|entry| inside(&entry.path.to_ascii_lowercase()))
+                .for_each(|entry| add(entry.path)),
+            GuardSource::Tree(tree) => {
+                tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+                    let path = [root.as_bytes(), entry.name_bytes()].concat();
+                    let folded = path.to_ascii_lowercase();
+                    if entry.kind() == Some(git2::ObjectType::Tree) {
+                        if inside(&folded) || on_the_way(&folded) {
+                            git2::TreeWalkResult::Ok
+                        } else {
+                            git2::TreeWalkResult::Skip
+                        }
+                    } else {
+                        if inside(&folded) {
+                            add(path);
+                        }
+                        git2::TreeWalkResult::Ok
+                    }
+                })?;
+            }
+        }
+    }
+    Ok(names
+        .into_values()
+        .filter(|names| names.len() > 1)
+        .collect())
+}
+
 /// The first of [`case_pairs`], optionally only one a forced checkout limited to the literal
 /// `paths` would select.
 fn find_case_pair<P: AsRef<[u8]>>(
     sources: &[&GuardSource],
     paths: Option<&[P]>,
 ) -> Result<Option<CasePair>, git2::Error> {
-    let pair = case_pairs(sources)?.into_iter().find(|names| {
-        paths.is_none_or(|paths| names.iter().any(|name| selected(name, paths, true)))
-    });
+    let pairs = match paths {
+        Some(paths) => selected_case_pairs(sources, paths)?,
+        None => case_pairs(&distinct_trees(sources))?,
+    };
+    let pair = pairs.into_iter().next();
     Ok(pair.map(|names| {
         let mut names = names
             .into_iter()
@@ -459,6 +534,24 @@ fn find_case_pair<P: AsRef<[u8]>>(
             other: names.next().unwrap_or_default(),
         }
     }))
+}
+
+/// `sources` without a tree another source already is (the target of a discard or a hard reset
+/// to HEAD is HEAD's tree): walking it twice finds no other pair.
+fn distinct_trees<'s, 'a>(sources: &[&'s GuardSource<'a>]) -> Vec<&'s GuardSource<'a>> {
+    let mut seen = Vec::new();
+    sources
+        .iter()
+        .copied()
+        .filter(|source| match source {
+            GuardSource::Tree(tree) if seen.contains(&tree.id()) => false,
+            GuardSource::Tree(tree) => {
+                seen.push(tree.id());
+                true
+            }
+            GuardSource::Index(_) => true,
+        })
+        .collect()
 }
 
 /// Refuses a forced checkout of `sources` (optionally limited to `paths`) that would include a
@@ -1291,6 +1384,48 @@ pub(crate) enum Incoming<'a> {
     /// apply). Nothing is skipped: libgit2 merges a file below a folder HEAD tracks as a link
     /// without a conflict and writes it through the link.
     Merge(GuardSource<'a>),
+    /// A merge result (merge, cherry-pick, revert, rebase step) whose file/folder collisions the
+    /// caller writes as git's conflict (`file_folder::check_out_as_conflicts`, #155). As
+    /// `Merge`, except that a folder link HEAD tracks and the result keeps unchanged is
+    /// skipped: entries below it are a file/folder collision, which the conflict checkout
+    /// writes as git does (the link moves to `<link>~HEAD`, the folder's files are written in
+    /// a real folder), never through the link.
+    MergeAsConflict(&'a git2::Index),
+}
+
+/// What [`refuse_linked_folders_known`] lets a source's folder links pass.
+enum Skip<'a> {
+    Nothing,
+    /// Links HEAD tracks (`Incoming::Checkout`).
+    HeadLinks,
+    /// Links HEAD tracks that this merge result keeps (`Incoming::MergeAsConflict`).
+    KeptHeadLinks(&'a git2::Index),
+}
+
+/// `result` holds HEAD's link `rel` unchanged (the same id and mode, merged at stage 0 or as the
+/// "ours" side of a conflict at stage 2), and the link on disk is still HEAD's: it points where
+/// HEAD's link does. A link the user retargeted is a local change that a checkout allowing
+/// conflicts would leave in place and write through, so it is never skipped.
+fn keeps_head_link(
+    repo: &git2::Repository,
+    workdir: &Path,
+    head_tree: Option<&git2::Tree>,
+    result: &git2::Index,
+    rel: &Path,
+) -> bool {
+    let Some(head_entry) = head_tree.and_then(|tree| tree.get_path(rel).ok()) else {
+        return false;
+    };
+    let kept = head_entry.filemode() as u32 == MODE_LINK
+        && [0, 2].into_iter().any(|stage| {
+            result
+                .get_path(rel, stage)
+                .is_some_and(|entry| entry.mode == MODE_LINK && entry.id == head_entry.id())
+        });
+    kept && std::fs::read_link(workdir.join(rel)).is_ok_and(|target| {
+        repo.find_blob(head_entry.id())
+            .is_ok_and(|blob| path_from_bytes(blob.content()) == target)
+    })
 }
 
 /// Refuses while a symlink stands where HEAD, the index or what the operation brings in has a
@@ -1327,28 +1462,36 @@ where
     let index = repo.index()?;
     let mut sources = Vec::new();
     if let Some(head_tree) = &head_tree {
-        sources.push((GuardSource::Tree(head_tree), false));
+        sources.push((GuardSource::Tree(head_tree), Skip::Nothing));
     }
-    sources.push((GuardSource::Index(&index), false));
+    sources.push((GuardSource::Index(&index), Skip::Nothing));
     for source in incoming {
         sources.push(match source {
-            Incoming::Checkout(tree) => (GuardSource::Tree(tree), true),
-            Incoming::Merge(GuardSource::Tree(tree)) => (GuardSource::Tree(tree), false),
-            Incoming::Merge(GuardSource::Index(index)) => (GuardSource::Index(index), false),
+            Incoming::Checkout(tree) => (GuardSource::Tree(tree), Skip::HeadLinks),
+            Incoming::Merge(GuardSource::Tree(tree)) => (GuardSource::Tree(tree), Skip::Nothing),
+            Incoming::Merge(GuardSource::Index(index)) => {
+                (GuardSource::Index(index), Skip::Nothing)
+            }
+            Incoming::MergeAsConflict(index) => {
+                (GuardSource::Index(index), Skip::KeptHeadLinks(index))
+            }
         });
     }
     // Only folder links matter here, so files are never examined.
     let mut scanner = Scanner::new(workdir, false);
     let mut found = None;
-    for (source, skip_head_links) in &sources {
+    for (source, skip) in &sources {
         let mut hazards = BTreeSet::new();
         scanner.scan(source, ALL, false, &mut hazards)?;
-        found = hazards.into_iter().find_map(|hazard| match hazard {
-            Hazard::Ancestor(dir)
-                if !(*skip_head_links && tracked_as_link(head_tree.as_ref(), &dir)) =>
-            {
-                Some(dir)
+        let skipped = |dir: &Path| match skip {
+            Skip::Nothing => false,
+            Skip::HeadLinks => tracked_as_link(head_tree.as_ref(), dir),
+            Skip::KeptHeadLinks(result) => {
+                keeps_head_link(repo, workdir, head_tree.as_ref(), result, dir)
             }
+        };
+        found = hazards.into_iter().find_map(|hazard| match hazard {
+            Hazard::Ancestor(dir) if !skipped(&dir) => Some(dir),
             _ => None,
         });
         if found.is_some() {
@@ -1370,9 +1513,22 @@ where
                 Incoming::Checkout(tree) => GuardSource::Tree(tree),
                 Incoming::Merge(GuardSource::Tree(tree)) => GuardSource::Tree(tree),
                 Incoming::Merge(GuardSource::Index(index)) => GuardSource::Index(index),
+                Incoming::MergeAsConflict(index) => GuardSource::Index(index),
             })
             .collect();
-        let incoming = find_case_collisions_in(&sources, ALL)?;
+        // In a merge result written as git's conflict, a link and a folder of the identical
+        // spelling are the file/folder collision that checkout writes as git does (the link
+        // moved to `<link>~HEAD`, #155), not a case collision; only differing spellings are.
+        let incoming: Vec<CaseCollision> = find_case_collisions_in(&sources, ALL)?
+            .into_iter()
+            .filter(|collision| {
+                collision.link != collision.folder
+                    || !incoming.iter().any(|source| {
+                        matches!(source, Incoming::MergeAsConflict(index)
+                            if holds_link(index, &collision.link))
+                    })
+            })
+            .collect();
         if !incoming.is_empty() {
             let known = known_collisions(repo, ALL, also_known)?;
             if let Some(collision) = brought_in(incoming, &sources, &known) {
@@ -1381,6 +1537,13 @@ where
         }
     }
     Ok(())
+}
+
+/// `index` has `path` as a symlink entry, at any stage.
+fn holds_link(index: &git2::Index, path: &str) -> bool {
+    index
+        .iter()
+        .any(|entry| entry.mode == MODE_LINK && entry.path == path.as_bytes())
 }
 
 /// True when a directory on the way to `path` (relative to `workdir`) is a symlink. Fails closed:
@@ -2136,6 +2299,148 @@ pub(crate) fn open_beneath(workdir: &Path, rel: &Path) -> io::Result<Option<std:
 mod tests {
     use super::*;
     use git2::Repository;
+
+    /// A tree with `entries` (path, content), built without touching any work tree.
+    fn files_tree<'r>(repo: &'r Repository, entries: &[&str]) -> git2::Tree<'r> {
+        let mut index = git2::Index::new().unwrap();
+        for path in entries {
+            let blob = repo.blob(path.as_bytes()).unwrap();
+            index
+                .add(&git2::IndexEntry {
+                    ctime: git2::IndexTime::new(0, 0),
+                    mtime: git2::IndexTime::new(0, 0),
+                    dev: 0,
+                    ino: 0,
+                    mode: 0o100644,
+                    uid: 0,
+                    gid: 0,
+                    file_size: 0,
+                    id: blob,
+                    flags: 0,
+                    flags_extended: 0,
+                    path: path.as_bytes().to_vec(),
+                })
+                .unwrap();
+        }
+        repo.find_tree(index.write_tree_to(repo).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_path_limited_pair_search_finds_what_the_whole_search_selects() {
+        // #512: the targeted walk must find exactly the pairs the whole-tree search would
+        // keep for those paths, through folders that differ in case too.
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let tree = files_tree(
+            &repo,
+            &[
+                "A",
+                "a",
+                "D/f",
+                "d/f",
+                "X/y/B",
+                "x/Y/b",
+                "keep/c",
+                "other.txt",
+            ],
+        );
+        let source = GuardSource::Tree(&tree);
+        let sources = [&source];
+        let cases: [&[&str]; 9] = [
+            &["a"],
+            &["A"],
+            &["d"],
+            &["D/F"],
+            &["x"],
+            &["x/y/b/"],
+            &["keep"],
+            &["other.txt", "keep/c"],
+            &["d/f/g"],
+        ];
+        for paths in cases {
+            let whole: Vec<_> = case_pairs(&sources)
+                .unwrap()
+                .into_iter()
+                .filter(|names| names.iter().any(|name| selected(name, paths, true)))
+                .collect();
+            assert_eq!(
+                selected_case_pairs(&sources, paths).unwrap(),
+                whole,
+                "{paths:?}"
+            );
+        }
+        let mut index = git2::Index::new().unwrap();
+        index.read_tree(&tree).unwrap();
+        let source = GuardSource::Index(&index);
+        assert_eq!(selected_case_pairs(&[&source], &["D"]).unwrap().len(), 1);
+        assert!(selected_case_pairs(&[&source], &["keep"])
+            .unwrap()
+            .is_empty());
+    }
+
+    /// #512: what the case-pair check costs a forced checkout under `core.ignorecase` on a
+    /// repository of 100,000 files (1,000 folders of 100), measured against the whole guard.
+    /// Run with `cargo test -p git-core --release --lib -- --ignored --nocapture case_pair_cost`.
+    #[test]
+    #[ignore = "measurement, not a check"]
+    fn case_pair_cost() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        repo.config()
+            .unwrap()
+            .set_bool("core.ignorecase", true)
+            .unwrap();
+        let blob = repo.blob(b"x\n").unwrap();
+        let mut root = repo.treebuilder(None).unwrap();
+        for folder in 0..1000 {
+            let mut inner = repo.treebuilder(None).unwrap();
+            for file in 0..100 {
+                inner
+                    .insert(format!("File{file:03}.txt"), blob, 0o100644)
+                    .unwrap();
+            }
+            root.insert(format!("dir{folder:04}"), inner.write().unwrap(), 0o040000)
+                .unwrap();
+        }
+        let tree = repo.find_tree(root.write().unwrap()).unwrap();
+        let sig = git2::Signature::now("T", "t@example.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "c", &tree, &[])
+            .unwrap();
+        let mut index = repo.index().unwrap();
+        index.read_tree(&tree).unwrap();
+        index.write().unwrap();
+        let target = GuardSource::Tree(&tree);
+        let time = |label: &str, run: &dyn Fn()| {
+            let started = std::time::Instant::now();
+            for _ in 0..5 {
+                run();
+            }
+            eprintln!("{label}: {:?} per run", started.elapsed() / 5);
+        };
+        time("refuse_case_pair (target, HEAD, index)", &|| {
+            refuse_case_pair::<crate::rebase::RebaseError, &str>(&repo, Some(&target), ALL).unwrap()
+        });
+        time("refuse_case_pair, one path", &|| {
+            refuse_case_pair::<crate::rebase::RebaseError, &str>(
+                &repo,
+                Some(&target),
+                Some(&["dir0500/File050.txt"]),
+            )
+            .unwrap()
+        });
+        time("prepare_forced_checkout, one path", &|| {
+            prepare_forced_checkout::<crate::rebase::RebaseError, &str>(
+                &repo,
+                Some(&target),
+                Some(&["dir0500/File050.txt"]),
+            )
+            .unwrap()
+        });
+        time("prepare_forced_checkout, whole tree", &|| {
+            prepare_forced_checkout::<crate::rebase::RebaseError, &str>(&repo, Some(&target), ALL)
+                .unwrap()
+        });
+    }
 
     const ALL: Option<&[&str]> = None;
     use tempfile::TempDir;

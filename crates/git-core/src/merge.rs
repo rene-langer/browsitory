@@ -170,7 +170,7 @@ fn refuse_unsafe_merge(
     // The link check first: its refusal is the more specific one when the "file" is a link.
     crate::worktree_guard::refuse_linked_folders::<MergeError>(
         repo,
-        &[Incoming::Merge(GuardSource::Index(&merged))],
+        &[Incoming::MergeAsConflict(&merged)],
     )?;
     // libgit2's ignore-case index would keep one name of a case pair the merge brings in, and
     // the merge would be committed without the other (#522).
@@ -340,6 +340,7 @@ pub fn start_merge(
         ));
     }
 
+    refuse_case_pair_held(repo)?;
     if let Some(merged) = colliding {
         let label = merge_subject(target);
         let files = merge_with_file_folder_conflict(
@@ -348,6 +349,7 @@ pub fn start_merge(
             Some((their_commit.id(), &label)),
             short_ref_name(target),
         )?;
+        record_merge_mode(repo, opts.fast_forward)?;
         return Ok(MergeOutcome::Conflicted { files });
     }
 
@@ -355,6 +357,7 @@ pub fn start_merge(
     let mut checkout = git2::build::CheckoutBuilder::new();
     crate::hardlink::on_checkout(repo, &mut checkout);
     repo.merge(&[&their_annotated], None, Some(&mut checkout))?;
+    record_merge_mode(repo, opts.fast_forward)?;
 
     let files = conflicted_files(&repo.index()?)?;
     if files.is_empty() {
@@ -362,6 +365,27 @@ pub fn start_merge(
     } else {
         Ok(MergeOutcome::Conflicted { files })
     }
+}
+
+/// With `core.ignorecase` on, libgit2's merge checkout refuses whenever HEAD or the index holds
+/// a case pair (`A` and `a`), even when the merge touches neither name: "1 conflict prevents
+/// checkout" (#512). Refused up front with `CasePair`, which says why; nothing is written. A
+/// fast-forward, a cherry-pick and a revert keep both names and aren't refused.
+fn refuse_case_pair_held(repo: &Repository) -> Result<(), MergeError> {
+    crate::worktree_guard::refuse_case_pair::<MergeError, &str>(repo, None, None)
+}
+
+/// `MERGE_MODE` as `git merge` writes it: `no-ff` for `--no-ff`, else empty. The commit
+/// concluding the merge keeps every parent only with `no-ff` (#227). libgit2 always writes
+/// `no-ff`.
+fn record_merge_mode(repo: &Repository, fast_forward: FastForward) -> Result<(), MergeError> {
+    let mode = if fast_forward == FastForward::Never {
+        "no-ff"
+    } else {
+        ""
+    };
+    std::fs::write(repo.path().join("MERGE_MODE"), mode)?;
+    Ok(())
 }
 
 /// `git merge --squash`: merge into the index and worktree, write `SQUASH_MSG`, and leave no
@@ -375,6 +399,7 @@ fn squash_merge(
     colliding: Option<git2::Index>,
     their_label: &str,
 ) -> Result<MergeOutcome, MergeError> {
+    refuse_case_pair_held(repo)?;
     // Built before `repo.merge` so a failure here leaves the repository untouched.
     let message = build_squash_message(repo, their_id)?;
     let files = match colliding {

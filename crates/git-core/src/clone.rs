@@ -53,6 +53,11 @@ pub enum CloneError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     CaseCollision(#[from] crate::CaseCollision),
+    /// `core.ignorecase` is on for the new repository (a global setting on a case-sensitive
+    /// file system) and its HEAD commit holds two paths that differ only in case (#512): the
+    /// checkout would keep only one of them in the index.
+    #[error(transparent)]
+    CasePair(#[from] crate::CasePair),
     /// `core.ignorecase` can't be read, so the case-collision check can't run (#225).
     #[error(transparent)]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
@@ -214,6 +219,7 @@ pub(crate) fn clone_repo_with(
         cleanup(&opts.dest, state);
         return Err(match error {
             CheckoutFailure::Case(collision) => collision.into(),
+            CheckoutFailure::CasePair(pair) => pair.into(),
             CheckoutFailure::Held(held) => held.into(),
             CheckoutFailure::CaseConfig(error) => error.into(),
             CheckoutFailure::Git(error) => classify(error, false, cancel),
@@ -240,6 +246,7 @@ pub(crate) fn clone_repo_with(
 
 enum CheckoutFailure {
     Case(crate::CaseCollision),
+    CasePair(crate::CasePair),
     Held(crate::HeldOpen),
     CaseConfig(crate::CaseConfigUnreadable),
     Git(git2::Error),
@@ -248,6 +255,12 @@ enum CheckoutFailure {
 impl From<crate::CaseConfigUnreadable> for CheckoutFailure {
     fn from(error: crate::CaseConfigUnreadable) -> Self {
         Self::CaseConfig(error)
+    }
+}
+
+impl From<crate::CasePair> for CheckoutFailure {
+    fn from(pair: crate::CasePair) -> Self {
+        Self::CasePair(pair)
     }
 }
 
@@ -263,7 +276,8 @@ impl From<git2::Error> for CheckoutFailure {
     }
 }
 
-/// Checks the fresh clone's HEAD tree for a case collision, then checks it out into the empty
+/// Checks the fresh clone's HEAD tree for a case collision and, under `core.ignorecase`, for a
+/// case pair (#512, `worktree_guard::refuse_case_pair`), then checks it out into the empty
 /// work tree as the clone would have (forced), with progress and cancel. An unborn HEAD (empty
 /// remote) has nothing to check out.
 fn checkout_clone(
@@ -281,6 +295,13 @@ fn checkout_clone(
             return Err(CheckoutFailure::Case(collision));
         }
     }
+    // The forced checkout below would keep one name of a pair in the ignore-case index. The
+    // fresh index is empty, so the tree is all there is to check.
+    crate::worktree_guard::refuse_case_pair::<CheckoutFailure, &str>(
+        repo,
+        Some(&GuardSource::Tree(&tree)),
+        None,
+    )?;
     let mut checkout = CheckoutBuilder::new();
     checkout.force();
     // Every written file is an `UPDATED` notification; returning false aborts the checkout.

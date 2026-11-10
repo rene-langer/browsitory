@@ -967,3 +967,61 @@ fn a_continue_that_loses_head_to_another_writer_saves_nothing() {
     );
     assert_eq!(std::fs::read_to_string(rebase_file(&repo)).unwrap(), stored);
 }
+
+/// #151: a rebase step's signing program is reported as the `signing` pseudo-hook under a
+/// `rebase-<n>` id (`HookSource::Pick`, so the hook strip shows it), and cancelling that id stops
+/// the signer. The step stays paused, so Continue can try it again.
+#[test]
+#[cfg(unix)]
+fn cancelling_a_rebase_steps_signer_stops_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, repo) = init_repo();
+    let (_worker, handle, _, _tip) = paused_for_edit(dir.path(), &repo);
+    let tools = TempDir::new().unwrap();
+    let script = tools.path().join("hung-gpg");
+    std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    {
+        let mut config = repo.config().unwrap();
+        config.set_bool("commit.gpgSign", true).unwrap();
+        config
+            .set_str("gpg.program", script.to_str().unwrap())
+            .unwrap();
+    }
+    let started = std::time::Instant::now();
+    let (events_tx, events) = mpsc::channel();
+
+    let result = std::thread::scope(|scope| {
+        let continued = scope.spawn(|| handle.rebase_continue_reporting(events_tx));
+        let first = events.recv().unwrap();
+        let super::super::HookEvent::Started {
+            operation_id,
+            hook,
+            source,
+        } = &first
+        else {
+            panic!("{first:?}");
+        };
+        assert_eq!(hook, "signing");
+        assert_eq!(*source, super::super::HookSource::Pick);
+        assert!(operation_id.starts_with("rebase-"), "{operation_id}");
+        handle.cancel_transfer(operation_id);
+        continued.join().unwrap()
+    });
+
+    assert_eq!(result.unwrap_err().message, "Signing was cancelled.");
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+    assert!(matches!(
+        events.recv().unwrap(),
+        super::super::HookEvent::Finished { ref hook, .. } if hook == "signing"
+    ));
+    // Still paused at the step: with signing off, Continue lands it.
+    repo.config()
+        .unwrap()
+        .set_bool("commit.gpgSign", false)
+        .unwrap();
+    assert_eq!(
+        handle.rebase_continue().unwrap(),
+        git_core::rebase::RebaseStepResult::Done
+    );
+}

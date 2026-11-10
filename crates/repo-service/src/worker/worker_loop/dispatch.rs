@@ -677,16 +677,33 @@ where
                 onto,
                 plan,
                 edit,
+                operation_id,
+                events,
                 reply,
             } => {
-                let result = rebase::start(&self.repo, &onto, plan, self.operations.rebase_slot());
+                let result = rebase::start(
+                    &self.repo,
+                    &onto,
+                    plan,
+                    self.operations.rebase_slot(),
+                    remote::TransferOp::new(operation_id),
+                    events,
+                );
                 let label = undo::start_rebase_label(&onto, edit.as_ref());
                 undo::relabel_rebase_start(&mut self.undo_recorder, &self.repo, &label, &result);
                 let _ = reply.send(result);
             }
-            Command::RebaseContinue { reply } => {
-                rebase::continue_rebase(&self.repo, self.operations.rebase_slot(), reply)
-            }
+            Command::RebaseContinue {
+                operation_id,
+                events,
+                reply,
+            } => rebase::continue_rebase(
+                &self.repo,
+                self.operations.rebase_slot(),
+                remote::TransferOp::new(operation_id),
+                events,
+                reply,
+            ),
             Command::AbortRebase { reply } => {
                 rebase::abort(&self.repo, self.operations.rebase_slot(), reply)
             }

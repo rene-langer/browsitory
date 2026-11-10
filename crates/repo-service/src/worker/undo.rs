@@ -1125,6 +1125,8 @@ mod tests {
             onto: onto.into(),
             plan: Vec::new(),
             edit,
+            operation_id: "rebase-1".into(),
+            events: channel().0,
             reply: channel().0,
         }
     }
