@@ -37,6 +37,7 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   getGraphRemoteBranchSelection: async () => null,
   getWorkingDiff: async () => [],
   getCommitDiff: async () => [],
+  getCommitStats: async () => [],
   searchCommits: async () => ({ commits: [], nextCursor: null, scanned: 0 }),
   cancelSearch: async () => {},
   getCommitSignature: async () => ({ status: "unsigned", format: null, signer: null, key: null, detail: null }),

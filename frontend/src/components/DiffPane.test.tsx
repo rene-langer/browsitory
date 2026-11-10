@@ -1532,6 +1532,33 @@ describe("DiffPane", () => {
       expect(getCommitDiff).toHaveBeenCalledWith(TEST_REPO_PATH, "abc123", "src/main.rs", DEFAULT_DIFF_OPTIONS);
     });
 
+    it("shows the commit's totals and each file's lines added and removed (#620)", async () => {
+      const getCommitStats = vi.fn(async () => [
+        {
+          commitId: "abc123",
+          stats: {
+            filesChanged: 2,
+            insertions: 5,
+            deletions: 2,
+            files: [
+              { path: "src/main.rs", insertions: 5, deletions: 2, binary: false },
+              { path: "logo.png", insertions: 0, deletions: 0, binary: true },
+            ],
+          },
+        },
+      ]);
+      const getTwoFiles = vi.fn(async () => ["src/main.rs", "logo.png"]);
+      renderCommit(fakeClient({ getCommitFiles: getTwoFiles, getCommitDiff, getCommitStats }), "abc123");
+
+      const totals = (await screen.findByText("Size")).nextElementSibling as HTMLElement;
+      expect(totals).toHaveTextContent("2 files changed, 5 lines added, 2 removed");
+      expect(getCommitStats).toHaveBeenCalledWith(TEST_REPO_PATH, ["abc123"], true);
+      const mainHeader = screen.getByText("src/main.rs").parentElement as HTMLElement;
+      expect(within(mainHeader).getByTestId("line-stats")).toHaveTextContent("+5−2");
+      const imageHeader = screen.getByText("logo.png").parentElement as HTMLElement;
+      expect(within(imageHeader).getByText("Binary")).toBeInTheDocument();
+    });
+
     it("switches to All files, which lists the commit's tree and stays on for the next commit (#446)", async () => {
       const getCommitTree = vi.fn(async () => ({
         entries: [{ path: "README.md", name: "README.md", kind: "File" as const, size: 3 }],

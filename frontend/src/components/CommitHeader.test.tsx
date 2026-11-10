@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { CommitSignature, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import { CommitHeader } from "./CommitHeader";
@@ -262,5 +262,22 @@ describe("CommitHeader", () => {
       fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
       expect(screen.queryByRole("alert")).toBeNull();
     });
+  });
+});
+
+describe("CommitHeader line totals (#620)", () => {
+  it("shows the files changed and the lines added and removed", () => {
+    renderHeader({ lineStats: { filesChanged: 4, insertions: 120, deletions: 37, files: [] } });
+
+    const totals = screen.getByText("Size").nextElementSibling as HTMLElement;
+    expect(totals).toHaveTextContent("4 files changed, 120 lines added, 37 removed+120−37");
+  });
+
+  it("has no totals while counting or for a commit over the cap", () => {
+    renderHeader({ lineStats: undefined });
+    expect(screen.queryByText("Size")).toBeNull();
+    cleanup();
+    renderHeader({ lineStats: null });
+    expect(screen.queryByText("Size")).toBeNull();
   });
 });

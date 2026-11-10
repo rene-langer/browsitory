@@ -1,12 +1,14 @@
 import { Fragment, useEffect, useState, type KeyboardEvent } from "react";
-import type { CommitSignature, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import type { CommitSignature, CommitStats, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { copyText } from "../lib/clipboard";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
+import { filesChangedLabel } from "../lib/lineStats";
 import { parseMessageLinks } from "../lib/messageLinks";
 import { shortKey, signatureLabel } from "../lib/signatureStatus";
 import styles from "./CommitHeader.module.css";
+import { LineStatsBadge } from "./LineStatsBadge";
 import { InlineError } from "./primitives/InlineError";
 
 /**
@@ -51,7 +53,8 @@ function MessageText({
  * SHA (copyable), parents and children (#618). Author/date/parents come from the already-loaded
  * `GraphCommit` and the children from the loaded history; only the full message body and the
  * signature status need a `RepoClient` round trip. URLs and, with `issueForge`, issue
- * references in the subject and body are links (#612).
+ * references in the subject and body are links (#612). `lineStats` adds the commit's totals
+ * (#620).
  */
 export function CommitHeader({
   repoPath,
@@ -62,6 +65,7 @@ export function CommitHeader({
   childIds = [],
   onSelectRow,
   issueForge = null,
+  lineStats,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -75,6 +79,9 @@ export function CommitHeader({
   onSelectRow: (row: SelectedRow) => void;
   // The forge repository `#123` refers to (`issueForgeRepository`); `null` leaves it text.
   issueForge?: ForgeRepository | null;
+  // "4 files changed, +120 −37" (#620); `undefined` while counting, `null` for a commit over the
+  // backend's cap: no row then.
+  lineStats?: CommitStats | null;
 }) {
   const [message, setMessage] = useState<string | null>(null);
   // undefined = still checking, null = unsigned or the check failed (row hidden).
@@ -188,6 +195,15 @@ export function CommitHeader({
                   {shortKey(signature.key)}
                 </code>
               )}
+            </dd>
+          </>
+        )}
+        {lineStats != null && (
+          <>
+            <dt>Size</dt>
+            <dd>
+              {filesChangedLabel(lineStats.filesChanged)},{" "}
+              <LineStatsBadge insertions={lineStats.insertions} deletions={lineStats.deletions} />
             </dd>
           </>
         )}

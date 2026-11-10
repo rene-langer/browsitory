@@ -1,4 +1,5 @@
 use super::{emit_hook_events, repo_worker, AppState};
+use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
@@ -132,6 +133,23 @@ pub async fn get_commit_files(
     repo_worker(&state, &repo_path)?
         .call(move |w| w.get_commit_files(commit_id))
         .await
+}
+
+/// Line counts of `commit_ids` (#620). The commits the worker's time budget didn't reach are
+/// left out; the caller asks for them again.
+#[tauri::command]
+pub async fn get_commit_stats(
+    repo_path: String,
+    commit_ids: Vec<String>,
+    with_files: bool,
+    state: State<'_, AppState>,
+) -> Result<Vec<CommitStatsEntryDto>, ErrorDto> {
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.get_commit_stats(commit_ids, with_files))
+        .await?
+        .into_iter()
+        .map(CommitStatsEntryDto::from)
+        .collect())
 }
 
 #[tauri::command]

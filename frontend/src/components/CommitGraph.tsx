@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import type { GraphCommit, HeadInfo, RemoteInfo, StatusEntry } from "../ipc/RepoClient";
+import type { CommitStats, GraphCommit, HeadInfo, RemoteInfo, StatusEntry } from "../ipc/RepoClient";
 import { assignLanes } from "../lib/commitGraphLayout";
 import {
   EMPTY_SELECTION,
@@ -26,6 +26,7 @@ import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import formStyles from "./primitives/FormDialog.module.css";
+import { LineStatsBadge } from "./LineStatsBadge";
 import { RefBadges } from "./RefBadges";
 import { tagMenuItems } from "./tagMenuItems";
 import styles from "./CommitGraph.module.css";
@@ -68,6 +69,8 @@ export function CommitGraph({
   onCreateTag,
   onDeleteTagFromRemote,
   revealRequest = 0,
+  lineStats,
+  onCommitsVisible,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -150,6 +153,14 @@ export function CommitGraph({
   /** Bumped by "Go to" (#441): scrolls the selected row into view even when it was already
    *  selected. */
   revealRequest?: number;
+  /**
+   * Lines-changed badges (#620): the counted commits (`useCommitLineStats`); a row shows its
+   * badge once its numbers are in, and none for a commit over the cap (`null`). Omitted: no
+   * badges.
+   */
+  lineStats?: ReadonlyMap<string, CommitStats | null>;
+  /** The commits whose rows are on screen, in graph order, whenever that changes. */
+  onCommitsVisible?: (commitIds: string[]) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -318,6 +329,29 @@ export function CommitGraph({
       onDelete: setTagToDelete,
     });
   }
+
+  // The rows on screen, for the lazily counted badges (#620). Without IntersectionObserver every
+  // loaded row counts as visible.
+  useEffect(() => {
+    const list = listRef.current;
+    if (onCommitsVisible === undefined || list === null) return;
+    if (typeof IntersectionObserver === "undefined") {
+      onCommitsVisible(commits.map((commit) => commit.id));
+      return;
+    }
+    const visible = new Set<string>();
+    const observer = new IntersectionObserver((records) => {
+      for (const record of records) {
+        const id = (record.target as HTMLElement).dataset.commitId;
+        if (id === undefined) continue;
+        if (record.isIntersecting) visible.add(id);
+        else visible.delete(id);
+      }
+      onCommitsVisible(commits.filter((commit) => visible.has(commit.id)).map((commit) => commit.id));
+    });
+    for (const row of list.querySelectorAll<HTMLElement>("[data-commit-id]")) observer.observe(row);
+    return () => observer.disconnect();
+  }, [commits, onCommitsVisible]);
 
   // Keep the keyboard-driven selection visible in a long history, and a "Go to" target too.
   useEffect(() => {
@@ -660,6 +694,7 @@ export function CommitGraph({
           <span className={styles.commitSummary}>
             {commit.shortId} {commit.summary}
           </span>
+          <CommitRowLineStats stats={lineStats?.get(commit.id)} />
           <span className={styles.author} title={commit.authorEmail}>
             {commit.authorName}
           </span>
@@ -761,4 +796,10 @@ export function CommitGraph({
     )}
     </>
   );
+}
+
+/** A row's `+12 −3` (#620); nothing until the numbers are in, or for a commit over the cap. */
+function CommitRowLineStats({ stats }: { stats: CommitStats | null | undefined }) {
+  if (stats == null) return null;
+  return <LineStatsBadge insertions={stats.insertions} deletions={stats.deletions} className={styles.lineStats} />;
 }

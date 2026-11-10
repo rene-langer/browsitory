@@ -1,7 +1,7 @@
 import type { CommitView, DiffPanePatchActions, FileHistoryFocus } from "./diffPaneShared";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { useEffect, useMemo, useState } from "react";
-import type { CommitHunk, DiffOptions, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import type { CommitHunk, CommitStats, DiffOptions, FileStats, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { CollapseAllToggle } from "./CollapseToggle";
 import { CommitHeader } from "./CommitHeader";
@@ -104,6 +104,28 @@ export function CommitDiffPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, client, commitId]);
 
+  // #620: the totals in the header and each file's +/−. `undefined` while counting, `null` for a
+  // commit over the backend's cap (or a failed count): then the header has no totals.
+  const [lineStats, setLineStats] = useState<{ commitId: string; stats: CommitStats | null } | null>(null);
+  useEffect(() => {
+    let ignore = false;
+    Promise.resolve()
+      .then(() => client.getCommitStats(repoPath, [commitId], true))
+      .then((entries) => entries.find((entry) => entry.commitId === commitId)?.stats ?? null)
+      .catch(() => null)
+      .then((stats) => {
+        if (!ignore) setLineStats({ commitId, stats });
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [repoPath, client, commitId]);
+  const commitStats = lineStats?.commitId === commitId ? lineStats.stats : undefined;
+  const fileStats = useMemo(
+    () => new Map<string, FileStats>((commitStats?.files ?? []).map((file) => [file.path, file])),
+    [commitStats],
+  );
+
   const allCollapsed = files.length > 0 && files.every((path) => collapsedPaths.has(path));
 
   const toggleCollapse = (path: string) => {
@@ -147,6 +169,7 @@ export function CommitDiffPane({
         childIds={childIds}
         onSelectRow={onSelectRow}
         issueForge={issueForge}
+        lineStats={commitStats}
       />
       <div className={treeStyles.viewToggle} role="group" aria-label="Commit files">
         <button type="button" aria-pressed={view === "changes"} onClick={() => onViewChange("changes")}>
@@ -190,6 +213,7 @@ export function CommitDiffPane({
               toolSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
               previewSource={{ kind: "Commit", commitId, oldPath: focus.oldPath }}
               patch={patchActions && commitFilePatch(patchActions, commitId, focus.path, focus.oldPath)}
+              lineStats={fileStats.get(focus.path)}
             />
           </ul>
           {files.length > 1 && (
@@ -225,6 +249,7 @@ export function CommitDiffPane({
                 toolSource={{ kind: "Commit", commitId, oldPath: null }}
                 previewSource={{ kind: "Commit", commitId, oldPath: null }}
                 patch={patchActions && commitFilePatch(patchActions, commitId, path, null)}
+                lineStats={fileStats.get(path)}
               />
             ))}
           </ul>

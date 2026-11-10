@@ -116,6 +116,13 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "-",
         ),
         (cmd!(GetCommitFiles { commit_id: s(ONTO) }), "-"),
+        (
+            cmd!(GetCommitStats {
+                commit_ids: vec![s(ONTO)],
+                with_files: false
+            }),
+            "-",
+        ),
         (cmd!(GetCommitMessage { commit_id: s(ONTO) }), "-"),
         (cmd!(GetCommitSignature { commit_id: s(ONTO) }), "-"),
         (

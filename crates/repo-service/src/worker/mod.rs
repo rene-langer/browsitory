@@ -136,6 +136,11 @@ pub(crate) enum Command {
         commit_id: String,
         reply: Sender<Result<Vec<String>, ErrorDto>>,
     },
+    GetCommitStats {
+        commit_ids: Vec<String>,
+        with_files: bool,
+        reply: Sender<Result<Vec<git_core::commit_stats::CommitStatsEntry>, ErrorDto>>,
+    },
     GetCommitMessage {
         commit_id: String,
         reply: Sender<Result<String, ErrorDto>>,

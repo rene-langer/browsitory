@@ -668,6 +668,73 @@ impl From<git_core::locate::CommitLocation> for CommitLocationDto {
     }
 }
 
+/// One file's line counts in a commit (#620): see `git_core::commit_stats::FileStats`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "FileStats"))]
+#[serde(rename_all = "camelCase")]
+pub struct FileStatsDto {
+    pub path: String,
+    pub insertions: usize,
+    pub deletions: usize,
+    pub binary: bool,
+}
+
+impl From<git_core::commit_stats::FileStats> for FileStatsDto {
+    fn from(f: git_core::commit_stats::FileStats) -> Self {
+        FileStatsDto {
+            path: f.path,
+            insertions: f.insertions,
+            deletions: f.deletions,
+            binary: f.binary,
+        }
+    }
+}
+
+/// A commit's line counts (#620): see `git_core::commit_stats::CommitStats`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitStats"))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitStatsDto {
+    pub files_changed: usize,
+    pub insertions: usize,
+    pub deletions: usize,
+    /// Empty unless `withFiles` asked for them.
+    pub files: Vec<FileStatsDto>,
+}
+
+impl From<git_core::commit_stats::CommitStats> for CommitStatsDto {
+    fn from(s: git_core::commit_stats::CommitStats) -> Self {
+        CommitStatsDto {
+            files_changed: s.files_changed,
+            insertions: s.insertions,
+            deletions: s.deletions,
+            files: s.files.into_iter().map(FileStatsDto::from).collect(),
+        }
+    }
+}
+
+/// One answered commit of `getCommitStats` (#620): `stats` is `null` for a commit over the cap
+/// or one that couldn't be read.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitStatsEntry"))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitStatsEntryDto {
+    pub commit_id: String,
+    pub stats: Option<CommitStatsDto>,
+}
+
+impl From<git_core::commit_stats::CommitStatsEntry> for CommitStatsEntryDto {
+    fn from(e: git_core::commit_stats::CommitStatsEntry) -> Self {
+        CommitStatsEntryDto {
+            commit_id: e.commit_id,
+            stats: e.stats.map(CommitStatsDto::from),
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "HeadInfo"))]
@@ -2702,6 +2769,9 @@ mod ts_bindings {
             ChangedFileDto,
             CompareRangeDto,
             CommitLocationDto,
+            FileStatsDto,
+            CommitStatsDto,
+            CommitStatsEntryDto,
             HeadInfoDto,
             TerminalRebaseDto,
             ConfirmedAbortDto,

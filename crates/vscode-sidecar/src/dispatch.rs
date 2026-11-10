@@ -196,6 +196,7 @@ methods!(|params, repos, stdout| {
     ),
     "clear_graph_remote_branch_selection" => clear_graph_remote_branch_selection(RepoPathParams),
     "get_commit_files" => get_commit_files(GetCommitFilesParams, repos),
+    "get_commit_stats" => get_commit_stats(GetCommitStatsParams, repos),
     "get_commit_message" => get_commit_message(GetCommitFilesParams, repos),
     "get_commit_signature" => get_commit_signature(GetCommitFilesParams, repos),
     "stage_file" => stage_file(RepoFilePathParams, repos),
