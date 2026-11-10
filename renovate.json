@@ -67,6 +67,12 @@
       "groupName": "Tauri"
     },
     {
+      "description": "tauri-action (release.yml, pinned by commit, #399) writes latest.json, the manifest every installed app's updater reads, and only runs on a release tag: its own PR, never grouped with the Tauri crates/packages (which /^tauri/ above would match) or other actions",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["tauri-apps/tauri-action"],
+      "groupName": null
+    },
+    {
       "description": "0.x minor bumps are breaking (Cargo and npm treat 0.y as major): own PR, after approval",
       "matchUpdateTypes": ["minor"],
       "matchCurrentVersion": "/^[\\^~=]?0\\./",
