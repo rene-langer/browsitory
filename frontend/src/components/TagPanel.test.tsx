@@ -277,3 +277,17 @@ describe("TagPanel", () => {
     }
   });
 });
+
+describe("TagPanel — Create tag at HEAD… (#649)", () => {
+  it("offers a + in the header that opens Create tag at HEAD, also with no tags yet", () => {
+    const onCreateTagAtHead = vi.fn();
+    render(<TagPanel {...props({ tags: [], onCreateTagAtHead })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Create tag at HEAD…" }));
+    expect(onCreateTagAtHead).toHaveBeenCalledOnce();
+  });
+
+  it("has no + without a HEAD commit", () => {
+    render(<TagPanel {...props()} />);
+    expect(screen.queryByRole("button", { name: "Create tag at HEAD…" })).not.toBeInTheDocument();
+  });
+});

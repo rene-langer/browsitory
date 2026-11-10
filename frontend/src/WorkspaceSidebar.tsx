@@ -164,6 +164,14 @@ export function WorkspaceSidebar({
           pushDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
           revealRequest={sectionRevealRequest(revealRequest, "tags")}
+          onCreateTagAtHead={
+            appState.state.headInfo.headId === null
+              ? undefined
+              : () => {
+                  const headId = appState.state.headInfo.headId;
+                  if (headId !== null) openDialog({ kind: "createTag", commitId: headId });
+                }
+          }
         />
       )}
       {panelVisibility.visibility.pullRequests && (

@@ -157,6 +157,20 @@ describe("the repository toolbar (#637)", () => {
   });
 });
 
+describe("Apply patch… in the toolbar (#649)", () => {
+  it("asks for a patch file and applies it to the working tree", async () => {
+    const content = { base64: "ZGlmZg==" };
+    const openPatchFile = vi.fn(async () => content);
+    const applyPatch = vi.fn(async () => {});
+    await renderApp(layoutClient({ openPatchFile, applyPatch }));
+    const button = within(toolbar()).getByRole("button", { name: "Apply patch…" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() => expect(applyPatch).toHaveBeenCalledWith("/repos/a", content));
+    expect(openPatchFile).toHaveBeenCalledOnce();
+  });
+});
+
 describe("the current-branch switcher (#638)", () => {
   it("shows the branch and its upstream, and switches branch from a filtered list", async () => {
     const switchBranch = vi.fn(async () => {});

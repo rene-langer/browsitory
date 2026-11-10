@@ -82,3 +82,18 @@ li:focus-within > .iconButton,
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
+
+/* The header's "+" (Create tag at HEAD…, #649): always shown, unlike the rows' "…". */
+.headerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.headerButton:hover:not(:disabled) {
+  background: var(--color-control);
+  color: var(--color-text);
+}

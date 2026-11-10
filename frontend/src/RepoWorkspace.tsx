@@ -770,6 +770,11 @@ export function RepoWorkspace({
           onUndo: handleUndo,
           onRedo: handleRedo,
         }}
+        applyPatch={{
+          // Like the palette's "Apply patch…": behind the repository guard.
+          disabledReason: repositoryOperationDisabled ? (operationDisabledReason ?? "Another action is running.") : null,
+          onApplyPatch: () => void appState.applyPatchFile(),
+        }}
         onRefresh={() => void appState.refresh()}
       />
       <SplitView
