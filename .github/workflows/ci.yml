@@ -16,8 +16,6 @@ on:
 
 permissions:
   contents: read
-  checks: write
-  issues: write
 
 jobs:
   # Every job has a timeout-minutes (#353), so a stuck download fails the job instead of holding
@@ -27,12 +25,21 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # renovate: datasource=crate depName=cargo-audit
+      CARGO_AUDIT_VERSION: 0.22.2
     steps:
       - uses: actions/checkout@v7
-      - name: cargo audit
-        uses: rustsec/audit-check@v2
+      - uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          tool: cargo-audit@${{ env.CARGO_AUDIT_VERSION }}
+      # The plain CLI, not rustsec/audit-check: that action posts its result as an extra check
+      # run and often failed updating it ("Not Found - update-a-check-run"), failing this
+      # required job with no advisory found (#728). `cargo audit` fails only on a vulnerability
+      # not ignored in .cargo/audit.toml; unmaintained/unsound warnings are printed, not fatal.
+      # A new advisory on the weekly schedule fails the run, which notifies the owner.
+      - name: cargo audit
+        run: cargo audit
       - uses: pnpm/action-setup@v6
         with:
           version: 12
