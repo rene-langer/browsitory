@@ -2195,7 +2195,10 @@ only `error`.
   regardless of debug/release, so it can't be driven standalone). One flow per major feature
   area, added where a flow spans backend+frontend in a way unit tests can't catch; `App`
   (`frontend/src/state/useE2eAutoOpen.ts`) reads a `VITE_E2E_REPO_PATH` build-time env var to auto-open a fixture repo, since
-  `RepoPicker`'s native folder dialog can't be driven through WebDriver. (Not Playwright:
+  `RepoPicker`'s native folder dialog can't be driven through WebDriver. The same variable
+  turns off the release notes dialog (`useReleaseNotes`) and the update check
+  (`UpdateBanner`), so E2E runs and the guide screenshots never contact the update endpoints or
+  download a release bundle (#576); release builds don't set it. (Not Playwright:
   Playwright drives browser engines it manages itself and can't attach to a native
   Tauri/webkit2gtk window; `tauri-driver` is Tauri's own WebDriver bridge, the
   actually-supported E2E path.) All four pnpm projects (`frontend/`, `extension/`, `e2e/`,
