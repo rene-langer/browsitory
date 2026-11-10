@@ -339,6 +339,25 @@ fn an_amend_without_an_identity_is_missing_identity() {
 }
 
 #[test]
+fn a_malformed_identity_reports_git_s_error_not_a_missing_one() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "a.txt", "a\n");
+    commit_all(&repo, "a");
+    let mut config = repo
+        .config()
+        .unwrap()
+        .open_level(git2::ConfigLevel::Local)
+        .unwrap();
+    config.set_str("user.name", "Ada <x>").unwrap();
+
+    let error =
+        git_core::commit::amend_head(&repo, "reworded", None, HookOptions::default()).unwrap_err();
+
+    // Set, but not usable: git's own reason, not the "set your name and email" prompt.
+    assert!(!matches!(error, CommitError::MissingIdentity), "{error}");
+}
+
+#[test]
 fn set_identity_writes_the_repository_config_and_the_commit_then_goes_through() {
     let (dir, mut repo) = repo_without_identity();
     write_file(dir.path(), "a.txt", "a\n");
@@ -367,6 +386,8 @@ fn set_identity_refuses_a_blank_or_malformed_identity() {
         ("Ada <x>", "a@example.com"),
         ("Ada", "a b@example.com"),
         ("Ada\n", "a@example.com\nx"),
+        // A control character that isn't whitespace, so only the control check refuses it.
+        ("A\u{7}da", "a@example.com"),
     ] {
         assert!(
             matches!(
