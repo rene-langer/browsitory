@@ -49,8 +49,8 @@ commit). Binary files are included.
 
 ## Apply a patch file
 
-**Apply patch…** in the [command palette](command-palette.md) asks for a patch file (a plain diff
-or `git format-patch` mails) and shows what it holds before anything changes: each mail's
+**Apply patch…** in the repository toolbar or the [command palette](command-palette.md) asks for a
+patch file (a plain diff or `git format-patch` mails) and shows what it holds before anything changes: each mail's
 subject, author and date, and the files it changes with the lines added and removed. When the
 patch doesn't apply, the preview says why (for a file with several mails, the first one is checked
 against the working tree; each later one builds on the ones before it, so it is checked as it is
@@ -69,6 +69,10 @@ the changes of the ones before it are put back too (and with **Apply as commits*
 are taken back), so the working tree, the staged changes and the branch are left as they were.
 Each way is one step in [Undo](undo-redo.md) ("Apply patch", "Apply and stage patch" or "Apply
 patch as commits"); undoing the commits moves the branch back.
+
+In the desktop app you can also drop a `.patch`, `.diff` or `.mbox` file from your file manager
+onto the window: it is applied to the working tree at once, without the preview, with the same
+checks; each dropped file is one undo step.
 
 A patch that names a file outside the repository or in `.git` (under any name a file system
 reads as `.git`, such as `git~1`), would write through a symbolic link (one already in the

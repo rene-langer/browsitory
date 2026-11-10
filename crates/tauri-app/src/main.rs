@@ -50,6 +50,8 @@ use commands::{list_repo_aliases, set_repo_alias};
 use commands::{create_root_file, get_root_files};
 // Collapse merges in the commit graph (#617).
 use commands::{get_graph_collapse_merges, get_merged_commits, set_graph_collapse_merges};
+// Read a patch file dropped on the window (#649).
+use commands::read_patch_file;
 
 /// Declares the desktop app's Tauri commands once: `invoke_handler` registers them, and
 /// `COMMAND_NAMES` lists the same names for the transport parity check (#306), which compares it
@@ -116,6 +118,7 @@ commands![
     preview_patch,
     save_patch_file,
     open_patch_file,
+    read_patch_file,
     ignore_path,
     get_diff_settings,
     set_diff_settings,

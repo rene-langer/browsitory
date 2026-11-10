@@ -54,6 +54,7 @@ import { useOutcomeToasts } from "./state/useOutcomeToasts";
 import { useSequenceActions } from "./state/useSequenceActions";
 import { useUndoRedoActions } from "./state/useUndoRedoActions";
 import { useWorkspaceShortcuts } from "./state/useWorkspaceShortcuts";
+import { onWorkspaceRequest } from "./lib/workspaceRequests";
 import { WorkspaceActionsContext, type WorkspaceActions } from "./state/useWorkspaceActions";
 import { WorkspaceDialogs, type CommitDialogRequest } from "./WorkspaceDialogs";
 import { WorkspaceMain } from "./WorkspaceMain";
@@ -625,6 +626,19 @@ export function RepoWorkspace({
     onSelectionChange: setFileSelection,
   };
 
+  // Patch files dropped on the window (#649), applied like "Apply patch…": behind the repository
+  // guard, whose reason a warning names instead.
+  const { applyPatchFiles } = appState;
+  const dropBlockedReason = repositoryOperationDisabled ? (operationDisabledReason ?? "Another action is running.") : null;
+  useEffect(() => {
+    if (!active) return;
+    return onWorkspaceRequest((request) => {
+      if (typeof request !== "object" || request.kind !== "applyPatches") return;
+      if (dropBlockedReason !== null) pushToast(`Can't apply the patch now. ${dropBlockedReason}`, { tone: "warning" });
+      else void applyPatchFiles(request.paths);
+    });
+  }, [active, applyPatchFiles, dropBlockedReason, pushToast]);
+
   // Closing this tab while a transfer/merge/rebase is in progress would orphan it mid-operation
   // — report busy status up so `App`'s `RepoTabs` can disable this tab's close button, the same
   // rule that already disables every other mutating action while this is true.
@@ -795,6 +809,11 @@ export function RepoWorkspace({
           disabledReason: operationDisabledReason,
           onUndo: handleUndo,
           onRedo: handleRedo,
+        }}
+        applyPatch={{
+          // Like the palette's "Apply patch…": behind the repository guard.
+          disabledReason: repositoryOperationDisabled ? (operationDisabledReason ?? "Another action is running.") : null,
+          onApplyPatch: () => void appState.applyPatchFile(),
         }}
         onRefresh={() => void appState.refresh()}
       />

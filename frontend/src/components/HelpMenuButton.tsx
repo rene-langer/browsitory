@@ -23,7 +23,9 @@ export function HelpMenuButton({
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo: HTMLElement | undefined } | null>(null);
   const items: ContextMenuItem[] = [
     { label: "User guide", onSelect: onOpenUserGuide },
-    ...(shortcuts ? [{ label: "Keyboard shortcuts", onSelect: () => requestWorkspace("shortcuts") }] : []),
+    ...(shortcuts
+      ? [{ label: "Keyboard shortcuts", onSelect: () => requestWorkspace("shortcuts"), shortcut: "?", ariaKeyShortcuts: "?" }]
+      : []),
     { label: "What’s new", onSelect: onShowReleaseNotes },
   ];
   return (

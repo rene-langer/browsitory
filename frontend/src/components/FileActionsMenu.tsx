@@ -59,14 +59,18 @@ export function fileMenuItems(
       onSelect: () => onPick({ kind: "stash" }),
       disabled: stashDisabledReason !== null,
       title: stashDisabledReason ?? undefined,
+      group: "file",
     };
     if (entry.staged) {
       items.push(stash);
     } else {
-      items.push({ label: "Discard changes…", destructive: true, onSelect: () => onPick({ kind: "discard" }) }, stash);
+      items.push(
+        { label: "Discard changes…", destructive: true, onSelect: () => onPick({ kind: "discard" }), group: "discard" },
+        stash,
+      );
       if (isUntracked(entry)) {
         for (const { label, pattern } of ignorePatterns(entry.path)) {
-          items.push({ label, onSelect: () => onPick({ kind: "ignore", pattern }) });
+          items.push({ label, onSelect: () => onPick({ kind: "ignore", pattern }), group: "file" });
         }
       }
     }
@@ -89,17 +93,19 @@ export function fileToolItems(
       disabled: deleted,
       title: deleted ? "The file was deleted" : undefined,
       onSelect: () => onPick({ kind: "openInEditor" }),
+      group: "tools",
     },
-    { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }) },
+    { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }), group: "tools" },
   );
   if (entry.kind === "Conflicted") {
     items.push({
       label: "Open in merge tool",
       disabled: tools.mergeToolRunning,
       onSelect: () => onPick({ kind: "mergeTool" }),
+      group: "tools",
     });
   } else {
-    items.push({ label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }) });
+    items.push({ label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }), group: "tools" });
   }
   return items;
 }
@@ -122,6 +128,9 @@ function files(n: number): string {
  * row. `busyReason` (another action is running) disables the repository actions; `stashReason`
  * (`stashBlockReason`) disables stashing as it does "Stash file…".
  */
+/** The file list's `s` key stages or unstages the selection (#645: shown in the menu). */
+const STAGE_KEY = { group: "stage", shortcut: "s", ariaKeyShortcuts: "S" } as const;
+
 export function selectionMenuItems(
   summary: SelectionSummary,
   onPick: (action: FileAction) => void,
@@ -135,15 +144,21 @@ export function selectionMenuItems(
   });
   const items: ContextMenuItem[] = [];
   if (summary.staged) {
-    items.push({ label: `Unstage ${files(n)}`, ...blocked(n === 0), onSelect: () => onPick({ kind: "unstageSelection" }) });
+    items.push({
+      label: `Unstage ${files(n)}`,
+      ...blocked(n === 0),
+      onSelect: () => onPick({ kind: "unstageSelection" }),
+      ...STAGE_KEY,
+    });
   } else {
     items.push(
-      { label: `Stage ${files(n)}`, ...blocked(n === 0), onSelect: () => onPick({ kind: "stageSelection" }) },
+      { label: `Stage ${files(n)}`, ...blocked(n === 0), onSelect: () => onPick({ kind: "stageSelection" }), ...STAGE_KEY },
       {
         label: `Discard ${files(n)}…`,
         destructive: true,
         ...blocked(n === 0),
         onSelect: () => onPick({ kind: "discardSelection" }),
+        group: "discard",
       },
     );
     if (summary.untracked > 0) {
@@ -151,6 +166,7 @@ export function selectionMenuItems(
         label: `Ignore ${summary.untracked} untracked ${summary.untracked === 1 ? "file" : "files"}`,
         ...blocked(false),
         onSelect: () => onPick({ kind: "ignoreSelection" }),
+        group: "file",
       });
     }
   }
@@ -158,6 +174,7 @@ export function selectionMenuItems(
     label: `Stash ${files(n)}…`,
     ...blocked(n === 0, stashReason ?? busyReason),
     onSelect: () => onPick({ kind: "stashSelection" }),
+    group: "file",
   });
   return items;
 }
@@ -177,22 +194,33 @@ export function commitFileMenuItems(
   if (patch !== null) {
     const blocked = { disabled: patch.blockedReason !== null, title: patch.blockedReason ?? undefined };
     items.push(
-      { label: "Revert this file", ...blocked, onSelect: () => onPick({ kind: "revertCommitFile", stage: false }) },
-      { label: "Revert this file and stage", ...blocked, onSelect: () => onPick({ kind: "revertCommitFile", stage: true }) },
+      { label: "Revert this file", ...blocked, onSelect: () => onPick({ kind: "revertCommitFile", stage: false }), group: "patch" },
+      {
+        label: "Revert this file and stage",
+        ...blocked,
+        onSelect: () => onPick({ kind: "revertCommitFile", stage: true }),
+        group: "patch",
+      },
       {
         label: "Apply this file to the working tree",
         ...blocked,
         onSelect: () => onPick({ kind: "applyCommitFile", stage: false }),
+        group: "patch",
       },
-      { label: "Apply this file and stage", ...blocked, onSelect: () => onPick({ kind: "applyCommitFile", stage: true }) },
-      { label: "Save file as patch…", onSelect: () => onPick({ kind: "saveFilePatch" }) },
+      {
+        label: "Apply this file and stage",
+        ...blocked,
+        onSelect: () => onPick({ kind: "applyCommitFile", stage: true }),
+        group: "patch",
+      },
+      { label: "Save file as patch…", onSelect: () => onPick({ kind: "saveFilePatch" }), group: "patch" },
     );
   }
   if (tools) {
     items.push(
-      { label: "Open in editor", onSelect: () => onPick({ kind: "openInEditor" }) },
-      { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }) },
-      { label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }) },
+      { label: "Open in editor", onSelect: () => onPick({ kind: "openInEditor" }), group: "tools" },
+      { label: "Reveal in file manager", onSelect: () => onPick({ kind: "reveal" }), group: "tools" },
+      { label: "Open in diff tool", onSelect: () => onPick({ kind: "diffTool" }), group: "tools" },
     );
   }
   return items;

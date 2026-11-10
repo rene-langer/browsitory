@@ -662,11 +662,11 @@ describe("CommitGraph", () => {
     fireEvent.contextMenu(row("B"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Cherry-pick 3 commits" }));
     expect(onCherryPickMany).toHaveBeenCalledTimes(2);
-    // After the rebase items, which keep their order.
+    // After the rebase items, which keep their order; the destructive Drop goes last (#645).
     const labels = within(toolbar)
       .getAllByRole("button")
       .map((button) => button.textContent);
-    expect(labels.slice(-2)).toEqual(["Cherry-pick 3 commits", "Revert 3 commits"]);
+    expect(labels.slice(-3)).toEqual(["Cherry-pick 3 commits", "Revert 3 commits", "Drop 3 commits"]);
   });
 
   it("keeps multi-commit pick and revert next to Compare these commits", () => {
@@ -1732,6 +1732,26 @@ describe("CommitGraph — copy items (#614)", () => {
       fireEvent.click(item);
       expect(writeText).toHaveBeenLastCalledWith(text);
     }
+  });
+
+  it("groups the commit menu with separators: refs, apply, HEAD, edits, Drop, exports, copying (#645)", () => {
+    renderBusyGraph();
+    fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
+    const groups: string[][] = [[]];
+    for (const child of screen.getByRole("menu").children) {
+      if (child.getAttribute("role") === "separator") groups.push([]);
+      else groups[groups.length - 1].push(child.textContent ?? "");
+    }
+    expect(groups[0][0]).toBe("Branch from here");
+    expect(groups.find((group) => group.includes("Rebase onto here"))).not.toContain("Branch from here");
+    expect(groups[groups.length - 1]).toEqual([
+      "Copy SHA",
+      "Copy short SHA",
+      "Copy subject",
+      "Copy author",
+      "Copy date",
+    ]);
+    expect(groups.every((group) => group.length > 0)).toBe(true);
   });
 
   it("offers Copy tag name in the tag badge menu, before the delete item", () => {

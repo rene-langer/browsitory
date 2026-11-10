@@ -241,43 +241,65 @@ export function CommitGraph({
   function singleCommitItems(commitId: string): ContextMenuItem[] {
     const commit = commits.find((candidate) => candidate.id === commitId);
     const isHead = headInfo.headId === commitId;
-    const items: ContextMenuItem[] = [{ label: "Branch from here", onSelect: () => onBranchFromCommit(commitId) }];
+    // Grouped (#645): new refs, applying the commit elsewhere, moving HEAD, history edits,
+    // read-only exports, then copying.
+    const items: ContextMenuItem[] = [
+      { label: "Branch from here", onSelect: () => onBranchFromCommit(commitId), group: "refs" },
+    ];
     if (commit !== undefined) {
       // Availability, reasons and labels shared with the command palette (#495).
       const actions = commitActions(
         { blockers: { blocked: operationsBlocked, reason: operationsBlockedReason }, headId: headInfo.headId, currentBranch },
         commit,
       );
-      const menuItem = (action: { label: string; enabled: boolean; reason: string | undefined }, run: () => void) => ({
+      const menuItem = (
+        action: { label: string; enabled: boolean; reason: string | undefined },
+        run: () => void,
+        group: string,
+      ): ContextMenuItem => ({
         label: action.label,
         onSelect: run,
         disabled: !action.enabled,
         title: action.reason,
+        group,
       });
-      if (onCreateTag !== undefined) items.push(menuItem(actions.createTag, () => onCreateTag(commitId)));
+      if (onCreateTag !== undefined) items.push(menuItem(actions.createTag, () => onCreateTag(commitId), "refs"));
       items.push(
-        { label: "Rebase onto here", onSelect: () => onRebaseFromCommit(commitId), disabled: operationsBlocked, title: busyTitle },
+        {
+          label: "Rebase onto here",
+          onSelect: () => onRebaseFromCommit(commitId),
+          disabled: operationsBlocked,
+          title: busyTitle,
+          group: "apply",
+        },
         // A merge commit needs a parent to apply against: the ellipsis opens the parent picker.
-        menuItem(actions.cherryPick, () =>
-          actions.cherryPick.needsParent
-            ? onChooseParent("Cherry-pick", commitId, listElement)
-            : onCherryPick(commitId, null),
+        menuItem(
+          actions.cherryPick,
+          () =>
+            actions.cherryPick.needsParent
+              ? onChooseParent("Cherry-pick", commitId, listElement)
+              : onCherryPick(commitId, null),
+          "apply",
         ),
-        menuItem(actions.revert, () =>
-          actions.revert.needsParent
-            ? onChooseParent("Revert", commitId, listElement)
-            : onRevert(commitId, null),
+        menuItem(
+          actions.revert,
+          () => (actions.revert.needsParent ? onChooseParent("Revert", commitId, listElement) : onRevert(commitId, null)),
+          "apply",
         ),
-        menuItem(actions.checkout, () => onCheckoutCommit(commitId)),
-        menuItem(actions.reset, () => onRequestReset(commitId, listElement)),
+        menuItem(actions.checkout, () => onCheckoutCommit(commitId), "head"),
+        menuItem(actions.reset, () => onRequestReset(commitId, listElement), "head"),
       );
     }
     items.push(...editItems(commitId, isHead));
     if (onCompareWithWorkingTree !== undefined) {
-      items.push({ label: "Diff against working tree", onSelect: () => onCompareWithWorkingTree(commitId) });
+      items.push({
+        label: "Diff against working tree",
+        onSelect: () => onCompareWithWorkingTree(commitId),
+        group: "export",
+      });
     }
     if (onSavePatch !== undefined) {
-      items.push({ label: "Save as patch…", onSelect: () => onSavePatch([commitId]) });
+      items.push({ label: "Save as patch…", onSelect: () => onSavePatch([commitId]), group: "export" });
     }
     items.push(...copyItems(commitId, commit));
     return items;
@@ -286,15 +308,20 @@ export function CommitGraph({
   // "Copy …" (#614): last in the menu and never disabled (copying is not a Git operation). The
   // date is the instant the commit details show, in ISO 8601.
   function copyItems(commitId: string, commit: GraphCommit | undefined): ContextMenuItem[] {
-    const items: ContextMenuItem[] = [{ label: "Copy SHA", onSelect: () => copyToClipboard(commitId, "SHA") }];
+    const copy = (label: string, text: string, what: string): ContextMenuItem => ({
+      label,
+      onSelect: () => copyToClipboard(text, what),
+      group: "copy",
+    });
+    const items: ContextMenuItem[] = [copy("Copy SHA", commitId, "SHA")];
     if (commit === undefined) return items;
     const author = `${commit.authorName} <${commit.authorEmail}>`;
     const date = new Date(commit.timestamp * 1000).toISOString();
     items.push(
-      { label: "Copy short SHA", onSelect: () => copyToClipboard(commit.shortId, "short SHA") },
-      { label: "Copy subject", onSelect: () => copyToClipboard(commit.summary, "subject") },
-      { label: "Copy author", onSelect: () => copyToClipboard(author, "author") },
-      { label: "Copy date", onSelect: () => copyToClipboard(date, "date") },
+      copy("Copy short SHA", commit.shortId, "short SHA"),
+      copy("Copy subject", commit.summary, "subject"),
+      copy("Copy author", author, "author"),
+      copy("Copy date", date, "date"),
     );
     return items;
   }
@@ -307,6 +334,7 @@ export function CommitGraph({
       onSelect: onEditHeadMessage,
       disabled: operationsBlocked,
       title: busyTitle,
+      group: "edit",
     };
     if (onEditHistory === undefined) return isHead ? [headReword] : [];
     const checks = historyEditChecks({ commits, headInfo, currentBranch, status }, commitId);
@@ -317,6 +345,7 @@ export function CommitGraph({
       },
       disabled: operationsBlocked || !check.ok,
       title: check.ok ? busyTitle : check.reason,
+      group: "edit",
     });
     const edit = (request: HistoryEditRequest) => (onto: string) => onEditHistory(commitId, onto, request);
     return [
@@ -325,7 +354,7 @@ export function CommitGraph({
       item("Fixup into parent", checks.Fixup, edit({ kind: "Fixup" })),
       item("Move up", checks.MoveUp, edit({ kind: "MoveUp" })),
       item("Move down", checks.MoveDown, edit({ kind: "MoveDown" })),
-      { ...item("Drop", checks.Drop, edit({ kind: "Drop" })), destructive: true },
+      { ...item("Drop", checks.Drop, edit({ kind: "Drop" })), destructive: true, group: "drop" },
     ];
   }
 
@@ -583,12 +612,13 @@ export function CommitGraph({
         onSelect: () => {},
         disabled: true,
         title: rebasePlan.reason,
+        group: "rebase",
       });
       return [
         blocked("Interactive rebase…"),
         blocked(`Squash ${count} commits`),
         blocked(`Fixup ${count} commits`),
-        blocked(`Drop ${count} commits`),
+        { ...blocked(`Drop ${count} commits`), group: "drop" },
       ];
     }
     const { selection: plan } = rebasePlan;
@@ -600,24 +630,28 @@ export function CommitGraph({
         label: "Interactive rebase…",
         onSelect: () => onRebaseSelection?.(plan.onto, presetPickAll(plan)),
         disabled: operationsBlocked,
+        group: "rebase",
       },
       {
         label: `Squash ${count} commits`,
         onSelect: act("Squash"),
         disabled: operationsBlocked || !plan.contiguous,
         title: plan.contiguous ? undefined : needsRun,
+        group: "rebase",
       },
       {
         label: `Fixup ${count} commits`,
         onSelect: act("Fixup"),
         disabled: operationsBlocked || !plan.contiguous,
         title: plan.contiguous ? undefined : needsRun,
+        group: "rebase",
       },
       {
         label: `Drop ${count} commits`,
         onSelect: act("Drop"),
         disabled: operationsBlocked,
         destructive: true,
+        group: "drop",
       },
     ];
   })();
@@ -630,7 +664,7 @@ export function CommitGraph({
     const firstIndex = commits.findIndex((c) => c.id === first);
     const secondIndex = commits.findIndex((c) => c.id === second);
     const [fromId, toId] = firstIndex > secondIndex ? [first, second] : [second, first];
-    return { label: "Compare these commits", onSelect: () => onCompareCommits(fromId, toId) };
+    return { label: "Compare these commits", onSelect: () => onCompareCommits(fromId, toId), group: "export" };
   })();
   // Several commits as one cherry-pick/revert sequence. Unlike the rebase items they don't need
   // a rebasable plan (root commits are fine), only no merge commit: one mainline can't sensibly
@@ -649,6 +683,7 @@ export function CommitGraph({
         onSelect: () => onCherryPickMany(idsOldestFirst),
         disabled: operationsBlocked || hasMerge,
         title: hasMerge ? "Cherry-pick merge commits one at a time." : undefined,
+        group: "apply",
       });
     }
     if (onRevertMany !== undefined) {
@@ -657,6 +692,7 @@ export function CommitGraph({
         onSelect: () => onRevertMany(idsOldestFirst),
         disabled: operationsBlocked || hasMerge,
         title: hasMerge ? "Revert merge commits one at a time." : undefined,
+        group: "apply",
       });
     }
     return items;
@@ -667,6 +703,7 @@ export function CommitGraph({
       ? null
       : {
           label: `Save ${effectiveSelection.ids.size} commits as patch…`,
+          group: "export",
           onSelect: () =>
             onSavePatch(
               commits
@@ -675,11 +712,13 @@ export function CommitGraph({
                 .map((commit) => commit.id),
             ),
         };
+  // Grouped like the single-commit menu (#645): the destructive Drop goes last.
   const multiSelectItems: ContextMenuItem[] = [
-    ...rebaseItems,
-    ...(compareItem === null ? [] : [compareItem]),
+    ...rebaseItems.filter((item) => item.group !== "drop"),
     ...pickItems,
+    ...(compareItem === null ? [] : [compareItem]),
     ...(savePatchItem === null ? [] : [savePatchItem]),
+    ...rebaseItems.filter((item) => item.group === "drop"),
   ];
 
   // `null` means "show every remote badge" — skip building the membership set entirely in that

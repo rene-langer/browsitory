@@ -2,7 +2,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { error as logError } from "@tauri-apps/plugin-log";
 import { toCloneError, toRepoError } from "./RepoClient";
-import type { CloneOutcome, CloneRequest, HookProgress, OpenRepoEntry, RepoClient, TransferProgress } from "./RepoClient";
+import type {
+  CloneOutcome,
+  CloneRequest,
+  FileDropEvent,
+  HookProgress,
+  OpenRepoEntry,
+  PatchContent,
+  RepoClient,
+  TransferProgress,
+} from "./RepoClient";
 import { createRepoClient } from "./createRepoClient";
 
 let transferListenersReady: Promise<void> = Promise.resolve();
@@ -141,5 +150,33 @@ export const tauriRepoClient: RepoClient = {
       stop?.();
     };
   },
+  // The webview's native drag and drop events (#649): Tauri hands over the dropped paths, which
+  // the page's own drop events never see. Imported when first used, so loading this module needs
+  // no window.
+  subscribeFileDrops: (listener: (event: FileDropEvent) => void) => {
+    let disposed = false;
+    let stop: (() => void) | null = null;
+    import("@tauri-apps/api/webview")
+      .then(({ getCurrentWebview }) =>
+        getCurrentWebview().onDragDropEvent(({ payload }) => {
+          if (payload.type === "drop") listener({ kind: "drop", paths: payload.paths });
+          else if (payload.type === "leave") listener({ kind: "leave" });
+          else listener({ kind: "over" });
+        }),
+      )
+      .then(
+        (unlisten) => {
+          if (disposed) unlisten();
+          else stop = unlisten;
+        },
+        (error: unknown) => void logFrontendError("Listening for file drops failed", error),
+      );
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      stop?.();
+    };
+  },
+  readPatchFile: (path: string) => call<PatchContent>("read_patch_file", { path }),
   logFrontendError: (context: string, error: unknown) => logFrontendError(context, error),
 };

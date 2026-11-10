@@ -18,6 +18,16 @@ export interface PatchActions {
   applyPatchFile(): Promise<void>;
   /** Applies the previewed patch `how` the preview's buttons say, closing the preview. */
   applyPatch(content: PatchContent, preview: PatchPreview, how: PatchApply): Promise<void>;
+  /**
+   * Applies the patch files at `paths` (dropped on the window, #649) in order, each its own undo
+   * step; the first that can't be read or doesn't apply stops the rest.
+   */
+  applyPatchFiles(paths: string[]): Promise<void>;
+}
+
+/** The file name at the end of `path`, for messages. */
+function fileName(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
 }
 
 const short = (id: string) => id.slice(0, 7);
@@ -115,5 +125,25 @@ export function usePatchActions(
     [client, repoPath, runMutationWithOutcome, setState],
   );
 
-  return { applyCommitChange, savePatch, applyPatchFile, applyPatch };
+  const applyPatchFiles = useCallback(
+    async (paths: string[]) => {
+      setState((prev) => ({ ...prev, patchOutcome: null, error: null }));
+      for (const path of paths) {
+        let content;
+        try {
+          content = await client.readPatchFile(path);
+        } catch (err) {
+          setState((prev) => ({ ...prev, ...failureError(err) }));
+          return;
+        }
+        const ok = await runMutationWithOutcome(() => client.applyPatch(repoPath, content, "WorkTree"));
+        if (!ok) return;
+        const message = `Applied ${fileName(path)} to the working tree`;
+        setState((prev) => ({ ...prev, patchOutcome: { message, undoable: true } }));
+      }
+    },
+    [client, repoPath, runMutationWithOutcome, setState],
+  );
+
+  return { applyCommitChange, savePatch, applyPatchFile, applyPatch, applyPatchFiles };
 }

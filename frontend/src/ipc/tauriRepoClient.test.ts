@@ -17,6 +17,20 @@ vi.mock("@tauri-apps/plugin-log", () => ({
   error: vi.fn(async () => {}),
 }));
 
+// The webview's drag and drop events (#649): the handler `onDragDropEvent` was given.
+const dragDrop = vi.hoisted(() => ({
+  handler: null as null | ((event: { payload: unknown }) => void),
+  unlisten: vi.fn(),
+}));
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: async (handler: (event: { payload: unknown }) => void) => {
+      dragDrop.handler = handler;
+      return dragDrop.unlisten;
+    },
+  }),
+}));
+
 const TEST_REPO_PATH = "/repo";
 
 describe("tauriRepoClient remote URL validation", () => {
@@ -809,5 +823,31 @@ describe("tauriRepoClient external tools", () => {
     expect(invoke).toHaveBeenLastCalledWith("set_external_tool_settings", { settings: { editor: "code", terminal: null } });
     await tauriRepoClient.getGitTools("/repo");
     expect(invoke).toHaveBeenLastCalledWith("get_git_tools", { repoPath: "/repo" });
+  });
+});
+
+describe("tauriRepoClient file drops (#649)", () => {
+  it("passes the webview's drag and drop events on, and stops listening when unsubscribed", async () => {
+    const received = vi.fn();
+    const unsubscribe = tauriRepoClient.subscribeFileDrops(received);
+    await vi.waitFor(() => expect(dragDrop.handler).not.toBeNull());
+    dragDrop.handler!({ payload: { type: "enter", paths: ["/x"], position: { x: 0, y: 0 } } });
+    dragDrop.handler!({ payload: { type: "over", position: { x: 1, y: 1 } } });
+    dragDrop.handler!({ payload: { type: "leave" } });
+    dragDrop.handler!({ payload: { type: "drop", paths: ["/repos/a", "/tmp/fix.patch"], position: { x: 1, y: 1 } } });
+    expect(received.mock.calls.map(([event]) => event)).toEqual([
+      { kind: "over" },
+      { kind: "over" },
+      { kind: "leave" },
+      { kind: "drop", paths: ["/repos/a", "/tmp/fix.patch"] },
+    ]);
+    unsubscribe();
+    expect(dragDrop.unlisten).toHaveBeenCalledOnce();
+  });
+
+  it("reads a dropped patch file through read_patch_file", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({ base64: "aGk=" });
+    await expect(tauriRepoClient.readPatchFile("/tmp/fix.patch")).resolves.toEqual({ base64: "aGk=" });
+    expect(invoke).toHaveBeenLastCalledWith("read_patch_file", { path: "/tmp/fix.patch" });
   });
 });

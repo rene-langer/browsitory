@@ -41,7 +41,7 @@ export function tagMenuItems({
   const items: ContextMenuItem[] = [];
   if (onPushTag !== undefined) {
     if (remotes.length === 0) {
-      items.push({ label: "Push tag", onSelect: () => {}, disabled: true, title: noRemote });
+      items.push({ label: "Push tag", onSelect: () => {}, disabled: true, title: noRemote, group: "push" });
     } else {
       for (const remote of remotes) {
         items.push({
@@ -49,18 +49,25 @@ export function tagMenuItems({
           onSelect: () => onPushTag(remote.name, tag),
           disabled,
           title: busyTitle,
+          group: "push",
         });
       }
     }
   }
   if (commitId !== null && onBranchFromCommit !== undefined) {
-    items.push({ label: "Branch from tag", onSelect: () => onBranchFromCommit(commitId) });
+    items.push({ label: "Branch from tag", onSelect: () => onBranchFromCommit(commitId), group: "commit" });
   }
   if (commitId !== null && onCheckoutCommit !== undefined) {
-    items.push({ label: "Checkout (detached)", onSelect: () => onCheckoutCommit(commitId), disabled, title: busyTitle });
+    items.push({
+      label: "Checkout (detached)",
+      onSelect: () => onCheckoutCommit(commitId),
+      disabled,
+      title: busyTitle,
+      group: "commit",
+    });
   }
   if (onCopy !== undefined) {
-    items.push({ label: "Copy tag name", onSelect: () => onCopy(tag, "tag name") });
+    items.push({ label: "Copy tag name", onSelect: () => onCopy(tag, "tag name"), group: "copy" });
   }
   if (onDeleteFromRemote !== undefined) {
     items.push({
@@ -69,10 +76,18 @@ export function tagMenuItems({
       onSelect: () => onDeleteFromRemote(tag),
       disabled: disabled || remotes.length === 0,
       title: remotes.length === 0 ? noRemote : busyTitle,
+      group: "delete",
     });
   }
   if (onDelete !== undefined) {
-    items.push({ label: "Delete tag…", destructive: true, onSelect: () => onDelete(tag), disabled, title: busyTitle });
+    items.push({
+      label: "Delete tag…",
+      destructive: true,
+      onSelect: () => onDelete(tag),
+      disabled,
+      title: busyTitle,
+      group: "delete",
+    });
   }
   return items;
 }

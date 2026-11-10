@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { RepoError, type RepoClient } from "./ipc/RepoClient";
+import { RepoError, type FileDropEvent, type RepoClient } from "./ipc/RepoClient";
 import { fakeRepoClient } from "./test/fakeRepoClient";
 
 // Whole-App renders, like App.test.tsx (#217's slow-machine budget).
@@ -154,6 +154,59 @@ describe("the repository toolbar (#637)", () => {
     await waitFor(() => expect(getStatus.mock.calls.length).toBeGreaterThan(calls));
     fireEvent.click(stash);
     await waitFor(() => expect(saveStash).toHaveBeenCalled());
+  });
+});
+
+describe("Apply patch… in the toolbar (#649)", () => {
+  it("asks for a patch file and applies it to the working tree", async () => {
+    const content = { base64: "ZGlmZg==" };
+    const openPatchFile = vi.fn(async () => content);
+    const applyPatch = vi.fn(async () => {});
+    await renderApp(layoutClient({ openPatchFile, applyPatch }));
+    const button = within(toolbar()).getByRole("button", { name: "Apply patch…" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() => expect(applyPatch).toHaveBeenCalledWith("/repos/a", content, "WorkTree"));
+    expect(openPatchFile).toHaveBeenCalledOnce();
+  });
+});
+
+describe("dropping files on the window (#649)", () => {
+  function dropClient(overrides: Partial<RepoClient> = {}) {
+    let emit: (event: FileDropEvent) => void = () => {};
+    const client = layoutClient({
+      subscribeFileDrops: (listener) => {
+        emit = listener;
+        return () => {};
+      },
+      ...overrides,
+    });
+    return { client, emit: (event: FileDropEvent) => act(() => emit(event)) };
+  }
+
+  it("shows a hint while files hover and hides it when they leave", async () => {
+    const { client, emit } = dropClient();
+    await renderApp(client);
+    emit({ kind: "over" });
+    expect(screen.getByText(/Drop a folder to open it/)).toBeInTheDocument();
+    emit({ kind: "leave" });
+    expect(screen.queryByText(/Drop a folder to open it/)).toBeNull();
+  });
+
+  it("opens a dropped folder as a tab and applies a dropped patch to the active repository", async () => {
+    const openRepo = vi.fn(async () => {});
+    const content = { base64: "ZGlmZg==" };
+    const readPatchFile = vi.fn(async () => content);
+    const applyPatch = vi.fn(async () => {});
+    const { client, emit } = dropClient({ openRepo, readPatchFile, applyPatch });
+    await renderApp(client);
+    emit({ kind: "over" });
+    emit({ kind: "drop", paths: ["/home/me/fix.patch", "/repos/b"] });
+    expect(screen.queryByText(/Drop a folder to open it/)).toBeNull();
+    await waitFor(() => expect(applyPatch).toHaveBeenCalledWith("/repos/a", content, "WorkTree"));
+    expect(readPatchFile).toHaveBeenCalledWith("/home/me/fix.patch");
+    await waitFor(() => expect(openRepo).toHaveBeenCalledWith("/repos/b"));
+    expect(openRepo).not.toHaveBeenCalledWith("/home/me/fix.patch");
   });
 });
 

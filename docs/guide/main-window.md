@@ -26,12 +26,26 @@ window has three columns:
   fast-forward only** (see [Pulling](branches-and-remotes.md#pulling));
 - what is running: a fetch, pull or push by name ("Pushing main to origin/main") with a progress
   bar and **Cancel**, or, when another action takes more than a moment, "Working…";
-- **Stash** (see [Stashes](stashes.md)), **Undo** and **Redo** (see [Undo and redo](undo-redo.md)), and
-  **Refresh**, which reloads the repository's state;
+- **Stash** (see [Stashes](stashes.md)), **Apply patch…** (see [Patches](patches.md#apply-a-patch-file)),
+  **Undo** and **Redo** (see [Undo and redo](undo-redo.md)), and **Refresh**, which reloads the
+  repository's state;
 - when the repository was last fetched.
 
 While a repository opens, or after you switch tabs, the graph and the Branches section show grey
 placeholder rows until the repository has been read.
+
+**Menus.** A menu (right-click, the **⋯** button, or the Menu key or Shift+F10) is split into
+groups by thin lines: in a commit's menu, for example, new branches and tags, applying the commit
+elsewhere, moving HEAD, history edits, **Drop**, exports and copying. Destructive items are red
+and in a group of their own. Where a key does the same outside the menu, it is shown at the
+right of the item, such as `s` for **Stage 3 files** in the file list or **F2** for **Rename
+tab…**.
+
+**Dropping files** (desktop app). Drag a folder from your file manager onto the window to open it
+as a repository in a new tab, or a `.patch`, `.diff` or `.mbox` file to apply it to the current
+repository's working tree, as **Apply patch…** does. While you drag, the window says what a drop
+will do. Several items can be dropped at once; patches are applied in order and stop at the
+first one that doesn't apply.
 
 Drag the dividers between the columns to resize them. Double-click a divider to collapse the
 sidebar, and again to bring it back at its width. With a divider focused, the arrow keys resize

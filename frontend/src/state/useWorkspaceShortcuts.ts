@@ -47,7 +47,7 @@ export function useWorkspaceShortcuts({
     if (!active) return;
     return onWorkspaceRequest((request) => {
       if (request === "palette") setPaletteOpen(true);
-      else setShortcutsOpen(true);
+      else if (request === "shortcuts") setShortcutsOpen(true);
     });
   }, [active]);
 
