@@ -38,6 +38,55 @@ describe("CommandPalette", () => {
     expect(screen.getByText("Fetch origin")).toBeInTheDocument();
   });
 
+  it("lists unavailable commands only for a typed query, after the others, with their reason (#644)", () => {
+    const push = vi.fn();
+    const onRun = vi.fn();
+    const commands: Command[] = [
+      ...makeCommands(),
+      { id: "push", label: "Push to origin", keywords: [], run: push, group: "Remotes", disabledReason: "A merge is in progress." },
+      { id: "pull", label: "Pull from origin", keywords: [], run: vi.fn(), group: "Remotes" },
+    ];
+    render(<CommandPalette commands={commands} onRun={onRun} />);
+    expect(screen.queryByText("Push to origin")).not.toBeInTheDocument();
+
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "origin" } });
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "Fetch origin",
+      "Pull from origin",
+      "Push to originA merge is in progress.",
+    ]);
+    const unavailable = screen.getByRole("option", { name: "Push to origin" });
+    expect(unavailable).toHaveAttribute("aria-disabled", "true");
+    expect(unavailable).toHaveAccessibleDescription("A merge is in progress.");
+    expect(screen.getByText("Unavailable now")).toBeInTheDocument();
+
+    fireEvent.click(unavailable);
+    fireEvent.keyDown(input, { key: "End", ctrlKey: true });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(push).not.toHaveBeenCalled();
+    expect(onRun).not.toHaveBeenCalled();
+  });
+
+  it("never opens an unavailable picker (#644)", () => {
+    const commands: Command[] = [
+      ...makeCommands(),
+      {
+        id: "switch-branch",
+        label: "Switch branch…",
+        keywords: [],
+        run: vi.fn(),
+        group: "Branches",
+        disabledReason: "A rebase is in progress.",
+        picker: { placeholder: "Branch…", emptyText: "None", items: () => [{ id: "b:dev", label: "dev", keywords: [], run: vi.fn() }] },
+      },
+    ];
+    render(<CommandPalette commands={commands} onRun={vi.fn()} initialPickerId="switch-branch" />);
+    expect(screen.getByRole("combobox", { name: "Command palette" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "dev" })).not.toBeInTheDocument();
+  });
+
   it("renders every command when the query is empty", () => {
     render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
     expect(screen.getByText("Switch to main")).toBeInTheDocument();

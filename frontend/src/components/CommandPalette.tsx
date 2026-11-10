@@ -26,6 +26,8 @@ const RECENT_SHOWN = 5;
 /** PageUp/PageDown's step when the rows have no measured height (jsdom). */
 const FALLBACK_PAGE = 10;
 const RECENT_HEADING = "Recent";
+/** Heads the matches that can't run now, listed after the others for a typed query (#644). */
+const UNAVAILABLE_HEADING = "Unavailable now";
 
 type PaletteItem = Command | PickerItem;
 
@@ -46,7 +48,10 @@ export function CommandPalette({
   const [pickerId, setPickerId] = useState<string | null>(initialPickerId);
   const listboxId = useId();
 
-  const pickerCommand = pickerId === null ? undefined : commands.find((command) => command.id === pickerId);
+  // Never an unavailable command's picker (#644): a blocked "Switch branch…" opens nothing.
+  const findPicker = (id: string | null) =>
+    id === null ? undefined : commands.find((command) => command.id === id && command.disabledReason === undefined);
+  const pickerCommand = findPicker(pickerId);
   const picker = pickerCommand?.picker;
 
   const grouped = picker === undefined && query.trim() === "";
@@ -58,10 +63,23 @@ export function CommandPalette({
     results: readonly PaletteItem[];
     headings: ReadonlyMap<number, string>;
   } => {
-    const items = commands.find((command) => command.id === pickerId)?.picker?.items;
+    const items = commands.find((command) => command.id === pickerId && command.disabledReason === undefined)?.picker
+      ?.items;
     if (items !== undefined) return { results: items(query), headings: new Map() };
-    const ranked = filterAndSortCommands(commands, query);
-    if (query.trim() !== "") return { results: ranked, headings: new Map() };
+    const ranked = filterAndSortCommands(
+      commands.filter((command) => command.disabledReason === undefined),
+      query,
+    );
+    if (query.trim() !== "") {
+      // What can't run now follows the runnable matches, greyed out with its reason (#644).
+      const unavailable = filterAndSortCommands(
+        commands.filter((command) => command.disabledReason !== undefined),
+        query,
+      );
+      const starts = new Map<number, string>();
+      if (unavailable.length > 0) starts.set(ranked.length, UNAVAILABLE_HEADING);
+      return { results: [...ranked, ...unavailable], headings: starts };
+    }
     const byId = new Map(ranked.map((command) => [command.id, command]));
     const recent = loadRecentCommandIds()
       .map((id) => byId.get(id))
@@ -118,6 +136,8 @@ export function CommandPalette({
   }
 
   function runCommand(command: PaletteItem) {
+    // An unavailable command stays listed with its reason; choosing it does nothing.
+    if ("disabledReason" in command && command.disabledReason !== undefined) return;
     if (picker === undefined) recordCommandUsed(command.id);
     if (picker === undefined && "picker" in command && command.picker !== undefined) {
       setPickerId(command.id);
@@ -183,6 +203,8 @@ export function CommandPalette({
         onMouseMove={handleMouseMove} aria-label={picker === undefined ? "Command results" : "Results"}>
         {results.map((command, index) => {
           const heading = headings.get(index);
+          const disabledReason = "disabledReason" in command ? command.disabledReason : undefined;
+          const optionId = `${listboxId}-option-${index}`;
           return (
             <Fragment key={command.id}>
               {heading !== undefined && (
@@ -191,12 +213,20 @@ export function CommandPalette({
                 </li>
               )}
               <ListRow
-                id={`${listboxId}-option-${index}`}
-                className={styles.option}
+                id={optionId}
+                className={disabledReason === undefined ? styles.option : `${styles.option} ${styles.unavailable}`}
                 selected={index === clampedIndex}
+                disabled={disabledReason !== undefined}
+                describedBy={disabledReason === undefined ? undefined : `${optionId}-reason`}
                 onClick={() => runCommand(command)}
               >
                 <HighlightedLabel label={command.label} ranges={grouped ? [] : (matchItem(command, query)?.ranges ?? [])} />
+                {disabledReason !== undefined && (
+                  // Its description, not part of its name (`aria-hidden` still describes).
+                  <span id={`${optionId}-reason`} className={styles.reason} aria-hidden="true">
+                    {disabledReason}
+                  </span>
+                )}
               </ListRow>
             </Fragment>
           );

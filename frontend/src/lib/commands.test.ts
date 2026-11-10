@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
   type AppCommands,
   buildCommands,
+  buildPaletteCommands,
   commitPickerItems,
   type CommandContext,
   type CommandGroup,
@@ -257,6 +258,40 @@ function tabs(overrides: Partial<TabCommands> = {}): TabCommands {
 function commandsFor(appState: UseAppStateResult, extra: Partial<Omit<CommandContext, "appState">> = {}): Command[] {
   return buildCommands({ appState, sidebar: sidebar(), tabs: tabs(), ...extra });
 }
+
+describe("buildPaletteCommands (#644)", () => {
+  const paletteFor = (appState: UseAppStateResult) => buildPaletteCommands({ appState, sidebar: sidebar(), tabs: tabs() });
+
+  it("lists the runnable commands first, as buildCommands does, then the unavailable ones", () => {
+    const appState = makeAppState();
+    const runnable = commandsFor(appState).map((command) => command.id);
+    const all = paletteFor(appState);
+    expect(all.slice(0, runnable.length).map((command) => command.id)).toEqual(runnable);
+    expect(all.slice(runnable.length).every((command) => command.disabledReason !== undefined)).toBe(true);
+  });
+
+  it("keeps a disabled action with its reason: switching to the current branch", () => {
+    const current = paletteFor(makeAppState()).find((command) => command.id === "switch-branch:main");
+    expect(current?.disabledReason).toEqual(expect.any(String));
+    expect(commandsFor(makeAppState()).some((command) => command.id === "switch-branch:main")).toBe(false);
+  });
+
+  it("lists what an operation in progress leaves out, with the blocker's reason", () => {
+    const all = paletteFor(makeAppState({ pending: true }));
+    const push = all.find((command) => command.label === "Push branch to…");
+    expect(push?.disabledReason).toBe("Another action is in progress.");
+    const fetchAll = all.find((command) => command.label === "Fetch all remotes");
+    expect(fetchAll?.disabledReason).toBe("Another action is in progress.");
+    // Each id once, a runnable one never also as unavailable.
+    const ids = all.map((command) => command.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("lists nothing as unavailable twice when nothing blocks", () => {
+    const ids = paletteFor(makeAppState()).map((command) => command.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
 
 describe("buildCommands", () => {
   it("offers to toggle skip hooks only when commit hooks are installed, even while busy", () => {

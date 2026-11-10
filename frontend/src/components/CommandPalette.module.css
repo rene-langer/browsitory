@@ -72,3 +72,15 @@
 [aria-selected="true"] > .match {
   color: inherit;
 }
+
+/* A command that can't run now (#644): greyed out, its reason after the label. */
+.unavailable {
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.reason {
+  margin-left: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}

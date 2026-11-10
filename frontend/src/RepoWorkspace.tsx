@@ -10,7 +10,7 @@ import { SplitView, type SplitViewLeftState, type SplitViewRequest } from "./com
 import { RepoToolbar } from "./components/RepoToolbar";
 import { RepoActivity } from "./components/RepoActivity";
 import type { GraphCommit, RepoClient, StatusEntry } from "./ipc/RepoClient";
-import { buildCommands, SWITCH_BRANCH_PICKER_ID, type AppCommands, type CommitCommands } from "./lib/commands";
+import { buildPaletteCommands, SWITCH_BRANCH_PICKER_ID, type AppCommands, type CommitCommands } from "./lib/commands";
 import { effectiveFetchPrune } from "./lib/fetchPrune";
 import { readRecentBranches, recordRecentBranch } from "./lib/recentBranches";
 import { useExternalTools } from "./state/useExternalTools";
@@ -415,7 +415,7 @@ export function RepoWorkspace({
 
   // The palette's commands, built only while it is open.
   const paletteCommands = () =>
-    buildCommands({
+    buildPaletteCommands({
       appState: { ...appState, abortRebase, abortSequence: paletteAbortSequence, abortMerge: paletteAbortMerge },
       onShowShortcuts: () => setShortcutsOpen(true),
       app: appCommands,
