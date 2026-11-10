@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { coversEveryBranch, withRenamedBranch, withoutBranch } from "../lib/graphSelection";
-import type { RepoClient } from "../ipc/RepoClient";
+import { errorKind, type RepoClient, type StashSwitchOutcome } from "../ipc/RepoClient";
 import { refNameClash, takenNameMessage } from "../lib/takenNames";
 import type { SavedGraphSelection } from "./graphSelection";
 import type { AppState } from "./useAppState";
@@ -15,8 +15,18 @@ export interface BranchActions {
   // Naming a new branch is the one create-form action here with an obvious single trigger point
   // (the "New branch…" draft form), so its failure surfaces next to that form instead of the
   // shared banner (issue #30/UX-002).
-  createBranch(name: string, startPoint: string): Promise<string | null>;
+  // `checkout` (default true): switch to the new branch too, as one undo step (#656).
+  createBranch(name: string, startPoint: string, checkout?: boolean): Promise<string | null>;
+  // A switch refused by local changes in the way also sets `switchConflict` (#653), so the
+  // Stash and switch dialog opens over the error.
   switchBranch(name: string): Promise<void>;
+  /**
+   * "Stash and switch" (#653): stashes every local change, switches to `name` and, with
+   * `reapply`, pops the changes there. Resolves its outcome (also in `stashSwitchOutcome` for the
+   * toast), or `null` when it failed (the error is in `state.error`).
+   */
+  stashAndSwitch(name: string, reapply: boolean): Promise<StashSwitchOutcome | null>;
+  closeSwitchConflict(): void;
   deleteBranch(name: string, force: boolean): Promise<void>;
   renameBranch(oldName: string, newName: string): Promise<void>;
   openCreateBranchDraft(startPoint: string): void;
@@ -87,7 +97,7 @@ export function useBranchActions(
   );
 
   const createBranch = useCallback(
-    async (name: string, startPoint: string) => {
+    async (name: string, startPoint: string, checkout = true) => {
       const refused = refuseTaken(name, null);
       if (refused !== null) return refused;
       return runOptimisticMutationWithMessage(
@@ -97,7 +107,7 @@ export function useBranchActions(
             ? prev
             : { ...prev, branches: [...prev.branches, { name, isCurrent: false }] },
         async () => {
-          await client.createBranch(repoPath, name, startPoint);
+          await client.createBranch(repoPath, name, startPoint, checkout);
           setState((prev) => ({ ...prev, createBranchDraft: null, selectedRow: "uncommitted" }));
         },
       );
@@ -107,11 +117,41 @@ export function useBranchActions(
   const switchBranch = useCallback(
     (name: string) =>
       runMutation(async () => {
-        await client.switchBranch(repoPath, name);
+        try {
+          await client.switchBranch(repoPath, name);
+        } catch (error) {
+          if (errorKind(error) === "LocalChanges") {
+            // Named in the dialog; an empty list still offers Stash and switch.
+            const files = await client.getSwitchConflicts(repoPath, name).catch(() => []);
+            setState((prev) => ({ ...prev, switchConflict: { branchName: name, files } }));
+          }
+          throw error;
+        }
         setState((prev) => ({ ...prev, selectedRow: "uncommitted", pullOutcome: null }));
       }),
     [client, runMutation, repoPath, setState],
   );
+  const stashAndSwitch = useCallback(
+    async (name: string, reapply: boolean): Promise<StashSwitchOutcome | null> => {
+      let result: StashSwitchOutcome | null = null;
+      setState((prev) => ({ ...prev, switchConflict: null, stashSwitchOutcome: null }));
+      await runMutation(async () => {
+        const outcome = await client.stashAndSwitch(repoPath, name, reapply);
+        result = outcome;
+        setState((prev) => ({
+          ...prev,
+          selectedRow: "uncommitted",
+          pullOutcome: null,
+          stashSwitchOutcome: { branchName: name, outcome },
+        }));
+      });
+      return result;
+    },
+    [client, runMutation, repoPath, setState],
+  );
+  const closeSwitchConflict = useCallback(() => {
+    setState((prev) => ({ ...prev, switchConflict: null }));
+  }, [setState]);
   const deleteBranch = useCallback(
     (name: string, force: boolean) =>
       runOptimisticMutation(
@@ -205,6 +245,8 @@ export function useBranchActions(
   return {
     createBranch,
     switchBranch,
+    stashAndSwitch,
+    closeSwitchConflict,
     deleteBranch,
     renameBranch,
     openCreateBranchDraft,

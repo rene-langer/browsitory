@@ -23,7 +23,9 @@ use std::sync::mpsc;
 use tauri::{AppHandle, State};
 
 use super::{emit_transfer_events, repo_worker, AppState};
-use repo_service::wire::{PullOutcomeDto, RemoteAuthModeDto, RemoteInfoDto, UpstreamInfoDto};
+use repo_service::wire::{
+    PullOutcomeDto, PullStrategyDto, RemoteAuthModeDto, RemoteInfoDto, UpstreamInfoDto,
+};
 
 #[tauri::command]
 pub async fn list_remote_branches(
@@ -358,6 +360,32 @@ pub async fn push_tags(
     Ok(operation_id)
 }
 
+/// The pull strategy for a diverged pull (#652): the one remembered for this repository, else
+/// its git config's, else `null` (ask).
+#[tauri::command]
+pub async fn get_pull_strategy(
+    repo_path: String,
+    state: State<'_, AppState>,
+) -> Result<Option<PullStrategyDto>, ErrorDto> {
+    if let Some(strategy) = config::get_pull_preference(std::path::Path::new(&repo_path))
+        .map_err(ErrorDto::from_error)?
+    {
+        return Ok(Some(strategy.into()));
+    }
+    Ok(repo_worker(&state, &repo_path)?
+        .call(move |w| w.pull_defaults())
+        .await?
+        .map(PullStrategyDto::from))
+}
+/// Remembers the pull strategy for this repository (#652).
+#[tauri::command]
+pub async fn set_pull_strategy(
+    repo_path: String,
+    strategy: PullStrategyDto,
+) -> Result<(), ErrorDto> {
+    config::set_pull_preference(std::path::Path::new(&repo_path), strategy.into())
+        .map_err(ErrorDto::from_error)
+}
 #[tauri::command]
 pub async fn pull_current_upstream(
     repo_path: String,

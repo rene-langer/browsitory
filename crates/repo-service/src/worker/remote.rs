@@ -397,6 +397,13 @@ pub(super) fn pull<S: CredentialStore + Send + Sync + 'static>(
     });
 }
 
+pub(super) fn pull_defaults(
+    repo: &git2::Repository,
+    reply: Sender<Result<Option<git_core::remote::PullStrategy>, ErrorDto>>,
+) {
+    let _ = reply.send(Ok(git_core::remote::pull_defaults(repo)));
+}
+
 /// What a failed pull says: git-core's own text for the refusals and errors whose text is
 /// static or names only a path in the work tree, [`ErrorDto::pull_failed`] for anything else (a
 /// transport error may quote a URL with credentials).
@@ -775,6 +782,10 @@ impl WorkerHandle {
             events,
             reply,
         })
+    }
+    /// The pull strategy the current branch's git config sets, if any (#652).
+    pub fn pull_defaults(&self) -> Result<Option<git_core::remote::PullStrategy>, ErrorDto> {
+        self.request(|reply| Command::GetPullDefaults { reply })
     }
     pub fn pull_current_upstream(
         &self,

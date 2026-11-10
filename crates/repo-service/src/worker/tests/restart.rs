@@ -623,7 +623,9 @@ fn an_operation_aborted_outside_while_closed_drops_the_pending_entry() {
 
     assert_eq!(handle.get_undo_state().unwrap(), no_undo());
     assert!(undo_file(&repo).get("pending").is_none());
-    handle.create_branch("after".into(), "HEAD".into()).unwrap();
+    handle
+        .create_branch("after".into(), "HEAD".into(), true)
+        .unwrap();
     assert_eq!(
         handle.get_undo_state().unwrap().undo,
         Some("Create branch after".into())
@@ -690,7 +692,7 @@ fn undo_refuses_while_a_restored_pending_entry_exists() {
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let handle = worker.handle();
     handle
-        .create_branch("before".into(), "HEAD".into())
+        .create_branch("before".into(), "HEAD".into(), true)
         .unwrap();
     handle
         .start_merge(
@@ -746,7 +748,7 @@ fn branch_and_stash_commands_are_refused_during_a_rebase() {
     // Creating a branch checks it out (`git checkout -b`), which would move HEAD.
     assert_eq!(
         handle
-            .create_branch("new".into(), tip.to_string())
+            .create_branch("new".into(), tip.to_string(), true)
             .unwrap_err(),
         crate::wire::ErrorDto::from(busy)
     );
@@ -905,7 +907,8 @@ fn a_pending_entry_recorded_by_another_worker_is_not_recorded_twice() {
     a.commit("Merge feature".into(), false, Vec::new(), mpsc::channel().0)
         .unwrap();
 
-    b.create_branch("after".into(), "HEAD".into()).unwrap();
+    b.create_branch("after".into(), "HEAD".into(), true)
+        .unwrap();
 
     assert_eq!(
         b.undo().unwrap(),

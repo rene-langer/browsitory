@@ -6,6 +6,7 @@ import type {
   MarkResolvedOutcome,
   MergeOptions,
   MergeOutcome,
+  PullStrategy,
   RebasePlanEntry,
   RebaseStepResult,
   RepoClient,
@@ -34,6 +35,15 @@ export interface MergeRebaseActions {
   mergeBranch(branchName: string, options: MergeOptions): Promise<void>;
   /** "Pull has diverged → Merge": merges the upstream ref, allowing fast-forward, no dialog. */
   mergePull(upstreamRef: string): Promise<void>;
+  /**
+   * "Pull has diverged → Rebase" (#652): a plain rebase of the branch's own commits onto the
+   * upstream ref, every commit picked, without the planner. A conflict pauses it as any rebase.
+   */
+  rebasePull(upstreamRef: string): Promise<void>;
+  /** The remembered pull strategy, else the git config's, else `null` (ask). */
+  getPullStrategy(): Promise<PullStrategy | null>;
+  /** Remembers `strategy` for this repository; a failure is logged, never thrown. */
+  setPullStrategy(strategy: PullStrategy): Promise<void>;
   resolveConflict(path: string, resolvedContent: string): Promise<void>;
   resolveAddDeleteConflict(path: string, choice: FileConflictChoice): Promise<void>;
   /** Takes one side's whole file for a conflicted path (any conflict shape). */
@@ -91,6 +101,36 @@ export function useMergeRebaseActions(
   const mergePull = useCallback(
     (upstreamRef: string) => runMerge(upstreamRef, { fastForward: "Allow", squash: false }),
     [runMerge],
+  );
+  const rebasePull = useCallback(
+    (upstreamRef: string): Promise<void> =>
+      runMutation(async () => {
+        const commits = await client.commitsSince(repoPath, upstreamRef);
+        const plan: RebasePlanEntry[] = commits.map((commit) => ({
+          commitId: commit.id,
+          action: { kind: "Pick" },
+          combinedMessage: null,
+        }));
+        setState((prev) => ({ ...prev, historyEditOutcome: null }));
+        const step = await client.startRebase(repoPath, upstreamRef, plan);
+        // A pause shows in the rebase progress panel instead.
+        if (step.kind === "Done") {
+          const onto = upstreamRef.replace(/^refs\/(remotes|heads)\//, "");
+          setState((prev) => ({ ...prev, historyEditOutcome: { message: `Rebased onto ${onto}` } }));
+        }
+      }),
+    [client, runMutation, repoPath, setState],
+  );
+  const getPullStrategy = useCallback(() => client.getPullStrategy(repoPath), [client, repoPath]);
+  const setPullStrategy = useCallback(
+    async (strategy: PullStrategy): Promise<void> => {
+      try {
+        await client.setPullStrategy(repoPath, strategy);
+      } catch (error) {
+        logFailure("Remembering the pull strategy failed", error);
+      }
+    },
+    [client, repoPath],
   );
   const resolveConflict = useCallback(
     (path: string, resolvedContent: string) =>
@@ -201,6 +241,9 @@ export function useMergeRebaseActions(
     getMergeOptions,
     mergeBranch,
     mergePull,
+    rebasePull,
+    getPullStrategy,
+    setPullStrategy,
     resolveConflict,
     resolveAddDeleteConflict,
     resolveWholeFile,

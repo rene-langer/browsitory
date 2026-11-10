@@ -7,6 +7,7 @@ import type {
   HookSource,
   MergeOutcome,
   PullOutcome,
+  StashSwitchOutcome,
   PullRequestList,
   ReflogEntry,
   RemoteInfo,
@@ -155,6 +156,13 @@ export interface AppState {
   patchOutcome: { message: string; undoable: boolean } | null;
   pendingPull: { upstreamRef: string } | null;
   pullOutcome: PullOutcome | null;
+  // A switch that local changes refused, with the files in the way, for the Stash and switch
+  // dialog (#653).
+  switchConflict: { branchName: string; files: string[] } | null;
+  // The last Stash and switch, for its toast (#653).
+  stashSwitchOutcome: { branchName: string; outcome: StashSwitchOutcome } | null;
+  // A commit or amend refused for lack of a git identity: the identity dialog shows (#689).
+  identityRequired: boolean;
   // The last "Merge into current branch" result, for its toast.
   mergeOutcome: { branchName: string; outcome: MergeOutcome } | null;
   // "Restore staged changes" for stash Apply/Pop; session-only, default on.
@@ -301,6 +309,9 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     patchOutcome: null,
     pendingPull: null,
     pullOutcome: null,
+    switchConflict: null,
+    stashSwitchOutcome: null,
+    identityRequired: false,
     mergeOutcome: null,
     stashRestoreIndex: true,
     stashOutcome: null,

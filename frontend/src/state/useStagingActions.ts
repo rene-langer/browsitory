@@ -1,7 +1,7 @@
 import { useCallback } from "react";
-import type { HunkOptions, RepoClient, StatusEntry, StatusKind, Trailer } from "../ipc/RepoClient";
+import { errorKind, type HunkOptions, type RepoClient, type StatusEntry, type StatusKind, type Trailer } from "../ipc/RepoClient";
 import type { AppState, SelectedRow } from "./useAppState";
-import type { RunMutation, RunMutationWithOutcome, RunOptimisticMutation } from "./useMutationRunner";
+import { failureError, type RunMutation, type RunMutationWithOutcome, type RunOptimisticMutation } from "./useMutationRunner";
 import { hookFailedMessage } from "../lib/hookFailure";
 import { recordVisit, type VisitKind } from "../lib/navigationHistory";
 
@@ -37,6 +37,13 @@ export interface StagingActions {
   // `hookFailure`), so CommitBox only clears the message after a commit that landed. `noVerify`
   // skips the `pre-commit` and `commit-msg` hooks. `onCommitted` gets the new commit's id once
   // it landed, before the refresh (the commit toast names it, #651).
+  /**
+   * Sets the git identity commits are made with (#689): for this repository, or with `global`
+   * for every one. `null` once saved (the identity dialog closes), else the failure message.
+   */
+  setIdentity(name: string, email: string, global: boolean): Promise<string | null>;
+  /** Closes the identity dialog without saving. */
+  dismissIdentity(): void;
   commit(
     message: string,
     noVerify: boolean,
@@ -186,7 +193,11 @@ export function useStagingActions(
   const commit = useCallback(
     async (message: string, noVerify: boolean, trailers: Trailer[] = [], onCommitted?: (commitId: string) => void) => {
       const ok = await runMutationWithOutcome(async () => {
-        const outcome = await client.commit(repoPath, message, noVerify, trailers);
+        const outcome = await client.commit(repoPath, message, noVerify, trailers).catch((error: unknown) => {
+          // No `user.name`/`user.email`: the identity dialog offers to set them (#689).
+          if (errorKind(error) === "MissingIdentity") setState((prev) => ({ ...prev, identityRequired: true }));
+          throw error;
+        });
         if (outcome.kind === "HookFailed") {
           setState((prev) => ({
             ...prev,
@@ -208,7 +219,23 @@ export function useStagingActions(
     [client, runMutationWithOutcome, repoPath, setState],
   );
 
+  const setIdentity = useCallback(
+    async (name: string, email: string, global: boolean): Promise<string | null> => {
+      try {
+        await client.setIdentity(repoPath, name, email, global);
+      } catch (error) {
+        return failureError(error).error;
+      }
+      setState((prev) => ({ ...prev, identityRequired: false }));
+      return null;
+    },
+    [client, repoPath, setState],
+  );
+  const dismissIdentity = useCallback(() => setState((prev) => ({ ...prev, identityRequired: false })), [setState]);
+
   return {
+    setIdentity,
+    dismissIdentity,
     selectRow,
     stageFile,
     unstageFile,

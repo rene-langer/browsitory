@@ -53,6 +53,63 @@ pub enum CommitError {
     /// The revert was already committed but its REVERT_HEAD can't be removed (#232).
     #[error("This revert was already committed, but git's revert state can't be cleared. Check the permissions of the .git folder, then commit again.")]
     LeftoverRevertState,
+    /// `user.name` or `user.email` isn't set in any git config the repository reads (#689);
+    /// checked before any hook runs, nothing was committed.
+    #[error("Set your name and email for git before committing.")]
+    MissingIdentity,
+}
+
+/// Refuses a commit without a git identity, as `git commit` does before it runs any hook
+/// ("Please tell me who you are"), so the app can offer to set it (#689).
+fn require_identity(repo: &git2::Repository) -> Result<(), CommitError> {
+    match repo.signature() {
+        Ok(_) => Ok(()),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => {
+            Err(CommitError::MissingIdentity)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Sets `user.name` and `user.email` in `config` (one level: the repository's own config, or
+/// the user's global one), after checking them as git would: neither blank, and no `<`, `>`,
+/// newline or other control character (#689).
+pub fn set_identity(config: &mut git2::Config, name: &str, email: &str) -> Result<(), CommitError> {
+    let (name, email) = (name.trim(), email.trim());
+    let valid = |value: &str| {
+        !value.is_empty()
+            && !value
+                .chars()
+                .any(|c| c == '<' || c == '>' || c.is_control())
+    };
+    if !valid(name) || !valid(email) || email.chars().any(char::is_whitespace) {
+        return Err(CommitError::InvalidAuthor);
+    }
+    config.set_str("user.name", name)?;
+    config.set_str("user.email", email)?;
+    Ok(())
+}
+
+/// The config level [`set_identity`] writes for `global`: the user's global config
+/// (`~/.gitconfig`, created when missing), else the repository's own `.git/config`.
+pub fn identity_config(repo: &git2::Repository, global: bool) -> Result<git2::Config, CommitError> {
+    if global {
+        let path = match git2::Config::find_global() {
+            Ok(path) => path,
+            // No global config yet: create the one git itself would read first.
+            Err(_) => {
+                let home = std::env::var_os("HOME")
+                    .or_else(|| std::env::var_os("USERPROFILE"))
+                    .ok_or_else(|| {
+                        git2::Error::from_str("no home folder for the global git config")
+                    })?;
+                std::path::PathBuf::from(home).join(".gitconfig")
+            }
+        };
+        Ok(git2::Config::open(&path)?)
+    } else {
+        Ok(repo.config()?.open_level(git2::ConfigLevel::Local)?)
+    }
 }
 
 /// A person as typed or listed in the UI: an amend author override, or a recent author.
@@ -619,6 +676,7 @@ pub fn commit_with(
     set: CommitHookSet,
     mut hooks: HookOptions<'_>,
 ) -> Result<Committed, CommitError> {
+    require_identity(repo)?;
     // `mergehead_foreach` needs `&mut repo`, so it must run — and finish — before anything
     // below takes an immutable borrow that could outlive it. `git2::Tree` (bound below) has a
     // `Drop` impl, which under NLL's drop-check extends its immutable borrow of `repo` to the
@@ -1040,6 +1098,7 @@ pub fn amend_head(
         Some(author) => Some(valid_author(author).ok_or(CommitError::InvalidAuthor)?),
         None => None,
     };
+    require_identity(repo)?;
     crate::repo::check_no_terminal_rebase(repo)?;
     // `git commit --amend` refuses during a merge or cherry-pick. A leftover of one whose commit
     // already landed (HEAD is that commit) is cleared first instead, as the next commit does

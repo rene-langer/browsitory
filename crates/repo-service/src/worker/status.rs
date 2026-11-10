@@ -745,4 +745,27 @@ impl WorkerHandle {
             reply: tx,
         })
     }
+    /// Sets the git identity commits are made with (#689): in the repository's own config, or
+    /// with `global` in the user's global git config.
+    pub fn set_identity(&self, name: String, email: String, global: bool) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::SetIdentity {
+            name,
+            email,
+            global,
+            reply,
+        })
+    }
+}
+
+pub(super) fn set_identity(
+    repo: &git2::Repository,
+    name: String,
+    email: String,
+    global: bool,
+    reply: Sender<Result<(), ErrorDto>>,
+) {
+    let result = git_core::commit::identity_config(repo, global)
+        .and_then(|mut config| git_core::commit::set_identity(&mut config, &name, &email))
+        .map_err(ErrorDto::from_error);
+    let _ = reply.send(result);
 }

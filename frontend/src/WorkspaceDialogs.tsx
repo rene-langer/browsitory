@@ -8,7 +8,7 @@ import { MergeDialog } from "./components/MergeDialog";
 import { ParentPickerDialog } from "./components/ParentPickerDialog";
 import { ConfirmDialog } from "./components/primitives/ConfirmDialog";
 import { Overlay } from "./components/primitives/Overlay";
-import { PullDivergedDialog } from "./components/PullDivergedDialog";
+import { PendingPullPrompt } from "./components/PendingPullPrompt";
 import { PushBranchDialog } from "./components/PushBranchDialog";
 import { RebasePlanner } from "./components/RebasePlanner";
 import { RemoteDialogs } from "./components/RemoteDialogs";
@@ -270,19 +270,20 @@ export function WorkspaceDialogs({
       )}
       {active && appState.state.pendingPull !== null && (
         // Here, not in `BranchTree`, for the same reason as `RemoteDialogs` below (#636).
-        <PullDivergedDialog
+        <PendingPullPrompt
           upstreamRef={appState.state.pendingPull.upstreamRef}
+          branchName={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
           operationDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
+          getPullStrategy={appState.getPullStrategy}
+          setPullStrategy={appState.setPullStrategy}
           onMerge={(upstreamRef) => {
-            if (repositoryOperationDisabled) return;
             appState.clearPendingPull();
             void appState.mergePull(upstreamRef);
           }}
           onRebase={(upstreamRef) => {
-            if (repositoryOperationDisabled) return;
             appState.clearPendingPull();
-            appState.openRebasePlanner(upstreamRef);
+            void appState.rebasePull(upstreamRef);
           }}
           onCancel={appState.clearPendingPull}
         />

@@ -268,8 +268,33 @@ where
             Command::CreateBranch {
                 name,
                 start_point,
+                checkout,
                 reply,
-            } => branch::create(&self.repo, name, start_point, reply),
+            } => branch::create(&self.repo, name, start_point, checkout, reply),
+            Command::GetSwitchConflicts { name, reply } => {
+                branch::switch_conflicts(&self.repo, name, reply)
+            }
+            Command::StashAndSwitch {
+                name,
+                reapply,
+                operation_id,
+                events,
+                reply,
+            } => branch::stash_and_switch(
+                &mut self.repo,
+                name,
+                reapply,
+                remote::TransferOp::new(operation_id),
+                events,
+                reply,
+            ),
+            Command::SetIdentity {
+                name,
+                email,
+                global,
+                reply,
+            } => status::set_identity(&self.repo, name, email, global, reply),
+            Command::GetPullDefaults { reply } => remote::pull_defaults(&self.repo, reply),
             Command::SwitchBranch {
                 name,
                 operation_id,
