@@ -1,4 +1,4 @@
-### One graph selection
+### Internal: one graph selection
 
 - Changed: the commit graph's branch selection is one `GraphSelection` (`{ local, remote }`)
   passed as a single `selection` argument to `getCommitGraph`, `locateCommit` and
