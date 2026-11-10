@@ -10,26 +10,27 @@ commands you used last come first.
 
 The palette has almost every action in Browsitory, grouped like this:
 
-- **Branches:** switch to a branch, merge a branch into the current one, check out a tag.
-- **Remotes:** fetch, push, **Push branch to…**, **Force push current branch…**, push all tags,
-  **Browse branches on ⟨remote⟩**, add, edit or remove a remote, manage its credentials, delete
-  a remote branch, and delete a tag on a remote.
+- **Branches:** switch to a branch, merge a branch into the current one, and create, check out
+  or delete a tag.
+- **Remotes:** fetch one or all remotes, push, **Push branch to…**, **Force push current
+  branch…**, push all tags, **Browse branches on ⟨remote⟩**, add, edit or remove a remote,
+  manage its credentials, delete a remote branch, and delete a tag on a remote.
 - **Stash:** stash all, **Stash…**, stash the current file or the selected files, and show,
   apply, pop or drop a stash.
 - **Diff:** ignore whitespace, more or fewer context lines, syntax highlighting, wrap lines and
-  show whole file in the current diff (see [Diff options](history.md#diff-options)), stage,
-  unstage or discard the selected files, discard the current file or all unstaged changes, open the
-  current file in your editor or diff tool, **Apply patch…** and **Save staged changes as
-  patch…** (see [Patches and partial reverts](patches.md)).
+  show whole file in the current diff (see [Diff options](history.md#diff-options)), file
+  history of the current file, stage, unstage or discard the selected files, discard the current
+  file or all unstaged changes, open the current file in your editor or diff tool, **Apply
+  patch…** and **Save staged changes as patch…** (see [Patches and partial
+  reverts](patches.md)).
 - **Go to:** **Go to commit…**, **Go to branch…**, **Go to tag…** and **Go to stash…** (see
   below), and open a sidebar section and move to it, for example **Go to Tags**.
-- **Repositories:** switch to another tab, close the tab, open a terminal, reveal the
-  repository in the file manager.
-- **General:** **Refresh**, undo and redo, search commits, file history of the current file,
-  the selected commit's actions (cherry-pick, revert, reset, check out, reword, squash, fixup,
-  move, drop), worktree and submodule
-  actions, **Preferences…**, **Show keyboard shortcuts**, **Third-party licences** and **Open
-  user guide**.
+- **Repositories:** switch to another tab, close the tab, open a terminal, reveal the repository
+  in the file manager.
+- **General:** **Refresh**, undo and redo, search commits, the selected commit's actions
+  (cherry-pick, revert, reset, check out, reword, squash, fixup, move, drop), worktree and
+  submodule actions, **Preferences…**, **Show keyboard shortcuts**, **Third-party licences** and
+  **Open user guide**.
 
 Commands that can't run right now are left out. For example, while a rebase is paused, the
 palette offers only the commands that are safe until it is finished.
