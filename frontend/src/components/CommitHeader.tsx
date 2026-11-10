@@ -1,14 +1,55 @@
-import { useEffect, useState } from "react";
-import type { CommitSignature, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import { Fragment, useEffect, useState, type KeyboardEvent } from "react";
+import type { CommitSignature, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
+import { describeError, type DescribedError } from "../lib/errorMessages";
 import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
+import { parseMessageLinks } from "../lib/messageLinks";
 import { shortKey, signatureLabel } from "../lib/signatureStatus";
 import styles from "./CommitHeader.module.css";
+import { InlineError } from "./primitives/InlineError";
+
+/**
+ * A message with its URLs and issue references as links (#612). The links are spans, not
+ * anchors, so the webview never navigates and a copy is plain text; a click or Enter opens one
+ * through `onOpen`.
+ */
+function MessageText({
+  text,
+  issueForge,
+  onOpen,
+}: {
+  text: string;
+  issueForge: ForgeRepository | null;
+  onOpen: (url: string) => void;
+}) {
+  return parseMessageLinks(text, issueForge).map((segment, index) =>
+    segment.kind === "text" ? (
+      <Fragment key={index}>{segment.text}</Fragment>
+    ) : (
+      <span
+        key={index}
+        role="link"
+        tabIndex={0}
+        className={styles.messageLink}
+        title={segment.url}
+        onClick={() => onOpen(segment.url)}
+        onKeyDown={(event: KeyboardEvent) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          onOpen(segment.url);
+        }}
+      >
+        {segment.text}
+      </span>
+    ),
+  );
+}
 
 /**
  * Metadata block at the top of a selected commit's diff pane: subject, body, author, date, full
  * SHA (copyable) and parents. Author/date/parents come from the already-loaded `GraphCommit`;
- * only the full message body and the signature status need a `RepoClient` round trip.
+ * only the full message body and the signature status need a `RepoClient` round trip. URLs and,
+ * with `issueForge`, issue references in the subject and body are links (#612).
  */
 export function CommitHeader({
   repoPath,
@@ -17,6 +58,7 @@ export function CommitHeader({
   commit,
   knownCommitIds,
   onSelectRow,
+  issueForge = null,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -26,11 +68,14 @@ export function CommitHeader({
   // Ids present in the loaded history; a parent outside it cannot be selected.
   knownCommitIds: ReadonlySet<string>;
   onSelectRow: (row: SelectedRow) => void;
+  // The forge repository `#123` refers to (`issueForgeRepository`); `null` leaves it text.
+  issueForge?: ForgeRepository | null;
 }) {
   const [message, setMessage] = useState<string | null>(null);
   // undefined = still checking, null = unsigned or the check failed (row hidden).
   const [signature, setSignature] = useState<CommitSignature | null | undefined>(undefined);
   const [copied, setCopied] = useState(false);
+  const [openError, setOpenError] = useState<DescribedError | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -66,6 +111,16 @@ export function CommitHeader({
   const label =
     signature != null && signature.status !== "unsigned" ? signatureLabel(signature.status) : null;
 
+  const openLink = (url: string) => {
+    setOpenError(null);
+    Promise.resolve()
+      .then(() => client.openExternalUrl(url))
+      .catch((error: unknown) => {
+        const described = describeError(error);
+        setOpenError({ ...described, message: `Couldn't open the link: ${described.message}` });
+      });
+  };
+
   const copySha = () => {
     void navigator.clipboard
       ?.writeText(commitId)
@@ -78,8 +133,17 @@ export function CommitHeader({
 
   return (
     <section className={styles.header} aria-label="Commit details">
-      <h2 className={styles.subject}>{subject}</h2>
-      {body !== "" && <pre className={styles.body}>{body}</pre>}
+      <h2 className={styles.subject}>
+        <MessageText text={subject} issueForge={issueForge} onOpen={openLink} />
+      </h2>
+      {body !== "" && (
+        <pre className={styles.body}>
+          <MessageText text={body} issueForge={issueForge} onOpen={openLink} />
+        </pre>
+      )}
+      {openError !== null && (
+        <InlineError message={openError.message} hint={openError.hint} onDismiss={() => setOpenError(null)} />
+      )}
       <dl className={styles.meta}>
         {commit !== undefined && (
           <>

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CommitSignature, GraphCommit, RepoClient } from "../ipc/RepoClient";
+import type { CommitSignature, ForgeRepository, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import { CommitHeader } from "./CommitHeader";
 import { fakeRepoClient } from "../test/fakeRepoClient";
 
@@ -159,6 +159,79 @@ describe("CommitHeader", () => {
       renderHeader({ client: clientWithMessage("Fix the thing\n", new Error("boom")) });
       await waitFor(() => expect(screen.queryByText("Checking signature…")).not.toBeInTheDocument());
       expect(screen.queryByText("Signature")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("message links (#612)", () => {
+    const forge: ForgeRepository = {
+      provider: "GitHub",
+      host: "github.com",
+      owner: "acme",
+      name: "app",
+      remoteName: "origin",
+    };
+    const MESSAGE = "Fix the thing (#12)\n\nSee https://example.com/docs/a, and other/lib#3.\n  Indented line\n";
+
+    function clientWithLinks(openExternalUrl: RepoClient["openExternalUrl"]): RepoClient {
+      return fakeRepoClient({
+        getCommitMessage: vi.fn(async () => MESSAGE),
+        getCommitSignature: vi.fn(async () => UNSIGNED),
+        openExternalUrl: vi.fn(openExternalUrl),
+      });
+    }
+
+    it("links URLs and issue references and opens them in the browser", async () => {
+      const client = clientWithLinks(async () => {});
+      renderHeader({ client, commit: { ...commit, summary: "Fix the thing (#12)" }, issueForge: forge });
+
+      const url = await screen.findByRole("link", { name: "https://example.com/docs/a" });
+      expect(url).toHaveAttribute("title", "https://example.com/docs/a");
+      fireEvent.click(url);
+      await waitFor(() => expect(client.openExternalUrl).toHaveBeenLastCalledWith("https://example.com/docs/a"));
+
+      const issue = screen.getByRole("link", { name: "#12" });
+      expect(issue).toHaveAttribute("title", "https://github.com/acme/app/issues/12");
+      fireEvent.click(issue);
+      await waitFor(() => expect(client.openExternalUrl).toHaveBeenLastCalledWith("https://github.com/acme/app/issues/12"));
+
+      const other = screen.getByRole("link", { name: "other/lib#3" });
+      other.focus();
+      fireEvent.keyDown(other, { key: "Enter" });
+      await waitFor(() => expect(client.openExternalUrl).toHaveBeenLastCalledWith("https://github.com/other/lib/issues/3"));
+      expect(client.openExternalUrl).toHaveBeenCalledTimes(3);
+    });
+
+    it("keeps the body's text and whitespace as it is", async () => {
+      renderHeader({ client: clientWithLinks(async () => {}), issueForge: forge });
+
+      await screen.findByRole("link", { name: "https://example.com/docs/a" });
+      const body = document.querySelector("pre");
+      expect(body?.textContent).toBe("See https://example.com/docs/a, and other/lib#3.\n  Indented line");
+    });
+
+    it("leaves issue references as text without a forge remote", async () => {
+      renderHeader({ client: clientWithLinks(async () => {}), commit: { ...commit, summary: "Fix the thing (#12)" } });
+
+      expect(await screen.findByRole("link", { name: "https://example.com/docs/a" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "#12" })).toBeNull();
+      expect(screen.queryByRole("link", { name: "other/lib#3" })).toBeNull();
+    });
+
+    it("shows an inline error when the link can't be opened", async () => {
+      renderHeader({
+        client: clientWithLinks(async () => {
+          throw new Error("Only http and https links can be opened: x");
+        }),
+        issueForge: forge,
+      });
+
+      fireEvent.click(await screen.findByRole("link", { name: "https://example.com/docs/a" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Couldn't open the link: Only http and https links can be opened: x",
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss error" }));
+      expect(screen.queryByRole("alert")).toBeNull();
     });
   });
 });
