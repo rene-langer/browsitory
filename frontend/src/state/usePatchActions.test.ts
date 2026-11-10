@@ -45,7 +45,7 @@ describe("usePatchActions", () => {
     const { client, actions, state } = setup();
     await actions.applyCommitChange(change);
     expect(client.applyCommitChange).toHaveBeenCalledWith("/repo", change);
-    expect(state().patchOutcome).toEqual({ message: "Reverted hunk in a.txt from 1234567 in the working tree" });
+    expect(state().patchOutcome).toEqual({ message: "Reverted hunk in a.txt from 1234567 in the working tree", undoable: true });
   });
 
   it("sets no toast when the change doesn't apply (the runner shows the error)", async () => {
@@ -59,7 +59,7 @@ describe("usePatchActions", () => {
     await actions.savePatch({ kind: "Staged" }, "staged.patch");
     expect(client.getPatch).toHaveBeenCalledWith("/repo", { kind: "Staged" });
     expect(client.savePatchFile).toHaveBeenCalledWith("staged.patch", CONTENT);
-    expect(state().patchOutcome).toEqual({ message: "Saved patch to /home/me/x.patch" });
+    expect(state().patchOutcome).toEqual({ message: "Saved patch to /home/me/x.patch", undoable: false });
     // Reading needs no refresh.
     expect(runMutationWithOutcome).not.toHaveBeenCalled();
   });
@@ -78,7 +78,7 @@ describe("usePatchActions", () => {
     const { client, actions, state } = setup();
     await actions.applyPatchFile();
     expect(client.applyPatch).toHaveBeenCalledWith("/repo", CONTENT);
-    expect(state().patchOutcome).toEqual({ message: "Applied the patch to the working tree" });
+    expect(state().patchOutcome).toEqual({ message: "Applied the patch to the working tree", undoable: true });
 
     const cancelled = setup({ openPatchFile: vi.fn(async () => null) });
     await cancelled.actions.applyPatchFile();

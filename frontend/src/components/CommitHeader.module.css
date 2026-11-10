@@ -113,3 +113,36 @@
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 1px;
 }
+
+/* "Contained in" (#641): the graph's badge look. Branches filled, remote branches dashed, tags
+   outlined with a "#" before the name, so the kind never rests on colour alone. */
+.refs {
+  gap: var(--space-1) !important;
+}
+
+.ref {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--color-control);
+  color: var(--color-text);
+}
+
+.ref[data-kind="remote"] {
+  background: none;
+  border: 1px dashed currentColor;
+  color: var(--color-text-muted);
+}
+
+.ref[data-kind="tag"] {
+  background: none;
+  border-color: currentColor;
+  color: var(--color-text-muted);
+}
+
+.ref[data-kind="tag"]::before {
+  content: "#";
+  margin-right: 1px;
+}

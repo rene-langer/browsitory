@@ -18,6 +18,7 @@ import { ShortcutSheet } from "./components/ShortcutSheet";
 import { StashDialog } from "./components/StashDialog";
 import { TransferPanel } from "./components/TransferPanel";
 import type { GraphCommit, RepoClient } from "./ipc/RepoClient";
+import type { PushToast } from "./state/useToasts";
 import type { Command } from "./lib/commands";
 import { retrySuccessLabel } from "./lib/hookFailure";
 import { stashBlockReason, terminalAbortConfirm } from "./lib/operationStatus";
@@ -75,7 +76,7 @@ export function WorkspaceDialogs({
   client: RepoClient;
   appState: UseAppStateResult;
   announce: ReturnType<typeof useAnnounce>;
-  pushToast: (message: string) => void;
+  pushToast: PushToast;
   // The one "repository busy" rule and its reason (`operationBlockers`, #495).
   operationDisabled: boolean;
   operationDisabledReason: string | null;
@@ -141,7 +142,11 @@ export function WorkspaceDialogs({
               runContinueSequence(true);
             }
             // A pick's failure offers no retry (`retryLabel` is null), so this never runs for it.
-            else if (retry.kind !== "pick") void announce(retrySuccessLabel(retry), retryWithCurrentMessage)(retry);
+            else if (retry.kind !== "pick") {
+              // A commit or amend is an undo step; a push is not.
+              const undoable = retry.kind === "commit" || retry.kind === "amend";
+              void announce(retrySuccessLabel(retry), retryWithCurrentMessage, { undoable })(retry);
+            }
           }}
           onClose={appState.closeHookFailure}
         />
@@ -296,7 +301,7 @@ export function WorkspaceDialogs({
           onForgetHttpsCredential={appState.forgetHttpsCredential}
           onSetRemoteAuthMode={appState.setRemoteAuthMode}
           onClose={() => closeDialog("remote")}
-          onRemoteGone={(name) => pushToast(`Remote ${name} was removed or renamed.`)}
+          onRemoteGone={(name) => pushToast(`Remote ${name} was removed or renamed.`, { tone: "warning" })}
         />
       )}
       {active && deleteRemoteBranchDialog !== null && (
@@ -324,7 +329,7 @@ export function WorkspaceDialogs({
           disabledReason={operationDisabledReason}
           onCreate={async (name, message, pushTo) => {
             // With a push to follow, only the push is announced: its toast reports both steps.
-            const create = pushTo === null ? announce("Tag created", appState.createTag) : appState.createTag;
+            const create = pushTo === null ? announce(`Created tag ${name}`, appState.createTag, { undoable: true }) : appState.createTag;
             const failure = await create(name, message, createTagDialog.commitId);
             if (failure !== null) return failure;
             closeDialog("createTag");

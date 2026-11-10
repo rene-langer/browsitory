@@ -98,7 +98,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await commitMessageInput.waitForExist();
     await expect(commitMessageInput).toHaveValue(expect.stringContaining("e2e-merge-feature"));
 
-    const commitButton = await $("button=Commit");
+    const commitButton = await $('button[data-action="commit"]');
     await commitButton.waitForEnabled();
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 
@@ -162,7 +162,7 @@ describe("Browsitory merge with conflict resolution", () => {
     await keepTheirs.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), keepTheirs);
 
-    const commitButton = await $("button=Commit");
+    const commitButton = await $('button[data-action="commit"]');
     await commitButton.waitForEnabled();
     await browser.execute((el) => (el as HTMLElement).click(), commitButton);
 

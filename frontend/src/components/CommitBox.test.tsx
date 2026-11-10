@@ -1010,3 +1010,118 @@ describe("CommitBox showAbort", () => {
     });
   });
 });
+
+describe("CommitBox target and Commit and push (#651)", () => {
+  const amend = {
+    available: true,
+    on: false,
+    headMessage: null,
+    pushed: false,
+    onToggle: vi.fn(),
+    onAmend: vi.fn(async () => true),
+  };
+  function renderTarget(props: Partial<React.ComponentProps<typeof CommitBox>> = {}) {
+    const onCommit = vi.fn(async () => true);
+    const onCommitAndPush = vi.fn(async () => true);
+    const utils = render(
+      <CommitBox
+        onCommit={onCommit}
+        disabled={false}
+        onAbortMerge={() => {}}
+        stagedCount={3}
+        branchName="main"
+        commitAndPush={{ onCommitAndPush, disabledReason: null }}
+        {...props}
+      />,
+    );
+    const type = (text: string) => fireEvent.change(screen.getByLabelText("Commit message"), { target: { value: text } });
+    return { ...utils, onCommit, onCommitAndPush, type };
+  }
+
+  it("names the staged file count and the branch on the button", () => {
+    renderTarget();
+    expect(screen.getByRole("button", { name: "Commit 3 files to main" })).toBeInTheDocument();
+  });
+
+  it("says one file, and leaves out the branch on a detached HEAD", () => {
+    const { rerender } = renderTarget({ stagedCount: 1 });
+    expect(screen.getByRole("button", { name: "Commit 1 file to main" })).toBeInTheDocument();
+    rerender(<CommitBox onCommit={vi.fn(async () => true)} disabled={false} onAbortMerge={() => {}} stagedCount={2} branchName={null} />);
+    expect(screen.getByRole("button", { name: "Commit 2 files" })).toBeInTheDocument();
+  });
+
+  it("names only the branch when nothing is staged (a merge's commit)", () => {
+    renderTarget({ stagedCount: 0 });
+    expect(screen.getByRole("button", { name: "Commit to main" })).toBeInTheDocument();
+  });
+
+  it("marks the commit button for the end-to-end tests", () => {
+    renderTarget();
+    expect(screen.getByRole("button", { name: "Commit 3 files to main" })).toHaveAttribute("data-action", "commit");
+  });
+
+  it("says why Commit is disabled while the message is empty", () => {
+    const { type } = renderTarget();
+    const button = screen.getByRole("button", { name: "Commit 3 files to main" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription("Write a commit message to commit.");
+
+    type("feat: x");
+    expect(button).toBeEnabled();
+    expect(screen.queryByText("Write a commit message to commit.")).toBeNull();
+  });
+
+  it("shows the disabled reason rather than the empty-message hint", () => {
+    renderTarget({ disabled: true, disabledReason: "Stage changes to commit" });
+    expect(screen.getByText("Stage changes to commit")).toBeInTheDocument();
+    expect(screen.queryByText("Write a commit message to commit.")).toBeNull();
+  });
+
+  it("commits and pushes from the button's menu, and clears the message once landed", async () => {
+    const { type, onCommit, onCommitAndPush } = renderTarget();
+    type("feat: x");
+    fireEvent.click(screen.getByRole("button", { name: "More commit options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Commit and push" }));
+
+    expect(onCommitAndPush).toHaveBeenCalledWith("feat: x", []);
+    expect(onCommit).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByLabelText("Commit message")).toHaveValue(""));
+  });
+
+  it("keeps the message when Commit and push doesn't land the commit", async () => {
+    const onCommitAndPush = vi.fn(async () => false);
+    const { type } = renderTarget({ commitAndPush: { onCommitAndPush, disabledReason: null } });
+    type("feat: x");
+    fireEvent.click(screen.getByRole("button", { name: "More commit options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Commit and push" }));
+
+    await waitFor(() => expect(onCommitAndPush).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Commit 3 files to main" })).toBeEnabled());
+    expect(screen.getByLabelText("Commit message")).toHaveValue("feat: x");
+  });
+
+  it("disables Commit and push with its reason", () => {
+    const onCommitAndPush = vi.fn(async () => true);
+    const { type } = renderTarget({ commitAndPush: { onCommitAndPush, disabledReason: "No remote configured." } });
+    type("feat: x");
+    fireEvent.click(screen.getByRole("button", { name: "More commit options" }));
+    const item = screen.getByRole("menuitem", { name: "Commit and push" });
+    expect(item).toBeDisabled();
+    expect(item).toHaveAttribute("title", "No remote configured.");
+  });
+
+  it("turns amend mode on from the menu", () => {
+    const onToggle = vi.fn();
+    const { type } = renderTarget({ amend: { ...amend, onToggle } });
+    type("feat: x");
+    fireEvent.click(screen.getByRole("button", { name: "More commit options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Amend last commit" }));
+    expect(onToggle).toHaveBeenCalledWith(true);
+  });
+
+  it("has no menu while amending: the button amends", () => {
+    renderTarget({ amend: { ...amend, on: true, headMessage: "previous" } });
+    expect(screen.getByRole("button", { name: "Amend" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More commit options" })).toBeNull();
+  });
+});

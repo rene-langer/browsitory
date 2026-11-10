@@ -773,6 +773,54 @@ impl From<git_core::commit_stats::CommitStatsEntry> for CommitStatsEntryDto {
     }
 }
 
+/// An author or committer of a commit (#641): see `git_core::commit_details::Person`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitPerson"))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitPersonDto {
+    pub name: String,
+    pub email: String,
+    pub timestamp: i64,
+}
+
+impl From<git_core::commit_details::Person> for CommitPersonDto {
+    fn from(p: git_core::commit_details::Person) -> Self {
+        CommitPersonDto {
+            name: p.name,
+            email: p.email,
+            timestamp: p.timestamp,
+        }
+    }
+}
+
+/// `getCommitDetails` (#641): see `git_core::commit_details::CommitDetails`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "CommitDetails"))]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDetailsDto {
+    pub author: CommitPersonDto,
+    pub committer: CommitPersonDto,
+    pub branches: Vec<String>,
+    pub remote_branches: Vec<String>,
+    pub tags: Vec<String>,
+    pub complete: bool,
+}
+
+impl From<git_core::commit_details::CommitDetails> for CommitDetailsDto {
+    fn from(d: git_core::commit_details::CommitDetails) -> Self {
+        CommitDetailsDto {
+            author: d.author.into(),
+            committer: d.committer.into(),
+            branches: d.branches,
+            remote_branches: d.remote_branches,
+            tags: d.tags,
+            complete: d.complete,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "HeadInfo"))]
@@ -2837,6 +2885,8 @@ mod ts_bindings {
             FileStatsDto,
             CommitStatsDto,
             CommitStatsEntryDto,
+            CommitPersonDto,
+            CommitDetailsDto,
             HeadInfoDto,
             TerminalRebaseDto,
             ConfirmedAbortDto,

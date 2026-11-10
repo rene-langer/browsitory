@@ -11,8 +11,18 @@ button.
 Below the list, one diff viewer shows the current file: the first one when you open the view, or
 the one you click. Its header names the file and has **Blame** (who last changed each line) and
 **History**. When the current file leaves its group, for example because you staged it, the file
-now in its place becomes current. Type a commit message and click **Commit**. **Stash** in the
-repository toolbar sets the current changes aside; see [Stashes](stashes.md).
+now in its place becomes current.
+
+Type a commit message and click **Commit**. The button says what it commits and where, for
+example **Commit 3 files to main** (without the branch on a detached HEAD). Without a message it
+is disabled, and "Write a commit message to commit." says why. After a commit a notification
+names it, "Committed 4c5beaf to main", with **Push** to push the branch (to its upstream, or
+through the Push dialog when it has none), or **Undo** when the repository has no remote. Undo
+only acts while that commit is still the latest. The arrow next to the button has **Commit and
+push**, which commits and then pushes the same way (it needs a branch and a remote; otherwise its
+tooltip says why), and **Amend last commit**, which turns on amend mode (see [Rewriting
+commits](rewriting-commits.md)). **Stash** in the repository toolbar sets the current changes
+aside; see [Stashes](stashes.md).
 
 When **Changes** holds both changes to tracked files and untracked (new) files, **Stage
 modified** sits next to **Stage all**: it stages the tracked files' changes (edits, deletions,
@@ -29,8 +39,9 @@ The options above the viewer (**Unified view** / **Split view**, **Wrap lines**,
 file**, **Ignore whitespace**, **Show whitespace**, **Syntax highlighting** and the context
 lines) apply to every file and are remembered; see [Diff options](history.md#diff-options).
 
-Each hunk header has **Stage hunk** (or **Unstage hunk**) and **Discard hunk**. Discard asks once
-more: the button turns into **Confirm discard**, and a second click discards the hunk.
+Each hunk header has **Stage hunk** (or **Unstage hunk**) and **Discard hunk**. Discard doesn't
+ask: the hunk goes at once, and the notification that says so has an **Undo** button
+(Ctrl/Cmd+Z works too).
 
 A rename you staged (`git mv`, or staging both the deletion and the new file) is one **Staged**
 row under the new name with "Renamed from …": its diff shows only the edits, an image previews
@@ -93,7 +104,7 @@ In a diff, select lines by clicking one, Shift+clicking to extend, Ctrl/Cmd+clic
 or remove one, or dragging across several. Then use **Stage lines**, **Unstage lines** or
 **Discard lines** in the hunk header. With the keyboard, `↑`/`↓` move a line cursor inside the
 active hunk and select that line, `Shift+↑`/`Shift+↓` extend the selection, and `[` / `]` jump
-to the previous or next hunk (which clears the selection). `s` stages or unstages and `d` `d`
+to the previous or next hunk (which clears the selection). `s` stages or unstages and `d`
 discards the selection, or the whole hunk when nothing is selected.
 
 If the file changed since its diff was shown (for example you edited it in another editor),

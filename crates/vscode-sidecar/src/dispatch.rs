@@ -206,6 +206,7 @@ methods!(|params, repos, stdout| {
     "get_commit_stats" => get_commit_stats(GetCommitStatsParams, repos),
     "get_commit_message" => get_commit_message(GetCommitFilesParams, repos),
     "get_commit_signature" => get_commit_signature(GetCommitFilesParams, repos),
+    "get_commit_details" => get_commit_details(GetCommitFilesParams, repos),
     "stage_file" => stage_file(RepoFilePathParams, repos),
     "unstage_file" => unstage_file(RepoFilePathParams, repos),
     "stage_hunk" => stage_hunk(HunkParams, repos),

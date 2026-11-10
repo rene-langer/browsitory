@@ -482,6 +482,20 @@ describe("vscodeRepoClient", () => {
     await expect(promise).resolves.toEqual(entries);
   });
 
+  it("wires getCommitDetails (#641)", async () => {
+    const promise = vscodeRepoClient.getCommitDetails("/repo", "abc123");
+    expect(postMessage).toHaveBeenCalledWith({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "get_commit_details",
+      params: { repoPath: "/repo", commitId: "abc123" },
+    });
+    const person = { name: "Ada", email: "ada@example.com", timestamp: 1 };
+    const details = { author: person, committer: person, branches: ["main"], remoteBranches: [], tags: [], complete: true };
+    respond(1, details);
+    await expect(promise).resolves.toEqual(details);
+  });
+
   it("wires the compare methods", async () => {
     const opts = { ignoreWhitespace: true, contextLines: 5, algorithm: "Patience" as const };
     const files = vscodeRepoClient.getRangeFiles("/repo", "a", "b");

@@ -13,8 +13,6 @@ import { logFailure } from "../lib/logger";
 import { DiffLineContent } from "./DiffLineContent";
 import styles from "./DiffView.module.css";
 
-const DISCARD_DISARM_MS = 5000;
-
 /**
  * Pairs up a hunk's Remove/Add lines so word-level diffing and the split view can line them up.
  *
@@ -138,7 +136,8 @@ const lineCount = new Intl.NumberFormat("en-US");
  * resolved empty diff (binary file, mode-only change, or no changes).
  *
  * Hunk actions are not tab stops: the diff container is one tab stop and handles `[`/`]`
- * (previous/next hunk), `s` (stage or unstage the active hunk) and `d` (discard; press twice).
+ * (previous/next hunk), `s` (stage or unstage the active hunk) and `d` (discard it: one press, as
+ * Undo brings it back and the toast offers Undo, #662).
  * The per-hunk buttons stay clickable but are removed from the tab order.
  *
  * The view options (Split, Wrap lines, whitespace, context, whole file, highlighting) are the
@@ -198,7 +197,6 @@ export function DiffView({
   focusKey?: number;
 }) {
   const [previousHunks, setPreviousHunks] = useState(hunks);
-  const [confirmingDiscardIndex, setConfirmingDiscardIndex] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   // Split view is the pane's (#640): its one `DiffOptionsToolbar` sets it for every diff.
   const { split } = useDiffViewOptions();
@@ -230,23 +228,14 @@ export function DiffView({
   );
   const claimHandlers = { onPointerDownCapture: claimCurrent, onFocusCapture: claimCurrent };
 
-  // A stale armed confirmation must never carry over to a different hunk list — `hunkIndex` is
-  // only meaningful relative to the `hunks` array it was armed against. Reset-during-render (as
-  // `TagPanel` does) rather than an effect, which would cost a second render per refetch. The
-  // line selection is indexed the same way, so it resets too.
+  // The active hunk and the line selection are indexes into `hunks`, so a new hunk list resets
+  // them. Reset-during-render (as `TagPanel` does) rather than an effect, which would cost a
+  // second render per refetch.
   if (previousHunks !== hunks) {
     setPreviousHunks(hunks);
-    setConfirmingDiscardIndex(null);
     setActiveIndex(0);
     setSelection(EMPTY_SELECTION);
   }
-
-  // The armed state must not linger: it disarms after a short timeout (also on blur / Escape).
-  useEffect(() => {
-    if (confirmingDiscardIndex === null) return;
-    const timer = setTimeout(() => setConfirmingDiscardIndex(null), DISCARD_DISARM_MS);
-    return () => clearTimeout(timer);
-  }, [confirmingDiscardIndex]);
 
   // A drag ends wherever the button is released, even outside the diff.
   useEffect(() => {
@@ -296,11 +285,8 @@ export function DiffView({
   const active = Math.min(activeIndex, hunks.length - 1);
   const selectedCount = selection.selected.size;
 
-  // Any selection change disarms a pending discard, so "Confirm discard" can never switch from
-  // the hunk (or lines) it was armed for to a different target.
   const apply = (action: SelectionAction) => {
     setSelection((prev) => reduceSelection(prev, action, hunks));
-    setConfirmingDiscardIndex(null);
   };
 
   const selectedIn = (hunkIndex: number) =>
@@ -308,7 +294,6 @@ export function DiffView({
 
   const moveTo = (index: number) => {
     setActiveIndex(index);
-    setConfirmingDiscardIndex(null);
     hunkRefs.current[index]?.scrollIntoView?.({ block: "nearest" });
   };
 
@@ -380,14 +365,7 @@ export function DiffView({
       if (onStageHunk !== undefined) onStageHunk(hunk.oldStart, hunk.newStart);
       else if (onUnstageHunk !== undefined) onUnstageHunk(hunk.oldStart, hunk.newStart);
     } else if (event.key === "d" && discard !== undefined) {
-      if (confirmingDiscardIndex === active) {
-        discard();
-        setConfirmingDiscardIndex(null);
-      } else {
-        setConfirmingDiscardIndex(active);
-      }
-    } else if (event.key === "Escape" && confirmingDiscardIndex !== null) {
-      setConfirmingDiscardIndex(null);
+      discard();
     } else {
       handled = false;
     }
@@ -424,7 +402,6 @@ export function DiffView({
         {hunks.map((hunk, hunkIndex) => {
           let oldLine = hunk.oldStart;
           let newLine = hunk.newStart;
-          const armed = confirmingDiscardIndex === hunkIndex;
           const splitRows = split ? buildSplitRows(hunk.lines) : null;
           const indexOf = split ? new Map(hunk.lines.map((l, i) => [l, i])) : null;
           const lines = selectedIn(hunkIndex);
@@ -482,31 +459,8 @@ export function DiffView({
                       </button>
                     )}
                     {discard && (
-                      <button
-                        tabIndex={-1}
-                        className={armed ? styles.armedDiscard : undefined}
-                        title={
-                          armed
-                            ? `Permanently discards ${byLines ? "the selected lines" : "this hunk"}. Cannot be undone.`
-                            : undefined
-                        }
-                        onBlur={() => setConfirmingDiscardIndex(null)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape" && armed) {
-                            event.stopPropagation();
-                            setConfirmingDiscardIndex(null);
-                          }
-                        }}
-                        onClick={() => {
-                          if (armed) {
-                            discard.run();
-                            setConfirmingDiscardIndex(null);
-                          } else {
-                            setConfirmingDiscardIndex(hunkIndex);
-                          }
-                        }}
-                      >
-                        {armed ? "Confirm discard" : discard.label}
+                      <button tabIndex={-1} onClick={discard.run}>
+                        {discard.label}
                       </button>
                     )}
                   </Toolbar>

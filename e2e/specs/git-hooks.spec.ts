@@ -59,7 +59,7 @@ describe("Browsitory git hooks", () => {
       commitMessageInput,
       SUMMARY,
     );
-    const commitButton = await $("button=Commit");
+    const commitButton = await $('button[data-action="commit"]');
     await browser.waitUntil(async () => commitButton.isEnabled(), {
       timeoutMsg: "Commit did not enable after staging",
     });

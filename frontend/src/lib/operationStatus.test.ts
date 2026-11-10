@@ -41,10 +41,10 @@ describe("operationStatus", () => {
       "Cherry-picking 2/5",
     );
     expect(sequenceLabel({ kind: "Revert", currentStep: 1, totalSteps: 3, currentCommit: "c" })).toBe("Reverting 1/3");
-    expect(pickToast("CherryPick", { kind: "Committed", commitId: "c" })).toBe("Cherry-picked");
-    expect(pickToast("Revert", { kind: "Committed", commitId: "c" })).toBe("Reverted");
-    expect(pickToast("CherryPick", { kind: "Conflicted", files: ["a"] })).toBeNull();
-    expect(pickToast("Revert", { kind: "Conflicted", files: ["a"] })).toBeNull();
+    expect(pickToast("CherryPick", { kind: "Committed", commitId: "c" }, "1234567890")).toBe("Cherry-picked 1234567");
+    expect(pickToast("Revert", { kind: "Committed", commitId: "c" }, "1234567890")).toBe("Reverted 1234567");
+    expect(pickToast("CherryPick", { kind: "Conflicted", files: ["a"] }, "1234567890")).toBeNull();
+    expect(pickToast("Revert", { kind: "Conflicted", files: ["a"] }, "1234567890")).toBeNull();
     expect(sequenceToast("CherryPick", { kind: "Completed", applied: 3, skipped: [] })).toBe("Cherry-picked 3 commits");
     expect(sequenceToast("Revert", { kind: "Completed", applied: 1, skipped: [] })).toBe("Reverted 1 commit");
     expect(
