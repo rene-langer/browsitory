@@ -323,6 +323,44 @@ fn a_merge_committed_outside_while_the_other_window_held_the_lock_is_not_recorde
     assert_eq!(handle.get_undo_state().unwrap(), no_undo());
 }
 
+/// A read while a merge is paused is tracked (an entry is pending) but doesn't hold its reply:
+/// the reply arrives before the undo `finish`, so reads never wait for the "after" snapshot.
+#[test]
+fn a_read_during_a_paused_operation_replies_before_the_undo_finish() {
+    let (dir, _repo) = conflicting_branches();
+    let (worker, pause) = Worker::spawn_with_pause_before_finish(dir.path().to_path_buf());
+    let handle = worker.handle();
+    assert!(matches!(
+        handle
+            .start_merge(
+                "feature".into(),
+                git_core::merge::MergeOptions::default(),
+                std::sync::mpsc::channel().0
+            )
+            .unwrap(),
+        git_core::merge::MergeOutcome::Conflicted { .. }
+    ));
+
+    pause.arm();
+    let (replied_tx, replied_rx) = mpsc::channel();
+    let reading = {
+        let handle = handle.clone();
+        std::thread::spawn(move || {
+            let _ = replied_tx.send(handle.get_status());
+        })
+    };
+    pause.wait_reached();
+    let replied = replied_rx.recv_timeout(Duration::from_secs(5));
+    pause.go();
+    reading.join().unwrap();
+    assert!(
+        replied
+            .expect("the read's reply waited for the undo finish")
+            .is_ok(),
+        "the read failed"
+    );
+}
+
 #[test]
 fn a_locked_command_runs_after_the_wait_when_the_lock_stays_held() {
     let (dir, repo) = init_repo();
