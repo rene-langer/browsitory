@@ -108,6 +108,66 @@ mod tests {
             None
         );
     }
+
+    /// The per-ref answers a push gets back (`push_update_reference`), as `record_ref_update`
+    /// turns them into `PushState` and progress.
+    mod ref_updates {
+        use super::super::{
+            record_ref_update, PushState, TransferErrorKind, TransferOperation, TransferPhase,
+            TransferProgress, TransferReporter,
+        };
+        use std::cell::RefCell;
+
+        #[derive(Default)]
+        struct Phases(Vec<TransferPhase>);
+
+        impl TransferReporter for Phases {
+            fn report(&mut self, event: TransferProgress) {
+                self.0.push(event.phase);
+            }
+        }
+
+        /// The rejection and the progress phases after the remote answered `statuses`.
+        fn answer(statuses: &[Option<&str>]) -> (Option<TransferErrorKind>, Vec<TransferPhase>) {
+            let mut phases = Phases::default();
+            let state = PushState::default();
+            {
+                let reporter: RefCell<&mut dyn TransferReporter> = RefCell::new(&mut phases);
+                for status in statuses {
+                    record_ref_update(*status, TransferOperation::PushBranch, &reporter, &state);
+                }
+            }
+            (state.rejection.get(), phases.0)
+        }
+
+        #[test]
+        fn an_applied_update_is_reported_as_progress() {
+            assert_eq!(answer(&[None]), (None, vec![TransferPhase::Updating]));
+        }
+
+        #[test]
+        fn a_rejected_ref_is_recorded_and_not_reported_as_progress() {
+            let rejected = Some(TransferErrorKind::RejectedRemoteRef);
+            assert_eq!(
+                answer(&[Some("pre-receive hook declined")]),
+                (rejected, vec![])
+            );
+        }
+
+        #[test]
+        fn both_spellings_of_non_fast_forward_are_recognized() {
+            let nff = Some(TransferErrorKind::NonFastForward);
+            assert_eq!(answer(&[Some("Non-Fast-Forward")]).0, nff);
+            assert_eq!(answer(&[Some("rejected: nonfastforward")]).0, nff);
+        }
+
+        #[test]
+        fn a_non_fast_forward_wins_over_other_rejections() {
+            let nff = Some(TransferErrorKind::NonFastForward);
+            assert_eq!(answer(&[Some("non-fast-forward"), Some("declined")]).0, nff);
+            assert_eq!(answer(&[Some("declined"), Some("non-fast-forward")]).0, nff);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -970,14 +1030,16 @@ pub fn force_push_current_branch(
     let refspec = format!("+refs/heads/{local}:{dst}");
     push_refs(
         repo,
-        remote_name,
-        &[refspec],
-        TransferOperation::ForcePushBranch,
+        &PushRequest {
+            remote_name,
+            refspecs: &[refspec],
+            operation: TransferOperation::ForcePushBranch,
+            lease: Some((dst.as_str(), expected)),
+            no_verify,
+        },
         credentials,
         reporter,
         cancel,
-        Some((dst.as_str(), expected)),
-        no_verify,
     )
 }
 
@@ -1068,14 +1130,16 @@ pub fn push_branch(
     let refspec = format!("refs/heads/{local_branch}:refs/heads/{remote_branch}");
     push_refs(
         repo,
-        remote_name,
-        &[refspec],
-        TransferOperation::PushBranch,
+        &PushRequest {
+            remote_name,
+            refspecs: &[refspec],
+            operation: TransferOperation::PushBranch,
+            lease: None,
+            no_verify,
+        },
         credentials,
         reporter,
         cancel,
-        None,
-        no_verify,
     )?;
     if set_upstream {
         set_branch_upstream(repo, local_branch, remote_name, remote_branch)?;
@@ -1100,14 +1164,16 @@ pub fn delete_remote_branch(
     validate_branch_name(branch)?;
     push_refs(
         repo,
-        remote_name,
-        &[format!(":refs/heads/{branch}")],
-        TransferOperation::DeleteRemoteBranch,
+        &PushRequest {
+            remote_name,
+            refspecs: &[format!(":refs/heads/{branch}")],
+            operation: TransferOperation::DeleteRemoteBranch,
+            lease: None,
+            no_verify,
+        },
         credentials,
         reporter,
         cancel,
-        None,
-        no_verify,
     )?;
     // libgit2's push update_tips normally removed it already; this makes it not depend on that.
     // The local tracking ref is wherever the remote's fetch refspec maps the branch, not a
@@ -1137,14 +1203,16 @@ pub fn delete_remote_tag(
     validate_tag_name(tag)?;
     push_refs(
         repo,
-        remote_name,
-        &[format!(":refs/tags/{tag}")],
-        TransferOperation::DeleteRemoteTag,
+        &PushRequest {
+            remote_name,
+            refspecs: &[format!(":refs/tags/{tag}")],
+            operation: TransferOperation::DeleteRemoteTag,
+            lease: None,
+            no_verify,
+        },
         credentials,
         reporter,
         cancel,
-        None,
-        no_verify,
     )
 }
 
@@ -1200,14 +1268,16 @@ pub fn push_tags(
     }
     push_refs(
         repo,
-        remote_name,
-        &refspecs,
-        TransferOperation::PushTags,
+        &PushRequest {
+            remote_name,
+            refspecs: &refspecs,
+            operation: TransferOperation::PushTags,
+            lease: None,
+            no_verify,
+        },
         credentials,
         reporter,
         cancel,
-        None,
-        no_verify,
     )
 }
 
@@ -1539,19 +1609,38 @@ fn current_local_branch_name(repo: &Repository) -> Result<String, RemoteError> {
     Ok(head.shorthand()?.to_string())
 }
 
-#[allow(clippy::too_many_arguments)]
+/// One push: which refs go to which remote, and how.
+struct PushRequest<'a> {
+    remote_name: &'a str,
+    refspecs: &'a [String],
+    operation: TransferOperation,
+    /// Force-with-lease: the destination ref and the value the remote must still have.
+    lease: Option<(&'a str, git2::Oid)>,
+    /// Skip the `pre-push` hook.
+    no_verify: bool,
+}
+
+/// What the push callbacks found, for [`push_outcome`] to turn into the push's result.
+#[derive(Default)]
+struct PushState {
+    /// Cancelled at negotiation (or while `pre-push` ran): the remote is untouched.
+    cancelled_at_negotiation: Cell<bool>,
+    /// The lease's ref moved on the remote.
+    stale_lease: Cell<bool>,
+    /// `pre-push` failed or couldn't run.
+    hook_failure: RefCell<Option<RemoteError>>,
+    /// The remote rejected a ref (a non-fast-forward wins over other rejections).
+    rejection: Cell<Option<TransferErrorKind>>,
+}
+
 fn push_refs(
     repo: &Repository,
-    remote_name: &str,
-    refspecs: &[String],
-    operation: TransferOperation,
+    request: &PushRequest<'_>,
     credentials: &mut dyn CredentialProvider,
     reporter: &mut dyn TransferReporter,
     cancel: &dyn Fn() -> bool,
-    lease: Option<(&str, git2::Oid)>,
-    no_verify: bool,
 ) -> Result<(), RemoteError> {
-    let mut remote = repo.find_remote(remote_name)?;
+    let mut remote = repo.find_remote(request.remote_name)?;
     let push_url = remote
         .pushurl()
         .ok()
@@ -1559,15 +1648,14 @@ fn push_refs(
         .or_else(|| remote.url().ok())
         .unwrap_or_default()
         .to_string();
-    let run_pre_push = !no_verify
+    let run_pre_push = !request.no_verify
         && matches!(
             crate::hooks::find_hook(repo, "pre-push"),
             Ok(crate::hooks::HookLookup::Found(_))
         );
-    let hook_failure: RefCell<Option<RemoteError>> = RefCell::new(None);
+    let state = PushState::default();
     let credentials = RefCell::new(credentials);
     let reporter = RefCell::new(reporter);
-    let rejection = Cell::new(None);
 
     // Connect first, on its own, as a fetch does (`fetch_with`): `push` below reuses this
     // connection (libgit2's `connect_or_reset_options`), and the caller learns when the remote
@@ -1599,76 +1687,22 @@ fn push_refs(
     // report "cancelled" for a push that actually landed (and skip the local tracking-ref
     // update), so a cancel pressed after negotiation is deliberately ignored and the push
     // reports its real outcome.
-    let cancelled_at_negotiation = Cell::new(false);
-    let stale_lease = Cell::new(false);
     callbacks.push_negotiation(|updates| {
-        if cancel() {
-            cancelled_at_negotiation.set(true);
-            return Err(git2::Error::from_str("transfer cancelled"));
-        }
-        // Force-with-lease: `src()` is what the remote advertised for the destination ref
-        // (zero when absent). This runs after advertisement and before any pack data is sent,
-        // so refusing here leaves the remote untouched — the same window
-        // `git push --force-with-lease` has.
-        if let Some((dst, expected)) = lease {
-            let current = updates
-                .iter()
-                .find(|update| update.dst_refname() == Ok(dst))
-                .map(|update| update.src())
-                .unwrap_or(git2::Oid::ZERO_SHA1);
-            if current != expected {
-                stale_lease.set(true);
-                return Err(git2::Error::from_str("stale lease"));
-            }
-        }
-        // git runs pre-push at exactly this point: refs advertised (so `src()` is the live
-        // remote SHA), nothing sent yet. A stale lease was rejected above first, as git does.
-        if run_pre_push {
-            reporter.borrow_mut().report(TransferProgress {
-                operation_id: String::new(),
-                operation,
-                phase: TransferPhase::RunningHook,
-                current: 0,
-                total: 0,
-                received_bytes: 0,
-                message: None,
-            });
-            let input = pre_push_input(updates);
-            let args = [remote_name, push_url.as_str()];
-            let invocation = crate::hooks::HookInvocation {
-                name: "pre-push",
-                args: &args,
-                stdin: Some(input.as_bytes()),
-                env: &[],
-            };
-            match crate::hooks::run_hook(repo, &invocation, cancel, crate::hooks::HOOK_TIMEOUT) {
-                Ok(outcome) => {
-                    if let Some(output) =
-                        crate::hooks::failure_output(&outcome, crate::hooks::HOOK_TIMEOUT)
-                    {
-                        *hook_failure.borrow_mut() = Some(RemoteError::HookFailed {
-                            hook: "pre-push".to_string(),
-                            output,
-                        });
-                        return Err(git2::Error::from_str("pre-push hook failed"));
-                    }
-                }
-                Err(crate::hooks::HookError::Cancelled { .. }) => {
-                    cancelled_at_negotiation.set(true);
-                    return Err(git2::Error::from_str("transfer cancelled"));
-                }
-                Err(error) => {
-                    *hook_failure.borrow_mut() = Some(RemoteError::Hook(error));
-                    return Err(git2::Error::from_str("pre-push hook could not run"));
-                }
-            }
-        }
-        Ok(())
+        negotiate(
+            repo,
+            request,
+            &push_url,
+            run_pre_push,
+            updates,
+            cancel,
+            &reporter,
+            &state,
+        )
     });
     callbacks.push_transfer_progress(|current, total, transferred_bytes| {
         reporter.borrow_mut().report(TransferProgress {
             operation_id: String::new(),
-            operation,
+            operation: request.operation,
             phase: TransferPhase::Receiving,
             current,
             total,
@@ -1677,41 +1711,136 @@ fn push_refs(
         });
     });
     callbacks.push_update_reference(|_reference, status| {
-        if let Some(status) = status {
-            let status = status.to_ascii_lowercase();
-            let kind = if status.contains("non-fast-forward") || status.contains("nonfastforward") {
-                TransferErrorKind::NonFastForward
-            } else {
-                TransferErrorKind::RejectedRemoteRef
-            };
-            if rejection.get() != Some(TransferErrorKind::NonFastForward) {
-                rejection.set(Some(kind));
-            }
-            return Ok(());
-        }
-        reporter.borrow_mut().report(TransferProgress {
-            operation_id: String::new(),
-            operation,
-            phase: TransferPhase::Updating,
-            current: 0,
-            total: 0,
-            received_bytes: 0,
-            message: None,
-        });
+        record_ref_update(status, request.operation, &reporter, &state);
         Ok(())
     });
 
     let mut options = PushOptions::new();
     options.remote_callbacks(callbacks);
-    let pushed = connection.remote().push(refspecs, Some(&mut options));
+    let pushed = connection
+        .remote()
+        .push(request.refspecs, Some(&mut options));
+    push_outcome(pushed, &state)
+}
+
+/// The push's negotiation step (`push_negotiation`): cancels when asked, refuses a stale lease
+/// and runs `pre-push`. An `Err` aborts the push before anything is sent; `state` says why.
+#[allow(clippy::too_many_arguments)]
+fn negotiate(
+    repo: &Repository,
+    request: &PushRequest<'_>,
+    push_url: &str,
+    run_pre_push: bool,
+    updates: &[git2::PushUpdate<'_>],
+    cancel: &dyn Fn() -> bool,
+    reporter: &RefCell<&mut dyn TransferReporter>,
+    state: &PushState,
+) -> Result<(), git2::Error> {
+    if cancel() {
+        state.cancelled_at_negotiation.set(true);
+        return Err(git2::Error::from_str("transfer cancelled"));
+    }
+    // Force-with-lease: `src()` is what the remote advertised for the destination ref
+    // (zero when absent). This runs after advertisement and before any pack data is sent,
+    // so refusing here leaves the remote untouched — the same window
+    // `git push --force-with-lease` has.
+    if let Some((dst, expected)) = request.lease {
+        let current = updates
+            .iter()
+            .find(|update| update.dst_refname() == Ok(dst))
+            .map(|update| update.src())
+            .unwrap_or(git2::Oid::ZERO_SHA1);
+        if current != expected {
+            state.stale_lease.set(true);
+            return Err(git2::Error::from_str("stale lease"));
+        }
+    }
+    // git runs pre-push at exactly this point: refs advertised (so `src()` is the live
+    // remote SHA), nothing sent yet. A stale lease was rejected above first, as git does.
+    if run_pre_push {
+        reporter.borrow_mut().report(TransferProgress {
+            operation_id: String::new(),
+            operation: request.operation,
+            phase: TransferPhase::RunningHook,
+            current: 0,
+            total: 0,
+            received_bytes: 0,
+            message: None,
+        });
+        let input = pre_push_input(updates);
+        let args = [request.remote_name, push_url];
+        let invocation = crate::hooks::HookInvocation {
+            name: "pre-push",
+            args: &args,
+            stdin: Some(input.as_bytes()),
+            env: &[],
+        };
+        match crate::hooks::run_hook(repo, &invocation, cancel, crate::hooks::HOOK_TIMEOUT) {
+            Ok(outcome) => {
+                if let Some(output) =
+                    crate::hooks::failure_output(&outcome, crate::hooks::HOOK_TIMEOUT)
+                {
+                    *state.hook_failure.borrow_mut() = Some(RemoteError::HookFailed {
+                        hook: "pre-push".to_string(),
+                        output,
+                    });
+                    return Err(git2::Error::from_str("pre-push hook failed"));
+                }
+            }
+            Err(crate::hooks::HookError::Cancelled { .. }) => {
+                state.cancelled_at_negotiation.set(true);
+                return Err(git2::Error::from_str("transfer cancelled"));
+            }
+            Err(error) => {
+                *state.hook_failure.borrow_mut() = Some(RemoteError::Hook(error));
+                return Err(git2::Error::from_str("pre-push hook could not run"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The remote's answer for one ref (`push_update_reference`): a rejection (`status`) is recorded
+/// in `state`, an applied update reported as progress.
+fn record_ref_update(
+    status: Option<&str>,
+    operation: TransferOperation,
+    reporter: &RefCell<&mut dyn TransferReporter>,
+    state: &PushState,
+) {
+    if let Some(status) = status {
+        let status = status.to_ascii_lowercase();
+        let kind = if status.contains("non-fast-forward") || status.contains("nonfastforward") {
+            TransferErrorKind::NonFastForward
+        } else {
+            TransferErrorKind::RejectedRemoteRef
+        };
+        if state.rejection.get() != Some(TransferErrorKind::NonFastForward) {
+            state.rejection.set(Some(kind));
+        }
+        return;
+    }
+    reporter.borrow_mut().report(TransferProgress {
+        operation_id: String::new(),
+        operation,
+        phase: TransferPhase::Updating,
+        current: 0,
+        total: 0,
+        received_bytes: 0,
+        message: None,
+    });
+}
+
+/// The push's result from libgit2's answer and what the callbacks recorded.
+fn push_outcome(pushed: Result<(), git2::Error>, state: &PushState) -> Result<(), RemoteError> {
     // Only a negotiation-time abort is a cancellation; a genuine failure that happens while
     // Cancel is pressed keeps its real classification.
     if let Err(error) = pushed {
-        return if stale_lease.get() {
+        return if state.stale_lease.get() {
             Err(RemoteError::StaleLease)
-        } else if cancelled_at_negotiation.get() {
+        } else if state.cancelled_at_negotiation.get() {
             Err(RemoteError::Cancelled)
-        } else if let Some(failure) = hook_failure.borrow_mut().take() {
+        } else if let Some(failure) = state.hook_failure.borrow_mut().take() {
             Err(failure)
         } else if error.code() == ErrorCode::NotFastForward {
             Err(RemoteError::NonFastForward)
@@ -1719,7 +1848,7 @@ fn push_refs(
             Err(error.into())
         };
     }
-    match rejection.get() {
+    match state.rejection.get() {
         Some(TransferErrorKind::NonFastForward) => Err(RemoteError::NonFastForward),
         Some(TransferErrorKind::RejectedRemoteRef) => Err(RemoteError::RejectedRemoteRef),
         // A lease failure aborts at negotiation, never as a per-ref rejection.
