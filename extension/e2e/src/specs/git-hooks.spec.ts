@@ -117,7 +117,7 @@ describe("Browsitory VSCode extension git hooks", () => {
       if (Date.now() - cancelledAt > 20000) throw new Error("Cancel did not stop the hook in time");
       if (lastSummary() === summary) throw new Error("commit landed despite Cancel");
       // The cancel's error banner stays until it is dismissed or the next change starts (#177).
-      await webview.waitForText('p[role="alert"]', "The pre-commit hook was cancelled.", 10000);
+      await webview.waitForText('[role="alert"]', "The pre-commit hook was cancelled.", 10000);
       await new Promise((resolve) => setTimeout(resolve, 3000));
       if (!(await webview.bodyText()).includes("The pre-commit hook was cancelled.")) {
         throw new Error(`the cancel banner went away on its own\npage text:\n${await webview.bodyText()}`);

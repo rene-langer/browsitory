@@ -6,8 +6,8 @@ them. The group shows a badge such as **1 conflict**, and each file is marked "(
 
 The status strip at the top of the repository says what is in progress and where, for example **Merging
 feature/x into main** or **Cherry-picking onto main**, with the number of conflicts left. **Go to
-conflict** there shows the first conflicted file. During a rebase the strip also has **Continue
-rebase** next to **Abort rebase**; it says "Resolve 1 conflict to continue" until no conflict is
+conflict** there shows the first conflicted file. During a rebase the strip also has **Continue**
+next to **Abort rebase**; it says "Resolve 1 conflict to continue" until no conflict is
 left.
 
 A conflicted file opens the **Resolve conflict** pane:

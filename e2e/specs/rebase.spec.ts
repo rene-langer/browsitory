@@ -306,7 +306,7 @@ describe("Browsitory interactive rebase", () => {
 
       await (await $("button=Start rebase")).click();
 
-      const alert = await $("//p[@role='alert'][contains(., 'You have uncommitted changes to')]");
+      const alert = await $("//*[@role='alert'][contains(., 'You have uncommitted changes to')]");
       await alert.waitForExist();
       const alertText = await browser.execute((el) => (el as HTMLElement).textContent ?? "", alert);
       expect(alertText).toContain(

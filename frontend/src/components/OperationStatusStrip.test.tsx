@@ -488,7 +488,7 @@ describe("OperationStatusStrip", () => {
       expect(screen.queryByRole("button", { name: "Go to conflict" })).toBeNull();
     });
 
-    it("offers Continue rebase next to Abort, unavailable with the reason while conflicts remain", () => {
+    it("offers Continue next to Abort rebase, unavailable with the reason while conflicts remain", () => {
       const onContinueRebase = vi.fn();
       const props = {
         merging: false,
@@ -499,14 +499,14 @@ describe("OperationStatusStrip", () => {
         onAbortRebase: noop,
       };
       const { rerender } = render(<OperationStatusStrip {...props} conflictCount={1} />);
-      const blocked = screen.getByRole("button", { name: "Continue rebase" });
+      const blocked = screen.getByRole("button", { name: "Continue" });
       expect(blocked).toHaveAttribute("aria-disabled", "true");
       expect(blocked).toHaveAccessibleDescription("Resolve 1 conflict to continue");
       fireEvent.click(blocked);
       expect(onContinueRebase).not.toHaveBeenCalled();
 
       rerender(<OperationStatusStrip {...props} conflictCount={0} />);
-      fireEvent.click(screen.getByRole("button", { name: "Continue rebase" }));
+      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
       expect(onContinueRebase).toHaveBeenCalledOnce();
       expect(screen.getByRole("button", { name: "Abort rebase" })).toBeInTheDocument();
     });

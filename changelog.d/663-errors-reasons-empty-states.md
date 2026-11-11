@@ -15,5 +15,5 @@
   how to make the first commit, instead of an empty pane (#665).
 - Added: conflicted files head **Changes** in a **Conflicts** group (#665).
 - Added: the status strip says what is merged into which branch ("Merging feature/x into main",
-  "Cherry-picking onto main") and has **Go to conflict**; during a rebase it also has **Continue
-  rebase** (#665).
+  "Cherry-picking onto main") and has **Go to conflict**; during a rebase it also has **Continue**
+  (#665).

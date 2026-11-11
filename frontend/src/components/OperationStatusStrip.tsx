@@ -206,12 +206,13 @@ export function OperationStatusStrip({
       <span className={styles.spacer} />
       {!leftover && goToConflict}
       {rebaseProgress !== null && onContinueRebase !== undefined && (
-        // Continue next to Abort (#665), as the rebase panel's: once no conflict is left.
+        // Continue next to Abort (#665), as the sequence's and the rebase panel's "Continue
+        // rebase": once no conflict is left.
         <ReasonButton
           reason={pending ? "Another action is in progress." : (reason ?? null)}
           onClick={onContinueRebase}
         >
-          Continue rebase
+          Continue
         </ReasonButton>
       )}
       <button

@@ -183,7 +183,7 @@ describe("Browsitory remote transfer", () => {
       await browser.waitUntil(() => challenge.requests() > 0, {
         timeoutMsg: "expected Fetch to reach the loopback HTTPS credential challenge",
       });
-      const alert = await $("p[role='alert']");
+      const alert = await $("[role='alert']");
       await alert.waitForExist();
       await expect(alert).toHaveText(expect.stringMatching(/Save an HTTPS token for this remote before retrying\.|operating-system credential store is unavailable/));
       expect(await alert.getText()).not.toContain(challenge.url);
