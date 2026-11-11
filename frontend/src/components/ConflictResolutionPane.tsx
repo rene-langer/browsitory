@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { errorKind, type ConflictSegment, type ConflictSide, type FileConflictChoice, type RepoClient } from "../ipc/RepoClient";
 import { conflictSideNames, type ConflictSideNames } from "../lib/conflictSides";
 import {
@@ -9,6 +9,11 @@ import {
   type BlockState,
   type ConflictBlock,
 } from "../lib/conflictMerge";
+import { useConflictTokens } from "../lib/conflictHighlight";
+import type { Token } from "../lib/highlight";
+import { languageForPath } from "../lib/languageForPath";
+import { logFailure } from "../lib/logger";
+import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
@@ -53,6 +58,33 @@ function lineCount(text: string): number {
 }
 
 const NO_NAMES: ConflictSideNames = { ours: null, theirs: null };
+
+function logHighlightError(error: unknown): void {
+  logFailure("Syntax highlighting failed", error);
+}
+
+/** `text` as it is, its lines coloured with `tokens` when given (#763). */
+function Code({ text, tokens }: { text: string; tokens: readonly Token[][] | undefined }) {
+  if (tokens === undefined) return <>{text}</>;
+  return (
+    <>
+      {text.split(/(?<=\n)/).map((line, i) => {
+        const lineTokens = tokens[i];
+        if (lineTokens === undefined) return <Fragment key={i}>{line}</Fragment>;
+        return (
+          <Fragment key={i}>
+            {lineTokens.map((token, j) => (
+              <span key={j} style={token.color !== undefined ? { color: token.color } : undefined}>
+                {token.content}
+              </span>
+            ))}
+            {/\r?\n$/.exec(line)?.[0] ?? ""}
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
 
 /** Whole-result editing (#720): the assembled file as one text, and that text as it started. */
 interface WholeEdit {
@@ -149,6 +181,10 @@ export function ConflictResolutionPane({
       ignore = true;
     };
   }, [repoPath, client]);
+
+  // The read-only parts are highlighted like the diff viewer (#763); the results stay plain.
+  const { settings } = useDiffSettingsContext();
+  const tokens = useConflictTokens(segments, languageForPath(path), settings.syntaxHighlight, logHighlightError);
 
   // "Ours" is stage 2 (HEAD); "theirs" stage 3, the commit being applied. During a rebase that
   // makes "ours" the branch being rebased onto, which is why the titles name what they replace.
@@ -293,20 +329,29 @@ export function ConflictResolutionPane({
     const head = index > 0 ? CONTEXT_LINES : 0;
     const tail = index < segments.length - 1 ? CONTEXT_LINES : 0;
     const hidden = lines.length - head - tail;
+    const cleanTokens = tokens?.ours[index];
     if (expanded.has(index) || hidden <= 2) {
       return (
         <pre key={index} className={styles.segment}>
-          {content}
+          <Code text={content} tokens={cleanTokens} />
         </pre>
       );
     }
     return (
       <div key={index}>
-        {head > 0 && <pre className={styles.segment}>{lines.slice(0, head).join("")}</pre>}
+        {head > 0 && (
+          <pre className={styles.segment}>
+            <Code text={lines.slice(0, head).join("")} tokens={cleanTokens?.slice(0, head)} />
+          </pre>
+        )}
         <button className={styles.expand} onClick={() => setExpanded((prev) => new Set(prev).add(index))}>
           Show {hidden} unchanged lines
         </button>
-        {tail > 0 && <pre className={styles.segment}>{lines.slice(lines.length - tail).join("")}</pre>}
+        {tail > 0 && (
+          <pre className={styles.segment}>
+            <Code text={lines.slice(lines.length - tail).join("")} tokens={cleanTokens?.slice(lines.length - tail)} />
+          </pre>
+        )}
       </div>
     );
   };
@@ -338,18 +383,22 @@ export function ConflictResolutionPane({
           <div className={`${styles.side} ${choice === "base" ? styles.chosen : ""}`}>
             <div className={styles.sideLabel}>Base</div>
             <pre className={`${styles.segment} ${segment.base === "" ? styles.placeholder : ""}`}>
-              {segment.base === "" ? "Empty: no common lines" : segment.base}
+              {segment.base === "" ? "Empty: no common lines" : <Code text={segment.base} tokens={tokens?.base[index]} />}
             </pre>
           </div>
         )}
         <div className={styles.sides}>
           <div className={`${styles.side} ${choice === "ours" || bothChosen ? styles.chosen : ""}`}>
             <div className={styles.sideLabel}>{sideLabel("Ours", names.ours)}</div>
-            <pre className={styles.segment}>{segment.ours}</pre>
+            <pre className={styles.segment}>
+              <Code text={segment.ours} tokens={tokens?.ours[index]} />
+            </pre>
           </div>
           <div className={`${styles.side} ${choice === "theirs" || bothChosen ? styles.chosen : ""}`}>
             <div className={styles.sideLabel}>{sideLabel("Theirs", names.theirs)}</div>
-            <pre className={styles.segment}>{segment.theirs}</pre>
+            <pre className={styles.segment}>
+              <Code text={segment.theirs} tokens={tokens?.theirs[index]} />
+            </pre>
           </div>
         </div>
         <Toolbar aria-label={`${title}: choice`}>
