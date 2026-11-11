@@ -273,86 +273,100 @@ fn tokenize(input: &str) -> Result<Vec<Token>, SearchError> {
             continue;
         }
 
-        // A key is a run of ASCII letters immediately followed by `:`.
-        let end = i + chars[i..]
-            .iter()
-            .take_while(|c| c.is_ascii_alphabetic())
-            .count();
-        let key = if end > i && end < chars.len() && chars[end] == ':' {
-            let key: String = chars[i..end].iter().collect::<String>().to_lowercase();
-            if !KEYS.contains(&key.as_str()) {
-                let raw: String = chars[i..end].iter().collect();
-                return Err(invalid(format!(
-                    "Unknown search key \"{raw}:\". Put the text in quotes to search for it literally."
-                )));
-            }
-            i = end + 1;
-            if i >= chars.len() || chars[i].is_whitespace() || chars[i] == ')' {
-                return Err(invalid(format!("{key}: needs a value.")));
-            }
-            if chars[i] == '(' {
-                return Err(invalid(format!(
-                    "{key}: takes one value. For several, repeat it: ({key}:a or {key}:b)."
-                )));
-            }
-            Some(key)
+        let (key, start) = key_at(&chars, i)?;
+        let (value, next) = if chars[start] == '"' {
+            quoted_value(&chars, start)?
         } else {
-            None
+            bare_value(&chars, start)
         };
-
-        let value = if chars[i] == '"' {
-            // An iterator, not index arithmetic: it always advances, so the loop that grows
-            // `value` always ends.
-            let mut rest = chars[i + 1..].iter();
-            let mut value = String::new();
-            let mut closed = false;
-            while let Some(&c) = rest.next() {
-                match c {
-                    '"' => {
-                        closed = true;
-                        break;
-                    }
-                    '\\' if matches!(rest.as_slice().first(), Some('"' | '\\')) => {
-                        value.extend(rest.next());
-                    }
-                    c => value.push(c),
-                }
-            }
-            i = chars.len() - rest.as_slice().len();
-            if !closed {
-                return Err(invalid("Missing closing quote."));
-            }
-            if value.is_empty() {
-                return Err(invalid("Empty quotes don't match anything."));
-            }
-            value
-        } else {
-            let start = i;
-            // Parentheses opened inside the value; a `)` beyond them closes a group instead.
-            let mut depth = 0usize;
-            let len = chars[start..]
-                .iter()
-                .take_while(|&&c| match c {
-                    c if c.is_whitespace() => false,
-                    '(' => {
-                        depth += 1;
-                        true
-                    }
-                    ')' if depth == 0 => false,
-                    ')' => {
-                        depth -= 1;
-                        true
-                    }
-                    _ => true,
-                })
-                .count();
-            i = start + len;
-            chars[start..i].iter().collect()
-        };
-
+        i = next;
         tokens.push(Token::Term(term(key.as_deref(), value)?));
     }
     Ok(tokens)
+}
+
+/// The `key:` of the term at `i`, if it has one: a run of ASCII letters immediately followed
+/// by `:`, checked to be one of [`KEYS`] and to have a value. Returns the key (lower case) and
+/// where the term's value starts (`i` itself without a key).
+fn key_at(chars: &[char], i: usize) -> Result<(Option<String>, usize), SearchError> {
+    let end = i + chars[i..]
+        .iter()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .count();
+    if !(end > i && end < chars.len() && chars[end] == ':') {
+        return Ok((None, i));
+    }
+    let key: String = chars[i..end].iter().collect::<String>().to_lowercase();
+    if !KEYS.contains(&key.as_str()) {
+        let raw: String = chars[i..end].iter().collect();
+        return Err(invalid(format!(
+            "Unknown search key \"{raw}:\". Put the text in quotes to search for it literally."
+        )));
+    }
+    let start = end + 1;
+    if start >= chars.len() || chars[start].is_whitespace() || chars[start] == ')' {
+        return Err(invalid(format!("{key}: needs a value.")));
+    }
+    if chars[start] == '(' {
+        return Err(invalid(format!(
+            "{key}: takes one value. For several, repeat it: ({key}:a or {key}:b)."
+        )));
+    }
+    Ok((Some(key), start))
+}
+
+/// The `"quoted"` value starting at `i` (at its opening quote), with `\"` and `\\` escapes,
+/// and the index after its closing quote.
+fn quoted_value(chars: &[char], i: usize) -> Result<(String, usize), SearchError> {
+    // An iterator, not index arithmetic: it always advances, so the loop that grows `value`
+    // always ends.
+    let mut rest = chars[i + 1..].iter();
+    let mut value = String::new();
+    let mut closed = false;
+    while let Some(&c) = rest.next() {
+        match c {
+            '"' => {
+                closed = true;
+                break;
+            }
+            '\\' if matches!(rest.as_slice().first(), Some('"' | '\\')) => {
+                value.extend(rest.next());
+            }
+            c => value.push(c),
+        }
+    }
+    let next = chars.len() - rest.as_slice().len();
+    if !closed {
+        return Err(invalid("Missing closing quote."));
+    }
+    if value.is_empty() {
+        return Err(invalid("Empty quotes don't match anything."));
+    }
+    Ok((value, next))
+}
+
+/// The unquoted value starting at `i`, up to the next whitespace or a `)` that closes a group,
+/// and the index after it.
+fn bare_value(chars: &[char], i: usize) -> (String, usize) {
+    // Parentheses opened inside the value; a `)` beyond them closes a group instead.
+    let mut depth = 0usize;
+    let len = chars[i..]
+        .iter()
+        .take_while(|&&c| match c {
+            c if c.is_whitespace() => false,
+            '(' => {
+                depth += 1;
+                true
+            }
+            ')' if depth == 0 => false,
+            ')' => {
+                depth -= 1;
+                true
+            }
+            _ => true,
+        })
+        .count();
+    (chars[i..i + len].iter().collect(), i + len)
 }
 
 fn term(key: Option<&str>, value: String) -> Result<SearchTerm, SearchError> {
