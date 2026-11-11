@@ -707,6 +707,13 @@ before it waits for the gate (`WorkerHandle::claim_search_generation`), so a can
 search also cancels a search still waiting there; and the stored work tree path
 (`tools::workdir_of`) behind Open in editor, Reveal and Open terminal.
 
+The read lane's commands (#734, see "Reads during a transfer" above) have a gate of their own:
+`repo_worker(..).read(|r| ..)` waits at the repository's read gate (`RepoGates::read`) and hands
+its closure a `ReadHandle`, which has only the read lane's methods, so nothing else can be sent
+that way. A pull's call holds the main gate until the pull ends; its reads pass it, and the
+worker answers them while the pull's fetch runs. A repository then holds at most two blocking
+threads, one per gate.
+
 **One worker per repository, whatever the spelling (#223).** Commands name a repository by the
 path string the frontend sent, and one repository has many spellings: a trailing slash, a
 subfolder, `..`, a symbolic link, another letter case on Windows and macOS. A worktree's Open

@@ -9,7 +9,7 @@ pub async fn list_branches(
     state: State<'_, AppState>,
 ) -> Result<Vec<BranchInfoDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.list_branches())
+        .read(move |w| w.list_branches())
         .await?
         .into_iter()
         .map(BranchInfoDto::from)
@@ -37,7 +37,7 @@ pub async fn get_switch_conflicts(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, ErrorDto> {
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.switch_conflicts(name))
+        .read(move |w| w.switch_conflicts(name))
         .await
 }
 /// Stash and switch (#653); `post-checkout` is reported as for `switch_branch`.

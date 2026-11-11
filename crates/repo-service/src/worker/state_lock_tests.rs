@@ -482,6 +482,7 @@ fn a_burst_of_locked_commands_waits_once_while_the_lock_stays_held() {
         .map(|name| {
             let (reply, rx) = mpsc::channel();
             handle
+                .reads
                 .tx
                 .send(super::Command::StageFile {
                     path: format!("{name}.txt"),

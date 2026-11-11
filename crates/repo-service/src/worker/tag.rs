@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 
 use git_core::remote::TagInfo;
 
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 
 pub(super) fn list(repo: &git2::Repository, reply: Sender<Result<Vec<TagInfo>, ErrorDto>>) {
     let result = git_core::remote::list_tags(repo).map_err(ErrorDto::from_error);
@@ -28,10 +28,6 @@ pub(super) fn delete(repo: &git2::Repository, name: String, reply: Sender<Result
 }
 
 impl WorkerHandle {
-    pub fn list_tags(&self) -> Result<Vec<TagInfo>, ErrorDto> {
-        self.request(|reply_tx| Command::ListTags { reply: reply_tx })
-    }
-
     /// Tags `target` (a full commit id), or HEAD's commit when `None`.
     pub fn create_tag(
         &self,
@@ -52,5 +48,11 @@ impl WorkerHandle {
             name,
             reply: reply_tx,
         })
+    }
+}
+
+impl ReadHandle {
+    pub fn list_tags(&self) -> Result<Vec<TagInfo>, ErrorDto> {
+        self.read(|reply_tx| Command::ListTags { reply: reply_tx })
     }
 }

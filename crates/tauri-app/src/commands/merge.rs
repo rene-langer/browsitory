@@ -38,7 +38,7 @@ pub async fn get_merge_options(
     }
     Ok(MergeOptionsDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.merge_defaults())
+            .read(move |w| w.merge_defaults())
             .await?,
     ))
 }
@@ -61,7 +61,7 @@ pub async fn get_conflict_hunks(
     state: State<'_, AppState>,
 ) -> Result<Vec<ConflictSegmentDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_conflict_hunks(path))
+        .read(move |w| w.get_conflict_hunks(path))
         .await?
         .into_iter()
         .map(ConflictSegmentDto::from)
@@ -90,7 +90,7 @@ pub async fn get_merge_message(
     state: State<'_, AppState>,
 ) -> Result<Option<String>, ErrorDto> {
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_merge_message())
+        .read(move |w| w.get_merge_message())
         .await
 }
 #[tauri::command]

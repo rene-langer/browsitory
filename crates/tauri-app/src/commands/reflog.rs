@@ -10,7 +10,7 @@ pub async fn list_reflog_refs(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, ErrorDto> {
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.list_reflog_refs())
+        .read(move |w| w.list_reflog_refs())
         .await
 }
 
@@ -21,7 +21,7 @@ pub async fn get_reflog(
     state: State<'_, AppState>,
 ) -> Result<Vec<ReflogEntryDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_reflog(reference))
+        .read(move |w| w.get_reflog(reference))
         .await?
         .into_iter()
         .map(ReflogEntryDto::from)

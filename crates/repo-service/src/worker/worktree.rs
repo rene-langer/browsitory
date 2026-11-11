@@ -4,7 +4,7 @@ use std::sync::mpsc::Sender;
 
 use git_core::worktree::WorktreeInfo;
 
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 
 pub(super) fn list(repo: &git2::Repository, reply: Sender<Result<Vec<WorktreeInfo>, ErrorDto>>) {
     let result = git_core::worktree::list_worktrees(repo).map_err(ErrorDto::from_error);
@@ -85,10 +85,6 @@ pub(super) fn prune(
 }
 
 impl WorkerHandle {
-    pub fn list_worktrees(&self) -> Result<Vec<WorktreeInfo>, ErrorDto> {
-        self.request(|reply_tx| Command::ListWorktrees { reply: reply_tx })
-    }
-
     pub fn create_worktree(
         &self,
         name: String,
@@ -114,5 +110,11 @@ impl WorkerHandle {
 
     pub fn prune_worktrees(&self) -> Result<(), ErrorDto> {
         self.request(|reply_tx| Command::PruneWorktrees { reply: reply_tx })
+    }
+}
+
+impl ReadHandle {
+    pub fn list_worktrees(&self) -> Result<Vec<WorktreeInfo>, ErrorDto> {
+        self.read(|reply_tx| Command::ListWorktrees { reply: reply_tx })
     }
 }

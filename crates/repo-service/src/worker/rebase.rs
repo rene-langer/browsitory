@@ -1,6 +1,6 @@
 use super::gate::RebaseMemory;
 use super::rebase_store::RebaseStore;
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 use crate::wire::ErrorDto;
 use git_core::rebase::{
     RebaseAbort, RebasePlanCommit, RebasePlanEntry, RebaseState, RebaseStepResult,
@@ -205,11 +205,6 @@ pub(super) fn abort(
 }
 
 impl WorkerHandle {
-    #[allow(dead_code)]
-    pub fn commits_since(&self, onto: String) -> Result<Vec<RebasePlanCommit>, ErrorDto> {
-        self.request(|tx| Command::CommitsSince { onto, reply: tx })
-    }
-
     /// `start_rebase_reporting` without anyone listening to the signing program.
     #[allow(dead_code)]
     pub fn start_rebase(
@@ -262,5 +257,12 @@ impl WorkerHandle {
     #[allow(dead_code)]
     pub fn abort_rebase(&self) -> Result<RebaseAbort, ErrorDto> {
         self.request(|tx| Command::AbortRebase { reply: tx })
+    }
+}
+
+impl ReadHandle {
+    #[allow(dead_code)]
+    pub fn commits_since(&self, onto: String) -> Result<Vec<RebasePlanCommit>, ErrorDto> {
+        self.read(|tx| Command::CommitsSince { onto, reply: tx })
     }
 }

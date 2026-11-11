@@ -14,7 +14,7 @@ pub async fn get_merged_commits(
     state: State<'_, AppState>,
 ) -> Result<Vec<GraphCommitDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_merged_commits(merge_id, limit))
+        .read(move |w| w.get_merged_commits(merge_id, limit))
         .await?
         .into_iter()
         .map(GraphCommitDto::from)

@@ -15,7 +15,7 @@ pub async fn get_commit_tree(
     state: State<'_, AppState>,
 ) -> Result<TreeListingDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_commit_tree(commit_id, dir, filter))
+        .read(move |w| w.get_commit_tree(commit_id, dir, filter))
         .await?
         .into())
 }
@@ -28,7 +28,7 @@ pub async fn get_file_at_commit(
     state: State<'_, AppState>,
 ) -> Result<FileContentDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_file_at_commit(commit_id, path))
+        .read(move |w| w.get_file_at_commit(commit_id, path))
         .await?
         .into())
 }
@@ -65,7 +65,7 @@ pub async fn save_file_version(
         .map_err(|error| ErrorDto::from(error.to_string()))?;
     let shown = destination.display().to_string();
     worker
-        .call(move |w| w.save_file_version(commit_id, path, destination))
+        .read(move |w| w.save_file_version(commit_id, path, destination))
         .await?;
     Ok(Some(shown))
 }
