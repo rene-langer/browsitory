@@ -23,6 +23,7 @@ extension/*.vsix
 
 # E2E
 e2e/node_modules
+e2e/failure-screenshots
 extension/e2e/node_modules
 extension/e2e/out
 extension/e2e/.vscode-test
