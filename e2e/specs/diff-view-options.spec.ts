@@ -165,7 +165,7 @@ describe("Browsitory diff word wrap and whole file", () => {
     // l20 is 15 lines from either change: only the whole file shows it.
     await waitUntilInPage(".diff-line-context", " l20", { contains: true });
     const hunkHeaders = await browser.execute(
-      () => [...document.querySelectorAll("span")].filter((el) => el.textContent!.startsWith("@@ ")).length,
+      () => [...document.querySelectorAll("span")].filter((el) => /^(Removed )?[Ll]ines? \d/.test(el.textContent!)).length,
     );
     expect(hunkHeaders).toBe(1);
 
