@@ -178,8 +178,9 @@ export function UncommittedDiffPane({
   // ever increase, so the sum changes whenever either does — and a hunk action, which bumps both
   // (its `runMutation` ends in a `refresh()`), still yields one refetch rather than two when React
   // batches the two updates into one render. The viewer refetches on any refresh: that is
-  // deliberate, it's the only signal an external edit, stash apply or pull leaves behind (there's
-  // no file watcher). Only the current file's diff is ever fetched (#639).
+  // deliberate, it's the only signal an external edit, stash apply or pull leaves behind (changes
+  // made outside the app reach it as a refresh too, `useExternalChanges`, #650). Only the
+  // current file's diff is ever fetched (#639).
   const staleness = (key: string) => (diffVersion[key] ?? 0) + refreshGeneration;
 
   const stagedEntries = status.filter((entry) => entry.staged);

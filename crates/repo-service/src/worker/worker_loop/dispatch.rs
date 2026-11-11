@@ -27,6 +27,7 @@ where
                 panic!("intentional panic for worker-crash-recovery test")
             }
             Command::GetStatus { reply } => status::get_status(&self.repo, reply),
+            Command::GetChangeStamp { reply } => status::get_change_stamp(&self.repo, reply),
             Command::GetCommitGraph {
                 limit,
                 selection,

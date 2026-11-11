@@ -27,12 +27,14 @@ pub struct StatusEntry {
     pub kind: StatusKind,
 }
 
-pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
-    // Explicit options, because libgit2's defaults both do too much and too little: they
-    // scan ignored files (whose flags then resolve to `None`/`None` and get dropped below)
-    // and they leave rename detection off. Renames are detected between HEAD and the index
-    // only, like `git status`: a file moved but not staged is "deleted" + "new", so per-file
-    // stage and discard keep acting on one path (#137).
+/// The options `status` reads with; `change_stamp` reads the same entries (#650).
+///
+/// Explicit options, because libgit2's defaults both do too much and too little: they scan
+/// ignored files (whose flags then resolve to `None`/`None` and get dropped by `status`) and
+/// they leave rename detection off. Renames are detected between HEAD and the index only, like
+/// `git status`: a file moved but not staged is "deleted" + "new", so per-file stage and discard
+/// keep acting on one path (#137).
+pub(crate) fn status_options() -> git2::StatusOptions {
     let mut options = git2::StatusOptions::new();
     options
         .include_untracked(true)
@@ -40,8 +42,11 @@ pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> 
         .include_ignored(false)
         .renames_head_to_index(true)
         .renames_index_to_workdir(false);
+    options
+}
 
-    let statuses = repo.statuses(Some(&mut options))?;
+pub fn status(repo: &git2::Repository) -> Result<Vec<StatusEntry>, StatusError> {
+    let statuses = repo.statuses(Some(&mut status_options()))?;
     let mut entries = Vec::new();
 
     for entry in statuses.iter() {

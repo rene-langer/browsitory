@@ -44,6 +44,7 @@ import {
 } from "./state/updateCheck";
 import { DiffSettingsProvider } from "./state/DiffSettingsProvider";
 import { useOpenRepos } from "./state/useOpenRepos";
+import { useMountedTabs } from "./state/useMountedTabs";
 import { useTabChangeMarkers } from "./state/useTabChangeMarkers";
 import { useWorkspaces } from "./state/useWorkspaces";
 import styles from "./App.module.css";
@@ -117,6 +118,10 @@ function AppContent({
   // The tab whose "Rename tab…" dialog is open (#625).
   const [renamingTab, setRenamingTab] = useState<string | null>(null);
   const { activePath } = openRepos;
+  const mountedTabs = useMountedTabs(
+    openRepos.openRepos.map((repo) => repo.path),
+    activePath,
+  );
   const renameActiveTab = useCallback(() => setRenamingTab(activePath), [activePath]);
 
   // `RepoPicker` only surfaces errors from its own `pickRepoFolder`/`listRecentRepos` calls, and
@@ -556,19 +561,17 @@ function AppContent({
           onNewRepository={appCommands?.onNewRepository}
         />
       ) : (
-        // PERF-001: only the active tab's workspace is mounted — an inactive one renders nothing
-        // rather than staying mounted `display: none`. `RepoTabs` above still renders every open
-        // tab (so switching away and back is possible); this just avoids paying N tabs' worth of
-        // steady-state DOM/IPC cost while only one is ever visible. Switching back remounts a
-        // fresh `RepoWorkspace`, which re-fetches its own status/graph on mount — already the
-        // existing behavior for a newly-opened repo, so no new loading-state code is needed.
+        // The last few shown tabs stay mounted (#642, `useMountedTabs`): an inactive one is hidden
+        // with `display: none` and keeps its view, so switching back shows it as it was. Older
+        // tabs unmount (PERF-001: N tabs' worth of DOM and IPC for one visible view), and a
+        // remount reads the repository again.
         openRepos.openRepos
-          .filter((repo) => repo.path === openRepos.activePath)
+          .filter((repo) => mountedTabs.includes(repo.path))
           .map((repo) => (
             <RepoWorkspace
               key={repo.path}
               repoPath={repo.path}
-              active
+              active={repo.path === openRepos.activePath}
               client={client}
               onOpenRepoTab={openRepoTab}
               onBusyChange={onBusyChange}

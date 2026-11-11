@@ -109,6 +109,10 @@ pub(crate) enum Command {
     GetStatus {
         reply: Sender<Result<Vec<StatusEntry>, ErrorDto>>,
     },
+    /// `git_core::change_stamp` (#650): the frontend's check for changes made outside the app.
+    GetChangeStamp {
+        reply: Sender<Result<String, ErrorDto>>,
+    },
     GetCommitGraph {
         limit: usize,
         selection: GraphSelection,

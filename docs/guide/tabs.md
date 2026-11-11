@@ -1,13 +1,18 @@
 # Multiple repositories
 
 Every repo you open lands in its own tab at the top of the window, independent
-of the others. Only the active tab's view is kept loaded: switching back to a
-tab reloads its history and changes, and a half-typed commit message is kept,
-but the selected row and expanded diff sections start fresh. Open another via
+of the others. The last four tabs you looked at stay loaded: switching back to
+one of them shows it as you left it, with the same selected commit, scroll
+positions, open panels, search and file history, and reads the repository again
+only if it changed meanwhile. A tab you haven't looked at for longer starts
+fresh and reloads its history and changes; its half-typed commit message is
+still kept. Open another via
 **+** at the end of the tab bar, or (desktop app) drop its folder on the window. Close a tab with its **×** button (dimmed on the other tabs), **Delete**
 on the focused tab, or **Close tab** in the command palette. While a push,
 fetch, or similar operation is running in the active tab, that tab can't be
 closed until it finishes.
+With a tab focused, **Left**/**Right**, **Home** and **End** move the focus to
+another tab without switching to it; **Enter** or **Space** switches.
 To bring a closed tab back, use **Reopen closed tab** in the command palette or in a
 tab's menu (right-click), or press **Ctrl+Shift+T** (**⇧⌘T** on macOS) where the host doesn't
 use that key. It returns to its old place and workspace group and becomes the active tab;
@@ -17,6 +22,20 @@ A dot after a tab's name means its repository has uncommitted changes: staged,
 unstaged or untracked files, as the **Uncommitted changes** row counts them. The
 active tab's dot follows its changes live; the other tabs are checked when you
 leave them, when the window comes back into view, and after a fetch.
+
+## Changes made outside Browsitory
+
+You don't need to refresh after working in a terminal, an editor or another Git
+tool. While a tab is shown, Browsitory checks every few seconds whether anything
+it displays has changed: files, staged changes, commits, branches, tags,
+stashes, remotes, or a merge or rebase in progress. When something has, it
+reloads the tab; when nothing has, it reads nothing more. It also checks at once
+when the window gets the focus back or comes into view (in VSCode, when the
+panel is shown again), and when you switch to a tab. Files your `.gitignore`
+ignores don't count, and nothing is checked while one of the tab's own actions
+runs: its own reload follows when it is done. In a very large repository, where
+a check takes longer, the checks come less often (at most one a minute). The
+**Refresh** command still reloads at once.
 Reopening Browsitory restores every tab you had open, workspace groupings
 included.
 

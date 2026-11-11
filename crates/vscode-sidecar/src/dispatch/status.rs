@@ -16,6 +16,12 @@ use super::{
     RepoPathParams, Repos,
 };
 
+/// The repository's change stamp (#650), a string.
+pub(super) fn get_change_stamp(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    let stamp = worker_handle(repos, &params.repo_path)?.get_change_stamp()?;
+    Ok(Value::String(stamp))
+}
+
 pub(super) fn get_status(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let entries: Vec<StatusEntryDto> = worker_handle(repos, &params.repo_path)?
         .get_status()?
