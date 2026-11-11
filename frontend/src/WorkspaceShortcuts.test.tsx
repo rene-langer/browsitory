@@ -90,25 +90,25 @@ describe("global shortcuts for the core loop (#646)", () => {
   });
 
   it("stages all changes on Ctrl+Shift+A, but not from a text field", async () => {
-    const stageFile = vi.fn(async () => {});
-    await renderApp(shortcutClient({ stageFile }));
+    const stagePaths = vi.fn(async () => {});
+    await renderApp(shortcutClient({ stagePaths }));
     await screen.findByRole("listbox", { name: "Unstaged changes" });
 
     const search = screen.getByRole("combobox", { name: /Search commits/ });
     fireEvent.keyDown(search, { key: "A", code: "KeyA", ctrlKey: true, shiftKey: true });
-    expect(stageFile).not.toHaveBeenCalled();
+    expect(stagePaths).not.toHaveBeenCalled();
 
     fireEvent.keyDown(window, { key: "A", code: "KeyA", ctrlKey: true, shiftKey: true });
-    await waitFor(() => expect(stageFile).toHaveBeenCalledWith("/repos/a", "a.txt"));
+    await waitFor(() => expect(stagePaths).toHaveBeenCalledWith("/repos/a", ["a.txt"]));
   });
 
   // #642: the last few tabs stay mounted, hidden; their global listeners must stay quiet.
   it("runs a shortcut only in the shown tab while another tab's workspace is mounted in the background", async () => {
-    const stageFile = vi.fn(async () => {});
+    const stagePaths = vi.fn(async () => {});
     const getStatus = vi.fn(async (_path: string) => [change]);
     const view = await renderApp(
       shortcutClient({
-        stageFile,
+        stagePaths,
         getStatus,
         listOpenRepos: async () => ({
           entries: [
@@ -125,8 +125,8 @@ describe("global shortcuts for the core loop (#646)", () => {
     await screen.findByRole("listbox", { name: "Unstaged changes" });
 
     fireEvent.keyDown(window, { key: "A", code: "KeyA", ctrlKey: true, shiftKey: true });
-    await waitFor(() => expect(stageFile).toHaveBeenCalledWith("/repos/b", "a.txt"));
-    expect(stageFile).not.toHaveBeenCalledWith("/repos/a", expect.anything());
+    await waitFor(() => expect(stagePaths).toHaveBeenCalledWith("/repos/b", ["a.txt"]));
+    expect(stagePaths).not.toHaveBeenCalledWith("/repos/a", expect.anything());
 
     const statusReadsOf = (path: string) => getStatus.mock.calls.filter(([repo]) => repo === path).length;
     const readsOfA = statusReadsOf("/repos/a");
