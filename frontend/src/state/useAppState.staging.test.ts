@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { RepoClient, StatusEntry } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
@@ -98,19 +98,17 @@ describe("useAppState", () => {
   // DiffPane's "Stage all" used to loop the per-file `stageFile`, and every one of those is its
   // own `runMutation` — so an N-file batch cost N stage calls *plus* N full `refresh()` rounds
   // (~13 IPC reads each, plus one per remote), all serialized through the single per-repo worker
-  // thread. The bulk variants still make one IPC call per path (there is no bulk backend op) but
-  // do it inside a single mutation, so the whole batch refreshes once.
-  it("stageAllFiles stages every path but refreshes only once for the whole batch", async () => {
-    const stagedPaths: string[] = [];
+  // thread. The bulk variants make one multi-path backend call (one undo step, #528) inside a
+  // single mutation, so the whole batch refreshes once.
+  it("stageAllFiles stages every path in one call and refreshes only once (#528)", async () => {
     let getStatusCalls = 0;
+    const stagePaths = vi.fn(async () => {});
     const client = transferClient({
       getStatus: async () => {
         getStatusCalls += 1;
         return [];
       },
-      stageFile: async (_repoPath: string, path: string) => {
-        stagedPaths.push(path);
-      },
+      stagePaths,
     });
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -119,22 +117,21 @@ describe("useAppState", () => {
 
     await act(() => result.current.stageAllFiles(["a.txt", "b.txt", "c.txt"]));
 
-    expect(stagedPaths).toEqual(["a.txt", "b.txt", "c.txt"]);
+    expect(stagePaths).toHaveBeenCalledTimes(1);
+    expect(stagePaths).toHaveBeenCalledWith(TEST_REPO_PATH, ["a.txt", "b.txt", "c.txt"]);
     expect(getStatusCalls - refreshesBefore).toBe(1);
     expect(result.current.state.pending).toBe(false);
   });
 
-  it("unstageAllFiles unstages every path but refreshes only once for the whole batch", async () => {
-    const unstagedPaths: string[] = [];
+  it("unstageAllFiles unstages every path in one call and refreshes only once (#528)", async () => {
     let getStatusCalls = 0;
+    const unstagePaths = vi.fn(async () => {});
     const client = transferClient({
       getStatus: async () => {
         getStatusCalls += 1;
         return [];
       },
-      unstageFile: async (_repoPath: string, path: string) => {
-        unstagedPaths.push(path);
-      },
+      unstagePaths,
     });
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -143,21 +140,20 @@ describe("useAppState", () => {
 
     await act(() => result.current.unstageAllFiles(["a.txt", "b.txt"]));
 
-    expect(unstagedPaths).toEqual(["a.txt", "b.txt"]);
+    expect(unstagePaths).toHaveBeenCalledTimes(1);
+    expect(unstagePaths).toHaveBeenCalledWith(TEST_REPO_PATH, ["a.txt", "b.txt"]);
     expect(getStatusCalls - refreshesBefore).toBe(1);
   });
 
-  it("ignorePaths adds every pattern in order but refreshes only once (#449)", async () => {
-    const patterns: string[] = [];
+  it("ignorePaths adds every pattern in order in one call and refreshes only once (#449, #528)", async () => {
     let getStatusCalls = 0;
+    const ignorePaths = vi.fn(async () => {});
     const client = transferClient({
       getStatus: async () => {
         getStatusCalls += 1;
         return [];
       },
-      ignorePath: async (_repoPath: string, pattern: string) => {
-        patterns.push(pattern);
-      },
+      ignorePaths,
     });
 
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
@@ -166,7 +162,8 @@ describe("useAppState", () => {
 
     await act(() => result.current.ignorePaths(["/a.log", "/b.log"]));
 
-    expect(patterns).toEqual(["/a.log", "/b.log"]);
+    expect(ignorePaths).toHaveBeenCalledTimes(1);
+    expect(ignorePaths).toHaveBeenCalledWith(TEST_REPO_PATH, ["/a.log", "/b.log"]);
     expect(getStatusCalls - refreshesBefore).toBe(1);
   });
 
