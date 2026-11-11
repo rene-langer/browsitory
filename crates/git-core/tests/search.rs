@@ -379,15 +379,69 @@ fn merges_only_and_none_split_on_parent_count() {
     assert_eq!(summaries(&repo, "-merges:only after"), ["after work"]);
 }
 
+/// `commit_tree`, authored and committed at `seconds` after the epoch.
+fn commit_tree_at(
+    repo: &Repository,
+    files: &[(&str, &str, u32)],
+    parents: &[Oid],
+    message: &str,
+    seconds: i64,
+) -> Oid {
+    let tree = repo
+        .find_commit(commit_tree(repo, files, parents, message))
+        .unwrap()
+        .tree()
+        .unwrap();
+    let sig = Signature::new("Test User", "test@example.com", &at(seconds, 0)).unwrap();
+    let parents: Vec<git2::Commit> = parents
+        .iter()
+        .map(|id| repo.find_commit(*id).unwrap())
+        .collect();
+    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
+    repo.commit(None, &sig, &sig, message, &tree, &parent_refs)
+        .unwrap()
+}
+
 /// `trunk`: base → direct → merge(direct, side) → after; `side`: base → side work. Every
 /// message contains "work".
+///
+/// Fixed commit times (#770): `direct work` and `side work` are both children of `base work`,
+/// so a walk newest first orders them by time alone. `side work` is the older one, and a full
+/// walk lists `direct work` first. With the clock's times they tied in the same second (the
+/// walk's tie order) or not, and the order changed with the runner's timing.
 fn merged_side_branch(repo: &Repository) {
     const FILE: u32 = 0o100644;
-    let base = commit_tree(repo, &[("a.txt", "a", FILE)], &[], "base work");
-    let direct = commit_tree(repo, &[("a.txt", "d", FILE)], &[base], "direct work");
-    let side = commit_tree(repo, &[("a.txt", "s", FILE)], &[base], "side work");
-    let merge = commit_tree(repo, &[("a.txt", "m", FILE)], &[direct, side], "merge work");
-    let after = commit_tree(repo, &[("a.txt", "x", FILE)], &[merge], "after work");
+    const HOUR: i64 = 3600;
+    let t0 = 1_700_000_000;
+    let base = commit_tree_at(repo, &[("a.txt", "a", FILE)], &[], "base work", t0);
+    let side = commit_tree_at(
+        repo,
+        &[("a.txt", "s", FILE)],
+        &[base],
+        "side work",
+        t0 + HOUR,
+    );
+    let direct = commit_tree_at(
+        repo,
+        &[("a.txt", "d", FILE)],
+        &[base],
+        "direct work",
+        t0 + 2 * HOUR,
+    );
+    let merge = commit_tree_at(
+        repo,
+        &[("a.txt", "m", FILE)],
+        &[direct, side],
+        "merge work",
+        t0 + 3 * HOUR,
+    );
+    let after = commit_tree_at(
+        repo,
+        &[("a.txt", "x", FILE)],
+        &[merge],
+        "after work",
+        t0 + 4 * HOUR,
+    );
     repo.reference("refs/heads/trunk", after, true, "test")
         .unwrap();
     repo.reference("refs/heads/side", side, true, "test")
