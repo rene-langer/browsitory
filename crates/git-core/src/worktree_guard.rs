@@ -27,8 +27,11 @@ use beneath_windows as beneath;
 
 #[cfg(any(unix, windows))]
 mod walk_types {
-    //! The shared vocabulary of the platform walkers (`beneath_unix`, `beneath_windows`).
-    use std::ffi::OsStr;
+    //! The shared vocabulary of the platform walkers (`beneath_unix`, `beneath_windows`), and
+    //! the walk itself ([`walk_from`]), written once over the OS primitives of [`HeldDir`].
+    use std::ffi::{OsStr, OsString};
+    use std::io;
+    use std::path::Path;
 
     /// How a walk treats a link where it needs a folder.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +64,39 @@ mod walk_types {
 
     pub(crate) fn no_step(_: Step<'_>) {}
 
+    /// How often a walk (or a temporary file's creation, or another step that races a change of
+    /// the work tree) retries before giving up.
+    pub(crate) const ATTEMPTS: usize = 8;
+
+    /// At most this many units of the leaf's name go into its temporary file's name: bytes on
+    /// Unix, UTF-16 units on Windows. Each platform cuts on a whole character.
+    pub(crate) const TEMP_PREFIX_LEN: usize = 64;
+
+    /// The next number for a temporary file's name, unique in this process.
+    pub(crate) fn next_temp_number() -> usize {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// A temporary file's name in the platform's units: `.<prefix>.browsitory-<pid>-<n>.tmp`, a
+    /// leading dot (which hides it on Unix), the start of the leaf's name (`prefix`, already cut
+    /// by the caller) and this process, so a left-over one (after a crash) says where it came
+    /// from. `encode` turns the ASCII parts into the platform's units.
+    pub(crate) fn temp_name_units<U: Copy>(
+        prefix: &[U],
+        n: usize,
+        encode: impl Fn(&str) -> Vec<U>,
+    ) -> Vec<U> {
+        let mut name = encode(".");
+        name.extend_from_slice(prefix);
+        name.extend(encode(&format!(
+            ".browsitory-{}-{n}.tmp",
+            std::process::id()
+        )));
+        name
+    }
+
     /// Where a walk ended.
     pub(crate) enum Walk<B> {
         Found(B),
@@ -72,9 +108,455 @@ mod walk_types {
         /// A component on the way is a file or something else that isn't a folder.
         NotDir,
     }
+
+    impl<B> Walk<B> {
+        /// The same walk's end, with a found `B` turned into a `C`.
+        pub(crate) fn map<C>(self, f: impl FnOnce(B) -> C) -> Walk<C> {
+            match self {
+                Walk::Found(found) => Walk::Found(f(found)),
+                Walk::Link => Walk::Link,
+                Walk::Missing => Walk::Missing,
+                Walk::NotDir => Walk::NotDir,
+            }
+        }
+    }
+
+    /// What stands at a name in a held folder, as [`HeldDir::open_child_dir`] found it.
+    pub(crate) enum Child<D> {
+        /// A folder, now held.
+        Dir(D),
+        Missing,
+        /// A link (Unix symlink; Windows name surrogate: symbolic link, junction, …).
+        Link,
+        /// A file or something else that isn't a folder.
+        NotDir,
+        /// It changed while it was being looked at (a folder again, or gone): look again. Only
+        /// Unix reports it; Windows judges the handle it opened, so there is nothing to recheck.
+        #[cfg_attr(windows, allow(dead_code))]
+        Changed,
+    }
+
+    /// The OS primitives a walk needs from a held folder (a Unix descriptor, a Windows handle).
+    /// Each acts on a name directly in this folder, never following a link.
+    pub(crate) trait HeldDir: Sized {
+        /// Opens the folder `name` and holds it, or says what stands there instead.
+        fn open_child_dir(&self, name: &OsStr) -> io::Result<Child<Self>>;
+        /// Creates the folder `name`; `false` when something already exists there.
+        fn create_child_dir(&self, name: &OsStr) -> io::Result<bool>;
+        /// Removes the link `name` itself (never its target). `true` reports [`Step::Cleared`].
+        fn clear_link(&self, name: &OsStr) -> io::Result<bool>;
+    }
+
+    /// The folders a walk holds, from its root down to the leaf's parent.
+    pub(crate) struct Held<D> {
+        /// `dirs[0]` is the walk's root; `dirs[i + 1]` is `names[i]` opened in `dirs[i]`.
+        pub(crate) dirs: Vec<D>,
+        /// Every component of the path, the leaf last (`names.len() == dirs.len()`).
+        pub(crate) names: Vec<OsString>,
+    }
+
+    /// Walks `rel` (a plain relative path) from the held folder `root` down to its last
+    /// component's parent, holding each folder. A component that keeps changing under the walk
+    /// is tried [`ATTEMPTS`] times before the walk gives up with an error.
+    pub(crate) fn walk_from<D: HeldDir>(
+        root: D,
+        rel: &Path,
+        on_link: OnLink,
+        on_missing: OnMissing,
+        step: StepFn<'_>,
+    ) -> io::Result<Walk<Held<D>>> {
+        let names: Vec<OsString> = rel
+            .components()
+            .map(|c| c.as_os_str().to_os_string())
+            .collect();
+        if names.is_empty() {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        let mut dirs: Vec<D> = vec![root];
+        for name in &names[..names.len() - 1] {
+            let mut next = None;
+            for _ in 0..ATTEMPTS {
+                let dir = &dirs[dirs.len() - 1];
+                match dir.open_child_dir(name)? {
+                    Child::Dir(child) => {
+                        step(Step::Opened(name));
+                        next = Some(child);
+                        break;
+                    }
+                    Child::Missing => match on_missing {
+                        OnMissing::Stop => return Ok(Walk::Missing),
+                        OnMissing::Create => {
+                            if dir.create_child_dir(name)? {
+                                step(Step::Created(name));
+                            }
+                        }
+                    },
+                    Child::Link => match on_link {
+                        OnLink::Refuse => return Ok(Walk::Link),
+                        OnLink::Clear => {
+                            if dir.clear_link(name)? {
+                                step(Step::Cleared(name));
+                            }
+                            if on_missing == OnMissing::Stop {
+                                return Ok(Walk::Link);
+                            }
+                        }
+                    },
+                    Child::NotDir => return Ok(Walk::NotDir),
+                    Child::Changed => {}
+                }
+            }
+            match next {
+                Some(dir) => dirs.push(dir),
+                None => {
+                    return Err(io::Error::other(
+                        "the working tree kept changing while it was being written",
+                    ))
+                }
+            }
+        }
+        Ok(Walk::Found(Held { dirs, names }))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        //! [`walk_from`] against a scripted [`HeldDir`], so every branch of the walk loop runs
+        //! on every platform, including the races a real file system can't be made to show.
+        use super::*;
+        use std::cell::RefCell;
+        use std::collections::VecDeque;
+        use std::rc::Rc;
+
+        /// What the next [`HeldDir::open_child_dir`] answers.
+        #[derive(Debug, Clone, Copy)]
+        enum Answer {
+            Dir,
+            Missing,
+            Link,
+            NotDir,
+            Changed,
+            Fail,
+        }
+
+        #[derive(Default)]
+        struct World {
+            answers: VecDeque<Answer>,
+            /// What `create_child_dir` and `clear_link` answer.
+            created: bool,
+            cleared: bool,
+            /// Every call, as `open <folder>/<name>`, `create …`, `clear …`.
+            calls: Vec<String>,
+        }
+
+        /// A held folder: its path from the walk's root (`""` for the root).
+        struct FakeDir {
+            path: String,
+            world: Rc<RefCell<World>>,
+        }
+
+        impl FakeDir {
+            fn child_path(&self, name: &OsStr) -> String {
+                let name = name.to_str().unwrap();
+                if self.path.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{}/{name}", self.path)
+                }
+            }
+        }
+
+        impl HeldDir for FakeDir {
+            fn open_child_dir(&self, name: &OsStr) -> io::Result<Child<Self>> {
+                let path = self.child_path(name);
+                let mut world = self.world.borrow_mut();
+                world.calls.push(format!("open {path}"));
+                let answer = world.answers.pop_front().expect("an answer left");
+                Ok(match answer {
+                    Answer::Dir => Child::Dir(FakeDir {
+                        path,
+                        world: Rc::clone(&self.world),
+                    }),
+                    Answer::Missing => Child::Missing,
+                    Answer::Link => Child::Link,
+                    Answer::NotDir => Child::NotDir,
+                    Answer::Changed => Child::Changed,
+                    Answer::Fail => return Err(io::Error::other("open failed")),
+                })
+            }
+
+            fn create_child_dir(&self, name: &OsStr) -> io::Result<bool> {
+                let mut world = self.world.borrow_mut();
+                world
+                    .calls
+                    .push(format!("create {}", self.child_path(name)));
+                Ok(world.created)
+            }
+
+            fn clear_link(&self, name: &OsStr) -> io::Result<bool> {
+                let mut world = self.world.borrow_mut();
+                world.calls.push(format!("clear {}", self.child_path(name)));
+                Ok(world.cleared)
+            }
+        }
+
+        /// The walk's end (`found <held folders>` / `link` / `missing` / `not a folder` /
+        /// `error: …`), the steps it reported, and the calls it made.
+        struct Run {
+            end: String,
+            steps: Vec<String>,
+            calls: Vec<String>,
+        }
+
+        fn run(
+            rel: &str,
+            answers: &[Answer],
+            on_link: OnLink,
+            on_missing: OnMissing,
+            created: bool,
+            cleared: bool,
+        ) -> Run {
+            let world = Rc::new(RefCell::new(World {
+                answers: answers.iter().copied().collect(),
+                created,
+                cleared,
+                calls: Vec::new(),
+            }));
+            let root = FakeDir {
+                path: String::new(),
+                world: Rc::clone(&world),
+            };
+            let mut steps = Vec::new();
+            let mut record = |step: Step<'_>| steps.push(format!("{step:?}"));
+            let end = match walk_from(root, Path::new(rel), on_link, on_missing, &mut record) {
+                Ok(Walk::Found(held)) => {
+                    let names: Vec<_> = held.names.iter().map(|n| n.to_str().unwrap()).collect();
+                    assert_eq!(names, rel.split('/').collect::<Vec<_>>(), "{rel}");
+                    let dirs: Vec<_> = held.dirs.iter().map(|d| d.path.as_str()).collect();
+                    format!("found {dirs:?}")
+                }
+                Ok(Walk::Link) => "link".to_string(),
+                Ok(Walk::Missing) => "missing".to_string(),
+                Ok(Walk::NotDir) => "not a folder".to_string(),
+                Err(error) => format!("error: {error}"),
+            };
+            let calls = world.borrow().calls.clone();
+            assert!(
+                world.borrow().answers.is_empty(),
+                "unused answers for {rel}"
+            );
+            Run { end, steps, calls }
+        }
+
+        fn refuse(rel: &str, answers: &[Answer]) -> Run {
+            run(rel, answers, OnLink::Refuse, OnMissing::Stop, true, true)
+        }
+
+        const KEPT_CHANGING: &str =
+            "error: the working tree kept changing while it was being written";
+
+        #[test]
+        fn temp_numbers_are_never_handed_out_twice() {
+            let first = next_temp_number();
+            let second = next_temp_number();
+            assert!(second > first, "{first} then {second}");
+        }
+
+        #[test]
+        fn holds_every_folder_down_to_the_leafs_parent() {
+            let r = refuse("a/b/f", &[Answer::Dir, Answer::Dir]);
+            assert_eq!(r.end, r#"found ["", "a", "a/b"]"#);
+            assert_eq!(r.calls, ["open a", "open a/b"]);
+            assert_eq!(r.steps, [r#"Opened("a")"#, r#"Opened("b")"#]);
+        }
+
+        #[test]
+        fn a_leaf_alone_is_found_in_the_root_without_opening_anything() {
+            let r = refuse("f", &[]);
+            assert_eq!(r.end, r#"found [""]"#);
+            assert!(r.calls.is_empty());
+            assert!(r.steps.is_empty());
+        }
+
+        #[test]
+        fn an_empty_path_is_invalid_input() {
+            let world = Rc::new(RefCell::new(World::default()));
+            let root = FakeDir {
+                path: String::new(),
+                world,
+            };
+            let error = walk_from(
+                root,
+                Path::new(""),
+                OnLink::Refuse,
+                OnMissing::Stop,
+                &mut no_step,
+            )
+            .err()
+            .expect("an error");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        }
+
+        #[test]
+        fn a_missing_folder_stops_the_walk_or_is_created() {
+            let r = refuse("a/b/f", &[Answer::Dir, Answer::Missing]);
+            assert_eq!(r.end, "missing");
+            assert_eq!(r.calls, ["open a", "open a/b"]);
+
+            let create = |created| {
+                let answers = [Answer::Missing, Answer::Dir];
+                run(
+                    "a/f",
+                    &answers,
+                    OnLink::Refuse,
+                    OnMissing::Create,
+                    created,
+                    true,
+                )
+            };
+            let r = create(true);
+            assert_eq!(r.end, r#"found ["", "a"]"#);
+            assert_eq!(r.calls, ["open a", "create a", "open a"]);
+            assert_eq!(r.steps, [r#"Created("a")"#, r#"Opened("a")"#]);
+            // Someone else created it first: no `Created` step, the walk goes on.
+            let r = create(false);
+            assert_eq!(r.end, r#"found ["", "a"]"#);
+            assert_eq!(r.calls, ["open a", "create a", "open a"]);
+            assert_eq!(r.steps, [r#"Opened("a")"#]);
+        }
+
+        #[test]
+        fn a_link_is_refused_without_touching_it() {
+            let r = refuse("a/b/f", &[Answer::Dir, Answer::Link]);
+            assert_eq!(r.end, "link");
+            assert_eq!(r.calls, ["open a", "open a/b"]);
+            assert_eq!(r.steps, [r#"Opened("a")"#]);
+        }
+
+        #[test]
+        fn a_cleared_link_still_ends_a_walk_that_creates_nothing() {
+            let clear = |cleared| {
+                let answers = [Answer::Link];
+                run(
+                    "a/f",
+                    &answers,
+                    OnLink::Clear,
+                    OnMissing::Stop,
+                    true,
+                    cleared,
+                )
+            };
+            let r = clear(true);
+            assert_eq!(r.end, "link");
+            assert_eq!(r.calls, ["open a", "clear a"]);
+            assert_eq!(r.steps, [r#"Cleared("a")"#]);
+            // Gone before it could be removed: no `Cleared` step.
+            let r = clear(false);
+            assert_eq!(r.end, "link");
+            assert_eq!(r.calls, ["open a", "clear a"]);
+            assert!(r.steps.is_empty());
+        }
+
+        #[test]
+        fn a_cleared_link_is_replaced_by_a_new_folder_when_creating() {
+            let answers = [Answer::Link, Answer::Missing, Answer::Dir];
+            let r = run(
+                "a/f",
+                &answers,
+                OnLink::Clear,
+                OnMissing::Create,
+                true,
+                true,
+            );
+            assert_eq!(r.end, r#"found ["", "a"]"#);
+            assert_eq!(
+                r.calls,
+                ["open a", "clear a", "open a", "create a", "open a"]
+            );
+            assert_eq!(
+                r.steps,
+                [r#"Cleared("a")"#, r#"Created("a")"#, r#"Opened("a")"#]
+            );
+        }
+
+        #[test]
+        fn something_that_is_not_a_folder_ends_the_walk() {
+            let r = run(
+                "a/b/f",
+                &[Answer::Dir, Answer::NotDir],
+                OnLink::Clear,
+                OnMissing::Create,
+                true,
+                true,
+            );
+            assert_eq!(r.end, "not a folder");
+            assert_eq!(r.calls, ["open a", "open a/b"]);
+        }
+
+        #[test]
+        fn an_error_opening_a_folder_ends_the_walk() {
+            let r = refuse("a/b/f", &[Answer::Dir, Answer::Fail]);
+            assert_eq!(r.end, "error: open failed");
+        }
+
+        #[test]
+        fn a_folder_that_keeps_changing_is_tried_attempts_times() {
+            // The last attempt still succeeds.
+            let mut answers = vec![Answer::Changed; ATTEMPTS - 1];
+            answers.push(Answer::Dir);
+            let r = refuse("a/f", &answers);
+            assert_eq!(r.end, r#"found ["", "a"]"#);
+            assert_eq!(r.calls.len(), ATTEMPTS);
+            assert_eq!(r.steps, [r#"Opened("a")"#]);
+            // Then the walk gives up.
+            let r = refuse("a/f", &[Answer::Changed; ATTEMPTS]);
+            assert_eq!(r.end, KEPT_CHANGING);
+            assert_eq!(r.calls.len(), ATTEMPTS);
+            assert!(r.steps.is_empty());
+        }
+
+        #[test]
+        fn each_folder_gets_its_own_attempts() {
+            let mut answers = vec![Answer::Changed; ATTEMPTS - 1];
+            answers.push(Answer::Dir);
+            answers.extend(vec![Answer::Changed; ATTEMPTS - 1]);
+            answers.push(Answer::Dir);
+            let r = refuse("a/b/f", &answers);
+            assert_eq!(r.end, r#"found ["", "a", "a/b"]"#);
+        }
+
+        #[test]
+        fn a_folder_that_keeps_vanishing_or_turning_into_a_link_gives_up_too() {
+            // Created and gone again, every time.
+            let answers = [Answer::Missing; ATTEMPTS];
+            let r = run(
+                "a/f",
+                &answers,
+                OnLink::Refuse,
+                OnMissing::Create,
+                true,
+                true,
+            );
+            assert_eq!(r.end, KEPT_CHANGING);
+            assert_eq!(r.steps, vec![r#"Created("a")"#; ATTEMPTS]);
+            // Cleared and back again, every time.
+            let answers = [Answer::Link; ATTEMPTS];
+            let r = run(
+                "a/f",
+                &answers,
+                OnLink::Clear,
+                OnMissing::Create,
+                true,
+                true,
+            );
+            assert_eq!(r.end, KEPT_CHANGING);
+            assert_eq!(r.steps, vec![r#"Cleared("a")"#; ATTEMPTS]);
+        }
+    }
 }
+#[cfg(all(test, any(unix, windows)))]
+use walk_types::Step;
 #[cfg(any(unix, windows))]
-use walk_types::{no_step, OnLink, OnMissing, Step, StepFn, Walk};
+use walk_types::{no_step, OnLink, OnMissing, StepFn, Walk};
 
 /// Git's file modes for a symlink and a submodule (gitlink).
 const MODE_LINK: u32 = 0o120000;
