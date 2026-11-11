@@ -1756,7 +1756,7 @@ mod tests {
         std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o555)).unwrap();
         let created = held(&d).create_child_dir(OsStr::new("new"));
         std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let error = created.err().expect("an error");
+        let error = created.expect_err("an error");
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert!(!d.join("new").exists());
     }
