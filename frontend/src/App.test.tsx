@@ -303,6 +303,8 @@ describe("App", () => {
 
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     const input = await screen.findByRole("combobox", { name: "Command palette" });
+    // The overlay is a named dialog (#669).
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toContainElement(input);
     fireEvent.change(input, { target: { value: "Open user guide" } });
     fireEvent.click(await screen.findByRole("option", { name: "Open user guide" }));
 
@@ -413,6 +415,7 @@ describe("App", () => {
       fireEvent.click(help);
       fireEvent.click(await screen.findByRole("menuitem", { name: "Keyboard shortcuts" }));
       expect(await screen.findByRole("heading", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Close" }));
       await waitFor(() => expect(screen.queryByRole("heading", { name: "Keyboard shortcuts" })).not.toBeInTheDocument());
 

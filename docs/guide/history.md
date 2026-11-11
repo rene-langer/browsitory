@@ -155,8 +155,8 @@ default, remembered across sessions, and in the command palette as **Toggle whit
 **Wrap lines** wraps long lines at the pane's width, or turns wrapping off so each line stays on
 one row and the diff scrolls sideways. Line numbers stay next to their line either way, and
 selecting and staging lines works the same. The button sets **Preferences → Diff → Word wrap**
-to **On** or **Off** for every diff; the setting also has **Auto** (the default, shown as a
-half-pressed button). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
+to **On** or **Off** for every diff; the setting also has **Auto** (the default, shown with a
+dashed outline instead of the pressed button's tint and solid outline). Auto wraps the split view, prose files (Markdown, plain text, reStructuredText,
 AsciiDoc and the like) and any diff with a line longer than 300 characters, such as minified or
 generated files; code in the unified view scrolls sideways so its indentation stays readable.
 

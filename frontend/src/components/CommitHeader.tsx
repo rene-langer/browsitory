@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, type KeyboardEvent } from "react";
+import { CircleAlert, CircleCheck, CircleHelp, CircleX, type LucideIcon } from "lucide-react";
 import type {
   CommitDetails,
   CommitPerson,
@@ -14,7 +15,7 @@ import { describeError, type DescribedError } from "../lib/errorMessages";
 import { formatAbsoluteDate, formatRelativeDate } from "../lib/formatDate";
 import { filesChangedLabel } from "../lib/lineStats";
 import { parseMessageLinks } from "../lib/messageLinks";
-import { shortKey, signatureLabel } from "../lib/signatureStatus";
+import { shortKey, signatureLabel, type SignatureTone } from "../lib/signatureStatus";
 import styles from "./CommitHeader.module.css";
 import { LineStatsBadge } from "./LineStatsBadge";
 import { InlineError } from "./primitives/InlineError";
@@ -277,7 +278,7 @@ export function CommitHeader({
             <dt>Signature</dt>
             <dd>
               <span className={styles.signature} data-tone={label.tone} title={signature.detail ?? undefined}>
-                <span aria-hidden="true" className={styles.signatureIcon} />
+                <SignatureIcon tone={label.tone} />
                 {label.text}
               </span>
               {signature.signer !== null && <span>{signature.signer}</span>}
@@ -362,4 +363,17 @@ export function CommitHeader({
       </dl>
     </section>
   );
+}
+
+// Shape carries the tone too, so colour is never the only signal.
+const SIGNATURE_ICON: Record<SignatureTone, LucideIcon> = {
+  success: CircleCheck,
+  warning: CircleAlert,
+  danger: CircleX,
+  neutral: CircleHelp,
+};
+
+function SignatureIcon({ tone }: { tone: SignatureTone }) {
+  const Icon = SIGNATURE_ICON[tone];
+  return <Icon size={12} aria-hidden="true" className={styles.signatureIcon} />;
 }

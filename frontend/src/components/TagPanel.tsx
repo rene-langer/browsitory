@@ -8,7 +8,7 @@ import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import formStyles from "./primitives/FormDialog.module.css";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
-import { Toolbar } from "./primitives/Toolbar";
+import { ReasonButton } from "./primitives/ReasonButton";
 import { tagMenuItems } from "./tagMenuItems";
 import styles from "./TagPanel.module.css";
 
@@ -19,8 +19,10 @@ type TagMenu = { name: string; x: number; y: number; returnFocusTo?: HTMLElement
 /**
  * The list of every local tag: one line per tag (push-selection checkbox, name, kind), its
  * actions in a menu (the "…" button, right-click, or the Menu key / Shift+F10 on the row's
- * checkbox or "…"), the same items as the tag badge menu in the graph (`tagMenuItems`). Above
- * the list a name filter, below it push selected / push all. Tags are created from the graph
+ * checkbox or "…"), the same items as the tag badge menu in the graph (`tagMenuItems`), which
+ * pushes one tag. Above the list a name filter and "Select all" (the tags the filter shows);
+ * ticking tags shows a selection bar below it that pushes them (#674). Pushing every tag is the
+ * palette's "Push all tags to <remote>". Tags are created from the graph
  * (a commit's "Create tag…"), the palette or the header's "+" ("Create tag at HEAD…", #649).
  * Clicking a row (or Enter / Space on it) selects the tag's commit in the graph, like the
  * palette's "Go to tag…" (#441).
@@ -45,7 +47,7 @@ export function TagPanel({
   onDelete: (name: string) => Promise<void>;
   /** Opens the "Delete from remote" dialog for that tag. */
   onDeleteFromRemote: (name: string) => void;
-  /** Push selected (`names`) or all (`[]`) tags. */
+  /** Push the selected tags (`names`); `[]` would push all of them. */
   onPush: (remoteName: string, names: string[]) => Promise<void>;
   /** A row menu's "Push <tag> to <remote>". */
   onPushTag: (remoteName: string, name: string) => void;
@@ -105,6 +107,21 @@ export function TagPanel({
   const needle = filter.trim().toLowerCase();
   const shown = needle === "" ? tags : tags.filter((tag) => tag.name.toLowerCase().includes(needle));
   const disabledTitle = pushDisabled ? (operationDisabledReason ?? undefined) : undefined;
+  const shownSelected = shown.filter((tag) => selected.includes(tag.name)).length;
+  const allShownSelected = shown.length > 0 && shownSelected === shown.length;
+  const toggleAllShown = () => {
+    const names = shown.map((tag) => tag.name);
+    setSelected((current) =>
+      allShownSelected
+        ? current.filter((name) => !names.includes(name))
+        : [...current, ...names.filter((name) => !current.includes(name))],
+    );
+  };
+  const pushReason = pushDisabled
+    ? (operationDisabledReason ?? "Another operation is in progress.")
+    : remoteName === ""
+      ? "Add a remote to push tags to."
+      : null;
 
   return (
     <AccordionSection
@@ -146,95 +163,101 @@ export function TagPanel({
           {shown.length === 0 ? (
             <p className={styles.empty}>No tags match “{filter.trim()}”.</p>
           ) : (
-            <ul className={styles.list} aria-label="Tags">
-              {shown.map((tag) => (
-                <ListRow
-                  key={tag.name}
-                  onClick={() => onGoToTag(tag)}
-                  onOpenMenu={(anchor, trigger) =>
-                    setMenu({
-                      name: tag.name,
-                      ...anchor,
-                      returnFocusTo: trigger?.querySelector<HTMLElement>('button[aria-haspopup="menu"]') ?? undefined,
-                    })
-                  }
-                >
-                  <input
-                    type="checkbox"
-                    className={styles.select}
-                    checked={selected.includes(tag.name)}
-                    onChange={() => toggleTag(tag.name)}
-                    // Ticking the box selects the tag for pushing, not its commit.
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => openFromKey(event, tag.name)}
-                    aria-label={`Select ${tag.name}`}
-                    aria-keyshortcuts="Shift+F10 ContextMenu"
-                  />
-                  <Tag size={14} aria-hidden="true" className={styles.rowIcon} />
-                  <span className={styles.tagName} title={tag.name}>
-                    {tag.name}
-                  </span>
-                  <span className={styles.kind}>{tag.annotated ? "Annotated" : "Lightweight"}</span>
-                  <button
-                    type="button"
-                    className={styles.iconButton}
-                    aria-label={`Actions for ${tag.name}`}
-                    aria-haspopup="menu"
-                    aria-expanded={menu?.name === tag.name}
-                    data-menu-key={tag.name}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      const trigger = event.currentTarget;
-                      if (menu?.name === tag.name) {
-                        // A second click closes it; focus stays on the button.
-                        trigger.focus({ preventScroll: true });
-                        setMenu(null);
-                      } else {
-                        setMenu({ name: tag.name, ...rectAnchor(trigger), returnFocusTo: trigger });
-                      }
-                    }}
+            <>
+              <label className={styles.selectAll}>
+                <input
+                  type="checkbox"
+                  className={styles.select}
+                  checked={allShownSelected}
+                  ref={(element) => {
+                    if (element !== null) element.indeterminate = shownSelected > 0 && !allShownSelected;
+                  }}
+                  onChange={toggleAllShown}
+                />
+                {needle === "" ? "Select all" : "Select all shown"}
+              </label>
+              <ul className={styles.list} aria-label="Tags">
+                {shown.map((tag) => (
+                  <ListRow
+                    key={tag.name}
+                    onClick={() => onGoToTag(tag)}
+                    onOpenMenu={(anchor, trigger) =>
+                      setMenu({
+                        name: tag.name,
+                        ...anchor,
+                        returnFocusTo: trigger?.querySelector<HTMLElement>('button[aria-haspopup="menu"]') ?? undefined,
+                      })
+                    }
                   >
-                    <MoreHorizontal size={14} aria-hidden="true" />
-                  </button>
-                </ListRow>
-              ))}
-            </ul>
+                    <input
+                      type="checkbox"
+                      className={styles.select}
+                      checked={selected.includes(tag.name)}
+                      onChange={() => toggleTag(tag.name)}
+                      // Ticking the box selects the tag for pushing, not its commit.
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => openFromKey(event, tag.name)}
+                      aria-label={`Select ${tag.name}`}
+                      aria-keyshortcuts="Shift+F10 ContextMenu"
+                    />
+                    <Tag size={14} aria-hidden="true" className={styles.rowIcon} />
+                    <span className={styles.tagName} title={tag.name}>
+                      {tag.name}
+                    </span>
+                    <span className={styles.kind}>{tag.annotated ? "Annotated" : "Lightweight"}</span>
+                    <button
+                      type="button"
+                      className={styles.iconButton}
+                      aria-label={`Actions for ${tag.name}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menu?.name === tag.name}
+                      data-menu-key={tag.name}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        const trigger = event.currentTarget;
+                        if (menu?.name === tag.name) {
+                          // A second click closes it; focus stays on the button.
+                          trigger.focus({ preventScroll: true });
+                          setMenu(null);
+                        } else {
+                          setMenu({ name: tag.name, ...rectAnchor(trigger), returnFocusTo: trigger });
+                        }
+                      }}
+                    >
+                      <MoreHorizontal size={14} aria-hidden="true" />
+                    </button>
+                  </ListRow>
+                ))}
+              </ul>
+            </>
+          )}
+          {selected.length > 0 && (
+            <div className={styles.selectionBar} role="group" aria-label="Selected tags">
+              <span className={styles.selectionCount}>{selected.length} selected</span>
+              {remotes.length > 1 && (
+                <select
+                  aria-label="Remote"
+                  value={remoteName}
+                  onChange={(event) => setRemoteName(event.target.value)}
+                  disabled={pushDisabled}
+                  title={disabledTitle}
+                >
+                  {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
+                </select>
+              )}
+              <ReasonButton
+                reason={pushReason}
+                onClick={() => void onPush(remoteName, selected)}
+              >
+                {remotes.length > 1 || remoteName === "" ? "Push" : `Push to ${remoteName}`}
+              </ReasonButton>
+              <button type="button" onClick={() => setSelected([])}>
+                Clear selection
+              </button>
+            </div>
           )}
         </>
       )}
-
-      <section aria-labelledby="push-tags-heading">
-        <h3 id="push-tags-heading" className={styles.sectionHeading}>Push tags</h3>
-        <label className={styles.label}>
-          Remote
-          <select
-            value={remoteName}
-            onChange={(event) => setRemoteName(event.target.value)}
-            disabled={pushDisabled || remotes.length === 0}
-            title={disabledTitle}
-          >
-            {remotes.map((remote) => <option key={remote.name} value={remote.name}>{remote.name}</option>)}
-          </select>
-        </label>
-        <Toolbar>
-          <button
-            type="button"
-            disabled={pushDisabled || remoteName === "" || selected.length === 0}
-            title={disabledTitle}
-            onClick={() => void onPush(remoteName, selected)}
-          >
-            Push selected tags
-          </button>
-          <button
-            type="button"
-            disabled={pushDisabled || remoteName === ""}
-            title={disabledTitle}
-            onClick={() => void onPush(remoteName, [])}
-          >
-            Push all tags
-          </button>
-        </Toolbar>
-      </section>
 
       {menu !== null && menuTag !== undefined && (
         <ContextMenu

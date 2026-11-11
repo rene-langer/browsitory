@@ -13,18 +13,17 @@
   resize: vertical;
 }
 
-/* The body ruler: a 1px line at the configured column, drawn behind the text and scrolling with
-   it. `1ch` is one character only in a monospace font, hence the font switch. */
+/* The body ruler: a faint dotted 1px line at the configured column, drawn behind the text and
+   scrolling with it. Dotted, so near the field's right edge it doesn't read as a second border
+   boxing in a column (#674). `1ch` is one character only in a monospace font, hence the font
+   switch. */
 .textarea[data-ruler="true"] {
   --ruler-x: calc(var(--space-2) + var(--ruler-column) * 1ch);
   font-family: var(--font-mono);
-  background-image: linear-gradient(
-    to right,
-    transparent var(--ruler-x),
-    var(--color-border) var(--ruler-x),
-    var(--color-border) calc(var(--ruler-x) + 1px),
-    transparent calc(var(--ruler-x) + 1px)
-  );
+  background-image: linear-gradient(to bottom, var(--color-input-border) 25%, transparent 25%);
+  background-size: 1px 4px;
+  background-position: var(--ruler-x) 0;
+  background-repeat: repeat-y;
   background-attachment: local;
 }
 
@@ -103,8 +102,14 @@
   white-space: nowrap;
 }
 
+/* At least 24 × 24 px to hit (#672); the chip grows to fit it. */
 .chipRemove {
-  padding: 0 var(--space-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--size-target-min);
+  min-height: var(--size-target-min);
+  padding: 0;
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;

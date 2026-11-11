@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { X } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { formatShortDate } from "../lib/formatDate";
 import { lineRangeLabel } from "../lib/selectedLines";
@@ -66,7 +67,7 @@ export function FileHistoryList({
           {target.kind === "lines" && target.revision !== "HEAD" && <> at {target.revision.slice(0, 7)}</>}
         </span>
         <button type="button" aria-label={target.kind === "lines" ? "Close line history" : "Close file history"} onClick={onClose}>
-          ×
+          <X size={14} aria-hidden="true" />
         </button>
       </div>
       {history.error !== null && (

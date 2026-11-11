@@ -64,8 +64,20 @@ button:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--color-control-hover);
 }
 
-button[aria-pressed="true"] {
+/* A pressed toggle (#667): a tinted fill plus an accent outline, so the state shows in shape and
+   not by colour alone. The outline is an inset shadow: it adds no size, and buttons drawn without
+   a border get it too. `[aria-pressed]` is repeated to outrank a module's quiet-button rule
+   (`.rowActions button { background: transparent }`); the forced-colours block below fills it
+   with the system highlight instead. "mixed" (Wrap lines on Auto) gets a dashed outline. */
+button[aria-pressed][aria-pressed="true"] {
   color: var(--color-accent-fg);
+  background: var(--color-accent-tint);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+button[aria-pressed][aria-pressed="mixed"]:not(:focus-visible) {
+  outline: 1px dashed var(--color-accent);
+  outline-offset: -1px;
 }
 
 button:focus-visible {
@@ -156,7 +168,7 @@ kbd {
     outline-offset: -2px;
   }
 
-  button[aria-pressed="true"] {
+  button[aria-pressed][aria-pressed="true"] {
     forced-color-adjust: none;
     color: HighlightText;
     background: Highlight;

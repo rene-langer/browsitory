@@ -228,22 +228,61 @@ describe("TagPanel", () => {
     expect(p.onDelete).toHaveBeenCalledWith("v1.0.0");
   });
 
-  it("pushes only selected tags to the selected remote", () => {
+  it("has no push form until tags are ticked, then pushes them from the selection bar (#674)", () => {
     const { props: p } = renderPanel();
 
+    expect(screen.queryByRole("group", { name: "Selected tags" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Push/ })).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
-    fireEvent.click(screen.getByRole("button", { name: "Push selected tags" }));
+    const bar = screen.getByRole("group", { name: "Selected tags" });
+    expect(bar).toHaveTextContent("1 selected");
+    // One remote: no picker, the button names it.
+    expect(within(bar).queryByRole("combobox")).toBeNull();
+    fireEvent.click(within(bar).getByRole("button", { name: "Push to origin" }));
 
     expect(p.onPush).toHaveBeenCalledWith("origin", ["v1.0.0"]);
   });
 
-  it("offers a separate all-tags action rather than treating no selection as all tags", () => {
-    const { props: p } = renderPanel();
+  it("picks the remote in the selection bar when there are several", () => {
+    const { props: p } = renderPanel({ remotes: [origin, backup] });
 
-    expect(screen.getByRole("button", { name: "Push selected tags" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Push all tags" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
+    const bar = screen.getByRole("group", { name: "Selected tags" });
+    fireEvent.change(within(bar).getByRole("combobox", { name: "Remote" }), { target: { value: "backup" } });
+    fireEvent.click(within(bar).getByRole("button", { name: "Push" }));
 
-    expect(p.onPush).toHaveBeenCalledWith("origin", []);
+    expect(p.onPush).toHaveBeenCalledWith("backup", ["v1.0.0"]);
+  });
+
+  it("clears the selection, which hides the bar", () => {
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+
+    expect(screen.getByRole("checkbox", { name: "Select v1.0.0" })).not.toBeChecked();
+    expect(screen.queryByRole("group", { name: "Selected tags" })).toBeNull();
+  });
+
+  it("selects every tag the filter shows with Select all, and only those", () => {
+    const tags = ["v1.0.0", "v1.1.0", "v2.0.0"].map((name) => ({ ...tag, name }));
+    const { props: p } = renderPanel({ tags });
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Filter tags" }), { target: { value: "v1." } });
+    const selectAll = screen.getByRole("checkbox", { name: "Select all shown" });
+    fireEvent.click(selectAll);
+    expect(selectAll).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Push to origin" }));
+    expect(p.onPush).toHaveBeenCalledWith("origin", ["v1.0.0", "v1.1.0"]);
+
+    // Some but not all shown: mixed; a click selects the rest, the next clears them.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.1.0" }));
+    expect(selectAll).not.toBeChecked();
+    expect(selectAll).toHaveProperty("indeterminate", true);
+    fireEvent.click(selectAll);
+    expect(selectAll).toBeChecked();
+    fireEvent.click(selectAll);
+    expect(screen.queryByRole("group", { name: "Selected tags" })).toBeNull();
   });
 
   it("selects a newly available remote after the remotes refresh", () => {
@@ -251,9 +290,21 @@ describe("TagPanel", () => {
     const { rerender } = renderPanel({ remotes: [], onPush });
 
     rerender(<TagPanel {...props({ remotes: [origin, backup], onPush })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Push all tags" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
+    fireEvent.click(screen.getByRole("button", { name: "Push" }));
 
-    expect(onPush).toHaveBeenCalledWith("origin", []);
+    expect(onPush).toHaveBeenCalledWith("origin", ["v1.0.0"]);
+  });
+
+  it("says why it can't push without a remote", () => {
+    const { props: p } = renderPanel({ remotes: [] });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
+    const push = screen.getByRole("button", { name: "Push" });
+    expect(push).toHaveAttribute("aria-disabled", "true");
+    expect(push).toHaveAccessibleDescription("Add a remote to push tags to.");
+    fireEvent.click(push);
+    expect(p.onPush).not.toHaveBeenCalled();
   });
 
   it("prunes selections for tags removed by a refresh", () => {
@@ -263,18 +314,19 @@ describe("TagPanel", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
     rerender(<TagPanel {...props({ tags: [], onPush })} />);
 
-    expect(screen.getByRole("button", { name: "Push selected tags" })).toBeDisabled();
+    expect(screen.queryByRole("group", { name: "Selected tags" })).toBeNull();
   });
 
-  // Disabled buttons went inert with no explanation — issue #31/UX-003.
-  it("disables the push controls while an operation runs and explains why", () => {
-    renderPanel({ pushDisabled: true, operationDisabledReason: "A transfer is in progress." });
+  // Disabled buttons went inert with no explanation — issue #31/UX-003, #664.
+  it("blocks pushing while an operation runs and says why", () => {
+    const { props: p } = renderPanel({ pushDisabled: true, operationDisabledReason: "A transfer is in progress." });
 
-    for (const name of ["Push selected tags", "Push all tags"]) {
-      const button = screen.getByRole("button", { name });
-      expect(button).toBeDisabled();
-      expect(button).toHaveAttribute("title", "A transfer is in progress.");
-    }
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select v1.0.0" }));
+    const push = screen.getByRole("button", { name: "Push to origin" });
+    expect(push).toHaveAttribute("aria-disabled", "true");
+    expect(push).toHaveAccessibleDescription("A transfer is in progress.");
+    fireEvent.click(push);
+    expect(p.onPush).not.toHaveBeenCalled();
   });
 });
 

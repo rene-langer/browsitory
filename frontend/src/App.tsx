@@ -480,7 +480,7 @@ function AppContent({
         />
       )}
       {pickingRepo && (
-        <Overlay onClose={() => setPickingRepo(false)}>
+        <Overlay onClose={() => setPickingRepo(false)} ariaLabel="Open repository">
           <RepoPicker
             client={client}
             onOpenRepo={(path) => {
@@ -508,6 +508,7 @@ function AppContent({
         // FormDialog already blocks Escape while running; this guard is belt-and-braces for the
         // backdrop path so a running clone is never dismissed invisibly.
         <Overlay
+          ariaLabel="Clone repository"
           onClose={() => {
             if (!cloneRunning.current) setCloning(false);
           }}

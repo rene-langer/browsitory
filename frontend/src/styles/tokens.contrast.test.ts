@@ -52,7 +52,15 @@ const PAIRS: Pair[] = [
   ...each("focus-ring", [...TEXT_SURFACES, "input-bg"], UI),
   ...each("accent", ["bg", "bg-subtle", "surface", "chrome"], UI),
   ...each("input-border", ["input-bg", "bg", "surface"], UI),
-  ...each("selected-marker", ["selected-bg", "bg", "surface"], UI),
+  // The selected-row bar, also on a selected diff line's add/remove tint (#722).
+  ...each("selected-marker", ["selected-bg", "bg", "surface", "diff-add-bg", "diff-remove-bg"], UI),
+  // A pressed toggle's outline on its own tinted fill (#667), over the surfaces toggles sit on.
+  ...["bg", "bg-subtle", "surface", "chrome", "control"].map((base) => ({
+    fg: t("accent"),
+    bg: t("accent-tint"),
+    base: t(base),
+    min: UI,
+  })),
   ...[1, 2, 3, 4, 5, 6].flatMap((lane) => each(`lane-${lane}`, ["surface", "bg", "selected-bg"], UI)),
 ];
 

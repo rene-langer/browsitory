@@ -85,7 +85,7 @@ working tree and puts the cursor in the message from anywhere outside a text fie
 
 Below the message, **Summary 42/50** counts the characters of the first line. Past the limit it
 turns to a warning color, because many tools cut longer summaries; it never stops a commit. A
-faint ruler marks column 72 for wrapping the body, and the field uses a monospace font while the
+faint dotted ruler marks column 72 for wrapping the body, and the field uses a monospace font while the
 ruler is shown so the column lines up. Change the limit, the ruler column (both 10 to 200) or
 turn the ruler off under **Preferences → Commit message**.
 
@@ -116,7 +116,8 @@ commit** commits what you were committing. After an amend, the dialog only saves
 ## Staging individual lines
 
 In a diff, select lines by clicking one, Shift+clicking to extend, Ctrl/Cmd+clicking to add
-or remove one, or dragging across several. Then use **Stage lines**, **Unstage lines** or
+or remove one, or dragging across several. A selected line has a bar on its right edge (the
+line cursor's bar is on the left) and keeps its added or removed colour. Then use **Stage lines**, **Unstage lines** or
 **Discard lines** in the hunk header. With the keyboard, `↑`/`↓` move a line cursor inside the
 active hunk and select that line, `Shift+↑`/`Shift+↓` extend the selection, and `[` / `]` jump
 to the previous or next hunk (which clears the selection). `s` stages or unstages and `d`
