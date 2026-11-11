@@ -62,6 +62,8 @@ describe("Browsitory fetch automatically", () => {
     const preferences = await $("header button[aria-label='Preferences']");
     await preferences.waitForClickable();
     await preferences.click();
+    // Preferences shows one group at a time (#784).
+    await (await $("//dialog[@aria-label='Preferences']//button[@role='tab' and normalize-space(.)='Fetch']")).click();
     const select = await $("//select[@id=//label[normalize-space(.)='Fetch automatically']/@for]");
     await select.waitForExist();
     expect(await select.getValue()).toBe("0");

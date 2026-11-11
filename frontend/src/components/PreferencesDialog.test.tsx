@@ -23,9 +23,10 @@ import { AppearanceSection } from "./PreferencesDialog";
 function renderTools(client: Partial<RepoClient>, toolHost: "desktop" | "vscode" = "desktop", repoPath: string | null = "/r") {
   const onClose = vi.fn();
   render(
-    <PreferencesDialog onClose={onClose}>
-      <ExternalToolsSection client={fakeRepoClient(client)} repoPath={repoPath} toolHost={toolHost} />
-    </PreferencesDialog>,
+    <PreferencesDialog
+      onClose={onClose}
+      groups={[{ id: "external-tools", label: "External tools", content: <ExternalToolsSection client={fakeRepoClient(client)} repoPath={repoPath} toolHost={toolHost} /> }]}
+    />,
   );
   return onClose;
 }
@@ -147,9 +148,10 @@ describe("Commit message preferences", () => {
   function renderCommitMessage(client: Partial<RepoClient>) {
     render(
       <CommitMessageSettingsProvider client={fakeRepoClient(client)}>
-        <PreferencesDialog onClose={vi.fn()}>
-          <CommitMessageSection />
-        </PreferencesDialog>
+        <PreferencesDialog
+          onClose={vi.fn()}
+          groups={[{ id: "commit-message", label: "Commit message", content: <CommitMessageSection /> }]}
+        />
       </CommitMessageSettingsProvider>,
     );
   }
@@ -221,9 +223,10 @@ describe("DiffSection", () => {
     });
     render(
       <DiffSettingsProvider client={client}>
-        <PreferencesDialog onClose={vi.fn()}>
-          <DiffSection />
-        </PreferencesDialog>
+        <PreferencesDialog
+          onClose={vi.fn()}
+          groups={[{ id: "diff", label: "Diff", content: <DiffSection /> }]}
+        />
       </DiffSettingsProvider>,
     );
     const group = screen.getByRole("group", { name: "Diff" });
@@ -252,9 +255,10 @@ describe("DiffSection", () => {
     });
     render(
       <DiffSettingsProvider client={client}>
-        <PreferencesDialog onClose={vi.fn()}>
-          <DiffSection />
-        </PreferencesDialog>
+        <PreferencesDialog
+          onClose={vi.fn()}
+          groups={[{ id: "diff", label: "Diff", content: <DiffSection /> }]}
+        />
       </DiffSettingsProvider>,
     );
     const algorithm = within(screen.getByRole("group", { name: "Diff" })).getByRole("combobox", { name: "Diff algorithm" });
@@ -285,9 +289,10 @@ describe("DiffSection", () => {
     });
     render(
       <DiffSettingsProvider client={client}>
-        <PreferencesDialog onClose={vi.fn()}>
-          <DiffSection />
-        </PreferencesDialog>
+        <PreferencesDialog
+          onClose={vi.fn()}
+          groups={[{ id: "diff", label: "Diff", content: <DiffSection /> }]}
+        />
       </DiffSettingsProvider>,
     );
     const expand = within(screen.getByRole("group", { name: "Diff" })).getByRole("checkbox", { name: "Expand untracked files" });
@@ -317,9 +322,10 @@ describe("Fetch preferences", () => {
   function renderFetch(client: Partial<RepoClient>, repoPath: string | null = "/work/app") {
     render(
       <FetchSettingsProvider client={fakeRepoClient(client)}>
-        <PreferencesDialog onClose={() => {}}>
-          <FetchSection repoPath={repoPath} />
-        </PreferencesDialog>
+        <PreferencesDialog
+          onClose={() => {}}
+          groups={[{ id: "fetch", label: "Fetch", content: <FetchSection repoPath={repoPath} /> }]}
+        />
       </FetchSettingsProvider>,
     );
   }
@@ -402,9 +408,10 @@ describe("AppearanceSection (#615)", () => {
   function renderAppearance(client: Partial<RepoClient>) {
     render(
       <AppearanceSettingsProvider client={fakeRepoClient(client)}>
-        <PreferencesDialog onClose={() => {}}>
-          <AppearanceSection />
-        </PreferencesDialog>
+        <PreferencesDialog
+          onClose={() => {}}
+          groups={[{ id: "appearance", label: "Appearance", content: <AppearanceSection /> }]}
+        />
       </AppearanceSettingsProvider>,
     );
     return screen.getByRole("group", { name: "Appearance" });
@@ -523,9 +530,10 @@ describe("AppearanceSection (#615)", () => {
     const onChange = vi.fn();
     render(
       <AppearanceSettingsProvider client={fakeRepoClient({ getAppearanceSettings: async () => defaults })}>
-        <PreferencesDialog onClose={() => {}}>
-          <AppearanceSection theme={{ preference: "system", onChange }} />
-        </PreferencesDialog>
+        <PreferencesDialog
+          onClose={() => {}}
+          groups={[{ id: "appearance", label: "Appearance", content: <AppearanceSection theme={{ preference: "system", onChange }} /> }]}
+        />
       </AppearanceSettingsProvider>,
     );
     const theme = within(screen.getByRole("group", { name: "Appearance" })).getByRole("combobox", { name: "Theme" });
@@ -549,9 +557,10 @@ describe("Updates preferences (#630)", () => {
   ) {
     render(
       <UpdateSettingsProvider client={fakeRepoClient(client)}>
-        <PreferencesDialog onClose={() => {}}>
-          <UpdatesSection onCheckNow={onCheckNow} />
-        </PreferencesDialog>
+        <PreferencesDialog
+          onClose={() => {}}
+          groups={[{ id: "updates", label: "Updates", content: <UpdatesSection onCheckNow={onCheckNow} /> }]}
+        />
       </UpdateSettingsProvider>,
     );
     return screen.getByRole("group", { name: "Updates" });
