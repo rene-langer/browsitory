@@ -17,12 +17,27 @@ type ActionKind = RebaseAction["kind"];
 interface Row {
   commit: RebasePlanCommit;
   actionKind: ActionKind;
-  /** The full message to reword, body included (#655); `null` until it is loaded. */
+  /**
+   * The reword message the user typed; `null` while untouched, and the field then shows the
+   * commit's full message, body included (#655).
+   */
   rewordMessage: string | null;
-  rewordLoading: boolean;
-  /** Why the full message couldn't be read; the summary is then filled in instead. */
-  rewordError: string | null;
-  combinedMessage: string | null; // set only when this row is a group leader
+  /**
+   * The combined message the user typed on a group leader; `null` while untouched, and the field
+   * then shows the default built from the group's full messages (#721).
+   */
+  combinedMessage: string | null;
+}
+
+/** A commit's full message, read with `getCommitMessage` when a field needs it. */
+type FullMessage = { kind: "loading" } | { kind: "ready"; text: string } | { kind: "failed"; error: string };
+
+type FullMessages = ReadonlyMap<string, FullMessage>;
+
+/** The commit's full message once read; its summary while loading or when it couldn't be read. */
+function messageOf(messages: FullMessages, commit: RebasePlanCommit): string {
+  const message = messages.get(commit.id);
+  return message?.kind === "ready" ? message.text : commit.summary;
 }
 
 function isGroupMember(kind: ActionKind): boolean {
@@ -44,8 +59,10 @@ function nextNonDropActionKind(rows: Row[], index: number): ActionKind | undefin
   return undefined;
 }
 
-function defaultCombinedMessage(rows: Row[], leaderIndex: number): string {
-  const parts = [rows[leaderIndex].commit.summary];
+// The commits whose messages make up a group's default: the leader and its Squash members, as
+// `git rebase -i` builds a squash message (a Fixup's message is dropped).
+function groupMessageCommits(rows: Row[], leaderIndex: number): RebasePlanCommit[] {
+  const commits = [rows[leaderIndex].commit];
   for (let i = leaderIndex + 1; i < rows.length; i++) {
     const kind = rows[i].actionKind;
     if (kind === "Drop") {
@@ -55,10 +72,29 @@ function defaultCombinedMessage(rows: Row[], leaderIndex: number): string {
       break;
     }
     if (kind === "Squash") {
-      parts.push(rows[i].commit.summary);
+      commits.push(rows[i].commit);
     }
   }
-  return parts.join("\n\n");
+  return commits;
+}
+
+// The full messages, bodies included, one after another (#721). Until a message is read, or when
+// it can't be, its summary stands in.
+function defaultCombinedMessage(rows: Row[], leaderIndex: number, messages: FullMessages): string {
+  return groupMessageCommits(rows, leaderIndex)
+    .map((commit) => messageOf(messages, commit).trimEnd())
+    .join("\n\n");
+}
+
+// The commits whose full messages the plan needs: every Reword row and every group's leader and
+// Squash members.
+function commitsNeedingMessages(rows: Row[]): RebasePlanCommit[] {
+  const needed: RebasePlanCommit[] = [];
+  rows.forEach((row, index) => {
+    if (row.actionKind === "Reword") needed.push(row.commit);
+    if (isLeader(rows, index)) needed.push(...groupMessageCommits(rows, index));
+  });
+  return needed;
 }
 
 function isLeader(rows: Row[], index: number): boolean {
@@ -100,26 +136,18 @@ function groupFingerprints(rows: Row[]): Map<string, string> {
   return fingerprints;
 }
 
-// Re-derives which rows are group leaders after a reorder or action change, recomputing a fresh
-// default combined message only for groups that actually changed. A leader whose group is
-// untouched by the mutation keeps its current `combinedMessage` verbatim — otherwise editing any
-// row would silently wipe a combined message the user hand-typed on an unrelated group.
+// Re-derives which rows are group leaders after a reorder or action change. A leader keeps a
+// hand-typed combined message only while its group is unchanged; otherwise editing any row would
+// silently wipe a message typed on an unrelated group. A changed group goes back to the default.
 function recomputeGroupLeaders(prev: Row[], next: Row[]): Row[] {
   const before = groupFingerprints(prev);
   const after = groupFingerprints(next);
-  return next.map((row, index) => {
-    if (!after.has(row.commit.id)) {
-      // Not a leader (any more): no combined-message field belongs on this row.
-      return { ...row, combinedMessage: null };
-    }
+  return next.map((row) => {
     const unchanged =
+      after.has(row.commit.id) &&
       before.has(row.commit.id) &&
-      before.get(row.commit.id) === after.get(row.commit.id) &&
-      row.combinedMessage !== null;
-    return {
-      ...row,
-      combinedMessage: unchanged ? row.combinedMessage : defaultCombinedMessage(next, index),
-    };
+      before.get(row.commit.id) === after.get(row.commit.id);
+    return unchanged ? row : { ...row, combinedMessage: null };
   });
 }
 
@@ -153,6 +181,9 @@ export function RebasePlanner({
     kind: "loading",
   });
   const [attempt, setAttempt] = useState(0);
+  const [messages, setMessages] = useState<FullMessages>(new Map());
+  // The same map, current at once, so a request made in the same tick doesn't read it twice.
+  const messagesRef = useRef<Map<string, FullMessage>>(new Map());
   // The control that moved a row: a keyed reorder can take its node out of the document, which
   // drops focus, so it is focused again after the render.
   const refocus = useRef<HTMLElement | null>(null);
@@ -173,15 +204,14 @@ export function RebasePlanner({
             commit,
             actionKind: (presetActions?.get(commit.id) ?? "Pick") as ActionKind,
             rewordMessage: null,
-            rewordLoading: false,
-            rewordError: null,
             combinedMessage: null,
           }));
           const planned = new Set(commits.map((commit) => commit.id));
           setPresetMissing(
             presetActions !== undefined && [...presetActions.keys()].some((id) => !planned.has(id)),
           );
-          setRows(recomputeGroupLeaders(initialRows, initialRows));
+          setRows(initialRows);
+          requestMessages(commitsNeedingMessages(initialRows));
           setLoad({ kind: "ready" });
         }
       })
@@ -191,6 +221,8 @@ export function RebasePlanner({
     return () => {
       ignore = true;
     };
+    // `requestMessages` only reads the ref and the props listed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoPath, client, onto, presetActions, attempt]);
 
   const retry = () => {
@@ -206,7 +238,7 @@ export function RebasePlanner({
     const next = [...rows];
     [next[index], next[target]] = [next[target], next[index]];
     refocus.current = control ?? null;
-    setRows(recomputeGroupLeaders(rows, next));
+    changeRows(next);
   };
 
   // Alt+Up/Down moves the row holding the focused control; plain arrows stay with the control.
@@ -217,30 +249,36 @@ export function RebasePlanner({
     moveRow(index, event.key === "ArrowUp" ? -1 : 1, event.target as HTMLElement);
   };
 
-  const updateRow = (commitId: string, change: Partial<Row>) => {
-    setRows((prev) => prev.map((row) => (row.commit.id === commitId ? { ...row, ...change } : row)));
-  };
+  // Reads the full messages not read yet; the fields show them as they arrive.
+  function requestMessages(commits: RebasePlanCommit[]) {
+    const settle = (id: string, message: FullMessage) => {
+      messagesRef.current.set(id, message);
+      setMessages(new Map(messagesRef.current));
+    };
+    let requested = false;
+    for (const commit of commits) {
+      if (messagesRef.current.has(commit.id)) continue;
+      messagesRef.current.set(commit.id, { kind: "loading" });
+      requested = true;
+      client
+        .getCommitMessage(repoPath, commit.id)
+        .then((text) => settle(commit.id, { kind: "ready", text }))
+        .catch((err: unknown) =>
+          settle(commit.id, { kind: "failed", error: err instanceof Error ? err.message : String(err) }),
+        );
+    }
+    if (requested) setMessages(new Map(messagesRef.current));
+  }
 
-  const loadRewordMessage = (commit: RebasePlanCommit) => {
-    client
-      .getCommitMessage(repoPath, commit.id)
-      .then((message) => updateRow(commit.id, { rewordMessage: message, rewordLoading: false }))
-      .catch((err: unknown) =>
-        updateRow(commit.id, {
-          rewordMessage: commit.summary,
-          rewordLoading: false,
-          rewordError: err instanceof Error ? err.message : String(err),
-        }),
-      );
+  const changeRows = (next: Row[]) => {
+    setRows(recomputeGroupLeaders(rows, next));
+    requestMessages(commitsNeedingMessages(next));
   };
 
   const setActionKind = (index: number, actionKind: ActionKind) => {
     const next = [...rows];
-    const row = next[index];
-    const needsMessage = actionKind === "Reword" && row.rewordMessage === null && !row.rewordLoading;
-    next[index] = { ...row, actionKind, rewordLoading: row.rewordLoading || needsMessage };
-    setRows(recomputeGroupLeaders(rows, next));
-    if (needsMessage) loadRewordMessage(row.commit);
+    next[index] = { ...next[index], actionKind };
+    changeRows(next);
   };
 
   const setRewordMessage = (index: number, rewordMessage: string) => {
@@ -255,17 +293,22 @@ export function RebasePlanner({
     setRows(next);
   };
 
-  const messageLoading = rows.some((row) => row.actionKind === "Reword" && row.rewordLoading);
+  const messageLoading = commitsNeedingMessages(rows).some(
+    (commit) => (messages.get(commit.id)?.kind ?? "loading") === "loading",
+  );
+  // The combined message each group leader starts with: typed, or the default.
+  const combinedMessageAt = (index: number): string | null =>
+    isLeader(rows, index) ? (rows[index].combinedMessage ?? defaultCombinedMessage(rows, index, messages)) : null;
   const startDisabled =
     blockedReason !== null || presetMissing || load.kind !== "ready" || rows.length === 0 || messageLoading;
 
   const start = () => {
     if (startDisabled) return;
-    const plan: RebasePlanEntry[] = rows.map((row) => {
+    const plan: RebasePlanEntry[] = rows.map((row, index) => {
       let action: RebaseAction;
       switch (row.actionKind) {
         case "Reword":
-          action = { kind: "Reword", message: row.rewordMessage ?? row.commit.summary };
+          action = { kind: "Reword", message: row.rewordMessage ?? messageOf(messages, row.commit) };
           break;
         case "Pick":
         case "Edit":
@@ -278,7 +321,7 @@ export function RebasePlanner({
       return {
         commitId: row.commit.id,
         action,
-        combinedMessage: row.combinedMessage,
+        combinedMessage: combinedMessageAt(index),
       };
     });
     onStartRebase(onto, plan);
@@ -305,6 +348,7 @@ export function RebasePlanner({
       <ul className={styles.list}>
         {rows.map((row, index) => {
           const name = `${row.commit.shortId} ${row.commit.summary}`;
+          const combined = combinedMessageAt(index);
           return (
             <ListRow key={row.commit.id}>
               <div className={styles.rowKeys} onKeyDown={(event) => onRowKeyDown(index, event)}>
@@ -345,36 +389,29 @@ export function RebasePlanner({
                     <option value="Drop">Drop</option>
                   </select>
                 </label>
-                {row.actionKind === "Reword" &&
-                  (row.rewordMessage === null ? (
-                    <p className={styles.caption}>Loading the message…</p>
-                  ) : (
-                    <>
+                {row.actionKind === "Reword" && (
+                  <RewordField
+                    row={row}
+                    message={messages.get(row.commit.id)}
+                    onChange={(rewordMessage) => setRewordMessage(index, rewordMessage)}
+                  />
+                )}
+                {combined !== null && (
+                  <>
+                    <label>
+                      Combined message
                       <textarea
-                        aria-label={`New message for ${row.commit.shortId}`}
-                        placeholder="New commit message"
+                        aria-label="Combined message"
                         className={styles.message}
-                        rows={Math.min(10, Math.max(3, row.rewordMessage.split("\n").length))}
-                        value={row.rewordMessage}
-                        onChange={(event) => setRewordMessage(index, event.target.value)}
+                        rows={Math.min(12, Math.max(3, combined.split("\n").length))}
+                        value={combined}
+                        onChange={(event) => setCombinedMessage(index, event.target.value)}
                       />
-                      {row.rewordError !== null && (
-                        <p role="alert">
-                          Couldn&apos;t read the full message of {row.commit.shortId} ({row.rewordError}). Only
-                          the summary is filled in; add the body back if it had one.
-                        </p>
-                      )}
-                    </>
-                  ))}
-                {row.combinedMessage !== null && (
-                  <label>
-                    Combined message
-                    <textarea
-                      aria-label="Combined message"
-                      value={row.combinedMessage}
-                      onChange={(event) => setCombinedMessage(index, event.target.value)}
-                    />
-                  </label>
+                    </label>
+                    {row.combinedMessage === null && (
+                      <GroupMessageNotes commits={groupMessageCommits(rows, index)} messages={messages} />
+                    )}
+                  </>
                 )}
               </div>
             </ListRow>
@@ -395,5 +432,58 @@ export function RebasePlanner({
         <button onClick={onCancel}>Cancel</button>
       </Toolbar>
     </Panel>
+  );
+}
+
+function RewordField({
+  row,
+  message,
+  onChange,
+}: {
+  row: Row;
+  message: FullMessage | undefined;
+  onChange: (message: string) => void;
+}) {
+  if (row.rewordMessage === null && (message === undefined || message.kind === "loading")) {
+    return <p className={styles.caption}>Loading the message…</p>;
+  }
+  const value = row.rewordMessage ?? (message?.kind === "ready" ? message.text : row.commit.summary);
+  return (
+    <>
+      <textarea
+        aria-label={`New message for ${row.commit.shortId}`}
+        placeholder="New commit message"
+        className={styles.message}
+        rows={Math.min(10, Math.max(3, value.split("\n").length))}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {message?.kind === "failed" && (
+        <p role="alert">
+          Couldn&apos;t read the full message of {row.commit.shortId} ({message.error}). Only the
+          summary is filled in; add the body back if it had one.
+        </p>
+      )}
+    </>
+  );
+}
+
+/** Under an untouched combined message: what is still loading, or couldn't be read (#721). */
+function GroupMessageNotes({ commits, messages }: { commits: RebasePlanCommit[]; messages: FullMessages }) {
+  const loading = commits.some((commit) => (messages.get(commit.id)?.kind ?? "loading") === "loading");
+  const failed = commits.flatMap((commit) => {
+    const message = messages.get(commit.id);
+    return message?.kind === "failed" ? [{ commit, error: message.error }] : [];
+  });
+  return (
+    <>
+      {loading && <p className={styles.caption}>Loading the full messages…</p>}
+      {failed.map(({ commit, error }) => (
+        <p role="alert" key={commit.id}>
+          Couldn&apos;t read the full message of {commit.shortId} ({error}). Only its summary is in
+          the combined message; add the body back if it had one.
+        </p>
+      ))}
+    </>
   );
 }

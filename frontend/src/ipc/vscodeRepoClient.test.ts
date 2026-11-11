@@ -1216,8 +1216,8 @@ describe("vscodeRepoClient", () => {
 
   it("wires getConflictHunks, resolveConflict, abortMerge, getMergeMessage, and resolveAddDeleteConflict", async () => {
     const hunksPromise = vscodeRepoClient.getConflictHunks("/repo", "file.txt");
-    respond(1, [{ kind: "Conflict", ours: "a", theirs: "b" }]);
-    await expect(hunksPromise).resolves.toEqual([{ kind: "Conflict", ours: "a", theirs: "b" }]);
+    respond(1, [{ kind: "Conflict", ours: "a", base: "", theirs: "b" }]);
+    await expect(hunksPromise).resolves.toEqual([{ kind: "Conflict", ours: "a", base: "", theirs: "b" }]);
 
     const resolvePromise = vscodeRepoClient.resolveConflict("/repo", "file.txt", "resolved");
     expect(postMessage).toHaveBeenCalledWith({

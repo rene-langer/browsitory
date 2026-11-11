@@ -6,8 +6,16 @@ import { fakeRepoClient } from "../test/fakeRepoClient";
 
 const TEST_REPO_PATH = "/repo";
 
+// A commit's full message is its summary unless a test says otherwise (#721).
 function fakeClient(overrides: Partial<RepoClient> = {}): RepoClient {
-  return fakeRepoClient(overrides, "empty");
+  return fakeRepoClient(
+    {
+      getCommitMessage: async (_repo: string, id: string) =>
+        `${fourCommits.find((commit) => commit.id === id)?.summary ?? id}\n`,
+      ...overrides,
+    },
+    "empty",
+  );
 }
 
 const commits: RebasePlanCommit[] = [
@@ -128,6 +136,80 @@ describe("RebasePlanner", () => {
 
     const combined = await screen.findByLabelText("Combined message");
     expect(combined).toHaveValue("add a\n\nadd b");
+  });
+
+  // #721: the default used to hold only the summaries, so the bodies were lost.
+  it("pre-fills the combined message with the group's full messages, bodies included", async () => {
+    const onStartRebase = vi.fn();
+    const bodies: Record<string, string> = {
+      aaa: "add a\n\nWhy a.\n",
+      bbb: "add b\n\nWhy b.\nSigned-off-by: Rene\n",
+      ccc: "add c\n\nWhy c.\n",
+    };
+    const getCommitMessage = vi.fn(async (_repo: string, id: string) => bodies[id]);
+    const client = fakeClient({ commitsSince: async () => threeCommits, getCommitMessage });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={onStartRebase} onCancel={vi.fn()} />);
+    await screen.findByText(/add a/);
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[1], { target: { value: "Squash" } });
+    // A Fixup's message is left out, as `git rebase -i` does.
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[2], { target: { value: "Fixup" } });
+
+    const combined = await screen.findByLabelText("Combined message");
+    await waitFor(() =>
+      expect(combined).toHaveValue("add a\n\nWhy a.\n\nadd b\n\nWhy b.\nSigned-off-by: Rene"),
+    );
+    expect(getCommitMessage).not.toHaveBeenCalledWith(TEST_REPO_PATH, "ccc");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start rebase" }));
+    const [, plan] = onStartRebase.mock.calls[0];
+    expect(plan[0].combinedMessage).toBe("add a\n\nWhy a.\n\nadd b\n\nWhy b.\nSigned-off-by: Rene");
+    expect(plan[1].combinedMessage).toBeNull();
+    expect(plan[2].combinedMessage).toBeNull();
+  });
+
+  it("keeps Start disabled while a group's full messages load", async () => {
+    const resolvers: Array<() => void> = [];
+    const client = fakeClient({
+      commitsSince: async () => commits,
+      getCommitMessage: (_repo, id) =>
+        new Promise((resolve) => resolvers.push(() => resolve(`${id} summary\n\n${id} body\n`))),
+    });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />);
+    await screen.findByText(/add a/);
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[1], { target: { value: "Squash" } });
+
+    expect(screen.getByText("Loading the full messages…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeDisabled();
+    resolvers.forEach((resolve) => resolve());
+    await waitFor(() =>
+      expect(screen.getByLabelText("Combined message")).toHaveValue(
+        "aaa summary\n\naaa body\n\nbbb summary\n\nbbb body",
+      ),
+    );
+    expect(screen.queryByText("Loading the full messages…")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeEnabled();
+  });
+
+  it("uses the summary, and says so, when a squashed commit's full message can't be read", async () => {
+    const client = fakeClient({
+      commitsSince: async () => commits,
+      getCommitMessage: async (_repo, id) => {
+        if (id === "bbb") throw new Error("object not found");
+        return "add a\n\nWhy a.\n";
+      },
+    });
+
+    render(<RebasePlanner repoPath={TEST_REPO_PATH} client={client} onto="base" onStartRebase={vi.fn()} onCancel={vi.fn()} />);
+    await screen.findByText(/add a/);
+    fireEvent.change(screen.getAllByLabelText(/^Action for /)[1], { target: { value: "Squash" } });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't read the full message of bbb2222 (object not found). Only its summary is in the combined message",
+    );
+    expect(screen.getByLabelText("Combined message")).toHaveValue("add a\n\nWhy a.\n\nadd b");
+    expect(screen.getByRole("button", { name: "Start rebase" })).toBeEnabled();
   });
 
   it("a Drop between the leader and a Squash row doesn't steal the combined-message field", async () => {

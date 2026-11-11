@@ -153,10 +153,12 @@ fn conflict_hunks_returns_clean_and_conflict_segments_for_a_conflicted_file() {
         .find(|s| matches!(s, ConflictSegment::Conflict { .. }))
         .expect("expected a Conflict segment");
     match conflict {
-        ConflictSegment::Conflict { ours, theirs } => {
+        ConflictSegment::Conflict { ours, base, theirs } => {
             // Each side keeps its own trailing newline — `parse_conflict_markers` now splits on
             // `split_inclusive('\n')` rather than `.lines()`, so terminators aren't stripped.
             assert_eq!(ours, "main two\n");
+            // The ancestor's lines for the block (#720).
+            assert_eq!(base, "line two\n");
             assert_eq!(theirs, "feature two\n");
         }
         _ => unreachable!(),
@@ -183,6 +185,141 @@ fn conflict_hunks_round_trip_preserves_the_original_files_trailing_newline() {
         .join("");
 
     assert_eq!(reconstructed, "line one\nmain two\nline three\n");
+}
+
+/// Merges `feature` into the checked-out branch after both changed `path` from `base` (or both
+/// added it, when `base` is `None`), and returns the conflict's segments.
+fn conflict_segments_for(
+    path: &str,
+    base: Option<&str>,
+    ours: &str,
+    theirs: &str,
+) -> Vec<ConflictSegment> {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "other.txt", "other\n");
+    if let Some(base) = base {
+        write_file(dir.path(), path, base);
+    }
+    commit_all(&repo, "base commit");
+    let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+        .name
+        .clone();
+    git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+    write_file(dir.path(), path, theirs);
+    commit_all(&repo, "feature commit");
+    git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+    write_file(dir.path(), path, ours);
+    commit_all(&repo, "main commit");
+    let outcome =
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
+    assert!(matches!(outcome, MergeOutcome::Conflicted { .. }));
+    git_core::merge::conflict_hunks(&repo, path).unwrap()
+}
+
+#[test]
+fn conflict_hunks_of_an_add_add_conflict_have_an_empty_base() {
+    let segments = conflict_segments_for("added.txt", None, "one\nours\n", "one\ntheirs\n");
+
+    assert_eq!(
+        segments,
+        vec![
+            ConflictSegment::Clean {
+                content: "one\n".to_string()
+            },
+            ConflictSegment::Conflict {
+                ours: "ours\n".to_string(),
+                base: String::new(),
+                theirs: "theirs\n".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn conflict_hunks_keep_lines_that_look_like_conflict_markers() {
+    // Runs of seven (and eight) marker characters in the file itself: the markers get longer,
+    // so none of these lines is read as one.
+    let base = "<<<<<<<< a\nx\n=======\n|||||||\n>>>>>>> b\n";
+    let ours = "<<<<<<<< a\nours\n=======\n|||||||\n>>>>>>> b\n";
+    let theirs = "<<<<<<<< a\ntheirs\n=======\n|||||||\n>>>>>>> b\n";
+
+    let segments = conflict_segments_for("markers.txt", Some(base), ours, theirs);
+
+    assert_eq!(
+        segments,
+        vec![
+            ConflictSegment::Clean {
+                content: "<<<<<<<< a\n".to_string()
+            },
+            ConflictSegment::Conflict {
+                ours: "ours\n".to_string(),
+                base: "x\n".to_string(),
+                theirs: "theirs\n".to_string(),
+            },
+            ConflictSegment::Clean {
+                content: "=======\n|||||||\n>>>>>>> b\n".to_string()
+            },
+        ]
+    );
+}
+
+#[test]
+fn conflict_hunks_keep_marker_lines_inside_a_block() {
+    // Lines of exactly seven marker characters inside the conflicting lines: with git's default
+    // markers they would end ours early or start a base part.
+    let segments = conflict_segments_for(
+        "inside.txt",
+        Some("a\nx\nz\n"),
+        "a\n<<<<<<< o\n=======\n|||||||\nz\n",
+        "a\n>>>>>>> t\nz\n",
+    );
+
+    assert_eq!(
+        segments,
+        vec![
+            ConflictSegment::Clean {
+                content: "a\n".to_string()
+            },
+            ConflictSegment::Conflict {
+                ours: "<<<<<<< o\n=======\n|||||||\n".to_string(),
+                base: "x\n".to_string(),
+                theirs: ">>>>>>> t\n".to_string(),
+            },
+            ConflictSegment::Clean {
+                content: "z\n".to_string()
+            },
+        ]
+    );
+}
+
+#[test]
+fn conflict_hunks_cut_the_blocks_as_tightly_as_the_default_style() {
+    // zdiff3 keeps lines both sides changed the same way out of the block; plain diff3 would
+    // make the whole changed region one block.
+    let segments = conflict_segments_for(
+        "tight.txt",
+        Some("a\nb\nc\n"),
+        "a\nsame\nours\nc\n",
+        "a\nsame\ntheirs\nc\n",
+    );
+
+    assert_eq!(
+        segments,
+        vec![
+            ConflictSegment::Clean {
+                content: "a\nsame\n".to_string()
+            },
+            ConflictSegment::Conflict {
+                ours: "ours\n".to_string(),
+                base: "b\n".to_string(),
+                theirs: "theirs\n".to_string(),
+            },
+            ConflictSegment::Clean {
+                content: "c\n".to_string()
+            },
+        ]
+    );
 }
 
 #[test]
@@ -3587,4 +3724,48 @@ fn a_fifo_swapped_in_for_the_held_repositorys_head_is_never_opened() {
     );
     let repo = git2::Repository::open(dir.path()).unwrap();
     assert!(repo.index().unwrap().has_conflicts());
+}
+
+#[test]
+fn conflict_hunks_refuse_a_delete_modify_conflict() {
+    let (_dir, repo) = make_delete_modify_conflict();
+
+    let error = git_core::merge::conflict_hunks(&repo, "shared.txt").unwrap_err();
+
+    assert!(
+        matches!(error, git_core::merge::MergeError::NotATextConflict(_)),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn conflict_hunks_refuse_a_binary_conflict() {
+    for (base, ours, theirs) in [
+        ("a\0base\n", "a\0ours\n", "a\0theirs\n"),
+        ("base\n", "a\0ours\n", "theirs\n"),
+        ("base\n", "ours\n", "a\0theirs\n"),
+        ("a\0base\n", "ours\n", "theirs\n"),
+    ] {
+        let (dir, repo) = init_repo();
+        write_file(dir.path(), "bin.dat", base);
+        commit_all(&repo, "base commit");
+        let main_branch = git_core::branch::list_branches(&repo).unwrap()[0]
+            .name
+            .clone();
+        git_core::branch::create_branch(&repo, "feature", "HEAD").unwrap();
+        write_file(dir.path(), "bin.dat", theirs);
+        commit_all(&repo, "feature commit");
+        git_core::branch::switch_branch(&repo, &main_branch).unwrap();
+        write_file(dir.path(), "bin.dat", ours);
+        commit_all(&repo, "main commit");
+        git_core::merge::start_merge(&repo, "feature", git_core::merge::MergeOptions::default())
+            .unwrap();
+
+        let error = git_core::merge::conflict_hunks(&repo, "bin.dat").unwrap_err();
+
+        assert!(
+            matches!(error, git_core::merge::MergeError::BinaryConflict(ref path) if path == "bin.dat"),
+            "{base:?} {ours:?} {theirs:?}: {error:?}"
+        );
+    }
 }

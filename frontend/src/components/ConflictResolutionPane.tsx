@@ -1,34 +1,64 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { errorKind, type ConflictSegment, type ConflictSide, type FileConflictChoice, type RepoClient } from "../ipc/RepoClient";
 import { conflictSideNames, type ConflictSideNames } from "../lib/conflictSides";
+import {
+  assembleResult,
+  blockResult,
+  hasConflictMarkers,
+  type BlockChoice,
+  type BlockState,
+  type ConflictBlock,
+} from "../lib/conflictMerge";
+import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { Panel } from "./primitives/Panel";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./ConflictResolutionPane.module.css";
 
-type Resolution = "ours" | "theirs" | "both";
-
-const CHOICES: { resolution: Resolution; label: string }[] = [
-  { resolution: "ours", label: "Accept ours" },
-  { resolution: "theirs", label: "Accept theirs" },
-  { resolution: "both", label: "Accept both" },
+const CHOICES: { choice: BlockChoice; label: string; title: string }[] = [
+  { choice: "ours", label: "Accept ours", title: "Take our lines for this block." },
+  { choice: "theirs", label: "Accept theirs", title: "Take their lines for this block." },
+  { choice: "oursThenTheirs", label: "Ours then theirs", title: "Keep both: our lines first." },
+  { choice: "theirsThenOurs", label: "Theirs then ours", title: "Keep both: their lines first." },
+  { choice: "base", label: "Accept base", title: "Go back to the common ancestor's lines." },
 ];
 
-function resolvedText(segment: Extract<ConflictSegment, { kind: "Conflict" }>, resolution: Resolution): string {
-  switch (resolution) {
-    case "ours":
-      return segment.ours;
-    case "theirs":
-      return segment.theirs;
-    case "both":
-      return segment.ours + segment.theirs;
-  }
-}
+const STATE_LABELS: Record<BlockChoice, string> = {
+  ours: "Ours",
+  theirs: "Theirs",
+  oursThenTheirs: "Ours then theirs",
+  theirsThenOurs: "Theirs then ours",
+  base: "Base",
+};
+
+/** Lines of an unchanged run shown next to a conflict; a longer run is collapsed in between. */
+const CONTEXT_LINES = 3;
 
 function sideLabel(side: string, name: string | null): string {
   return name === null ? side : `${side} (${name})`;
 }
 
+function stateLabel(state: BlockState): string {
+  switch (state.kind) {
+    case "unchosen":
+      return "Not chosen";
+    case "chosen":
+      return STATE_LABELS[state.choice];
+    case "edited":
+      return "Edited";
+  }
+}
+
+function lineCount(text: string): number {
+  return text.split("\n").length;
+}
+
 const NO_NAMES: ConflictSideNames = { ours: null, theirs: null };
+
+/** Whole-result editing (#720): the assembled file as one text, and that text as it started. */
+interface WholeEdit {
+  text: string;
+  initial: string;
+}
 
 export function ConflictResolutionPane({
   repoPath,
@@ -50,10 +80,14 @@ export function ConflictResolutionPane({
   onMarkResolved?: () => void;
 }) {
   const [segments, setSegments] = useState<ConflictSegment[]>([]);
-  // `null`: not chosen yet. Every block starts that way, so Save never takes a side the user
-  // didn't pick (#654).
-  const [resolutions, setResolutions] = useState<(Resolution | null)[]>([]);
+  // Every block starts unchosen, so Save never takes a side the user didn't pick (#654).
+  const [states, setStates] = useState<BlockState[]>([]);
   const [names, setNames] = useState<ConflictSideNames>(NO_NAMES);
+  const [showBase, setShowBase] = useState(false);
+  // Unchanged runs the user expanded, by segment index.
+  const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
+  const [wholeEdit, setWholeEdit] = useState<WholeEdit | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const blockRefs = useRef<(HTMLElement | null)[]>([]);
   const [currentConflict, setCurrentConflict] = useState(-1);
   const idPrefix = useId();
@@ -75,7 +109,10 @@ export function ConflictResolutionPane({
       .then((next) => {
         if (!ignore) {
           setSegments(next);
-          setResolutions(next.map(() => null));
+          setStates(next.map(() => ({ kind: "unchosen" })));
+          setExpanded(new Set());
+          setWholeEdit(null);
+          setConfirmLeave(false);
           setCurrentConflict(-1);
           setError(null);
           setLoadedPath(path);
@@ -173,12 +210,13 @@ export function ConflictResolutionPane({
     );
   }
 
-  const setResolutionAt = (index: number, resolution: Resolution) => {
-    setResolutions((prev) => prev.map((r, i) => (i === index ? resolution : r)));
+  const setStateAt = (index: number, state: BlockState) => {
+    setStates((prev) => prev.map((s, i) => (i === index ? state : s)));
   };
 
   const conflictIndices = segments.flatMap((segment, index) => (segment.kind === "Conflict" ? [index] : []));
-  const resolvedCount = conflictIndices.filter((index) => resolutions[index] !== null).length;
+  const stateAt = (index: number): BlockState => states[index] ?? { kind: "unchosen" };
+  const resolvedCount = conflictIndices.filter((index) => stateAt(index).kind !== "unchosen").length;
   const allResolved = resolvedCount === conflictIndices.length;
 
   const goToConflict = (position: number) => {
@@ -188,20 +226,166 @@ export function ConflictResolutionPane({
     block?.scrollIntoView?.({ block: "nearest" });
   };
 
+  const startWholeEdit = () => {
+    const text = assembleResult(segments, states);
+    setWholeEdit({ text, initial: text });
+  };
+
+  const leaveWholeEdit = () => {
+    setConfirmLeave(false);
+    setWholeEdit(null);
+  };
+
+  if (wholeEdit !== null) {
+    const markers = hasConflictMarkers(wholeEdit.text);
+    return (
+      <Panel title="Resolve conflict">
+        {header}
+        <Toolbar aria-label="Editing the whole result">
+          <button
+            onClick={() => (wholeEdit.text === wholeEdit.initial ? leaveWholeEdit() : setConfirmLeave(true))}
+          >
+            Back to blocks
+          </button>
+        </Toolbar>
+        <p className={styles.hint}>
+          The whole file as it will be saved. Blocks without a choice are in it with their conflict
+          markers; resolve them here.
+        </p>
+        <textarea
+          aria-label="Whole result"
+          className={`${styles.segment} ${styles.result}`}
+          spellCheck={false}
+          rows={Math.min(40, Math.max(10, lineCount(wholeEdit.text)))}
+          value={wholeEdit.text}
+          onChange={(event) => setWholeEdit({ ...wholeEdit, text: event.target.value })}
+        />
+        {markers && (
+          <p className={styles.hint}>
+            Remove the conflict markers (lines starting with &lt;&lt;&lt;&lt;&lt;&lt;&lt; or
+            &gt;&gt;&gt;&gt;&gt;&gt;&gt;) to save.
+          </p>
+        )}
+        <button disabled={markers} onClick={() => onResolve(path, wholeEdit.text)}>
+          Save resolution
+        </button>
+        {confirmLeave && (
+          <ConfirmDialog
+            ariaLabel="Drop the edits"
+            message="Going back to the blocks drops what you changed in the whole result."
+            confirmLabel="Drop edits"
+            cancelLabel="Keep editing"
+            onConfirm={leaveWholeEdit}
+            onCancel={() => setConfirmLeave(false)}
+          />
+        )}
+      </Panel>
+    );
+  }
+
   const save = () => {
     if (!allResolved) return;
-    // Each segment already carries its own embedded line terminators (see
-    // `parse_conflict_markers` in `crates/git-core/src/merge.rs`), so segments are joined with
-    // "" — no synthetic separator needed, and none of the old empty-side blank-line guards are
-    // needed either: concatenating "" with anything is a no-op.
-    const parts = segments.map((segment, index) => {
-      if (segment.kind === "Clean") {
-        return segment.content;
-      }
-      const resolution = resolutions[index];
-      return resolution === null ? "" : resolvedText(segment, resolution);
-    });
-    onResolve(path, parts.join(""));
+    onResolve(path, assembleResult(segments, states));
+  };
+
+  const renderClean = (content: string, index: number) => {
+    const lines = content.split(/(?<=\n)/);
+    const head = index > 0 ? CONTEXT_LINES : 0;
+    const tail = index < segments.length - 1 ? CONTEXT_LINES : 0;
+    const hidden = lines.length - head - tail;
+    if (expanded.has(index) || hidden <= 2) {
+      return (
+        <pre key={index} className={styles.segment}>
+          {content}
+        </pre>
+      );
+    }
+    return (
+      <div key={index}>
+        {head > 0 && <pre className={styles.segment}>{lines.slice(0, head).join("")}</pre>}
+        <button className={styles.expand} onClick={() => setExpanded((prev) => new Set(prev).add(index))}>
+          Show {hidden} unchanged lines
+        </button>
+        {tail > 0 && <pre className={styles.segment}>{lines.slice(lines.length - tail).join("")}</pre>}
+      </div>
+    );
+  };
+
+  const renderBlock = (segment: ConflictBlock, index: number) => {
+    const position = conflictIndices.indexOf(index);
+    const state = stateAt(index);
+    const title = `Conflict ${position + 1} of ${conflictIndices.length}`;
+    const result = blockResult(segment, state);
+    const choice = state.kind === "chosen" ? state.choice : null;
+    const bothChosen = choice === "oursThenTheirs" || choice === "theirsThenOurs";
+    const resultId = `${idPrefix}-result-${index}`;
+    return (
+      <section
+        key={index}
+        ref={(el) => {
+          blockRefs.current[index] = el;
+        }}
+        tabIndex={-1}
+        aria-label={title}
+        className={styles.block}
+        onFocus={() => setCurrentConflict(position)}
+      >
+        <h4 className={styles.blockTitle}>
+          {title}
+          <span className={styles.blockState}>{stateLabel(state)}</span>
+        </h4>
+        {showBase && (
+          <div className={`${styles.side} ${choice === "base" ? styles.chosen : ""}`}>
+            <div className={styles.sideLabel}>Base</div>
+            <pre className={`${styles.segment} ${segment.base === "" ? styles.placeholder : ""}`}>
+              {segment.base === "" ? "Empty: no common lines" : segment.base}
+            </pre>
+          </div>
+        )}
+        <div className={styles.sides}>
+          <div className={`${styles.side} ${choice === "ours" || bothChosen ? styles.chosen : ""}`}>
+            <div className={styles.sideLabel}>{sideLabel("Ours", names.ours)}</div>
+            <pre className={styles.segment}>{segment.ours}</pre>
+          </div>
+          <div className={`${styles.side} ${choice === "theirs" || bothChosen ? styles.chosen : ""}`}>
+            <div className={styles.sideLabel}>{sideLabel("Theirs", names.theirs)}</div>
+            <pre className={styles.segment}>{segment.theirs}</pre>
+          </div>
+        </div>
+        <Toolbar aria-label={`${title}: choice`}>
+          {CHOICES.map((option) => (
+            <button
+              key={option.choice}
+              aria-pressed={choice === option.choice}
+              title={option.title}
+              onClick={() => setStateAt(index, { kind: "chosen", choice: option.choice })}
+            >
+              {option.label}
+            </button>
+          ))}
+          <button
+            disabled={state.kind === "unchosen"}
+            title="Clear this block's choice and edits."
+            onClick={() => setStateAt(index, { kind: "unchosen" })}
+          >
+            Reset
+          </button>
+        </Toolbar>
+        <label className={styles.sideLabel} htmlFor={resultId}>
+          Result
+        </label>
+        <textarea
+          id={resultId}
+          className={`${styles.segment} ${styles.result}`}
+          spellCheck={false}
+          placeholder="Not chosen yet: take a side above, or type the result."
+          rows={Math.min(20, Math.max(2, lineCount(result ?? "")))}
+          value={result ?? ""}
+          onChange={(event) => setStateAt(index, { kind: "edited", text: event.target.value })}
+        />
+        {result === "" && <p className={styles.hint}>Empty: the block&apos;s lines are removed.</p>}
+      </section>
+    );
   };
 
   return (
@@ -221,66 +405,18 @@ export function ConflictResolutionPane({
           >
             Next conflict
           </button>
+          <button aria-pressed={showBase} onClick={() => setShowBase(!showBase)}>
+            Show base
+          </button>
+          <button onClick={startWholeEdit}>Edit whole result</button>
         </Toolbar>
       )}
-      {segments.map((segment, index) => {
-        if (segment.kind === "Clean") {
-          return (
-            <pre key={index} className={styles.segment}>
-              {segment.content}
-            </pre>
-          );
-        }
-        const position = conflictIndices.indexOf(index);
-        const resolution = resolutions[index] ?? null;
-        const title = `Conflict ${position + 1} of ${conflictIndices.length}`;
-        const result = resolution === null ? null : resolvedText(segment, resolution);
-        const oursChosen = resolution === "ours" || resolution === "both";
-        const theirsChosen = resolution === "theirs" || resolution === "both";
-        return (
-          <section
-            key={index}
-            ref={(el) => {
-              blockRefs.current[index] = el;
-            }}
-            tabIndex={-1}
-            aria-label={title}
-            className={styles.block}
-            onFocus={() => setCurrentConflict(position)}
-          >
-            <h4 className={styles.blockTitle}>{title}</h4>
-            <div className={`${styles.side} ${oursChosen ? styles.chosen : ""}`}>
-              <div className={styles.sideLabel}>{sideLabel("Ours", names.ours)}</div>
-              <pre className={styles.segment}>{segment.ours}</pre>
-            </div>
-            <div className={`${styles.side} ${theirsChosen ? styles.chosen : ""}`}>
-              <div className={styles.sideLabel}>{sideLabel("Theirs", names.theirs)}</div>
-              <pre className={styles.segment}>{segment.theirs}</pre>
-            </div>
-            <Toolbar aria-label={`${title}: choice`}>
-              {CHOICES.map((choice) => (
-                <button
-                  key={choice.resolution}
-                  aria-pressed={resolution === choice.resolution}
-                  onClick={() => setResolutionAt(index, choice.resolution)}
-                >
-                  {choice.label}
-                </button>
-              ))}
-            </Toolbar>
-            <div className={styles.sideLabel} id={`${idPrefix}-result-${index}`}>
-              Result
-            </div>
-            <pre
-              className={`${styles.segment} ${result === null || result === "" ? styles.placeholder : ""}`}
-              aria-labelledby={`${idPrefix}-result-${index}`}
-            >
-              {result === null ? "Not chosen yet" : result === "" ? "Empty: the block's lines are removed" : result}
-            </pre>
-          </section>
-        );
-      })}
-      {loaded && !allResolved && <p className={styles.hint}>Choose a side for every conflict to save.</p>}
+      {segments.map((segment, index) =>
+        segment.kind === "Clean" ? renderClean(segment.content, index) : renderBlock(segment, index),
+      )}
+      {loaded && !allResolved && (
+        <p className={styles.hint}>Choose or type a result for every conflict to save.</p>
+      )}
       <button onClick={save} disabled={!loaded || !allResolved}>
         Save resolution
       </button>

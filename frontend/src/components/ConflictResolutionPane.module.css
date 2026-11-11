@@ -57,3 +57,31 @@
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
+
+/* Ours and theirs side by side; stacked when the pane is too narrow for both (#720). */
+.sides {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-2);
+}
+
+.blockState {
+  margin-left: var(--space-2);
+  font-weight: normal;
+  color: var(--color-text-muted);
+}
+
+/* The editable result of a block, or of the whole file. */
+.result {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.expand {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+}

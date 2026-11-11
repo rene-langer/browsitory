@@ -14,19 +14,32 @@ A conflicted file opens the **Resolve conflict** pane:
 
 ![A merge stopped on a conflict, with the resolve controls](assets/conflict.png)
 
-- For text conflicts, choose **Accept ours**, **Accept theirs** or **Accept both** for each
-  conflicting block, then **Save resolution**. Every block starts unresolved: the pressed button
-  shows your choice, **Result** under the block shows the text it gives, and a counter such as
-  "1 of 3 resolved" shows how far you are. **Save resolution** is enabled once every block has a
-  choice. The sides are labelled with what they are, for example "Ours (main)" and
+- For text conflicts the pane is a merge editor. It shows the file with each conflicting block
+  in place; long runs of unchanged lines are collapsed to the three lines next to a conflict
+  (**Show N unchanged lines** shows the rest). Each block shows our lines and their lines side
+  by side; **Show base** adds the common ancestor's lines ("Empty: no common lines" when there
+  are none, for example when both sides added the file). For each block choose **Accept ours**,
+  **Accept theirs**, **Ours then theirs**, **Theirs then ours** or **Accept base**, or type the
+  block's **Result** yourself: the result field is editable, and typing in it marks the block
+  "Edited". **Reset** clears a block's choice and edits. Every block starts unresolved: the
+  pressed button and the label next to the block's title show your choice, and a counter such
+  as "1 of 3 resolved" shows how far you are. **Save resolution** is enabled once every block
+  has a result. The sides are labelled with what they are, for example "Ours (main)" and
   "Theirs (feature)" for a merge. **Previous conflict** and **Next conflict** move between the
   blocks.
+- **Edit whole result** turns the file into one text field, for changes outside the blocks too.
+  It starts from your choices; a block without one is written with git's conflict markers
+  (`<<<<<<< ours`, `||||||| base`, `=======`, `>>>>>>> theirs`), and **Save resolution** stays
+  disabled until no `<<<<<<<` or `>>>>>>>` line is left. **Back to blocks** returns to the
+  blocks with their choices; if you changed the text, Browsitory asks first, because those
+  changes are dropped.
 - **Use ours (whole file)** keeps your current branch's version (HEAD) of the whole file and
   **Use theirs (whole file)** takes the incoming version: the commit being merged, cherry-picked
   or reverted, or the stash. During a rebase "ours" is the branch you are rebasing onto and
   "theirs" the commit being replayed. These work for every conflict, including binary files and
   files one side deleted (choosing the deleting side deletes the file). The file keeps the chosen
   side's executable bit. Symlink and submodule conflicts have to be resolved with git.
+  A binary file has no lines to merge: the pane says so and offers only these.
 - **Mark resolved** stages the file as it is on disk, after you edited it yourself or in another
   tool. If it still contains `<<<<<<<` / `>>>>>>>` conflict markers, Browsitory asks before
   staging it. A deleted file is marked resolved as deleted.
