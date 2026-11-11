@@ -75,6 +75,7 @@ plugins:
 markdown_extensions:
   - admonition
   - attr_list
+  - pymdownx.details
   - tables
   - toc:
       permalink: true
