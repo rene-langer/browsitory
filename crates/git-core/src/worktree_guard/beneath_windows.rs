@@ -54,8 +54,12 @@ use std::path::{Path, PathBuf};
 use super::reparse::{
     self, leaf_action, LeafAction, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
 };
-use super::walk_types::{next_temp_number, temp_name_units, ATTEMPTS, TEMP_PREFIX_LEN};
-use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
+use super::walk_types::{
+    next_temp_number, temp_name_units, Child, Held, HeldDir, ATTEMPTS, TEMP_PREFIX_LEN,
+};
+#[cfg(test)]
+use super::Step;
+use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, StepFn, Walk};
 
 const FILE_LIST_DIRECTORY: u32 = 0x0001;
 const FILE_READ_ATTRIBUTES: u32 = 0x0080;
@@ -811,7 +815,15 @@ enum Purpose {
 /// classifies it. `None` when missing. Shares delete: the handle is what any later act uses, so
 /// a rename of the name meanwhile changes nothing.
 fn open_leaf_at(at: &Beneath, name: &OsStr, purpose: Purpose) -> io::Result<Option<(File, Found)>> {
-    let parent = at.parent_file();
+    open_leaf_in(at.parent_file(), name, purpose)
+}
+
+/// [`open_leaf_at`] in the held folder `parent`.
+fn open_leaf_in(
+    parent: &File,
+    name: &OsStr,
+    purpose: Purpose,
+) -> io::Result<Option<(File, Found)>> {
     let open = |access| {
         nt_open(
             parent,
@@ -934,86 +946,53 @@ fn walk_from(
     on_missing: OnMissing,
     step: StepFn<'_>,
 ) -> io::Result<Walk<Beneath>> {
-    let names: Vec<OsString> = rel
-        .components()
-        .map(|c| c.as_os_str().to_os_string())
-        .collect();
-    if names.is_empty() {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
-    }
-    let mut at = Beneath {
-        dirs: vec![root_dir],
-        names,
-    };
-    for k in 0..at.names.len() - 1 {
-        let name = at.names[k].clone();
-        let mut next = None;
-        for _ in 0..ATTEMPTS {
-            let dir = match nt_open(
-                at.parent_file(),
-                &name,
-                FILE_LIST_DIRECTORY,
-                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                FILE_OPEN,
-                FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT,
-                0,
-            ) {
-                Ok(dir) => dir,
-                Err(error) if missing(&error) => match on_missing {
-                    OnMissing::Stop => return Ok(Walk::Missing),
-                    OnMissing::Create => {
-                        match create_dir_in(at.parent_file(), &name) {
-                            Ok(()) => step(Step::Created(&name)),
-                            Err(error) if error.raw_os_error() == Some(ERROR_ALREADY_EXISTS) => {}
-                            Err(error) => return Err(error),
-                        }
-                        continue;
-                    }
-                },
-                Err(error) => return Err(error),
-            };
-            if !in_parent(&dir, at.parent_file())? {
-                return Err(redirected());
-            }
-            let info = attribute_tag(&dir)?;
-            match leaf_action(info.file_attributes, info.reparse_tag) {
-                LeafAction::Refuse => {
-                    drop(dir);
-                    match on_link {
-                        OnLink::Refuse => return Ok(Walk::Link),
-                        OnLink::Clear => {
-                            // Through its own handle, checked to be the link in the held parent.
-                            if let Some((link, Found::Link)) =
-                                open_leaf_at(&at, &name, Purpose::Delete)?
-                            {
-                                delete_by_handle(&link)?;
-                            }
-                            step(Step::Cleared(&name));
-                            if on_missing == OnMissing::Stop {
-                                return Ok(Walk::Link);
-                            }
-                        }
-                    }
-                }
-                // A plain folder, or one a file system filter resolves (a OneDrive folder).
-                _ if info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0 => {
-                    step(Step::Opened(&name));
-                    next = Some(dir);
-                    break;
-                }
-                _ => return Ok(Walk::NotDir),
-            }
+    let walked = super::walk_types::walk_from(root_dir, rel, on_link, on_missing, step)?;
+    Ok(walked.map(|Held { dirs, names }| Beneath { dirs, names }))
+}
+
+impl HeldDir for File {
+    fn open_child_dir(&self, name: &OsStr) -> io::Result<Child<File>> {
+        let dir = match nt_open(
+            self,
+            name,
+            FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            FILE_OPEN,
+            FILE_OPEN_FOR_BACKUP_INTENT | FILE_OPEN_REPARSE_POINT,
+            0,
+        ) {
+            Ok(dir) => dir,
+            Err(error) if missing(&error) => return Ok(Child::Missing),
+            Err(error) => return Err(error),
+        };
+        if !in_parent(&dir, self)? {
+            return Err(redirected());
         }
-        match next {
-            Some(dir) => at.dirs.push(dir),
-            None => {
-                return Err(io::Error::other(
-                    "the working tree kept changing while it was being written",
-                ))
-            }
+        let info = attribute_tag(&dir)?;
+        Ok(match leaf_action(info.file_attributes, info.reparse_tag) {
+            LeafAction::Refuse => Child::Link,
+            // A plain folder, or one a file system filter resolves (a OneDrive folder).
+            _ if info.file_attributes & FILE_ATTRIBUTE_DIRECTORY != 0 => Child::Dir(dir),
+            _ => Child::NotDir,
+        })
+    }
+
+    fn create_child_dir(&self, name: &OsStr) -> io::Result<bool> {
+        match create_dir_in(self, name) {
+            Ok(()) => Ok(true),
+            Err(error) if error.raw_os_error() == Some(ERROR_ALREADY_EXISTS) => Ok(false),
+            Err(error) => Err(error),
         }
     }
-    Ok(Walk::Found(at))
+
+    /// Through its own handle, checked to be the link in this folder. Reports
+    /// `Step::Cleared` even when no link was left to delete (#800).
+    fn clear_link(&self, name: &OsStr) -> io::Result<bool> {
+        if let Some((link, Found::Link)) = open_leaf_in(self, name, Purpose::Delete)? {
+            delete_by_handle(&link)?;
+        }
+        Ok(true)
+    }
 }
 
 fn unreadable(error: &io::Error) -> bool {

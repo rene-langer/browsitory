@@ -17,8 +17,12 @@ use std::path::Path;
 
 #[cfg(test)]
 use super::no_step;
-use super::walk_types::{next_temp_number, temp_name_units, ATTEMPTS, TEMP_PREFIX_LEN};
-use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, Step, StepFn, Walk};
+use super::walk_types::{
+    next_temp_number, temp_name_units, Child, Held, HeldDir, ATTEMPTS, TEMP_PREFIX_LEN,
+};
+#[cfg(test)]
+use super::Step;
+use super::{Content, HeldFolder, Kind, Leaf, OnLink, OnMissing, Probe, StepFn, Walk};
 
 /// The folders from the work tree root down to the leaf's parent, each held open.
 pub(super) struct Beneath {
@@ -207,74 +211,50 @@ fn walk_from(
     on_missing: OnMissing,
     step: StepFn<'_>,
 ) -> io::Result<Walk<Beneath>> {
-    let names: Vec<OsString> = rel
-        .components()
-        .map(|c| c.as_os_str().to_os_string())
-        .collect();
-    if names.is_empty() {
-        return Err(io::Error::from(io::ErrorKind::InvalidInput));
-    }
-    let mut dirs: Vec<OwnedFd> = vec![root];
-    for name in &names[..names.len() - 1] {
-        let mut next = None;
-        for _ in 0..ATTEMPTS {
-            let dir = dirs[dirs.len() - 1].as_raw_fd();
-            match open_at(
-                dir,
-                name,
-                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-                0,
-            ) {
-                Ok(fd) => {
-                    step(Step::Opened(name));
-                    next = Some(fd);
-                    break;
-                }
-                Err(error) if errno(&error) == libc::ENOENT => match on_missing {
-                    OnMissing::Stop => return Ok(Walk::Missing),
-                    OnMissing::Create => match mkdir_at(dir, name) {
-                        Ok(()) => step(Step::Created(name)),
-                        Err(error) if errno(&error) == libc::EEXIST => {}
-                        Err(error) => return Err(error),
-                    },
-                },
-                // A link (`ELOOP`; `EMLINK` on FreeBSD) or not a folder (`ENOTDIR`).
-                Err(error)
-                    if matches!(errno(&error), libc::ELOOP | libc::ENOTDIR | libc::EMLINK) =>
-                {
-                    match stat_at(dir, name)? {
-                        Some(stat) if is_link(&stat) => match on_link {
-                            OnLink::Refuse => return Ok(Walk::Link),
-                            OnLink::Clear => {
-                                match unlink_at(dir, name, false) {
-                                    Ok(()) => step(Step::Cleared(name)),
-                                    Err(error) if errno(&error) == libc::ENOENT => {}
-                                    Err(error) => return Err(error),
-                                }
-                                if on_missing == OnMissing::Stop {
-                                    return Ok(Walk::Link);
-                                }
-                            }
-                        },
-                        // Swapped back to a folder, or gone: try again.
-                        Some(stat) if is_dir(&stat) => {}
-                        None => {}
-                        Some(_) => return Ok(Walk::NotDir),
-                    }
-                }
-                Err(error) => return Err(error),
+    let walked = super::walk_types::walk_from(root, rel, on_link, on_missing, step)?;
+    Ok(walked.map(|Held { dirs, names }| Beneath { dirs, names }))
+}
+
+impl HeldDir for OwnedFd {
+    fn open_child_dir(&self, name: &OsStr) -> io::Result<Child<OwnedFd>> {
+        let dir = self.as_raw_fd();
+        match open_at(
+            dir,
+            name,
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+            0,
+        ) {
+            Ok(fd) => Ok(Child::Dir(fd)),
+            Err(error) if errno(&error) == libc::ENOENT => Ok(Child::Missing),
+            // A link (`ELOOP`; `EMLINK` on FreeBSD) or not a folder (`ENOTDIR`).
+            Err(error) if matches!(errno(&error), libc::ELOOP | libc::ENOTDIR | libc::EMLINK) => {
+                Ok(match stat_at(dir, name)? {
+                    Some(stat) if is_link(&stat) => Child::Link,
+                    // Swapped back to a folder, or gone: try again.
+                    Some(stat) if is_dir(&stat) => Child::Changed,
+                    None => Child::Changed,
+                    Some(_) => Child::NotDir,
+                })
             }
-        }
-        match next {
-            Some(fd) => dirs.push(fd),
-            None => {
-                return Err(io::Error::other(
-                    "the working tree kept changing while it was being written",
-                ))
-            }
+            Err(error) => Err(error),
         }
     }
-    Ok(Walk::Found(Beneath { dirs, names }))
+
+    fn create_child_dir(&self, name: &OsStr) -> io::Result<bool> {
+        match mkdir_at(self.as_raw_fd(), name) {
+            Ok(()) => Ok(true),
+            Err(error) if errno(&error) == libc::EEXIST => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn clear_link(&self, name: &OsStr) -> io::Result<bool> {
+        match unlink_at(self.as_raw_fd(), name, false) {
+            Ok(()) => Ok(true),
+            Err(error) if errno(&error) == libc::ENOENT => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
 }
 
 fn gone(error: &io::Error) -> bool {
