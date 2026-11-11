@@ -106,8 +106,9 @@ in the list on the left (above the settings in a narrow window), or move through
 the arrow keys. The groups are:
 
 - **Appearance**: the theme, fonts and sizes (see below).
-- **Diff**: word wrap, the diff algorithm and **Expand untracked files** (see
-  [Diff options](history.md#diff-options)).
+- **Diff**: word wrap, the diff algorithm, **Expand untracked files** (see
+  [Diff options](history.md#diff-options)) and **Show changed files as a tree** (see
+  [Staging and committing](staging-and-committing.md)).
 - **Commit message**: the summary length limit and the ruler (see
   [Staging and committing](staging-and-committing.md)).
 - **Fetch**: **Fetch automatically** (see

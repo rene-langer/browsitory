@@ -8,11 +8,13 @@ command palette does). Double-click a local branch, or choose
 **Checkout** from its context menu, to switch to it;
 right-click a branch, a remote folder, or a remote branch to bring up its actions:
 
-- a local branch: checkout, rename, delete, merge, **Push to…**, **Isolate branch** (the graph
+- a local branch: checkout, rename, delete, merge, **Rebase current branch onto ⟨branch⟩…** (see
+  [Rebase](rebase.md)), **Push to…**, **Isolate branch** (the graph
   then shows only that branch's own commits and merges, see
   [Which branches the graph shows](history.md#which-branches-the-graph-shows)), and for the
   current branch **Set upstream…** and **Push to ⟨remote⟩**, and **Copy branch name**;
-- a remote branch: checkout, **Set as upstream for current branch**, **Isolate branch** (as for
+- a remote branch: checkout, **Set as upstream for current branch**, **Rebase current branch
+  onto ⟨remote⟩/⟨branch⟩…**, **Isolate branch** (as for
   a local branch), **Copy branch name** (as `remote/branch`), or **Delete ⟨remote⟩/⟨branch⟩…**;
 - a remote: fetch, **Push current branch here**, edit, manage credentials, **Copy fetch URL**
   (and **Copy push URL** when pushes go to a different URL), or remove.
