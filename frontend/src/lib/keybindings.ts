@@ -228,7 +228,12 @@ const ARIA_KEY_NAMES: Record<string, string> = { " ": "Space" };
 
 /** The shortcut in `aria-keyshortcuts` syntax ("Control+Shift+Z Control+Y"). */
 export function ariaKeyShortcuts(id: ShortcutId, apple: boolean = isApplePlatform()): string {
-  return chordsFor(id, apple)
+  return ariaChords(chordsFor(id, apple), apple);
+}
+
+/** Chords in `aria-keyshortcuts` syntax. */
+export function ariaChords(chords: readonly KeyChord[], apple: boolean = isApplePlatform()): string {
+  return chords
     .map((chord) => {
       const parts: string[] = [];
       if (chord.ctrl || (chord.mod && !apple)) parts.push("Control");
@@ -270,6 +275,60 @@ export function matchesChord(event: KeyEventLike, chord: KeyChord): boolean {
   if (event.altKey !== Boolean(chord.alt)) return false;
   if (single && !alphanumeric) return !chord.shift || event.shiftKey;
   return event.shiftKey === Boolean(chord.shift);
+}
+
+/**
+ * The merge editor's own keys (#764), bound by `ConflictResolutionPane` while its focus is inside
+ * it, never globally. The digits act on the focused conflict block outside its result field (a
+ * text field types them); F7 / Shift+F7 work anywhere in the editor. No global shortcut and no
+ * key VSCode binds for a webview uses them.
+ */
+export type MergeEditorShortcutId =
+  | "conflict-ours"
+  | "conflict-theirs"
+  | "conflict-ours-then-theirs"
+  | "conflict-theirs-then-ours"
+  | "conflict-base"
+  | "previous-conflict"
+  | "next-conflict";
+
+export interface MergeEditorShortcut {
+  id: MergeEditorShortcutId;
+  /** The button's label, which the sheet and the palette use too. */
+  description: string;
+  chords: KeyChord[];
+}
+
+/** In the order the shortcut sheet lists them. */
+export const MERGE_EDITOR_SHORTCUTS: readonly MergeEditorShortcut[] = [
+  { id: "conflict-ours", description: "Accept ours", chords: [{ key: "1" }] },
+  { id: "conflict-theirs", description: "Accept theirs", chords: [{ key: "2" }] },
+  { id: "conflict-ours-then-theirs", description: "Ours then theirs", chords: [{ key: "3" }] },
+  { id: "conflict-theirs-then-ours", description: "Theirs then ours", chords: [{ key: "4" }] },
+  { id: "conflict-base", description: "Accept base", chords: [{ key: "5" }] },
+  { id: "previous-conflict", description: "Previous conflict", chords: [{ shift: true, key: "F7" }] },
+  { id: "next-conflict", description: "Next conflict", chords: [{ key: "F7" }] },
+];
+
+export function mergeEditorShortcut(id: MergeEditorShortcutId): MergeEditorShortcut {
+  const shortcut = MERGE_EDITOR_SHORTCUTS.find((candidate) => candidate.id === id);
+  if (shortcut === undefined) throw new Error(`Unknown merge editor shortcut ${id}`);
+  return shortcut;
+}
+
+/** The merge editor shortcut's keys as the platform writes them ("Shift+F7", "⇧F7"). */
+export function mergeEditorShortcutLabel(id: MergeEditorShortcutId, apple: boolean = isApplePlatform()): string {
+  return formatChords(mergeEditorShortcut(id).chords, apple);
+}
+
+/** The merge editor shortcut in `aria-keyshortcuts` syntax. */
+export function mergeEditorAriaKeyShortcuts(id: MergeEditorShortcutId, apple: boolean = isApplePlatform()): string {
+  return ariaChords(mergeEditorShortcut(id).chords, apple);
+}
+
+/** The merge editor shortcut `event` presses, if any. */
+export function matchMergeEditorShortcut(event: KeyEventLike): MergeEditorShortcut | null {
+  return MERGE_EDITOR_SHORTCUTS.find((shortcut) => shortcut.chords.some((chord) => matchesChord(event, chord))) ?? null;
 }
 
 /** The global shortcut `event` presses on this platform, if any. */
