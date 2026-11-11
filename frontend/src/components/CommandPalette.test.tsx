@@ -390,4 +390,12 @@ describe("CommandPalette", () => {
       expect(mark?.parentElement?.textContent).toBe("Switch to main");
     });
   });
+
+  it("shows the keys a command's pane binds (#764)", () => {
+    const commands: Command[] = [
+      { id: "next-conflict", label: "Next conflict", keywords: [], run: vi.fn(), group: "Diff", keys: "F7" },
+    ];
+    render(<CommandPalette commands={commands} onRun={vi.fn()} />);
+    expect(screen.getByRole("option", { name: "Next conflict" })).toHaveTextContent("F7");
+  });
 });
