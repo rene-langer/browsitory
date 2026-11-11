@@ -413,6 +413,16 @@ export interface HookProgress {
   phase: "Started" | "Finished";
   source: HookSource;
 }
+/**
+ * A repository watcher's report (#756), for the path `watchRepo` was called with: `Changed`
+ * (something the change stamp reads may have changed) or `Stopped` (the watcher gave up, e.g. the
+ * system's watch limit was reached; poll instead).
+ */
+export type RepoWatchKind = "Changed" | "Stopped";
+export interface RepoWatch {
+  repoPath: string;
+  kind: RepoWatchKind;
+}
 export type ResetMode = "soft" | "mixed" | "hard";
 
 export type TransferOperation =
@@ -1126,6 +1136,15 @@ export interface RepoClient {
    */
   getChangeStamp(repoPath: string): Promise<ChangeStamp>;
   /**
+   * Watches the repository's work tree and git folder for changes made outside the app (#756);
+   * reports arrive on `subscribeRepoWatch`. Resolves whether it is watched: not when the system
+   * refuses (no watches left, a file system without notifications) or the work tree has too many
+   * folders; then the caller polls `getChangeStamp` as before. Watching again is a no-op.
+   */
+  watchRepo(repoPath: string): Promise<boolean>;
+  /** Stops `watchRepo`'s watcher; `closeRepo` stops it too. A no-op when not watched. */
+  unwatchRepo(repoPath: string): Promise<void>;
+  /**
    * The commits of `selection.local` plus those of `selection.remote`. Exactly one branch in
    * total, or `selection.firstParent`, walks first parents only; its merge rows then carry
    * `mergedCount`. Missing branches are skipped. Paged (#685): at most `limit` commits from
@@ -1335,6 +1354,8 @@ export interface RepoClient {
   cancelTransfer(repoPath: string, operationId: string): Promise<void>;
   subscribeTransferProgress(listener: (progress: TransferProgress) => void): () => void;
   subscribeHookProgress(listener: (event: HookProgress) => void): () => void;
+  /** The repository watchers' reports (#756), for every watched repository. */
+  subscribeRepoWatch(listener: (event: RepoWatch) => void): () => void;
   /**
    * File manager drags onto the window (#649), until the returned function is called. Desktop
    * only: in the VSCode extension, VSCode handles drops itself and this never calls `listener`.

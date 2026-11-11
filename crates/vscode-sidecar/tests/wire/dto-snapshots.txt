@@ -84,6 +84,8 @@ HookProgress/Started-Checkout {"hook":"pre-commit","operationId":"op-1","phase":
 HookProgress/Started-Merge {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Merge"}
 HookProgress/Started-Pick {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Pick"}
 HookProgress/Finished-Commit {"hook":"pre-commit","operationId":"op-1","phase":"Finished","repoPath":"/repos/app","source":"Commit"}
+RepoWatch/Changed {"kind":"Changed","repoPath":"/repos/app"}
+RepoWatch/Stopped {"kind":"Stopped","repoPath":"/repos/app"}
 BranchInfo/tracking {"ahead":2,"behind":0,"isCurrent":true,"name":"main","upstream":"origin/main"}
 BranchInfo/local-only {"ahead":null,"behind":null,"isCurrent":false,"name":"topic","upstream":null}
 WorktreeInfo/main {"head":"4444444444444444444444444444444444444444","isLocked":false,"isMain":true,"isPrunable":false,"name":"app","path":"/repos/app"}

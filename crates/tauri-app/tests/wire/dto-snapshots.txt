@@ -84,6 +84,9 @@ HookProgress/Started-Checkout {"repoPath":"/repos/app","operationId":"op-1","hoo
 HookProgress/Started-Merge {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Started","source":"Merge"}
 HookProgress/Started-Pick {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Started","source":"Pick"}
 HookProgress/Finished-Commit {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Finished","source":"Commit"}
+RepoWatch/Changed {"repoPath":"/repos/app","kind":"Changed"}
+RepoWatch/Stopped {"repoPath":"/repos/app","kind":"Stopped"}
+RepoWatchEvent/all "repo-watch"
 HookProgressEvent/all "hook-progress"
 BranchInfo/tracking {"name":"main","isCurrent":true,"upstream":"origin/main","ahead":2,"behind":0}
 BranchInfo/local-only {"name":"topic","isCurrent":false,"upstream":null,"ahead":null,"behind":null}

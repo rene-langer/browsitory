@@ -55,6 +55,10 @@ exceptions = [
     # Build time only (system-deps for the Linux GTK bindings). The LLVM exception only adds
     # permissions to Apache-2.0.
     { crate = "target-lexicon", allow = ["Apache-2.0 WITH LLVM-exception"] },
+    # The file watcher behind repo-service's change events (#756). CC0-1.0 grants no patent
+    # licence; accepted for a thin wrapper over the operating systems' watch APIs. Owner
+    # decision 2026-11-11. Its own dependencies stay within the policy.
+    { crate = "notify", allow = ["CC0-1.0"] },
 ]
 
 # libgit2-sys declares only its binding's licence (MIT OR Apache-2.0), but it vendors libgit2.

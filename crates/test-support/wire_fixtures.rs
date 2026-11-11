@@ -17,6 +17,7 @@ use git_core::remote::{TransferErrorKind, TransferOperation, TransferPhase};
 use git_core::repo::{OperationKind, TerminalRebaseKind};
 use git_core::status::StatusKind;
 use git_core::tools::ConfigSource;
+use repo_service::watch::WatchEvent;
 use repo_service::worker::{HookEvent, HookSource, TransferEvent};
 
 pub type Cases<T> = Vec<(String, T)>;
@@ -1024,6 +1025,20 @@ pub fn hook_events() -> Cases<HookEvent> {
 
 /// The repository path the hook event DTOs carry.
 pub const HOOK_REPO_PATH: &str = "/repos/app";
+
+/// Each event a repository watcher reports (#756), for `HOOK_REPO_PATH`.
+pub fn watch_events() -> Cases<WatchEvent> {
+    let cases = vec![
+        case("Changed", WatchEvent::Changed),
+        case("Stopped", WatchEvent::Stopped),
+    ];
+    assert_every_variant!(
+        cases.iter().map(|(_, event)| event),
+        WatchEvent::Changed,
+        WatchEvent::Stopped,
+    );
+    cases
+}
 
 pub fn branches() -> Cases<git_core::branch::BranchInfo> {
     vec![

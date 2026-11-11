@@ -1034,6 +1034,19 @@ describe("vscodeRepoClient", () => {
     expect(received).toHaveLength(1);
   });
 
+  it("delivers repoWatch notifications to subscribed listeners and stops after unsubscribe (#756)", () => {
+    const received: unknown[] = [];
+    const unsubscribe = vscodeRepoClient.subscribeRepoWatch((event) => received.push(event));
+    const event = { repoPath: "/r", kind: "Changed" };
+
+    notify("repoWatch", event);
+    expect(received).toEqual([event]);
+
+    unsubscribe();
+    notify("repoWatch", event);
+    expect(received).toHaveLength(1);
+  });
+
   it("delivers transferProgress notifications to subscribed listeners and stops after unsubscribe", () => {
     const received: unknown[] = [];
     const unsubscribe = vscodeRepoClient.subscribeTransferProgress((p) => received.push(p));

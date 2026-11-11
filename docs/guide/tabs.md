@@ -26,16 +26,24 @@ leave them, when the window comes back into view, and after a fetch.
 ## Changes made outside Browsitory
 
 You don't need to refresh after working in a terminal, an editor or another Git
-tool. While a tab is shown, Browsitory checks every few seconds whether anything
-it displays has changed: files, staged changes, commits, branches, tags,
-stashes, remotes, or a merge or rebase in progress. When something has, it
-reloads the tab; when nothing has, it reads nothing more. It also checks at once
-when the window gets the focus back or comes into view (in VSCode, when the
-panel is shown again), and when you switch to a tab. Files your `.gitignore`
+tool. Browsitory asks your operating system to tell it when files of the
+repository change, and then checks whether anything it displays has changed:
+files, staged changes, commits, branches, tags, stashes, remotes, or a merge or
+rebase in progress. When something has, it reloads the tab, usually within a
+second; when nothing has, it reads nothing more. It also checks at once when the
+window gets the focus back or comes into view (in VSCode, when the panel is
+shown again), when you switch to a tab, and every 30 seconds in case a change
+went unreported (some network drives report none). Files your `.gitignore`
 ignores don't count, and nothing is checked while one of the tab's own actions
-runs: its own reload follows when it is done. In a very large repository, where
-a check takes longer, the checks come less often (at most one a minute). The
-**Refresh** command still reloads at once.
+runs: its own reload follows when it is done. A tab in the background is checked
+when you switch to it.
+
+Where the operating system can't report changes, Browsitory checks every few
+seconds instead: on some network drives, when Linux has no file watches left
+(each folder of a repository needs one; see `fs.inotify.max_user_watches`), and
+in a repository with more than 20 000 folders that aren't ignored. In a very
+large repository, where a check takes longer, those checks come less often (at
+most one a minute). The **Refresh** command still reloads at once.
 Reopening Browsitory restores every tab you had open, workspace groupings
 included.
 

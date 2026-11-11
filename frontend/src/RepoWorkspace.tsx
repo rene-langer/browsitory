@@ -387,6 +387,8 @@ export function RepoWorkspace({
   useScrollMemory(workspaceElement, active);
   // Changes made outside the app show without a manual refresh (#650).
   useExternalChanges({
+    client,
+    repoPath,
     active,
     busy: discardDropBlockedReason !== null,
     checkForChanges: appState.checkForChanges,
