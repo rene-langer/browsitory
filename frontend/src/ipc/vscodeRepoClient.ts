@@ -218,6 +218,8 @@ export const vscodeRepoClient: RepoClient = {
   cloneRepo: () => Promise.reject(new Error("Not supported in the VSCode extension")),
   cancelClone: () => Promise.reject(new Error("Not supported in the VSCode extension")),
   initRepo: () => Promise.reject(new Error("Not supported in the VSCode extension")),
+  supportsHostGitCommands: true,
+  runHostGitCommand: (command: "clone" | "init") => call<void>("run_vscode_git_command", { command }),
   subscribeTransferProgress: (listener: (progress: TransferProgress) => void) => {
     // Initialize eagerly: a caller may subscribe before it ever issues a request, and the
     // `message` listener registered here is what delivers notifications.

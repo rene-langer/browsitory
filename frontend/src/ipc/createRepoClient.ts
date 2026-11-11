@@ -94,7 +94,7 @@ export type BackendCall = <T>(method: string, params?: Record<string, unknown>) 
  * The `RepoClient` members each transport implements itself, because they really differ:
  *
  * - clone and init: the desktop app clones and initializes; the extension leaves that to VSCode's
- *   own commands (`supportsCloneAndInit: false`).
+ *   own commands (`supportsCloneAndInit: false`), which `runHostGitCommand` runs there (#680).
  * - `listOpenRepos`: the Tauri command answers a `[entries, activePath]` tuple, the sidecar an
  *   object.
  * - the two progress subscriptions: Tauri events on the desktop, JSON-RPC notifications in VSCode.
@@ -108,6 +108,8 @@ export type TransportSpecific =
   | "cloneRepo"
   | "cancelClone"
   | "initRepo"
+  | "supportsHostGitCommands"
+  | "runHostGitCommand"
   | "listOpenRepos"
   | "subscribeTransferProgress"
   | "subscribeHookProgress"
@@ -155,6 +157,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
   
     pickRepoFolder: () => call<string | null>("pick_repo_folder"),
     listRecentRepos: () => call<string[]>("list_recent_repos"),
+    removeRecentRepo: (path: string) => call<void>("remove_recent_repo", { path }),
+    listMissingRecentRepos: () => call<string[]>("list_missing_recent_repos"),
     getAppVersion: () => call<string>("get_app_version"),
     getLastSeenVersion: () => call<string | null>("get_last_seen_version"),
     setLastSeenVersion: (version: string) =>

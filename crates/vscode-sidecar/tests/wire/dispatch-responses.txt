@@ -276,6 +276,9 @@ init_submodule/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"
 list_branches/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoPathParams"}}}
 list_branches/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 list_branches/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoPathParams"}}}
+list_missing_recent_repos/absent {"jsonrpc":"2.0","id":7,"result":[]}
+list_missing_recent_repos/empty {"jsonrpc":"2.0","id":7,"result":[]}
+list_missing_recent_repos/string {"jsonrpc":"2.0","id":7,"result":[]}
 list_open_repos/absent {"jsonrpc":"2.0","id":7,"result":{"activePath":null,"entries":[]}}
 list_open_repos/empty {"jsonrpc":"2.0","id":7,"result":{"activePath":null,"entries":[]}}
 list_open_repos/string {"jsonrpc":"2.0","id":7,"result":{"activePath":null,"entries":[]}}
@@ -357,6 +360,9 @@ rebase_continue/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":
 redo_last/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoPathParams"}}}
 redo_last/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 redo_last/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoPathParams"}}}
+remove_recent_repo/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RemoveRecentRepoParams","data":{"kind":"Other","message":"invalid type: null, expected struct RemoveRecentRepoParams"}}}
+remove_recent_repo/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `path`","data":{"kind":"Other","message":"missing field `path`"}}}
+remove_recent_repo/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RemoveRecentRepoParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RemoveRecentRepoParams"}}}
 remove_remote/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RemoveRemoteParams","data":{"kind":"Other","message":"invalid type: null, expected struct RemoveRemoteParams"}}}
 remove_remote/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 remove_remote/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RemoveRemoteParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RemoveRemoteParams"}}}

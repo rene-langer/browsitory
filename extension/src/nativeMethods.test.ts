@@ -49,6 +49,7 @@ function bridgeWithoutSidecar() {
     createTerminal: () => {},
     openDiff: async () => undefined,
     openMergeEditor: async () => true,
+    executeCommand: async () => undefined,
   });
   return { bridge, postToWebview, spawn };
 }

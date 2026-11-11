@@ -395,6 +395,17 @@ pub fn add_recent_repo(path: &Path) -> Result<(), ConfigError> {
     add_recent_repo_at(&config_file_path()?, path)
 }
 
+/// Removes `path` from the recent-repos list (#690); a path that isn't in it is no error.
+pub fn remove_recent_repo(path: &Path) -> Result<(), ConfigError> {
+    remove_recent_repo_at(&config_file_path()?, path)
+}
+
+/// The recent repositories whose folder is gone (#690): each listed path that isn't a
+/// directory now, in the list's order.
+pub fn list_missing_recent_repos() -> Result<Vec<PathBuf>, ConfigError> {
+    list_missing_recent_repos_at(&config_file_path()?)
+}
+
 /// Finds repositories directly beneath `root` by looking for a `.git` entry.
 ///
 /// The scan intentionally examines only immediate child directories. A `.git` entry may be
@@ -429,6 +440,17 @@ pub fn add_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigE
     config.recent_repos.insert(0, path.to_path_buf());
     config.recent_repos.truncate(MAX_RECENT_REPOS);
     write_config(config_file, &config)
+}
+
+pub fn remove_recent_repo_at(config_file: &Path, path: &Path) -> Result<(), ConfigError> {
+    let mut config = read_config(config_file)?;
+    config.recent_repos.retain(|p| p != path);
+    write_config(config_file, &config)
+}
+
+pub fn list_missing_recent_repos_at(config_file: &Path) -> Result<Vec<PathBuf>, ConfigError> {
+    let recent = read_config(config_file)?.recent_repos;
+    Ok(recent.into_iter().filter(|path| !path.is_dir()).collect())
 }
 
 pub fn get_last_seen_version() -> Result<Option<String>, ConfigError> {

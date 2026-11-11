@@ -160,6 +160,8 @@ methods!(|params, repos, stdout| {
     ),
     "get_branch_compare_range" => get_branch_compare_range(GetBranchCompareRangeParams, repos),
     "list_recent_repos" => list_recent_repos(),
+    "remove_recent_repo" => remove_recent_repo(RemoveRecentRepoParams),
+    "list_missing_recent_repos" => list_missing_recent_repos(),
     "list_open_repos" => list_open_repos_handler(),
     "persist_open_repos" => persist_open_repos(PersistOpenReposParams),
     "list_repo_aliases" => list_repo_aliases(),

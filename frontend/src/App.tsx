@@ -234,9 +234,31 @@ function AppContent({
       });
     });
   }, [reopenClosedRepo]);
+  // In VSCode, Clone… and New repository… run its own Git: Clone and Git: Initialize Repository
+  // (#680), which ask for the URL or folder and offer to open the result themselves.
+  const runHostGitCommand = useCallback(
+    (command: "clone" | "init") => {
+      setPickingRepo(false);
+      client
+        .runHostGitCommand(command)
+        .catch((error: unknown) =>
+          setOpenError({ message: String(error instanceof Error ? error.message : error), path: "" }),
+        );
+    },
+    [client],
+  );
+  const cloneAndInitCommands = useMemo(
+    () =>
+      client.supportsCloneAndInit
+        ? { onCloneRepository: startClone, onNewRepository: startNewRepository }
+        : client.supportsHostGitCommands
+          ? { onCloneRepository: () => runHostGitCommand("clone"), onNewRepository: () => runHostGitCommand("init") }
+          : {},
+    [client.supportsCloneAndInit, client.supportsHostGitCommands, startClone, startNewRepository, runHostGitCommand],
+  );
   const appCommands = useMemo<AppCommands>(
     () => ({
-      ...(client.supportsCloneAndInit ? { onCloneRepository: startClone, onNewRepository: startNewRepository } : {}),
+      ...cloneAndInitCommands,
       onOpenPreferences: openPreferences,
       onOpenThirdPartyLicences: openLicences,
       onOpenUserGuide: openUserGuide,
@@ -245,9 +267,7 @@ function AppContent({
       onCheckForUpdates: checkForUpdates,
     }),
     [
-      client.supportsCloneAndInit,
-      startClone,
-      startNewRepository,
+      cloneAndInitCommands,
       openPreferences,
       openLicences,
       openUserGuide,
@@ -312,7 +332,22 @@ function AppContent({
     [client, reopenClosedTab, canReopenClosedRepo, rootFiles, loadRootFiles],
   );
 
-  const { releaseNotesView, setReleaseNotesView, closeReleaseNotes } = useReleaseNotes(client);
+  // VSCode (#680): an update shows a toast that opens the notes, not a dialog over the editor.
+  const announceUpdate = useMemo(
+    () =>
+      toolHost === "vscode"
+        ? (version: string, showNotes: () => void) =>
+            pushAppToast(`Browsitory was updated to ${version}`, {
+              tone: "info",
+              action: { label: "What’s new", run: showNotes },
+            })
+        : undefined,
+    [toolHost, pushAppToast],
+  );
+  const { releaseNotesView, setReleaseNotesView, closeReleaseNotes, welcome, dismissWelcome } = useReleaseNotes(
+    client,
+    { announce: announceUpdate, repoOpen: openRepos.openRepos.length > 0 },
+  );
 
   // Switches to the other theme; Preferences > Appearance > Theme goes back to System (#691).
   const themeToggle = themeControls && (
@@ -547,6 +582,7 @@ function AppContent({
       {openRepos.openRepos.length === 0 ? (
         <RepoPicker
           client={client}
+          welcome={welcome ? { onDismiss: dismissWelcome, onOpenUserGuide: openUserGuide } : undefined}
           onOpenRepo={openRepoTab}
           onOpenWorkspace={(workspace) => void openRepos.openWorkspace(workspace)}
           workspaces={workspaces.workspaces}

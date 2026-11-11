@@ -1052,6 +1052,10 @@ export type HostRequest =
 export interface RepoClient {
   pickRepoFolder(): Promise<string | null>;
   listRecentRepos(): Promise<string[]>;
+  /** Takes `path` off the recent repositories (#690); a path that isn't listed is no error. */
+  removeRecentRepo(path: string): Promise<void>;
+  /** The recent repositories whose folder is gone (#690), in the list's order. */
+  listMissingRecentRepos(): Promise<string[]>;
   getAppVersion(): Promise<string>;
   getLastSeenVersion(): Promise<string | null>;
   setLastSeenVersion(version: string): Promise<void>;
@@ -1066,6 +1070,13 @@ export interface RepoClient {
   scanReposInRoot(root: string): Promise<string[]>;
   /** False in the VSCode extension, where VSCode's own Git: Clone / Initialize cover this. */
   readonly supportsCloneAndInit: boolean;
+  /**
+   * True in the VSCode extension (#680): `runHostGitCommand` runs VSCode's Git: Clone or Git:
+   * Initialize Repository, which ask for the URL or folder and offer to open the result.
+   */
+  readonly supportsHostGitCommands: boolean;
+  /** Rejects where `supportsHostGitCommands` is false, without calling the backend. */
+  runHostGitCommand(command: "clone" | "init"): Promise<void>;
   /**
    * Clones and resolves when done. `operationId` is chosen by the caller so it can
    * `cancelClone` before this resolves; progress arrives on `subscribeTransferProgress` with

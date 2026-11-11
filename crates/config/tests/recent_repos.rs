@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use config::{
-    add_recent_repo_at, list_open_repos_at, list_recent_repos_at, set_open_repos_at, OpenRepoEntry,
+    add_recent_repo_at, list_missing_recent_repos_at, list_open_repos_at, list_recent_repos_at,
+    remove_recent_repo_at, set_open_repos_at, OpenRepoEntry,
 };
 
 #[test]
@@ -193,4 +194,64 @@ fn list_open_repos_at_parses_a_pre_workspaces_config_file() {
     );
     assert!(entries.iter().all(|e| e.workspace_id.is_none()));
     assert_eq!(active, Some(PathBuf::from("/repos/a")));
+}
+
+#[test]
+fn remove_recent_repo_at_removes_only_that_entry_and_keeps_the_order() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+    for repo in ["/repo/a", "/repo/b", "/repo/c"] {
+        add_recent_repo_at(&config_file, Path::new(repo)).unwrap();
+    }
+
+    remove_recent_repo_at(&config_file, Path::new("/repo/b")).unwrap();
+
+    assert_eq!(
+        list_recent_repos_at(&config_file).unwrap(),
+        vec![PathBuf::from("/repo/c"), PathBuf::from("/repo/a")]
+    );
+}
+
+#[test]
+fn remove_recent_repo_at_ignores_a_path_that_isnt_listed() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+    add_recent_repo_at(&config_file, Path::new("/repo/a")).unwrap();
+
+    remove_recent_repo_at(&config_file, Path::new("/repo/other")).unwrap();
+
+    assert_eq!(
+        list_recent_repos_at(&config_file).unwrap(),
+        vec![PathBuf::from("/repo/a")]
+    );
+}
+
+#[test]
+fn list_missing_recent_repos_at_lists_the_entries_whose_folder_is_gone() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config_file = dir.path().join("config.toml");
+    let present = dir.path().join("present");
+    std::fs::create_dir(&present).unwrap();
+    let file = dir.path().join("a-file");
+    std::fs::write(&file, "").unwrap();
+    let gone = dir.path().join("gone");
+    for repo in [&gone, &present, &file] {
+        add_recent_repo_at(&config_file, repo).unwrap();
+    }
+
+    assert_eq!(
+        list_missing_recent_repos_at(&config_file).unwrap(),
+        vec![file, gone]
+    );
+}
+
+#[test]
+fn list_missing_recent_repos_at_is_empty_without_a_config_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+
+    assert!(
+        list_missing_recent_repos_at(&dir.path().join("config.toml"))
+            .unwrap()
+            .is_empty()
+    );
 }
