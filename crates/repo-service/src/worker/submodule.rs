@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 
 use git_core::submodule::SubmoduleInfo;
 
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 
 pub(super) fn list(repo: &git2::Repository, reply: Sender<Result<Vec<SubmoduleInfo>, ErrorDto>>) {
     let result = git_core::submodule::list_submodules(repo).map_err(ErrorDto::from_error);
@@ -27,10 +27,6 @@ pub(super) fn update(
 }
 
 impl WorkerHandle {
-    pub fn list_submodules(&self) -> Result<Vec<SubmoduleInfo>, ErrorDto> {
-        self.request(|reply_tx| Command::ListSubmodules { reply: reply_tx })
-    }
-
     pub fn init_submodule(&self, path: String) -> Result<(), ErrorDto> {
         self.request(|reply_tx| Command::InitSubmodule {
             path,
@@ -44,5 +40,11 @@ impl WorkerHandle {
             recursive,
             reply: reply_tx,
         })
+    }
+}
+
+impl ReadHandle {
+    pub fn list_submodules(&self) -> Result<Vec<SubmoduleInfo>, ErrorDto> {
+        self.read(|reply_tx| Command::ListSubmodules { reply: reply_tx })
     }
 }

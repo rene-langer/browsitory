@@ -1,4 +1,4 @@
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 use crate::wire::ErrorDto;
 use git_core::forge::{ForgeProvider, ForgeRepository};
 use std::sync::mpsc::Sender;
@@ -97,10 +97,6 @@ pub(super) fn create_pull_request<S: CredentialStore, A: ForgeApi>(
 }
 
 impl WorkerHandle {
-    pub fn detect_forge_repository(&self) -> Result<Vec<ForgeRepository>, ErrorDto> {
-        self.request(|tx| Command::DetectForgeRepository { reply: tx })
-    }
-
     pub fn save_forge_token(
         &self,
         provider: ForgeProvider,
@@ -151,5 +147,11 @@ impl WorkerHandle {
             create,
             reply: tx,
         })
+    }
+}
+
+impl ReadHandle {
+    pub fn detect_forge_repository(&self) -> Result<Vec<ForgeRepository>, ErrorDto> {
+        self.read(|tx| Command::DetectForgeRepository { reply: tx })
     }
 }

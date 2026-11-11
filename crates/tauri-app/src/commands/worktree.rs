@@ -12,7 +12,7 @@ pub async fn list_worktrees(
     state: State<'_, AppState>,
 ) -> Result<Vec<WorktreeInfoDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.list_worktrees())
+        .read(move |w| w.list_worktrees())
         .await?
         .into_iter()
         .map(WorktreeInfoDto::from)

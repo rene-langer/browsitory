@@ -870,13 +870,32 @@ pub struct Worker {
 /// reply, so a slow (or wedged) repository operation can't serialize unrelated commands.
 #[derive(Clone)]
 pub struct WorkerHandle {
-    tx: Sender<Command>,
+    /// The read lane's requests, and the channel every request goes through.
+    reads: ReadHandle,
     /// Shared with the worker thread — see `CancelRegistry`.
     cancelled: CancelRegistry,
     /// Shared with the worker thread — see `SearchGeneration`.
     search_generation: SearchGeneration,
     /// The work tree root, captured at spawn (`None` for a bare repository).
     workdir: Option<PathBuf>,
+}
+
+/// The part of a `WorkerHandle` that can only send the read lane's commands (#734): the ones the
+/// worker also runs while it waits for a fetch, pull or push (`worker_loop/read.rs`). The
+/// desktop app sends these through a gate of their own, so they don't queue behind a pull that
+/// holds the main one. A `WorkerHandle` dereferences to it, so every read is also a method of the
+/// full handle.
+#[derive(Clone)]
+pub struct ReadHandle {
+    tx: Sender<Command>,
+}
+
+impl std::ops::Deref for WorkerHandle {
+    type Target = ReadHandle;
+
+    fn deref(&self) -> &ReadHandle {
+        &self.reads
+    }
 }
 
 /// Finds the `ForgeRepository` for a named remote. Returns a secret-free, static error (never
@@ -985,7 +1004,9 @@ impl Worker {
     /// A cloneable handle to this worker, cheap enough to take out of a mutex guard.
     pub fn handle(&self) -> WorkerHandle {
         WorkerHandle {
-            tx: self.tx.clone(),
+            reads: ReadHandle {
+                tx: self.tx.clone(),
+            },
             cancelled: self.cancelled.clone(),
             search_generation: Arc::clone(&self.search_generation),
             workdir: self.workdir.clone(),
@@ -1098,11 +1119,11 @@ impl PauseControl {
     }
 }
 
-impl WorkerHandle {
+impl ReadHandle {
     /// Sends the command `build` makes around a fresh reply channel and waits for its reply.
     /// Every request goes through here, so a stopped worker always answers the same
     /// `ErrorKind::WorkerStopped` errors (#527).
-    pub(crate) fn request<T>(
+    fn send<T>(
         &self,
         build: impl FnOnce(Sender<Result<T, ErrorDto>>) -> Command,
     ) -> Result<T, ErrorDto> {
@@ -1112,6 +1133,37 @@ impl WorkerHandle {
             .map_err(|_| ErrorDto::worker_stopped())?;
         rx.recv()
             .map_err(|_| ErrorDto::worker_stopped_before_replying())?
+    }
+
+    /// A read lane request: `send` for the methods of `ReadHandle`, whose commands must all be
+    /// `Lane::Read` (checked in debug builds, so the worker tests check every method they reach).
+    pub(crate) fn read<T>(
+        &self,
+        build: impl FnOnce(Sender<Result<T, ErrorDto>>) -> Command,
+    ) -> Result<T, ErrorDto> {
+        self.send(|reply| {
+            let command = build(reply);
+            debug_assert!(
+                policy::of(&command).lane == policy::Lane::Read,
+                "a ReadHandle method sends a main-lane command"
+            );
+            command
+        })
+    }
+}
+
+impl WorkerHandle {
+    /// A request of any lane (see `ReadHandle::send`).
+    pub(crate) fn request<T>(
+        &self,
+        build: impl FnOnce(Sender<Result<T, ErrorDto>>) -> Command,
+    ) -> Result<T, ErrorDto> {
+        self.reads.send(build)
+    }
+
+    /// The read lane's requests alone, for a caller that sends them through a gate of their own.
+    pub fn reads(&self) -> ReadHandle {
+        self.reads.clone()
     }
 
     /// True if the worker thread behind this handle is still running.
@@ -1124,7 +1176,7 @@ impl WorkerHandle {
     /// but simply busy with a slow command ahead of this one in the queue.
     pub fn is_alive(&self) -> bool {
         let (reply, _reply_rx) = mpsc::channel();
-        self.tx.send(Command::Ping { reply }).is_ok()
+        self.reads.tx.send(Command::Ping { reply }).is_ok()
     }
 
     /// Asks the in-flight transfer identified by `operation_id` to stop.
@@ -1147,7 +1199,7 @@ impl WorkerHandle {
     /// `Command::PanicNow`.
     #[cfg(test)]
     pub(crate) fn crash_for_test(&self) {
-        let _ = self.tx.send(Command::PanicNow);
+        let _ = self.reads.tx.send(Command::PanicNow);
     }
 }
 

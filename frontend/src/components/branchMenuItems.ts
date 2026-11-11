@@ -7,6 +7,7 @@ import {
   type BranchDrop,
   type RebaseTarget,
 } from "../lib/actions/branchActions";
+import type { CommitDrop, CommitDropRun, DraggedCommits } from "../lib/actions/commitActions";
 import { addRemoteAction, remoteActions } from "../lib/actions/remoteActions";
 import type { OperationBlockers } from "../lib/operationStatus";
 import type { CopyToClipboard } from "../state/useCopyToClipboard";
@@ -34,6 +35,8 @@ export type RowContextMenu = { x: number; y: number; returnFocusTo?: HTMLElement
   | { kind: "remote-branch"; remoteName: string; branchName: string }
   /** The choices of a branch dropped on a branch (#744). */
   | { kind: "branch-drop"; source: RebaseTarget; target: RebaseTarget }
+  /** The choice of commits dragged from the graph onto a branch (#744). */
+  | { kind: "commit-drop"; dragged: DraggedCommits; target: RebaseTarget }
 );
 
 /**
@@ -49,6 +52,7 @@ export function rowMenuKey(menu: RowContextMenu): string {
       return `${menu.kind}:${menu.remoteName}/${menu.branchName}`;
     case "add":
     case "branch-drop":
+    case "commit-drop":
       return menu.kind;
   }
 }
@@ -274,6 +278,17 @@ export function branchDropMenuItems(
       ...menuItem(item, () => (item.run.kind === "merge" ? onMergeBranch(item.run.name) : onRebaseOnto(item.run.onto))),
       group: "drop",
     })),
+    { label: "Cancel", onSelect: () => {}, group: "cancel" },
+  ];
+}
+
+/** The menu commits dropped on a branch open (#744): the cherry-pick, then Cancel. */
+export function commitDropMenuItems(
+  drop: Extract<CommitDrop, { kind: "menu" }>,
+  onRun: (run: CommitDropRun) => void,
+): ContextMenuItem[] {
+  return [
+    { ...menuItem(drop.item, () => onRun(drop.item.run)), group: "drop" },
     { label: "Cancel", onSelect: () => {}, group: "cancel" },
   ];
 }

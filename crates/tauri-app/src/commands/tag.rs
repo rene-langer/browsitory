@@ -10,7 +10,7 @@ pub async fn list_tags(
     state: State<'_, AppState>,
 ) -> Result<Vec<TagInfoDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.list_tags())
+        .read(move |w| w.list_tags())
         .await?
         .into_iter()
         .map(TagInfoDto::from)

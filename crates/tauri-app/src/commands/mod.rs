@@ -12,7 +12,7 @@ use repo_service::wire::{
     DiffSettingsDto, ErrorDto, FetchSettingsDto, OpenRepoEntryDto, OpenRepoEntryInput,
     TransferProgressDto, UpdateSettingsDto, WorkspaceDto,
 };
-use repo_service::worker::{HookEvent, TransferEvent, WorkerHandle, WorkerRegistry};
+use repo_service::worker::{HookEvent, ReadHandle, TransferEvent, WorkerHandle, WorkerRegistry};
 
 mod branch;
 mod clone;
@@ -155,13 +155,21 @@ impl From<git_core::tools::MergeToolOutcome> for MergeToolOutcomeDto {
 pub struct AppState {
     /// One worker per repository, whatever path spelling a command uses (#223).
     pub registry: WorkerRegistry,
-    /// One gate per open repository, keyed by the registry's repository key (not the command's
-    /// spelling), so two spellings of one repository share it (see `RepoWorker::call`, #181).
-    gates: Mutex<HashMap<String, Arc<RepoGate>>>,
+    /// One pair of gates per open repository, keyed by the registry's repository key (not the
+    /// command's spelling), so two spellings of one repository share them (see `RepoWorker::call`,
+    /// #181, and `RepoWorker::read`, #734).
+    gates: Mutex<HashMap<String, Arc<RepoGates>>>,
 }
 
 /// Lets one call per repository at a time take a blocking-pool thread (see `RepoWorker::call`).
 type RepoGate = tauri::async_runtime::Mutex<()>;
+
+/// A repository's two gates: one for every call, one for the read lane's (#734).
+#[derive(Default)]
+struct RepoGates {
+    main: Arc<RepoGate>,
+    read: Arc<RepoGate>,
+}
 
 #[tauri::command]
 pub async fn open_repo(path: String, state: State<'_, AppState>) -> Result<(), ErrorDto> {
@@ -472,14 +480,14 @@ pub fn get_app_version(app: tauri::AppHandle) -> String {
 /// of work (see its comment).
 pub(crate) struct RepoWorker {
     handle: WorkerHandle,
-    gate: Arc<RepoGate>,
+    gates: Arc<RepoGates>,
 }
 
 impl RepoWorker {
     /// Runs `f` (one or more worker round trips) on the blocking pool and awaits its result.
     ///
-    /// Waits for the repository's gate first, so a repository holds at most one blocking-pool
-    /// thread (#181). Each queued call used to hold its own thread until the serial worker got
+    /// Waits for the repository's gate first, so a repository's calls hold at most one
+    /// blocking-pool thread (#181; its reads hold one more, see `read`). Each queued call used to hold its own thread until the serial worker got
     /// to it: a long hook plus repeated refreshes could fill Tokio's pool (512 threads), and every
     /// other repository's commands then queued behind them. The worker runs one command at a
     /// time, so waiting at the gate instead of in its queue loses little; waiting calls are
@@ -495,11 +503,30 @@ impl RepoWorker {
         F: FnOnce(&WorkerHandle) -> Result<T, ErrorDto> + Send + 'static,
         T: Send + 'static,
     {
-        let turn = Arc::clone(&self.gate).lock_owned().await;
+        let turn = Arc::clone(&self.gates.main).lock_owned().await;
         let handle = self.handle;
         off_runtime(move || {
             let _turn = turn;
             f(&handle)
+        })
+        .await?
+    }
+
+    /// `call` for the read lane's commands (#734): the worker also runs them while it waits for
+    /// a fetch, pull or push, so they wait at a gate of their own instead of behind the call
+    /// holding the main one (a pull holds it until the pull ends). `f` only gets a `ReadHandle`,
+    /// so nothing else can be sent this way. A repository then holds at most two blocking-pool
+    /// threads, one per gate.
+    pub(crate) async fn read<T, F>(self, f: F) -> Result<T, ErrorDto>
+    where
+        F: FnOnce(&ReadHandle) -> Result<T, ErrorDto> + Send + 'static,
+        T: Send + 'static,
+    {
+        let turn = Arc::clone(&self.gates.read).lock_owned().await;
+        let reads = self.handle.reads();
+        off_runtime(move || {
+            let _turn = turn;
+            f(&reads)
         })
         .await?
     }
@@ -519,7 +546,7 @@ impl RepoWorker {
     fn with_own_gate(handle: WorkerHandle) -> Self {
         Self {
             handle,
-            gate: Arc::default(),
+            gates: Arc::default(),
         }
     }
 }
@@ -539,7 +566,10 @@ pub(crate) fn repo_worker(state: &AppState, repo_path: &str) -> Result<RepoWorke
                 .entry(key.to_string())
                 .or_default()
                 .clone();
-            RepoWorker { handle, gate }
+            RepoWorker {
+                handle,
+                gates: gate,
+            }
         })
         .ok_or_else(|| format!("repo not open: {repo_path}"))
 }

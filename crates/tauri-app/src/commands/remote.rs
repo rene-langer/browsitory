@@ -4,7 +4,7 @@ pub async fn list_remotes(
     state: State<'_, AppState>,
 ) -> Result<Vec<RemoteInfoDto>, ErrorDto> {
     repo_worker(&state, &repo_path)?
-        .call(move |worker| {
+        .read(move |worker| {
             worker
                 .list_remotes()?
                 .into_iter()
@@ -34,7 +34,7 @@ pub async fn list_remote_branches(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, ErrorDto> {
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.list_remote_branches(remote_name))
+        .read(move |w| w.list_remote_branches(remote_name))
         .await
 }
 
@@ -44,7 +44,7 @@ pub async fn get_current_upstream(
     state: State<'_, AppState>,
 ) -> Result<Option<UpstreamInfoDto>, ErrorDto> {
     let upstream = repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_current_upstream())
+        .read(move |w| w.get_current_upstream())
         .await?;
     Ok(upstream.map(UpstreamInfoDto::from))
 }
@@ -55,7 +55,7 @@ pub async fn get_remote_upstreams(
     state: State<'_, AppState>,
 ) -> Result<Vec<UpstreamInfoDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_remote_upstreams(name))
+        .read(move |w| w.get_remote_upstreams(name))
         .await?
         .into_iter()
         .map(UpstreamInfoDto::from)
@@ -373,7 +373,7 @@ pub async fn get_pull_strategy(
         return Ok(Some(strategy.into()));
     }
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.pull_defaults())
+        .read(move |w| w.pull_defaults())
         .await?
         .map(PullStrategyDto::from))
 }

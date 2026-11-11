@@ -1,5 +1,5 @@
 use super::sequence_store::SequenceStore;
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 use crate::wire::ErrorDto;
 use git_core::pick::{PickOutcome, SequenceAbort, SequenceKind, SequenceOutcome, SequenceRun};
 use git_core::repo::HeadInfo;
@@ -313,9 +313,6 @@ pub(super) fn checkout(
 }
 
 impl WorkerHandle {
-    pub fn get_head_info(&self) -> Result<HeadInfo, ErrorDto> {
-        self.request(|reply| Command::GetHeadInfo { reply })
-    }
     /// Amends HEAD; hooks, events and cancel as for `commit`.
     pub fn amend_commit(
         &self,
@@ -335,10 +332,6 @@ impl WorkerHandle {
             events,
             reply,
         })
-    }
-    /// Up to `RECENT_AUTHORS_LIMIT` recent authors other than the current user, newest first.
-    pub fn list_recent_authors(&self) -> Result<Vec<git_core::commit::SignatureInput>, ErrorDto> {
-        self.request(|reply| Command::ListRecentAuthors { reply })
     }
     /// `mainline` (1-based parent) is required for a merge commit and refused otherwise. A clean
     /// pick runs `prepare-commit-msg` and `post-commit` (#183), reported on `events`
@@ -443,5 +436,15 @@ impl WorkerHandle {
             events,
             reply,
         })
+    }
+}
+
+impl ReadHandle {
+    pub fn get_head_info(&self) -> Result<HeadInfo, ErrorDto> {
+        self.read(|reply| Command::GetHeadInfo { reply })
+    }
+    /// Up to `RECENT_AUTHORS_LIMIT` recent authors other than the current user, newest first.
+    pub fn list_recent_authors(&self) -> Result<Vec<git_core::commit::SignatureInput>, ErrorDto> {
+        self.read(|reply| Command::ListRecentAuthors { reply })
     }
 }

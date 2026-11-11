@@ -11,7 +11,7 @@ use git_core::tools::{
     DiffSource, FileVersion, GitTools, PreparedDiffTool, PreparedMergeTool, MAX_FILE_VERSION_BYTES,
 };
 
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 
 pub(super) fn prepare_diff_tool(
     repo: &git2::Repository,
@@ -89,12 +89,6 @@ pub(super) fn create_root_file(
 const NO_WORKDIR: &str = "repository has no working directory (bare repository)";
 
 impl WorkerHandle {
-    /// The checks a merge tool launch makes, for hosts that open their own merge editor
-    /// (VSCode): a text conflict, no symlink or submodule, a work tree file inside the tree.
-    pub fn check_merge_target(&self, path: String) -> Result<(), ErrorDto> {
-        self.request(|tx| Command::CheckMergeTarget { path, reply: tx })
-    }
-
     /// Work tree root captured at spawn (the repo path may be a subdirectory). No round trip
     /// to the worker.
     pub fn workdir(&self) -> Result<PathBuf, ErrorDto> {
@@ -114,13 +108,26 @@ impl WorkerHandle {
         self.request(|tx| Command::CreateRootFile { name, reply: tx })
     }
 
+    /// Resolves the merge tool and writes its side files. The caller runs it, off this worker.
+    pub fn prepare_merge_tool(&self, path: String) -> Result<PreparedMergeTool, ErrorDto> {
+        self.request(|tx| Command::PrepareMergeTool { path, reply: tx })
+    }
+}
+
+impl ReadHandle {
+    /// The checks a merge tool launch makes, for hosts that open their own merge editor
+    /// (VSCode): a text conflict, no symlink or submodule, a work tree file inside the tree.
+    pub fn check_merge_target(&self, path: String) -> Result<(), ErrorDto> {
+        self.read(|tx| Command::CheckMergeTarget { path, reply: tx })
+    }
+
     /// Both sides of `path` in `source` as bytes, each capped at `MAX_PREVIEW_BYTES`.
     pub fn get_file_sides(
         &self,
         path: String,
         source: DiffSource,
     ) -> Result<git_core::diff::FileSides, ErrorDto> {
-        self.request(|tx| Command::GetFileSides {
+        self.read(|tx| Command::GetFileSides {
             path,
             source,
             reply: tx,
@@ -133,21 +140,16 @@ impl WorkerHandle {
         path: String,
         source: DiffSource,
     ) -> Result<PreparedDiffTool, ErrorDto> {
-        self.request(|tx| Command::PrepareDiffTool {
+        self.read(|tx| Command::PrepareDiffTool {
             path,
             source,
             reply: tx,
         })
     }
 
-    /// Resolves the merge tool and writes its side files. The caller runs it, off this worker.
-    pub fn prepare_merge_tool(&self, path: String) -> Result<PreparedMergeTool, ErrorDto> {
-        self.request(|tx| Command::PrepareMergeTool { path, reply: tx })
-    }
-
     /// The diff and merge tools from the user's git config, for the Preferences dialog.
     pub fn get_git_tools(&self) -> Result<GitTools, ErrorDto> {
-        self.request(|tx| Command::GetGitTools { reply: tx })
+        self.read(|tx| Command::GetGitTools { reply: tx })
     }
 
     /// `path` in `version`, capped at `MAX_FILE_VERSION_BYTES` (VSCode's content provider).
@@ -156,7 +158,7 @@ impl WorkerHandle {
         path: String,
         version: FileVersion,
     ) -> Result<Option<Vec<u8>>, ErrorDto> {
-        self.request(|tx| Command::ReadFileVersion {
+        self.read(|tx| Command::ReadFileVersion {
             path,
             version,
             reply: tx,

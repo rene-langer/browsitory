@@ -1,4 +1,4 @@
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 use crate::wire::ErrorDto;
 use git_core::blame::BlameLine;
 use git_core::commit_stats::{commit_stats_batch, CommitStatsEntry, StatsBudget};
@@ -456,190 +456,6 @@ pub(super) fn commit(
 }
 
 impl WorkerHandle {
-    pub fn get_status(&self) -> Result<Vec<StatusEntry>, ErrorDto> {
-        self.request(|tx| Command::GetStatus { reply: tx })
-    }
-
-    /// The repository's change stamp (#650); see `git_core::change_stamp`.
-    pub fn get_change_stamp(&self) -> Result<git_core::change_stamp::ChangeStamp, ErrorDto> {
-        self.request(|tx| Command::GetChangeStamp { reply: tx })
-    }
-
-    /// One page of the graph of `selection` (#685), from `cursor` on (`None`: the first commit).
-    pub fn get_commit_graph(
-        &self,
-        limit: usize,
-        selection: GraphSelection,
-        cursor: Option<String>,
-    ) -> Result<git_core::graph::GraphPage, ErrorDto> {
-        self.request(|tx| Command::GetCommitGraph {
-            limit,
-            selection,
-            cursor,
-            reply: tx,
-        })
-    }
-
-    /// Where `revision`'s commit sits in the graph of `selection` (#441).
-    pub fn locate_commit(
-        &self,
-        revision: String,
-        selection: GraphSelection,
-    ) -> Result<Option<git_core::locate::CommitLocation>, ErrorDto> {
-        self.request(|tx| Command::LocateCommit {
-            revision,
-            selection,
-            reply: tx,
-        })
-    }
-
-    /// The commits merge `merge_id` brought in, at most `limit` (#617).
-    pub fn get_merged_commits(
-        &self,
-        merge_id: String,
-        limit: usize,
-    ) -> Result<Vec<GraphCommit>, ErrorDto> {
-        self.request(|tx| Command::GetMergedCommits {
-            merge_id,
-            limit,
-            reply: tx,
-        })
-    }
-
-    /// `old_path`: a staged rename's old path (see `status::get_working_diff`).
-    pub fn get_working_diff(
-        &self,
-        path: String,
-        staged: bool,
-        opts: git_core::diff::DiffOptions,
-        old_path: Option<String>,
-    ) -> Result<Vec<DiffHunk>, ErrorDto> {
-        self.request(|tx| Command::GetWorkingDiff {
-            path,
-            staged,
-            opts,
-            old_path,
-            reply: tx,
-        })
-    }
-
-    pub fn get_commit_diff(
-        &self,
-        commit_id: String,
-        path: String,
-        opts: git_core::diff::DiffOptions,
-    ) -> Result<Vec<DiffHunk>, ErrorDto> {
-        self.request(|tx| Command::GetCommitDiff {
-            commit_id,
-            path,
-            opts,
-            reply: tx,
-        })
-    }
-
-    pub fn get_commit_files(&self, commit_id: String) -> Result<Vec<String>, ErrorDto> {
-        self.request(|tx| Command::GetCommitFiles {
-            commit_id,
-            reply: tx,
-        })
-    }
-
-    /// Line counts of `commit_ids` (#620); see `status::get_commit_stats`.
-    pub fn get_commit_stats(
-        &self,
-        commit_ids: Vec<String>,
-        with_files: bool,
-    ) -> Result<Vec<CommitStatsEntry>, ErrorDto> {
-        self.request(|tx| Command::GetCommitStats {
-            commit_ids,
-            with_files,
-            reply: tx,
-        })
-    }
-
-    pub fn get_commit_message(&self, commit_id: String) -> Result<String, ErrorDto> {
-        self.request(|tx| Command::GetCommitMessage {
-            commit_id,
-            reply: tx,
-        })
-    }
-
-    /// Author, committer and containing refs of `commit_id` (#641); see
-    /// `status::get_commit_details`.
-    pub fn get_commit_details(
-        &self,
-        commit_id: String,
-    ) -> Result<git_core::commit_details::CommitDetails, ErrorDto> {
-        self.request(|tx| Command::GetCommitDetails {
-            commit_id,
-            reply: tx,
-        })
-    }
-
-    pub fn get_commit_signature(
-        &self,
-        commit_id: String,
-    ) -> Result<git_core::signing::CommitSignature, ErrorDto> {
-        self.request(|tx| Command::GetCommitSignature {
-            commit_id,
-            reply: tx,
-        })
-    }
-
-    pub fn get_blame(&self, commit_id: String, path: String) -> Result<Vec<BlameLine>, ErrorDto> {
-        self.request(|tx| Command::GetBlame {
-            commit_id,
-            path,
-            reply: tx,
-        })
-    }
-
-    pub fn get_file_history(
-        &self,
-        path: String,
-        limit: usize,
-    ) -> Result<Vec<git_core::history::FileHistoryEntry>, ErrorDto> {
-        self.request(|tx| Command::GetFileHistory {
-            path,
-            limit,
-            reply: tx,
-        })
-    }
-
-    pub fn get_line_history(
-        &self,
-        revision: String,
-        path: String,
-        start_line: usize,
-        end_line: usize,
-        limit: usize,
-    ) -> Result<git_core::line_history::LineHistory, ErrorDto> {
-        self.request(|tx| Command::GetLineHistory {
-            revision,
-            path,
-            start_line,
-            end_line,
-            limit,
-            reply: tx,
-        })
-    }
-
-    pub fn get_commit_rename_diff(
-        &self,
-        commit_id: String,
-        old_path: String,
-        new_path: String,
-        opts: git_core::diff::DiffOptions,
-    ) -> Result<Vec<DiffHunk>, ErrorDto> {
-        self.request(|tx| Command::GetCommitRenameDiff {
-            commit_id,
-            old_path,
-            new_path,
-            opts,
-            reply: tx,
-        })
-    }
-
     pub fn stage_file(&self, path: String) -> Result<(), ErrorDto> {
         self.request(|tx| Command::StageFile { path, reply: tx })
     }
@@ -814,6 +630,192 @@ impl WorkerHandle {
             email,
             global,
             reply,
+        })
+    }
+}
+
+impl ReadHandle {
+    pub fn get_status(&self) -> Result<Vec<StatusEntry>, ErrorDto> {
+        self.read(|tx| Command::GetStatus { reply: tx })
+    }
+
+    /// The repository's change stamp (#650); see `git_core::change_stamp`.
+    pub fn get_change_stamp(&self) -> Result<git_core::change_stamp::ChangeStamp, ErrorDto> {
+        self.read(|tx| Command::GetChangeStamp { reply: tx })
+    }
+
+    /// One page of the graph of `selection` (#685), from `cursor` on (`None`: the first commit).
+    pub fn get_commit_graph(
+        &self,
+        limit: usize,
+        selection: GraphSelection,
+        cursor: Option<String>,
+    ) -> Result<git_core::graph::GraphPage, ErrorDto> {
+        self.read(|tx| Command::GetCommitGraph {
+            limit,
+            selection,
+            cursor,
+            reply: tx,
+        })
+    }
+
+    /// Where `revision`'s commit sits in the graph of `selection` (#441).
+    pub fn locate_commit(
+        &self,
+        revision: String,
+        selection: GraphSelection,
+    ) -> Result<Option<git_core::locate::CommitLocation>, ErrorDto> {
+        self.read(|tx| Command::LocateCommit {
+            revision,
+            selection,
+            reply: tx,
+        })
+    }
+
+    /// The commits merge `merge_id` brought in, at most `limit` (#617).
+    pub fn get_merged_commits(
+        &self,
+        merge_id: String,
+        limit: usize,
+    ) -> Result<Vec<GraphCommit>, ErrorDto> {
+        self.read(|tx| Command::GetMergedCommits {
+            merge_id,
+            limit,
+            reply: tx,
+        })
+    }
+
+    /// `old_path`: a staged rename's old path (see `status::get_working_diff`).
+    pub fn get_working_diff(
+        &self,
+        path: String,
+        staged: bool,
+        opts: git_core::diff::DiffOptions,
+        old_path: Option<String>,
+    ) -> Result<Vec<DiffHunk>, ErrorDto> {
+        self.read(|tx| Command::GetWorkingDiff {
+            path,
+            staged,
+            opts,
+            old_path,
+            reply: tx,
+        })
+    }
+
+    pub fn get_commit_diff(
+        &self,
+        commit_id: String,
+        path: String,
+        opts: git_core::diff::DiffOptions,
+    ) -> Result<Vec<DiffHunk>, ErrorDto> {
+        self.read(|tx| Command::GetCommitDiff {
+            commit_id,
+            path,
+            opts,
+            reply: tx,
+        })
+    }
+
+    pub fn get_commit_files(&self, commit_id: String) -> Result<Vec<String>, ErrorDto> {
+        self.read(|tx| Command::GetCommitFiles {
+            commit_id,
+            reply: tx,
+        })
+    }
+
+    /// Line counts of `commit_ids` (#620); see `status::get_commit_stats`.
+    pub fn get_commit_stats(
+        &self,
+        commit_ids: Vec<String>,
+        with_files: bool,
+    ) -> Result<Vec<CommitStatsEntry>, ErrorDto> {
+        self.read(|tx| Command::GetCommitStats {
+            commit_ids,
+            with_files,
+            reply: tx,
+        })
+    }
+
+    pub fn get_commit_message(&self, commit_id: String) -> Result<String, ErrorDto> {
+        self.read(|tx| Command::GetCommitMessage {
+            commit_id,
+            reply: tx,
+        })
+    }
+
+    /// Author, committer and containing refs of `commit_id` (#641); see
+    /// `status::get_commit_details`.
+    pub fn get_commit_details(
+        &self,
+        commit_id: String,
+    ) -> Result<git_core::commit_details::CommitDetails, ErrorDto> {
+        self.read(|tx| Command::GetCommitDetails {
+            commit_id,
+            reply: tx,
+        })
+    }
+
+    pub fn get_commit_signature(
+        &self,
+        commit_id: String,
+    ) -> Result<git_core::signing::CommitSignature, ErrorDto> {
+        self.read(|tx| Command::GetCommitSignature {
+            commit_id,
+            reply: tx,
+        })
+    }
+
+    pub fn get_blame(&self, commit_id: String, path: String) -> Result<Vec<BlameLine>, ErrorDto> {
+        self.read(|tx| Command::GetBlame {
+            commit_id,
+            path,
+            reply: tx,
+        })
+    }
+
+    pub fn get_file_history(
+        &self,
+        path: String,
+        limit: usize,
+    ) -> Result<Vec<git_core::history::FileHistoryEntry>, ErrorDto> {
+        self.read(|tx| Command::GetFileHistory {
+            path,
+            limit,
+            reply: tx,
+        })
+    }
+
+    pub fn get_line_history(
+        &self,
+        revision: String,
+        path: String,
+        start_line: usize,
+        end_line: usize,
+        limit: usize,
+    ) -> Result<git_core::line_history::LineHistory, ErrorDto> {
+        self.read(|tx| Command::GetLineHistory {
+            revision,
+            path,
+            start_line,
+            end_line,
+            limit,
+            reply: tx,
+        })
+    }
+
+    pub fn get_commit_rename_diff(
+        &self,
+        commit_id: String,
+        old_path: String,
+        new_path: String,
+        opts: git_core::diff::DiffOptions,
+    ) -> Result<Vec<DiffHunk>, ErrorDto> {
+        self.read(|tx| Command::GetCommitRenameDiff {
+            commit_id,
+            old_path,
+            new_path,
+            opts,
+            reply: tx,
         })
     }
 }

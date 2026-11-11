@@ -30,7 +30,7 @@ pub async fn get_patch(
     state: State<'_, AppState>,
 ) -> Result<PatchContentDto, ErrorDto> {
     let bytes = repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_patch(source.into()))
+        .read(move |w| w.get_patch(source.into()))
         .await?;
     Ok(PatchContentDto::from_bytes(&bytes))
 }
@@ -62,7 +62,7 @@ pub async fn preview_patch(
 ) -> Result<PatchPreviewDto, ErrorDto> {
     let bytes = content.into_bytes()?;
     let preview = repo_worker(&state, &repo_path)?
-        .call(move |w| w.preview_patch(bytes))
+        .read(move |w| w.preview_patch(bytes))
         .await?;
     Ok(preview.into())
 }

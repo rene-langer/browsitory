@@ -13,7 +13,7 @@ pub async fn get_head_info(
 ) -> Result<HeadInfoDto, ErrorDto> {
     Ok(HeadInfoDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.get_head_info())
+            .read(move |w| w.get_head_info())
             .await?,
     ))
 }
@@ -54,7 +54,7 @@ pub async fn list_recent_authors(
     state: State<'_, AppState>,
 ) -> Result<Vec<SignatureInputDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.list_recent_authors())
+        .read(move |w| w.list_recent_authors())
         .await?
         .into_iter()
         .map(Into::into)

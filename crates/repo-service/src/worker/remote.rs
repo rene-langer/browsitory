@@ -8,7 +8,7 @@ use git_core::remote::{
 };
 
 use super::transfer_thread::{self, TransferHost, Wait};
-use super::{Command, TransferEvent, WorkerHandle};
+use super::{Command, ReadHandle, TransferEvent, WorkerHandle};
 use crate::credentials::{CredentialService, CredentialStore};
 
 pub(super) fn list(repo: &git2::Repository, reply: Sender<Result<Vec<RemoteInfo>, ErrorDto>>) {
@@ -787,10 +787,6 @@ impl WorkerHandle {
             reply,
         })
     }
-    /// The pull strategy the current branch's git config sets, if any (#652).
-    pub fn pull_defaults(&self) -> Result<Option<git_core::remote::PullStrategy>, ErrorDto> {
-        self.request(|reply| Command::GetPullDefaults { reply })
-    }
     pub fn pull_current_upstream(
         &self,
         events: Sender<TransferEvent>,
@@ -848,24 +844,6 @@ impl WorkerHandle {
             events,
             reply,
         })
-    }
-    pub fn list_remotes(&self) -> Result<Vec<RemoteInfo>, ErrorDto> {
-        self.request(|reply| Command::ListRemotes { reply })
-    }
-    pub fn list_remote_branches(&self, remote_name: String) -> Result<Vec<String>, ErrorDto> {
-        self.request(|reply| Command::ListRemoteBranches { remote_name, reply })
-    }
-    pub fn get_current_upstream(&self) -> Result<Option<UpstreamInfo>, ErrorDto> {
-        self.request(|reply| Command::GetCurrentUpstream { reply })
-    }
-    pub fn get_remote_upstreams(&self, name: String) -> Result<Vec<UpstreamInfo>, ErrorDto> {
-        self.request(|reply| Command::GetRemoteUpstreams { name, reply })
-    }
-    pub fn get_remote_auth_mode(
-        &self,
-        name: String,
-    ) -> Result<Option<git_core::remote::RemoteAuthMode>, ErrorDto> {
-        self.request(|reply| Command::GetRemoteAuthMode { name, reply })
     }
     pub fn save_https_credential(
         &self,
@@ -947,6 +925,31 @@ impl WorkerHandle {
     }
     pub fn clear_current_upstream(&self) -> Result<(), ErrorDto> {
         self.request(|reply| Command::ClearCurrentUpstream { reply })
+    }
+}
+
+impl ReadHandle {
+    /// The pull strategy the current branch's git config sets, if any (#652).
+    pub fn pull_defaults(&self) -> Result<Option<git_core::remote::PullStrategy>, ErrorDto> {
+        self.read(|reply| Command::GetPullDefaults { reply })
+    }
+    pub fn list_remotes(&self) -> Result<Vec<RemoteInfo>, ErrorDto> {
+        self.read(|reply| Command::ListRemotes { reply })
+    }
+    pub fn list_remote_branches(&self, remote_name: String) -> Result<Vec<String>, ErrorDto> {
+        self.read(|reply| Command::ListRemoteBranches { remote_name, reply })
+    }
+    pub fn get_current_upstream(&self) -> Result<Option<UpstreamInfo>, ErrorDto> {
+        self.read(|reply| Command::GetCurrentUpstream { reply })
+    }
+    pub fn get_remote_upstreams(&self, name: String) -> Result<Vec<UpstreamInfo>, ErrorDto> {
+        self.read(|reply| Command::GetRemoteUpstreams { name, reply })
+    }
+    pub fn get_remote_auth_mode(
+        &self,
+        name: String,
+    ) -> Result<Option<git_core::remote::RemoteAuthMode>, ErrorDto> {
+        self.read(|reply| Command::GetRemoteAuthMode { name, reply })
     }
 }
 

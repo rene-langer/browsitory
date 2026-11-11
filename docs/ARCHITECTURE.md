@@ -273,6 +273,14 @@ one side of the drop. The answer is shown on the hovered row (`data-drop-positio
 `refused`) and in the label beside the pointer, and a drop opens a menu with the choices and
 Cancel. A collapsed folder hovered for `FOLDER_OPEN_DELAY_MS` opens for that session only.
 
+Commits dragged from the graph onto a branch cross two components: `CommitGraph` starts the drag
+and `BranchTree` is its drop side. `RepoWorkspace` owns the drag (`useCommitDragSession`,
+`state/useCommitDrag.ts`) and shares it through `CommitDragContext`; the Branches section
+registers its handlers there and shows the verdict on its rows like a branch drag, from
+`commitDropActions` (`lib/actions/commitActions.ts`): the commit menu's Cherry-pick rules, or the
+multi-selection's for several commits, and only the current branch takes the drop. The drop
+menu's choice runs back through the session: the pick, the parent picker or a sequence.
+
 ## git2 API gotchas
 
 - `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return
@@ -706,6 +714,13 @@ on the gate. What must not wait behind the worker goes through the ungated `sign
 before it waits for the gate (`WorkerHandle::claim_search_generation`), so a cancel or a newer
 search also cancels a search still waiting there; and the stored work tree path
 (`tools::workdir_of`) behind Open in editor, Reveal and Open terminal.
+
+The read lane's commands (#734, see "Reads during a transfer" above) have a gate of their own:
+`repo_worker(..).read(|r| ..)` waits at the repository's read gate (`RepoGates::read`) and hands
+its closure a `ReadHandle`, which has only the read lane's methods, so nothing else can be sent
+that way. A pull's call holds the main gate until the pull ends; its reads pass it, and the
+worker answers them while the pull's fetch runs. A repository then holds at most two blocking
+threads, one per gate.
 
 **One worker per repository, whatever the spelling (#223).** Commands name a repository by the
 path string the frontend sent, and one repository has many spellings: a trailing slash, a

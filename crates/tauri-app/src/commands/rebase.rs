@@ -13,7 +13,7 @@ pub async fn commits_since(
     state: State<'_, AppState>,
 ) -> Result<Vec<RebasePlanCommitDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.commits_since(onto))
+        .read(move |w| w.commits_since(onto))
         .await?
         .into_iter()
         .map(RebasePlanCommitDto::from)

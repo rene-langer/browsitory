@@ -8,7 +8,7 @@ use std::sync::mpsc::Sender;
 
 use git_core::tree::{FileContent, TreeListing, MAX_TREE_MATCHES, MAX_VIEW_BYTES};
 
-use super::{Command, WorkerHandle};
+use super::{Command, ReadHandle, WorkerHandle};
 
 pub(super) fn get_commit_tree(
     repo: &git2::Repository,
@@ -64,6 +64,17 @@ pub(super) fn restore_file_version(
 }
 
 impl WorkerHandle {
+    /// Restores `path` as it is in `commit_id` to the work tree (one undo entry).
+    pub fn restore_file_version(&self, commit_id: String, path: String) -> Result<(), ErrorDto> {
+        self.request(|reply| Command::RestoreFileVersion {
+            commit_id,
+            path,
+            reply,
+        })
+    }
+}
+
+impl ReadHandle {
     /// The entries directly in `dir` (`""`: the root) of `commit_id`'s tree, or, with a
     /// non-blank `filter`, every file whose path contains it (at most `MAX_TREE_MATCHES`).
     pub fn get_commit_tree(
@@ -72,7 +83,7 @@ impl WorkerHandle {
         dir: String,
         filter: Option<String>,
     ) -> Result<TreeListing, ErrorDto> {
-        self.request(|reply| Command::GetCommitTree {
+        self.read(|reply| Command::GetCommitTree {
             commit_id,
             dir,
             filter,
@@ -86,7 +97,7 @@ impl WorkerHandle {
         commit_id: String,
         path: String,
     ) -> Result<FileContent, ErrorDto> {
-        self.request(|reply| Command::GetFileAtCommit {
+        self.read(|reply| Command::GetFileAtCommit {
             commit_id,
             path,
             reply,
@@ -100,19 +111,10 @@ impl WorkerHandle {
         path: String,
         destination: PathBuf,
     ) -> Result<(), ErrorDto> {
-        self.request(|reply| Command::SaveFileVersion {
+        self.read(|reply| Command::SaveFileVersion {
             commit_id,
             path,
             destination,
-            reply,
-        })
-    }
-
-    /// Restores `path` as it is in `commit_id` to the work tree (one undo entry).
-    pub fn restore_file_version(&self, commit_id: String, path: String) -> Result<(), ErrorDto> {
-        self.request(|reply| Command::RestoreFileVersion {
-            commit_id,
-            path,
             reply,
         })
     }

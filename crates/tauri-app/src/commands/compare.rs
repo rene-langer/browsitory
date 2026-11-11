@@ -11,7 +11,7 @@ pub async fn get_range_files(
     state: State<'_, AppState>,
 ) -> Result<Vec<ChangedFileDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_range_files(from_id, to_id))
+        .read(move |w| w.get_range_files(from_id, to_id))
         .await?
         .into_iter()
         .map(ChangedFileDto::from)
@@ -29,7 +29,7 @@ pub async fn get_range_diff(
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_range_diff(from_id, to_id, path, old_path, opts.into()))
+        .read(move |w| w.get_range_diff(from_id, to_id, path, old_path, opts.into()))
         .await?
         .into_iter()
         .map(DiffHunkDto::from)
@@ -43,7 +43,7 @@ pub async fn get_working_tree_compare_files(
     state: State<'_, AppState>,
 ) -> Result<Vec<ChangedFileDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_working_tree_compare_files(commit_id))
+        .read(move |w| w.get_working_tree_compare_files(commit_id))
         .await?
         .into_iter()
         .map(ChangedFileDto::from)
@@ -60,7 +60,7 @@ pub async fn get_working_tree_compare_diff(
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_working_tree_compare_diff(commit_id, path, old_path, opts.into()))
+        .read(move |w| w.get_working_tree_compare_diff(commit_id, path, old_path, opts.into()))
         .await?
         .into_iter()
         .map(DiffHunkDto::from)
@@ -74,7 +74,7 @@ pub async fn get_branch_compare_range(
     state: State<'_, AppState>,
 ) -> Result<CompareRangeDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_branch_compare_range(ref_name))
+        .read(move |w| w.get_branch_compare_range(ref_name))
         .await?
         .into())
 }

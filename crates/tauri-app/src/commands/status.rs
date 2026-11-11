@@ -17,7 +17,7 @@ pub async fn get_status(
     state: State<'_, AppState>,
 ) -> Result<Vec<StatusEntryDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_status())
+        .read(move |w| w.get_status())
         .await?
         .into_iter()
         .map(StatusEntryDto::from)
@@ -32,7 +32,7 @@ pub async fn get_change_stamp(
     state: State<'_, AppState>,
 ) -> Result<ChangeStampDto, ErrorDto> {
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_change_stamp().map(ChangeStampDto::from))
+        .read(move |w| w.get_change_stamp().map(ChangeStampDto::from))
         .await
 }
 
@@ -47,7 +47,7 @@ pub async fn get_commit_graph(
 ) -> Result<GraphPageDto, ErrorDto> {
     let selection = git_core::graph::GraphSelection::from(selection);
     repo_worker(&state, &repo_path)?
-        .call(move |w| {
+        .read(move |w| {
             w.get_commit_graph(limit, selection, cursor)
                 .map(GraphPageDto::from)
         })
@@ -64,7 +64,7 @@ pub async fn locate_commit(
 ) -> Result<Option<CommitLocationDto>, ErrorDto> {
     let selection = git_core::graph::GraphSelection::from(selection);
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.locate_commit(revision, selection))
+        .read(move |w| w.locate_commit(revision, selection))
         .await?
         .map(CommitLocationDto::from))
 }
@@ -117,7 +117,7 @@ pub async fn get_working_diff(
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_working_diff(path, staged, opts.into(), old_path))
+        .read(move |w| w.get_working_diff(path, staged, opts.into(), old_path))
         .await?
         .into_iter()
         .map(DiffHunkDto::from)
@@ -133,7 +133,7 @@ pub async fn get_commit_diff(
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_commit_diff(commit_id, path, opts.into()))
+        .read(move |w| w.get_commit_diff(commit_id, path, opts.into()))
         .await?
         .into_iter()
         .map(DiffHunkDto::from)
@@ -147,7 +147,7 @@ pub async fn get_commit_files(
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, ErrorDto> {
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_commit_files(commit_id))
+        .read(move |w| w.get_commit_files(commit_id))
         .await
 }
 
@@ -161,7 +161,7 @@ pub async fn get_commit_stats(
     state: State<'_, AppState>,
 ) -> Result<Vec<CommitStatsEntryDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_commit_stats(commit_ids, with_files))
+        .read(move |w| w.get_commit_stats(commit_ids, with_files))
         .await?
         .into_iter()
         .map(CommitStatsEntryDto::from)
@@ -175,7 +175,7 @@ pub async fn get_commit_message(
     state: State<'_, AppState>,
 ) -> Result<String, ErrorDto> {
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_commit_message(commit_id))
+        .read(move |w| w.get_commit_message(commit_id))
         .await
 }
 
@@ -187,7 +187,7 @@ pub async fn get_commit_signature(
 ) -> Result<CommitSignatureDto, ErrorDto> {
     Ok(CommitSignatureDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.get_commit_signature(commit_id))
+            .read(move |w| w.get_commit_signature(commit_id))
             .await?,
     ))
 }
@@ -201,7 +201,7 @@ pub async fn get_commit_details(
 ) -> Result<CommitDetailsDto, ErrorDto> {
     Ok(CommitDetailsDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.get_commit_details(commit_id))
+            .read(move |w| w.get_commit_details(commit_id))
             .await?,
     ))
 }
@@ -214,7 +214,7 @@ pub async fn get_blame(
     state: State<'_, AppState>,
 ) -> Result<Vec<BlameLineDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_blame(commit_id, path))
+        .read(move |w| w.get_blame(commit_id, path))
         .await?
         .into_iter()
         .map(BlameLineDto::from)
@@ -229,7 +229,7 @@ pub async fn get_file_history(
     state: State<'_, AppState>,
 ) -> Result<Vec<FileHistoryEntryDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_file_history(path, limit))
+        .read(move |w| w.get_file_history(path, limit))
         .await?
         .into_iter()
         .map(FileHistoryEntryDto::from)
@@ -247,7 +247,7 @@ pub async fn get_line_history(
     state: State<'_, AppState>,
 ) -> Result<LineHistoryDto, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_line_history(revision, path, start_line, end_line, limit))
+        .read(move |w| w.get_line_history(revision, path, start_line, end_line, limit))
         .await?
         .into())
 }
@@ -262,7 +262,7 @@ pub async fn get_commit_rename_diff(
     state: State<'_, AppState>,
 ) -> Result<Vec<DiffHunkDto>, ErrorDto> {
     Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_commit_rename_diff(commit_id, old_path, new_path, opts.into()))
+        .read(move |w| w.get_commit_rename_diff(commit_id, old_path, new_path, opts.into()))
         .await?
         .into_iter()
         .map(DiffHunkDto::from)

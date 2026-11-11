@@ -10,7 +10,7 @@ pub async fn get_undo_state(
 ) -> Result<UndoStateDto, ErrorDto> {
     Ok(UndoStateDto::from(
         repo_worker(&state, &repo_path)?
-            .call(move |w| w.get_undo_state())
+            .read(move |w| w.get_undo_state())
             .await?,
     ))
 }
