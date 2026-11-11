@@ -20,20 +20,6 @@ const CASE_PAIRS: [(&str, &str); 5] = [
     ("D/f", "d/f"),
 ];
 
-fn head_id(repo: &git2::Repository) -> String {
-    repo.head().unwrap().target().unwrap().to_string()
-}
-
-fn index_paths(dir: &std::path::Path) -> Vec<String> {
-    let index = git2::Index::open(&dir.join(".git/index")).unwrap();
-    let mut paths: Vec<String> = index
-        .iter()
-        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
-        .collect();
-    paths.sort();
-    paths
-}
-
 fn tree_paths(repo: &git2::Repository, rev: &str) -> Vec<String> {
     let tree = repo.revparse_single(rev).unwrap().peel_to_tree().unwrap();
     let mut flat = git2::Index::new().unwrap();
@@ -122,11 +108,11 @@ fn side_adds_the_other_name(
 
 /// Nothing changed on `main`: HEAD, a clean state, the index and the files as committed.
 fn assert_untouched(dir: &std::path::Path, repo: &git2::Repository, pair: (&str, &str), tip: &str) {
-    assert_eq!(head_id(repo), tip, "{pair:?}");
+    assert_eq!(common::head_id(repo).to_string(), tip, "{pair:?}");
     assert!(!repo.head_detached().unwrap(), "{pair:?}");
     assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
     assert_eq!(
-        index_paths(dir),
+        common::index_paths(dir),
         sorted(&[pair.0, "conf", "other"]),
         "{pair:?}"
     );
@@ -152,7 +138,7 @@ fn cherry_pick_refuses_a_commit_that_brings_in_a_case_pair() {
     // The pick committed `a` without `A` (or `A` was not recorded), its file left untracked.
     for pair in CASE_PAIRS {
         let (dir, repo) = side_adds_the_other_name(pair, false);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
         let side = commit_id(&repo, "side");
 
         let error =
@@ -221,11 +207,11 @@ fn revert_refuses_a_commit_whose_revert_brings_in_a_case_pair() {
             index.write().unwrap();
         }
         commit_all(&repo, "old deletes the other name");
-        let old = head_id(&repo);
+        let old = common::head_id(&repo).to_string();
         write_file(dir.path(), pair.0, "first\n");
         commit_all(&repo, "adds the first name");
         let repo = ignore_case(dir.path(), repo);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
 
         let error = git_core::pick::revert(&repo, &old, None, HookOptions::default()).unwrap_err();
 
@@ -257,13 +243,13 @@ fn a_sequence_stops_at_a_step_that_brings_in_a_case_pair_and_aborts() {
         switch(&repo, "side");
         write_file(dir.path(), "other", "side\n");
         commit_all(&repo, "s1 edits other");
-        let s1 = head_id(&repo);
+        let s1 = common::head_id(&repo).to_string();
         write_file(dir.path(), pair.1, "second\n");
         commit_all(&repo, "s2 adds the other name");
-        let s2 = head_id(&repo);
+        let s2 = common::head_id(&repo).to_string();
         switch(&repo, &main);
         let repo = ignore_case(dir.path(), repo);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
 
         let run = git_core::pick::cherry_pick_many(&repo, &[s1, s2], HookOptions::default());
 
@@ -274,7 +260,7 @@ fn a_sequence_stops_at_a_step_that_brings_in_a_case_pair_and_aborts() {
         );
         let state = run.state.expect("the sequence stopped after a landed step");
         assert_eq!(state.next, 1, "{pair:?}");
-        assert_ne!(head_id(&repo), tip, "{pair:?}");
+        assert_ne!(common::head_id(&repo).to_string(), tip, "{pair:?}");
         assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
         assert_eq!(
             tree_paths(&repo, "HEAD"),
@@ -306,7 +292,7 @@ fn rebase_brings_in_a_case_pair(
     }
     write_file(dir.path(), "conf", "upstream\n");
     commit_all(&repo, "upstream");
-    let onto = head_id(&repo);
+    let onto = common::head_id(&repo).to_string();
     switch(&repo, "topic");
     write_file(dir.path(), "other", "c1\n");
     commit_all(&repo, "c1");
@@ -319,7 +305,7 @@ fn rebase_brings_in_a_case_pair(
         index.write().unwrap();
     }
     commit_all(&repo, "c3 deletes it again");
-    let tip = head_id(&repo);
+    let tip = common::head_id(&repo).to_string();
     let repo = ignore_case(dir.path(), repo);
     (dir, repo, onto, tip)
 }
@@ -354,9 +340,13 @@ fn assert_on_topic(dir: &std::path::Path, repo: &git2::Repository, pair: (&str, 
         Some("topic"),
         "{pair:?}"
     );
-    assert_eq!(head_id(repo), tip, "{pair:?}");
+    assert_eq!(common::head_id(repo).to_string(), tip, "{pair:?}");
     assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
-    assert_eq!(index_paths(dir), sorted(&[pair.0, "other"]), "{pair:?}");
+    assert_eq!(
+        common::index_paths(dir),
+        sorted(&[pair.0, "other"]),
+        "{pair:?}"
+    );
     assert_eq!(read(dir, pair.0).as_deref(), Some("first\n"), "{pair:?}");
     assert_eq!(read(dir, pair.1), None, "{pair:?}");
     assert_eq!(read(dir, "other").as_deref(), Some("c1\n"), "{pair:?}");
@@ -405,10 +395,14 @@ fn rebase_continue_stops_at_a_pick_that_brings_in_a_case_pair_and_aborts() {
         assert_eq!(state.stop, RebaseStop::Error, "{pair:?}");
         assert_eq!(state.cursor, 1, "{pair:?}");
         assert!(repo.head_detached().unwrap(), "{pair:?}");
-        assert_eq!(head_id(&repo), state.expected_head.to_string(), "{pair:?}");
+        assert_eq!(
+            common::head_id(&repo).to_string(),
+            state.expected_head.to_string(),
+            "{pair:?}"
+        );
         assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
         assert_eq!(
-            index_paths(dir.path()),
+            common::index_paths(dir.path()),
             sorted(&[pair.0, "conf", "other"]),
             "{pair:?}"
         );
@@ -445,7 +439,7 @@ fn merge_refuses_a_branch_that_brings_in_a_case_pair() {
     for pair in CASE_PAIRS {
         for opts in options {
             let (dir, repo) = side_adds_the_other_name(pair, true);
-            let tip = head_id(&repo);
+            let tip = common::head_id(&repo).to_string();
 
             let error = git_core::merge::start_merge(&repo, "side", opts).unwrap_err();
 
@@ -487,7 +481,7 @@ fn fast_forward_merge_refuses_a_branch_that_brings_in_a_case_pair() {
     for pair in CASE_PAIRS {
         for fast_forward in [FastForward::Allow, FastForward::Only] {
             let (dir, repo) = ahead_adds_the_other_name(pair);
-            let tip = head_id(&repo);
+            let tip = common::head_id(&repo).to_string();
             let opts = MergeOptions {
                 fast_forward,
                 squash: false,
@@ -508,7 +502,7 @@ fn fast_forward_merge_refuses_a_branch_that_brings_in_a_case_pair() {
 fn fast_forward_pull_refuses_an_upstream_that_brings_in_a_case_pair() {
     for pair in CASE_PAIRS {
         let (dir, repo) = ahead_adds_the_other_name(pair);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
         let ahead = repo.revparse_single("ahead").unwrap().id();
         repo.reference("refs/remotes/origin/main", ahead, true, "test")
             .unwrap();
@@ -546,7 +540,7 @@ fn stash_apply_refuses_a_stash_that_brings_in_a_case_pair() {
                 .unwrap();
             assert_eq!(read(dir.path(), pair.1), None);
             let mut repo = ignore_case(dir.path(), repo);
-            let tip = head_id(&repo);
+            let tip = common::head_id(&repo).to_string();
             let stash = repo.revparse_single("refs/stash").unwrap().id();
 
             let error = apply_stash(&mut repo, 0, None, restore_index).unwrap_err();
@@ -587,15 +581,15 @@ fn sequence_after_a_split_step(
     }
     write_file(dir.path(), "conf", "main\n");
     commit_all(&repo, "main");
-    let main = head_id(&repo);
+    let main = common::head_id(&repo).to_string();
     switch(&repo, "side");
     write_file(dir.path(), pair.1, "second\n");
     write_file(dir.path(), "notes", "s1\n");
     commit_all(&repo, "s1 adds the other name");
-    let s1 = head_id(&repo);
+    let s1 = common::head_id(&repo).to_string();
     write_file(dir.path(), "conf", "side\n");
     commit_all(&repo, "s2 conflicts");
-    let s2 = head_id(&repo);
+    let s2 = common::head_id(&repo).to_string();
     repo.set_head(&main_ref).unwrap();
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
@@ -644,11 +638,11 @@ fn sequence_abort_rewinds_after_a_step_brought_in_a_case_pair() {
         let abort = git_core::pick::abort_sequence(&repo, &state).unwrap();
 
         assert!(abort.rewound, "{pair:?}");
-        assert_eq!(head_id(&repo), main, "{pair:?}");
+        assert_eq!(common::head_id(&repo).to_string(), main, "{pair:?}");
         assert!(!repo.head_detached().unwrap(), "{pair:?}");
         assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
         assert_eq!(
-            index_paths(dir.path()),
+            common::index_paths(dir.path()),
             sorted(&[pair.0, "conf", "notes"]),
             "{pair:?}"
         );
@@ -697,7 +691,7 @@ fn sequence_abort_keeps_a_local_change_to_one_of_a_case_pair() {
             matches!(&error, git_core::pick::PickError::RewindBlocked(path) if *path == held),
             "{pair:?}: {error:?}"
         );
-        assert_ne!(head_id(&repo), main, "{pair:?}");
+        assert_ne!(common::head_id(&repo).to_string(), main, "{pair:?}");
         assert_eq!(
             read(dir.path(), &held).as_deref(),
             Some("mine\n"),
@@ -714,7 +708,7 @@ fn sequence_abort_keeps_a_local_change_to_one_of_a_case_pair() {
 fn switch_branch_refuses_a_branch_that_brings_in_a_case_pair() {
     for pair in CASE_PAIRS {
         let (dir, repo) = ahead_adds_the_other_name(pair);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
 
         let error = git_core::branch::switch_branch(&repo, "ahead").unwrap_err();
 
@@ -731,7 +725,7 @@ fn switch_branch_refuses_a_branch_that_brings_in_a_case_pair() {
 fn checkout_commit_refuses_a_commit_that_brings_in_a_case_pair() {
     for pair in CASE_PAIRS {
         let (dir, repo) = ahead_adds_the_other_name(pair);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
         let ahead = commit_id(&repo, "ahead");
 
         let error = git_core::branch::checkout_commit(&repo, &ahead).unwrap_err();
@@ -749,7 +743,7 @@ fn checkout_commit_refuses_a_tag_or_remote_branch_that_brings_in_a_case_pair() {
     // A tag or a remote branch is checked out by its commit (detached).
     for pair in CASE_PAIRS {
         let (dir, repo) = ahead_adds_the_other_name(pair);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
         let ahead = repo.revparse_single("ahead").unwrap().id();
         repo.reference("refs/remotes/origin/ahead", ahead, true, "test")
             .unwrap();
@@ -769,7 +763,7 @@ fn checkout_commit_refuses_a_tag_or_remote_branch_that_brings_in_a_case_pair() {
 fn create_branch_refuses_a_start_point_that_brings_in_a_case_pair_and_creates_nothing() {
     for pair in CASE_PAIRS {
         let (dir, repo) = ahead_adds_the_other_name(pair);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
 
         let error = git_core::branch::create_branch(&repo, "topic", "ahead").unwrap_err();
 
@@ -810,8 +804,8 @@ fn switch_branch_keeps_a_case_only_rename_where_names_fold() {
 
     git_core::branch::switch_branch(&repo, "side").unwrap();
 
-    assert_eq!(head_id(&repo), commit_id(&repo, "side"));
-    assert_eq!(index_paths(dir.path()), sorted(&["a", "conf"]));
+    assert_eq!(common::head_id(&repo).to_string(), commit_id(&repo, "side"));
+    assert_eq!(common::index_paths(dir.path()), sorted(&["a", "conf"]));
     assert_eq!(read(dir.path(), "a").as_deref(), Some("first\n"));
 }
 
@@ -844,7 +838,7 @@ fn switch_branch_goes_ahead_when_head_already_holds_the_pair() {
 fn create_worktree_refuses_a_branch_that_holds_a_case_pair() {
     for pair in CASE_PAIRS {
         let (dir, repo) = ahead_adds_the_other_name(pair);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
         let parent = tempfile::tempdir().unwrap();
         let path = parent.path().join("wt");
 
@@ -894,13 +888,13 @@ fn a_sequence_abort_without_a_case_pair_rewinds_by_checkout() {
     switch(&repo, "side");
     write_file(dir.path(), "other", "side\n");
     commit_all(&repo, "s1 edits other");
-    let s1 = head_id(&repo);
+    let s1 = common::head_id(&repo).to_string();
     write_file(dir.path(), pair.1, "second\n");
     commit_all(&repo, "s2 adds the other name");
-    let s2 = head_id(&repo);
+    let s2 = common::head_id(&repo).to_string();
     switch(&repo, &main);
     let repo = ignore_case(dir.path(), repo);
-    let tip = head_id(&repo);
+    let tip = common::head_id(&repo).to_string();
     let run = git_core::pick::cherry_pick_many(&repo, &[s1, s2], HookOptions::default());
     assert!(run.outcome.is_err());
     let state = run.state.expect("the sequence stopped after a landed step");
@@ -913,7 +907,7 @@ fn a_sequence_abort_without_a_case_pair_rewinds_by_checkout() {
     let abort = git_core::pick::abort_sequence(&repo, &state).unwrap();
 
     assert!(abort.rewound);
-    assert_eq!(head_id(&repo), tip);
+    assert_eq!(common::head_id(&repo).to_string(), tip);
     assert_eq!(read(dir.path(), "other").as_deref(), Some("base\r\n"));
     let index = git2::Index::open(&dir.path().join(".git/index")).unwrap();
     assert_eq!(
@@ -947,9 +941,9 @@ fn a_sequence_abort_around_a_case_pair_keeps_unrelated_staged_changes() {
         let abort = git_core::pick::abort_sequence(&repo, &state).unwrap();
 
         assert!(abort.rewound, "{pair:?}");
-        assert_eq!(head_id(&repo), main, "{pair:?}");
+        assert_eq!(common::head_id(&repo).to_string(), main, "{pair:?}");
         assert_eq!(
-            index_paths(dir.path()),
+            common::index_paths(dir.path()),
             sorted(&[pair.0, "conf", "extra", "notes"]),
             "{pair:?}"
         );
@@ -999,9 +993,9 @@ fn a_sequence_abort_around_a_case_pair_keeps_an_unrelated_staged_deletion() {
         let abort = git_core::pick::abort_sequence(&repo, &state).unwrap();
 
         assert!(abort.rewound, "{pair:?}");
-        assert_eq!(head_id(&repo), main, "{pair:?}");
+        assert_eq!(common::head_id(&repo).to_string(), main, "{pair:?}");
         assert_eq!(
-            index_paths(dir.path()),
+            common::index_paths(dir.path()),
             sorted(&[pair.0, "notes"]),
             "{pair:?}"
         );
@@ -1106,7 +1100,7 @@ fn submodule_update_refuses_a_commit_that_brings_in_a_case_pair() {
     for pair in CASE_PAIRS {
         let (_src, dir, repo, ahead) = submodule_behind_the_other_name(pair);
         let sub_dir = dir.path().join("sub");
-        let before = head_id(&git2::Repository::open(&sub_dir).unwrap());
+        let before = common::head_id(&git2::Repository::open(&sub_dir).unwrap()).to_string();
         commit_gitlink(&repo, ahead);
 
         let error = git_core::submodule::update_submodule(&repo, "sub", false).unwrap_err();
@@ -1120,7 +1114,7 @@ fn submodule_update_refuses_a_commit_that_brings_in_a_case_pair() {
         );
         assert_brought_in(&error, pair);
         let sub = git2::Repository::open(&sub_dir).unwrap();
-        assert_eq!(head_id(&sub), before, "{pair:?}");
+        assert_eq!(common::head_id(&sub).to_string(), before, "{pair:?}");
         assert_eq!(
             submodule_index_paths(&sub_dir),
             sorted(&[pair.0, "conf", "other"]),
@@ -1195,6 +1189,10 @@ fn submodule_update_goes_ahead_when_the_submodule_already_holds_the_pair() {
         git_core::submodule::update_submodule(&repo, "sub", false).unwrap();
 
         let sub = git2::Repository::open(&sub_dir).unwrap();
-        assert_eq!(head_id(&sub), ahead.to_string(), "{pair:?}");
+        assert_eq!(
+            common::head_id(&sub).to_string(),
+            ahead.to_string(),
+            "{pair:?}"
+        );
     }
 }

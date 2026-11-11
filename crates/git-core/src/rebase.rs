@@ -182,9 +182,7 @@ fn edited_skip_worktree(
                     } else {
                         // Apply git's filters as status would (`core.autocrlf`, attributes); this
                         // writes a loose object, only when the raw bytes differ.
-                        let mut writer = repo.blob_writer(Some(std::path::Path::new(&path)))?;
-                        std::io::Write::write_all(&mut writer, &bytes)?;
-                        writer.commit()? != entry.id
+                        crate::undo::filtered_blob::<RebaseError>(repo, &path, &bytes)? != entry.id
                     }
                 }
                 Err(_) => true,

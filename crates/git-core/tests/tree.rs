@@ -6,15 +6,6 @@ use git_core::tree::{
     TreeError, MAX_VIEW_BYTES,
 };
 
-fn head_id(repo: &git2::Repository) -> String {
-    repo.head()
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id()
-        .to_string()
-}
-
 /// `common::commit_all` with deletions staged too.
 fn commit_everything(repo: &git2::Repository, message: &str) {
     let mut index = repo.index().unwrap();
@@ -40,7 +31,7 @@ fn lists_one_folder_at_a_time_folders_first() {
     common::write_file(dir.path(), "src/deep/x.rs", "x\n");
     common::write_file(dir.path(), "docs/guide.md", "g\n");
     common::commit_all(&repo, "base");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
 
     let root = list_tree(&repo, &id, "").unwrap();
     assert_eq!(
@@ -73,7 +64,7 @@ fn lists_the_tree_of_an_older_commit() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "old.txt", "o\n");
     common::commit_all(&repo, "first");
-    let first = head_id(&repo);
+    let first = common::head_id(&repo).to_string();
     std::fs::remove_file(dir.path().join("old.txt")).unwrap();
     common::write_file(dir.path(), "new.txt", "n\n");
     commit_everything(&repo, "second");
@@ -87,7 +78,7 @@ fn refuses_a_missing_folder_a_file_and_an_unsafe_path() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "f.txt", "f\n");
     common::commit_all(&repo, "base");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
 
     assert!(matches!(
         list_tree(&repo, &id, "nope"),
@@ -116,7 +107,7 @@ fn reports_executables_and_symlinks() {
     .unwrap();
     std::os::unix::fs::symlink("run.sh", dir.path().join("link")).unwrap();
     common::commit_all(&repo, "base");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
 
     let listing = list_tree(&repo, &id, "").unwrap();
     assert_eq!(
@@ -135,7 +126,7 @@ fn finds_files_by_path_case_insensitively() {
     common::write_file(dir.path(), "src/lib.rs", "l\n");
     common::write_file(dir.path(), "docs/main-guide.md", "g\n");
     common::commit_all(&repo, "base");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
 
     let found = find_in_tree(&repo, &id, "MAIN", 10).unwrap();
     assert_eq!(
@@ -165,7 +156,7 @@ fn stops_finding_at_the_limit() {
         common::write_file(dir.path(), &format!("f{i}.txt"), "x\n");
     }
     common::commit_all(&repo, "base");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
 
     let found = find_in_tree(&repo, &id, "f", 3).unwrap();
     assert_eq!(found.entries.len(), 3);
@@ -181,7 +172,7 @@ fn reads_text_binary_and_too_large_files() {
     common::write_file(dir.path(), "a.txt", "hello\n");
     std::fs::write(dir.path().join("b.bin"), [0u8, 1, 2, 3]).unwrap();
     common::commit_all(&repo, "base");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     common::write_file(dir.path(), "a.txt", "changed in the work tree\n");
 
     assert_eq!(
@@ -212,7 +203,7 @@ fn saves_a_version_to_another_place() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "a.txt", "v1\n");
     common::commit_all(&repo, "first");
-    let first = head_id(&repo);
+    let first = common::head_id(&repo).to_string();
     common::write_file(dir.path(), "a.txt", "v2\n");
     common::commit_all(&repo, "second");
 
@@ -228,7 +219,7 @@ fn restores_a_version_to_the_work_tree_without_staging_it() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "a.txt", "v1\n");
     common::commit_all(&repo, "first");
-    let first = head_id(&repo);
+    let first = common::head_id(&repo).to_string();
     common::write_file(dir.path(), "a.txt", "v2\n");
     common::commit_all(&repo, "second");
     common::write_file(dir.path(), "a.txt", "local edit\n");
@@ -247,7 +238,7 @@ fn restores_a_file_deleted_since_and_its_folder() {
     common::write_file(dir.path(), "keep.txt", "k\n");
     common::write_file(dir.path(), "gone/old.txt", "old\n");
     common::commit_all(&repo, "first");
-    let first = head_id(&repo);
+    let first = common::head_id(&repo).to_string();
     std::fs::remove_dir_all(dir.path().join("gone")).unwrap();
     commit_everything(&repo, "second");
 
@@ -261,7 +252,7 @@ fn restore_refuses_a_path_that_is_not_a_file_in_the_commit() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "src/a.txt", "a\n");
     common::commit_all(&repo, "base");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
 
     assert!(matches!(
         restore_file_version(&repo, &id, "src"),
@@ -282,7 +273,7 @@ fn restore_refuses_when_a_file_took_a_folders_place() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "d/f.txt", "f\n");
     common::commit_all(&repo, "base");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     std::fs::remove_dir_all(dir.path().join("d")).unwrap();
     common::write_file(dir.path(), "d", "now a file\n");
 
@@ -299,7 +290,7 @@ fn restore_never_writes_through_a_symlinked_folder() {
     let (dir, repo) = common::init_repo();
     common::write_file(dir.path(), "d/f.txt", "f\n");
     common::commit_all(&repo, "base");
-    let id = head_id(&repo);
+    let id = common::head_id(&repo).to_string();
     let outside = common::outside_dir();
     std::fs::remove_dir_all(dir.path().join("d")).unwrap();
     std::os::unix::fs::symlink(outside.path(), dir.path().join("d")).unwrap();

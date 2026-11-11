@@ -955,10 +955,6 @@ fn edit(commit_id: &str) -> RebasePlanEntry {
     }
 }
 
-fn head_id(repo: &git2::Repository) -> git2::Oid {
-    repo.head().unwrap().peel_to_commit().unwrap().id()
-}
-
 /// `base` (onto) → "add a" (a.txt) → "add b" (b.txt) on the current branch. Returns
 /// `(onto, [a, b], branch_ref)`.
 fn two_commits_on_a_branch(
@@ -1009,7 +1005,7 @@ fn a_conflict_pause_records_stop_conflict_onto_and_the_original_tip() {
     write_file(dir.path(), "shared.txt", "line one\nchanged again\n");
     commit_all(&repo, "conflicting change");
     let branch = repo.head().unwrap().name().unwrap().to_string();
-    let tip = head_id(&repo);
+    let tip = common::head_id(&repo);
     let commits = git_core::rebase::commits_since(&repo, &onto).unwrap();
 
     let (state, result) =
@@ -1020,7 +1016,7 @@ fn a_conflict_pause_records_stop_conflict_onto_and_the_original_tip() {
     assert_eq!(state.onto.to_string(), onto);
     assert_eq!(state.original_tip, tip);
     assert_eq!(state.original_branch_ref, branch);
-    assert_eq!(state.expected_head, head_id(&repo));
+    assert_eq!(state.expected_head, common::head_id(&repo));
     assert_eq!(state.cursor, 0);
     assert_eq!(state.group_start_parent, None);
 }
@@ -1142,7 +1138,7 @@ fn continue_refuses_while_another_cherry_pick_is_paused() {
          continuing the rebase."
     );
     assert_eq!(state, before);
-    assert_eq!(head_id(&repo), head.id());
+    assert_eq!(common::head_id(&repo), head.id());
 }
 
 #[test]
@@ -1583,7 +1579,7 @@ fn abort_restores_the_branch_when_head_is_where_the_rebase_left_it() {
         repo.head().unwrap().name().unwrap(),
         state.original_branch_ref
     );
-    assert_eq!(head_id(&repo), state.original_tip);
+    assert_eq!(common::head_id(&repo), state.original_tip);
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
 }
 
@@ -1600,7 +1596,7 @@ fn abort_after_an_error_stop_restores_the_branch() {
 
     assert_eq!(abort, RebaseAbort { restored: true });
     assert!(!repo.head_detached().unwrap());
-    assert_eq!(head_id(&repo), state.original_tip);
+    assert_eq!(common::head_id(&repo), state.original_tip);
 }
 
 #[test]
@@ -1631,7 +1627,7 @@ fn abort_with_the_branch_deleted_leaves_head_detached() {
 
     assert_eq!(abort, RebaseAbort { restored: false });
     assert!(repo.head_detached().unwrap());
-    assert_eq!(head_id(&repo), state.expected_head);
+    assert_eq!(common::head_id(&repo), state.expected_head);
     assert_eq!(repo.state(), git2::RepositoryState::Clean);
     // The paused step's change is gone from the index and work tree, like `--abort`.
     assert!(!dir.path().join("a.txt").exists());
@@ -1651,7 +1647,7 @@ fn abort_with_the_branch_moved_leaves_head_and_work_alone() {
 
     assert_eq!(abort, RebaseAbort { restored: false });
     assert!(repo.head_detached().unwrap());
-    assert_eq!(head_id(&repo), state.expected_head);
+    assert_eq!(common::head_id(&repo), state.expected_head);
     assert_eq!(branch_tip(&repo, "refs/heads/topic"), moved);
     assert_eq!(
         common::read(dir.path(), "base.txt"),
@@ -1869,7 +1865,7 @@ fn abort_restores_the_branch_when_the_step_was_committed_by_hand() {
         repo.head().unwrap().name().unwrap(),
         state.original_branch_ref
     );
-    assert_eq!(head_id(&repo), state.original_tip);
+    assert_eq!(common::head_id(&repo), state.original_tip);
 }
 
 /// #170: the branch is `base(f.txt, shared.txt) → g(g.txt)`; `onto` is `base → h(h.txt)`.
