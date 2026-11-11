@@ -95,17 +95,33 @@ the right:
   your system's setting; **Theme** under **Appearance** in **Preferences** goes back to that. In
   VSCode the button isn't there: the panel takes the colours and fonts of VSCode's own theme
   (light, dark or high contrast) and changes with it.
-- The gear button opens **Preferences**: the commit message settings, **Fetch automatically**
-  (see [Branches and remotes](branches-and-remotes.md#fetching-automatically)), diff word wrap
-  and diff algorithm (see [Diff options](history.md#diff-options)), your editor, terminal and diff tools (see
-  [External tools](external-tools.md)), the **Appearance** settings below and, in the desktop
-  app, **Updates** (see below).
+- The gear button opens **Preferences** (see below).
 - The sparkle button (**What's new**) opens the release notes (see below).
 - The question mark button (**Help**) opens a menu: **User guide** opens this guide in your
   browser, **Keyboard shortcuts** shows the list of shortcuts (while a repository is open), and
   **What's new** opens the release notes.
 
-**Appearance.** The Appearance section of Preferences changes how the window and its text look.
+**Preferences.** The settings are grouped, and the dialog shows one group at a time: pick it
+in the list on the left (above the settings in a narrow window), or move through the list with
+the arrow keys. The groups are:
+
+- **Appearance**: the theme, fonts and sizes (see below).
+- **Diff**: word wrap, the diff algorithm and **Expand untracked files** (see
+  [Diff options](history.md#diff-options)).
+- **Commit message**: the summary length limit and the ruler (see
+  [Staging and committing](staging-and-committing.md)).
+- **Fetch**: **Fetch automatically** (see
+  [Branches and remotes](branches-and-remotes.md#fetching-automatically)).
+- **External tools**: your editor, terminal and diff tools (see
+  [External tools](external-tools.md)).
+- **Updates**, in the desktop app (see below).
+
+Type in **Filter settings** above the list to keep only the groups with a setting whose name
+contains the text, for example "font"; Escape clears the filter. Preferences opens on the group
+you looked at last, and the **Diff preferences** button next to an untracked file's **Show
+contents** opens it on **Diff**.
+
+**Appearance.** The Appearance group of Preferences changes how the window and its text look.
 Each change shows at once, without a restart:
 
 - **Theme** (desktop app): **System** (the default) follows your system's light or dark setting,

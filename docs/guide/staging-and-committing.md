@@ -40,8 +40,9 @@ text field.
 
 Only the current file's diff is loaded. To keep large new or generated files from loading when
 you move onto them, turn off **Preferences → Diff → Expand untracked files**: an untracked file
-then shows **Show contents** in the viewer and loads only when you press it (it stays shown when
-the list refreshes); changes to tracked files always load at once.
+then shows **Show contents** (and **Diff preferences**, which opens that setting) in the viewer
+and loads only when you press it (it stays shown when the list refreshes); changes to tracked
+files always load at once.
 
 The options above the viewer (**Unified view** / **Split view**, **Wrap lines**, **Show whole
 file**, **Ignore whitespace**, **Show whitespace**, **Syntax highlighting** and the context
