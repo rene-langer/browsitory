@@ -96,6 +96,43 @@ async function sweep(label: string) {
   });
 }
 
+async function realTarget(label: string, selector: string) {
+  await browser.execute(() => {
+    const w = window as unknown as { probe751events: string[] };
+    w.probe751events = [];
+    const describe = (el: EventTarget | null) =>
+      el instanceof Element ? `${el.tagName.toLowerCase()}[${el.getAttribute("aria-label") ?? ""}] "${(el.textContent ?? "").trim().slice(0, 30)}"${el.isConnected ? "" : " DETACHED"}` : String(el);
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click", "focusin", "focusout"]) {
+      document.addEventListener(
+        type,
+        (event) => w.probe751events.push(`${type}@${Math.round((event as MouseEvent).clientY ?? -1)} ${describe(event.target)}`),
+        true,
+      );
+    }
+  });
+  const target = await $(selector);
+  if (!(await target.isExisting())) {
+    console.log(`[probe751] ${label}: not found`);
+    return;
+  }
+  const before = await browser.execute((el) => {
+    const r = (el as HTMLElement).getBoundingClientRect();
+    return JSON.stringify({ rect: [r.top, r.height], expanded: (el as HTMLElement).getAttribute("aria-expanded") });
+  }, target);
+  let error = "";
+  try {
+    await target.click();
+  } catch (e) {
+    error = String(e).slice(0, 200);
+  }
+  await browser.pause(300);
+  const after = await browser.execute((sel: string) => {
+    const el = document.querySelector(sel);
+    return JSON.stringify({ expanded: el?.getAttribute("aria-expanded") ?? "gone", events: (window as unknown as { probe751events: string[] }).probe751events });
+  }, selector);
+  console.log(`[probe751] ${label}: before=${before} error=${error} after=${after}`);
+}
+
 describe("probe #751", () => {
   it("logs where WebDriver clicks arrive", async () => {
     await browser.refresh();
@@ -110,5 +147,10 @@ describe("probe #751", () => {
     await browser.pause(500);
     await geometry("moved to 0,0");
     await sweep("moved to 0,0");
+    const pr = "[data-active-repo='true'] section[aria-label='Pull requests'] button[aria-expanded][aria-label='Pull requests']";
+    await realTarget("PR header click 1", pr);
+    await realTarget("PR header click 2", pr);
+    const reflog = "[data-active-repo='true'] section[aria-label='Reflog'] button[aria-expanded][aria-label='Reflog']";
+    await realTarget("Reflog header", reflog);
   });
 });
