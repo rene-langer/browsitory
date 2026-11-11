@@ -27,3 +27,8 @@
 .row dd {
   margin: 0;
 }
+
+.note {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+}

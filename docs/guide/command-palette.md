@@ -103,10 +103,14 @@ The global shortcuts work anywhere in the window:
 | ? | ? | Show the keyboard shortcuts (outside a text field) |
 
 A shortcut that can't run says why in a notification, for example "Can't pull now. No upstream
-set for the current branch." The host may take some keys before Browsitory sees them: the
-macOS app menu takes ⌘W, and in VSCode the editor's own keybindings may take Ctrl+Tab,
-Ctrl+1 … Ctrl+9, Ctrl+W, Ctrl+Shift+T, Ctrl+Alt+B or Alt+←. The toolbar, the tab strip and the
-command palette do the same things.
+set for the current branch." In the desktop app on macOS, the app menu takes ⌘W before
+Browsitory sees it; the tab strip and the command palette close a tab too.
+
+In VSCode, every key in the table works while Browsitory has the focus. VSCode binds Ctrl+K,
+F5, Shift+F5, F6, Shift+F6, Ctrl+Alt+B, the tab keys, Ctrl+W, Ctrl+Shift+T and Alt+← / Alt+→
+itself, so the extension contributes keybindings that hand them to Browsitory while it has the
+focus; elsewhere they keep doing what VSCode does. To change one, search for "Browsitory" in VSCode's
+**Keyboard Shortcuts**; the sheet and the palette still show the default keys.
 
 **Moving between panes.** F6 moves the focus to the next pane (the repository toolbar, the
 sidebar, the history, the diff) and Shift+F6 to the previous one, wrapping around. A pane gets

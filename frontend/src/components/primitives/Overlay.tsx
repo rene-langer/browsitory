@@ -8,8 +8,8 @@ export function Overlay({
   children,
 }: {
   onClose?: () => void;
-  /** The `<dialog>`'s accessible name. Give one whenever the overlay is a dialog of its own. */
-  ariaLabel?: string;
+  /** The `<dialog>`'s accessible name (#669): every modal dialog is announced by name. */
+  ariaLabel: string;
   /** Closes the overlay (calling `onClose`) on a click on the backdrop. Off by default: a modal
    * `<dialog>` ignores backdrop clicks, and an overlay holding unsaved input shouldn't lose it to
    * a stray click. Meant for read-only overlays such as the release notes. */

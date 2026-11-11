@@ -29,7 +29,7 @@ function installDialogPolyfill(): () => void {
 describe("Overlay", () => {
   it("renders its children inside a dialog", () => {
     render(
-      <Overlay>
+      <Overlay ariaLabel="Test overlay">
         <p>overlay content</p>
       </Overlay>,
     );
@@ -47,7 +47,7 @@ describe("Overlay", () => {
     // Confirm the component calls showModal when the environment provides it —
     // verified indirectly: the dialog has the `open` attribute after mount.
     const { unmount } = render(
-      <Overlay>
+      <Overlay ariaLabel="Test overlay">
         <p>content</p>
       </Overlay>,
     );
@@ -62,7 +62,7 @@ describe("Overlay", () => {
   it("calls onClose when the dialog's close event fires", () => {
     const onClose = vi.fn();
     render(
-      <Overlay onClose={onClose}>
+      <Overlay ariaLabel="Test overlay" onClose={onClose}>
         <p>content</p>
       </Overlay>,
     );
@@ -85,7 +85,7 @@ describe("Overlay", () => {
 
         render(
           <StrictMode>
-            <Overlay onClose={onClose}>
+            <Overlay ariaLabel="Test overlay" onClose={onClose}>
               <p>content</p>
             </Overlay>
           </StrictMode>,
@@ -118,7 +118,7 @@ describe("Overlay", () => {
       };
       try {
         render(
-          <Overlay>
+          <Overlay ariaLabel="Test overlay">
             <p>content</p>
           </Overlay>,
         );
@@ -138,7 +138,7 @@ describe("Overlay", () => {
 
         render(
           <StrictMode>
-            <Overlay onClose={onClose}>
+            <Overlay ariaLabel="Test overlay" onClose={onClose}>
               <p>content</p>
             </Overlay>
           </StrictMode>,
@@ -159,7 +159,7 @@ describe("Overlay", () => {
     function renderOverlay(closeOnBackdropClick?: boolean) {
       const onClose = vi.fn();
       render(
-        <Overlay onClose={onClose} closeOnBackdropClick={closeOnBackdropClick}>
+        <Overlay ariaLabel="Test overlay" onClose={onClose} closeOnBackdropClick={closeOnBackdropClick}>
           <p>content</p>
         </Overlay>,
       );

@@ -56,10 +56,6 @@
   background: var(--color-danger-bg);
 }
 
-.viewOptions button[aria-pressed="true"] {
-  color: var(--color-accent-fg);
-}
-
 .activeHunk .hunkHeader {
   color: var(--color-text);
 }
@@ -242,12 +238,25 @@
   border-right: 1px solid var(--color-border);
 }
 
+/* A line picked for partial staging (#722): a bar on the right edge in the selected-row marker
+   colour, so it never looks like the cursor's bar on the left. An added or removed line keeps
+   its tint under it; a context line also takes the selected-row tint. */
 .lineSelected {
+  box-shadow: inset -3px 0 0 var(--color-selected-marker);
+}
+
+.lineSelected:not(.lineAdd):not(.lineRemove) {
   background: var(--color-selected-bg);
 }
 
 .lineCursor {
   box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.lineSelected.lineCursor {
+  box-shadow:
+    inset 2px 0 0 var(--color-accent),
+    inset -3px 0 0 var(--color-selected-marker);
 }
 
 .hint {

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { matchShortcut, type ShortcutId } from "../lib/keybindings";
+import { GLOBAL_SHORTCUTS, matchShortcut, type GlobalShortcut, type ShortcutId } from "../lib/keybindings";
 import { navigationKeyDirection } from "../lib/navigationKeys";
 import { focusAdjacentPane, paneOf } from "../lib/paneFocus";
+import { isVscodeHost } from "../lib/platform";
 import { onWorkspaceRequest } from "../lib/workspaceRequests";
 import type { AppState } from "./useAppState";
 
@@ -14,6 +15,46 @@ const COMMAND_SHORTCUTS: ReadonlySet<ShortcutId> = new Set<ShortcutId>([
   "stage-all",
   "focus-commit-message",
 ]);
+
+const GLOBAL_SHORTCUT_BY_ID = new Map<string, GlobalShortcut>(GLOBAL_SHORTCUTS.map((shortcut) => [shortcut.id, shortcut]));
+
+/**
+ * How a shortcut was pressed: a key in the page, or (#679) a key VSCode took first and handed
+ * back through the extension's keybinding, which carries no event.
+ */
+interface ShortcutPress {
+  target: EventTarget | null;
+  preventDefault(): void;
+  repeat: boolean;
+  /** A control already used the key. */
+  defaultPrevented: boolean;
+  /** Ctrl/Cmd+1…9's digit. */
+  digit: number | null;
+  /** Back (-1) or Forward (1) for the Back/Forward keys. */
+  direction: -1 | 1 | null;
+}
+
+function keyPress(event: KeyboardEvent): ShortcutPress {
+  return {
+    target: event.target,
+    preventDefault: () => event.preventDefault(),
+    repeat: event.repeat,
+    defaultPrevented: event.defaultPrevented,
+    digit: Number(event.code.startsWith("Digit") ? event.code.slice(5) : event.key),
+    direction: navigationKeyDirection(event),
+  };
+}
+
+function hostPress(id: ShortcutId, index: number | undefined): ShortcutPress {
+  return {
+    target: document.activeElement,
+    preventDefault: () => {},
+    repeat: false,
+    defaultPrevented: false,
+    digit: index ?? null,
+    direction: id === "go-back" ? -1 : id === "go-forward" ? 1 : null,
+  };
+}
 
 function isTextField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -105,7 +146,7 @@ export function useWorkspaceShortcuts({
 
   useEffect(() => {
     /** Ctrl+Tab, Ctrl+Shift+Tab and Ctrl/Cmd+1…9; whether the key was used. */
-    function switchTab(event: KeyboardEvent, id: ShortcutId): boolean {
+    function switchTab(press: ShortcutPress, id: ShortcutId): boolean {
       const tabs = latest.current.tabs;
       if (tabs === undefined || tabs.paths.length < 2) return false;
       const index = tabs.paths.indexOf(repoPath);
@@ -115,7 +156,8 @@ export function useWorkspaceShortcuts({
         next = tabs.paths[(index + step + tabs.paths.length) % tabs.paths.length];
       } else {
         // Ctrl/Cmd+9 is the last tab, as in browsers.
-        const digit = Number(event.code.startsWith("Digit") ? event.code.slice(5) : event.key);
+        const digit = press.digit;
+        if (digit === null) return false;
         next = digit === 9 ? tabs.paths[tabs.paths.length - 1] : tabs.paths[digit - 1];
       }
       if (next === undefined) return false;
@@ -126,9 +168,20 @@ export function useWorkspaceShortcuts({
     function handleKeyDown(event: KeyboardEvent) {
       if (!active) return;
       const shortcut = matchShortcut(event);
+      if (shortcut === null) return;
+      // In VSCode these keys reach the workbench too, whose keybinding (contributed by the
+      // extension while the panel has the focus) hands them back as a host request (#679).
+      if (shortcut.vscodeKeybinding === true && isVscodeHost()) {
+        event.preventDefault();
+        return;
+      }
+      runShortcut(shortcut, keyPress(event));
+    }
+
+    function runShortcut(shortcut: GlobalShortcut, event: ShortcutPress) {
       const target = event.target;
       // Text fields keep their own keys (native undo in the commit message, "?" typed, …).
-      if (shortcut === null || (!shortcut.inTextFields && isTextField(target))) return;
+      if (!shortcut.inTextFields && isTextField(target)) return;
       switch (shortcut.id) {
         case "palette":
           event.preventDefault();
@@ -178,7 +231,7 @@ export function useWorkspaceShortcuts({
           // may claim the keys first (a webview may hand Alt+Left to the workbench's own Back);
           // the toolbar buttons and the palette offer the same. Not where a control already used
           // the arrow (a tab strip, a divider).
-          const direction = navigationKeyDirection(event);
+          const direction = event.direction;
           if (direction === null) return;
           if (event.defaultPrevented || (target instanceof Element && target.getAttribute("role") === "separator")) return;
           event.preventDefault();
@@ -220,9 +273,15 @@ export function useWorkspaceShortcuts({
     }
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("mouseup", handleMouseUp);
+    const stopRequests = onWorkspaceRequest((request) => {
+      if (!active || typeof request !== "object" || request.kind !== "shortcut") return;
+      const shortcut = GLOBAL_SHORTCUT_BY_ID.get(request.id);
+      if (shortcut !== undefined) runShortcut(shortcut, hostPress(shortcut.id, request.index));
+    });
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mouseup", handleMouseUp);
+      stopRequests();
     };
   }, [
     active,

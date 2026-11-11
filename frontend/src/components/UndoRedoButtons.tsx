@@ -1,3 +1,4 @@
+import { Redo2, Undo2 } from "lucide-react";
 import { ReasonButton } from "./primitives/ReasonButton";
 import { Toolbar } from "./primitives/Toolbar";
 
@@ -26,10 +27,10 @@ export function UndoRedoButtons({
   return (
     <Toolbar aria-label="Undo">
       <ReasonButton aria-label={undoName} title={undoName} reason={busy ?? (undoLabel === null ? "Nothing to undo." : null)} onClick={onUndo}>
-        ↶
+        <Undo2 size={14} aria-hidden="true" />
       </ReasonButton>
       <ReasonButton aria-label={redoName} title={redoName} reason={busy ?? (redoLabel === null ? "Nothing to redo." : null)} onClick={onRedo}>
-        ↷
+        <Redo2 size={14} aria-hidden="true" />
       </ReasonButton>
     </Toolbar>
   );

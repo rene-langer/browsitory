@@ -52,6 +52,7 @@ import { RepoWorkspace } from "./RepoWorkspace";
 import { useBusyPaths } from "./state/useBusyPaths";
 import { useCommitDrafts } from "./state/useCommitDrafts";
 import { useE2eAutoOpen } from "./state/useE2eAutoOpen";
+import { useHostRequests } from "./state/useHostRequests";
 import { allReleaseNotes, useReleaseNotes } from "./state/useReleaseNotes";
 import { useTheme } from "./state/useTheme";
 
@@ -146,6 +147,9 @@ function AppContent({
     },
     [openRepo],
   );
+
+  // "Browsitory: Open", its menus and the contributed shortcut keys in VSCode (#677).
+  useHostRequests(client, !openRepos.loading, openRepoTab);
 
   const appToasts = useToasts();
   const [cloning, setCloning] = useState(false);
@@ -481,7 +485,7 @@ function AppContent({
         />
       )}
       {pickingRepo && (
-        <Overlay onClose={() => setPickingRepo(false)}>
+        <Overlay onClose={() => setPickingRepo(false)} ariaLabel="Open repository">
           <RepoPicker
             client={client}
             onOpenRepo={(path) => {
@@ -509,6 +513,7 @@ function AppContent({
         // FormDialog already blocks Escape while running; this guard is belt-and-braces for the
         // backdrop path so a running clone is never dismissed invisibly.
         <Overlay
+          ariaLabel="Clone repository"
           onClose={() => {
             if (!cloneRunning.current) setCloning(false);
           }}

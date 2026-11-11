@@ -220,8 +220,8 @@ describe("Browsitory remote transfer", () => {
   });
 
   it("pushes the current branch and a tag created at an older commit", async () => {
-    // "Branches" holds the remote-folder's push action; "Tags" holds the push-tags controls used
-    // later in this test. Both default closed.
+    // "Branches" holds the remote-folder's push action; "Tags" holds the tag list whose
+    // selection bar pushes the tag later in this test. Both default closed.
     await expandSidebarSection("Branches");
     await expandSidebarSection("Tags");
 
@@ -306,10 +306,14 @@ describe("Browsitory remote transfer", () => {
       { timeoutMsg: "expected the tag to be created at the older commit" },
     );
     expect(git(E2E_REPO_PATH, "rev-parse", "HEAD")).toBe(localHead);
-    const pushTags = await $("button=Push all tags");
-    await pushTags.waitForEnabled();
-    await $("section[aria-labelledby='push-tags-heading'] select").selectByAttribute("value", "transfer-origin");
-    await browser.execute((el) => (el as HTMLElement).click(), pushTags);
+    // Tick the tag: the selection bar under the list pushes it (#674). With one remote the bar
+    // has no remote picker and its button names the remote.
+    await clickInPage("input[aria-label='Select e2e-transfer-tag']");
+    const bar = "[role='group'][aria-label='Selected tags']";
+    await (await $(bar)).waitForExist();
+    const remotePicker = await $(`${bar} select`);
+    if (await remotePicker.isExisting()) await remotePicker.selectByAttribute("value", "transfer-origin");
+    await clickInPage(`${bar} button`, "Push", { contains: true });
 
     await browser.waitUntil(
       () => {

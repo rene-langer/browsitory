@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SEARCH_SYNTAX_FOOTER } from "../lib/searchSyntax";
 import { CommitSearchBar } from "./CommitSearchBar";
@@ -74,13 +74,44 @@ it("shows an invalid query's message under the field and marks the field invalid
   const input = field();
   expect(input).toHaveAttribute("aria-invalid", "true");
   expect(input).toHaveAccessibleDescription("Invalid search: Missing closing parenthesis.");
-  expect(screen.getByRole("alert")).toHaveTextContent("Invalid search: Missing closing parenthesis.");
+  expect(screen.getByText("Invalid search: Missing closing parenthesis.")).toBeVisible();
 });
 
 it("shows no message for a valid query", () => {
   renderBar({ query: "a" });
   expect(field()).toHaveAttribute("aria-invalid", "false");
   expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByRole("status")).toHaveTextContent("");
+});
+
+describe("invalid query announcement (#669)", () => {
+  it("is polite, not an alert, and waits until the query stops changing", () => {
+    vi.useFakeTimers();
+    try {
+      const props = renderBar({ query: "(", error: "Invalid search: one." });
+      const status = screen.getByRole("status");
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(status).toHaveTextContent("");
+      act(() => vi.advanceTimersByTime(400));
+      // Another keystroke, another message: the wait starts over.
+      props.rerender({ query: "(a", error: "Invalid search: two." });
+      act(() => vi.advanceTimersByTime(400));
+      expect(status).toHaveTextContent("");
+      act(() => vi.advanceTimersByTime(1000));
+      expect(status).toHaveTextContent("Invalid search: two.");
+      // Fixed: nothing left to read out.
+      props.rerender({ query: "(a)", error: null });
+      expect(status).toHaveTextContent("");
+      act(() => vi.advanceTimersByTime(10));
+      // The same mistake again waits again.
+      props.rerender({ query: "(a", error: "Invalid search: two." });
+      expect(status).toHaveTextContent("");
+      act(() => vi.advanceTimersByTime(1000));
+      expect(status).toHaveTextContent("Invalid search: two.");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("recent searches (#540)", () => {

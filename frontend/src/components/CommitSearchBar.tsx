@@ -6,6 +6,9 @@ import styles from "./CommitSearchBar.module.css";
 
 const NO_RECENT_SEARCHES: string[] = [];
 
+/** How long a query must stay invalid before its message is read out (#669). */
+const SEARCH_ERROR_ANNOUNCE_DELAY_MS = 800;
+
 /**
  * The always-visible search field above the commit graph. Focused and empty, it offers the
  * repository's recent searches (#540) as a combobox list: ↓/↑ move through them, Enter runs one,
@@ -55,6 +58,17 @@ export function CommitSearchBar({
   const helpId = useId();
   const errorId = useId();
   const listId = useId();
+
+  // The message under the field changes as the query is typed; read out on every keystroke it
+  // would drown the typing (#669). A polite status repeats it once the query has stayed invalid
+  // for a moment; the field keeps it as its description throughout.
+  const [settledError, setSettledError] = useState<string | null>(null);
+  useEffect(() => {
+    // A fixed query forgets the message, so the same mistake made again waits again.
+    const timer = setTimeout(() => setSettledError(error), error === null ? 0 : SEARCH_ERROR_ANNOUNCE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [error]);
+  const announcedError = error !== null && settledError === error ? error : "";
 
   const recentOpen = focused && query === "" && !dismissed && !helpOpen && recentSearches.length > 0;
   const activeIndex = Math.min(active, recentSearches.length - 1);
@@ -190,10 +204,13 @@ export function CommitSearchBar({
         <CircleHelp size={14} aria-hidden="true" />
       </button>
       {error !== null && (
-        <p id={errorId} className={styles.error} role="alert">
+        <p id={errorId} className={styles.error}>
           {error}
         </p>
       )}
+      <span role="status" className={styles.srOnly}>
+        {announcedError}
+      </span>
       {recentOpen && (
         <div className={styles.recent}>
           <p className={styles.recentTitle} aria-hidden="true">

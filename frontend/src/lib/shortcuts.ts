@@ -1,5 +1,5 @@
 import { GLOBAL_SHORTCUTS, formatChords, shortcutLabel, type GlobalShortcut, type KeyChord } from "./keybindings";
-import { isApplePlatform } from "./platform";
+import { isApplePlatform, isVscodeHost } from "./platform";
 
 /** One row of the shortcut sheet: its keys and what they do, written for the platform (#683). */
 export interface ShortcutEntry {
@@ -21,8 +21,10 @@ const SHIFT_UP = k("ArrowUp", { shift: true });
 const SHIFT_DOWN = k("ArrowDown", { shift: true });
 const MENU_KEYS = [k("ContextMenu"), k("F10", { shift: true })];
 
-function globalEntry(shortcut: GlobalShortcut, apple: boolean): ShortcutEntry {
-  const description = shortcut.hostMayClaim ? `${shortcut.description} (where the host doesn't claim it)` : shortcut.description;
+function globalEntry(shortcut: GlobalShortcut, apple: boolean, vscode: boolean): ShortcutEntry {
+  // In VSCode the extension contributes these keys for the Browsitory panel (#679), so they work.
+  const claimed = shortcut.hostMayClaim === true && !(vscode && shortcut.vscodeKeybinding === true);
+  const description = claimed ? `${shortcut.description} (where the host doesn't claim it)` : shortcut.description;
   return { keys: shortcutLabel(shortcut.id, apple), description };
 }
 
@@ -30,7 +32,7 @@ function globalEntry(shortcut: GlobalShortcut, apple: boolean): ShortcutEntry {
  * Every keyboard shortcut the app implements, for the help sheet, written for the platform. The
  * global ones come from `GLOBAL_SHORTCUTS`; keep the others in sync with their handlers.
  */
-export function shortcutGroups(apple: boolean = isApplePlatform()): ShortcutGroup[] {
+export function shortcutGroups(apple: boolean = isApplePlatform(), vscode: boolean = isVscodeHost()): ShortcutGroup[] {
   // Chords, or words such as "A letter".
   const row = (keys: readonly KeyChord[] | string, description: string): ShortcutEntry => ({
     keys: typeof keys === "string" ? keys : formatChords(keys, apple),
@@ -40,7 +42,7 @@ export function shortcutGroups(apple: boolean = isApplePlatform()): ShortcutGrou
     {
       title: "Global",
       shortcuts: [
-        ...GLOBAL_SHORTCUTS.map((shortcut) => globalEntry(shortcut, apple)),
+        ...GLOBAL_SHORTCUTS.map((shortcut) => globalEntry(shortcut, apple, vscode)),
         row("Mouse back / forward buttons", "Back / forward through the selected commits"),
       ],
     },

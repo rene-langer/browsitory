@@ -1,4 +1,4 @@
-import { Code, Columns2, Pilcrow, Rows2, Space, UnfoldVertical, WrapText, type LucideIcon } from "lucide-react";
+import { Code, Columns2, Minus, Pilcrow, Plus, Rows2, Space, UnfoldVertical, WrapText, type LucideIcon } from "lucide-react";
 import { MAX_CONTEXT_LINES } from "../ipc/RepoClient";
 import { useDiffSettingsContext } from "../state/useDiffSettings";
 import { useDiffViewOptions } from "../state/useDiffViewOptions";
@@ -116,7 +116,7 @@ export function DiffOptionsToolbar({ wholeFile = true, sticky = false }: { whole
           disabled={wholeFileOn || settings.contextLines <= 0}
           onClick={() => update({ contextLines: settings.contextLines - 1 })}
         >
-          −
+          <Minus size={12} aria-hidden="true" />
         </button>
         <span aria-label="Context lines">{settings.contextLines}</span>
         <button
@@ -125,7 +125,7 @@ export function DiffOptionsToolbar({ wholeFile = true, sticky = false }: { whole
           disabled={wholeFileOn || settings.contextLines >= MAX_CONTEXT_LINES}
           onClick={() => update({ contextLines: settings.contextLines + 1 })}
         >
-          +
+          <Plus size={12} aria-hidden="true" />
         </button>
       </span>
     </div>

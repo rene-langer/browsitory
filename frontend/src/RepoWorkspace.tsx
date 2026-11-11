@@ -58,7 +58,7 @@ import { useSequenceActions } from "./state/useSequenceActions";
 import { useUndoRedoActions } from "./state/useUndoRedoActions";
 import { useWorkspaceShortcuts } from "./state/useWorkspaceShortcuts";
 import { runShortcutCommand } from "./lib/shortcutCommands";
-import { onWorkspaceRequest } from "./lib/workspaceRequests";
+import { onHistoryRequest, onWorkspaceRequest, takeHistoryRequest } from "./lib/workspaceRequests";
 import { WorkspaceActionsContext, type WorkspaceActions } from "./state/useWorkspaceActions";
 import { WorkspaceDialogs, type CommitDialogRequest } from "./WorkspaceDialogs";
 import { WorkspaceMain } from "./WorkspaceMain";
@@ -119,6 +119,20 @@ export function RepoWorkspace({
     appState.state.selectedRow,
     appState.selectRow,
   );
+  // "Show File History" / "Show Line History in Browsitory" from VSCode's menus (#678): taken
+  // when this workspace mounts (the request may have opened its tab) or when one arrives.
+  const { open: openFileHistory, openLines: openLineHistory } = fileHistory;
+  useEffect(() => {
+    if (!active) return;
+    const take = () => {
+      const request = takeHistoryRequest(repoPath);
+      if (request === null) return;
+      if (request.lines === undefined) openFileHistory(request.path);
+      else openLineHistory(request.path, "HEAD", request.lines.startLine, request.lines.endLine);
+    };
+    take();
+    return onHistoryRequest(take);
+  }, [active, repoPath, openFileHistory, openLineHistory]);
   const commitSearch = useCommitSearch(
     client,
     repoPath,
