@@ -39,7 +39,7 @@
     "worktree"
   ],
   "activationEvents": [
-    "onCommand:browsitory.open"
+    "onWebviewPanel:browsitory"
   ],
   "main": "./dist/extension.js",
   "license": "MIT",
@@ -57,7 +57,340 @@
     "commands": [
       {
         "command": "browsitory.open",
-        "title": "Browsitory: Open"
+        "title": "Open",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.openRepository",
+        "title": "Open in Browsitory"
+      },
+      {
+        "command": "browsitory.showFileHistory",
+        "title": "Show File History in Browsitory"
+      },
+      {
+        "command": "browsitory.showLineHistory",
+        "title": "Show Line History in Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.palette",
+        "title": "Open the command palette",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.refresh",
+        "title": "Refresh the repository",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.fetch",
+        "title": "Fetch",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.next-pane",
+        "title": "Move to the next pane",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.previous-pane",
+        "title": "Move to the previous pane",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.toggle-sidebar",
+        "title": "Show or hide the sidebar",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.next-tab",
+        "title": "Switch to the next tab",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.previous-tab",
+        "title": "Switch to the previous tab",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "title": "Switch to tab 1 to 8, or the last tab",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.close-tab",
+        "title": "Close the active tab",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.reopen-closed-tab",
+        "title": "Reopen the last closed tab",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.go-back",
+        "title": "Back through the selected commits",
+        "category": "Browsitory"
+      },
+      {
+        "command": "browsitory.shortcut.go-forward",
+        "title": "Forward through the selected commits",
+        "category": "Browsitory"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "browsitory.openRepository",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.showFileHistory",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "browsitory.showLineHistory",
+          "when": "editorTextFocus && resourceScheme == file"
+        },
+        {
+          "command": "browsitory.shortcut.palette",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.refresh",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.fetch",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.next-pane",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.previous-pane",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.toggle-sidebar",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.next-tab",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.previous-tab",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.tab-by-number",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.close-tab",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.reopen-closed-tab",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.go-back",
+          "when": "false"
+        },
+        {
+          "command": "browsitory.shortcut.go-forward",
+          "when": "false"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "browsitory.openRepository",
+          "when": "scmProvider == git",
+          "group": "browsitory@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "browsitory.openRepository",
+          "when": "explorerResourceIsFolder && resourceScheme == file",
+          "group": "browsitory@1"
+        },
+        {
+          "command": "browsitory.showFileHistory",
+          "when": "!explorerResourceIsFolder && resourceScheme == file",
+          "group": "browsitory@2"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "browsitory.showFileHistory",
+          "when": "resourceScheme == file",
+          "group": "browsitory@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "browsitory.showFileHistory",
+          "when": "resourceScheme == file",
+          "group": "browsitory@1"
+        },
+        {
+          "command": "browsitory.showLineHistory",
+          "when": "resourceScheme == file",
+          "group": "browsitory@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "browsitory.shortcut.palette",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.refresh",
+        "key": "f5",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.fetch",
+        "key": "shift+f5",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.next-pane",
+        "key": "f6",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.previous-pane",
+        "key": "shift+f6",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.toggle-sidebar",
+        "key": "ctrl+alt+b",
+        "mac": "alt+cmd+b",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.next-tab",
+        "key": "ctrl+tab",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.previous-tab",
+        "key": "ctrl+shift+tab",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "key": "ctrl+1",
+        "mac": "cmd+1",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused",
+        "args": {
+          "index": 1
+        }
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "key": "ctrl+2",
+        "mac": "cmd+2",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused",
+        "args": {
+          "index": 2
+        }
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "key": "ctrl+3",
+        "mac": "cmd+3",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused",
+        "args": {
+          "index": 3
+        }
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "key": "ctrl+4",
+        "mac": "cmd+4",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused",
+        "args": {
+          "index": 4
+        }
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "key": "ctrl+5",
+        "mac": "cmd+5",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused",
+        "args": {
+          "index": 5
+        }
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "key": "ctrl+6",
+        "mac": "cmd+6",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused",
+        "args": {
+          "index": 6
+        }
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "key": "ctrl+7",
+        "mac": "cmd+7",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused",
+        "args": {
+          "index": 7
+        }
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "key": "ctrl+8",
+        "mac": "cmd+8",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused",
+        "args": {
+          "index": 8
+        }
+      },
+      {
+        "command": "browsitory.shortcut.tab-by-number",
+        "key": "ctrl+9",
+        "mac": "cmd+9",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused",
+        "args": {
+          "index": 9
+        }
+      },
+      {
+        "command": "browsitory.shortcut.close-tab",
+        "key": "ctrl+w",
+        "mac": "cmd+w",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.reopen-closed-tab",
+        "key": "ctrl+shift+t",
+        "mac": "shift+cmd+t",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.go-back",
+        "key": "alt+left",
+        "mac": "cmd+[",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
+      },
+      {
+        "command": "browsitory.shortcut.go-forward",
+        "key": "alt+right",
+        "mac": "cmd+]",
+        "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
       }
     ]
   },

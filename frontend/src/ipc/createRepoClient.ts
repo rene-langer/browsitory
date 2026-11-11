@@ -101,6 +101,7 @@ export type BackendCall = <T>(method: string, params?: Record<string, unknown>) 
  * - file drops (#649): the desktop webview's drag and drop events and `readPatchFile`; none in
  *   VSCode, which handles drops on its windows itself.
  * - `logFrontendError`: the desktop app writes through its log plugin and has no command for it.
+ * - `subscribeHostRequests` (#677): the VSCode extension host's notifications; none on the desktop.
  */
 export type TransportSpecific =
   | "supportsCloneAndInit"
@@ -112,6 +113,7 @@ export type TransportSpecific =
   | "subscribeHookProgress"
   | "subscribeFileDrops"
   | "readPatchFile"
+  | "subscribeHostRequests"
   | "logFrontendError";
 
 export type SharedRepoClient = Omit<RepoClient, TransportSpecific>;

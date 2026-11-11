@@ -50,6 +50,7 @@ const SUBSCRIPTIONS = [
   "subscribeTransferProgress",
   "subscribeHookProgress",
   "subscribeFileDrops",
+  "subscribeHostRequests",
 ] as const satisfies readonly Method[];
 
 /**
@@ -147,8 +148,11 @@ describe("transport parity", () => {
 
     const posted: Sent[] = [];
     (globalThis as unknown as { acquireVsCodeApi: () => unknown }).acquireVsCodeApi = () => ({
-      postMessage: (message: { method: string; params: unknown }) =>
-        posted.push({ name: message.method, params: message.params }),
+      // A notification to the extension host itself (`hostReady`, `webviewFocus`; no `id`) is
+      // no backend call.
+      postMessage: (message: { id?: number; method: string; params: unknown }) => {
+        if (message.id !== undefined) posted.push({ name: message.method, params: message.params });
+      },
     });
     const vscodeModule = await import("./vscodeRepoClient");
     resetVscode = vscodeModule.__resetVscodeRepoClientForTests;

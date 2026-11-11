@@ -65,6 +65,13 @@ export interface GlobalShortcut {
   inTextFields?: boolean;
   /** A host (a VSCode webview, the macOS app menu) may take these keys before the app sees them. */
   hostMayClaim?: boolean;
+  /**
+   * VSCode binds these keys itself, and a webview hands every key to VSCode too: the extension
+   * contributes a keybinding for each, active while the Browsitory panel has the focus, which
+   * runs it through the webview (#679, `lib/vscodeKeybindings.ts`). Every chord list has the
+   * same length on every platform.
+   */
+  vscodeKeybinding?: boolean;
   /** Shown as the first and last chord ("Ctrl+1 … Ctrl+9"), not every one of them. */
   range?: boolean;
 }
@@ -73,10 +80,10 @@ const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
 /** Every global shortcut, in the order the sheet lists them. */
 export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
-  { id: "palette", description: "Open the command palette", chords: [{ mod: true, key: "k" }], inTextFields: true },
+  { id: "palette", vscodeKeybinding: true, description: "Open the command palette", chords: [{ mod: true, key: "k" }], inTextFields: true },
   { id: "show-shortcuts", description: "Show keyboard shortcuts", chords: [{ key: "?" }] },
-  { id: "refresh", description: "Refresh the repository", chords: [{ key: "F5" }], inTextFields: true },
-  { id: "fetch", description: "Fetch", chords: [{ shift: true, key: "F5" }], inTextFields: true },
+  { id: "refresh", vscodeKeybinding: true, description: "Refresh the repository", chords: [{ key: "F5" }], inTextFields: true },
+  { id: "fetch", vscodeKeybinding: true, description: "Fetch", chords: [{ shift: true, key: "F5" }], inTextFields: true },
   { id: "pull", description: "Pull the current branch", chords: [{ mod: true, shift: true, key: "l" }], inTextFields: true },
   { id: "push", description: "Push the current branch", chords: [{ mod: true, shift: true, key: "k" }], inTextFields: true },
   { id: "stage-all", description: "Stage all changes", chords: [{ mod: true, shift: true, key: "a" }] },
@@ -91,18 +98,20 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
     ],
     appleChords: [{ mod: true, shift: true, key: "z" }],
   },
-  { id: "next-pane", description: "Move to the next pane", chords: [{ key: "F6" }], inTextFields: true },
-  { id: "previous-pane", description: "Move to the previous pane", chords: [{ shift: true, key: "F6" }], inTextFields: true },
+  { id: "next-pane", vscodeKeybinding: true, description: "Move to the next pane", chords: [{ key: "F6" }], inTextFields: true },
+  { id: "previous-pane", vscodeKeybinding: true, description: "Move to the previous pane", chords: [{ shift: true, key: "F6" }], inTextFields: true },
   {
     id: "toggle-sidebar",
+    vscodeKeybinding: true,
     description: "Show or hide the sidebar",
     chords: [{ mod: true, alt: true, key: "b" }],
     inTextFields: true,
     hostMayClaim: true,
   },
-  { id: "next-tab", description: "Switch to the next tab", chords: [{ ctrl: true, key: "Tab" }], inTextFields: true, hostMayClaim: true },
+  { id: "next-tab", vscodeKeybinding: true, description: "Switch to the next tab", chords: [{ ctrl: true, key: "Tab" }], inTextFields: true, hostMayClaim: true },
   {
     id: "previous-tab",
+    vscodeKeybinding: true,
     description: "Switch to the previous tab",
     chords: [{ ctrl: true, shift: true, key: "Tab" }],
     inTextFields: true,
@@ -110,15 +119,17 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
   },
   {
     id: "tab-by-number",
+    vscodeKeybinding: true,
     description: "Switch to tab 1 to 8, or the last tab",
     chords: DIGITS.map((key) => ({ mod: true, key })),
     inTextFields: true,
     hostMayClaim: true,
     range: true,
   },
-  { id: "close-tab", description: "Close the active tab", chords: [{ mod: true, key: "w" }], inTextFields: true, hostMayClaim: true },
+  { id: "close-tab", vscodeKeybinding: true, description: "Close the active tab", chords: [{ mod: true, key: "w" }], inTextFields: true, hostMayClaim: true },
   {
     id: "reopen-closed-tab",
+    vscodeKeybinding: true,
     description: "Reopen the last closed tab",
     chords: [{ mod: true, shift: true, key: "t" }],
     inTextFields: true,
@@ -126,6 +137,7 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
   },
   {
     id: "go-back",
+    vscodeKeybinding: true,
     description: "Back through the selected commits",
     chords: [{ alt: true, key: "ArrowLeft" }],
     appleChords: [{ mod: true, key: "[" }],
@@ -133,6 +145,7 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
   },
   {
     id: "go-forward",
+    vscodeKeybinding: true,
     description: "Forward through the selected commits",
     chords: [{ alt: true, key: "ArrowRight" }],
     appleChords: [{ mod: true, key: "]" }],

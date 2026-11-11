@@ -52,6 +52,18 @@ describe("ShortcutSheet", () => {
     }
   });
 
+  it("in VSCode, drops the host caveat from the keys the extension binds, and says where to change them (#679)", () => {
+    const { unmount } = render(<ShortcutSheet onClose={vi.fn()} apple={false} vscode={false} />);
+    expect(screen.getByText("Close the active tab (where the host doesn't claim it)")).toBeInTheDocument();
+    expect(screen.queryByText(/Keyboard Shortcuts/)).toBeNull();
+    unmount();
+
+    render(<ShortcutSheet onClose={vi.fn()} apple={false} vscode />);
+    expect(screen.getByText("Close the active tab").closest("div")).toHaveTextContent("Ctrl+W");
+    expect(document.body.textContent).not.toMatch(/where the host/);
+    expect(screen.getByText(/search for "Browsitory" in VSCode's Keyboard Shortcuts/)).toBeInTheDocument();
+  });
+
   it("Close calls onClose", () => {
     const onClose = vi.fn();
     render(<ShortcutSheet onClose={onClose} />);
