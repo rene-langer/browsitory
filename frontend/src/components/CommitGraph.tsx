@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+  type RefObject,
+} from "react";
 import type { CommitStats, GraphCommit, HeadInfo, RemoteInfo, StatusEntry } from "../ipc/RepoClient";
 import { type CommitGraphLayout, useCommitGraphLayout } from "../lib/useCommitGraphLayout";
 import { laneColor } from "../lib/laneColors";
@@ -20,6 +29,7 @@ import { commitActions } from "../lib/actions/commitActions";
 import type { VisitKind } from "../lib/navigationHistory";
 import { rowsEqual, type SelectedRow } from "../state/useAppState";
 import { useCopyToClipboard } from "../state/useCopyToClipboard";
+import { useCommitDrag } from "../state/useCommitDrag";
 import { CommitLaneGraphic, WorkingTreeLaneGraphic } from "./CommitLaneGraphic";
 import { formatShortDate } from "../lib/formatDate";
 import { ListRow } from "./primitives/ListRow";
@@ -643,6 +653,21 @@ export function CommitGraph({
   };
 
   const multiSelected = effectiveSelection.ids.size >= 2;
+
+  // A row dragged onto a branch in the sidebar cherry-picks it (#744); a row of the
+  // multi-selection drags the whole selection, oldest first. The menus stay the other way.
+  const commitDrag = useCommitDrag();
+  const draggedIds = new Set(commitDrag?.drag?.payload.commits.map((commit) => commit.id) ?? []);
+  const startCommitDrag = (event: PointerEvent<HTMLLIElement>, commit: GraphCommit) => {
+    if (commitDrag === null) return;
+    // The row's own controls ("+N", tag badges) keep their press.
+    if ((event.target as Element).closest("button, input, textarea, select") !== null) return;
+    const dragged =
+      multiSelected && effectiveSelection.ids.has(commit.id)
+        ? commits.filter((candidate) => effectiveSelection.ids.has(candidate.id)).reverse()
+        : [commit];
+    commitDrag.startDrag(event, { commits: dragged, headId: headInfo.headId });
+  };
   const rebasePlan = multiSelected
     ? planRebaseSelection(commits, effectiveSelection.ids)
     : null;
@@ -828,6 +853,8 @@ export function CommitGraph({
           onContextMenu={(event) => handleContextMenu(event, commit.id)}
           onMouseEnter={() => setHoveredSegmentId(commitLayouts[index].laneSegmentId)}
           onMouseLeave={() => setHoveredSegmentId(null)}
+          onPointerDown={commitDrag === null ? undefined : (event) => startCommitDrag(event, commit)}
+          dragging={draggedIds.has(commit.id)}
         >
           <div className={styles.graphCell}>
             <CommitLaneGraphic

@@ -273,6 +273,14 @@ one side of the drop. The answer is shown on the hovered row (`data-drop-positio
 `refused`) and in the label beside the pointer, and a drop opens a menu with the choices and
 Cancel. A collapsed folder hovered for `FOLDER_OPEN_DELAY_MS` opens for that session only.
 
+Commits dragged from the graph onto a branch cross two components: `CommitGraph` starts the drag
+and `BranchTree` is its drop side. `RepoWorkspace` owns the drag (`useCommitDragSession`,
+`state/useCommitDrag.ts`) and shares it through `CommitDragContext`; the Branches section
+registers its handlers there and shows the verdict on its rows like a branch drag, from
+`commitDropActions` (`lib/actions/commitActions.ts`): the commit menu's Cherry-pick rules, or the
+multi-selection's for several commits, and only the current branch takes the drop. The drop
+menu's choice runs back through the session: the pick, the parent picker or a sequence.
+
 ## git2 API gotchas
 
 - `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return

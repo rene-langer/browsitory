@@ -82,6 +82,18 @@ already on the branch is skipped, and the result says so ("Cherry-picked 2 commi
 with no changes"). Reverting a revert is called "Reapply …", as in git. Merge commits have to be picked one at a time, so the actions are disabled
 when the selection holds one.
 
+**Dragging commits onto a branch.** Drag a commit from the graph onto the current branch in the
+sidebar's Branches section to cherry-pick it there. While you drag, a label beside the pointer
+says what the drop does, and the branch under the pointer is highlighted; on release a small
+menu offers **Cherry-pick ⟨commit⟩ onto ⟨branch⟩** and **Cancel**. Dragging a commit of a
+multi-selection drags the whole selection (**Cherry-pick N commits onto ⟨branch⟩**, oldest
+first); a merge commit's item reads **Cherry-pick ⟨commit⟩ onto ⟨branch⟩…** and opens the parent
+picker. The same rules as the menu items apply: a cherry-pick lands on the current branch, so any
+other branch refuses the drop, as do a detached HEAD, the HEAD commit itself, a selection with a
+merge commit and a repository busy with another operation; the label says why. A collapsed
+folder opens when you hold the commit over it for a moment. Escape cancels the drag. The commit
+menu and the bar under the graph offer the same actions without dragging.
+
 A conflict pauses the sequence: the status strip shows "Cherry-picking 2/5" and the commit area
 shows **Continue cherry-pick** / **Abort cherry-pick** instead of the message box. Resolve the
 conflicts (see [Resolving conflicts](conflicts.md)), then **Continue**; it commits the

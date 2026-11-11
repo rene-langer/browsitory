@@ -3,7 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
 import { clickInPage } from "../support/dom";
+import { dragInPage } from "../support/drag";
 import { gitIn } from "../support/git";
+import { expandSidebarSection, sidebarBranchRow } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
 const git = gitIn(E2E_REPO_PATH);
@@ -100,5 +102,34 @@ describe("Browsitory cherry-pick sequence", () => {
       () => browser.execute(() => document.querySelector('[aria-label="Operation status"]') === null),
       { timeoutMsg: "the operation status strip did not go away" },
     );
+  });
+
+  // #744: a commit dragged from the graph onto the current branch in the sidebar offers
+  // "Cherry-pick <commit> onto <branch>", which picks it like the commit menu's Cherry-pick.
+  it("cherry-picks a commit dragged onto the current branch", async () => {
+    git("checkout", "-b", "e2e-drag-source");
+    fs.writeFileSync(path.join(E2E_REPO_PATH, "drag-pick.txt"), "dragged\n");
+    git("add", "drag-pick.txt");
+    git("commit", "-m", "e2e: drag pick");
+    const shortId = git("rev-parse", "HEAD").slice(0, 7);
+    git("checkout", baseBranch);
+    const tipBefore = git("rev-parse", "HEAD");
+
+    await browser.refresh();
+    await expandSidebarSection("Branches");
+    const row = await $("li*=e2e: drag pick");
+    await row.waitForExist();
+    // Pressed on the summary, not on a branch badge.
+    const summary = await row.$("span*=e2e: drag pick");
+    const currentRow = await $(sidebarBranchRow(baseBranch));
+    await currentRow.waitForExist();
+    await dragInPage(summary, currentRow);
+
+    await jsClick(`button=Cherry-pick ${shortId} onto ${baseBranch}`);
+    await browser.waitUntil(() => git("log", "-1", "--format=%s") === "e2e: drag pick", {
+      timeoutMsg: "the dragged commit was not cherry-picked",
+    });
+    expect(git("rev-parse", "HEAD~1")).toBe(tipBefore);
+    expect(git("rev-parse", "--abbrev-ref", "HEAD")).toBe(baseBranch);
   });
 });
