@@ -103,6 +103,21 @@ describe("App", () => {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getCommitGraph: async () => graphPage([graphCommit("head111", "Tip of main", ["base222"]), graphCommit("base222", "Base", [])]),
+      getHeadInfo: async () => ({
+        headId: "head111",
+        detachedAt: null,
+        headPushed: false,
+        operation: null,
+        operationLeftover: false,
+        squashMessage: null,
+        commitHooks: [],
+        sequence: null,
+        rebase: null,
+        bisect: null, terminalSequence: null, terminalRebase: null,
+      }),
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getStatus: async () => [],
       locateCommit,
       subscribeHostRequests,
     });
@@ -111,8 +126,9 @@ describe("App", () => {
 
     act(() => emit({ kind: "showCommit", repoPath: "/repos/a", commitId: "base222" }));
 
-    const history = await screen.findByRole("listbox", { name: "Commit history" });
-    await waitFor(() => expect(within(history).getByRole("option", { name: /Base/, selected: true })).toBeInTheDocument());
+    // The list is mounted again once the history is read.
+    const history = () => screen.getByRole("listbox", { name: "Commit history" });
+    await waitFor(() => expect(within(history()).getByRole("option", { name: /Base/, selected: true })).toBeInTheDocument());
 
     // Not among the loaded commits: Go to's path finds it, loading more history as needed.
     act(() => emit({ kind: "showCommit", repoPath: "/repos/a", commitId: "old3333" }));
