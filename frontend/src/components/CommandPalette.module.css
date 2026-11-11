@@ -69,7 +69,7 @@
 }
 
 /* On the highlighted row, keep the row's own text colour for contrast against its tint. */
-[aria-selected="true"] > .match {
+[aria-selected="true"] .match {
   color: inherit;
 }
 

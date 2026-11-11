@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { waitUntilInPage } from "../support/dom";
+import { clickInPage, waitUntilInPage } from "../support/dom";
 import { expandSidebarSection, sidebarBranchRow, sidebarRemoteFolder, sidebarSectionToggle } from "../support/sidebar";
 import { SLOW_UI_TIMEOUT } from "../support/timeouts";
 import { DEMO_REPO_PATH, startConflict } from "./demoRepo";
@@ -80,7 +80,8 @@ describe("Documentation screenshots", () => {
   });
 
   it("staging", async () => {
-    await click("span*=src/app.js (Modified)");
+    // By text in the page: "(Modified)" is screen-reader text, which `span*=` doesn't match.
+    await clickInPage("span", "src/app.js (Modified)");
     await waitUntilInPage(".diff-line-add");
     const message = await $("textarea[placeholder='Commit message']");
     await browser.execute(
@@ -154,18 +155,10 @@ describe("Documentation screenshots", () => {
     // The status strip and the commit box both offer it.
     await waitUntilInPage("button", "Abort merge", { contains: true });
     await click("li*=Uncommitted changes");
-    // Bring the conflicted file's resolve controls into view.
-    const conflicted = await $("span*=src/search.js (Conflicted)");
-    await conflicted.waitForExist();
-    await browser.execute((el) => {
-      (el as HTMLElement).scrollIntoView({ block: "start" });
-      // scrollIntoView also scrolls ancestors that only clip (overflow: hidden), shifting the whole
-      // window; put those back so only the diff pane's own scroll area moved.
-      for (let node = (el as HTMLElement).parentElement; node !== null; node = node.parentElement) {
-        const overflowY = getComputedStyle(node).overflowY;
-        if (overflowY !== "auto" && overflowY !== "scroll") node.scrollTop = 0;
-      }
-    }, conflicted);
+    // Conflicted files head the list (#665): selecting the row shows its resolve controls.
+    // By text in the page: "(Conflicted)" is screen-reader text, which `span*=` doesn't match.
+    await clickInPage("span", "src/search.js (Conflicted)");
+    await waitUntilInPage("button", "Mark resolved", { contains: true });
     await shoot("conflict");
   });
 

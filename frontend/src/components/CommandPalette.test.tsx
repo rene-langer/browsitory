@@ -381,5 +381,13 @@ describe("CommandPalette", () => {
       expect(options[0]).toHaveTextContent("Switch to main");
       expect(Array.from(options[0].querySelectorAll("mark")).map((mark) => mark.textContent)).toEqual(["Sw", "main"]);
     });
+
+    it("keeps a highlighted label in one element, so the row's gap doesn't split its words", () => {
+      render(<CommandPalette commands={makeCommands()} onRun={vi.fn()} />);
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "main sw" } });
+      const mark = screen.getByRole("option").querySelector("mark");
+      expect(mark?.parentElement?.tagName).toBe("SPAN");
+      expect(mark?.parentElement?.textContent).toBe("Switch to main");
+    });
   });
 });
