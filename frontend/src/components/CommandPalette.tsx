@@ -244,9 +244,12 @@ export function CommandPalette({
   );
 }
 
-/** `label` with the matched `ranges` marked (#644). */
+/**
+ * `label` with the matched `ranges` marked (#644), in one span: the row is a flex container
+ * with a gap, so loose text and `mark`s would each become a flex item, spaced apart.
+ */
 function HighlightedLabel({ label, ranges }: { label: string; ranges: readonly MatchRange[] }) {
-  if (ranges.length === 0) return <>{label}</>;
+  if (ranges.length === 0) return <span>{label}</span>;
   const parts: ReactNode[] = [];
   let position = 0;
   for (const [start, end] of ranges) {
@@ -259,5 +262,5 @@ function HighlightedLabel({ label, ranges }: { label: string; ranges: readonly M
     position = end;
   }
   if (position < label.length) parts.push(label.slice(position));
-  return <>{parts}</>;
+  return <span>{parts}</span>;
 }
