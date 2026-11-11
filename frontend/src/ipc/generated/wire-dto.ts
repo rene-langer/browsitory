@@ -13,6 +13,8 @@ export type BlameLine = { lineNumber: number, content: string, commitId: string,
 
 export type BranchInfo = { name: string, isCurrent: boolean, upstream: string | null, ahead: number | null, behind: number | null, };
 
+export type ChangeStamp = { refs: string, workTree: string, };
+
 export type ChangedFile = { path: string, oldPath: string | null, };
 
 export type CollapsedMerge = { mergeId: string, mergePosition: number, offset: number, };
@@ -279,7 +281,7 @@ export type SignatureStatus = "unsigned" | "good" | "goodUntrusted" | "bad" | "u
 
 export type StashApplyOutcome = { "kind": "Applied" } | { "kind": "Conflicted", files: Array<string>, };
 
-export type StashEntry = { index: number, message: string, commitId: string, };
+export type StashEntry = { index: number, message: string, commitId: string, branch: string | null, timestamp: number, fileCount: number, hasStagedChanges: boolean, };
 
 export type StashFiles = { tracked: Array<string>, untracked: Array<string>, untrackedCommitId: string | null, };
 

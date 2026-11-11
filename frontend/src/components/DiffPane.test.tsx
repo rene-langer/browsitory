@@ -2032,13 +2032,11 @@ describe("DiffPane diff options contract", () => {
 });
 
 describe("DiffPane stash view", () => {
-  const stash = { index: 0, message: "On main: wip", commitId: "s0" };
+  const stash = { index: 0, message: "On main: wip", commitId: "s0", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false };
   const stashActions = (overrides: Partial<NonNullable<React.ComponentProps<typeof DiffPane>["stashActions"]>> = {}) => ({
     onApply: vi.fn(),
     onPop: vi.fn(),
     onDrop: vi.fn(),
-    restoreIndex: true,
-    onSetRestoreIndex: vi.fn(),
     blockers: { apply: null, drop: null },
     ...overrides,
   });
@@ -2061,8 +2059,9 @@ describe("DiffPane stash view", () => {
     const { getCommitDiff, client } = renderStash({ tracked: ["a.txt"], untracked: ["new.txt"], untrackedCommitId: "u1" });
 
     const section = await screen.findByRole("region", { name: "Stash details" });
-    expect(within(section).getByRole("heading", { name: "On main: wip" })).toBeInTheDocument();
+    expect(within(section).getByRole("heading", { name: "wip" })).toBeInTheDocument();
     expect(section).toHaveTextContent("stash@{0}");
+    expect(section).toHaveTextContent(/On main · .+ · 1 file/);
     expect(await within(section).findByText("Changes (1)")).toBeInTheDocument();
     expect(within(section).getByText("Untracked (1)")).toBeInTheDocument();
     await waitFor(() => {
@@ -2091,26 +2090,37 @@ describe("DiffPane stash view", () => {
     const section = await screen.findByRole("region", { name: "Stash details" });
 
     fireEvent.click(within(section).getByRole("button", { name: "Apply" }));
-    expect(actions.onApply).toHaveBeenCalledWith(0);
+    expect(actions.onApply).toHaveBeenCalledWith(0, true);
     fireEvent.click(within(section).getByRole("button", { name: "Pop" }));
-    expect(actions.onPop).toHaveBeenCalledWith(0);
+    expect(actions.onPop).toHaveBeenCalledWith(0, true);
 
     fireEvent.click(within(section).getByRole("button", { name: "Drop…" }));
     expect(actions.onDrop).not.toHaveBeenCalled();
-    const dialog = screen.getByRole("dialog", { name: "Drop stash On main: wip", hidden: true });
-    expect(dialog).toHaveTextContent('Drop "On main: wip"? This cannot be undone.');
+    const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
+    expect(dialog).toHaveTextContent('Drop "wip"? This cannot be undone.');
     fireEvent.click(within(dialog).getByRole("button", { name: "Drop stash", hidden: true }));
     expect(actions.onDrop).toHaveBeenCalledWith(0);
   });
 
-  it("reflects and toggles Restore staged changes", async () => {
+  it("offers Apply and Pop as unstaged only for a stash with staged changes (#657)", async () => {
     const { actions } = renderStash({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null });
-    const checkbox = await screen.findByRole("checkbox", { name: "Restore staged changes" });
+    const section = await screen.findByRole("region", { name: "Stash details" });
+    expect(within(section).queryByRole("button", { name: "Apply as unstaged" })).toBeNull();
+    expect(within(section).queryByRole("checkbox")).toBeNull();
+    cleanup();
 
-    expect(checkbox).toBeChecked();
-    fireEvent.click(checkbox);
-
-    expect(actions.onSetRestoreIndex).toHaveBeenCalledWith(false);
+    const staged = { ...stash, hasStagedChanges: true };
+    const client = fakeClient({
+      getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null })),
+      getCommitDiff: vi.fn(async () => []),
+      getBlame: async () => [],
+    });
+    renderCommit(client, "s0", { stashes: [staged], stashActions: actions });
+    const view = await screen.findByRole("region", { name: "Stash details" });
+    fireEvent.click(within(view).getByRole("button", { name: "Apply as unstaged" }));
+    expect(actions.onApply).toHaveBeenCalledWith(0, false);
+    fireEvent.click(within(view).getByRole("button", { name: "Pop as unstaged" }));
+    expect(actions.onPop).toHaveBeenCalledWith(0, false);
   });
 
   it("disables Apply and Pop with the reason, keeping Drop", async () => {
@@ -2154,7 +2164,7 @@ describe("DiffPane stash view", () => {
     const drop = within(section).getByRole("button", { name: "Drop…" });
     expect(drop).toBeDisabled();
     expect(drop).toHaveAttribute("title", reason);
-    const dialog = screen.getByRole("dialog", { name: "Drop stash On main: wip", hidden: true });
+    const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
     expect(dialog).toHaveTextContent(reason);
     const confirm = within(dialog).getByRole("button", { name: "Drop stash", hidden: true });
     expect(confirm).toBeDisabled();
@@ -2475,13 +2485,11 @@ describe("DiffPane image preview", () => {
       }),
       "s0",
       {
-        stashes: [{ index: 0, message: "On main: wip", commitId: "s0" }],
+        stashes: [{ index: 0, message: "On main: wip", commitId: "s0", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false }],
         stashActions: {
           onApply: vi.fn(),
           onPop: vi.fn(),
           onDrop: vi.fn(),
-          restoreIndex: true,
-          onSetRestoreIndex: vi.fn(),
           blockers: { apply: null, drop: null },
         },
       },

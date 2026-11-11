@@ -14,10 +14,12 @@ export interface StashActions {
    * the stash dialog (`dialog` kind "stash") if open.
    */
   saveStash(options?: StashOptions): Promise<void>;
-  /** Apply/Pop use `state.stashRestoreIndex` and record `state.stashOutcome` for the toast. */
-  applyStash(index: number): Promise<void>;
-  popStash(index: number): Promise<void>;
-  setStashRestoreIndex(on: boolean): void;
+  /**
+   * Apply/Pop record `state.stashOutcome` for the toast. `restoreIndex` (default on) restores the
+   * stash's staged changes as staged; "Apply as unstaged" passes `false` (#657).
+   */
+  applyStash(index: number, restoreIndex?: boolean): Promise<void>;
+  popStash(index: number, restoreIndex?: boolean): Promise<void>;
   dropStash(index: number): Promise<void>;
 }
 
@@ -28,7 +30,6 @@ export function useStashActions(
   runOptimisticMutation: RunOptimisticMutation,
   setState: (updater: (prev: AppState) => AppState) => void,
   stashes: StashEntry[],
-  restoreIndex: boolean,
 ): StashActions {
   const saveStash = useCallback(
     (options: StashOptions = STASH_EVERYTHING) =>
@@ -37,10 +38,6 @@ export function useStashActions(
         await client.saveStash(repoPath, options);
       }),
     [client, runMutation, repoPath, setState],
-  );
-  const setStashRestoreIndex = useCallback(
-    (on: boolean) => setState((prev) => ({ ...prev, stashRestoreIndex: on })),
-    [setState],
   );
   // Apply/Pop/Drop send the listed stash's commit id along with its index; the backend refuses
   // when `stash@{index}` is now another stash. An index this list doesn't know is refused here.
@@ -54,7 +51,7 @@ export function useStashActions(
     [stashes, setState],
   );
   const applyStash = useCallback(
-    async (index: number) => {
+    async (index: number, restoreIndex = true) => {
       const commitId = listedCommitId(index);
       if (commitId === null) return;
       await runMutation(async () => {
@@ -63,10 +60,10 @@ export function useStashActions(
         setState((prev) => ({ ...prev, stashOutcome: { action: "apply", outcome } }));
       });
     },
-    [client, runMutation, repoPath, setState, restoreIndex, listedCommitId],
+    [client, runMutation, repoPath, setState, listedCommitId],
   );
   const popStash = useCallback(
-    async (index: number) => {
+    async (index: number, restoreIndex = true) => {
       const poppedCommitId = listedCommitId(index);
       if (poppedCommitId === null) return;
       await runMutation(async () => {
@@ -86,7 +83,7 @@ export function useStashActions(
         });
       });
     },
-    [client, runMutation, repoPath, setState, restoreIndex, listedCommitId],
+    [client, runMutation, repoPath, setState, listedCommitId],
   );
   const dropStash = useCallback(
     async (index: number) => {
@@ -113,7 +110,6 @@ export function useStashActions(
     saveStash,
     applyStash,
     popStash,
-    setStashRestoreIndex,
     dropStash,
   };
 }

@@ -2325,7 +2325,7 @@ describe("App", () => {
       render(
         <App
           client={stashClient({
-            listStashes: async () => [{ index: 0, message: "On main: wip", commitId: "s0" }],
+            listStashes: async () => [{ index: 0, message: "On main: wip", commitId: "s0", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false }],
             popStash,
             applyStash,
           })}
@@ -2333,8 +2333,8 @@ describe("App", () => {
       );
 
       fireEvent.click(await screen.findByRole("button", { name: "Stashes" }));
-      const row = (await screen.findByText("On main: wip")).closest("li")!;
-      fireEvent.click(within(row).getByRole("button", { name: "Actions for On main: wip" }));
+      const row = (await screen.findByText("wip")).closest("li")!;
+      fireEvent.click(within(row).getByRole("button", { name: "Actions for wip" }));
       fireEvent.click(screen.getByRole("menuitem", { name: button }));
 
       expect(await screen.findByText(toast)).toBeInTheDocument();
@@ -2348,14 +2348,14 @@ describe("App", () => {
         <App
           client={stashClient({
             getStatus: async () => [{ path: "a.txt", oldPath: null, staged: true, kind: "Modified" }],
-            listStashes: async () => [{ index: 0, message: "On main: wip", commitId: "s0" }],
+            listStashes: async () => [{ index: 0, message: "On main: wip", commitId: "s0", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false }],
           })}
         />,
       );
 
       fireEvent.click(await screen.findByRole("button", { name: "Stashes" }));
-      const row = (await screen.findByText("On main: wip")).closest("li")!;
-      fireEvent.click(within(row).getByRole("button", { name: "Actions for On main: wip" }));
+      const row = (await screen.findByText("wip")).closest("li")!;
+      fireEvent.click(within(row).getByRole("button", { name: "Actions for wip" }));
       await waitFor(() => expect(screen.getByRole("menuitem", { name: "Pop" })).toBeDisabled());
       expect(screen.getByRole("menuitem", { name: "Apply" })).toHaveAttribute(
         "title",
@@ -2554,7 +2554,7 @@ describe("App", () => {
     const base = { authorName: "Rene", authorEmail: "rene@example.com", timestamp: 1_700_000_000, branchRefs: [], remoteBranchRefs: [], tags: [] };
     const newer = { ...base, id: "n".repeat(40), shortId: "nnnnnnn", summary: "newer commit", parentIds: ["o".repeat(40)] };
     const older = { ...base, id: "o".repeat(40), shortId: "ooooooo", summary: "older commit", parentIds: [] };
-    const stash = { index: 0, message: "wip stash", commitId: "s".repeat(40) };
+    const stash = { index: 0, message: "wip stash", commitId: "s".repeat(40), branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false };
     function compareClient() {
       return fakeClient({
         listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),

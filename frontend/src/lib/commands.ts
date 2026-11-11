@@ -4,7 +4,7 @@ import { UNAVAILABLE_REASON, type PaletteAction } from "./actions/action";
 import { branchActions } from "./actions/branchActions";
 import { commitActions } from "./actions/commitActions";
 import { addRemoteAction, remoteActions } from "./actions/remoteActions";
-import { stashActions, stashBlockers } from "./actions/stashActions";
+import { stashActions, stashBlockers, stashTitle } from "./actions/stashActions";
 import { pruneWorktreesAction, worktreeActions } from "./actions/worktreeActions";
 import { busyReason, operationBlockers, stashBlockReason, type OperationBlockers } from "./operationStatus";
 import { stageAllPaths, stageModifiedPaths, untrackedPaths } from "./stagePaths";
@@ -612,7 +612,7 @@ function operationCommands({ appState, state }: FamilyContext): Command[] {
       run: () => void appState.abortMerge(),
     });
   }
-  add({ id: "refresh", label: "Refresh", keywords: ["refresh", "reload"], run: () => void appState.refresh() });
+  add({ id: "refresh", label: "Refresh", keywords: ["refresh", "reload"], run: () => void appState.refresh({ full: true }) });
   return commands;
 }
 
@@ -1001,12 +1001,22 @@ function stashCommands({ appState, state, diff, sidebar, panelVisible }: FamilyC
     const actions = stashActions(storedStashBlockers, stash);
     add({
       id: `show-stash:${stash.index}`,
-      label: `Show stash: ${stash.message}`,
+      label: `Show stash: ${stashTitle(stash)}`,
       keywords: ["stash", "show", "view", "diff"],
       run: () => appState.selectRow({ commitId: stash.commitId }),
     });
-    offer(`apply-stash:${stash.index}`, actions.apply, ["stash", "apply"], () => void appState.applyStash(stash.index));
-    offer(`pop-stash:${stash.index}`, actions.pop, ["stash", "pop", "apply"], () => void appState.popStash(stash.index));
+    offer(`apply-stash:${stash.index}`, actions.apply, ["stash", "apply"], () => void appState.applyStash(stash.index, true));
+    if (actions.applyUnstaged !== null) {
+      offer(`apply-stash-unstaged:${stash.index}`, actions.applyUnstaged, ["stash", "apply", "unstaged"], () =>
+        void appState.applyStash(stash.index, false),
+      );
+    }
+    offer(`pop-stash:${stash.index}`, actions.pop, ["stash", "pop", "apply"], () => void appState.popStash(stash.index, true));
+    if (actions.popUnstaged !== null) {
+      offer(`pop-stash-unstaged:${stash.index}`, actions.popUnstaged, ["stash", "pop", "apply", "unstaged"], () =>
+        void appState.popStash(stash.index, false),
+      );
+    }
     // Dropping has a confirmation in the Stashes panel and the stash view; like "Delete tag", the
     // palette only shows the stash and reveals the section, never drops directly.
     if (sidebar !== undefined) {

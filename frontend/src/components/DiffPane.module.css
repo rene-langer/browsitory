@@ -342,13 +342,6 @@ li.fileRow.current {
   color: var(--color-text-muted);
 }
 
-.restoreIndex {
-  flex-direction: row;
-  gap: var(--space-1);
-  align-items: baseline;
-  font-size: var(--text-xs);
-}
-
 .stashEmpty {
   padding: var(--space-3);
   color: var(--color-text-muted);

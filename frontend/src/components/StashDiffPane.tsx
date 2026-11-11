@@ -9,11 +9,12 @@ import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { InlineError } from "./primitives/InlineError";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
-import { stashActions as stashActionRules } from "../lib/actions/stashActions";
+import { stashActions as stashActionRules, stashDetails, stashTitle } from "../lib/actions/stashActions";
 
 /**
- * A selected stash: its message, `stash@{n}`, Apply / Pop / Drop… with "Restore staged changes",
- * then its tracked changes (diffed against the HEAD it was made on) and its untracked files
+ * A selected stash: its name, `stash@{n}` with "On main · 2 days ago · 3 files", Apply / Pop /
+ * Drop… (and "Apply as unstaged" / "Pop as unstaged" for a stash that recorded staged changes,
+ * #657), then its tracked changes (diffed against the HEAD it was made on) and its untracked files
  * (diffed as whole-file adds through the parentless untracked-files commit).
  */
 export function StashDiffPane({
@@ -74,29 +75,51 @@ export function StashDiffPane({
   return (
     <section aria-label="Stash details" className={styles.stashDetails}>
       <div className={styles.stashHeader}>
-        <h2 className={styles.stashMessage}>{stash.message}</h2>
+        <h2 className={styles.stashMessage} title={stash.message}>
+          {stashTitle(stash)}
+        </h2>
         <span className={styles.stashRef}>
           stash@{"{"}
           {stash.index}
-          {"}"} · {stash.commitId.slice(0, 7)}
+          {"}"} · {stash.commitId.slice(0, 7)} · {stashDetails(stash)}
         </span>
         <Toolbar aria-label="Stash actions">
           <button
             type="button"
             disabled={!rules.apply.enabled}
             title={rules.apply.reason}
-            onClick={() => actions.onApply(stash.index)}
+            onClick={() => actions.onApply(stash.index, true)}
           >
             {rules.apply.label}
           </button>
+          {rules.applyUnstaged !== null && (
+            <button
+              type="button"
+              disabled={!rules.applyUnstaged.enabled}
+              title={rules.applyUnstaged.reason ?? "Apply, leaving its staged changes unstaged"}
+              onClick={() => actions.onApply(stash.index, false)}
+            >
+              {rules.applyUnstaged.label}
+            </button>
+          )}
           <button
             type="button"
             disabled={!rules.pop.enabled}
             title={rules.pop.reason}
-            onClick={() => actions.onPop(stash.index)}
+            onClick={() => actions.onPop(stash.index, true)}
           >
             {rules.pop.label}
           </button>
+          {rules.popUnstaged !== null && (
+            <button
+              type="button"
+              disabled={!rules.popUnstaged.enabled}
+              title={rules.popUnstaged.reason ?? "Pop, leaving its staged changes unstaged"}
+              onClick={() => actions.onPop(stash.index, false)}
+            >
+              {rules.popUnstaged.label}
+            </button>
+          )}
           <button
             type="button"
             disabled={!rules.drop.enabled}
@@ -105,14 +128,6 @@ export function StashDiffPane({
           >
             {rules.drop.label}
           </button>
-          <label className={styles.restoreIndex}>
-            <input
-              type="checkbox"
-              checked={actions.restoreIndex}
-              onChange={(event) => actions.onSetRestoreIndex(event.target.checked)}
-            />
-            Restore staged changes
-          </label>
         </Toolbar>
       </div>
       {error !== null ? (
@@ -174,8 +189,8 @@ export function StashDiffPane({
       )}
       {confirmingDrop && (
         <ConfirmDialog
-          ariaLabel={`Drop stash ${stash.message}`}
-          message={withBlockedReason(<p>Drop "{stash.message}"? This cannot be undone.</p>, dropDisabledReason)}
+          ariaLabel={`Drop stash ${stashTitle(stash)}`}
+          message={withBlockedReason(<p>Drop "{stashTitle(stash)}"? This cannot be undone.</p>, dropDisabledReason)}
           confirmLabel="Drop stash"
           confirmDisabled={dropDisabledReason !== null}
           confirmTitle={dropDisabledReason ?? undefined}
