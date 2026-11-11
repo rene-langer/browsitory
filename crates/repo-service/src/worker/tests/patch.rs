@@ -148,6 +148,7 @@ fn a_patch_applied_as_commits_is_one_undo_step() {
 }
 
 /// Two commits on `base` as a patch series, with HEAD reset to `base`.
+#[cfg(unix)]
 fn series_on_base(
     dir: &Path,
     repo: &git2::Repository,
