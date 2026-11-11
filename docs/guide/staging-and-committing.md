@@ -94,8 +94,10 @@ files** (or **Unstage N files**), **Discard N files…**, **Ignore N untracked f
 selection has untracked files) and **Stash N files…**; `s`, a selected file's **⋯** menu and
 the command palette offer the same actions. **Discard N files…** asks once for all of them and
 is one step for **Undo**. **Ignore** adds each untracked file to `.gitignore` as **Ignore file**
-does. Staging, unstaging and ignoring a selection (like **Stage all** and **Unstage all**) record
-one undo step per file. Conflicted files in
+does. Staging, unstaging or ignoring a selection (like **Stage all** and **Unstage all**) is one
+step for **Undo** too ("Stage 3 files", "Ignore 2 patterns"), and the notification after
+**Ignore** has an **Undo** button. If one of the files can't be staged or unstaged, none of them
+is, and the error names why. Conflicted files in
 a selection are left out of these actions, as **Stage all** leaves them out. While another
 action is running, the bar's buttons are disabled.
 

@@ -77,9 +77,9 @@ pub use status::{
     get_commit_details, get_commit_diff, get_commit_files, get_commit_graph, get_commit_message,
     get_commit_rename_diff, get_commit_signature, get_commit_stats, get_file_history,
     get_graph_branch_selection, get_graph_remote_branch_selection, get_line_history, get_status,
-    get_working_diff, ignore_path, locate_commit, set_graph_branch_selection,
+    get_working_diff, ignore_path, ignore_paths, locate_commit, set_graph_branch_selection,
     set_graph_remote_branch_selection, set_identity, stage_file, stage_hunk, stage_lines,
-    unstage_file, unstage_hunk, unstage_lines,
+    stage_paths, unstage_file, unstage_hunk, unstage_lines, unstage_paths,
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
@@ -347,6 +347,29 @@ pub fn list_recent_repos() -> Result<Vec<String>, ErrorDto> {
 #[tauri::command]
 pub fn remove_recent_repo(path: String) -> Result<(), ErrorDto> {
     config::remove_recent_repo(Path::new(&path)).map_err(ErrorDto::from_error)
+}
+
+/// The pinned recent repositories, in pin order (#766).
+#[tauri::command]
+pub fn list_pinned_repos() -> Result<Vec<String>, ErrorDto> {
+    config::list_pinned_repos()
+        .map(|paths| {
+            paths
+                .into_iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        })
+        .map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
+pub fn pin_recent_repo(path: String) -> Result<(), ErrorDto> {
+    config::pin_recent_repo(Path::new(&path)).map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
+pub fn unpin_recent_repo(path: String) -> Result<(), ErrorDto> {
+    config::unpin_recent_repo(Path::new(&path)).map_err(ErrorDto::from_error)
 }
 
 /// Async: it checks each recent folder on disk, which a slow network drive could hold up, and

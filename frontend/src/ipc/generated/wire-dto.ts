@@ -173,7 +173,7 @@ export type HookProgress = { repoPath: string, operationId: string, hook: string
 
 export type HookProgressPhase = "Started" | "Finished";
 
-export type HookSource = "Commit" | "Checkout" | "Merge" | "Pick";
+export type HookSource = "Commit" | "Checkout" | "Merge" | "Pick" | "Patch";
 
 export type LineHistory = { entries: Array<LineHistoryEntry>, 
 /**
@@ -200,6 +200,8 @@ export type OpenRepoEntryInput = { path: string, workspaceId: string | null, };
 export type OperationKind = "Merge" | "CherryPick" | "Revert";
 
 export type PatchApply = "WorkTree" | "Stage" | "Commits";
+
+export type PatchApplyOutcome = { "kind": "Applied" } | { "kind": "HookFailed", hook: string, output: string, subject: string, };
 
 export type PatchContent = { base64: string, };
 
@@ -233,7 +235,7 @@ export type PatchSource = { "kind": "Commits", commitIds: Array<string>, } | { "
 
 export type PickOutcome = { "kind": "Committed", commitId: string, } | { "kind": "Conflicted", files: Array<string>, } | { "kind": "HookFailed", hook: string, output: string, };
 
-export type PullOutcome = { "kind": "UpToDate" } | { "kind": "FastForwarded", upstreamRef: string, } | { "kind": "Diverged", upstreamRef: string, };
+export type PullOutcome = { "kind": "UpToDate" } | { "kind": "FastForwarded", upstreamRef: string, } | { "kind": "Diverged", upstreamRef: string, } | { "kind": "NoFastForward", upstreamRef: string, };
 
 export type PullRequest = { id: string, number: number, title: string, url: string, author: string, sourceBranch: string, targetBranch: string, state: string, };
 

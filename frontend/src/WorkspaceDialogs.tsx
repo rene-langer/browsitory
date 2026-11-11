@@ -148,8 +148,9 @@ export function WorkspaceDialogs({
               dismissError();
               void retryWithCurrentMessage(retry);
             }
-            // A pick's failure offers no retry (`retryLabel` is null), so this never runs for it.
-            else if (retry.kind !== "pick") {
+            // A pick's or patch's failure offers no retry (`retryLabel` is null), so this never
+            // runs for them.
+            else if (retry.kind !== "pick" && retry.kind !== "applyPatch") {
               void announce(retrySuccessLabel(retry), retryWithCurrentMessage, { undoable: true })(retry);
             }
           }}
@@ -304,14 +305,15 @@ export function WorkspaceDialogs({
         // Here, not in `BranchTree`, for the same reason as `RemoteDialogs` below (#636).
         <PendingPullPrompt
           upstreamRef={appState.state.pendingPull.upstreamRef}
+          noFastForward={appState.state.pendingPull.noFastForward === true}
           branchName={appState.state.branches.find((branch) => branch.isCurrent)?.name ?? null}
           operationDisabled={repositoryOperationDisabled}
           operationDisabledReason={operationDisabledReason}
           getPullStrategy={appState.getPullStrategy}
           setPullStrategy={appState.setPullStrategy}
-          onMerge={(upstreamRef) => {
+          onMerge={(upstreamRef, fastForward) => {
             appState.clearPendingPull();
-            void appState.mergePull(upstreamRef);
+            void appState.mergePull(upstreamRef, fastForward);
           }}
           onRebase={(upstreamRef) => {
             appState.clearPendingPull();

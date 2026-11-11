@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type {
   RebaseAbort,
   ConflictSide,
+  FastForwardMode,
   FileConflictChoice,
   MarkResolvedOutcome,
   MergeOptions,
@@ -34,8 +35,12 @@ export interface MergeRebaseActions {
    * `branchName` with them, recording the outcome in `state.mergeOutcome` for the toast.
    */
   mergeBranch(branchName: string, options: MergeOptions): Promise<void>;
-  /** "Pull has diverged → Merge": merges the upstream ref, allowing fast-forward, no dialog. */
-  mergePull(upstreamRef: string): Promise<void>;
+  /**
+   * A pull's merge, no dialog: "Pull has diverged → Merge" allows a fast-forward (the default);
+   * a pull git config wants as a merge commit passes `Never`, or `Only` when a remembered rebase
+   * or fast-forward-only strategy fast-forwards it instead (#740).
+   */
+  mergePull(upstreamRef: string, fastForward?: FastForwardMode): Promise<void>;
   /**
    * "Pull has diverged → Rebase" (#652): a plain rebase of the branch's own commits onto the
    * upstream ref, every commit picked, without the planner. A conflict pauses it as any rebase.
@@ -100,7 +105,7 @@ export function useMergeRebaseActions(
     [client, repoPath, runMerge],
   );
   const mergePull = useCallback(
-    (upstreamRef: string) => runMerge(upstreamRef, { fastForward: "Allow", squash: false }),
+    (upstreamRef: string, fastForward: FastForwardMode = "Allow") => runMerge(upstreamRef, { fastForward, squash: false }),
     [runMerge],
   );
   const rebasePull = useCallback(

@@ -6,6 +6,7 @@ import type {
   CommitChangeRequest,
   HunkOptions,
   PatchApply,
+  PatchApplyOutcome,
   PatchContent,
   PatchPreview,
   PatchSource,
@@ -165,6 +166,9 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     listRecentRepos: () => call<string[]>("list_recent_repos"),
     removeRecentRepo: (path: string) => call<void>("remove_recent_repo", { path }),
     listMissingRecentRepos: () => call<string[]>("list_missing_recent_repos"),
+    listPinnedRepos: () => call<string[]>("list_pinned_repos"),
+    pinRecentRepo: (path: string) => call<void>("pin_recent_repo", { path }),
+    unpinRecentRepo: (path: string) => call<void>("unpin_recent_repo", { path }),
     getAppVersion: () => call<string>("get_app_version"),
     getLastSeenVersion: () => call<string | null>("get_last_seen_version"),
     setLastSeenVersion: (version: string) =>
@@ -213,6 +217,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<CommitSignature>("get_commit_signature", { repoPath, commitId }),
     stageFile: (repoPath: string, path: string) => call<void>("stage_file", { repoPath, path }),
     unstageFile: (repoPath: string, path: string) => call<void>("unstage_file", { repoPath, path }),
+    stagePaths: (repoPath: string, paths: string[]) => call<void>("stage_paths", { repoPath, paths }),
+    unstagePaths: (repoPath: string, paths: string[]) => call<void>("unstage_paths", { repoPath, paths }),
     stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
       call<void>("stage_hunk", { repoPath, path, oldStart, newStart, ...hunk }),
     unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
@@ -231,13 +237,14 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<void>("apply_commit_change", { repoPath, change }),
     getPatch: (repoPath: string, source: PatchSource) => call<PatchContent>("get_patch", { repoPath, source }),
     applyPatch: (repoPath: string, content: PatchContent, how: PatchApply) =>
-      call<void>("apply_patch", { repoPath, content, how }),
+      call<PatchApplyOutcome>("apply_patch", { repoPath, content, how }),
     previewPatch: (repoPath: string, content: PatchContent) =>
       call<PatchPreview>("preview_patch", { repoPath, content }),
     savePatchFile: (suggestedName: string, content: PatchContent) =>
       call<string | null>("save_patch_file", { suggestedName, content }),
     openPatchFile: () => call<PatchContent | null>("open_patch_file"),
     ignorePath: (repoPath: string, pattern: string) => call<void>("ignore_path", { repoPath, pattern }),
+    ignorePaths: (repoPath: string, patterns: string[]) => call<void>("ignore_paths", { repoPath, patterns }),
     getDiffSettings: () => call<DiffSettings>("get_diff_settings"),
     setDiffSettings: (settings: DiffSettings) => call<void>("set_diff_settings", { settings }),
     commit: (repoPath: string, message: string, noVerify: boolean, trailers: Trailer[] = []) =>

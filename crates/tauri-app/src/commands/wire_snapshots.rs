@@ -5,32 +5,25 @@
 //! serialized the way Tauri sends it. The sidecar's snapshot test compares
 //! the cases both transports share (see `crates/vscode-sidecar/src/dispatch/wire_snapshots.rs`).
 //! Regenerate with `UPDATE_TRANSPORT_METHODS=1 cargo test -p tauri-app wire_snapshots`.
+//!
+//! The cases both transports share are listed once, in `crates/test-support/wire_cases.rs`
+//! (#488); this file serializes them and adds its own.
 
 use serde::Serialize;
 
 use super::clone::{CloneErrorDto, CloneOutcomeDto};
 use super::*;
-use repo_service::wire::{
-    hook_progress_dto, AppearanceSettingsDto, BlameLineDto, BranchInfoDto, ChangeStampDto,
-    ChangedFileDto, CommitLocationDto, CommitMessageSettingsDto, CommitOutcomeDto,
-    CommitSignatureDto, CompareRangeDto, ConflictSegmentDto, DiffHunkDto, DiffSettingsDto,
-    ExternalToolSettingsDto, FetchSettingsDto, FileContentDto, FileHistoryEntryDto, FileSidesDto,
-    ForgeRepositoryDto, GitToolsDto, GraphCommitDto, GraphPageDto, HeadInfoDto, LineHistoryDto,
-    MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto,
-    PullOutcomeDto, PullRequestDto, PullRequestListDto, PullStrategyDto, RebaseAbortDto,
-    RebaseInfoDto, RebasePlanCommitDto, RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto,
-    SearchPageDto, SequenceAbortDto, SequenceOutcomeDto, SequenceProgressDto, SignatureInputDto,
-    StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StashSwitchOutcomeDto, StatusEntryDto,
-    SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto, TerminalSequenceDto, TreeListingDto,
-    UndoOutcomeDto, UndoStateDto, UpdateSettingsDto, UpstreamInfoDto, WorkspaceDto,
-    WorktreeInfoDto,
-};
 
 #[path = "../../../test-support/wire_fixtures.rs"]
 #[macro_use]
 mod fixtures;
 
 use fixtures::Cases;
+
+#[path = "../../../test-support/wire_cases.rs"]
+mod cases;
+
+use cases::{shared_wire_cases, Slot, WireCases};
 
 /// What Tauri sends for a command's answer (`IpcResponse::body`) and an event's payload
 /// (`EmitArgs::new`): `serde_json::to_string` of the value, fields in declaration order.
@@ -47,292 +40,50 @@ fn wire_error<T: Serialize>(value: &T) -> String {
 #[derive(Default)]
 struct Snapshots(Vec<(String, String)>);
 
-impl Snapshots {
-    /// One line per case, named `<dto>/<case>`.
+impl WireCases for Snapshots {
     fn add<T, D: Serialize>(&mut self, dto: &str, cases: Cases<T>, to_dto: impl Fn(T) -> D) {
         for (case, value) in cases {
             self.0.push((format!("{dto}/{case}"), wire(&to_dto(value))));
+        }
+    }
+
+    fn transport_cases(&mut self, slot: Slot) {
+        match slot {
+            Slot::AfterRepoWatch => {
+                // The Tauri event they are all emitted as.
+                self.0.push((
+                    "RepoWatchEvent/all".to_string(),
+                    wire(&super::watch::REPO_WATCH_EVENT),
+                ));
+                // The Tauri event they are all emitted as.
+                self.0.push((
+                    "HookProgressEvent/all".to_string(),
+                    wire(&HOOK_PROGRESS_EVENT),
+                ));
+            }
+            Slot::AfterTransferProgress => {
+                // What the desktop app emits is the shared `TransferProgress` DTO.
+                for (case, event) in fixtures::transfer_events() {
+                    assert_eq!(
+                        wire(&transfer_event_payload(event.clone()).1),
+                        wire(&repo_service::wire::transfer_progress_dto(event)),
+                        "TransferProgress/{case}"
+                    );
+                }
+                // The Tauri event each one is emitted as.
+                self.add(
+                    "TransferProgressEvent",
+                    fixtures::transfer_events(),
+                    |event| transfer_event_payload(event).0,
+                );
+            }
         }
     }
 }
 
 fn snapshots() -> Vec<(String, String)> {
     let mut s = Snapshots::default();
-    s.add(
-        "StatusEntry",
-        fixtures::status_entries(),
-        StatusEntryDto::from,
-    );
-    s.add(
-        "GraphCommit",
-        fixtures::graph_commits(),
-        GraphCommitDto::from,
-    );
-    s.add("DiffHunk", fixtures::diff_hunks(), DiffHunkDto::from);
-    s.add(
-        "FileHistoryEntry",
-        fixtures::file_history_entries(),
-        FileHistoryEntryDto::from,
-    );
-    s.add(
-        "LineHistory",
-        fixtures::line_histories(),
-        LineHistoryDto::from,
-    );
-    s.add("SearchPage", fixtures::search_pages(), SearchPageDto::from);
-    s.add("GraphPage", fixtures::graph_pages(), GraphPageDto::from);
-    s.add(
-        "ChangedFile",
-        fixtures::changed_files(),
-        ChangedFileDto::from,
-    );
-    s.add(
-        "CompareRange",
-        fixtures::compare_ranges(),
-        CompareRangeDto::from,
-    );
-    s.add(
-        "CommitLocation",
-        fixtures::commit_locations(),
-        CommitLocationDto::from,
-    );
-    s.add(
-        "CommitStatsEntry",
-        fixtures::commit_stats_entries(),
-        repo_service::wire::CommitStatsEntryDto::from,
-    );
-    s.add(
-        "CommitDetails",
-        fixtures::commit_details(),
-        repo_service::wire::CommitDetailsDto::from,
-    );
-    s.add("PatchContent", fixtures::patch_contents(), |bytes| {
-        repo_service::wire::PatchContentDto::from_bytes(&bytes)
-    });
-    s.add(
-        "OpenRepoEntry",
-        fixtures::open_repo_entries(),
-        OpenRepoEntryDto::from,
-    );
-    s.add("Workspace", fixtures::workspaces(), WorkspaceDto::from);
-    s.add(
-        "RepoAlias",
-        fixtures::repo_aliases(),
-        repo_service::wire::RepoAliasDto::from,
-    );
-    s.add(
-        "DiffSettings",
-        fixtures::diff_settings(),
-        DiffSettingsDto::from,
-    );
-    s.add(
-        "ExternalToolSettings",
-        fixtures::external_tool_settings(),
-        ExternalToolSettingsDto::from,
-    );
-    s.add(
-        "CommitMessageSettings",
-        fixtures::commit_message_settings(),
-        CommitMessageSettingsDto::from,
-    );
-    s.add(
-        "FetchSettings",
-        fixtures::fetch_settings(),
-        FetchSettingsDto::from,
-    );
-    s.add(
-        "AppearanceSettings",
-        fixtures::appearance_settings(),
-        AppearanceSettingsDto::from,
-    );
-    s.add(
-        "UpdateSettings",
-        fixtures::update_settings(),
-        UpdateSettingsDto::from,
-    );
-    s.add("GitTools", fixtures::git_tools(), GitToolsDto::from);
-    s.add(
-        "MarkResolvedOutcome",
-        fixtures::mark_resolved_outcomes(),
-        MarkResolvedOutcomeDto::from,
-    );
-    s.add("FileSides", fixtures::file_sides(), FileSidesDto::from);
-    s.add(
-        "TreeListing",
-        fixtures::tree_listings(),
-        TreeListingDto::from,
-    );
-    s.add(
-        "FileContent",
-        fixtures::file_contents(),
-        FileContentDto::from,
-    );
-    s.add(
-        "CommitOutcome",
-        fixtures::commit_outcomes(),
-        CommitOutcomeDto::from,
-    );
-    s.add("HookProgress", fixtures::hook_events(), |event| {
-        hook_progress_dto(fixtures::HOOK_REPO_PATH, event)
-    });
-    s.add("RepoWatch", fixtures::watch_events(), |event| {
-        repo_service::wire::repo_watch_dto(fixtures::HOOK_REPO_PATH, event)
-    });
-    // The Tauri event they are all emitted as.
-    s.0.push((
-        "RepoWatchEvent/all".to_string(),
-        wire(&super::watch::REPO_WATCH_EVENT),
-    ));
-    // The Tauri event they are all emitted as.
-    s.0.push((
-        "HookProgressEvent/all".to_string(),
-        wire(&HOOK_PROGRESS_EVENT),
-    ));
-    s.add("BranchInfo", fixtures::branches(), BranchInfoDto::from);
-    s.add("WorktreeInfo", fixtures::worktrees(), WorktreeInfoDto::from);
-    s.add(
-        "SubmoduleInfo",
-        fixtures::submodules(),
-        SubmoduleInfoDto::from,
-    );
-    s.add(
-        "ReflogEntry",
-        fixtures::reflog_entries(),
-        ReflogEntryDto::from,
-    );
-    s.add("RemoteInfo", fixtures::remotes(), RemoteInfoDto::from);
-    s.add("UpstreamInfo", fixtures::upstreams(), UpstreamInfoDto::from);
-    s.add("TagInfo", fixtures::tags(), TagInfoDto::from);
-    s.add("TransferProgress", fixtures::transfer_events(), |event| {
-        transfer_event_payload(event).1
-    });
-    // The Tauri event each one is emitted as.
-    s.add(
-        "TransferProgressEvent",
-        fixtures::transfer_events(),
-        |event| transfer_event_payload(event).0,
-    );
-    s.add(
-        "SequenceProgress",
-        fixtures::sequence_progresses(),
-        SequenceProgressDto::from,
-    );
-    s.add("RebaseInfo", fixtures::rebase_infos(), RebaseInfoDto::from);
-    s.add(
-        "TerminalSequence",
-        fixtures::terminal_sequences(),
-        TerminalSequenceDto::from,
-    );
-    s.add(
-        "TerminalRebase",
-        fixtures::terminal_rebases(),
-        TerminalRebaseDto::from,
-    );
-    s.add("HeadInfo", fixtures::head_infos(), HeadInfoDto::from);
-    s.add(
-        "RebaseAbort",
-        fixtures::rebase_aborts(),
-        RebaseAbortDto::from,
-    );
-    s.add(
-        "SequenceOutcome",
-        fixtures::sequence_outcomes(),
-        SequenceOutcomeDto::from,
-    );
-    s.add(
-        "SequenceAbort",
-        fixtures::sequence_aborts(),
-        SequenceAbortDto::from,
-    );
-    s.add(
-        "PickOutcome",
-        fixtures::pick_outcomes(),
-        PickOutcomeDto::from,
-    );
-    s.add("UndoState", fixtures::undo_states(), UndoStateDto::from);
-    s.add(
-        "ChangeStamp",
-        fixtures::change_stamps(),
-        ChangeStampDto::from,
-    );
-    s.add(
-        "CommitSignature",
-        fixtures::commit_signatures(),
-        CommitSignatureDto::from,
-    );
-    s.add(
-        "UndoOutcome",
-        fixtures::undo_outcomes(),
-        UndoOutcomeDto::from,
-    );
-    s.add(
-        "PullOutcome",
-        fixtures::pull_outcomes(),
-        PullOutcomeDto::from,
-    );
-    s.add("StashEntry", fixtures::stash_entries(), StashEntryDto::from);
-    s.add(
-        "StashApplyOutcome",
-        fixtures::stash_apply_outcomes(),
-        StashApplyOutcomeDto::from,
-    );
-    s.add(
-        "StashSwitchOutcome",
-        fixtures::stash_switch_outcomes(),
-        StashSwitchOutcomeDto::from,
-    );
-    s.add(
-        "PullStrategy",
-        fixtures::pull_strategies(),
-        PullStrategyDto::from,
-    );
-    s.add("StashFiles", fixtures::stash_files(), StashFilesDto::from);
-    s.add("BlameLine", fixtures::blame_lines(), BlameLineDto::from);
-    s.add(
-        "MergeOutcome",
-        fixtures::merge_outcomes(),
-        MergeOutcomeDto::from,
-    );
-    s.add(
-        "MergeOptions",
-        fixtures::merge_options(),
-        MergeOptionsDto::from,
-    );
-    s.add(
-        "ConflictSegment",
-        fixtures::conflict_segments(),
-        ConflictSegmentDto::from,
-    );
-    s.add(
-        "RebasePlanCommit",
-        fixtures::rebase_plan_commits(),
-        RebasePlanCommitDto::from,
-    );
-    s.add(
-        "RebaseStepResult",
-        fixtures::rebase_step_results(),
-        RebaseStepResultDto::from,
-    );
-    s.add(
-        "ForgeRepository",
-        fixtures::forge_repositories(),
-        ForgeRepositoryDto::from,
-    );
-    s.add(
-        "PullRequest",
-        fixtures::pull_requests(),
-        PullRequestDto::from,
-    );
-    s.add(
-        "PullRequestList",
-        fixtures::pull_request_lists(),
-        PullRequestListDto::from,
-    );
-    s.add(
-        "SignatureInput",
-        fixtures::recent_authors(),
-        SignatureInputDto::from,
-    );
+    shared_wire_cases(&mut s);
 
     // Desktop only.
     s.add(

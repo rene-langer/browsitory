@@ -46,10 +46,14 @@ use commands::{
 use commands::{
     get_pull_strategy, get_switch_conflicts, set_identity, set_pull_strategy, stash_and_switch,
 };
+// Several paths as one undo step (#528).
+use commands::{ignore_paths, stage_paths, unstage_paths};
 // The repository tab names (#625).
 use commands::{list_repo_aliases, set_repo_alias};
 // The picker's recent repositories: remove one, and which folders are gone (#690).
 use commands::{list_missing_recent_repos, remove_recent_repo};
+// Pinned recent repositories (#766).
+use commands::{list_pinned_repos, pin_recent_repo, unpin_recent_repo};
 // Open or create .gitignore and .gitattributes (#624).
 use commands::{create_root_file, get_root_files};
 // Collapse merges in the commit graph (#617).
@@ -114,6 +118,8 @@ commands![
     stage_file,
     stage_hunk,
     unstage_file,
+    stage_paths,
+    unstage_paths,
     unstage_hunk,
     discard_hunk,
     stage_lines,
@@ -129,6 +135,7 @@ commands![
     open_patch_file,
     read_patch_file,
     ignore_path,
+    ignore_paths,
     get_diff_settings,
     set_diff_settings,
     commit,
@@ -137,6 +144,9 @@ commands![
     list_recent_repos,
     remove_recent_repo,
     list_missing_recent_repos,
+    list_pinned_repos,
+    pin_recent_repo,
+    unpin_recent_repo,
     get_last_seen_version,
     set_last_seen_version,
     get_app_version,

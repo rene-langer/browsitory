@@ -219,6 +219,18 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "undo(RefsAndIndex, Unstage a.txt) lock hold",
         ),
         (
+            cmd!(StagePaths {
+                paths: vec![s("a.txt"), s("b.txt"), s("c.txt")]
+            }),
+            "undo(RefsAndIndex, Stage 3 files) lock hold",
+        ),
+        (
+            cmd!(UnstagePaths {
+                paths: vec![s("a.txt")]
+            }),
+            "undo(RefsAndIndex, Unstage a.txt) lock hold",
+        ),
+        (
             cmd!(StageHunk {
                 path: s("a.txt"),
                 old_start: 1,
@@ -325,21 +337,27 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
         (
             cmd!(ApplyPatch {
                 content: vec![],
-                how: git_core::patch::PatchApply::WorkTree
+                how: git_core::patch::PatchApply::WorkTree,
+                operation_id: op(),
+                events: channel().0
             }),
             "undo(Full, Apply patch) lock busy=Discard hold",
         ),
         (
             cmd!(ApplyPatch {
                 content: vec![],
-                how: git_core::patch::PatchApply::Stage
+                how: git_core::patch::PatchApply::Stage,
+                operation_id: op(),
+                events: channel().0
             }),
             "undo(Full, Apply and stage patch) lock busy=Discard hold",
         ),
         (
             cmd!(ApplyPatch {
                 content: vec![],
-                how: git_core::patch::PatchApply::Commits
+                how: git_core::patch::PatchApply::Commits,
+                operation_id: op(),
+                events: channel().0
             }),
             "undo(Full, Apply patch as commits) lock busy=Discard hold gate",
         ),
@@ -349,6 +367,12 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 pattern: s("*.log")
             }),
             "undo(Full, Ignore *.log) lock hold",
+        ),
+        (
+            cmd!(IgnorePaths {
+                patterns: vec![s("*.log"), s("/out/")]
+            }),
+            "undo(Full, Ignore 2 patterns) lock hold",
         ),
         (
             cmd!(CreateRootFile {

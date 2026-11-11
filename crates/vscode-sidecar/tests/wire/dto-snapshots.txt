@@ -79,10 +79,13 @@ FileContent/Binary-not-an-image {"kind":"Binary","size":3}
 FileContent/TooLarge {"kind":"TooLarge","size":99000000}
 CommitOutcome/Committed {"commitId":"3333333333333333333333333333333333333333","kind":"Committed"}
 CommitOutcome/HookFailed {"hook":"pre-commit","kind":"HookFailed","output":"lint failed\n"}
+PatchApplyOutcome/Applied {"kind":"Applied"}
+PatchApplyOutcome/HookFailed {"hook":"applypatch-msg","kind":"HookFailed","output":"no sign-off\n","subject":"Fix the parser"}
 HookProgress/Started-Commit {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Commit"}
 HookProgress/Started-Checkout {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Checkout"}
 HookProgress/Started-Merge {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Merge"}
 HookProgress/Started-Pick {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Pick"}
+HookProgress/Started-Patch {"hook":"pre-commit","operationId":"op-1","phase":"Started","repoPath":"/repos/app","source":"Patch"}
 HookProgress/Finished-Commit {"hook":"pre-commit","operationId":"op-1","phase":"Finished","repoPath":"/repos/app","source":"Commit"}
 RepoWatch/Changed {"kind":"Changed","repoPath":"/repos/app"}
 RepoWatch/Stopped {"kind":"Stopped","repoPath":"/repos/app"}
@@ -193,6 +196,7 @@ UndoOutcome/OperationInProgress {"kind":"OperationInProgress"}
 PullOutcome/UpToDate {"kind":"UpToDate"}
 PullOutcome/FastForwarded {"kind":"FastForwarded","upstreamRef":"refs/remotes/origin/main"}
 PullOutcome/Diverged {"kind":"Diverged","upstreamRef":"refs/remotes/origin/main"}
+PullOutcome/NoFastForward {"kind":"NoFastForward","upstreamRef":"refs/remotes/origin/main"}
 StashEntry/plain {"branch":"main","commitId":"1515151515151515151515151515151515151515","fileCount":3,"hasStagedChanges":true,"index":0,"message":"WIP on main: Add","timestamp":1700000000}
 StashEntry/no-branch {"branch":null,"commitId":"1616161616161616161616161616161616161616","fileCount":1,"hasStagedChanges":false,"index":1,"message":"autostash","timestamp":1700000000}
 StashApplyOutcome/Applied {"kind":"Applied"}

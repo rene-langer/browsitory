@@ -160,7 +160,11 @@ export interface AppState {
   // for its toast (#448).
   /** `undoable`: the action changed the working tree (an undo step), so its toast offers Undo. */
   patchOutcome: { message: string; undoable: boolean } | null;
-  pendingPull: { upstreamRef: string } | null;
+  /**
+   * A pull that fetched but must go on as a merge or rebase: a diverged one (#652), or with
+   * `noFastForward` one git config wants as a merge commit where it could fast-forward (#740).
+   */
+  pendingPull: { upstreamRef: string; noFastForward?: true } | null;
   pullOutcome: PullOutcome | null;
   // A switch that local changes refused, with the files in the way, for the Stash and switch
   // dialog (#653).
@@ -840,7 +844,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       }
       if (retry.kind === "continueSequence") return (await continueSequence(true)) !== null;
       // A pick's `prepare-commit-msg` can't be skipped; the dialog offers no retry for it.
-      if (retry.kind === "pick") return false;
+      if (retry.kind === "pick" || retry.kind === "applyPatch") return false;
       const push = retry.push;
       if (push.operation === "PushBranch") await pushCurrentBranch(push.remoteName, true);
       else if (push.operation === "ForcePushBranch") await forcePushCurrentBranch(push.remoteName, true);

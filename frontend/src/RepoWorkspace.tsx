@@ -663,7 +663,10 @@ export function RepoWorkspace({
     },
     onIgnorePath: (pattern) => announce(`Added ${pattern} to .gitignore`, appState.ignorePath, { undoable: true })(pattern),
     onIgnorePaths: (patterns) =>
-      announce(`Added ${patterns.length} ${patterns.length === 1 ? "pattern" : "patterns"} to .gitignore`, appState.ignorePaths)(patterns),
+      // One undo step for all of them (#528), so the toast offers Undo like `onIgnorePath`'s.
+      announce(`Added ${patterns.length} ${patterns.length === 1 ? "pattern" : "patterns"} to .gitignore`, appState.ignorePaths, {
+        undoable: true,
+      })(patterns),
     onResolveConflict: appState.resolveConflict,
     onResolveAddDeleteConflict: appState.resolveAddDeleteConflict,
     onMarkResolved: appState.markResolved,

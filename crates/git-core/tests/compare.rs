@@ -219,22 +219,13 @@ fn an_unknown_commit_is_an_error() {
 
     assert!(range_diff_files(&repo, &"0".repeat(40), &c1.to_string()).is_err());
 }
-fn head_id(repo: &git2::Repository) -> String {
-    repo.head()
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id()
-        .to_string()
-}
-
 #[test]
 fn working_tree_lists_staged_unstaged_untracked_and_deleted_files() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "a.txt", "a\n");
     write_file(dir.path(), "gone.txt", "gone\n");
     commit_all(&repo, "base");
-    let base = head_id(&repo);
+    let base = common::head_id(&repo).to_string();
     write_file(dir.path(), "a.txt", "a changed\n");
     write_file(dir.path(), "s.txt", "staged\n");
     let mut index = repo.index().unwrap();
@@ -267,7 +258,7 @@ fn working_tree_against_an_older_commit_includes_later_commits() {
     let (dir, repo) = init_repo();
     write_file(dir.path(), "a.txt", "one\n");
     commit_all(&repo, "first");
-    let first = head_id(&repo);
+    let first = common::head_id(&repo).to_string();
     write_file(dir.path(), "a.txt", "two\n");
     commit_all(&repo, "second");
     write_file(dir.path(), "a.txt", "three\n");

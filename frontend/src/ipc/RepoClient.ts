@@ -401,10 +401,10 @@ export type CommitOutcome =
 /**
  * The kind of command a hook runs for (#185): `Commit` (commit, amend, a sequence's Continue)
  * shows in the commit box and sequence panel; the others (`post-checkout` after a switch or
- * checkout, `post-merge` after a fast-forward or squash, a cherry-pick's or revert's hooks) in
- * the "Hook status" strip.
+ * checkout, `post-merge` after a fast-forward or squash, a cherry-pick's or revert's hooks, the
+ * hooks of a patch applied as commits) in the "Hook status" strip.
  */
-export type HookSource = "Commit" | "Checkout" | "Merge" | "Pick";
+export type HookSource = "Commit" | "Checkout" | "Merge" | "Pick" | "Patch";
 /** A hook starting or finishing; `operationId` is accepted by `cancelTransfer`. */
 export interface HookProgress {
   repoPath: string;
@@ -843,7 +843,13 @@ export type StashSwitchOutcome =
 export type PullOutcome =
   | { kind: "UpToDate" }
   | { kind: "FastForwarded"; upstreamRef: string }
-  | { kind: "Diverged"; upstreamRef: string };
+  | { kind: "Diverged"; upstreamRef: string }
+  /**
+   * The branch could fast-forward, but git config asks for a merge commit (`pull.ff=false`,
+   * `branch.<name>.mergeoptions=--no-ff`, `merge.ff=false`) and configures no rebase (#740).
+   * Nothing changed; the caller merges `upstreamRef` with a merge commit.
+   */
+  | { kind: "NoFastForward"; upstreamRef: string };
 
 export type ConflictSegment =
   | { kind: "Clean"; content: string }
@@ -893,6 +899,13 @@ export interface PatchContent {
  */
 export type PatchApply = "WorkTree" | "Stage" | "Commits";
 /** What a patch file holds and whether it applies (#658). */
+/**
+ * What applying a patch file did (#747): `HookFailed` when `applypatch-msg` or `pre-applypatch`
+ * rejected the mail `subject` (nothing was applied), with the hook's output.
+ */
+export type PatchApplyOutcome =
+  | { kind: "Applied" }
+  | { kind: "HookFailed"; hook: string; output: string; subject: string };
 export interface PatchPreview {
   /** One per mail, in order (one for a plain diff). */
   parts: PatchPreviewPart[];
@@ -1092,6 +1105,15 @@ export interface RepoClient {
   removeRecentRepo(path: string): Promise<void>;
   /** The recent repositories whose folder is gone (#690), in the list's order. */
   listMissingRecentRepos(): Promise<string[]>;
+  /**
+   * The pinned repositories (#766), in pin order. `listRecentRepos` lists them first; they don't
+   * count against its cap of 10.
+   */
+  listPinnedRepos(): Promise<string[]>;
+  /** Pins `path` (#766): listed first from now on; pinning a pinned path changes nothing. */
+  pinRecentRepo(path: string): Promise<void>;
+  /** Unpins `path` (#766): it becomes the newest recent repository; a path not pinned is no error. */
+  unpinRecentRepo(path: string): Promise<void>;
   getAppVersion(): Promise<string>;
   getLastSeenVersion(): Promise<string | null>;
   setLastSeenVersion(version: string): Promise<void>;
@@ -1229,6 +1251,10 @@ export interface RepoClient {
   getCommitSignature(repoPath: string, commitId: string): Promise<CommitSignature>;
   stageFile(repoPath: string, path: string): Promise<void>;
   unstageFile(repoPath: string, path: string): Promise<void>;
+  /** Stages `paths` as one undo step; rejects, staging none of them, when one fails (#528). */
+  stagePaths(repoPath: string, paths: string[]): Promise<void>;
+  /** Unstages `paths` as one undo step; rejects, unstaging none of them, when one fails (#528). */
+  unstagePaths(repoPath: string, paths: string[]): Promise<void>;
   stageHunk(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
   stageLines(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions, lineIndices: number[], expectedLines: string[]): Promise<void>;
   unstageHunk(repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions): Promise<void>;
@@ -1248,9 +1274,11 @@ export interface RepoClient {
   /**
    * Applies a patch file's content (a diff, or `git format-patch` mails in order) to the working
    * tree, all or nothing (#448); `how` also stages it, or commits each mail with its authorship
-   * (#658). Recorded for Undo.
+   * (#658). Recorded for Undo. As commits it runs `applypatch-msg`, `pre-applypatch` and
+   * `post-applypatch` (#747), reported as `hookProgress` with `source: "Patch"`; a rejecting hook
+   * resolves `HookFailed` and nothing is applied.
    */
-  applyPatch(repoPath: string, content: PatchContent, how: PatchApply): Promise<void>;
+  applyPatch(repoPath: string, content: PatchContent, how: PatchApply): Promise<PatchApplyOutcome>;
   /** What a patch file's content holds and whether it applies (#658); changes nothing. */
   previewPatch(repoPath: string, content: PatchContent): Promise<PatchPreview>;
   /** Asks the user where to save `content` and writes it: the path, or `null` when cancelled. */
@@ -1264,6 +1292,8 @@ export interface RepoClient {
    */
   readPatchFile(path: string): Promise<PatchContent>;
   ignorePath(repoPath: string, pattern: string): Promise<void>;
+  /** Adds `patterns` to `.gitignore` in one write and one undo step (#528). */
+  ignorePaths(repoPath: string, patterns: string[]): Promise<void>;
   getDiffSettings(): Promise<DiffSettings>;
   setDiffSettings(settings: DiffSettings): Promise<void>;
   /**

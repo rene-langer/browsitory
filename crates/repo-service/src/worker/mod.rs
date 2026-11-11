@@ -237,6 +237,16 @@ pub(crate) enum Command {
         path: String,
         reply: Sender<Result<(), ErrorDto>>,
     },
+    /// #528: several files staged as one undo step, all or nothing.
+    StagePaths {
+        paths: Vec<String>,
+        reply: Sender<Result<(), ErrorDto>>,
+    },
+    /// #528: several files unstaged as one undo step, all or nothing.
+    UnstagePaths {
+        paths: Vec<String>,
+        reply: Sender<Result<(), ErrorDto>>,
+    },
     StageHunk {
         path: String,
         old_start: u32,
@@ -302,11 +312,15 @@ pub(crate) enum Command {
         source: PatchSource,
         reply: Sender<Result<Vec<u8>, ErrorDto>>,
     },
-    /// #658: a patch file applied to the working tree, also staged, or as commits.
+    /// #658: a patch file applied to the working tree, also staged, or as commits. As commits it
+    /// runs `git am`'s hooks (#747), reported on `events` (`HookSource::Patch`) under
+    /// `operation_id`, which `cancel_transfer` stops.
     ApplyPatch {
         content: Vec<u8>,
         how: git_core::patch::PatchApply,
-        reply: Sender<Result<(), ErrorDto>>,
+        operation_id: cancel::OperationId,
+        events: Sender<HookEvent>,
+        reply: Sender<Result<git_core::patch::PatchApplyOutcome, ErrorDto>>,
     },
     /// #658: what a patch file holds and whether it applies; changes nothing.
     PreviewPatch {
@@ -315,6 +329,11 @@ pub(crate) enum Command {
     },
     IgnorePath {
         pattern: String,
+        reply: Sender<Result<(), ErrorDto>>,
+    },
+    /// #528: several patterns added to `.gitignore` in one write and one undo step.
+    IgnorePaths {
+        patterns: Vec<String>,
         reply: Sender<Result<(), ErrorDto>>,
     },
     /// Creates a missing `.gitignore` or `.gitattributes` at the work tree root, empty (#624).

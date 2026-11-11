@@ -89,6 +89,28 @@ describe("the diverged-pull prompt (#636)", () => {
   });
 });
 
+describe("a pull git config wants as a merge commit (#740)", () => {
+  it("merges the upstream with a merge commit at once, without the diverged dialog", async () => {
+    const mergeBranch = vi.fn(async () => ({ kind: "Merged" as const }));
+    await renderApp(
+      layoutClient({
+        pullCurrentUpstream: async () => ({ kind: "NoFastForward", upstreamRef: "refs/remotes/origin/main" }),
+        getPullStrategy: async () => null,
+        mergeBranch,
+      }),
+    );
+    const pull = within(toolbar()).getByRole("button", { name: "Pull" });
+    await waitFor(() => expect(pull).not.toHaveAttribute("aria-disabled"));
+    fireEvent.click(pull);
+
+    await waitFor(() =>
+      expect(mergeBranch).toHaveBeenCalledWith("/repos/a", "refs/remotes/origin/main", { fastForward: "Never", squash: false }),
+    );
+    expect(mergeBranch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog", { name: "Pull has diverged" })).toBeNull();
+  });
+});
+
 describe("the sidebar in a narrow window (#635)", () => {
   it("opens as a drawer from the toolbar and closes with Escape", async () => {
     setWindowWidth(800);
@@ -166,7 +188,7 @@ describe("Apply patch… in the toolbar (#649)", () => {
       problem: null,
     };
     const previewPatch = vi.fn(async () => preview);
-    const applyPatch = vi.fn(async () => {});
+    const applyPatch = vi.fn(async () => ({ kind: "Applied" as const }));
     await renderApp(layoutClient({ openPatchFile, previewPatch, applyPatch }));
     const button = within(toolbar()).getByRole("button", { name: "Apply patch…" });
     await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
@@ -206,7 +228,7 @@ describe("dropping files on the window (#649)", () => {
     const openRepo = vi.fn(async () => {});
     const content = { base64: "ZGlmZg==" };
     const readPatchFile = vi.fn(async () => content);
-    const applyPatch = vi.fn(async () => {});
+    const applyPatch = vi.fn(async () => ({ kind: "Applied" as const }));
     const { client, emit } = dropClient({ openRepo, readPatchFile, applyPatch });
     await renderApp(client);
     emit({ kind: "over" });

@@ -48,6 +48,31 @@ pub(super) fn remove_recent_repo(params: RemoveRecentRepoParams) -> Result<Value
     Ok(Value::Null)
 }
 
+/// The pinned recent repositories, in pin order (#766).
+pub(super) fn list_pinned_repos() -> Result<Value, ErrorDto> {
+    let paths = config::list_pinned_repos().map_err(ErrorDto::from_error)?;
+    let paths: Vec<String> = paths
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    serde_json::to_value(paths).map_err(ErrorDto::from_error)
+}
+
+#[derive(Deserialize)]
+pub(super) struct PinRecentRepoParams {
+    path: String,
+}
+
+pub(super) fn pin_recent_repo(params: PinRecentRepoParams) -> Result<Value, ErrorDto> {
+    config::pin_recent_repo(Path::new(&params.path)).map_err(ErrorDto::from_error)?;
+    Ok(Value::Null)
+}
+
+pub(super) fn unpin_recent_repo(params: PinRecentRepoParams) -> Result<Value, ErrorDto> {
+    config::unpin_recent_repo(Path::new(&params.path)).map_err(ErrorDto::from_error)?;
+    Ok(Value::Null)
+}
+
 pub(super) fn list_missing_recent_repos() -> Result<Value, ErrorDto> {
     let paths = config::list_missing_recent_repos().map_err(ErrorDto::from_error)?;
     let paths: Vec<String> = paths

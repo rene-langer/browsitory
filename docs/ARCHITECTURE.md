@@ -1354,6 +1354,14 @@ certificate.
   (`push_branch` and its `push_current_branch` wrapper, force push, tags,
   `delete_remote_branch`, `delete_remote_tag`) funnels through `push_refs`, so all of them run
   `pre-push`.
+  `patch::apply_patch_with(.., PatchApply::Commits, hooks)` (#747) runs `git am`'s hooks per
+  mail: `applypatch-msg <git dir>/COMMIT_EDITMSG` before the mail is applied (re-read after),
+  `pre-applypatch` once it is in the index (the index is re-read if it ran), then the commit;
+  `no_verify` skips both. A rejection is `PatchError::HookFailed { hook, output, subject }`
+  (`PatchApplyOutcome::HookFailed` on the wire) and takes the whole series back like a mail that
+  doesn't apply. `post-applypatch` runs once per commit only after the whole series landed (the
+  owner's choice for #747; `git am` runs it after each commit), result ignored. The worker
+  reports them under `HookSource::Patch` on an `apply-<n>` operation (`HookRunStrip`, Cancel).
   `post-checkout`/`post-merge` run in the `repo-service` worker after successful commands only,
   so undo restores, rebase and other git-core internals never trigger hooks. Each runs on its
   command's own operation, before the cancel id is released and before the reply
@@ -1367,7 +1375,7 @@ certificate.
   the pull's cancel check, before `Completed`; the toolbar's transfer progress (`RepoActivity`) labels `RunningHook` by
   operation (`Pull` → `post-merge`, else `pre-push`).
 - `HookEvent::{Started, Finished}` carry `source: HookSource` (`Commit` for commit, amend and
-  Continue; `Checkout`, `Merge`, `Pick`), sent as `source` in both transports' `hook-progress` /
+  Continue; `Checkout`, `Merge`, `Pick`, `Patch`), sent as `source` in both transports' `hook-progress` /
   `hookProgress` payloads (#185). The frontend keeps it in `state.hookRun`: a `Commit` hook shows
   in the commit box and sequence panel (`HookStatus`), any other in the non-modal `HookRunStrip`
   ("Hook status", role `status`) under `OperationStatusStrip`, with Cancel (D8-A). `RepoClient`
@@ -2014,6 +2022,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   libgit2's `reset_default` fails on them ("invalid entry mode"), and dropping them would
   discard a side of the merge. The pair's removals stay in memory (`reset_default` uses the same
   repository index and writes it once); a failed reset re-reads the index from disk.
+- Several paths at once (#528): `stage_paths` and `unstage_paths` run `stage_file` /
+  `unstage_file` per path but keep a copy of `.git/index` first; when one path fails, the copy
+  is written back and the repository's index object re-read, so nothing is staged or unstaged
+  and the worker records no undo entry. `ignore_paths` checks every pattern before reading
+  `.gitignore`, then writes it once. Each is one worker command and so one undo step ("Stage 3
+  files", "Ignore 2 patterns"; one path keeps the single-path label).
 
 ## Image preview
 
@@ -2407,6 +2421,9 @@ only `error`.
   `crates/vscode-sidecar/src/dispatch/wire_snapshots.rs` builds every output DTO from the same
   domain values (`crates/test-support/wire_fixtures.rs`, included by both with `#[path]`),
   through the same `From` impls and helpers the commands and handlers call, and
+  from one case list (`shared_wire_cases` in `crates/test-support/wire_cases.rs`, also
+  included with `#[path]`; each transport serializes the cases its own way and adds its own
+  cases at named slots, #488), and
   compares the exact bytes with `crates/*/tests/wire/dto-snapshots.txt`, one
   `<dto>/<case> <json>` line per case. The fixtures cover every enum variant and both `None`
   and `Some` of every optional field: a fieldless enum's list and a data-carrying enum's
@@ -2484,6 +2501,12 @@ only `error`.
     `waitForDisplayed({ reverse: true })` on an element that stays mounted is fine. After a
     commit made through the UI, wait on the repository (`e2e/support/git.ts`), not on a row
     whose text may already match something else.
+  - Blocked buttons and prefilled fields: a `ReasonButton` that can't run is `aria-disabled`,
+    not `disabled`, and ignores clicks, so `waitForEnabled` doesn't wait for it; click it with
+    `clickInPage`, which waits until it is neither (#790). A field that starts with text (a
+    reword or combined message) is set with `setValueInPage`, not `setValue`: WebKitWebDriver's
+    clear fires no `input` event, so a render before the first keystroke puts the old text back
+    and the typed text is appended to it (#783, #791). `setValue` on an empty field is fine.
   - Shared spec helpers (#500): specs run the git CLI only through `e2e/support/git.ts`
     (`git(cwd, ...args)` returns trimmed output and throws with git's stderr; `gitIn(repo)`
     binds a repository; `gitWith` keeps output untrimmed or discards it). The VSCode specs

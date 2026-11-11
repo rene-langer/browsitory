@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { clickInPage, waitUntilGoneInPage } from "../support/dom";
+import { clickInPage, setValueInPage, waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
 import { git } from "../support/git";
 import { expandSidebarSection, sidebarBranchRow } from "../support/sidebar";
 
@@ -119,17 +119,18 @@ describe("Browsitory interactive rebase", () => {
     );
     await squashRowSelect.selectByVisibleText("Squash");
 
-    const combinedMessageField = await $("[aria-label='Combined message']");
-    await combinedMessageField.waitForExist();
-    await combinedMessageField.setValue("e2e: combined rebase commit");
+    // Not `setValue`: the field starts with the default combined message, and when the group's
+    // full messages arrived between `setValue`'s clear and its typing, the default came back and
+    // the typed text was appended to it, so no commit had this subject (#791).
+    await setValueInPage("[aria-label='Combined message']", "e2e: combined rebase commit");
 
-    const startButton = await $("button=Start rebase");
-    // Start waits for the group's full messages (#721).
-    await startButton.waitForEnabled();
-    await startButton.click();
+    // Start waits for the group's full messages (#721); `clickInPage` waits until it's enabled.
+    await clickInPage("button", "Start rebase");
 
-    await browser.waitUntil(async () => (await $("li*=e2e: combined rebase commit")).isExisting());
-    const commitGraphAfter = await $("li*=e2e: combined rebase commit");
+    await browser.waitUntil(() => git(E2E_REPO_PATH, "log", "-1", "--format=%s") === "e2e: combined rebase commit", {
+      timeoutMsg: "the rebase did not land the combined commit",
+    });
+    await waitUntilInPage("li", "e2e: combined rebase commit", { contains: true });
     await waitUntilGoneInPage("li", "rebase commit b (to drop)", { contains: true });
   });
 

@@ -22,6 +22,12 @@ describe("hookFailure", () => {
     expect(retryLabel({ ...base, hook: "prepare-commit-msg", retry: { kind: "commit", message: "m", trailers: [] } })).toBeNull();
   });
 
+  it("offers no retry when Apply as commits was rejected by a hook (#747)", () => {
+    for (const hook of ["applypatch-msg", "pre-applypatch"]) {
+      expect(retryLabel({ output: "", dialogOpen: true, hook, retry: { kind: "applyPatch" } })).toBeNull();
+    }
+  });
+
   it("offers Commit without hooks for a failed pre-merge-commit", () => {
     expect(
       retryLabel({ output: "", dialogOpen: true, hook: "pre-merge-commit", retry: { kind: "commit", message: "m", trailers: [] } }),

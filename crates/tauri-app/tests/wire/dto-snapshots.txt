@@ -79,10 +79,13 @@ FileContent/Binary-not-an-image {"kind":"Binary","size":3}
 FileContent/TooLarge {"kind":"TooLarge","size":99000000}
 CommitOutcome/Committed {"kind":"Committed","commitId":"3333333333333333333333333333333333333333"}
 CommitOutcome/HookFailed {"kind":"HookFailed","hook":"pre-commit","output":"lint failed\n"}
+PatchApplyOutcome/Applied {"kind":"Applied"}
+PatchApplyOutcome/HookFailed {"kind":"HookFailed","hook":"applypatch-msg","output":"no sign-off\n","subject":"Fix the parser"}
 HookProgress/Started-Commit {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Started","source":"Commit"}
 HookProgress/Started-Checkout {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Started","source":"Checkout"}
 HookProgress/Started-Merge {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Started","source":"Merge"}
 HookProgress/Started-Pick {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Started","source":"Pick"}
+HookProgress/Started-Patch {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Started","source":"Patch"}
 HookProgress/Finished-Commit {"repoPath":"/repos/app","operationId":"op-1","hook":"pre-commit","phase":"Finished","source":"Commit"}
 RepoWatch/Changed {"repoPath":"/repos/app","kind":"Changed"}
 RepoWatch/Stopped {"repoPath":"/repos/app","kind":"Stopped"}
@@ -236,6 +239,7 @@ UndoOutcome/OperationInProgress {"kind":"OperationInProgress"}
 PullOutcome/UpToDate {"kind":"UpToDate"}
 PullOutcome/FastForwarded {"kind":"FastForwarded","upstreamRef":"refs/remotes/origin/main"}
 PullOutcome/Diverged {"kind":"Diverged","upstreamRef":"refs/remotes/origin/main"}
+PullOutcome/NoFastForward {"kind":"NoFastForward","upstreamRef":"refs/remotes/origin/main"}
 StashEntry/plain {"index":0,"message":"WIP on main: Add","commitId":"1515151515151515151515151515151515151515","branch":"main","timestamp":1700000000,"fileCount":3,"hasStagedChanges":true}
 StashEntry/no-branch {"index":1,"message":"autostash","commitId":"1616161616161616161616161616161616161616","branch":null,"timestamp":1700000000,"fileCount":1,"hasStagedChanges":false}
 StashApplyOutcome/Applied {"kind":"Applied"}
