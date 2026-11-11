@@ -3176,6 +3176,98 @@ fn stashing_a_file_removed_from_the_index_puts_its_entry_back() {
 }
 
 #[test]
+fn stashing_a_file_removed_from_the_index_ignores_an_ignored_removed_file_it_does_not_take() {
+    // #259 refuses only for the picked paths: `.env` (removed from the index, then ignored) is
+    // not picked, so Stash file… on `a.txt` (removed from the index too) goes ahead.
+    let (dir, mut repo) = ignored_file_removed_from_the_index();
+    let mut index = repo.index().unwrap();
+    index.remove_path(std::path::Path::new("a.txt")).unwrap();
+    index.write().unwrap();
+    let opts = with(|o| o.paths = vec!["a.txt".into()]);
+
+    git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+    assert_eq!(in_index(&repo, "a.txt").as_deref(), Some("a\n"));
+    assert_eq!(read(dir.path(), ".env"), "local secret\n");
+    assert!(in_index(&repo, ".env").is_none());
+}
+
+/// The stage-0 index entry of `path`, read fresh from disk.
+fn index_entry(repo: &git2::Repository, path: &str) -> git2::IndexEntry {
+    let mut index = repo.index().unwrap();
+    index.read(true).unwrap();
+    index.get_path(std::path::Path::new(path), 0).unwrap()
+}
+
+#[test]
+fn stashing_an_edited_file_keeps_the_stat_data_of_its_reverted_index_entry() {
+    // The checkout writes HEAD's `f` and its index entry with the file's stat data; the #248
+    // pass leaves an entry that already matches HEAD alone instead of re-adding it without.
+    let (dir, mut repo) = removed_paths(&["f"], &[], &["f"]);
+    let opts = with(|o| o.paths = vec!["f".into()]);
+
+    git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+    assert_eq!(read(dir.path(), "f"), "head\n");
+    let entry = index_entry(&repo, "f");
+    assert_eq!(entry.file_size, 5);
+    assert_ne!(entry.mtime.seconds(), 0);
+}
+
+#[test]
+fn stashing_a_staged_file_whose_worktree_matches_head_keeps_its_index_flags() {
+    // A staged `f` whose file already matches HEAD: the checkout writes nothing, and the #248
+    // pass puts HEAD's entry back. It keeps assume-unchanged and skip-worktree of the entry it
+    // replaces (and the extended flag skip-worktree needs) and nothing else.
+    const ASSUME_VALID: u16 = 0x8000;
+    const EXTENDED: u16 = 0x4000;
+    const SKIP_WORKTREE: u16 = 1 << 14;
+    const INTENT_TO_ADD: u16 = 1 << 13;
+    for (assume_valid, skip_worktree) in
+        [(false, false), (true, false), (false, true), (true, true)]
+    {
+        let (dir, mut repo) = removed_paths(&["f"], &[], &[]);
+        let staged = repo.blob(b"staged\n").unwrap();
+        let mut index = repo.index().unwrap();
+        let mut entry = index.get_path(std::path::Path::new("f"), 0).unwrap();
+        entry.id = staged;
+        entry.file_size = 7;
+        if assume_valid {
+            entry.flags |= ASSUME_VALID;
+        }
+        if skip_worktree {
+            entry.flags |= EXTENDED;
+            entry.flags_extended |= SKIP_WORKTREE;
+        }
+        index.add(&entry).unwrap();
+        index.write().unwrap();
+        let case = format!("assume_valid={assume_valid} skip_worktree={skip_worktree}");
+        let opts = with(|o| o.paths = vec!["f".into()]);
+
+        git_core::stash::save_stash(&mut repo, &opts).unwrap();
+
+        assert_eq!(read(dir.path(), "f"), "head\n", "{case}");
+        let entry = index_entry(&repo, "f");
+        assert_eq!(
+            repo.find_blob(entry.id).unwrap().content(),
+            b"head\n",
+            "{case}"
+        );
+        let mut flags = 1; // the path's length
+        if assume_valid {
+            flags |= ASSUME_VALID;
+        }
+        if skip_worktree {
+            flags |= EXTENDED;
+        }
+        assert_eq!(entry.flags, flags, "{case}");
+        let extended = if skip_worktree { SKIP_WORKTREE } else { 0 };
+        assert_eq!(entry.flags_extended & !INTENT_TO_ADD, extended, "{case}");
+        assert_eq!(entry.flags_extended & INTENT_TO_ADD, 0, "{case}");
+    }
+}
+
+#[test]
 fn stash_all_with_a_file_removed_from_the_index_stashes_a_folder_that_replaced_a_file() {
     // The #247 route is the path-limited stash, which now takes a folder that replaced a tracked
     // file when it holds only untracked files (#207), as libgit2's whole stash would.
