@@ -265,6 +265,35 @@ fn conflict_hunks_keep_lines_that_look_like_conflict_markers() {
 }
 
 #[test]
+fn conflict_hunks_keep_marker_lines_inside_a_block() {
+    // Lines of exactly seven marker characters inside the conflicting lines: with git's default
+    // markers they would end ours early or start a base part.
+    let segments = conflict_segments_for(
+        "inside.txt",
+        Some("a\nx\nz\n"),
+        "a\n<<<<<<< o\n=======\n|||||||\nz\n",
+        "a\n>>>>>>> t\nz\n",
+    );
+
+    assert_eq!(
+        segments,
+        vec![
+            ConflictSegment::Clean {
+                content: "a\n".to_string()
+            },
+            ConflictSegment::Conflict {
+                ours: "<<<<<<< o\n=======\n|||||||\n".to_string(),
+                base: "x\n".to_string(),
+                theirs: ">>>>>>> t\n".to_string(),
+            },
+            ConflictSegment::Clean {
+                content: "z\n".to_string()
+            },
+        ]
+    );
+}
+
+#[test]
 fn conflict_hunks_cut_the_blocks_as_tightly_as_the_default_style() {
     // zdiff3 keeps lines both sides changed the same way out of the block; plain diff3 would
     // make the whole changed region one block.
