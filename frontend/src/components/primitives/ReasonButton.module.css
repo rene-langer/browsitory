@@ -21,10 +21,10 @@
   line-height: 1.4;
   white-space: normal;
   pointer-events: none;
-  visibility: hidden;
+  display: none;
 }
 
 .wrap:hover > .tip,
 .wrap:focus-within > .tip {
-  visibility: visible;
+  display: block;
 }

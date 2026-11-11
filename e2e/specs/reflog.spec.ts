@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { pageDiagnostics } from "../support/dom";
+import { clickInPage } from "../support/dom";
 import { expandSidebarSection } from "../support/sidebar";
 import { git } from "../support/git";
 
@@ -52,8 +52,9 @@ describe("Browsitory reflog recovery", () => {
     const dialog = await $(`aria/Restore ${branchRef}`);
     await dialog.waitForExist();
     await expect(dialog).toHaveText(expect.stringContaining(firstCommitId));
-    console.log(`[probe] before Restore reflog entry: ${await pageDiagnostics("dialog[open] button", false)}`);
-    await (await dialog.$("button=Restore reflog entry")).click();
+    // In the page (`clickInPage`): the button sits at the window's bottom edge, where
+    // WebKitWebDriver's own click stopped arriving (#751).
+    await clickInPage("dialog[open] button", "Restore reflog entry");
 
     // BranchTree has no separate switcher control any more — the current branch is just the row
     // in the Local folder carrying the " (current)" suffix. The row itself is the interactive
@@ -67,12 +68,9 @@ describe("Browsitory reflog recovery", () => {
       async () => await graphHasSummary(FIRST_SUMMARY),
       { timeoutMsg: "expected the restored commit in the refreshed graph" },
     );
-    try {
-      await browser.waitUntil(async () => !(await graphHasSummary(SECOND_SUMMARY)), {
-        timeoutMsg: "expected the newer commit to leave the refreshed graph",
-      });
-    } catch (error) {
-      throw new Error(`${String(error)}\npage: ${await pageDiagnostics("dialog[open] button")}`);
-    }
+    await browser.waitUntil(
+      async () => !(await graphHasSummary(SECOND_SUMMARY)),
+      { timeoutMsg: "expected the newer commit to leave the refreshed graph" },
+    );
   });
 });
