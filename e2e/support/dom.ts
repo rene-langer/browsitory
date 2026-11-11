@@ -123,9 +123,10 @@ export async function clickInPage(
  * then appended to it. That only bites a field that isn't empty to begin with, such as a
  * reword or combined message.
  *
- * Waits until the field exists, is enabled, editable (`readOnly` is how a dialog marks a field
- * still loading) and rendered. Each poll sets the value if it differs, and only a later poll
- * that still finds it passes, so a render that restored the old text in between is caught.
+ * Waits until a matching field exists that is enabled, editable (`readOnly` is how a dialog
+ * marks a field still loading) and rendered, and uses the first such one. Each poll looks the
+ * field up again and sets the value if it differs, and only a later poll that still finds it
+ * passes, so a render that restored the old text (or replaced the field) in between is caught.
  */
 export async function setValueInPage(
   selector: string,
@@ -136,9 +137,15 @@ export async function setValueInPage(
     () =>
       browser.execute(
         (sel: string, wanted: string) => {
-          const field = document.querySelector(sel);
-          if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return false;
-          if (field.disabled || field.readOnly || field.getClientRects().length === 0) return false;
+          // The first usable match: a hidden tab's workspace (#642) can hold an earlier one.
+          const field = Array.from(document.querySelectorAll(sel)).find(
+            (element): element is HTMLInputElement | HTMLTextAreaElement =>
+              (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) &&
+              !element.disabled &&
+              !element.readOnly &&
+              element.getClientRects().length > 0,
+          );
+          if (field === undefined) return false;
           if (field.value === wanted && field.dataset.e2eSetValue === wanted) return true;
           const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
           Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(field, wanted);

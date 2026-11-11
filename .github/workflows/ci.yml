@@ -1057,3 +1057,10 @@ jobs:
         # with one it takes under a second (measured in #182; NO_AT_BRIDGE=1,
         # GTK_USE_PORTAL=0 and WEBKIT_DISABLE_COMPOSITING_MODE=1 made no difference).
         run: dbus-run-session -- xvfb-run --auto-servernum pnpm test
+      # Screenshots a spec saved at a failure (`e2e/support/diagnostics.ts`, #810).
+      - uses: actions/upload-artifact@v7
+        if: failure() && env.RUN_STEPS == 'true'
+        with:
+          name: e2e-failure-screenshots
+          path: e2e/failure-screenshots
+          if-no-files-found: ignore

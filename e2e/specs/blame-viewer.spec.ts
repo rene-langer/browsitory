@@ -2,7 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expect } from "@wdio/globals";
-import { clickInPage, waitUntilInPage } from "../support/dom";
+import { clickInPage, setValueInPage, waitUntilInPage } from "../support/dom";
+import { withFailureDiagnostics } from "../support/diagnostics";
 import { git } from "../support/git";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -15,6 +16,7 @@ const BLAME_FIXTURE_FILE = "blame-fixture.txt";
 // the first already committed, which is no working-tree change at all: no file row, and no stage
 // control to click. Distinct names make that impossible to trip over.
 const PRIME_FILE = "blame-prime.txt";
+const COMMIT_MESSAGE = "textarea[placeholder='Commit message']";
 
 describe("Browsitory blame", () => {
   before(() => {
@@ -31,23 +33,25 @@ describe("Browsitory blame", () => {
   });
 
   it("shows per-line blame for a historic commit and jumps history selection on a line click", async () => {
-    const commitMessageInput = await $("textarea[placeholder='Commit message']");
-    await commitMessageInput.waitForExist();
+    await waitUntilInPage(COMMIT_MESSAGE);
 
     // Stage+commit the throwaway prime file through the real UI — the only way to make
     // useAppState refetch, which is what makes the two git-CLI commits above show up below.
     // The per-row stage control is icon-only (aria-label only, no visible text) since the
     // file-list migration to `ListRow` — target the throwaway prime file written above.
-    const stageButton = await $(`button[aria-label="Stage ${PRIME_FILE}"]`);
-    await stageButton.waitForExist();
-    // `opacity: 0` until the row is hovered/focused — see `first-flow.spec.ts`'s note on why
-    // both the scroll and the click go through `browser.execute`.
-    await browser.execute((el) => (el as HTMLElement).scrollIntoView({ block: "center" }), stageButton);
-    await browser.execute((el) => (el as HTMLElement).click(), stageButton);
+    // `opacity: 0` until the row is hovered/focused, so it is clicked inside the page (see
+    // `first-flow.spec.ts`'s note), looked up and clicked in one step.
+    await clickInPage(`button[aria-label="Stage ${PRIME_FILE}"]`);
     // Wait for the row to move under Staged before committing (#697).
     await waitUntilInPage(`button[aria-label="Unstage ${PRIME_FILE}"]`);
-    await browser.execute((el) => { const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set; setter?.call(el, "e2e: prime the refresh"); el.dispatchEvent(new Event("input", { bubbles: true })); }, commitMessageInput);
-    await clickInPage('button[data-action="commit"]');
+    // The message field is looked up again here, not taken at the start: a handle taken before
+    // the workspace settled can point at a field React has since replaced, and the message then
+    // never reaches the Commit button (#810). On failure, the commit box's state and a
+    // screenshot say which side it was.
+    await withFailureDiagnostics("blame-viewer-commit", async () => {
+      await setValueInPage(COMMIT_MESSAGE, "e2e: prime the refresh");
+      await clickInPage('button[data-action="commit"]');
+    });
 
     const secondCommitEntry = await $("li*=e2e: blame fixture second commit");
     await secondCommitEntry.waitForExist();
