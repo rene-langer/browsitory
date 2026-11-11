@@ -99,14 +99,25 @@ describe("Browsitory merge with conflict resolution", () => {
     const result = await block.$("textarea");
     // Not `toHaveValue`: it trims the expected text but not the field's value.
     expect(await result.getValue()).toBe("feature two\n");
-    await result.setValue("feature two, edited\n");
+    // As the other specs fill a textarea: WebKitWebDriver's clear + send keys doesn't reliably
+    // reach React's state.
+    await browser.execute((el) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+      setter?.call(el, "feature two, edited\n");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }, result);
+    expect(await result.getValue()).toBe("feature two, edited\n");
     const saveResolution = await $("button=Save resolution");
     await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
     await browser.waitUntil(
       () =>
         fs.readFileSync(path.join(E2E_REPO_PATH, "shared.txt"), "utf8") ===
         "line one\nfeature two, edited\nline three\n",
-      { timeoutMsg: "the edited result was not saved" },
+      {
+        timeoutMsg: `the edited result was not saved: ${JSON.stringify(
+          fs.readFileSync(path.join(E2E_REPO_PATH, "shared.txt"), "utf8"),
+        )}`,
+      },
     );
 
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
