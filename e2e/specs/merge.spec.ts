@@ -91,8 +91,22 @@ describe("Browsitory merge with conflict resolution", () => {
     await browser.execute((el) => (el as HTMLElement).click(), conflictedRow);
     await acceptTheirs.waitForExist();
     await browser.execute((el) => (el as HTMLElement).click(), acceptTheirs);
+    // The merge editor (#720): the ancestor's lines behind Show base, and an editable result.
+    const showBase = await $("button=Show base");
+    await browser.execute((el) => (el as HTMLElement).click(), showBase);
+    const block = await $("section[aria-label='Conflict 1 of 1']");
+    await block.$("pre*=line two").waitForExist();
+    const result = await block.$("textarea");
+    await expect(result).toHaveValue("feature two\n");
+    await result.setValue("feature two, edited\n");
     const saveResolution = await $("button=Save resolution");
     await browser.execute((el) => (el as HTMLElement).click(), saveResolution);
+    await browser.waitUntil(
+      () =>
+        fs.readFileSync(path.join(E2E_REPO_PATH, "shared.txt"), "utf8") ===
+        "line one\nfeature two, edited\nline three\n",
+      { timeoutMsg: "the edited result was not saved" },
+    );
 
     const commitMessageInput = await $("textarea[placeholder='Commit message']");
     await commitMessageInput.waitForExist();

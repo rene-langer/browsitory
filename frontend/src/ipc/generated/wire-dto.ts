@@ -61,7 +61,7 @@ export type CompareRange = { fromId: string, toId: string, };
 
 export type ConfirmedAbort = { headId: string, startedAt: string, rewinds: boolean, commitsToRemove: number, pausedOnConflict: boolean, };
 
-export type ConflictSegment = { "kind": "Clean", content: string, } | { "kind": "Conflict", ours: string, theirs: string, };
+export type ConflictSegment = { "kind": "Clean", content: string, } | { "kind": "Conflict", ours: string, base: string, theirs: string, };
 
 export type ConflictSide = "Ours" | "Theirs";
 

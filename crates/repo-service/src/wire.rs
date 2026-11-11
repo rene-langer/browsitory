@@ -1929,8 +1929,14 @@ impl From<git_core::stash::StashFiles> for StashFilesDto {
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "ConflictSegment"))]
 #[serde(tag = "kind")]
 pub enum ConflictSegmentDto {
-    Clean { content: String },
-    Conflict { ours: String, theirs: String },
+    Clean {
+        content: String,
+    },
+    Conflict {
+        ours: String,
+        base: String,
+        theirs: String,
+    },
 }
 
 impl From<git_core::merge::ConflictSegment> for ConflictSegmentDto {
@@ -1939,8 +1945,8 @@ impl From<git_core::merge::ConflictSegment> for ConflictSegmentDto {
             git_core::merge::ConflictSegment::Clean { content } => {
                 ConflictSegmentDto::Clean { content }
             }
-            git_core::merge::ConflictSegment::Conflict { ours, theirs } => {
-                ConflictSegmentDto::Conflict { ours, theirs }
+            git_core::merge::ConflictSegment::Conflict { ours, base, theirs } => {
+                ConflictSegmentDto::Conflict { ours, base, theirs }
             }
         }
     }

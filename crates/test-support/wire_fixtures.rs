@@ -1814,6 +1814,15 @@ pub fn conflict_segments() -> Cases<git_core::merge::ConflictSegment> {
             "Conflict",
             ConflictSegment::Conflict {
                 ours: "ours\n".to_string(),
+                base: "base\n".to_string(),
+                theirs: "theirs\n".to_string(),
+            },
+        ),
+        case(
+            "Conflict-no-base",
+            ConflictSegment::Conflict {
+                ours: "ours\n".to_string(),
+                base: String::new(),
                 theirs: "theirs\n".to_string(),
             },
         ),

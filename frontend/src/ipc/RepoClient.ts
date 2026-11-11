@@ -813,7 +813,7 @@ export type PullOutcome =
 
 export type ConflictSegment =
   | { kind: "Clean"; content: string }
-  | { kind: "Conflict"; ours: string; theirs: string };
+  | { kind: "Conflict"; ours: string; base: string; theirs: string };
 
 export type FileConflictChoice = "Ours" | "Theirs" | "Delete";
 

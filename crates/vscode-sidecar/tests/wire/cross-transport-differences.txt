@@ -31,6 +31,8 @@ CommitSignature/status-UnknownKey key-order
 CommitSignature/status-Unsigned key-order
 CommitStatsEntry/counted key-order
 ConflictSegment/Clean key-order
+ConflictSegment/Conflict key-order
+ConflictSegment/Conflict-no-base key-order
 DiffHunk/empty key-order
 DiffHunk/every-origin key-order
 DiffSettings/algorithm-Default key-order
