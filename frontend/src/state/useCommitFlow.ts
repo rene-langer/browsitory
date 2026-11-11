@@ -12,12 +12,13 @@ type CommitWith = (
 
 /**
  * Where a commit lands, "Commit and push", and the toast after a commit (#651): "Committed
- * 4c5beaf to main" with Push, or with Undo when there is nowhere to push. `commitWith` is
+ * 4c5beaf to main" with Push and Undo (#733), or Undo alone when there is nowhere to push. `commitWith` is
  * `useCommitDraftActions`' `commitAndClearDraft`; `undoToastAction` is `useUndoRedoActions`'
  * (#725), whose Undo runs only while the commit is still the newest undo step.
  *
  * The toast stack is app-level and outlives this workspace (a tab switch unmounts it), so Push
- * checks at click time that the workspace is still mounted and idle.
+ * checks at click time that the workspace is still mounted and idle, and that the branch it
+ * names is still the current one (#735): it never pushes a branch checked out since.
  */
 export function useCommitFlow(
   appState: UseAppStateResult,
@@ -34,7 +35,7 @@ export function useCommitFlow(
         ? "No remote configured."
         : null;
 
-  const live = useRef({ mounted: true, busy: false });
+  const live = useRef({ mounted: true, busy: false, branch: null as string | null });
   useEffect(() => {
     const state = live.current;
     state.mounted = true;
@@ -45,6 +46,9 @@ export function useCommitFlow(
   useEffect(() => {
     live.current.busy = pending || transfer !== null;
   }, [pending, transfer]);
+  useEffect(() => {
+    live.current.branch = branch;
+  }, [branch]);
   const idle = () => live.current.mounted && !live.current.busy;
 
   const { pushCurrentBranch, openDialog } = appState;
@@ -72,14 +76,23 @@ export function useCommitFlow(
         pushToast(text, { tone: "success" });
         push();
       } else if (commitAndPushReason === null) {
+        const committedTo = branch;
         pushToast(text, {
           tone: "success",
-          action: {
-            label: "Push",
-            run: () => {
-              if (idle()) push();
+          actions: [
+            {
+              label: "Push",
+              run: () => {
+                if (!idle()) return;
+                if (live.current.branch !== committedTo) {
+                  pushToast(`Not pushed: ${committedTo} is no longer the current branch.`, { tone: "info" });
+                  return;
+                }
+                push();
+              },
             },
-          },
+            undoToastAction(),
+          ],
         });
       } else {
         pushToast(text, { tone: "success", action: undoToastAction() });
