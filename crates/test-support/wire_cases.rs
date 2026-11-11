@@ -145,6 +145,11 @@ pub fn shared_wire_cases(s: &mut impl WireCases) {
         fixtures::commit_outcomes(),
         CommitOutcomeDto::from,
     );
+    s.add(
+        "PatchApplyOutcome",
+        fixtures::patch_apply_outcomes(),
+        repo_service::wire::PatchApplyOutcomeDto::from,
+    );
     s.add("HookProgress", fixtures::hook_events(), |event| {
         hook_progress_dto(fixtures::HOOK_REPO_PATH, event)
     });

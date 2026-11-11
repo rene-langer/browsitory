@@ -82,6 +82,37 @@ attempt() {
   return 1
 }
 
+# A mirror outside Canonical's and Azure's networks, tried second. On 2026-11-11 every
+# Canonical host (azure.archive, archive and security.ubuntu.com) stopped answering the
+# runners for hours while other hosts answered at once, so dropping from one Canonical mirror
+# to the next could not help. kernel.org's mirror carries noble, -updates and -security, so it
+# can serve both the main and the security sources, which share $MIRRORS.
+FALLBACK_MIRROR="https://mirrors.edge.kernel.org/ubuntu/"
+
+# Puts FALLBACK_MIRROR second in apt-mirrors.txt, so the first retry (after drop_first_mirror)
+# uses it, and renumbers the `priority:` fields in file order: apt's mirror method orders by
+# them. Does nothing if the file is missing or already lists the fallback.
+add_fallback_mirror() {
+  [ -f "$MIRRORS" ] || return 0
+  grep -qF "$FALLBACK_MIRROR" "$MIRRORS" && return 0
+  sudo awk -v fallback="$FALLBACK_MIRROR" '
+    /^[[:space:]]*[a-z]+:\/\// {
+      url = $1
+      urls[++n] = url
+      if (n == 1) urls[++n] = fallback
+      next
+    }
+    { other[++m] = $0 }
+    END {
+      if (n == 0) urls[++n] = fallback
+      for (i = 1; i <= m; i++) print other[i]
+      for (i = 1; i <= n; i++) printf "%s\tpriority:%d\n", urls[i], i
+    }
+  ' "$MIRRORS" | sudo tee "$MIRRORS.new" >/dev/null
+  sudo mv "$MIRRORS.new" "$MIRRORS"
+}
+add_fallback_mirror
+
 # Shows where apt fetches from: the runner's sources point at mirror+file:$MIRRORS.
 echo "::group::apt sources and mirrors"
 for f in /etc/apt/sources.list /etc/apt/sources.list.d/* "$MIRRORS"; do

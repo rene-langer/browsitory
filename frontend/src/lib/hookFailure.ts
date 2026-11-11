@@ -23,7 +23,12 @@ export type HookRetry =
    * A single cherry-pick/revert whose `prepare-commit-msg` failed (#183). Never retried:
    * `--no-verify` can't skip that hook; the commit box finishes the staged pick instead.
    */
-  | { kind: "pick" };
+  | { kind: "pick" }
+  /**
+   * "Apply as commits" rejected by `applypatch-msg` or `pre-applypatch` (#747). Never retried:
+   * the whole patch file was taken back; apply it again once the hook accepts it.
+   */
+  | { kind: "applyPatch" };
 
 export interface HookFailure {
   hook: string;
@@ -49,7 +54,9 @@ export function runningHookLabel(hook: string): string {
 
 /** The dialog's retry button; `null` for a hook `--no-verify` cannot skip (it would fail again). */
 export function retryLabel(failure: HookFailure): string | null {
-  if (!SKIPPABLE_HOOKS.has(failure.hook) || failure.retry.kind === "pick") return null;
+  if (!SKIPPABLE_HOOKS.has(failure.hook) || failure.retry.kind === "pick" || failure.retry.kind === "applyPatch") {
+    return null;
+  }
   if (failure.retry.kind === "commit") return "Commit without hooks";
   if (failure.retry.kind === "amend") return "Amend without hooks";
   if (failure.retry.kind === "continueSequence") return "Continue without hooks";

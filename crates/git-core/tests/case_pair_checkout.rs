@@ -24,7 +24,7 @@ fn case_pair_history(pair: (&str, &str)) -> (tempfile::TempDir, git2::Repository
     write_file(dir.path(), pair.1, "second\n");
     write_file(dir.path(), "other", "x\n");
     commit_all(&repo, "base");
-    let base = head_id(&repo);
+    let base = common::head_id(&repo).to_string();
     for name in ["c1", "c2"] {
         write_file(dir.path(), "other", &format!("{name}\n"));
         commit_all(&repo, name);
@@ -38,20 +38,6 @@ fn case_pair_history(pair: (&str, &str)) -> (tempfile::TempDir, git2::Repository
     (dir, repo, base)
 }
 
-fn head_id(repo: &git2::Repository) -> String {
-    repo.head().unwrap().target().unwrap().to_string()
-}
-
-fn index_paths(dir: &std::path::Path) -> Vec<String> {
-    let index = git2::Index::open(&dir.join(".git/index")).unwrap();
-    let mut paths: Vec<String> = index
-        .iter()
-        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
-        .collect();
-    paths.sort();
-    paths
-}
-
 fn read(dir: &std::path::Path, rel: &str) -> Option<String> {
     std::fs::read_to_string(dir.join(rel)).ok()
 }
@@ -60,7 +46,7 @@ fn read(dir: &std::path::Path, rel: &str) -> Option<String> {
 fn assert_pair_kept(dir: &std::path::Path, pair: (&str, &str), other: &str) {
     let mut expected = vec![pair.0.to_string(), pair.1.to_string(), "other".to_string()];
     expected.sort();
-    assert_eq!(index_paths(dir), expected, "{pair:?}");
+    assert_eq!(common::index_paths(dir), expected, "{pair:?}");
     assert_eq!(read(dir, pair.0).as_deref(), Some("first\n"), "{pair:?}");
     assert_eq!(read(dir, pair.1).as_deref(), Some("second\n"), "{pair:?}");
     assert_eq!(read(dir, "other").as_deref(), Some(other), "{pair:?}");
@@ -86,7 +72,7 @@ fn libgit2_forced_checkout_of_both_names_of_a_case_pair_keeps_one_under_ignoreca
             .path(pair.0)
             .path(pair.1);
         repo.checkout_head(Some(&mut checkout)).unwrap();
-        assert_eq!(index_paths(dir.path()).len(), 2, "{pair:?}");
+        assert_eq!(common::index_paths(dir.path()).len(), 2, "{pair:?}");
 
         let (dir, repo, _) = case_pair_history(pair);
         write_file(dir.path(), "other", "edited\n");
@@ -106,7 +92,7 @@ fn hard_reset_refuses_a_case_pair_where_names_fold() {
         for to_head in [true, false] {
             let (dir, repo, base) = case_pair_history(pair);
             write_file(dir.path(), "other", "edited\n");
-            let tip = head_id(&repo);
+            let tip = common::head_id(&repo).to_string();
             let index_before = std::fs::read(dir.path().join(".git/index")).unwrap();
             let target = if to_head { tip.clone() } else { base };
 
@@ -123,7 +109,7 @@ fn hard_reset_refuses_a_case_pair_where_names_fold() {
                     "'{path}' and '{other}' differ only in case, which this repository's core.ignorecase setting takes for one name, so the checkout would remove one of them. Rename one of the two in the repository first."
                 )
             );
-            assert_eq!(head_id(&repo), tip);
+            assert_eq!(common::head_id(&repo).to_string(), tip);
             assert_eq!(
                 std::fs::read(dir.path().join(".git/index")).unwrap(),
                 index_before
@@ -142,10 +128,14 @@ fn mixed_and_soft_resets_keep_a_case_pair_where_names_fold() {
 
             reset_to(&repo, &base, mode).unwrap();
 
-            assert_eq!(head_id(&repo), base);
+            assert_eq!(common::head_id(&repo).to_string(), base);
             let mut expected = vec![pair.0.to_string(), pair.1.to_string(), "other".to_string()];
             expected.sort();
-            assert_eq!(index_paths(dir.path()), expected, "{pair:?} {mode:?}");
+            assert_eq!(
+                common::index_paths(dir.path()),
+                expected,
+                "{pair:?} {mode:?}"
+            );
             assert_eq!(read(dir.path(), pair.0).as_deref(), Some("first\n"));
             assert_eq!(read(dir.path(), pair.1).as_deref(), Some("second\n"));
         }
@@ -214,7 +204,7 @@ fn rebase_refuses_a_case_pair_where_names_fold() {
     use git_core::rebase::{RebaseAction, RebaseError, RebasePlanEntry};
     for pair in CASE_PAIRS {
         let (dir, repo, base) = case_pair_history(pair);
-        let tip = head_id(&repo);
+        let tip = common::head_id(&repo).to_string();
         let plan: Vec<RebasePlanEntry> = git_core::rebase::commits_since(&repo, &base)
             .unwrap()
             .into_iter()
@@ -233,7 +223,7 @@ fn rebase_refuses_a_case_pair_where_names_fold() {
         );
         assert_eq!(repo.state(), git2::RepositoryState::Clean);
         assert!(!repo.head_detached().unwrap());
-        assert_eq!(head_id(&repo), tip);
+        assert_eq!(common::head_id(&repo).to_string(), tip);
         assert_pair_kept(dir.path(), pair, "c2\n");
     }
 }
@@ -278,7 +268,7 @@ fn pair_brought_in_by_a_rebase(
     }
     write_file(dir.path(), "conf", "upstream\n");
     commit_all(&repo, "upstream");
-    let onto = head_id(&repo);
+    let onto = common::head_id(&repo).to_string();
 
     repo.set_head("refs/heads/topic").unwrap();
     let mut checkout = git2::build::CheckoutBuilder::new();
@@ -308,7 +298,7 @@ fn pair_brought_in_by_a_rebase(
         )
         .unwrap();
     }
-    let tip = head_id(&repo);
+    let tip = common::head_id(&repo).to_string();
 
     repo.config()
         .unwrap()
@@ -412,7 +402,7 @@ fn rebase_abort_restores_the_branch_after_a_pick_brought_in_a_case_pair() {
         // Unless the index tracks it (then Abort discards it like any change to a file the
         // rebase tracks), what the user wrote there during the pause stays: the repository
         // doesn't hold it.
-        let kept = own && !index_paths(dir.path()).contains(&pair.1.to_string());
+        let kept = own && !common::index_paths(dir.path()).contains(&pair.1.to_string());
         if own {
             write_file(dir.path(), pair.1, "mine\n");
         }
@@ -421,11 +411,11 @@ fn rebase_abort_restores_the_branch_after_a_pick_brought_in_a_case_pair() {
 
         assert!(abort.restored, "{pair:?}");
         assert!(!repo.head_detached().unwrap(), "{pair:?}");
-        assert_eq!(head_id(&repo), tip, "{pair:?}");
+        assert_eq!(common::head_id(&repo).to_string(), tip, "{pair:?}");
         assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
         let mut expected = vec![pair.0.to_string(), "conf".to_string(), "other".to_string()];
         expected.sort();
-        assert_eq!(index_paths(dir.path()), expected, "{pair:?}");
+        assert_eq!(common::index_paths(dir.path()), expected, "{pair:?}");
         assert_eq!(
             read(dir.path(), pair.0).as_deref(),
             Some("first\n"),
@@ -465,7 +455,7 @@ fn cherry_pick_brought_in_a_case_pair(
     }
     write_file(dir.path(), "conf", "main\n");
     commit_all(&repo, "main");
-    let main = head_id(&repo);
+    let main = common::head_id(&repo).to_string();
     let main_ref = repo.head().unwrap().name().unwrap().to_string();
     repo.set_head("refs/heads/side").unwrap();
     let mut checkout = git2::build::CheckoutBuilder::new();
@@ -474,7 +464,7 @@ fn cherry_pick_brought_in_a_case_pair(
     write_file(dir.path(), pair.1, "second\n");
     write_file(dir.path(), "conf", "side\n");
     commit_all(&repo, "side");
-    let side = head_id(&repo);
+    let side = common::head_id(&repo).to_string();
     repo.set_head(&main_ref).unwrap();
     repo.checkout_head(Some(&mut checkout)).unwrap();
     assert_eq!(read(dir.path(), pair.1), None);
@@ -484,7 +474,7 @@ fn cherry_pick_brought_in_a_case_pair(
         .unwrap();
     drop(repo);
     let repo = git2::Repository::open(dir.path()).unwrap();
-    assert_eq!(head_id(&repo), main);
+    assert_eq!(common::head_id(&repo).to_string(), main);
 
     repo.cherrypick(
         &repo
@@ -512,15 +502,15 @@ fn cherry_pick_abort_after_a_pick_brought_in_a_case_pair() {
         );
         // For `a`/`A` libgit2's index kept `a` and dropped the picked `A` (its file is written
         // all the same): Abort resets only what the pick touched, so `A` stays, untracked.
-        let staged = index_paths(dir.path()).contains(&pair.1.to_string());
+        let staged = common::index_paths(dir.path()).contains(&pair.1.to_string());
 
         git_core::merge::abort_merge(&repo).unwrap();
 
         assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
-        assert_eq!(head_id(&repo), main, "{pair:?}");
+        assert_eq!(common::head_id(&repo).to_string(), main, "{pair:?}");
         let mut expected = vec![pair.0.to_string(), "conf".to_string()];
         expected.sort();
-        assert_eq!(index_paths(dir.path()), expected, "{pair:?}");
+        assert_eq!(common::index_paths(dir.path()), expected, "{pair:?}");
         assert_eq!(
             read(dir.path(), pair.0).as_deref(),
             Some("first\n"),
@@ -549,7 +539,7 @@ fn cherry_pick_abort_keeps_an_edit_to_one_of_a_case_pair() {
     for pair in CASE_PAIRS {
         for edited in [pair.0, pair.1] {
             let (dir, repo, main) = cherry_pick_brought_in_a_case_pair(pair);
-            let split = index_paths(dir.path()).contains(&pair.1.to_string());
+            let split = common::index_paths(dir.path()).contains(&pair.1.to_string());
             write_file(dir.path(), edited, "mine\n");
 
             let result = git_core::merge::abort_merge(&repo);
@@ -571,7 +561,11 @@ fn cherry_pick_abort_keeps_an_edit_to_one_of_a_case_pair() {
                 );
             } else {
                 assert!(result.is_ok(), "{pair:?} {edited}: {result:?}");
-                assert_eq!(head_id(&repo), main, "{pair:?} {edited}");
+                assert_eq!(
+                    common::head_id(&repo).to_string(),
+                    main,
+                    "{pair:?} {edited}"
+                );
             }
         }
     }
@@ -591,7 +585,7 @@ fn cherry_pick_abort_after_a_conflict_on_one_of_a_case_pair() {
         }
         write_file(dir.path(), pair.0, "main\n");
         commit_all(&repo, "main");
-        let main = head_id(&repo);
+        let main = common::head_id(&repo).to_string();
         let main_ref = repo.head().unwrap().name().unwrap().to_string();
         repo.set_head("refs/heads/side").unwrap();
         let mut checkout = git2::build::CheckoutBuilder::new();
@@ -600,7 +594,7 @@ fn cherry_pick_abort_after_a_conflict_on_one_of_a_case_pair() {
         write_file(dir.path(), pair.0, "side\n");
         write_file(dir.path(), pair.1, "second\n");
         commit_all(&repo, "side");
-        let side = head_id(&repo);
+        let side = common::head_id(&repo).to_string();
         repo.set_head(&main_ref).unwrap();
         repo.checkout_head(Some(&mut checkout)).unwrap();
         repo.config()
@@ -626,7 +620,7 @@ fn cherry_pick_abort_after_a_conflict_on_one_of_a_case_pair() {
         let result = git_core::merge::abort_merge(&repo);
 
         assert!(result.is_ok(), "{pair:?}: {result:?}");
-        assert_eq!(head_id(&repo), main, "{pair:?}");
+        assert_eq!(common::head_id(&repo).to_string(), main, "{pair:?}");
         assert_eq!(
             read(dir.path(), pair.0).as_deref(),
             Some("main\n"),

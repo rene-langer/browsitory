@@ -3,17 +3,12 @@
 //! from the developer's config, #282).
 mod common;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use git2::{Oid, Repository};
 use git_core::reflog::restore_reflog_entry;
 use tempfile::TempDir;
 use test_support::git;
-
-fn git_ok(dir: &Path, args: &[&str]) {
-    let output = git(dir, args);
-    assert!(output.status.success(), "git {args:?}: {output:?}");
-}
 
 struct Fixture {
     dir: TempDir,
@@ -43,7 +38,7 @@ fn fixture() -> Fixture {
         .unwrap();
     let elsewhere = TempDir::new().unwrap();
     let linked_path = elsewhere.path().join("linked");
-    git_ok(
+    common::git_ok(
         dir.path(),
         &[
             "worktree",
@@ -155,7 +150,7 @@ fn a_branch_checked_out_in_a_locked_worktree_whose_folder_is_gone_isnt_restored(
         second,
     } = fixture();
     drop(linked);
-    git_ok(
+    common::git_ok(
         dir.path(),
         &["worktree", "lock", linked_path.to_str().unwrap()],
     );
@@ -188,14 +183,14 @@ fn this_worktrees_head_isnt_restored_during_a_merge() {
     common::write_file(dir.path(), "f", "base\n");
     common::commit_all(&repo, "base");
     let base = repo.head().unwrap().target().unwrap();
-    git_ok(dir.path(), &["branch", "side"]);
+    common::git_ok(dir.path(), &["branch", "side"]);
     common::write_file(dir.path(), "f", "main\n");
     common::commit_all(&repo, "main");
     let main = repo.head().unwrap().target().unwrap();
-    git_ok(dir.path(), &["checkout", "-q", "side"]);
+    common::git_ok(dir.path(), &["checkout", "-q", "side"]);
     common::write_file(dir.path(), "f", "side\n");
-    git_ok(dir.path(), &["commit", "-qam", "side"]);
-    git_ok(dir.path(), &["checkout", "-q", "main"]);
+    common::git_ok(dir.path(), &["commit", "-qam", "side"]);
+    common::git_ok(dir.path(), &["checkout", "-q", "main"]);
     assert!(!git(dir.path(), &["merge", "side"]).status.success());
     let repo = Repository::open(dir.path()).unwrap();
     assert_eq!(repo.state(), git2::RepositoryState::Merge);

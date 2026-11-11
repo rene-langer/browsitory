@@ -217,6 +217,18 @@ pub(crate) fn file_mode(
     }
 }
 
+/// Writes `bytes`, read from the work-tree path `path`, as a blob through git's clean filters
+/// (`core.autocrlf`, `.gitattributes`), as `git add` and `Index::add_path` would. `path` is only
+/// the filter hint; nothing is read from it.
+pub(crate) fn filtered_blob<E>(repo: &Repository, path: &str, bytes: &[u8]) -> Result<Oid, E>
+where
+    E: From<git2::Error> + From<io::Error>,
+{
+    let mut writer = repo.blob_writer(Some(Path::new(path)))?;
+    io::Write::write_all(&mut writer, bytes)?;
+    Ok(writer.commit()?)
+}
+
 pub(crate) fn index_entry(path: &str, id: Oid, mode: u32) -> IndexEntry {
     IndexEntry {
         ctime: IndexTime::new(0, 0),

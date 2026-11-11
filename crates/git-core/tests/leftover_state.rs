@@ -12,6 +12,7 @@ use git_core::hooks::HookOptions;
 use git_core::pick::{cherry_pick, revert, PickOutcome};
 use git_core::repo::{head_info, OperationKind};
 use std::path::Path;
+use test_support::git;
 
 fn stage(repo: &git2::Repository, path: &str) {
     let mut index = repo.index().unwrap();
@@ -368,10 +369,6 @@ fn amend_after_a_leftover_revert_ends_like_git_commit_amend() {
 }
 
 // ---- an empty re-pick looks the same, and is treated like `git cherry-pick --skip` ------------
-
-fn git(dir: &Path, args: &[&str]) -> std::process::Output {
-    test_support::git_command(dir).args(args).output().unwrap()
-}
 
 /// Picks F with Browsitory (HEAD is its pick), then runs `git cherry-pick <args>` in a terminal,
 /// which stops on F because its change is already in HEAD ("The previous cherry-pick is now

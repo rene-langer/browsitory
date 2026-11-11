@@ -50,6 +50,8 @@ use commands::{
 use commands::{list_repo_aliases, set_repo_alias};
 // The picker's recent repositories: remove one, and which folders are gone (#690).
 use commands::{list_missing_recent_repos, remove_recent_repo};
+// Pinned recent repositories (#766).
+use commands::{list_pinned_repos, pin_recent_repo, unpin_recent_repo};
 // Open or create .gitignore and .gitattributes (#624).
 use commands::{create_root_file, get_root_files};
 // Collapse merges in the commit graph (#617).
@@ -137,6 +139,9 @@ commands![
     list_recent_repos,
     remove_recent_repo,
     list_missing_recent_repos,
+    list_pinned_repos,
+    pin_recent_repo,
+    unpin_recent_repo,
     get_last_seen_version,
     set_last_seen_version,
     get_app_version,

@@ -21,7 +21,7 @@ function setup(overrides: Partial<Record<string, unknown>> = {}, ok = true) {
     savePatchFile: vi.fn(async () => "/home/me/x.patch"),
     openPatchFile: vi.fn(async () => CONTENT),
     readPatchFile: vi.fn(async () => CONTENT),
-    applyPatch: vi.fn(async () => {}),
+    applyPatch: vi.fn(async () => ({ kind: "Applied" as const })),
     previewPatch: vi.fn(async () => PREVIEW),
     ...overrides,
   };
@@ -111,6 +111,26 @@ describe("usePatchActions", () => {
     expect(client.applyPatch).toHaveBeenCalledWith("/repo", CONTENT, "Commits");
     expect(state().dialog).toBeNull();
     expect(state().patchOutcome).toEqual({ message: "Committed the patch as 2 commits", undoable: true });
+  });
+
+  it("opens the hook dialog when a hook rejects a mail, with no toast (#747)", async () => {
+    const applyPatch = vi.fn(async () => ({
+      kind: "HookFailed" as const,
+      hook: "applypatch-msg",
+      output: "no Two here\n",
+      subject: "Two",
+    }));
+    const { actions, state } = setup({ applyPatch });
+    await actions.applyPatch(CONTENT, PREVIEW, "Commits");
+    expect(state().patchOutcome).toBeNull();
+    expect(state().dialog).toBeNull();
+    expect(state().error).toBe("The applypatch-msg hook failed on “Two”. Nothing was applied.");
+    expect(state().hookFailure).toEqual({
+      hook: "applypatch-msg",
+      output: "no Two here\n",
+      retry: { kind: "applyPatch" },
+      dialogOpen: true,
+    });
   });
 
   it("keeps no toast when the previewed patch doesn't apply", async () => {

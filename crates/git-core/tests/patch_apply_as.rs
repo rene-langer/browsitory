@@ -434,3 +434,336 @@ fn as_commits_refuses_an_index_with_conflicts() {
     assert_eq!(head(&repo).id().to_string(), base);
     assert_eq!(read(dir.path(), "f.txt"), "one\n");
 }
+
+/// #747: "Apply as commits" runs `git am`'s hooks: `applypatch-msg` (may rewrite or reject the
+/// message) before each mail is applied, `pre-applypatch` (may reject) once the mail is in the
+/// index and before its commit, `post-applypatch` (ignored) once the series landed.
+#[cfg(unix)]
+mod hooks {
+    use super::*;
+    use git_core::hooks::{hooks_dir, HookError, HookOptions, HookOutcome, HookReporter};
+    use git_core::patch::apply_patch_with;
+
+    fn apply_with_hooks(
+        repo: &Repository,
+        series: &[u8],
+        how: PatchApply,
+    ) -> Result<Vec<String>, PatchError> {
+        apply_patch_with(repo, series, how, HookOptions::default())
+    }
+
+    fn log_path(repo: &Repository) -> std::path::PathBuf {
+        repo.path().join("hook-log")
+    }
+
+    fn read_hook_log(repo: &Repository) -> String {
+        std::fs::read_to_string(log_path(repo)).unwrap_or_default()
+    }
+
+    /// `name`'s hook appends `<name>` and then whatever `body` prints to the log.
+    fn logging_hook(repo: &Repository, name: &str, body: &str) {
+        let log = log_path(repo);
+        common::install_hook(
+            &hooks_dir(repo).unwrap(),
+            name,
+            &format!("{{ echo {name}; {body} }} >> '{}'", log.display()),
+        );
+    }
+
+    fn assert_put_back(dir: &std::path::Path, repo: &Repository, base: &str) {
+        assert_eq!(head(repo).id().to_string(), base);
+        assert_eq!(read(dir, "f.txt"), "one\n");
+        assert!(!dir.join("g.txt").exists());
+        assert!(status(repo).is_empty(), "{:?}", status(repo));
+    }
+
+    #[test]
+    fn applypatch_msg_gets_each_mails_message_in_a_file() {
+        let (_dir, repo, _base, series) = series_on_base();
+        logging_hook(&repo, "applypatch-msg", "cat \"$1\";");
+
+        apply_with_hooks(&repo, &series, PatchApply::Commits).unwrap();
+
+        assert_eq!(
+            read_hook_log(&repo),
+            "applypatch-msg\nSecond\n\nWhy it changed.\napplypatch-msg\nThird\n"
+        );
+    }
+
+    #[test]
+    fn applypatch_msg_can_rewrite_the_message() {
+        let (_dir, repo, _base, series) = series_on_base();
+        common::install_hook(
+            &hooks_dir(&repo).unwrap(),
+            "applypatch-msg",
+            "printf 'Checked: %s\\n' \"$(head -n 1 \"$1\")\" > \"$1\"",
+        );
+
+        apply_with_hooks(&repo, &series, PatchApply::Commits).unwrap();
+
+        let third = head(&repo);
+        assert_eq!(third.message().unwrap(), "Checked: Third\n");
+        assert_eq!(
+            third.parent(0).unwrap().message().unwrap(),
+            "Checked: Second\n"
+        );
+    }
+
+    #[test]
+    fn a_failing_applypatch_msg_puts_the_whole_series_back() {
+        let (dir, repo, base, series) = series_on_base();
+        // Accepts the first mail, rejects the second.
+        common::install_hook(
+            &hooks_dir(&repo).unwrap(),
+            "applypatch-msg",
+            "if grep -q Third \"$1\"; then echo 'no Third here' >&2; exit 1; fi",
+        );
+
+        let err = apply_with_hooks(&repo, &series, PatchApply::Commits).unwrap_err();
+
+        match &err {
+            PatchError::HookFailed {
+                hook,
+                output,
+                subject,
+            } => {
+                assert_eq!(hook, "applypatch-msg");
+                assert_eq!(output, "no Third here\n");
+                assert_eq!(subject, "Third");
+            }
+            other => panic!("expected HookFailed, got {other:?}"),
+        }
+        assert_eq!(
+            err.to_string(),
+            "The applypatch-msg hook failed on \"Third\". Nothing was applied."
+        );
+        assert_put_back(dir.path(), &repo, &base);
+    }
+
+    #[test]
+    fn pre_applypatch_runs_with_the_mail_in_the_index_before_its_commit() {
+        if !common::program_available("git") {
+            eprintln!("git CLI not found; skipping");
+            return;
+        }
+        let (_dir, repo, base, series) = series_on_base();
+        logging_hook(
+            &repo,
+            "pre-applypatch",
+            "git diff --cached --name-only; git rev-parse HEAD;",
+        );
+
+        let ids = apply_with_hooks(&repo, &series, PatchApply::Commits).unwrap();
+
+        assert_eq!(
+            read_hook_log(&repo),
+            format!(
+                "pre-applypatch\nf.txt\n{base}\npre-applypatch\nf.txt\ng.txt\n{}\n",
+                ids[0]
+            )
+        );
+    }
+
+    #[test]
+    fn a_failing_pre_applypatch_puts_the_whole_series_back() {
+        let (dir, repo, base, series) = series_on_base();
+        // Accepts the first mail, rejects the second (which creates g.txt).
+        common::install_hook(
+            &hooks_dir(&repo).unwrap(),
+            "pre-applypatch",
+            "if [ -e g.txt ]; then echo 'g.txt is not allowed'; exit 3; fi",
+        );
+
+        let err = apply_with_hooks(&repo, &series, PatchApply::Commits).unwrap_err();
+
+        match &err {
+            PatchError::HookFailed {
+                hook,
+                output,
+                subject,
+            } => {
+                assert_eq!(hook, "pre-applypatch");
+                assert_eq!(output, "g.txt is not allowed\n");
+                assert_eq!(subject, "Third");
+            }
+            other => panic!("expected HookFailed, got {other:?}"),
+        }
+        assert_put_back(dir.path(), &repo, &base);
+    }
+
+    #[test]
+    fn files_pre_applypatch_stages_are_part_of_the_commit() {
+        if !common::program_available("git") {
+            eprintln!("git CLI not found; skipping");
+            return;
+        }
+        let (dir, repo, _base, series) = series_on_base();
+        write_file(dir.path(), "extra.txt", "made by the hook\n");
+        common::install_hook(
+            &hooks_dir(&repo).unwrap(),
+            "pre-applypatch",
+            "git add extra.txt",
+        );
+
+        let ids = apply_with_hooks(&repo, &series, PatchApply::Commits).unwrap();
+
+        let first = repo
+            .find_commit(git2::Oid::from_str(&ids[0]).unwrap())
+            .unwrap();
+        assert!(first.tree().unwrap().get_name("extra.txt").is_some());
+        assert!(status(&repo).is_empty(), "{:?}", status(&repo));
+    }
+
+    #[test]
+    fn post_applypatch_runs_for_each_commit_once_the_series_landed_and_its_failure_is_ignored() {
+        let (_dir, repo, _base, series) = series_on_base();
+        common::log_hooks(&repo, &["applypatch-msg", "pre-applypatch"]);
+        let log = log_path(&repo);
+        common::install_hook(
+            &hooks_dir(&repo).unwrap(),
+            "post-applypatch",
+            &format!("echo \"post-applypatch $*\" >> '{}'; exit 1", log.display()),
+        );
+
+        let ids = apply_with_hooks(&repo, &series, PatchApply::Commits).unwrap();
+
+        assert_eq!(ids.len(), 2);
+        assert_eq!(head(&repo).id().to_string(), ids[1]);
+        assert_eq!(
+            common::read_log(&repo),
+            "applypatch-msg <msg>\npre-applypatch \napplypatch-msg <msg>\npre-applypatch \n\
+             post-applypatch \npost-applypatch \n"
+        );
+    }
+
+    #[test]
+    fn no_post_applypatch_runs_when_the_series_is_put_back() {
+        let (dir, repo, base, series) = series_on_base();
+        common::log_hooks(&repo, &["post-applypatch"]);
+        common::install_hook(
+            &hooks_dir(&repo).unwrap(),
+            "pre-applypatch",
+            "if [ -e g.txt ]; then exit 1; fi",
+        );
+
+        apply_with_hooks(&repo, &series, PatchApply::Commits).unwrap_err();
+
+        assert_eq!(common::read_log(&repo), "");
+        assert_put_back(dir.path(), &repo, &base);
+    }
+
+    #[test]
+    fn no_verify_skips_applypatch_msg_and_pre_applypatch_but_not_post_applypatch() {
+        let (_dir, repo, _base, series) = series_on_base();
+        let hooks = hooks_dir(&repo).unwrap();
+        common::install_hook(&hooks, "applypatch-msg", "exit 1");
+        common::install_hook(&hooks, "pre-applypatch", "exit 1");
+        let log = log_path(&repo);
+        common::install_hook(
+            &hooks,
+            "post-applypatch",
+            &format!("echo post-applypatch >> '{}'", log.display()),
+        );
+
+        let ids = apply_patch_with(
+            &repo,
+            &series,
+            PatchApply::Commits,
+            HookOptions {
+                no_verify: true,
+                ..HookOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(ids.len(), 2);
+        assert_eq!(read_hook_log(&repo), "post-applypatch\npost-applypatch\n");
+    }
+
+    #[test]
+    fn applying_without_committing_runs_no_hooks() {
+        for how in [PatchApply::WorkTree, PatchApply::Stage] {
+            let (_dir, repo, _base, series) = series_on_base();
+            common::log_hooks(
+                &repo,
+                &["applypatch-msg", "pre-applypatch", "post-applypatch"],
+            );
+
+            apply_with_hooks(&repo, &series, how).unwrap();
+
+            assert_eq!(common::read_log(&repo), "", "{how:?}");
+        }
+    }
+
+    #[test]
+    fn apply_patch_as_runs_the_hooks_too() {
+        let (dir, repo, base, series) = series_on_base();
+        common::install_hook(&hooks_dir(&repo).unwrap(), "applypatch-msg", "exit 1");
+
+        let err = apply_patch_as(&repo, &series, PatchApply::Commits).unwrap_err();
+
+        assert!(matches!(err, PatchError::HookFailed { .. }), "{err:?}");
+        assert_put_back(dir.path(), &repo, &base);
+    }
+
+    #[test]
+    fn a_hook_that_cannot_start_rejects_like_a_failing_one() {
+        let (dir, repo, base, series) = series_on_base();
+        let path = common::install_hook(&hooks_dir(&repo).unwrap(), "pre-applypatch", "");
+        std::fs::write(&path, "#!/no/such/interpreter\n").unwrap();
+
+        let err = apply_with_hooks(&repo, &series, PatchApply::Commits).unwrap_err();
+
+        match &err {
+            PatchError::HookFailed { hook, output, .. } => {
+                assert_eq!(hook, "pre-applypatch");
+                assert!(output.contains("#! line"), "{output}");
+            }
+            other => panic!("expected HookFailed, got {other:?}"),
+        }
+        assert_put_back(dir.path(), &repo, &base);
+    }
+
+    #[derive(Default)]
+    struct Recorder(Vec<String>);
+    impl HookReporter for Recorder {
+        fn started(&mut self, hook: &str) {
+            self.0.push(format!("start {hook}"));
+        }
+        fn finished(&mut self, hook: &str, _result: &Result<HookOutcome, HookError>) {
+            self.0.push(format!("end {hook}"));
+        }
+    }
+
+    #[test]
+    fn the_reporter_sees_each_hook_and_cancel_puts_the_series_back() {
+        let (dir, repo, base, series) = series_on_base();
+        common::install_hook(&hooks_dir(&repo).unwrap(), "pre-applypatch", "sleep 30");
+        let mut recorder = Recorder::default();
+        let started = std::time::Instant::now();
+
+        let err = apply_patch_with(
+            &repo,
+            &series,
+            PatchApply::Commits,
+            HookOptions {
+                cancel: Some(&|| true),
+                reporter: Some(&mut recorder),
+                ..HookOptions::default()
+            },
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, PatchError::Hook(HookError::Cancelled { .. })),
+            "{err:?}"
+        );
+        assert_eq!(err.to_string(), "The pre-applypatch hook was cancelled.");
+        assert!(started.elapsed() < std::time::Duration::from_secs(20));
+        assert_eq!(
+            recorder.0,
+            vec!["start pre-applypatch", "end pre-applypatch"]
+        );
+        assert_put_back(dir.path(), &repo, &base);
+    }
+}
