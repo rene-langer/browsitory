@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
+import { DisabledReasonTip } from "./ReasonButton";
+import reasonStyles from "./ReasonButton.module.css";
 import styles from "./SplitButton.module.css";
 
 /**
  * A main action button with a chevron that opens a menu of related actions (SyncBar's Fetch,
  * the commit dock's Stash). The two buttons read as one control; the chevron's `aria-label` is
  * `menuLabel`. `disabled` disables both; `title` goes on the main button, `menuTitle` (default
- * `title`) on the chevron.
+ * `title`) on the chevron. A `reason` disables both too, as `aria-disabled` with the reason shown
+ * on hover and focus and as their description (#664), instead of a `title`.
  */
 export function SplitButton({
   label,
@@ -21,6 +24,7 @@ export function SplitButton({
   chevronClassName,
   describedBy,
   action,
+  reason = null,
 }: {
   label: string;
   onClick: () => void;
@@ -37,18 +41,28 @@ export function SplitButton({
   describedBy?: string;
   /** `data-action` of the main button, a stable hook for the end-to-end tests. */
   action?: string;
+  /** Why neither part can run now (#664); `null` leaves them to `disabled`. */
+  reason?: string | null;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number; returnFocusTo: HTMLElement } | null>(null);
+  const reasonId = useId();
+  const blocked = reason !== null;
+  const blockedProps = blocked
+    ? { "aria-disabled": true as const, "aria-describedby": [describedBy, reasonId].filter(Boolean).join(" ") }
+    : {};
   return (
-    <span className={styles.group}>
+    <span className={`${styles.group} ${reasonStyles.wrap}`}>
       <button
         type="button"
         className={className}
         disabled={disabled}
-        title={title}
+        title={blocked ? undefined : title}
         aria-describedby={describedBy}
         data-action={action}
-        onClick={() => onClick()}
+        {...blockedProps}
+        onClick={() => {
+          if (!blocked) onClick();
+        }}
       >
         {label}
       </button>
@@ -59,8 +73,10 @@ export function SplitButton({
         aria-haspopup="menu"
         aria-expanded={menu !== null}
         disabled={disabled}
-        title={menuTitle ?? title}
+        title={blocked ? undefined : (menuTitle ?? title)}
+        {...blockedProps}
         onClick={(event) => {
+          if (blocked) return;
           const chevron = event.currentTarget;
           if (menu !== null) {
             // A second click closes the menu; focus stays on the chevron (WebKit may not have
@@ -75,6 +91,7 @@ export function SplitButton({
       >
         <ChevronDown size={12} aria-hidden="true" />
       </button>
+      {blocked && <DisabledReasonTip id={reasonId} reason={reason} />}
       {menu !== null && (
         <ContextMenu
           x={menu.x}

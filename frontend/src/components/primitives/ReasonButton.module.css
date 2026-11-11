@@ -1,0 +1,30 @@
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Below the control, over whatever follows; shown on hover and focus only (#664). */
+.tip {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: 20rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  white-space: normal;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.wrap:hover > .tip,
+.wrap:focus-within > .tip {
+  visibility: visible;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useId } from "react";
 import type { FastForwardMode, MergeOptions } from "../ipc/RepoClient";
 import { FormDialog } from "./primitives/FormDialog";
 import { Toolbar } from "./primitives/Toolbar";
@@ -36,6 +36,8 @@ export function MergeDialog({
   /** Why repository operations are blocked now, or `null`. */
   blockedReason?: string | null;
 }) {
+  // The visible reason the submit button is disabled is its description (#664).
+  const reasonId = useId();
   const [options, setOptions] = useState<MergeOptions | null>(null);
 
   useEffect(() => {
@@ -95,9 +97,9 @@ export function MergeDialog({
         <p id="merge-dialog-squash-hint" className={styles.hint}>
           Stage the combined changes; you write the commit.
         </p>
-        {blockedReason !== null && <p className={formStyles.blocked}>{blockedReason}</p>}
+        {blockedReason !== null && <p id={reasonId} className={formStyles.blocked}>{blockedReason}</p>}
         <Toolbar>
-          <button type="submit" disabled={options === null || blockedReason !== null} title={blockedReason ?? undefined}>
+          <button type="submit" disabled={options === null || blockedReason !== null} title={blockedReason ?? undefined} aria-describedby={blockedReason !== null ? reasonId : undefined}>
             Merge
           </button>
           <button type="button" onClick={onCancel}>

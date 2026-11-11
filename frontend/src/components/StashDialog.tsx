@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useId } from "react";
 import type { StashOptions } from "../ipc/RepoClient";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
@@ -26,6 +26,8 @@ export function StashDialog({
   onStash: (options: StashOptions) => void;
   onCancel: () => void;
 }) {
+  // The visible reason the submit button is disabled is its description (#664).
+  const reasonId = useId();
   const [message, setMessage] = useState("");
   const [keepIndex, setKeepIndex] = useState(false);
   const [includeUntracked, setIncludeUntracked] = useState(true);
@@ -74,9 +76,9 @@ export function StashDialog({
             Include untracked files
           </label>
         )}
-        {blockedReason !== null && <p className={styles.blocked}>{blockedReason}</p>}
+        {blockedReason !== null && <p id={reasonId} className={styles.blocked}>{blockedReason}</p>}
         <Toolbar>
-          <button type="submit" disabled={blockedReason !== null} title={blockedReason ?? undefined}>
+          <button type="submit" disabled={blockedReason !== null} title={blockedReason ?? undefined} aria-describedby={blockedReason !== null ? reasonId : undefined}>
             Stash
           </button>
           <button type="button" onClick={onCancel}>

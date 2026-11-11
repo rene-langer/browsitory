@@ -18,16 +18,19 @@ describe("UndoRedoButtons", () => {
 
   it("is disabled with 'Nothing to …' when a stack is empty", () => {
     render(<UndoRedoButtons undoLabel={null} redoLabel={null} disabled={false} disabledReason={null} onUndo={vi.fn()} onRedo={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Nothing to undo" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Nothing to redo" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Nothing to undo" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Nothing to redo" })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("is disabled with the busy reason while an operation runs", () => {
+    const onUndo = vi.fn();
     render(
-      <UndoRedoButtons undoLabel="Stage a.txt" redoLabel={null} disabled disabledReason="Another action is in progress." onUndo={vi.fn()} onRedo={vi.fn()} />,
+      <UndoRedoButtons undoLabel="Stage a.txt" redoLabel={null} disabled disabledReason="Another action is in progress." onUndo={onUndo} onRedo={vi.fn()} />,
     );
     const undo = screen.getByRole("button", { name: "Undo Stage a.txt" });
-    expect(undo).toBeDisabled();
-    expect(undo).toHaveAttribute("title", "Another action is in progress.");
+    expect(undo).toHaveAttribute("aria-disabled", "true");
+    expect(undo).toHaveAccessibleDescription("Another action is in progress.");
+    fireEvent.click(undo);
+    expect(onUndo).not.toHaveBeenCalled();
   });
 });

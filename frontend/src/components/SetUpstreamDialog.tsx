@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useId } from "react";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { FormDialog } from "./primitives/FormDialog";
 import formStyles from "./primitives/FormDialog.module.css";
@@ -26,6 +26,8 @@ export function SetUpstreamDialog({
   onSetUpstream: (remoteName: string, remoteBranch: string) => Promise<void>;
   onClose: () => void;
 }) {
+  // The visible reason the submit button is disabled is its description (#664).
+  const reasonId = useId();
   const [upstreamRemoteField, setUpstreamRemoteField] = useState("");
   const [upstreamBranchField, setUpstreamBranchField] = useState("");
   const [remoteBranchOptions, setRemoteBranchOptions] = useState<string[]>([]);
@@ -75,8 +77,8 @@ export function SetUpstreamDialog({
             <option key={name} value={name} />
           ))}
         </datalist>
-        {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
-        <button type="submit" disabled={operationDisabled} title={busyReason ?? undefined}>
+        {busyReason !== null && <p id={reasonId} className={formStyles.blocked}>{busyReason}</p>}
+        <button type="submit" disabled={operationDisabled} title={busyReason ?? undefined} aria-describedby={busyReason !== null ? reasonId : undefined}>
           Set upstream
         </button>
         <button type="button" onClick={onClose}>

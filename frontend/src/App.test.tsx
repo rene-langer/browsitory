@@ -605,7 +605,7 @@ describe("App", () => {
     const closeA = () => tabA.parentElement!.querySelector<HTMLButtonElement>("button:not([role='tab'])")!;
 
     const stash = await screen.findByRole("button", { name: "Stash" });
-    await waitFor(() => expect(stash).toBeEnabled());
+    await waitFor(() => expect(stash).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(stash);
     await waitFor(() => expect(closeA()).toBeDisabled());
 
@@ -1190,7 +1190,7 @@ describe("App", () => {
     render(<App client={client} />);
 
     const push = await screen.findByRole("button", { name: "Push" });
-    await waitFor(() => expect(push).toBeEnabled());
+    await waitFor(() => expect(push).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(push);
     const dialog = await screen.findByRole("dialog", { name: "Push main" });
     expect(within(dialog).getByLabelText("Set as upstream")).toBeChecked();
@@ -1232,7 +1232,7 @@ describe("App", () => {
     render(<App client={client} />);
 
     const push = await screen.findByRole("button", { name: "Push" });
-    await waitFor(() => expect(push).toBeEnabled());
+    await waitFor(() => expect(push).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(push);
 
     const activity = await screen.findByRole("group", { name: "Pushing main to origin/main" });
@@ -1240,8 +1240,8 @@ describe("App", () => {
     act(() => emit(event("Receiving", 3, 4)));
     expect(within(activity).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "75");
     // Repository actions wait, and say what for; browsing (the sidebar toggle) stays available.
-    expect(push).toBeDisabled();
-    expect(push).toHaveAttribute("title", "Pushing main to origin/main. Wait for it to finish, or cancel it.");
+    expect(push).toHaveAttribute("aria-disabled", "true");
+    expect(push).toHaveAccessibleDescription("Pushing main to origin/main. Wait for it to finish, or cancel it.");
     expect(screen.getByRole("button", { name: "Sidebar" })).toBeEnabled();
 
     fireEvent.click(within(activity).getByRole("button", { name: "Cancel" }));
@@ -1283,7 +1283,7 @@ describe("App", () => {
     render(<App client={client} />);
 
     const fetch = await screen.findByRole("button", { name: "Fetch" });
-    await waitFor(() => expect(fetch).toBeEnabled());
+    await waitFor(() => expect(fetch).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(fetch);
 
     await screen.findByText("Fetched from origin. main is 3 commits behind origin/main.");
@@ -1969,8 +1969,11 @@ describe("App", () => {
         fireEvent.keyDown(window, { key: "k", ctrlKey: true });
         fireEvent.change(await screen.findByRole("combobox", { name: "Command palette" }), { target: { value: "c1" } });
         const results = await screen.findByRole("listbox", { name: "Command results" });
+        // Listed as unavailable, with the reason, never runnable (#644).
         for (const name of ["Cherry-pick c1", "Revert c1", "Checkout c1 (detached)", "Reset to c1…"]) {
-          expect(within(results).queryByRole("option", { name })).toBeNull();
+          const option = within(results).getByRole("option", { name });
+          expect(option).toHaveAttribute("aria-disabled", "true");
+          expect(option).toHaveAccessibleDescription("A rebase started in a terminal is in progress.");
         }
       } finally {
         Element.prototype.scrollIntoView = original;
@@ -2321,7 +2324,7 @@ describe("App", () => {
       render(<App client={stashClient({ saveStash })} />);
 
       const stash = await screen.findByRole("button", { name: "Stash" });
-      await waitFor(() => expect(stash).toBeEnabled());
+      await waitFor(() => expect(stash).not.toHaveAttribute("aria-disabled"));
       fireEvent.click(stash);
 
       await waitFor(() =>

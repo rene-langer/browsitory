@@ -1,6 +1,10 @@
+import { ReasonButton } from "./primitives/ReasonButton";
 import { Toolbar } from "./primitives/Toolbar";
 
-/** Undo/redo the last recorded Git operation; tooltips name the step. */
+/**
+ * Undo/redo the last recorded Git operation; tooltips name the step. Busy, each says why next to
+ * itself on hover and focus (#664).
+ */
 export function UndoRedoButtons({
   undoLabel,
   redoLabel,
@@ -18,15 +22,15 @@ export function UndoRedoButtons({
 }) {
   const undoName = undoLabel === null ? "Nothing to undo" : `Undo ${undoLabel}`;
   const redoName = redoLabel === null ? "Nothing to redo" : `Redo ${redoLabel}`;
-  const busyTitle = disabled ? (disabledReason ?? undefined) : undefined;
+  const busy = disabled ? (disabledReason ?? "Another operation is in progress.") : null;
   return (
     <Toolbar aria-label="Undo">
-      <button type="button" aria-label={undoName} title={busyTitle ?? undoName} disabled={disabled || undoLabel === null} onClick={onUndo}>
+      <ReasonButton aria-label={undoName} title={undoName} reason={busy ?? (undoLabel === null ? "Nothing to undo." : null)} onClick={onUndo}>
         ↶
-      </button>
-      <button type="button" aria-label={redoName} title={busyTitle ?? redoName} disabled={disabled || redoLabel === null} onClick={onRedo}>
+      </ReasonButton>
+      <ReasonButton aria-label={redoName} title={redoName} reason={busy ?? (redoLabel === null ? "Nothing to redo." : null)} onClick={onRedo}>
         ↷
-      </button>
+      </ReasonButton>
     </Toolbar>
   );
 }

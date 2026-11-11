@@ -56,6 +56,25 @@ describe("ContextMenu", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it("shows a disabled item's reason under its label, as its description (#664)", () => {
+    render(
+      <ContextMenu
+        x={0}
+        y={0}
+        onClose={() => {}}
+        items={[
+          { label: "Push", onSelect: () => {}, disabled: true, title: "A merge is in progress." },
+          { label: "Prune", onSelect: () => {}, title: "Remove deleted branches" },
+        ]}
+      />,
+    );
+    const push = screen.getByRole("menuitem", { name: "Push" });
+    expect(push).toHaveAccessibleDescription("A merge is in progress.");
+    expect(within(screen.getByRole("menu")).getByText("A merge is in progress.")).toBeVisible();
+    // An enabled item's title stays a tooltip only.
+    expect(screen.queryByText("Remove deleted branches")).toBeNull();
+  });
+
   it("marks a destructive item for styling via a data attribute", () => {
     render(
       <ContextMenu x={0} y={0} onClose={() => {}} items={[{ label: "Remove remote", onSelect: () => {}, destructive: true }]} />,

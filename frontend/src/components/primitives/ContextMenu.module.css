@@ -75,3 +75,12 @@
   margin: var(--space-1) calc(-1 * var(--space-1));
   background: var(--color-border);
 }
+
+/* Why a disabled item can't run (#664), visible under its label. */
+.reason {
+  display: block;
+  max-width: 22rem;
+  padding: 0 var(--space-2) var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
