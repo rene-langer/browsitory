@@ -20,6 +20,9 @@ pub enum HookSource {
     Merge,
     /// A cherry-pick or revert (single or sequence).
     Pick,
+    /// A patch file applied as commits: `applypatch-msg`, `pre-applypatch`, `post-applypatch`
+    /// (#747).
+    Patch,
 }
 
 /// Progress of a hook, tagged with the command's operation id (which

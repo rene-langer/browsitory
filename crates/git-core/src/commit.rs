@@ -677,131 +677,193 @@ pub fn commit_with(
     mut hooks: HookOptions<'_>,
 ) -> Result<Committed, CommitError> {
     require_identity(repo)?;
-    // `mergehead_foreach` needs `&mut repo`, so it must run — and finish — before anything
-    // below takes an immutable borrow that could outlive it. `git2::Tree` (bound below) has a
-    // `Drop` impl, which under NLL's drop-check extends its immutable borrow of `repo` to the
-    // end of this function's scope, not just its last use — so it (and everything borrowed
-    // alongside it) is confined to the block below, ending before `mergehead_foreach` could need `&mut`
-    // again.
-    let mut is_merging = merging_now(repo);
-    let mut merge_parent_ids = if is_merging {
-        merge_heads(repo)?
-    } else {
-        Vec::new()
+    let merge = MergeAtCommit::read(repo)?;
+    clear_landed_pick_or_revert(repo)?;
+    let pick_author = pick_author(repo);
+    // `git merge`'s hooks only for the very clean merge the caller saw; otherwise `git commit`'s.
+    let merge_hooks = match &set {
+        CommitHookSet::CleanMerge { head, merge_heads } => {
+            merge.is_merging && merge.head_before == Some(*head) && merge.parent_ids == *merge_heads
+        }
+        CommitHookSet::Commit => false,
     };
-    let head_before = head_commit_id(repo);
-    // A merge whose commit already landed but whose state could not be cleared (D7-A): every
-    // MERGE_HEAD is already in HEAD's history. Committing "the merge" again would make a second
-    // merge commit, so the leftover state is cleared and this is an ordinary commit (#183).
-    // Never with conflict stages in the index: that merge is still being resolved.
-    if is_merging
-        && !index_conflicted(repo)
-        && merge_already_committed(repo, head_before, &merge_parent_ids)
-    {
-        clear_commit_state(repo).map_err(|_| CommitError::LeftoverMergeState)?;
-        is_merging = false;
-        merge_parent_ids.clear();
+    let hooked = run_hooks_checking_merge(repo, message, &merge, merge_hooks, &mut hooks)?;
+    let oid = write_commit(repo, &mut hooks, &merge, &hooked, pick_author.as_ref())?;
+    finish_commit(repo, merge.is_merging, merge_hooks, &mut hooks);
+    Ok(Committed {
+        commit_id: oid.to_string(),
+        merge_hooks,
+    })
+}
+
+/// The merge a commit concludes (if any), read before its hooks run. `merge_heads` needs
+/// `&mut repo` (`mergehead_foreach`), so this is read before anything borrows `repo` for the
+/// commit itself.
+struct MergeAtCommit {
+    is_merging: bool,
+    /// The MERGE_HEADs: the commit's parents after HEAD.
+    parent_ids: Vec<git2::Oid>,
+    head_before: Option<git2::Oid>,
+}
+
+impl MergeAtCommit {
+    fn read(repo: &mut git2::Repository) -> Result<Self, CommitError> {
+        let mut is_merging = merging_now(repo);
+        let mut parent_ids = if is_merging {
+            merge_heads(repo)?
+        } else {
+            Vec::new()
+        };
+        let head_before = head_commit_id(repo);
+        // A merge whose commit already landed but whose state could not be cleared (D7-A): every
+        // MERGE_HEAD is already in HEAD's history. Committing "the merge" again would make a
+        // second merge commit, so the leftover state is cleared and this is an ordinary commit
+        // (#183). Never with conflict stages in the index: that merge is still being resolved.
+        if is_merging
+            && !index_conflicted(repo)
+            && merge_already_committed(repo, head_before, &parent_ids)
+        {
+            clear_commit_state(repo).map_err(|_| CommitError::LeftoverMergeState)?;
+            is_merging = false;
+            parent_ids.clear();
+        }
+        Ok(MergeAtCommit {
+            is_merging,
+            parent_ids,
+            head_before,
+        })
     }
-    // Likewise a cherry-pick whose commit already landed (D7-A): HEAD is the pick's own commit
-    // (`pick_already_committed`). Its CHERRY_PICK_HEAD must not make the picked author the
-    // author of this unrelated commit, so the leftover is cleared first and the commit is the
-    // user's (#226, decision D3-A: no message check, since hooks may rewrite it).
+
+    /// The parents were read before the hooks, which may run for minutes: a merge aborted and
+    /// restarted meanwhile must not be committed with the old merge's parents (#183).
+    fn changed(&self, repo: &mut git2::Repository) -> Result<bool, CommitError> {
+        Ok(self.is_merging
+            && (!merging_now(repo)
+                || head_commit_id(repo) != self.head_before
+                || merge_heads(repo)? != self.parent_ids))
+    }
+}
+
+/// Clears the state of a cherry-pick or revert whose commit already landed (D7-A), so it
+/// doesn't shape this unrelated commit.
+fn clear_landed_pick_or_revert(repo: &git2::Repository) -> Result<(), CommitError> {
+    // A cherry-pick: HEAD is the pick's own commit (`pick_already_committed`). Its
+    // CHERRY_PICK_HEAD must not make the picked author the author of this unrelated commit, so
+    // the leftover is cleared first and the commit is the user's (#226, decision D3-A: no
+    // message check, since hooks may rewrite it).
     if pick_already_committed(repo) {
         // A terminal `git cherry-pick A B C` keeps the rest of its todo (#241).
         clear_commit_state(repo).map_err(|_| CommitError::LeftoverPickState)?;
     }
-    // And a revert whose commit already landed (#232): its REVERT_HEAD and MERGE_MSG must not
-    // make this commit look like the revert (`prepare-commit-msg … merge`).
+    // A revert (#232): its REVERT_HEAD and MERGE_MSG must not make this commit look like the
+    // revert (`prepare-commit-msg … merge`).
     if revert_already_committed(repo) {
         clear_commit_state(repo).map_err(|_| CommitError::LeftoverRevertState)?;
     }
+    Ok(())
+}
 
-    let pick_author = if picking_now(repo) {
+/// The picked commit's author while a cherry-pick is being concluded; the commit keeps it.
+fn pick_author(repo: &git2::Repository) -> Option<git2::Signature<'static>> {
+    if picking_now(repo) {
         repo.find_reference("CHERRY_PICK_HEAD")
             .ok()
             .and_then(|r| r.peel_to_commit().ok())
             .map(|c| c.author().to_owned())
     } else {
         None
-    };
+    }
+}
 
-    // `git merge`'s hooks only for the very clean merge the caller saw; otherwise `git commit`'s.
-    let merge_hooks = match &set {
-        CommitHookSet::CleanMerge { head, merge_heads } => {
-            is_merging && head_before == Some(*head) && merge_parent_ids == *merge_heads
-        }
-        CommitHookSet::Commit => false,
-    };
+/// Runs the pre hook (`pre-commit`, or `pre-merge-commit` with `merge_hooks`) and the message
+/// hooks, and returns the message they leave. The merge is checked again after each, so a
+/// restarted merge's fresh MERGE_MSG isn't overwritten by the message file of the old one.
+fn run_hooks_checking_merge(
+    repo: &mut git2::Repository,
+    message: &str,
+    merge: &MergeAtCommit,
+    merge_hooks: bool,
+    hooks: &mut HookOptions<'_>,
+) -> Result<HookedMessage, CommitError> {
     let (pre_hook, message_file) = if merge_hooks {
         ("pre-merge-commit", MessageFile::MergeMsg)
     } else {
         ("pre-commit", MessageFile::CommitEditmsg)
     };
-    let source = message_source(repo, is_merging);
-    // The parents were read before the hooks, which may run for minutes: a merge aborted and
-    // restarted meanwhile must not be committed with the old merge's parents (#183). Checked
-    // after the pre hook too, so a restarted merge's fresh MERGE_MSG isn't overwritten by the
-    // message file of the old one.
-    let merge_changed = |repo: &mut git2::Repository| -> Result<bool, CommitError> {
-        Ok(is_merging
-            && (!merging_now(repo)
-                || head_commit_id(repo) != head_before
-                || merge_heads(repo)? != merge_parent_ids))
-    };
-    let reload_index = run_pre_hook(repo, pre_hook, &mut hooks)?;
-    if merge_changed(repo)? {
+    let source = message_source(repo, merge.is_merging);
+    let reload_index = run_pre_hook(repo, pre_hook, hooks)?;
+    if merge.changed(repo)? {
         return Err(CommitError::MergeChanged);
     }
     let hooked = HookedMessage {
-        message: run_message_hooks(repo, message, source, message_file, &mut hooks)?,
+        message: run_message_hooks(repo, message, source, message_file, hooks)?,
         reload_index,
     };
-    if merge_changed(repo)? {
+    if merge.changed(repo)? {
         return Err(CommitError::MergeChanged);
     }
+    Ok(hooked)
+}
 
-    let oid = {
-        let mut index = repo.index()?;
-        if hooked.reload_index {
-            index.read(true)?;
-        }
-        let tree_id = index.write_tree()?;
-        let tree = repo.find_tree(tree_id)?;
-        let signature = repo.signature()?;
+/// Writes the index's tree as a commit on HEAD, with the merge's parents, the picked author if
+/// any, and the hooked message.
+fn write_commit(
+    repo: &git2::Repository,
+    hooks: &mut HookOptions<'_>,
+    merge: &MergeAtCommit,
+    hooked: &HookedMessage,
+    pick_author: Option<&git2::Signature<'_>>,
+) -> Result<git2::Oid, CommitError> {
+    let mut index = repo.index()?;
+    if hooked.reload_index {
+        index.read(true)?;
+    }
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    let signature = repo.signature()?;
 
-        let head_parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-        let merge_parents: Vec<git2::Commit> = merge_parent_ids
-            .iter()
-            .filter_map(|oid| repo.find_commit(*oid).ok())
-            .collect();
+    let head_parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+    let merge_parents: Vec<git2::Commit> = merge
+        .parent_ids
+        .iter()
+        .filter_map(|oid| repo.find_commit(*oid).ok())
+        .collect();
 
-        let mut parents: Vec<&git2::Commit> = head_parent.iter().collect();
-        parents.extend(merge_parents.iter());
-        // `git commit` drops the parents another parent already contains (#227).
-        if is_merging && !merge_mode_no_ff(repo) {
-            parents = reduce_heads(repo, parents);
-        }
+    let mut parents: Vec<&git2::Commit> = head_parent.iter().collect();
+    parents.extend(merge_parents.iter());
+    // `git commit` drops the parents another parent already contains (#227).
+    if merge.is_merging && !merge_mode_no_ff(repo) {
+        parents = reduce_heads(repo, parents);
+    }
 
-        create_commit_reporting(
-            repo,
-            &mut hooks,
-            crate::signing::HeadUpdate {
-                expected: head_parent.as_ref().map(|commit| commit.id()),
-                reflog_operation: "commit",
-            },
-            pick_author.as_ref().unwrap_or(&signature),
-            &signature,
-            &hooked.message,
-            &tree,
-            &parents,
-        )?
-    };
+    create_commit_reporting(
+        repo,
+        hooks,
+        crate::signing::HeadUpdate {
+            expected: head_parent.as_ref().map(|commit| commit.id()),
+            reflog_operation: "commit",
+        },
+        pick_author.unwrap_or(&signature),
+        &signature,
+        &hooked.message,
+        &tree,
+        &parents,
+    )
+}
 
+/// After the commit landed, nothing fails it any more (#183): clears the merge, cherry-pick or
+/// revert state it concluded and a used SQUASH_MSG, and runs `post-commit` (not after
+/// `git merge`'s hooks; the caller runs `post-merge`).
+fn finish_commit(
+    repo: &git2::Repository,
+    is_merging: bool,
+    merge_hooks: bool,
+    hooks: &mut HookOptions<'_>,
+) {
     // Cherry-pick/revert leave CHERRY_PICK_HEAD/REVERT_HEAD + MERGE_MSG behind on conflict; the
     // commit that lands the resolved result is single-parent (HEAD only — they are not merges),
     // but the state files must still be cleared or `repo.state()` stays non-Clean.
     let finishes_pick = picking_now(repo) || reverting_now(repo);
-    // The commit landed: nothing after this point fails it (#183).
     if is_merging || finishes_pick {
         cleanup_after_commit(repo);
     }
@@ -813,12 +875,8 @@ pub fn commit_with(
     }
 
     if !merge_hooks {
-        run_post_commit(repo, &mut hooks);
+        run_post_commit(repo, hooks);
     }
-    Ok(Committed {
-        commit_id: oid.to_string(),
-        merge_hooks,
-    })
 }
 
 /// A merge is paused for the commit to conclude: libgit2's `Merge` state, or the MERGE_HEAD git

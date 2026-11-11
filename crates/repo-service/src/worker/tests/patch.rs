@@ -146,3 +146,125 @@ fn a_patch_applied_as_commits_is_one_undo_step() {
         "one\n"
     );
 }
+
+/// Two commits on `base` as a patch series, with HEAD reset to `base`.
+#[cfg(unix)]
+fn series_on_base(
+    dir: &Path,
+    repo: &git2::Repository,
+    handle: &crate::worker::WorkerHandle,
+) -> (String, Vec<u8>) {
+    write_file(dir, "a.txt", "one\n");
+    commit_all(repo, "base");
+    let base = head(repo);
+    write_file(dir, "a.txt", "two\n");
+    commit_all(repo, "Second");
+    let second = head(repo);
+    write_file(dir, "a.txt", "three\n");
+    commit_all(repo, "Third");
+    let third = head(repo);
+    let patch = handle
+        .get_patch(PatchSource::Commits(vec![second, third]))
+        .unwrap();
+    let base_commit = repo
+        .find_commit(git2::Oid::from_str(&base).unwrap())
+        .unwrap();
+    repo.reset(base_commit.as_object(), git2::ResetType::Hard, None)
+        .unwrap();
+    (base, patch)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_rejecting_applypatch_msg_replies_hook_failed_reports_the_hook_and_records_nothing() {
+    let (dir, repo) = init_repo();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let (base, patch) = series_on_base(dir.path(), &repo, &handle);
+    install_hook(
+        &repo,
+        "applypatch-msg",
+        "if grep -q Third \"$1\"; then echo 'no Third'; exit 1; fi",
+    );
+    let undo_before = handle.get_undo_state().unwrap().undo;
+    let (events_tx, events_rx) = mpsc::channel();
+
+    let outcome = handle
+        .apply_patch_reported(patch, PatchApply::Commits, events_tx)
+        .unwrap();
+
+    assert_eq!(
+        outcome,
+        git_core::patch::PatchApplyOutcome::HookFailed {
+            hook: "applypatch-msg".into(),
+            output: "no Third\n".into(),
+            subject: "Third".into(),
+        }
+    );
+    let events: Vec<HookEvent> = events_rx.iter().collect();
+    assert!(
+        matches!(&events[..], [
+            HookEvent::Started { operation_id: a, hook: h1, source: s1 },
+            HookEvent::Finished { operation_id: b, hook: h2, .. },
+            HookEvent::Started { operation_id: c, .. },
+            HookEvent::Finished { .. },
+        ] if a == b && a == c && a.starts_with("apply-") && h1 == "applypatch-msg"
+            && h2 == "applypatch-msg" && *s1 == crate::worker::HookSource::Patch),
+        "{events:?}"
+    );
+    assert_eq!(head(&repo), base);
+    assert_eq!(handle.get_undo_state().unwrap().undo, undo_before);
+}
+
+#[cfg(unix)]
+#[test]
+fn hooks_that_accept_leave_one_applied_outcome_and_one_undo_step() {
+    let (dir, repo) = init_repo();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let (_base, patch) = series_on_base(dir.path(), &repo, &handle);
+    install_hook(&repo, "pre-applypatch", "exit 0");
+    install_hook(&repo, "post-applypatch", "exit 1");
+    let (events_tx, _events_rx) = mpsc::channel();
+
+    let outcome = handle
+        .apply_patch_reported(patch, PatchApply::Commits, events_tx)
+        .unwrap();
+
+    assert_eq!(outcome, git_core::patch::PatchApplyOutcome::Applied);
+    let applied = repo.head().unwrap().peel_to_commit().unwrap();
+    assert_eq!(applied.summary().unwrap(), Some("Third"));
+    assert_eq!(
+        handle.get_undo_state().unwrap().undo,
+        Some("Apply patch as commits".to_string())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cancel_transfer_stops_a_running_pre_applypatch_and_puts_the_series_back() {
+    let (dir, repo) = init_repo();
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let (base, patch) = series_on_base(dir.path(), &repo, &handle);
+    install_hook(&repo, "pre-applypatch", "sleep 30");
+    let (events_tx, events_rx) = mpsc::channel();
+    let canceller = handle.clone();
+    let cancel_thread = std::thread::spawn(move || {
+        if let Ok(HookEvent::Started { operation_id, .. }) = events_rx.recv() {
+            canceller.cancel_transfer(&operation_id);
+        }
+    });
+    let started = std::time::Instant::now();
+
+    let result = handle.apply_patch_reported(patch, PatchApply::Commits, events_tx);
+
+    cancel_thread.join().unwrap();
+    assert_eq!(
+        result.unwrap_err(),
+        crate::wire::ErrorDto::from("The pre-applypatch hook was cancelled.")
+    );
+    // Generous bound: only proves the hook's `sleep 30` was not waited out.
+    assert!(started.elapsed() < Duration::from_secs(25));
+    assert_eq!(head(&repo), base);
+}

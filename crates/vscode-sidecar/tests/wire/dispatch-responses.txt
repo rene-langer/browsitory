@@ -282,6 +282,9 @@ list_missing_recent_repos/string {"jsonrpc":"2.0","id":7,"result":[]}
 list_open_repos/absent {"jsonrpc":"2.0","id":7,"result":{"activePath":null,"entries":[]}}
 list_open_repos/empty {"jsonrpc":"2.0","id":7,"result":{"activePath":null,"entries":[]}}
 list_open_repos/string {"jsonrpc":"2.0","id":7,"result":{"activePath":null,"entries":[]}}
+list_pinned_repos/absent {"jsonrpc":"2.0","id":7,"result":[]}
+list_pinned_repos/empty {"jsonrpc":"2.0","id":7,"result":[]}
+list_pinned_repos/string {"jsonrpc":"2.0","id":7,"result":[]}
 list_pull_requests/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct ListPullRequestsParams","data":{"kind":"Other","message":"invalid type: null, expected struct ListPullRequestsParams"}}}
 list_pull_requests/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 list_pull_requests/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct ListPullRequestsParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct ListPullRequestsParams"}}}
@@ -330,6 +333,9 @@ open_repo/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"inval
 persist_open_repos/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct PersistOpenReposParams","data":{"kind":"Other","message":"invalid type: null, expected struct PersistOpenReposParams"}}}
 persist_open_repos/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `entries`","data":{"kind":"Other","message":"missing field `entries`"}}}
 persist_open_repos/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct PersistOpenReposParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct PersistOpenReposParams"}}}
+pin_recent_repo/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct PinRecentRepoParams","data":{"kind":"Other","message":"invalid type: null, expected struct PinRecentRepoParams"}}}
+pin_recent_repo/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `path`","data":{"kind":"Other","message":"missing field `path`"}}}
+pin_recent_repo/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct PinRecentRepoParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct PinRecentRepoParams"}}}
 pop_stash/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct StashApplyParams","data":{"kind":"Other","message":"invalid type: null, expected struct StashApplyParams"}}}
 pop_stash/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 pop_stash/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct StashApplyParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct StashApplyParams"}}}
@@ -489,6 +495,9 @@ switch_branch/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"i
 undo_last/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoPathParams"}}}
 undo_last/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 undo_last/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoPathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoPathParams"}}}
+unpin_recent_repo/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct PinRecentRepoParams","data":{"kind":"Other","message":"invalid type: null, expected struct PinRecentRepoParams"}}}
+unpin_recent_repo/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `path`","data":{"kind":"Other","message":"missing field `path`"}}}
+unpin_recent_repo/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct PinRecentRepoParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct PinRecentRepoParams"}}}
 unstage_file/absent {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: null, expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: null, expected struct RepoFilePathParams"}}}
 unstage_file/empty {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"missing field `repoPath`","data":{"kind":"Other","message":"missing field `repoPath`"}}}
 unstage_file/string {"jsonrpc":"2.0","id":7,"error":{"code":-32000,"message":"invalid type: string \"x\", expected struct RepoFilePathParams","data":{"kind":"Other","message":"invalid type: string \"x\", expected struct RepoFilePathParams"}}}

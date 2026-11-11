@@ -209,6 +209,113 @@ describe("RepoPicker recent repositories (#690)", () => {
   });
 });
 
+describe("RepoPicker pinned repositories (#766)", () => {
+  /** A client whose recent list follows `pinRecentRepo`/`unpinRecentRepo`, like config's. */
+  function pinningClient(recent: string[], pinned: string[] = [], overrides: Partial<RepoClient> = {}) {
+    let pins = [...pinned];
+    let rest = recent.filter((path) => !pins.includes(path));
+    const pinRecentRepo = vi.fn(async (path: string) => {
+      if (!pins.includes(path)) pins = [...pins, path];
+      rest = rest.filter((recentPath) => recentPath !== path);
+    });
+    const unpinRecentRepo = vi.fn(async (path: string) => {
+      if (!pins.includes(path)) return;
+      pins = pins.filter((pin) => pin !== path);
+      rest = [path, ...rest];
+    });
+    const client = fakeClient({
+      listRecentRepos: async () => [...pins, ...rest],
+      listPinnedRepos: async () => [...pins],
+      pinRecentRepo,
+      unpinRecentRepo,
+      ...overrides,
+    });
+    return { client, pinRecentRepo, unpinRecentRepo };
+  }
+
+  const rowPaths = () =>
+    within(screen.getByRole("region", { name: "Recent repositories" }))
+      .getAllByText(/^\/repo\//)
+      .map((element) => element.textContent);
+
+  it("marks pinned repositories, listed first, with a pressed Unpin button", async () => {
+    const { client } = pinningClient(["/repo/a", "/repo/p"], ["/repo/p"]);
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    const unpin = await screen.findByRole("button", { name: "Unpin p" });
+    expect(unpin).toHaveAttribute("aria-pressed", "true");
+    const pin = screen.getByRole("button", { name: "Pin a" });
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    expect(rowPaths()).toEqual(["/repo/p", "/repo/a"]);
+  });
+
+  it("pins a repository without opening it and moves it to the top", async () => {
+    const onOpenRepo = vi.fn();
+    const { client, pinRecentRepo } = pinningClient(["/repo/a", "/repo/b"]);
+    render(<RepoPicker client={client} onOpenRepo={onOpenRepo} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pin b" }));
+
+    expect(await screen.findByRole("button", { name: "Unpin b" })).toBeInTheDocument();
+    expect(pinRecentRepo).toHaveBeenCalledWith("/repo/b");
+    expect(rowPaths()).toEqual(["/repo/b", "/repo/a"]);
+    expect(onOpenRepo).not.toHaveBeenCalled();
+  });
+
+  it("unpins a repository back into the recent ones", async () => {
+    const { client, unpinRecentRepo } = pinningClient(["/repo/a", "/repo/p", "/repo/q"], ["/repo/p", "/repo/q"]);
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Unpin p" }));
+
+    expect(await screen.findByRole("button", { name: "Pin p" })).toBeInTheDocument();
+    expect(unpinRecentRepo).toHaveBeenCalledWith("/repo/p");
+    expect(rowPaths()).toEqual(["/repo/q", "/repo/p", "/repo/a"]);
+  });
+
+  it("keeps the row as it was and shows the error when pinning fails", async () => {
+    const { client } = pinningClient(["/repo/a"], [], {
+      pinRecentRepo: async () => {
+        throw new Error("config read-only");
+      },
+    });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pin a" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("config read-only");
+    expect(screen.getByRole("button", { name: "Pin a" })).toBeInTheDocument();
+  });
+
+  it("marks a pinned repository whose folder is gone, and removes it with its pin", async () => {
+    const removeRecentRepo = vi.fn(async () => {});
+    const { client } = pinningClient(["/repo/a", "/repo/gone"], ["/repo/gone"], {
+      listMissingRecentRepos: async () => ["/repo/gone"],
+      removeRecentRepo,
+    });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    expect(await screen.findByRole("button", { name: /^gone Folder not found/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unpin gone" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove gone from recent repositories" }));
+
+    await waitFor(() => expect(screen.queryByText("/repo/gone")).toBeNull());
+    expect(removeRecentRepo).toHaveBeenCalledWith("/repo/gone");
+  });
+
+  it("shows every repository as unpinned when the pinned list can't be read", async () => {
+    const { client } = pinningClient(["/repo/a"], [], {
+      listPinnedRepos: async () => {
+        throw new Error("no");
+      },
+    });
+    render(<RepoPicker client={client} onOpenRepo={vi.fn()} {...workspaceProps()} />);
+
+    expect(await screen.findByRole("button", { name: "Pin a" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("RepoPicker welcome (#688)", () => {
   it("leads with the welcome, its start actions, the palette key and the user guide", async () => {
     const onDismiss = vi.fn();

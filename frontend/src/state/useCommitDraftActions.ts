@@ -68,7 +68,7 @@ export function useCommitDraftActions(
   // closing the dialog. Falls back to the failed message when the box is empty.
   const retryWithCurrentMessage = useCallback(
     async (retry: HookRetry) => {
-      if (retry.kind === "push" || retry.kind === "continueSequence" || retry.kind === "pick") {
+      if (retry.kind === "push" || retry.kind === "continueSequence" || retry.kind === "pick" || retry.kind === "applyPatch") {
         return retryWithoutHooks(retry);
       }
       // In amend mode the box shows HEAD's message and the commit draft is stashed: a commit

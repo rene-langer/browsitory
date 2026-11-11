@@ -166,7 +166,7 @@ describe("Apply patch… in the toolbar (#649)", () => {
       problem: null,
     };
     const previewPatch = vi.fn(async () => preview);
-    const applyPatch = vi.fn(async () => {});
+    const applyPatch = vi.fn(async () => ({ kind: "Applied" as const }));
     await renderApp(layoutClient({ openPatchFile, previewPatch, applyPatch }));
     const button = within(toolbar()).getByRole("button", { name: "Apply patch…" });
     await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
@@ -206,7 +206,7 @@ describe("dropping files on the window (#649)", () => {
     const openRepo = vi.fn(async () => {});
     const content = { base64: "ZGlmZg==" };
     const readPatchFile = vi.fn(async () => content);
-    const applyPatch = vi.fn(async () => {});
+    const applyPatch = vi.fn(async () => ({ kind: "Applied" as const }));
     const { client, emit } = dropClient({ openRepo, readPatchFile, applyPatch });
     await renderApp(client);
     emit({ kind: "over" });

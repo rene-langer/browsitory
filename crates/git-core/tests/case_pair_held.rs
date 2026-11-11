@@ -18,20 +18,6 @@ const CASE_PAIRS: [(&str, &str); 5] = [
     ("D/f", "d/f"),
 ];
 
-fn head_id(repo: &git2::Repository) -> git2::Oid {
-    repo.head().unwrap().target().unwrap()
-}
-
-fn index_paths(dir: &std::path::Path) -> Vec<String> {
-    let index = git2::Index::open(&dir.join(".git/index")).unwrap();
-    let mut paths: Vec<String> = index
-        .iter()
-        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
-        .collect();
-    paths.sort();
-    paths
-}
-
 fn sorted(names: &[&str]) -> Vec<String> {
     let mut names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
     names.sort();
@@ -54,7 +40,7 @@ fn repo_holding(
     git_core::branch::create_branch(&repo, "side", "HEAD").unwrap();
     write_file(dir.path(), "other.txt", "other\n");
     commit_all(&repo, "side");
-    let side = head_id(&repo);
+    let side = common::head_id(&repo);
     git_core::branch::switch_branch(&repo, &main).unwrap();
     if diverged {
         write_file(dir.path(), "main.txt", "main\n");
@@ -85,7 +71,7 @@ fn a_merge_is_refused_with_the_pair_named() {
             (false, options(FastForward::Never, false)),
         ] {
             let (dir, repo, _side) = repo_holding(pair, diverged);
-            let head = head_id(&repo);
+            let head = common::head_id(&repo);
 
             let error = git_core::merge::start_merge(&repo, "side", opts).unwrap_err();
 
@@ -98,7 +84,7 @@ fn a_merge_is_refused_with_the_pair_named() {
             assert!(error.to_string().contains("differ only in case"), "{error}");
             // Nothing was written.
             assert_eq!(repo.state(), git2::RepositoryState::Clean, "{pair:?}");
-            assert_eq!(head_id(&repo), head, "{pair:?}");
+            assert_eq!(common::head_id(&repo), head, "{pair:?}");
             assert!(!dir.path().join("other.txt").exists(), "{pair:?}");
             assert!(!repo.path().join("SQUASH_MSG").exists(), "{pair:?}");
         }
@@ -113,9 +99,9 @@ fn a_fast_forward_keeps_both_names() {
         let outcome = git_core::merge::start_merge(&repo, "side", MergeOptions::default()).unwrap();
 
         assert_eq!(outcome, MergeOutcome::FastForwarded, "{pair:?}");
-        assert_eq!(head_id(&repo), side);
+        assert_eq!(common::head_id(&repo), side);
         assert_eq!(
-            index_paths(dir.path()),
+            common::index_paths(dir.path()),
             sorted(&[pair.0, pair.1, "conf", "other.txt"]),
             "{pair:?}"
         );
@@ -129,15 +115,15 @@ fn a_cherry_pick_and_a_revert_keep_both_names() {
 
         git_core::pick::cherry_pick(&repo, &side.to_string(), None, Default::default()).unwrap();
         assert_eq!(
-            index_paths(dir.path()),
+            common::index_paths(dir.path()),
             sorted(&[pair.0, pair.1, "conf", "main.txt", "other.txt"]),
             "{pair:?}"
         );
 
-        let picked = head_id(&repo).to_string();
+        let picked = common::head_id(&repo).to_string();
         git_core::pick::revert(&repo, &picked, None, Default::default()).unwrap();
         assert_eq!(
-            index_paths(dir.path()),
+            common::index_paths(dir.path()),
             sorted(&[pair.0, pair.1, "conf", "main.txt"]),
             "{pair:?}"
         );

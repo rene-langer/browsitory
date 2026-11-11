@@ -613,14 +613,38 @@ fn step(
     if colliding {
         return stop_at_file_folder_conflict(repo, merged, target, kind, mainline);
     }
-    // A checkout that stops part-way (a file another program holds open, a read-only file) is
-    // rolled back, so the step can be tried again (#321). libgit2's own default strategy for a
-    // pick is safe with conflicts allowed; a builder of our own must say so.
+    apply_step(repo, target, kind, mainline, &merged)?;
+
+    let mut index = repo.index()?;
+    if index.has_conflicts() {
+        return Ok(StepResult::Conflicted(conflicted_paths(&index)?));
+    }
+
+    let tree_id = index.write_tree()?;
+    if tree_id == head.tree_id() {
+        clear_state(repo)?;
+        return Ok(StepResult::Empty);
+    }
+    commit_step(repo, head, target, kind, mainline, tree_id, hooks)
+}
+
+/// Applies `target` to the index and work tree (`merged` is libgit2's in-memory result of it).
+/// A checkout that stops part-way (a file another program holds open, a read-only file) is
+/// rolled back, so the step can be tried again (#321).
+fn apply_step(
+    repo: &Repository,
+    target: &Commit<'_>,
+    kind: Kind,
+    mainline: Option<u32>,
+    merged: &git2::Index,
+) -> Result<(), PickError> {
+    // libgit2's own default strategy for a pick is safe with conflicts allowed; a builder of our
+    // own must say so.
     let written = crate::partial_checkout::Written::default();
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.safe().allow_conflicts(true);
     written.record(repo, &mut checkout);
-    written.expect_conflicts(repo, &merged);
+    written.expect_conflicts(repo, merged);
     let applied = match kind {
         Kind::CherryPick => {
             let mut options = git2::CherrypickOptions::new();
@@ -649,25 +673,33 @@ fn step(
             error,
         ));
     }
+    Ok(())
+}
 
-    let mut index = repo.index()?;
-    if index.has_conflicts() {
-        let mut files: Vec<String> = index
-            .conflicts()?
-            .filter_map(|conflict| conflict.ok())
-            .filter_map(|conflict| conflict.our.or(conflict.their).or(conflict.ancestor))
-            .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
-            .collect();
-        files.sort();
-        files.dedup();
-        return Ok(StepResult::Conflicted(files));
-    }
+/// The paths with conflicts in `index`, sorted, each once.
+fn conflicted_paths(index: &git2::Index) -> Result<Vec<String>, PickError> {
+    let mut files: Vec<String> = index
+        .conflicts()?
+        .filter_map(|conflict| conflict.ok())
+        .filter_map(|conflict| conflict.our.or(conflict.their).or(conflict.ancestor))
+        .map(|entry| String::from_utf8_lossy(&entry.path).into_owned())
+        .collect();
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
 
-    let tree_id = index.write_tree()?;
-    if tree_id == head.tree_id() {
-        clear_state(repo)?;
-        return Ok(StepResult::Empty);
-    }
+/// Commits the step's tree `tree_id` on `head` through `prepare-commit-msg`, the commit and
+/// `post-commit`, as git's sequencer does.
+fn commit_step(
+    repo: &Repository,
+    head: &Commit<'_>,
+    target: &Commit<'_>,
+    kind: Kind,
+    mainline: Option<u32>,
+    tree_id: git2::Oid,
+    hooks: &mut HookOptions<'_>,
+) -> Result<StepResult, PickError> {
     let tree = repo.find_tree(tree_id)?;
     let committer = repo.signature()?;
     let (author, message) = match kind {

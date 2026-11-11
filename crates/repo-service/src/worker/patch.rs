@@ -3,7 +3,7 @@
 use crate::wire::ErrorDto;
 use std::sync::mpsc::Sender;
 
-use git_core::patch::{ApplyTarget, CommitHunk, PatchApply, PatchPreview};
+use git_core::patch::{ApplyTarget, CommitHunk, PatchApply, PatchApplyOutcome, PatchPreview};
 
 use super::{Command, WorkerHandle};
 
@@ -78,17 +78,35 @@ pub(super) fn get_patch(
     let _ = reply.send(result.map_err(ErrorDto::from_error));
 }
 
+/// Applies `content`; as commits with `git am`'s hooks (#747), reported on `events` as
+/// `HookSource::Patch` and cancellable through `op`. A hook rejecting a mail is an
+/// `Ok(PatchApplyOutcome::HookFailed)` the UI renders, like a commit's failing hook.
 pub(super) fn apply_patch(
     repo: &git2::Repository,
     content: Vec<u8>,
     how: PatchApply,
-    reply: Sender<Result<(), ErrorDto>>,
+    op: super::remote::TransferOp,
+    events: Sender<super::HookEvent>,
+    reply: Sender<Result<PatchApplyOutcome, ErrorDto>>,
 ) {
-    let _ = reply.send(
-        git_core::patch::apply_patch_as(repo, &content, how)
-            .map(|_| ())
-            .map_err(ErrorDto::from_error),
+    let cancel = op.cancel_check();
+    let mut reporter = super::hooks::ChannelHookReporter {
+        events,
+        operation_id: op.id.clone(),
+        source: super::hooks::HookSource::Patch,
+    };
+    let result = git_core::patch::apply_patch_with(
+        repo,
+        &content,
+        how,
+        git_core::hooks::HookOptions {
+            cancel: Some(&cancel),
+            reporter: Some(&mut reporter),
+            ..Default::default()
+        },
     );
+    op.clear();
+    let _ = reply.send(PatchApplyOutcome::from_result(result).map_err(ErrorDto::from_error));
 }
 
 pub(super) fn preview_patch(
@@ -112,12 +130,31 @@ impl WorkerHandle {
     }
 
     /// Applies a patch file's `content` to the working tree (`how`: also to the index, or as
-    /// commits with the mails' authorship), all of it or nothing. Recorded for Undo.
-    pub fn apply_patch(&self, content: Vec<u8>, how: PatchApply) -> Result<(), ErrorDto> {
-        self.request(|tx| Command::ApplyPatch {
+    /// commits with the mails' authorship), all of it or nothing. Recorded for Undo. As commits
+    /// it runs `git am`'s hooks (#747), unreported; see `apply_patch_reported`.
+    pub fn apply_patch(
+        &self,
+        content: Vec<u8>,
+        how: PatchApply,
+    ) -> Result<PatchApplyOutcome, ErrorDto> {
+        let (events, _) = std::sync::mpsc::channel();
+        self.apply_patch_reported(content, how, events)
+    }
+
+    /// `apply_patch`, reporting the hooks on `events` (`HookSource::Patch`) under an `apply-<n>`
+    /// id that `cancel_transfer` stops (#747).
+    pub fn apply_patch_reported(
+        &self,
+        content: Vec<u8>,
+        how: PatchApply,
+        events: Sender<super::HookEvent>,
+    ) -> Result<PatchApplyOutcome, ErrorDto> {
+        self.request(|reply| Command::ApplyPatch {
             content,
             how,
-            reply: tx,
+            operation_id: self.cancelled.allocate("apply"),
+            events,
+            reply,
         })
     }
 
