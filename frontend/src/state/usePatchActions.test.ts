@@ -113,6 +113,26 @@ describe("usePatchActions", () => {
     expect(state().patchOutcome).toEqual({ message: "Committed the patch as 2 commits", undoable: true });
   });
 
+  it("opens the hook dialog when a hook rejects a mail, with no toast (#747)", async () => {
+    const applyPatch = vi.fn(async () => ({
+      kind: "HookFailed" as const,
+      hook: "applypatch-msg",
+      output: "no Two here\n",
+      subject: "Two",
+    }));
+    const { actions, state } = setup({ applyPatch });
+    await actions.applyPatch(CONTENT, PREVIEW, "Commits");
+    expect(state().patchOutcome).toBeNull();
+    expect(state().dialog).toBeNull();
+    expect(state().error).toBe("The applypatch-msg hook failed on “Two”. Nothing was applied.");
+    expect(state().hookFailure).toEqual({
+      hook: "applypatch-msg",
+      output: "no Two here\n",
+      retry: { kind: "applyPatch" },
+      dialogOpen: true,
+    });
+  });
+
   it("keeps no toast when the previewed patch doesn't apply", async () => {
     const { actions, state } = setup({}, false);
     await actions.applyPatch(CONTENT, PREVIEW, "Stage");
