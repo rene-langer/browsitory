@@ -61,7 +61,7 @@ import { useSequenceActions } from "./state/useSequenceActions";
 import { useUndoRedoActions } from "./state/useUndoRedoActions";
 import { useWorkspaceShortcuts } from "./state/useWorkspaceShortcuts";
 import { runShortcutCommand } from "./lib/shortcutCommands";
-import { onHistoryRequest, onWorkspaceRequest, takeHistoryRequest } from "./lib/workspaceRequests";
+import { onCommitRequest, onHistoryRequest, onWorkspaceRequest, takeCommitRequest, takeHistoryRequest } from "./lib/workspaceRequests";
 import { WorkspaceActionsContext, type WorkspaceActions } from "./state/useWorkspaceActions";
 import { WorkspaceDialogs, type CommitDialogRequest } from "./WorkspaceDialogs";
 import { WorkspaceMain } from "./WorkspaceMain";
@@ -196,6 +196,18 @@ export function RepoWorkspace({
   );
   const goTo = useGoTo(client, repoPath, appState, reveal);
   const { goToRevision } = goTo;
+  // A commit picked in VSCode's Timeline view (#759): selected as Go to does, which loads history
+  // as far as it is. Taken once the first read is in, so that read doesn't replace the selection.
+  const loaded = appState.state.loaded;
+  useEffect(() => {
+    if (!active || !loaded) return;
+    const take = () => {
+      const request = takeCommitRequest(repoPath);
+      if (request !== null) void goToRevision(request.commitId);
+    };
+    take();
+    return onCommitRequest(take);
+  }, [active, loaded, repoPath, goToRevision]);
   useEffect(() => {
     selectSearchRowRef.current = (row) => {
       if (searchView === "graph" && row !== "uncommitted") void goToRevision(row.commitId, undefined, { keepSearch: true });

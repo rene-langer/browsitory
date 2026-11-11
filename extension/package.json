@@ -39,6 +39,7 @@
     "worktree"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onWebviewPanel:browsitory"
   ],
   "main": "./dist/extension.js",
@@ -71,6 +72,10 @@
       {
         "command": "browsitory.showLineHistory",
         "title": "Show Line History in Browsitory"
+      },
+      {
+        "command": "browsitory.showCommit",
+        "title": "Show Commit in Browsitory"
       },
       {
         "command": "browsitory.shortcut.palette",
@@ -151,6 +156,10 @@
         {
           "command": "browsitory.showLineHistory",
           "when": "editorTextFocus && resourceScheme == file"
+        },
+        {
+          "command": "browsitory.showCommit",
+          "when": "false"
         },
         {
           "command": "browsitory.shortcut.palette",
@@ -242,9 +251,22 @@
           "when": "resourceScheme == file",
           "group": "browsitory@2"
         }
+      ],
+      "timeline/item/context": [
+        {
+          "command": "browsitory.showCommit",
+          "when": "timelineItem =~ /git:(file|folder|workspace):commit\\b/ && !listMultiSelection",
+          "group": "browsitory@1"
+        }
       ]
     },
     "keybindings": [
+      {
+        "command": "browsitory.open",
+        "key": "ctrl+k ctrl+g",
+        "mac": "cmd+k cmd+g",
+        "when": "!browsitory.webviewFocused"
+      },
       {
         "command": "browsitory.shortcut.palette",
         "key": "ctrl+k",
@@ -392,7 +414,17 @@
         "mac": "cmd+]",
         "when": "activeWebviewPanelId == 'browsitory' && browsitory.webviewFocused"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Browsitory",
+      "properties": {
+        "browsitory.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a Browsitory button in the status bar that opens the active editor's repository."
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "tsc -p tsconfig.build.json",

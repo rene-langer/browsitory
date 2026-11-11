@@ -47,10 +47,18 @@ macOS (Intel or Apple silicon) or Windows x64. It doesn't run in vscode.dev or i
   `code --install-extension browsitory-<version>-<platform>.vsix` (or use **Extensions: Install
   from VSIX…**). A `.vsix` install doesn't update itself.
 
-Then run **Browsitory: Open** from VSCode's Command Palette. It opens the repository of the file
-in the active editor, or else, the first time, your workspace folders' repositories, each in a
-tab, next to the tabs you had open last time. With none of those, pick a repository folder.
-Browsitory opens in the active editor group and comes back after you reload the window.
+Then run **Browsitory: Open** from VSCode's Command Palette, press Ctrl+K Ctrl+G (Cmd+K Cmd+G
+on macOS), or click **Browsitory** in the status bar. It opens the repository of the file in the
+active editor. Without one, the first time, it opens your workspace's repositories, each in a
+tab, next to the tabs you had open last time: the workspace folders' repositories and those
+directly inside a workspace folder (one folder down, also inside another repository). When there
+are several, a list asks which ones to open, all ticked. With none of those, pick a repository
+folder. Browsitory opens in the active editor group and comes back after you reload the window.
+
+On macOS, Cmd+K clears the terminal while the terminal has the focus, so Cmd+K Cmd+G doesn't
+work there. To change the key, open VSCode's **Keyboard Shortcuts** and search for
+"Browsitory: Open". To hide the status bar button, turn off the **Browsitory › Status Bar:
+Enabled** setting (`browsitory.statusBar.enabled`).
 
 ### Browsitory in the VSCode menus
 
@@ -62,6 +70,9 @@ Browsitory opens in the active editor group and comes back after you reload the 
   the [history of those lines](file-history.md#history-of-lines). The line numbers count in the
   last commit (HEAD), so in a file with uncommitted changes above the selection the history may
   be of other lines.
+- **Show Commit in Browsitory**: right-click a commit in the **Timeline** view (in the Explorer)
+  to select that commit in Browsitory's graph. Browsitory loads as much history as it needs, as
+  [Go to commit…](history.md) does.
 
 ### Keyboard shortcuts in VSCode
 
