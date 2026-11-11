@@ -131,7 +131,16 @@ export async function pageDiagnostics(probe?: string): Promise<string> {
           const rect = target.getBoundingClientRect();
           const x = rect.left + rect.width / 2;
           const y = rect.top + rect.height / 2;
-          hit = { rect: [rect.left, rect.top, rect.width, rect.height], target: describe(target), atPoint: describe(document.elementFromPoint(x, y)) };
+          hit = {
+            rect: [rect.left, rect.top, rect.width, rect.height],
+            target: describe(target),
+            atPoint: describe(document.elementFromPoint(x, y)),
+            disabled: (target as HTMLButtonElement).disabled,
+            expanded: target.getAttribute("aria-expanded"),
+            window: [window.innerHeight, window.outerHeight, screen.height, window.devicePixelRatio],
+          };
+          // Does a script click do what the WebDriver click didn't?
+          (target as HTMLElement).click();
         } else hit = "probe not found";
       }
       const alerts = Array.from(document.querySelectorAll("[role='alert']")).map((el) => el.textContent ?? "");
@@ -148,7 +157,17 @@ export async function pageDiagnostics(probe?: string): Promise<string> {
         null,
         1,
       );
-    }, probe ?? null);
+    }, probe ?? null).then(async (first) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const after = await browser.execute((probeSelector: string | null) => {
+        const target = probeSelector === null ? null : document.querySelector(probeSelector);
+        return JSON.stringify({
+          afterScriptClick: target === null ? "gone" : { expanded: target.getAttribute("aria-expanded"), text: (target.textContent ?? "").slice(0, 60) },
+          dialogs: document.querySelectorAll("dialog[open]").length,
+        });
+      }, probe ?? null);
+      return `${first}\n${after}`;
+    });
   } catch (error) {
     return `no diagnostics: ${String(error)}`;
   }
