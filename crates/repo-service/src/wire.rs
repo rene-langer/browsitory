@@ -2450,6 +2450,129 @@ impl PatchContentDto {
     }
 }
 
+/// How "Apply patch…" applies a patch file (#658).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PatchApply"))]
+pub enum PatchApplyDto {
+    /// To the working tree, as unstaged changes.
+    WorkTree,
+    /// To the working tree and the index.
+    Stage,
+    /// Each mail as a commit with its author, date and message.
+    Commits,
+}
+
+impl From<PatchApplyDto> for git_core::patch::PatchApply {
+    fn from(dto: PatchApplyDto) -> Self {
+        match dto {
+            PatchApplyDto::WorkTree => Self::WorkTree,
+            PatchApplyDto::Stage => Self::Stage,
+            PatchApplyDto::Commits => Self::Commits,
+        }
+    }
+}
+
+/// What a patch file holds and whether it applies (#658): `git_core::patch::PatchPreview`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PatchPreview"))]
+#[serde(rename_all = "camelCase")]
+pub struct PatchPreviewDto {
+    /// One per mail, in order (one for a plain diff).
+    pub parts: Vec<PatchPreviewPartDto>,
+    /// Why it doesn't apply to the working tree; only the first mail is checked against it.
+    pub problem: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PatchPreviewPart"))]
+#[serde(rename_all = "camelCase")]
+pub struct PatchPreviewPartDto {
+    /// `null` for a plain diff.
+    pub mail: Option<PatchMailDto>,
+    pub files: Vec<PatchPreviewFileDto>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PatchMail"))]
+#[serde(rename_all = "camelCase")]
+pub struct PatchMailDto {
+    pub subject: String,
+    pub body: String,
+    pub author_name: String,
+    pub author_email: String,
+    /// Seconds since the epoch; `null` when the mail's date couldn't be read.
+    pub timestamp: Option<i64>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PatchPreviewFile"))]
+#[serde(rename_all = "camelCase")]
+pub struct PatchPreviewFileDto {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: PatchFileStatusDto,
+    pub additions: u32,
+    pub deletions: u32,
+    pub binary: bool,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "PatchFileStatus"))]
+pub enum PatchFileStatusDto {
+    Added,
+    Deleted,
+    Modified,
+    Renamed,
+    Copied,
+}
+
+impl From<git_core::patch::PatchPreview> for PatchPreviewDto {
+    fn from(preview: git_core::patch::PatchPreview) -> Self {
+        use git_core::patch::PreviewStatus;
+        let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+        Self {
+            parts: preview
+                .parts
+                .into_iter()
+                .map(|part| PatchPreviewPartDto {
+                    mail: part.mail.map(|mail| PatchMailDto {
+                        subject: mail.subject,
+                        body: mail.body,
+                        author_name: mail.author_name,
+                        author_email: mail.author_email,
+                        timestamp: mail.timestamp,
+                    }),
+                    files: part
+                        .files
+                        .into_iter()
+                        .map(|file| PatchPreviewFileDto {
+                            path: file.path,
+                            old_path: file.old_path,
+                            status: match file.status {
+                                PreviewStatus::Added => PatchFileStatusDto::Added,
+                                PreviewStatus::Deleted => PatchFileStatusDto::Deleted,
+                                PreviewStatus::Modified => PatchFileStatusDto::Modified,
+                                PreviewStatus::Renamed => PatchFileStatusDto::Renamed,
+                                PreviewStatus::Copied => PatchFileStatusDto::Copied,
+                            },
+                            additions: count(file.additions),
+                            deletions: count(file.deletions),
+                            binary: file.binary,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            problem: preview.problem,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[cfg_attr(any(test, feature = "ts"), ts(rename = "DiffSettings"))]
@@ -3033,6 +3156,12 @@ mod ts_bindings {
             CommitChangeRequestDto,
             PatchSourceDto,
             PatchContentDto,
+            PatchApplyDto,
+            PatchPreviewDto,
+            PatchPreviewPartDto,
+            PatchMailDto,
+            PatchPreviewFileDto,
+            PatchFileStatusDto,
             DiffSettingsDto,
             WordWrapDto,
             CommitMessageSettingsDto,

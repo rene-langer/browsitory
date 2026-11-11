@@ -62,7 +62,8 @@ pub use merge::{
     start_merge,
 };
 pub use patch::{
-    apply_commit_change, apply_patch, get_patch, open_patch_file, read_patch_file, save_patch_file,
+    apply_commit_change, apply_patch, get_patch, open_patch_file, preview_patch, read_patch_file,
+    save_patch_file,
 };
 pub use rebase::{abort_rebase, commits_since, rebase_continue, start_rebase};
 pub use reflog::{get_reflog, list_reflog_refs, restore_reflog_entry};

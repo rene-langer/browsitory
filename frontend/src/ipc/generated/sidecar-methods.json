@@ -108,6 +108,7 @@
   "open_repo",
   "persist_open_repos",
   "pop_stash",
+  "preview_patch",
   "prune_worktrees",
   "pull_current_upstream",
   "push_branch",

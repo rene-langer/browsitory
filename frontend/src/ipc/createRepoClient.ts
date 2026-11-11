@@ -3,7 +3,9 @@ import type {
   AppearanceSettings,
   CommitChangeRequest,
   HunkOptions,
+  PatchApply,
   PatchContent,
+  PatchPreview,
   PatchSource,
   CommitMessageSettings,
   FetchSettings,
@@ -215,7 +217,10 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     applyCommitChange: (repoPath: string, change: CommitChangeRequest) =>
       call<void>("apply_commit_change", { repoPath, change }),
     getPatch: (repoPath: string, source: PatchSource) => call<PatchContent>("get_patch", { repoPath, source }),
-    applyPatch: (repoPath: string, content: PatchContent) => call<void>("apply_patch", { repoPath, content }),
+    applyPatch: (repoPath: string, content: PatchContent, how: PatchApply) =>
+      call<void>("apply_patch", { repoPath, content, how }),
+    previewPatch: (repoPath: string, content: PatchContent) =>
+      call<PatchPreview>("preview_patch", { repoPath, content }),
     savePatchFile: (suggestedName: string, content: PatchContent) =>
       call<string | null>("save_patch_file", { suggestedName, content }),
     openPatchFile: () => call<PatchContent | null>("open_patch_file"),

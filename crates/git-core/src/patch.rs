@@ -63,6 +63,24 @@ pub enum PatchError {
     /// The patch creates `path` next to `existing`, which differs only in case (#403).
     #[error("The patch creates '{path}', but '{existing}' differs from it only in case and this file system can't hold both.")]
     CasePair { path: String, existing: String },
+    /// Applying and staging: the work tree's `path` differs from the index (#536).
+    #[error("'{0}' has unstaged changes, so the result can't be staged. Stage or stash them first, or apply without staging.")]
+    UnstagedChanges(String),
+    /// "Apply as commits" (#658): a part of the file has no mail headers to commit it with.
+    #[error("The patch isn't a series of git format-patch mails, so it has no author or message to commit with. Apply it, or apply and stage it, instead.")]
+    NotMails,
+    /// "Apply as commits" with staged changes, which the commits would take in.
+    #[error(
+        "There are staged changes. Commit or unstage them before applying a patch as commits."
+    )]
+    StagedChanges,
+    /// "Apply as commits" while a merge, rebase, cherry-pick or revert is in progress.
+    #[error("Finish or abort the operation in progress before applying a patch as commits.")]
+    OperationInProgress,
+    #[error("Set your name and email for commits before applying a patch as commits.")]
+    MissingIdentity,
+    #[error("{0}")]
+    Sign(#[from] crate::signing::SignError),
     #[error("{0}")]
     CaseConfig(#[from] crate::CaseConfigUnreadable),
     #[error("{0}")]
@@ -105,6 +123,67 @@ impl ApplyTarget {
             ApplyTarget::WorkTreeAndIndex => git2::ApplyLocation::Both,
         }
     }
+}
+
+/// How a patch file is applied (#658).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchApply {
+    /// To the working tree only, as unstaged changes.
+    WorkTree,
+    /// To the working tree and the index (`git apply --index`).
+    Stage,
+    /// Each mail committed with its author, date and message (like `git am`); the committer is
+    /// the current user.
+    Commits,
+}
+
+/// What a patch file holds and whether it applies (#658), read without changing anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchPreview {
+    /// One part per mail, in order (one part for a plain diff).
+    pub parts: Vec<PreviewPart>,
+    /// Why the patch doesn't apply to the working tree (the reason applying it would give), or
+    /// `None`. Every part is checked for the paths it names; the first part is also checked
+    /// against the working tree, the later ones only when they are applied (they build on it).
+    pub problem: Option<String>,
+}
+
+/// One mail of a patch file, or the whole of a plain diff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewPart {
+    /// The mail's author and message; `None` for a plain diff.
+    pub mail: Option<PreviewMail>,
+    pub files: Vec<PreviewFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewMail {
+    pub subject: String,
+    pub body: String,
+    pub author_name: String,
+    pub author_email: String,
+    /// Seconds since the epoch, when the mail's date could be read.
+    pub timestamp: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewFile {
+    pub path: String,
+    /// The old path of a rename or copy.
+    pub old_path: Option<String>,
+    pub status: PreviewStatus,
+    pub additions: usize,
+    pub deletions: usize,
+    pub binary: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreviewStatus {
+    Added,
+    Deleted,
+    Modified,
+    Renamed,
+    Copied,
 }
 
 /// The context a hunk keeps when it is applied: what the commit view shows may be the whole
@@ -222,9 +301,31 @@ pub fn staged_patch(repo: &git2::Repository) -> Result<Vec<u8>, PatchError> {
 /// earlier ones changed are put back and the folders they created removed, so the working tree
 /// is left as it was.
 pub fn apply_patch(repo: &git2::Repository, content: &[u8]) -> Result<(), PatchError> {
+    apply_patch_as(repo, content, PatchApply::WorkTree).map(|_| ())
+}
+
+/// [`apply_patch`], choosing how (#658): to the working tree, to the working tree and the index,
+/// or as commits, each mail committed with its own author, date and message (the committer is
+/// the current user, signed when `commit.gpgSign` asks for it). All or nothing: when a mail
+/// doesn't apply (or can't be committed), the working tree, the index and HEAD are put back.
+/// Returns the commits made, oldest first (none unless `PatchApply::Commits`).
+///
+/// Every part goes through the same checks as [`apply_patch`] before anything is written.
+/// "As commits" also needs every part to be a mail, no staged changes, no operation in
+/// progress and a name and email to commit with; it runs no hooks.
+pub fn apply_patch_as(
+    repo: &git2::Repository,
+    content: &[u8],
+    how: PatchApply,
+) -> Result<Vec<String>, PatchError> {
+    let target = match how {
+        PatchApply::WorkTree => ApplyTarget::WorkTree,
+        PatchApply::Stage | PatchApply::Commits => ApplyTarget::WorkTreeAndIndex,
+    };
     let parts = split_mails(content);
-    if parts.len() <= 1 {
-        return apply_one(repo, content, ApplyTarget::WorkTree);
+    if parts.len() <= 1 && how != PatchApply::Commits {
+        apply_one(repo, content, target)?;
+        return Ok(Vec::new());
     }
     // Parse and guard every mail before anything is written.
     let mut diffs = Vec::with_capacity(parts.len());
@@ -233,6 +334,10 @@ pub fn apply_patch(repo: &git2::Repository, content: &[u8]) -> Result<(), PatchE
         guard(repo, &diff)?;
         diffs.push(diff);
     }
+    let mails = match how {
+        PatchApply::Commits => Some(commit_mails(repo, &parts)?),
+        _ => None,
+    };
     let workdir = repo.workdir().ok_or(PatchError::NoWorkdir)?;
     let mut touched: Vec<String> = Vec::new();
     for diff in &diffs {
@@ -247,13 +352,244 @@ pub fn apply_patch(repo: &git2::Repository, content: &[u8]) -> Result<(), PatchE
         }
     }
     let saved = Saved::take(workdir, &touched)?;
-    for part in &parts {
-        if let Err(error) = apply_one(repo, part, ApplyTarget::WorkTree) {
+    let staged = match target {
+        ApplyTarget::WorkTree => None,
+        ApplyTarget::WorkTreeAndIndex => Some(SavedIndex::take(repo, &touched)?),
+    };
+    let head = match how {
+        PatchApply::Commits => Some(SavedHead::take(repo)?),
+        _ => None,
+    };
+    let mut commits = Vec::new();
+    for (at, part) in parts.iter().enumerate() {
+        let result = apply_one(repo, part, target).and_then(|()| match &mails {
+            Some(mails) => commit_mail(repo, &mails[at]).map(|id| commits.push(id)),
+            None => Ok(()),
+        });
+        if let Err(error) = result {
+            if let Some(head) = &head {
+                head.restore(repo);
+            }
+            if let Some(staged) = &staged {
+                staged.restore(repo);
+            }
             saved.restore(workdir);
             return Err(error);
         }
     }
-    Ok(())
+    Ok(commits)
+}
+
+/// What `content` holds, mail by mail, and whether it applies to the working tree (#658),
+/// without changing anything: the same checks [`apply_patch`] runs before it writes.
+pub fn preview_patch(repo: &git2::Repository, content: &[u8]) -> Result<PatchPreview, PatchError> {
+    let parts = split_mails(content);
+    let mut diffs = Vec::with_capacity(parts.len());
+    for part in &parts {
+        diffs.push(parse(part)?);
+    }
+    let mut preview_parts = Vec::with_capacity(parts.len());
+    for (part, diff) in parts.iter().zip(&diffs) {
+        let mail = crate::patch_mail::parse(part).map(|mail| PreviewMail {
+            subject: mail.subject,
+            body: mail.body,
+            author_name: mail.author_name,
+            author_email: mail.author_email,
+            timestamp: mail.time.map(|(seconds, _)| seconds),
+        });
+        preview_parts.push(PreviewPart {
+            mail,
+            files: preview_files(diff)?,
+        });
+    }
+    let mut problem = None;
+    for diff in &diffs {
+        if let Err(error) = guard(repo, diff) {
+            problem = Some(error.to_string());
+            break;
+        }
+    }
+    if problem.is_none() {
+        let first = parts.first().copied().unwrap_or(content);
+        if let Err(error) = prepare(repo, first, ApplyTarget::WorkTree) {
+            problem = Some(error.to_string());
+        }
+    }
+    Ok(PatchPreview {
+        parts: preview_parts,
+        problem,
+    })
+}
+
+fn preview_files(diff: &git2::Diff) -> Result<Vec<PreviewFile>, PatchError> {
+    let mut files = Vec::new();
+    for (at, delta) in diff.deltas().enumerate() {
+        let path_of = |file: git2::DiffFile| {
+            file.path()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
+        let status = match delta.status() {
+            git2::Delta::Added => PreviewStatus::Added,
+            git2::Delta::Deleted => PreviewStatus::Deleted,
+            git2::Delta::Renamed => PreviewStatus::Renamed,
+            git2::Delta::Copied => PreviewStatus::Copied,
+            _ => PreviewStatus::Modified,
+        };
+        // libgit2 gives a deletion's new side the old path.
+        let path = path_of(delta.new_file());
+        let old_path = match status {
+            PreviewStatus::Renamed | PreviewStatus::Copied => Some(path_of(delta.old_file())),
+            _ => None,
+        };
+        let binary = delta.flags().is_binary();
+        // A binary file's patch has no lines: 0 and 0.
+        let (additions, deletions) = match git2::Patch::from_diff(diff, at)? {
+            Some(patch) => {
+                let (_, additions, deletions) = patch.line_stats()?;
+                (additions, deletions)
+            }
+            _ => (0, 0),
+        };
+        files.push(PreviewFile {
+            path,
+            old_path,
+            status,
+            additions,
+            deletions,
+            binary,
+        });
+    }
+    Ok(files)
+}
+
+/// The mails of a patch applied as commits, once the repository can take them: no operation in
+/// progress, no staged changes (or conflicts) and a name and email for the committer.
+fn commit_mails(
+    repo: &git2::Repository,
+    parts: &[&[u8]],
+) -> Result<Vec<crate::patch_mail::Mail>, PatchError> {
+    let mails = parts
+        .iter()
+        .map(|part| crate::patch_mail::parse(part))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(PatchError::NotMails)?;
+    if repo.state() != git2::RepositoryState::Clean {
+        return Err(PatchError::OperationInProgress);
+    }
+    repo.signature().map_err(|_| PatchError::MissingIdentity)?;
+    let index = repo.index()?;
+    if index.has_conflicts() {
+        return Err(PatchError::OperationInProgress);
+    }
+    // No HEAD commit (an unborn branch): everything in the index is staged.
+    let head_tree = repo.head().ok().map(|h| h.peel_to_tree()).transpose()?;
+    let staged = repo.diff_tree_to_index(head_tree.as_ref(), Some(&index), None)?;
+    if staged.deltas().len() > 0 {
+        return Err(PatchError::StagedChanges);
+    }
+    Ok(mails)
+}
+
+/// Commits the index as `mail` on HEAD: the mail's author and date (now, when it has none) and
+/// message, the current user as committer.
+fn commit_mail(
+    repo: &git2::Repository,
+    mail: &crate::patch_mail::Mail,
+) -> Result<String, PatchError> {
+    let mut index = repo.index()?;
+    let tree = repo.find_tree(index.write_tree()?)?;
+    let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+    let author = match mail.time {
+        Some((seconds, offset)) => git2::Signature::new(
+            &mail.author_name,
+            &mail.author_email,
+            &git2::Time::new(seconds, offset),
+        )?,
+        None => git2::Signature::now(&mail.author_name, &mail.author_email)?,
+    };
+    let committer = repo.signature()?;
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
+    let oid = crate::signing::create_commit(
+        repo,
+        Some(crate::signing::HeadUpdate {
+            expected: parent.as_ref().map(git2::Commit::id),
+            reflog_operation: "am",
+        }),
+        &author,
+        &committer,
+        &mail.message(),
+        &tree,
+        &parents,
+    )?;
+    Ok(oid.to_string())
+}
+
+/// The index entries of the paths a patch series touches, to put back when a later patch of
+/// the series doesn't apply.
+struct SavedIndex(Vec<(String, Option<git2::IndexEntry>)>);
+
+impl SavedIndex {
+    fn take(repo: &git2::Repository, paths: &[String]) -> Result<Self, PatchError> {
+        let index = repo.index()?;
+        Ok(SavedIndex(
+            paths
+                .iter()
+                .map(|path| (path.clone(), index.get_path(Path::new(path), 0)))
+                .collect(),
+        ))
+    }
+
+    /// Best effort, like [`Saved::restore`].
+    fn restore(&self, repo: &git2::Repository) {
+        let Ok(mut index) = repo.index() else {
+            return;
+        };
+        if index.read(true).is_err() {
+            return;
+        }
+        for (path, entry) in &self.0 {
+            let _ = match entry {
+                Some(entry) => index.add(entry),
+                None => index.remove_path(Path::new(path)),
+            };
+        }
+        let _ = index.write();
+    }
+}
+
+/// Where HEAD pointed before a patch was applied as commits.
+struct SavedHead {
+    /// The ref HEAD moves: its branch, or `HEAD` itself when detached.
+    name: String,
+    /// `None`: the branch was unborn.
+    id: Option<git2::Oid>,
+}
+
+impl SavedHead {
+    fn take(repo: &git2::Repository) -> Result<Self, PatchError> {
+        let head = repo.find_reference("HEAD")?;
+        let name = match head.symbolic_target() {
+            Ok(Some(branch)) => branch.to_string(),
+            _ => "HEAD".to_string(),
+        };
+        let id = repo.refname_to_id(&name).ok();
+        Ok(SavedHead { name, id })
+    }
+
+    /// Best effort: moves the ref back, or removes a branch the series gave its first commit.
+    fn restore(&self, repo: &git2::Repository) {
+        match self.id {
+            Some(id) => {
+                let _ = repo.reference(&self.name, id, true, "am: put back");
+            }
+            None => {
+                if let Ok(mut reference) = repo.find_reference(&self.name) {
+                    let _ = reference.delete();
+                }
+            }
+        }
+    }
 }
 
 /// The forward (or, `reverse`, the backward) diff of `path` in `commit_id`, only `path`'s own
@@ -425,6 +761,23 @@ fn apply_one(
     content: &[u8],
     target: ApplyTarget,
 ) -> Result<(), PatchError> {
+    let prepared = prepare(repo, content, target)?;
+    write(repo, &prepared, target)
+}
+
+/// A patch that passed every check, with its hunks moved to where they apply now.
+struct Prepared {
+    diff: git2::Diff<'static>,
+    links: Vec<LinkChange>,
+}
+
+/// Everything [`apply_one`] checks before it writes; writes nothing. The preview (#658) runs it
+/// too, so it reports what applying would.
+fn prepare(
+    repo: &git2::Repository,
+    content: &[u8],
+    target: ApplyTarget,
+) -> Result<Prepared, PatchError> {
     let diff = parse(content)?;
     guard(repo, &diff)?;
     let relocated = rewrite_headers(content, &relocate(repo, &diff)?);
@@ -449,6 +802,9 @@ fn apply_one(
             }
         }
     }
+    if target == ApplyTarget::WorkTreeAndIndex {
+        refuse_unstaged(repo, &diff)?;
+    }
     // libgit2 reads a link in the working tree through it (#563): the links are this code's,
     // the rest libgit2's. Both are checked before either writes.
     let links = check_links(repo, workdir, &diff, target)?;
@@ -459,14 +815,50 @@ fn apply_one(
     check.check(true);
     repo.apply(&diff, location, Some(&mut check))
         .map_err(does_not_apply)?;
+    Ok(Prepared { diff, links })
+}
+
+/// Applying with the index (#536): libgit2 would refuse a file whose working tree differs from
+/// the index with a bare "does not match index"; this names the file and what to do. An
+/// addition is left to the existing-file check above.
+fn refuse_unstaged(repo: &git2::Repository, diff: &git2::Diff) -> Result<(), PatchError> {
+    // (`status_file` detects no renames; a link in place of a file is refused by `guard` first.)
+    let unstaged =
+        git2::Status::WT_MODIFIED | git2::Status::WT_DELETED | git2::Status::WT_TYPECHANGE;
+    for delta in diff.deltas() {
+        // A link's own check (`check_links`) compares it with the index.
+        if delta.status() == git2::Delta::Added || is_link(&delta) {
+            continue;
+        }
+        let Some(path) = delta.old_file().path() else {
+            continue;
+        };
+        if let Ok(status) = repo.status_file(path) {
+            if status.intersects(unstaged) {
+                return Err(PatchError::UnstagedChanges(path.display().to_string()));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Writes a [`prepare`]d patch.
+fn write(
+    repo: &git2::Repository,
+    prepared: &Prepared,
+    target: ApplyTarget,
+) -> Result<(), PatchError> {
+    let Prepared { diff, links } = prepared;
+    let workdir = repo.workdir().ok_or(PatchError::NoWorkdir)?;
+    let location = target.location();
     let mut before = git2::ApplyOptions::new();
     skip_links(&mut before);
-    crate::hardlink::before_apply(repo, &diff, location, &mut before);
+    crate::hardlink::before_apply(repo, diff, location, &mut before);
     let mut apply = git2::ApplyOptions::new();
     skip_links(&mut apply);
-    repo.apply(&diff, location, Some(&mut apply))
+    repo.apply(diff, location, Some(&mut apply))
         .map_err(does_not_apply)?;
-    write_links(repo, workdir, &links, target)
+    write_links(repo, workdir, links, target)
 }
 
 /// Whether `delta` changes, adds or removes a symbolic link.

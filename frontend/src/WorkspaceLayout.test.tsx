@@ -158,15 +158,24 @@ describe("the repository toolbar (#637)", () => {
 });
 
 describe("Apply patch… in the toolbar (#649)", () => {
-  it("asks for a patch file and applies it to the working tree", async () => {
+  it("asks for a patch file, previews it and applies it to the working tree (#658)", async () => {
     const content = { base64: "ZGlmZg==" };
     const openPatchFile = vi.fn(async () => content);
+    const preview = {
+      parts: [{ mail: null, files: [{ path: "a.txt", oldPath: null, status: "Modified" as const, additions: 1, deletions: 1, binary: false }] }],
+      problem: null,
+    };
+    const previewPatch = vi.fn(async () => preview);
     const applyPatch = vi.fn(async () => {});
-    await renderApp(layoutClient({ openPatchFile, applyPatch }));
+    await renderApp(layoutClient({ openPatchFile, previewPatch, applyPatch }));
     const button = within(toolbar()).getByRole("button", { name: "Apply patch…" });
     await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(button);
-    await waitFor(() => expect(applyPatch).toHaveBeenCalledWith("/repos/a", content));
+    const dialog = await screen.findByRole("dialog", { name: "Apply patch" });
+    expect(previewPatch).toHaveBeenCalledWith("/repos/a", content);
+    expect(applyPatch).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(applyPatch).toHaveBeenCalledWith("/repos/a", content, "WorkTree"));
     expect(openPatchFile).toHaveBeenCalledOnce();
   });
 });
@@ -203,7 +212,7 @@ describe("dropping files on the window (#649)", () => {
     emit({ kind: "over" });
     emit({ kind: "drop", paths: ["/home/me/fix.patch", "/repos/b"] });
     expect(screen.queryByText(/Drop a folder to open it/)).toBeNull();
-    await waitFor(() => expect(applyPatch).toHaveBeenCalledWith("/repos/a", content));
+    await waitFor(() => expect(applyPatch).toHaveBeenCalledWith("/repos/a", content, "WorkTree"));
     expect(readPatchFile).toHaveBeenCalledWith("/home/me/fix.patch");
     await waitFor(() => expect(openRepo).toHaveBeenCalledWith("/repos/b"));
     expect(openRepo).not.toHaveBeenCalledWith("/home/me/fix.patch");

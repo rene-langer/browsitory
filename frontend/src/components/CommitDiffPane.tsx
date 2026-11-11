@@ -19,17 +19,17 @@ function commitFilePatch(
   path: string,
   oldPath: string | null,
 ): CommitFilePatchActions {
-  const change = (reverse: boolean, hunk: CommitHunk | null) =>
-    actions.onApplyCommitChange({ commitId, path, oldPath, hunk, reverse, stage: false });
+  const change = (reverse: boolean, hunk: CommitHunk | null, stage: boolean) =>
+    actions.onApplyCommitChange({ commitId, path, oldPath, hunk, reverse, stage });
   const name = path.split("/").pop() ?? path;
   return {
     blockedReason: actions.blockedReason,
-    onRevertFile: () => change(true, null),
-    onApplyFile: () => change(false, null),
+    onRevertFile: (stage) => change(true, null, stage),
+    onApplyFile: (stage) => change(false, null, stage),
     onSavePatch: () =>
       actions.onSavePatch({ kind: "CommitFile", commitId, path, oldPath }, `${commitId.slice(0, 7)}-${name}.patch`),
-    onRevertHunk: (hunk) => change(true, hunk),
-    onApplyHunk: (hunk) => change(false, hunk),
+    onRevertHunk: (hunk, stage) => change(true, hunk, stage),
+    onApplyHunk: (hunk, stage) => change(false, hunk, stage),
   };
 }
 
