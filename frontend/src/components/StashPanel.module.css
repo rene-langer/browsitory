@@ -1,9 +1,14 @@
 .list {
   list-style: none;
-  display: grid;
-  gap: var(--space-1);
   margin: 0;
   padding: 0;
+}
+
+/* The space between rows is inside them (#775): the windowed list (useVirtualRows) counts rows of
+   one measured height, which a grid gap isn't part of. 1.5 × the row's own padding each side adds
+   the old `gap: var(--space-1)`. */
+.list > li {
+  padding-block: calc(var(--space-1) * 1.5);
 }
 
 .rowIcon {

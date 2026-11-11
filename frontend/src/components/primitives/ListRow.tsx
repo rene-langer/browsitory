@@ -94,7 +94,8 @@ export function ListRow({
   /**
    * A row of a windowed list (#685): its index among all rows (`data-row-index`, and
    * `aria-posinset` counted from 1) and the number of rows (`aria-setsize`), so assistive
-   * technology still announces "12 of 3000" although only the visible rows exist.
+   * technology still announces "12 of 3000" although only the visible rows exist. A standalone
+   * (button) row gets only `data-row-index`: ARIA doesn't support the other two on a button.
    */
   rowIndex?: number;
   setSize?: number;
@@ -136,8 +137,9 @@ export function ListRow({
       id={id}
       data-commit-id={dataCommitId}
       data-row-index={rowIndex}
-      aria-posinset={rowIndex === undefined ? undefined : rowIndex + 1}
-      aria-setsize={setSize}
+      // Not supported on role="button" (#775): a standalone row keeps only its index.
+      aria-posinset={rowIndex === undefined || standalone ? undefined : rowIndex + 1}
+      aria-setsize={standalone ? undefined : setSize}
       className={[styles.row, interactive ? styles.interactive : null, className]
         .filter((part) => part !== null && part !== undefined && part !== "")
         .join(" ")}

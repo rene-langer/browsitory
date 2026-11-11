@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { KeyboardEvent, RefObject } from "react";
 import { formatShortDate } from "../lib/formatDate";
 import { searchStatusText } from "../lib/searchStatus";
@@ -8,6 +8,7 @@ import type { CommitSearchResultsState } from "../state/useCommitSearch";
 import { InlineError } from "./primitives/InlineError";
 import { ListRow } from "./primitives/ListRow";
 import { RefBadges } from "./RefBadges";
+import { useVirtualRows } from "./useVirtualRows";
 import graphStyles from "./CommitGraph.module.css";
 import styles from "./CommitSearchResults.module.css";
 
@@ -39,14 +40,22 @@ export function CommitSearchResults({
   const selectedId = typeof selectedRow === "object" ? selectedRow.commitId : null;
   const selectedIndex = results.commits.findIndex((c) => c.id === selectedId);
 
-  const ownRef = useRef<HTMLUListElement>(null);
-  const ref = listRef ?? ownRef;
+  // Only the rows in view render (#775), as in the commit graph (#685).
+  const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
+  const attachList = useCallback(
+    (element: HTMLUListElement | null) => {
+      if (listRef !== undefined) listRef.current = element;
+      setListElement(element);
+    },
+    [listRef],
+  );
+  const virtual = useVirtualRows(listElement, results.commits.length);
 
   // Keep the keyboard-driven selection visible in a long result list.
+  const { scrollToIndex } = virtual;
   useEffect(() => {
-    const selected = ref.current?.children[selectedIndex] as HTMLElement | undefined;
-    if (typeof selected?.scrollIntoView === "function") selected.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex, ref]);
+    if (selectedIndex >= 0) scrollToIndex(selectedIndex);
+  }, [selectedIndex, scrollToIndex]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLUListElement>) => {
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f") {
@@ -83,17 +92,20 @@ export function CommitSearchResults({
         </p>
       )}
       <ul
-        ref={ref}
+        ref={attachList}
         className={graphStyles.list}
         role="listbox"
         aria-label="Search results"
         tabIndex={0}
         onKeyDown={handleKeyDown}
         aria-keyshortcuts="ArrowUp ArrowDown Escape Control+F Meta+F"
+        style={virtual.windowed ? { paddingTop: virtual.padTop, paddingBottom: virtual.padBottom } : undefined}
       >
-        {results.commits.map((commit) => (
+        {results.commits.slice(virtual.start, virtual.end).map((commit, offset) => (
           <ListRow
             key={commit.id}
+            rowIndex={virtual.start + offset}
+            setSize={results.commits.length}
             className="commit-row"
             data-commit-id={commit.id}
             selected={commit.id === selectedId}

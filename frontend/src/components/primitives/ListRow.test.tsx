@@ -105,6 +105,38 @@ describe("ListRow", () => {
     expect(row).not.toHaveAttribute("role", "option");
   });
 
+  it("gives a windowed list row its index and the row count, for a listitem or an option", () => {
+    render(
+      <ul>
+        <ListRow rowIndex={11} setSize={3000}>plain row</ListRow>
+        <ListRow rowIndex={12} setSize={3000} selected={false} onClick={vi.fn()}>
+          option row
+        </ListRow>
+      </ul>,
+    );
+    for (const [text, position] of [["plain row", "12"], ["option row", "13"]]) {
+      const row = screen.getByText(text).closest("li");
+      expect(row).toHaveAttribute("data-row-index", `${Number(position) - 1}`);
+      expect(row).toHaveAttribute("aria-posinset", position);
+      expect(row).toHaveAttribute("aria-setsize", "3000");
+    }
+  });
+
+  // #775: aria-posinset and aria-setsize aren't supported on role="button".
+  it("gives a standalone (button) row only its index, not the set position ARIA", () => {
+    render(
+      <ul>
+        <ListRow rowIndex={11} setSize={3000} onClick={vi.fn()}>
+          button row
+        </ListRow>
+      </ul>,
+    );
+    const row = screen.getByText("button row").closest("li");
+    expect(row).toHaveAttribute("data-row-index", "11");
+    expect(row).not.toHaveAttribute("aria-posinset");
+    expect(row).not.toHaveAttribute("aria-setsize");
+  });
+
   it("applies a passed id to the row, for a container to reference via aria-activedescendant", () => {
     render(
       <ul>
