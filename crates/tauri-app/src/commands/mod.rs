@@ -338,6 +338,25 @@ pub fn list_recent_repos() -> Result<Vec<String>, ErrorDto> {
 }
 
 #[tauri::command]
+pub fn remove_recent_repo(path: String) -> Result<(), ErrorDto> {
+    config::remove_recent_repo(Path::new(&path)).map_err(ErrorDto::from_error)
+}
+
+/// Async: it checks each recent folder on disk, which a slow network drive could hold up, and
+/// a synchronous command would hold up the window with it.
+#[tauri::command]
+pub async fn list_missing_recent_repos() -> Result<Vec<String>, ErrorDto> {
+    config::list_missing_recent_repos()
+        .map(|paths| {
+            paths
+                .into_iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        })
+        .map_err(ErrorDto::from_error)
+}
+
+#[tauri::command]
 pub fn get_diff_settings() -> Result<DiffSettingsDto, ErrorDto> {
     config::get_diff_settings()
         .map(DiffSettingsDto::from)

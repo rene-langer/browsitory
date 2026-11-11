@@ -37,6 +37,25 @@ pub(super) fn list_recent_repos() -> Result<Value, ErrorDto> {
     serde_json::to_value(paths).map_err(ErrorDto::from_error)
 }
 
+#[derive(Deserialize)]
+pub(super) struct RemoveRecentRepoParams {
+    path: String,
+}
+
+pub(super) fn remove_recent_repo(params: RemoveRecentRepoParams) -> Result<Value, ErrorDto> {
+    config::remove_recent_repo(Path::new(&params.path)).map_err(ErrorDto::from_error)?;
+    Ok(Value::Null)
+}
+
+pub(super) fn list_missing_recent_repos() -> Result<Value, ErrorDto> {
+    let paths = config::list_missing_recent_repos().map_err(ErrorDto::from_error)?;
+    let paths: Vec<String> = paths
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    serde_json::to_value(paths).map_err(ErrorDto::from_error)
+}
+
 /// `list_open_repos`'s answer. (The desktop app's command returns an `(entries, activePath)`
 /// tuple instead, which `tauriRepoClient.ts` turns into this shape.)
 #[derive(Serialize)]
