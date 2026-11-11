@@ -29,7 +29,8 @@ export interface UseCommitSearchResult {
   /** `null` while the graph shows (empty field). */
   results: CommitSearchResultsState | null;
   setQuery(text: string): void;
-  loadMore(): void;
+  /** Runs the next round; resolves to every match found so far once it ends (#687). */
+  loadMore(): Promise<GraphCommit[]>;
   retry(): void;
   close(): void;
   /** This repository's recent searches, newest first (#540): queries that ran without an
@@ -64,6 +65,8 @@ export function useCommitSearch(
   // True while a round is waiting on the backend, so close/unmount know to cancel it.
   const inFlight = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The open search's matches as the rounds add them, ahead of `results` (#687).
+  const matches = useRef<GraphCommit[]>([]);
   const previousRow = useRef<SelectedRow | null>(null);
   const resultsRef = useRef(results);
   const selectedRowRef = useRef(selectedRow);
@@ -132,6 +135,7 @@ export function useCommitSearch(
           if (from === null && cursor === null) recordSearch(q);
           found += page.commits.length;
           cursor = page.nextCursor;
+          matches.current = [...matches.current, ...page.commits];
           setResults(
             (prev) =>
               prev && {
@@ -169,6 +173,7 @@ export function useCommitSearch(
       if (activeQuery.current === null) previousRow.current = selectedRowRef.current;
       activeQuery.current = q;
       const gen = ++generation.current;
+      matches.current = [];
       setResults({ query: q, commits: [], nextCursor: null, scanned: 0, loading: true, error: null, queryError: null });
       void runRound(gen, q, null, selectFirst);
     },
@@ -213,12 +218,13 @@ export function useCommitSearch(
     [closeResults, start, debounceMs],
   );
 
-  const loadMore = useCallback(() => {
+  const loadMore = useCallback(async () => {
     const current = resultsRef.current;
-    if (current === null || current.loading || current.nextCursor === null) return;
+    if (current === null || current.loading || current.nextCursor === null) return matches.current;
     const gen = ++generation.current;
     setResults((prev) => prev && { ...prev, loading: true, error: null, queryError: null });
-    void runRound(gen, current.query, current.nextCursor, false);
+    await runRound(gen, current.query, current.nextCursor, false);
+    return matches.current;
   }, [runRound]);
 
   const retry = useCallback(() => {

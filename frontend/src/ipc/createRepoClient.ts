@@ -2,6 +2,7 @@ import type {
   AmendOptions,
   AppearanceSettings,
   ChangeStamp,
+  GraphPage,
   CommitChangeRequest,
   HunkOptions,
   PatchApply,
@@ -133,8 +134,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     closeRepo: (repoPath: string) => call<void>("close_repo", { repoPath }),
     getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
     getChangeStamp: (repoPath: string) => call<ChangeStamp>("get_change_stamp", { repoPath }),
-    getCommitGraph: (repoPath: string, limit: number, selection: GraphSelection) =>
-      call<GraphCommit[]>("get_commit_graph", { repoPath, limit, selection }),
+    getCommitGraph: (repoPath: string, limit: number, selection: GraphSelection, cursor: string | null) =>
+      call<GraphPage>("get_commit_graph", { repoPath, limit, selection, cursor }),
     locateCommit: (repoPath: string, revision: string, selection: GraphSelection) =>
       call<CommitLocation | null>("locate_commit", { repoPath, revision, selection }),
     getMergedCommits: (repoPath: string, mergeId: string, limit: number) =>

@@ -88,7 +88,8 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
         (
             cmd!(GetCommitGraph {
                 limit: 1,
-                selection: graph()
+                selection: graph(),
+                cursor: None
             }),
             "-",
         ),

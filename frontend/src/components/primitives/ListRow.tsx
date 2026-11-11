@@ -74,6 +74,8 @@ export function ListRow({
   onMouseLeave,
   className,
   "data-commit-id": dataCommitId,
+  rowIndex,
+  setSize,
   disabled,
   describedBy,
   children,
@@ -89,6 +91,13 @@ export function ListRow({
   className?: string;
   // Lets the command palette find a commit row to open its context menu.
   "data-commit-id"?: string;
+  /**
+   * A row of a windowed list (#685): its index among all rows (`data-row-index`, and
+   * `aria-posinset` counted from 1) and the number of rows (`aria-setsize`), so assistive
+   * technology still announces "12 of 3000" although only the visible rows exist.
+   */
+  rowIndex?: number;
+  setSize?: number;
   /** `aria-disabled`: shown, and reachable, but its action can't run (the palette's, #644). */
   disabled?: boolean;
   /** `aria-describedby`, e.g. the visible reason a disabled row can't run. */
@@ -126,6 +135,9 @@ export function ListRow({
     <li
       id={id}
       data-commit-id={dataCommitId}
+      data-row-index={rowIndex}
+      aria-posinset={rowIndex === undefined ? undefined : rowIndex + 1}
+      aria-setsize={setSize}
       className={[styles.row, interactive ? styles.interactive : null, className]
         .filter((part) => part !== null && part !== undefined && part !== "")
         .join(" ")}

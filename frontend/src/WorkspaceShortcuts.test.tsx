@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import type { RepoClient } from "./ipc/RepoClient";
-import { fakeRepoClient } from "./test/fakeRepoClient";
+import { fakeRepoClient, graphPage } from "./test/fakeRepoClient";
 
 // Whole-App renders, like App.test.tsx (#217's slow-machine budget).
 vi.setConfig({ testTimeout: 20_000 });
@@ -18,7 +18,7 @@ function shortcutClient(overrides: Partial<RepoClient> = {}): RepoClient {
       openRepo: async () => {},
       persistOpenRepos: async () => {},
       getStatus: async () => [change],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listStashes: async () => [],
       listBranches: async () => [{ name: "main", isCurrent: true, upstream: "origin/main", ahead: 1, behind: 2 }],
       listRemotes: async () => [origin],

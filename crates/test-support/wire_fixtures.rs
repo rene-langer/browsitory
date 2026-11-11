@@ -428,6 +428,27 @@ pub fn search_pages() -> Cases<git_core::search::SearchPage> {
     ]
 }
 
+pub fn graph_pages() -> Cases<git_core::graph::GraphPage> {
+    vec![
+        case(
+            "more",
+            git_core::graph::GraphPage {
+                commits: vec![graph_commit("Row")],
+                next_cursor: some("1:0123456789abcdef"),
+                stale: false,
+            },
+        ),
+        case(
+            "stale",
+            git_core::graph::GraphPage {
+                commits: Vec::new(),
+                next_cursor: None,
+                stale: true,
+            },
+        ),
+    ]
+}
+
 pub fn changed_files() -> Cases<git_core::diff::ChangedFile> {
     vec![
         case(

@@ -914,8 +914,31 @@ certificate.
   things that decide the walk, so a changed remote selection changes it too); resuming
   re-walks and skips `offset` (polling cancel every 1,024 skipped commits), and any moved start
   point is `StaleCursor` instead of a duplicate or a gap.
+- The graph pages the same way (#685): `get_commit_graph(limit, selection, cursor)` answers a
+  `GraphPage` (`commits`, `nextCursor`, `stale`) from `graph::graph_page`, with the same cursor
+  format (`graph::walk_fingerprint`). A cursor of another walk answers `stale: true` with no
+  commits rather than an error, and the frontend reads the history again from the start.
+  `useAppState.loadMoreHistory` appends the next page in the tab's read queue (after a running
+  refresh, never alongside one); a refresh that reads the history again reads as many rows as
+  are loaded (`graphLimit`). `CommitGraph` renders only the rows in view
+  (`components/useVirtualRows.ts`: one row height, measured from the first row; padding on the
+  list for the others; `aria-setsize`/`aria-posinset` on the rows) and asks for the next page
+  when the rows in view come within `LOAD_AHEAD_ROWS` of the last one. Without layout (a hidden
+  tab, jsdom) every row renders.
+- Branch colours (#673): `useCommitGraphLayout` computes the lanes once per commit list in
+  `RepoWorkspace`, for `CommitGraph` and for the sidebar: a branch's swatch, and the stripe on
+  its badges, is the colour of the lane its tip's row sits on (`laneColors.branchLaneColors`); a
+  branch whose tip isn't a loaded row has a neutral swatch. Lane colours follow the layout, so
+  they can change when history changes.
 - A refresh after any mutation (or a graph branch selection change) deliberately restarts an
   open search from page 1 rather than resuming its cursor.
+- An open search highlights its matches in the graph by default (#687): `CommitGraph`'s
+  `searchMatches` dims the other rows, `useSearchMatches` counts them ("3 of 100+") and steps
+  through them in walk order (the graph's), reading the search's next round past the last loaded
+  match, and Go to (`goToRevision(id, label, { keepSearch: true })`) shows each one: loading
+  history, expanding a collapsed merge or explaining why the graph has no row. The search
+  bar's **List** (`searchViewPreference.ts`, per machine) shows `CommitSearchResults`, the
+  matches alone, instead.
 - One in-flight search per repo: `WorkerHandle::search_commits` bumps a shared
   `SearchGeneration` (`Arc<AtomicU64>`) before queueing, and the running walk polls it, so a
   newer search or `cancel_search` stops an older one without going through the command queue

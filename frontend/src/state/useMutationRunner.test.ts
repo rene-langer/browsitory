@@ -17,6 +17,7 @@ const BASE_STATE: AppState = {
   expandedMerges: {},
   graphLimit: 300,
   hasMoreHistory: false,
+  loadingMoreHistory: false,
   graphSelection: { local: null, remote: null },
   branches: [],
   worktrees: [],

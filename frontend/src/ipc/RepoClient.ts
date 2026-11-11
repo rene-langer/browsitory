@@ -759,6 +759,16 @@ export interface CompareRange {
   toId: string;
 }
 
+/** One page of the commit graph (#685). */
+export interface GraphPage {
+  commits: GraphCommit[];
+  /** Resume point for the next page, or `null` once the walk is done. */
+  nextCursor: string | null;
+  /** The cursor belonged to another walk (a branch moved, the selection changed): no commits;
+   *  load the graph from the start. */
+  stale: boolean;
+}
+
 /** One page of a commit search. */
 export interface SearchPage {
   commits: GraphCommit[];
@@ -1118,9 +1128,10 @@ export interface RepoClient {
   /**
    * The commits of `selection.local` plus those of `selection.remote`. Exactly one branch in
    * total, or `selection.firstParent`, walks first parents only; its merge rows then carry
-   * `mergedCount`. Missing branches are skipped.
+   * `mergedCount`. Missing branches are skipped. Paged (#685): at most `limit` commits from
+   * `cursor` on (`null`: from the first commit), with the next page's cursor.
    */
-  getCommitGraph(repoPath: string, limit: number, selection: GraphSelection): Promise<GraphCommit[]>;
+  getCommitGraph(repoPath: string, limit: number, selection: GraphSelection, cursor: string | null): Promise<GraphPage>;
   /**
    * The commits merge `mergeId` brought in (reachable from its other parents, not from its first
    * parent), children first, at most `limit` (#617): what expanding a collapsed merge shows.

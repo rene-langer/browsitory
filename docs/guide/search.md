@@ -2,8 +2,17 @@
 
 The search field sits above the commit graph. Click it, press **Ctrl+F** (**⌘F** on macOS)
 while the commit list has focus, or run **Search commits** from the command palette. Once you
-stop typing, the graph is replaced by the matching commits and the first match is selected.
-Press ↓ in the field to move into the results.
+stop typing, the matches stand out in the graph: the other commits are dimmed, the matches keep
+their place among them, and the first match is selected. The bar under the field counts them
+("3 of 42", or "3 of 100+" while more are still to be read). Press **Enter** or **F3** (in the
+field, or in the commit list) for the next match and **Shift+Enter** or **Shift+F3** for the
+previous one, or use the arrows in that bar; from a commit that isn't a match they go to the
+nearest match below or above it. A match further down loads the history up to it; one inside a
+collapsed merge expands the merge; one the graph doesn't show (a `branch:` search of a branch
+that isn't in the graph) is still selected, and a note says why it has no row. Every match you
+go to counts for **Back** and **Forward**. **List** in that bar shows only the matching commits,
+as a list, instead; Browsitory remembers the choice. Press ↓ in the field to move into the
+graph or the list.
 
 | Syntax | Meaning |
 |---|---|
@@ -43,9 +52,10 @@ Press ↓ in the field to move into the results.
   or at the tip of the `branch:` term's branch. Put a path with spaces in quotes
   (`line:"my file.txt:3-4"`). Lines outside the file are an error.
 - If the search can't be read, the message under the field says why, such as a missing `)`.
-- Results load 100 at a time, and "Scanned N commits…" shows progress on large histories.
+- Results load 100 at a time, and "Scanned N commits…" shows progress on large histories in the
+  List view; Next past the last loaded match reads the next ones.
 - Selecting a result shows its diff as usual.
-- Esc or × goes back to the graph and the previous selection.
+- Esc or × ends the search and goes back to the previous selection.
 - File history opened from a result returns to the results when closed.
 
 ## Recent searches

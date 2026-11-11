@@ -19,6 +19,8 @@ LineHistory/complete {"entries":[{"commit":{"authorEmail":"ada@example.com","aut
 LineHistory/truncated {"entries":[],"truncated":true}
 SearchPage/more {"commits":[{"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Match","tags":["v1.0.0"],"timestamp":1700000000}],"nextCursor":"cursor-1","scanned":500}
 SearchPage/exhausted {"commits":[],"nextCursor":null,"scanned":0}
+GraphPage/more {"commits":[{"authorEmail":"ada@example.com","authorName":"Ada Lovelace","branchRefs":["main"],"id":"0123456789abcdef0123456789abcdef01234567","parentIds":["89abcdef0123456789abcdef0123456789abcdef"],"remoteBranchRefs":["origin/main"],"shortId":"0123456","summary":"Row","tags":["v1.0.0"],"timestamp":1700000000}],"nextCursor":"1:0123456789abcdef","stale":false}
+GraphPage/stale {"commits":[],"nextCursor":null,"stale":true}
 ChangedFile/plain {"oldPath":null,"path":"a.txt"}
 ChangedFile/renamed {"oldPath":"a.txt","path":"b.txt"}
 CompareRange/plain {"fromId":"1111111111111111111111111111111111111111","toId":"2222222222222222222222222222222222222222"}

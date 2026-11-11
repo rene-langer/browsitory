@@ -45,8 +45,9 @@ fn get_commit_graph_reflects_a_commit() {
     let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
     let commits = worker
         .handle()
-        .get_commit_graph(10, git_core::graph::GraphSelection::default())
-        .unwrap();
+        .get_commit_graph(10, git_core::graph::GraphSelection::default(), None)
+        .unwrap()
+        .commits;
 
     assert_eq!(commits.len(), 1);
     assert_eq!(commits[0].summary, "initial commit");
@@ -103,7 +104,10 @@ fn merged_commits_list_what_a_merge_brought_in_through_the_worker() {
         first_parent: true,
         ..Default::default()
     };
-    let rows = handle.get_commit_graph(10, collapsed).unwrap();
+    let rows = handle
+        .get_commit_graph(10, collapsed, None)
+        .unwrap()
+        .commits;
 
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].id, side_id.to_string());
@@ -325,4 +329,26 @@ fn a_bare_repository_has_no_root_files() {
     assert_eq!(handle.root_files(), None);
     assert!(handle.create_root_file(".gitignore".into()).is_err());
     assert!(!dir.path().join(".gitignore").exists());
+}
+
+// #685: the next page resumes from the previous one's cursor.
+#[test]
+fn get_commit_graph_pages_with_a_cursor() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "one");
+    commit_all(&repo, "first commit");
+    write_file(dir.path(), "file.txt", "two");
+    commit_all(&repo, "second commit");
+
+    let worker = Worker::spawn(dir.path().to_path_buf()).unwrap();
+    let handle = worker.handle();
+    let selection = git_core::graph::GraphSelection::default();
+    let first = handle.get_commit_graph(1, selection.clone(), None).unwrap();
+    assert_eq!(first.commits[0].summary, "second commit");
+    let second = handle
+        .get_commit_graph(1, selection, first.next_cursor)
+        .unwrap();
+    assert_eq!(second.commits[0].summary, "first commit");
+    assert_eq!(second.next_cursor, None);
+    assert!(!second.stale);
 }

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { RepoError, type FileDropEvent, type RepoClient } from "./ipc/RepoClient";
-import { fakeRepoClient } from "./test/fakeRepoClient";
+import { fakeRepoClient, graphPage } from "./test/fakeRepoClient";
 
 // Whole-App renders, like App.test.tsx (#217's slow-machine budget).
 vi.setConfig({ testTimeout: 20_000 });
@@ -16,7 +16,7 @@ function layoutClient(overrides: Partial<RepoClient> = {}): RepoClient {
       listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
       persistOpenRepos: async () => {},
       getStatus: async () => [],
-      getCommitGraph: async () => [],
+      getCommitGraph: async () => graphPage([]),
       listStashes: async () => [],
       listBranches: async () => [
         { name: "main", isCurrent: true, upstream: "origin/main", ahead: 1, behind: 2 },

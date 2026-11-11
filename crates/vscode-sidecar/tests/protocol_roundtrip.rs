@@ -212,7 +212,7 @@ fn commit_graph_reflects_a_commit_through_the_sidecar() {
         serde_json::json!({"repoPath": repo_path, "limit": 10, "selection": {"local": null, "remote": []}}),
     );
 
-    let commits = graph["result"]
+    let commits = graph["result"]["commits"]
         .as_array()
         .expect("commit graph result array");
     assert_eq!(commits.len(), 1);
@@ -278,12 +278,7 @@ fn commit_graph_and_search_walk_the_selected_remote_branches_through_the_sidecar
     sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
 
     let summaries = |response: &serde_json::Value, list: &str| -> Vec<String> {
-        let commits = if list.is_empty() {
-            &response["result"]
-        } else {
-            &response["result"][list]
-        };
-        commits
+        response["result"][list]
             .as_array()
             .expect("commit list")
             .iter()
@@ -298,13 +293,13 @@ fn commit_graph_and_search_walk_the_selected_remote_branches_through_the_sidecar
         )
     };
     assert_eq!(
-        summaries(&graph(&mut sidecar, 2, serde_json::json!([])), ""),
+        summaries(&graph(&mut sidecar, 2, serde_json::json!([])), "commits"),
         ["initial commit"]
     );
     assert_eq!(
         summaries(
             &graph(&mut sidecar, 3, serde_json::json!(["origin/feature"])),
-            ""
+            "commits"
         ),
         ["remote only", "initial commit"]
     );
@@ -391,7 +386,7 @@ fn working_and_commit_diff_round_trip_through_the_sidecar() {
         "get_commit_graph",
         serde_json::json!({"repoPath": repo_path, "limit": 1, "selection": {"local": null, "remote": []}}),
     );
-    let head_id = graph["result"][0]["id"]
+    let head_id = graph["result"]["commits"][0]["id"]
         .as_str()
         .expect("head commit id")
         .to_string();
@@ -832,8 +827,11 @@ fn a_collapsed_merge_expands_through_the_sidecar() {
         serde_json::json!({"repoPath": repo_path, "revision": side_id, "selection": collapsed}),
     );
 
-    assert_eq!(graph["result"][0]["mergedCount"], 1, "{graph}");
-    assert!(graph["result"][1].get("mergedCount").is_none(), "{graph}");
+    assert_eq!(graph["result"]["commits"][0]["mergedCount"], 1, "{graph}");
+    assert!(
+        graph["result"]["commits"][1].get("mergedCount").is_none(),
+        "{graph}"
+    );
     assert_eq!(merged["result"][0]["id"], side_id.as_str(), "{merged}");
     assert_eq!(
         located["result"]["merge"],
@@ -3608,4 +3606,47 @@ fn get_change_stamp_reports_its_two_parts() {
     let edited = sidecar.call(3, "get_change_stamp", params);
     assert_eq!(edited["result"]["refs"], clean["result"]["refs"]);
     assert_ne!(edited["result"]["workTree"], clean["result"]["workTree"]);
+}
+
+/// `get_commit_graph` pages (#685): `nextCursor` resumes, an absent cursor starts at the top, and a
+/// cursor of another walk answers `stale`.
+#[test]
+fn get_commit_graph_pages_with_a_cursor() {
+    let (dir, repo) = init_repo();
+    write_file(dir.path(), "file.txt", "v1");
+    commit_all(&repo, "first commit");
+    write_file(dir.path(), "file.txt", "v2");
+    commit_all(&repo, "second commit");
+    drop(repo);
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    let mut sidecar = Sidecar::spawn();
+    sidecar.call(1, "open_repo", serde_json::json!({"path": repo_path}));
+    let selection = serde_json::json!({"local": null, "remote": []});
+
+    let first = sidecar.call(
+        2,
+        "get_commit_graph",
+        serde_json::json!({"repoPath": repo_path, "limit": 1, "selection": selection}),
+    );
+    assert_eq!(first["result"]["commits"][0]["summary"], "second commit");
+    assert_eq!(first["result"]["stale"], false);
+    let cursor = first["result"]["nextCursor"].clone();
+    assert!(cursor.is_string(), "{first}");
+
+    let second = sidecar.call(
+        3,
+        "get_commit_graph",
+        serde_json::json!({"repoPath": repo_path, "limit": 1, "selection": selection, "cursor": cursor}),
+    );
+    assert_eq!(second["result"]["commits"][0]["summary"], "first commit");
+    assert_eq!(second["result"]["nextCursor"], serde_json::Value::Null);
+
+    let collapsed = serde_json::json!({"local": null, "remote": [], "firstParent": true});
+    let stale = sidecar.call(
+        4,
+        "get_commit_graph",
+        serde_json::json!({"repoPath": repo_path, "limit": 1, "selection": collapsed, "cursor": cursor}),
+    );
+    assert_eq!(stale["result"]["stale"], true, "{stale}");
+    assert_eq!(stale["result"]["commits"], serde_json::json!([]));
 }

@@ -68,6 +68,7 @@ export function shortcutGroups(apple: boolean = isApplePlatform(), vscode: boole
         row([RIGHT, LEFT], "Expand / collapse a collapsed merge (← on its commits: go to the merge)"),
         row([k("Enter"), ...MENU_KEYS], "Open the commit context menu"),
         row([k("f", { mod: true })], "Search commits"),
+        row([k("F3"), k("F3", { shift: true })], "Next / previous search match (Enter / Shift+Enter in the search field)"),
       ],
     },
     {

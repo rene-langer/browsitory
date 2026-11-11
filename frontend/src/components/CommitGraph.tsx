@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type RefObject } from "react";
 import type { CommitStats, GraphCommit, HeadInfo, RemoteInfo, StatusEntry } from "../ipc/RepoClient";
-import { assignLanes } from "../lib/commitGraphLayout";
+import { type CommitGraphLayout, useCommitGraphLayout } from "../lib/useCommitGraphLayout";
+import { laneColor } from "../lib/laneColors";
 import {
   EMPTY_SELECTION,
   extendSelection,
@@ -26,13 +27,17 @@ import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { LineStatsBadge } from "./LineStatsBadge";
-import { expandedFrom, expansionHasMore, MERGE_PAGE_SIZE, type MergeExpansion } from "../lib/mergeExpansion";
+import { expansionHasMore, MERGE_PAGE_SIZE, type MergeExpansion } from "../lib/mergeExpansion";
 import { RefBadges } from "./RefBadges";
+import { useVirtualRows } from "./useVirtualRows";
 import { tagMenuItems } from "./tagMenuItems";
 import styles from "./CommitGraph.module.css";
 
 const PAGE_SIZE = 10;
+/** The next page of history loads once the rows in view come this close to the last one (#685). */
+export const LOAD_AHEAD_ROWS = 50;
 const NO_EXPANSIONS: Readonly<Record<string, MergeExpansion>> = {};
+const NO_COMMITS: GraphCommit[] = [];
 
 export function CommitGraph({
   status,
@@ -58,6 +63,7 @@ export function CommitGraph({
   onEditHistory,
   onRewordCommit,
   hasMore = false,
+  loadingMore = false,
   onLoadMore,
   graphRemoteBranchSelection = null,
   onRequestSearch,
@@ -75,6 +81,10 @@ export function CommitGraph({
   expandedMerges = NO_EXPANSIONS,
   onExpandMerge,
   onCollapseMerge,
+  layout: sharedLayout,
+  searchMatches = null,
+  onStepMatch,
+  listRef: outerListRef,
 }: {
   status: StatusEntry[];
   commits: GraphCommit[];
@@ -123,8 +133,11 @@ export function CommitGraph({
   onEditHistory?: (commitId: string, onto: string, request: HistoryEditRequest) => void;
   /** Reword… of a commit below HEAD: opens the Reword dialog (a one-step rebase from `onto`). */
   onRewordCommit?: (commitId: string, onto: string) => void;
-  // True when the loaded history filled its limit, so older commits probably exist.
+  // True when older history exists beyond the loaded rows (#685): scrolling near the end, End,
+  // or a key past the last row calls `onLoadMore`.
   hasMore?: boolean;
+  /** The next page is on its way. */
+  loadingMore?: boolean;
   onLoadMore?: () => void;
   // `null`/omitted means "show every remote badge present" — mirrors BranchTree's local
   // `graphBranchSelection ?? branches.map(...)` fallback, but computed here from the commits
@@ -173,6 +186,20 @@ export function CommitGraph({
   expandedMerges?: Readonly<Record<string, MergeExpansion>>;
   onExpandMerge?: (mergeId: string, atLeast?: number) => void;
   onCollapseMerge?: (mergeId: string) => void;
+  /**
+   * The lanes of `commits` with `expandedMerges`, when the caller computed them already for the
+   * sidebar's swatches (#673); omitted, the graph computes them itself.
+   */
+  layout?: CommitGraphLayout;
+  /**
+   * An open search's matches (#687): the other rows are dimmed, lines included, so the matches
+   * stand out where they sit in the graph. `null`: no search.
+   */
+  searchMatches?: ReadonlySet<string> | null;
+  /** F3 / Shift+F3 in the list: the next / previous match. */
+  onStepMatch?: (direction: -1 | 1) => void;
+  /** Also set to the list, so the search field's ↓ can move into it (#687). */
+  listRef?: RefObject<HTMLUListElement | null>;
 }) {
   const [contextMenu, setContextMenu] = useState<{
     commitId: string;
@@ -186,9 +213,9 @@ export function CommitGraph({
   const [navigationPicker, setNavigationPicker] = useState<{ items: ContextMenuItem[]; x: number; y: number } | null>(
     null,
   );
-  // The commit of an expanded merge each listed commit belongs to (#617).
-  const mergeOwners = useMemo(() => expandedFrom(commits, expandedMerges), [commits, expandedMerges]);
-  const commitLayouts = useMemo(() => assignLanes(commits, new Set(mergeOwners.keys())), [commits, mergeOwners]);
+  // The commit of an expanded merge each listed commit belongs to (#617), and the lanes.
+  const ownLayout = useCommitGraphLayout(sharedLayout === undefined ? commits : NO_COMMITS, expandedMerges);
+  const { mergeOwners, layouts: commitLayouts } = sharedLayout ?? ownLayout;
   const [hoveredSegmentId, setHoveredSegmentId] = useState<number | null>(null);
   // `focusId` is the last focus the graph itself reported through `onSelectRow`. A focus that
   // differs from it came from outside (search, sidebar, refresh) and drops the multi-selection.
@@ -230,12 +257,21 @@ export function CommitGraph({
   // focus goes from a chosen item straight to the list, never back through whatever was focused
   // before the menu opened (#146).
   const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
-  const attachList = useCallback((element: HTMLUListElement | null) => {
-    listRef.current = element;
-    setListElement(element);
-  }, []);
+  const attachList = useCallback(
+    (element: HTMLUListElement | null) => {
+      listRef.current = element;
+      if (outerListRef !== undefined) outerListRef.current = element;
+      setListElement(element);
+    },
+    [outerListRef],
+  );
 
   const busyTitle = operationsBlocked ? (operationsBlockedReason ?? undefined) : undefined;
+
+  // Only the rows in view render (#685); row 0 is "Uncommitted changes".
+  const virtual = useVirtualRows(listElement, rows.length);
+  const rowElement = (list: HTMLElement, index: number) =>
+    list.querySelector<HTMLElement>(`:scope > li[data-row-index="${index}"]`) ?? undefined;
 
   function singleCommitItems(commitId: string): ContextMenuItem[] {
     const commit = commits.find((candidate) => candidate.id === commitId);
@@ -375,6 +411,7 @@ export function CommitGraph({
 
   // The rows on screen, for the lazily counted badges (#620). Without IntersectionObserver every
   // loaded row counts as visible.
+  const { start: firstRendered, end: endRendered } = virtual;
   useEffect(() => {
     const list = listRef.current;
     if (onCommitsVisible === undefined || list === null) return;
@@ -394,13 +431,18 @@ export function CommitGraph({
     });
     for (const row of list.querySelectorAll<HTMLElement>("[data-commit-id]")) observer.observe(row);
     return () => observer.disconnect();
-  }, [commits, onCommitsVisible]);
+  }, [commits, onCommitsVisible, firstRendered, endRendered]);
 
   // Keep the keyboard-driven selection visible in a long history, and a "Go to" target too.
+  const { scrollToIndex, windowed } = virtual;
   useEffect(() => {
-    const selected = listRef.current?.children[selectedIndex] as HTMLElement | undefined;
-    if (typeof selected?.scrollIntoView === "function") selected.scrollIntoView({ block: "nearest" });
-  }, [selectedIndex, revealRequest]);
+    if (selectedIndex >= 0) scrollToIndex(selectedIndex);
+  }, [selectedIndex, revealRequest, scrollToIndex]);
+
+  // Infinite scroll (#685): the next page loads before the last loaded row comes into view.
+  useEffect(() => {
+    if (windowed && hasMore && !loadingMore && endRendered >= rows.length - LOAD_AHEAD_ROWS) onLoadMore?.();
+  }, [windowed, hasMore, loadingMore, endRendered, rows.length, onLoadMore]);
 
   const moveSelection = (nextIndex: number, extendRange: boolean) => {
     // Arrowing/paging past the last loaded row pulls in the next page instead of dead-ending.
@@ -427,7 +469,7 @@ export function CommitGraph({
     return commit === undefined ? commitId.slice(0, 7) : `${commit.shortId} ${commit.summary}`;
   };
   const openPicker = (list: HTMLUListElement, items: ContextMenuItem[]) => {
-    const rect = (list.children[selectedIndex] as HTMLElement | undefined)?.getBoundingClientRect();
+    const rect = rowElement(list, selectedIndex)?.getBoundingClientRect();
     setNavigationPicker({ items, x: rect?.left ?? 0, y: rect?.bottom ?? 0 });
   };
   // `[`: the first parent; Shift+`[` on a merge commit: a picker of its parents.
@@ -502,8 +544,7 @@ export function CommitGraph({
 
   const openMenuForSelected = (list: HTMLUListElement) => {
     if (selectedIndex < 1) return;
-    const row = list.children[selectedIndex] as HTMLElement | undefined;
-    const rect = row?.getBoundingClientRect();
+    const rect = rowElement(list, selectedIndex)?.getBoundingClientRect();
     setContextMenu({
       commitId: commits[selectedIndex - 1].id,
       x: rect?.left ?? 0,
@@ -517,6 +558,11 @@ export function CommitGraph({
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "f" && onRequestSearch) {
       event.preventDefault();
       onRequestSearch();
+      return;
+    }
+    if (event.key === "F3" && searchMatches !== null && onStepMatch !== undefined) {
+      event.preventDefault();
+      onStepMatch(event.shiftKey ? -1 : 1);
       return;
     }
     // Cmd+[ / Cmd+] are Back/Forward on macOS (`useWorkspaceShortcuts`); AltGr (Ctrl+Alt) types
@@ -741,10 +787,14 @@ export function CommitGraph({
       role="listbox"
       aria-multiselectable="true"
       aria-label="Commit history"
-      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F [ ] Shift+["
+      aria-keyshortcuts={`ArrowUp ArrowDown ArrowLeft ArrowRight Home End PageUp PageDown Shift+ArrowUp Shift+ArrowDown Enter ContextMenu Shift+F10 Escape Control+F Meta+F [ ] Shift+[${searchMatches === null ? "" : " F3 Shift+F3"}`}
+      style={virtual.windowed ? { paddingTop: virtual.padTop, paddingBottom: virtual.padBottom } : undefined}
     >
+      {virtual.start === 0 && (
       <ListRow
-        className={styles.uncommittedRow}
+        className={searchMatches === null ? styles.uncommittedRow : `${styles.uncommittedRow} ${styles.searchDimmed}`}
+        rowIndex={0}
+        setSize={rows.length}
         selected={selectedRow === "uncommitted"}
         onClick={() => {
           setSelection(EMPTY_SELECTION, "uncommitted");
@@ -757,10 +807,21 @@ export function CommitGraph({
           Uncommitted changes{status.length > 0 && ` (${status.length})`}
         </span>
       </ListRow>
-      {commits.map((commit, index) => (
+      )}
+      {commits.slice(Math.max(virtual.start - 1, 0), Math.max(virtual.end - 1, 0)).map((commit, offset) => {
+        const index = Math.max(virtual.start - 1, 0) + offset;
+        return (
         <ListRow
           key={commit.id}
-          className={mergeOwners.has(commit.id) ? `commit-row ${styles.mergedRow}` : "commit-row"}
+          rowIndex={index + 1}
+          setSize={rows.length}
+          className={[
+            "commit-row",
+            mergeOwners.has(commit.id) ? styles.mergedRow : null,
+            searchMatches === null ? null : searchMatches.has(commit.id) ? styles.searchMatch : styles.searchDimmed,
+          ]
+            .filter((name) => name !== null)
+            .join(" ")}
           data-commit-id={commit.id}
           selected={effectiveSelection.ids.has(commit.id)}
           onClick={(event) => handleCommitClick(event, commit.id)}
@@ -777,6 +838,8 @@ export function CommitGraph({
           </div>
           <RefBadges
             commit={commit}
+            laneColor={laneColor(commitLayouts[index].lane)}
+            currentBranch={currentBranch}
             detachedHead={headInfo.detachedAt !== null && headInfo.headId === commit.id}
             shownRemoteBranches={shownRemoteBranches}
             onTagContextMenu={
@@ -809,7 +872,8 @@ export function CommitGraph({
             {formatShortDate(commit.timestamp)}
           </span>
         </ListRow>
-      ))}
+        );
+      })}
     </ul>
     {/* The menus sit next to the list, not in it (#669): a listbox holds only options. */}
     {contextMenu !== null && (
@@ -890,12 +954,9 @@ export function CommitGraph({
       </div>
     )}
     {hasMore && (
-      <div className={styles.loadMore}>
-        <span>Showing latest {commits.length} commits</span>
-        <button type="button" onClick={() => onLoadMore?.()}>
-          Load more
-        </button>
-      </div>
+      <p className={styles.loadMore} role="status">
+        {loadingMore ? "Loading older commits…" : `Showing the latest ${commits.length} commits; scroll for older ones.`}
+      </p>
     )}
     </>
   );

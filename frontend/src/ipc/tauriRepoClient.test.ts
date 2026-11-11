@@ -688,11 +688,12 @@ describe("tauriRepoClient commit search", () => {
 
   it("invokes get_commit_graph with the local and the remote selection", async () => {
     vi.mocked(invoke).mockResolvedValueOnce([]);
-    await tauriRepoClient.getCommitGraph("/repo", 50, { local: [], remote: ["origin/feature"] });
+    await tauriRepoClient.getCommitGraph("/repo", 50, { local: [], remote: ["origin/feature"] }, "300:abc");
     expect(invoke).toHaveBeenLastCalledWith("get_commit_graph", {
       repoPath: "/repo",
       limit: 50,
       selection: { local: [], remote: ["origin/feature"] },
+      cursor: "300:abc",
     });
   });
 

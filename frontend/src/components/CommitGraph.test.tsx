@@ -1193,20 +1193,19 @@ describe("CommitGraph history metadata and pagination", () => {
     expect(screen.getAllByTestId("commit-date")).toHaveLength(2);
   });
 
-  it("offers Load more when more history exists and calls onLoadMore", () => {
-    const onLoadMore = vi.fn();
-    render(<CommitGraph {...baseProps} hasMore onLoadMore={onLoadMore} />);
+  it("says older history exists, and that it is loading (#685)", () => {
+    const { rerender } = render(<CommitGraph {...baseProps} hasMore onLoadMore={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Showing the latest 2 commits; scroll for older ones.");
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
 
-    expect(screen.getByText(/Showing latest 2 commits/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
-
-    expect(onLoadMore).toHaveBeenCalledTimes(1);
+    rerender(<CommitGraph {...baseProps} hasMore loadingMore onLoadMore={vi.fn()} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading older commits…");
   });
 
-  it("does not offer Load more when the whole history is loaded", () => {
+  it("says nothing about older history when the whole history is loaded", () => {
     render(<CommitGraph {...baseProps} hasMore={false} onLoadMore={vi.fn()} />);
 
-    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("loads more when keyboard navigation reaches the last row", () => {
@@ -2065,5 +2064,179 @@ describe("CommitGraph collapsed merges (#617)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Show the 3 commits/ }));
 
     expect(onCommitsVisible).toHaveBeenLastCalledWith(["after", "merge", "f3", "f2", "f1", "direct", "base"]);
+  });
+});
+
+// #685: only the rows in view render, inside the scrolling history pane.
+describe("CommitGraph — windowed rows", () => {
+  const ROW = 26;
+  const many: GraphCommit[] = Array.from({ length: 1000 }, (_, n) => ({
+    ...commits[0],
+    id: `id${n}`,
+    shortId: `id${n}`,
+    summary: `commit ${n}`,
+    parentIds: n < 999 ? [`id${n + 1}`] : [],
+  }));
+
+  // jsdom has no layout: every `li` is ROW tall, and the pane (260px high, at the top of the
+  // page) scrolls the list, which starts at its top, up by its `scrollTop`.
+  function layout() {
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const height = this.tagName === "LI" ? ROW : 0;
+      const top = this.tagName === "UL" ? -(this.parentElement?.scrollTop ?? 0) : 0;
+      return { top, left: 0, right: 0, bottom: top + height, width: 0, height, x: 0, y: top, toJSON: () => ({}) };
+    };
+    return () => {
+      Element.prototype.getBoundingClientRect = original;
+    };
+  }
+
+  function renderInPane(props: Partial<ComponentProps<typeof CommitGraph>> = {}) {
+    const restore = layout();
+    const pane = document.createElement("div");
+    pane.style.overflowY = "auto";
+    Object.defineProperty(pane, "clientHeight", { configurable: true, value: 260 });
+    document.body.appendChild(pane);
+    const utils = render(
+      <CommitGraph
+        {...historyProps}
+        status={[]}
+        commits={many}
+        selectedRow="uncommitted"
+        operationsBlocked={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        {...props}
+      />,
+      { container: pane },
+    );
+    const scrollTo = (top: number) => {
+      pane.scrollTop = top;
+      fireEvent.scroll(pane);
+    };
+    return { ...utils, pane, scrollTo, restore };
+  }
+
+  it("renders the rows in view plus a margin, and pads for the rest", () => {
+    const { restore } = renderInPane();
+    try {
+      const list = screen.getByRole("listbox", { name: "Commit history" });
+      const rendered = within(list).getAllByRole("option");
+      // Rows 0–9 are in view, 20 more below them.
+      expect(rendered).toHaveLength(30);
+      expect(rendered[0]).toHaveTextContent("Uncommitted changes");
+      expect(rendered[1]).toHaveAttribute("aria-posinset", "2");
+      expect(rendered[1]).toHaveAttribute("aria-setsize", "1001");
+      expect(list.style.paddingTop).toBe("0px");
+      expect(list.style.paddingBottom).toBe(`${(1001 - 30) * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("renders the rows of the scrolled-to part", () => {
+    const { scrollTo, restore } = renderInPane();
+    try {
+      scrollTo(ROW * 500);
+      const list = screen.getByRole("listbox", { name: "Commit history" });
+      const rendered = within(list).getAllByRole("option");
+      expect(rendered[0]).toHaveAttribute("data-row-index", "480");
+      expect(rendered.at(-1)).toHaveAttribute("data-row-index", "529");
+      expect(screen.queryByText("Uncommitted changes")).toBeNull();
+      expect(list.style.paddingTop).toBe(`${480 * ROW}px`);
+    } finally {
+      restore();
+    }
+  });
+
+  it("scrolls a selected row far down the list into view", () => {
+    const { pane, rerender, restore } = renderInPane();
+    try {
+      rerender(
+        <CommitGraph
+          {...historyProps}
+          status={[]}
+          commits={many}
+          selectedRow={{ commitId: "id700" }}
+          operationsBlocked={false}
+          onSelectRow={vi.fn()}
+          onBranchFromCommit={vi.fn()}
+          onRebaseFromCommit={vi.fn()}
+        />,
+      );
+      // Row 701 (after "Uncommitted changes") ends at the pane's bottom edge.
+      expect(pane.scrollTop).toBe(702 * ROW - 260);
+      expect(screen.getByText(/commit 700$/)).toBeInTheDocument();
+    } finally {
+      restore();
+    }
+  });
+
+  it("loads the next page before the last loaded row comes into view", () => {
+    const onLoadMore = vi.fn();
+    const { scrollTo, restore } = renderInPane({ hasMore: true, onLoadMore });
+    try {
+      expect(onLoadMore).not.toHaveBeenCalled();
+      scrollTo(ROW * 940);
+      expect(onLoadMore).toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("doesn't ask for another page while one is loading", () => {
+    const onLoadMore = vi.fn();
+    const { scrollTo, restore } = renderInPane({ hasMore: true, loadingMore: true, onLoadMore });
+    try {
+      scrollTo(ROW * 940);
+      expect(onLoadMore).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+});
+
+// #687: an open search dims the rows that don't match, in the graph.
+describe("CommitGraph — search matches", () => {
+  function renderWithMatches(matches: ReadonlySet<string> | null, onStepMatch = vi.fn()) {
+    render(
+      <CommitGraph
+        {...historyProps}
+        status={status}
+        commits={commits}
+        selectedRow="uncommitted"
+        operationsBlocked={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+        searchMatches={matches}
+        onStepMatch={onStepMatch}
+      />,
+    );
+    return onStepMatch;
+  }
+  const row = (text: RegExp) => screen.getByText(text).closest("li");
+
+  it("dims the rows that don't match and marks the matches", () => {
+    renderWithMatches(new Set(["bbb222..."]));
+    expect(row(/first commit/)).toHaveClass(styles.searchMatch);
+    expect(row(/second commit/)).toHaveClass(styles.searchDimmed);
+    expect(row(/Uncommitted changes/)).toHaveClass(styles.searchDimmed);
+  });
+
+  it("dims nothing without a search", () => {
+    renderWithMatches(null);
+    expect(row(/second commit/)).not.toHaveClass(styles.searchDimmed);
+    expect(row(/second commit/)).not.toHaveClass(styles.searchMatch);
+  });
+
+  it("goes to the next and previous match with F3 and Shift+F3", () => {
+    const onStepMatch = renderWithMatches(new Set(["bbb222..."]));
+    const list = screen.getByRole("listbox", { name: "Commit history" });
+    fireEvent.keyDown(list, { key: "F3" });
+    fireEvent.keyDown(list, { key: "F3", shiftKey: true });
+    expect(onStepMatch.mock.calls).toEqual([[1], [-1]]);
   });
 });
