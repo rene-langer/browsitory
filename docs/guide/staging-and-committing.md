@@ -21,8 +21,10 @@ Type a commit message and click **Commit**. The button says what it commits and 
 example **Commit 3 files to main** (without the branch on a detached HEAD). Without a message it
 is disabled, and "Write a commit message to commit." says why. After a commit a notification
 names it, "Committed 4c5beaf to main", with **Push** to push the branch (to its upstream, or
-through the Push dialog when it has none), or **Undo** when the repository has no remote. Undo
-only acts while that commit is still the latest. The arrow next to the button has **Commit and
+through the Push dialog when it has none) and **Undo**; without a remote it has **Undo** only.
+Push only pushes the branch the notification names: if you have checked out another branch since,
+it says "Not pushed: main is no longer the current branch." instead. Undo only acts while that
+commit is still the latest. The arrow next to the button has **Commit and
 push**, which commits and then pushes the same way (it needs a branch and a remote; otherwise its
 tooltip says why), and **Amend last commit**, which turns on amend mode (see [Rewriting
 commits](rewriting-commits.md)). **Stash** in the repository toolbar sets the current changes

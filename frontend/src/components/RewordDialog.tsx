@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
 import { InlineError } from "./primitives/InlineError";
 import styles from "./PushBranchDialog.module.css";
+import { BlockedReason } from "./primitives/BlockedReason";
+import { describedBy } from "../lib/ariaDescribedBy";
 
 /**
  * "Reword…" of a commit below HEAD (#442): edits its full message, then the caller runs it as a
@@ -26,6 +28,8 @@ export function RewordDialog({
   onReword: (message: string) => void;
   onCancel: () => void;
 }) {
+  const reasonId = useId();
+  const busyReason = disabled ? disabledReason : null;
   const [original, setOriginal] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -77,8 +81,14 @@ export function RewordDialog({
           )}
         </Field>
         {loadError !== null && <InlineError message={loadError} onDismiss={() => setLoadError(null)} />}
+        <BlockedReason id={reasonId} reason={busyReason} />
         <div className={styles.actions}>
-          <button type="submit" disabled={blocked} title={disabled ? (disabledReason ?? undefined) : undefined}>
+          <button
+            type="submit"
+            disabled={blocked}
+            title={busyReason ?? undefined}
+            aria-describedby={describedBy(reasonId, busyReason)}
+          >
             Reword
           </button>
           <button type="button" onClick={onCancel}>

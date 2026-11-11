@@ -1,6 +1,6 @@
 import { MAX_CONTEXT_LINES, type DiffSettings, type GraphCommit, type PullStrategy } from "../ipc/RepoClient";
 import { historyEditChecks, type HistoryEditCheck, type HistoryEditRequest } from "./historyEdits";
-import type { PaletteAction } from "./actions/action";
+import { UNAVAILABLE_REASON, type PaletteAction } from "./actions/action";
 import { branchActions } from "./actions/branchActions";
 import { commitActions } from "./actions/commitActions";
 import { addRemoteAction, remoteActions } from "./actions/remoteActions";
@@ -337,9 +337,6 @@ function family(group: CommandGroup) {
 function selectedFiles(n: number): string {
   return `${n} selected ${n === 1 ? "file" : "files"}`;
 }
-
-/** What an unavailable command says when its action gives no reason of its own. */
-const UNAVAILABLE_REASON = "Not available right now.";
 
 /** The palette's commands for the current state, each family's from its own builder. */
 export function buildCommands(context: CommandContext): Command[] {

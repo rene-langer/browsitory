@@ -9,7 +9,8 @@ import { useCopyToClipboard } from "../state/useCopyToClipboard";
 import type { SidebarRevealRequest } from "../state/useSidebarReveal";
 import type { RemoteDialog } from "../state/workspaceDialog";
 import { AccordionSection } from "./primitives/AccordionSection";
-import formStyles from "./primitives/FormDialog.module.css";
+import { ReasonButton } from "./primitives/ReasonButton";
+import { UNAVAILABLE_REASON } from "../lib/actions/action";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
 import { ContextMenu } from "./primitives/ContextMenu";
 import { InlineError } from "./primitives/InlineError";
@@ -358,13 +359,12 @@ export function BranchTree({
                   Force delete "{pendingForceFor}"? Its unmerged commits will be on no branch. Undo can bring the
                   branch back.
                 </p>
-                {/* #521: the repository can become busy while the confirmation is open. */}
-                {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
               </>
             }
             confirmLabel="Force delete"
             confirmDisabled={operationDisabled}
-            confirmTitle={busyReason ?? undefined}
+            // #521: the repository can become busy while the confirmation is open.
+            confirmReason={busyReason}
             onConfirm={() => {
               if (operationDisabled) return;
               void onDeleteBranch(pendingForceFor, true);
@@ -477,14 +477,12 @@ export function BranchTree({
           )}
           {upstream !== null && (
             <Toolbar aria-label="Upstream actions">
-              <button
-                type="button"
-                disabled={operationDisabled}
-                title={busyReason ?? undefined}
+              <ReasonButton
+                reason={operationDisabled ? (busyReason ?? UNAVAILABLE_REASON) : null}
                 onClick={() => setClearUpstreamConfirm(true)}
               >
                 Clear upstream
-              </button>
+              </ReasonButton>
             </Toolbar>
           )}
         </section>
@@ -497,12 +495,11 @@ export function BranchTree({
                 <p>
                   Stop {upstream.localBranch} tracking {upstream.remoteName}/{upstream.remoteBranch}?
                 </p>
-                {busyReason !== null && <p className={formStyles.blocked}>{busyReason}</p>}
               </>
             }
             confirmLabel="Clear upstream"
             confirmDisabled={operationDisabled}
-            confirmTitle={busyReason ?? undefined}
+            confirmReason={busyReason}
             onConfirm={() => {
               if (operationDisabled) return;
               setClearUpstreamConfirm(false);

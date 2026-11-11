@@ -10,7 +10,7 @@ const WORKTREE_NAME = "feature-tree";
 const WORKTREE_BRANCH = "feature/e2e-worktree";
 // BranchTree splits a "/"-containing branch name into nested folders, so the leaf row's own
 // text is only the last segment — see the identical note in branch-management.spec.ts.
-const WORKTREE_BRANCH_LEAF = WORKTREE_BRANCH.split("/").pop();
+const WORKTREE_BRANCH_LEAF = WORKTREE_BRANCH.split("/").pop() ?? WORKTREE_BRANCH;
 const WORKTREE_PATH = path.join(os.tmpdir(), `browsitory-e2e-${Date.now()}`);
 
 // Opening a worktree opens it as its own tab (`WorktreePanel`'s `onOpenWorktree` routes through
@@ -48,9 +48,11 @@ async function activeElement(selector: string, timeout = UI_TIMEOUT) {
 
 // BranchTree has no separate switcher control — the current branch is just the row in the Local
 // folder whose text carries the " (current)" suffix. The row itself is the interactive element
-// (a `role="button"` `<li>`, not a nested `<button>` — see `ListRow.tsx`).
-function activeCurrentBranchButton() {
-  return activeElement('//li[@role="button" and contains(., \' (current)\')]');
+// (a `role="button"` `<li>`, not a nested `<button>` — see `ListRow.tsx`). Since tabs stay
+// mounted (#642), the tab being left still shows its own current-branch row for a moment after
+// the click: waiting for the row that names `branch` keeps the poll from picking that one up.
+function activeCurrentBranchButton(branch: string) {
+  return activeElement(`//li[@role="button" and contains(., '${branch} (current)')]`);
 }
 
 describe("Browsitory worktrees", () => {
@@ -84,11 +86,11 @@ describe("Browsitory worktrees", () => {
 
     await openLinkedWorktree.click();
     // The row may also carry ahead/behind counts (↑n ↓m) after the name.
-    await expect(await activeCurrentBranchButton()).toHaveText(expect.stringContaining(`${WORKTREE_BRANCH_LEAF} (current)`));
+    await expect(await activeCurrentBranchButton(WORKTREE_BRANCH_LEAF)).toHaveText(expect.stringContaining(`${WORKTREE_BRANCH_LEAF} (current)`));
     const openMainWorktree = await activeElement(`button=Open ${E2E_REPO_PATH}`);
 
     await openMainWorktree.click();
-    await expect(await activeCurrentBranchButton()).toHaveText(expect.stringContaining(`${mainBranch} (current)`));
+    await expect(await activeCurrentBranchButton(mainBranch)).toHaveText(expect.stringContaining(`${mainBranch} (current)`));
     const removeLinkedWorktree = await activeElement(`button=Remove ${WORKTREE_PATH}`);
 
     await removeLinkedWorktree.click();

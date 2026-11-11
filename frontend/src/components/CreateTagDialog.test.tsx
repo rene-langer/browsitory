@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { RemoteInfo } from "../ipc/RepoClient";
 import { CreateTagDialog } from "./CreateTagDialog";
+import { describedByText } from "../test/describedBy";
 
 const remote = (name: string): RemoteInfo => ({ name, fetchUrl: name, pushUrl: null, authMode: null, authUsername: null });
 
@@ -110,5 +111,6 @@ describe("CreateTagDialog", () => {
     const create = screen.getByRole("button", { name: "Create tag" });
     expect(create).toBeDisabled();
     expect(create).toHaveAttribute("title", "A transfer is in progress.");
+    expect(describedByText(create)).toBe("A transfer is in progress.");
   });
 });

@@ -25,7 +25,6 @@ import { ListRow } from "./primitives/ListRow";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { isMenuKey, menuAnchor } from "../lib/menuKeys";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
-import formStyles from "./primitives/FormDialog.module.css";
 import { LineStatsBadge } from "./LineStatsBadge";
 import { expandedFrom, expansionHasMore, MERGE_PAGE_SIZE, type MergeExpansion } from "../lib/mergeExpansion";
 import { RefBadges } from "./RefBadges";
@@ -861,13 +860,12 @@ export function CommitGraph({
         message={
           <>
             <p>Delete local tag {tagToDelete}?</p>
-            {/* #521: the repository can become busy while the confirmation is open. */}
-            {operationsBlocked && operationsBlockedReason !== null && <p className={formStyles.blocked}>{operationsBlockedReason}</p>}
           </>
         }
         confirmLabel="Delete tag"
         confirmDisabled={operationsBlocked}
-        confirmTitle={busyTitle}
+        // #521: the repository can become busy while the confirmation is open.
+        confirmReason={operationsBlocked ? operationsBlockedReason : null}
         onConfirm={() => {
           if (operationsBlocked) return;
           void onDeleteTag?.(tagToDelete).then(() => setTagToDelete(null));

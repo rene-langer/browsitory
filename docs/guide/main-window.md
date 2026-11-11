@@ -36,10 +36,10 @@ While a repository opens, or when you switch to a tab you haven't looked at for 
 [Multiple repositories](tabs.md)), the graph and the Branches section show grey placeholder rows
 until the repository has been read.
 
-**When a button can't run.** A toolbar button that can't run now, such as **Push** while a
-merge is in progress, is dimmed; point at it or move the keyboard focus to it and a note under it
-says why. A menu item that can't run shows the reason under its label, and a dialog shows it
-above its buttons.
+**When a button can't run.** A toolbar, sidebar panel or status strip button that can't run
+now, such as **Push** while a merge is in progress, is dimmed; point at it or move the keyboard
+focus to it and a note under it says why. A menu item that can't run shows the reason under its
+label, and a dialog or form shows it above its buttons.
 
 **Errors.** When something fails, a red banner appears between the toolbar and the columns,
 pushing them down rather than covering them. It shows Git's or the system's own message and,
