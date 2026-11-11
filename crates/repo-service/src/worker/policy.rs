@@ -1,7 +1,8 @@
 //! Each worker command's policy, stated in one place (#485): the undo entry it records, whether
 //! it holds the state lock, refuses while that lock stays busy, holds its reply until the undo
 //! recorder's `finish`, is refused while a rebase or a cherry-pick/revert sequence is stored, and
-//! whether it aborts a paused operation.
+//! whether it aborts a paused operation, and whether it may run while the worker waits for a
+//! transfer (its lane, #734).
 //!
 //! [`of`] names every `Command` variant (no catch-all), so a new command doesn't compile until it
 //! is given a policy, nor until `policy_tests.rs` pins that policy in a table row (#518). The
@@ -45,6 +46,19 @@ pub(super) struct CommandPolicy {
     pub gate: Gate,
     /// Aborts a paused operation: its `finish` drops the pending entry instead of recording it.
     pub aborts: bool,
+    /// Where the command may run (#734).
+    pub lane: Lane,
+}
+
+/// Whether a command may run while the worker waits for a fetch, pull or push (#734).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Lane {
+    /// Only once nothing else runs: everything that writes the repository or the app's state,
+    /// talks to the network, or leads to a write (the merge tool).
+    Main,
+    /// Also while the worker waits for a transfer's helper (`worker_loop/read.rs`): it only reads
+    /// the repository (or writes outside it, to a temp file or a path the user picked).
+    Read,
 }
 
 /// The reply of a command refused while the state lock stays busy.
@@ -93,6 +107,15 @@ impl CommandPolicy {
             holds_reply: false,
             gate: Gate::Open,
             aborts: false,
+            lane: Lane::Main,
+        }
+    }
+
+    /// A read: like `free`, and it may run while the worker waits for a transfer (#734).
+    fn read() -> Self {
+        CommandPolicy {
+            lane: Lane::Read,
+            ..Self::free()
         }
     }
 
@@ -200,7 +223,6 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::GetConflictHunks { .. }
         | Command::GetMergeMessage { .. }
         | Command::PrepareDiffTool { .. }
-        | Command::PrepareMergeTool { .. }
         | Command::GetGitTools { .. }
         | Command::GetFileSides { .. }
         | Command::ListRecentAuthors { .. }
@@ -213,10 +235,14 @@ pub(super) fn of(command: &Command) -> CommandPolicy {
         | Command::CommitsSince { .. }
         | Command::GetHeadInfo { .. }
         | Command::DetectForgeRepository { .. }
-        | Command::ListPullRequests { .. }
         | Command::GetSwitchConflicts { .. }
         | Command::GetPullDefaults { .. }
-        | Command::GetUndoState { .. } => P::free(),
+        | Command::GetUndoState { .. } => P::read(),
+
+        // Reads that stay on the main lane: the merge tool leads to a work tree write and a
+        // `MarkResolved`, and listing pull requests is an HTTP request on the worker, which would
+        // hold up the transfer's polling.
+        Command::PrepareMergeTool { .. } | Command::ListPullRequests { .. } => P::free(),
 
         // Changes the undo stack doesn't cover: worktrees and submodules, remotes and their
         // settings, credentials, stashes other than save/apply/pop, conflict resolution (the

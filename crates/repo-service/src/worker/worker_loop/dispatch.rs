@@ -2,13 +2,14 @@
 
 use git_core::merge::MergeOutcome;
 
+use super::read::{self, ReadState};
 use super::WorkerLoop;
 use crate::credentials::CredentialStore;
 use crate::pull_requests::ForgeApi;
 use crate::worker::state_lock::StateGuard;
 use crate::worker::{
-    branch, compare, fetch_all, forge, history, merge, patch, rebase, reflog, remote, search,
-    stash, status, submodule, tag, tools, tree, undo, worktree, Command,
+    branch, fetch_all, forge, history, merge, patch, rebase, reflog, remote, stash, status,
+    submodule, tag, tools, tree, undo, worktree, Command,
 };
 
 impl<S, A> WorkerLoop<S, A>
@@ -18,131 +19,79 @@ where
 {
     /// Runs `command`, after `before` gated it. `guard` is the state lock `acquire` took.
     pub(super) fn dispatch(&mut self, command: Command, guard: Option<&StateGuard>) {
+        let mut state = ReadState {
+            search_generation: &self.search_generation,
+            undo_recorder: &mut self.undo_recorder,
+            operations: &self.operations,
+            clean_merge: &self.clean_merge,
+        };
+        let Some(command) = read::dispatch(&mut self.repo, &mut state, command) else {
+            return;
+        };
         match command {
+            Command::GetStatus { .. }
+            | Command::GetChangeStamp { .. }
+            | Command::GetCommitGraph { .. }
+            | Command::LocateCommit { .. }
+            | Command::GetMergedCommits { .. }
+            | Command::GetWorkingDiff { .. }
+            | Command::GetCommitDiff { .. }
+            | Command::GetCommitFiles { .. }
+            | Command::GetCommitStats { .. }
+            | Command::GetCommitMessage { .. }
+            | Command::GetCommitSignature { .. }
+            | Command::GetCommitDetails { .. }
+            | Command::GetBlame { .. }
+            | Command::GetFileHistory { .. }
+            | Command::GetLineHistory { .. }
+            | Command::SearchCommits { .. }
+            | Command::GetCommitRenameDiff { .. }
+            | Command::GetRangeFiles { .. }
+            | Command::GetRangeDiff { .. }
+            | Command::GetWorkingTreeCompareFiles { .. }
+            | Command::GetWorkingTreeCompareDiff { .. }
+            | Command::GetBranchCompareRange { .. }
+            | Command::GetPatch { .. }
+            | Command::PreviewPatch { .. }
+            | Command::ListBranches { .. }
+            | Command::GetSwitchConflicts { .. }
+            | Command::GetPullDefaults { .. }
+            | Command::ListWorktrees { .. }
+            | Command::ListSubmodules { .. }
+            | Command::ListReflogRefs { .. }
+            | Command::GetReflog { .. }
+            | Command::ListRemotes { .. }
+            | Command::ListRemoteBranches { .. }
+            | Command::GetCurrentUpstream { .. }
+            | Command::GetRemoteUpstreams { .. }
+            | Command::GetRemoteAuthMode { .. }
+            | Command::ListTags { .. }
+            | Command::ListStashes { .. }
+            | Command::GetStashFiles { .. }
+            | Command::GetMergeDefaults { .. }
+            | Command::GetConflictHunks { .. }
+            | Command::GetHeadInfo { .. }
+            | Command::GetMergeMessage { .. }
+            | Command::PrepareDiffTool { .. }
+            | Command::GetGitTools { .. }
+            | Command::GetFileSides { .. }
+            | Command::ListRecentAuthors { .. }
+            | Command::CheckMergeTarget { .. }
+            | Command::ReadFileVersion { .. }
+            | Command::GetCommitTree { .. }
+            | Command::GetFileAtCommit { .. }
+            | Command::SaveFileVersion { .. }
+            | Command::CommitsSince { .. }
+            | Command::DetectForgeRepository { .. }
+            | Command::GetUndoState { .. } => {
+                unreachable!("`read::dispatch` runs the read lane's commands")
+            }
             Command::Ping { reply } => {
                 let _ = reply.send(());
             }
             #[cfg(test)]
             Command::PanicNow => {
                 panic!("intentional panic for worker-crash-recovery test")
-            }
-            Command::GetStatus { reply } => status::get_status(&self.repo, reply),
-            Command::GetChangeStamp { reply } => status::get_change_stamp(&self.repo, reply),
-            Command::GetCommitGraph {
-                limit,
-                selection,
-                cursor,
-                reply,
-            } => status::get_commit_graph(&self.repo, limit, selection, cursor, reply),
-            Command::LocateCommit {
-                revision,
-                selection,
-                reply,
-            } => status::locate_commit(&self.repo, revision, selection, reply),
-            Command::GetMergedCommits {
-                merge_id,
-                limit,
-                reply,
-            } => status::get_merged_commits(&self.repo, merge_id, limit, reply),
-            Command::GetWorkingDiff {
-                path,
-                staged,
-                opts,
-                old_path,
-                reply,
-            } => status::get_working_diff(&self.repo, path, staged, opts, old_path, reply),
-            Command::GetCommitDiff {
-                commit_id,
-                path,
-                opts,
-                reply,
-            } => status::get_commit_diff(&self.repo, commit_id, path, opts, reply),
-            Command::GetCommitFiles { commit_id, reply } => {
-                status::get_commit_files(&self.repo, commit_id, reply)
-            }
-            Command::GetCommitStats {
-                commit_ids,
-                with_files,
-                reply,
-            } => status::get_commit_stats(&self.repo, commit_ids, with_files, reply),
-            Command::GetCommitMessage { commit_id, reply } => {
-                status::get_commit_message(&self.repo, commit_id, reply)
-            }
-            Command::GetCommitSignature { commit_id, reply } => {
-                status::get_commit_signature(&self.repo, commit_id, reply)
-            }
-            Command::GetCommitDetails { commit_id, reply } => {
-                status::get_commit_details(&self.repo, commit_id, reply)
-            }
-            Command::GetBlame {
-                commit_id,
-                path,
-                reply,
-            } => status::get_blame(&self.repo, commit_id, path, reply),
-            Command::GetFileHistory { path, limit, reply } => {
-                status::get_file_history(&self.repo, path, limit, reply)
-            }
-            Command::GetLineHistory {
-                revision,
-                path,
-                start_line,
-                end_line,
-                limit,
-                reply,
-            } => status::get_line_history(
-                &self.repo, revision, path, start_line, end_line, limit, reply,
-            ),
-            Command::SearchCommits {
-                query,
-                selection,
-                cursor,
-                generation,
-                reply,
-            } => search::search_commits(
-                &self.repo,
-                &self.search_generation,
-                generation,
-                query,
-                selection,
-                cursor,
-                reply,
-            ),
-            Command::GetCommitRenameDiff {
-                commit_id,
-                old_path,
-                new_path,
-                opts,
-                reply,
-            } => status::get_commit_rename_diff(
-                &self.repo, commit_id, old_path, new_path, opts, reply,
-            ),
-            Command::GetRangeFiles {
-                from_id,
-                to_id,
-                reply,
-            } => compare::get_range_files(&self.repo, from_id, to_id, reply),
-            Command::GetRangeDiff {
-                from_id,
-                to_id,
-                path,
-                old_path,
-                opts,
-                reply,
-            } => compare::get_range_diff(&self.repo, from_id, to_id, path, old_path, opts, reply),
-            Command::GetWorkingTreeCompareFiles { commit_id, reply } => {
-                compare::get_working_tree_compare_files(&self.repo, commit_id, reply)
-            }
-            Command::GetWorkingTreeCompareDiff {
-                commit_id,
-                path,
-                old_path,
-                opts,
-                reply,
-            } => compare::get_working_tree_compare_diff(
-                &self.repo, commit_id, path, old_path, opts, reply,
-            ),
-            Command::GetBranchCompareRange { ref_name, reply } => {
-                compare::get_branch_compare_range(&self.repo, ref_name, reply)
             }
             Command::StageFile { path, reply } => status::stage_file(&self.repo, path, reply),
             Command::UnstageFile { path, reply } => status::unstage_file(&self.repo, path, reply),
@@ -232,7 +181,6 @@ where
             Command::ApplyCommitChange { change, reply } => {
                 patch::apply_commit_change(&self.repo, change, reply)
             }
-            Command::GetPatch { source, reply } => patch::get_patch(&self.repo, source, reply),
             Command::ApplyPatch {
                 content,
                 how,
@@ -247,9 +195,6 @@ where
                 events,
                 reply,
             ),
-            Command::PreviewPatch { content, reply } => {
-                patch::preview_patch(&self.repo, content, reply)
-            }
             Command::IgnorePath { pattern, reply } => {
                 status::ignore_path(&self.repo, pattern, reply)
             }
@@ -287,16 +232,12 @@ where
                     self.clean_merge = None;
                 }
             }
-            Command::ListBranches { reply } => branch::list(&self.repo, reply),
             Command::CreateBranch {
                 name,
                 start_point,
                 checkout,
                 reply,
             } => branch::create(&self.repo, name, start_point, checkout, reply),
-            Command::GetSwitchConflicts { name, reply } => {
-                branch::switch_conflicts(&self.repo, name, reply)
-            }
             Command::StashAndSwitch {
                 name,
                 reapply,
@@ -317,7 +258,6 @@ where
                 global,
                 reply,
             } => status::set_identity(&self.repo, name, email, global, reply),
-            Command::GetPullDefaults { reply } => remote::pull_defaults(&self.repo, reply),
             Command::SwitchBranch {
                 name,
                 operation_id,
@@ -338,7 +278,6 @@ where
                 new_name,
                 reply,
             } => branch::rename(&self.repo, old_name, new_name, reply),
-            Command::ListWorktrees { reply } => worktree::list(&self.repo, reply),
             Command::CreateWorktree {
                 name,
                 path,
@@ -360,25 +299,17 @@ where
             Command::PruneWorktrees { reply } => {
                 worktree::prune(&self.repo_path, &mut self.repo, reply)
             }
-            Command::ListSubmodules { reply } => submodule::list(&self.repo, reply),
             Command::InitSubmodule { path, reply } => submodule::init(&self.repo, path, reply),
             Command::UpdateSubmodule {
                 path,
                 recursive,
                 reply,
             } => submodule::update(&self.repo, path, recursive, reply),
-            Command::ListReflogRefs { reply } => reflog::list_refs(&self.repo, reply),
-            Command::GetReflog { reference, reply } => reflog::get(&self.repo, reference, reply),
             Command::RestoreReflogEntry {
                 reference,
                 new_id,
                 reply,
             } => reflog::restore(&self.repo, reference, new_id, reply),
-            Command::ListRemotes { reply } => remote::list(&self.repo, reply),
-            Command::ListRemoteBranches { remote_name, reply } => {
-                remote::list_branches(&self.repo, remote_name, reply)
-            }
-            Command::GetCurrentUpstream { reply } => remote::current_upstream(&self.repo, reply),
             Command::AddRemote {
                 name,
                 fetch_url,
@@ -396,12 +327,6 @@ where
                 push_url,
                 reply,
             } => remote::update_urls(&self.repo, name, fetch_url, push_url, reply),
-            Command::GetRemoteUpstreams { name, reply } => {
-                remote::upstreams(&self.repo, name, reply)
-            }
-            Command::GetRemoteAuthMode { name, reply } => {
-                remote::auth_mode(&self.repo, name, reply)
-            }
             Command::SaveHttpsCredential {
                 remote_name,
                 username,
@@ -436,7 +361,6 @@ where
             Command::ClearCurrentUpstream { reply } => {
                 remote::clear_current_upstream(&self.repo, reply)
             }
-            Command::ListTags { reply } => tag::list(&self.repo, reply),
             Command::CreateTag {
                 name,
                 message,
@@ -444,7 +368,6 @@ where
                 reply,
             } => tag::create(&self.repo, name, message, target, reply),
             Command::DeleteTag { name, reply } => tag::delete(&self.repo, name, reply),
-            Command::ListStashes { reply } => stash::list(&mut self.repo, reply),
             Command::SaveStash { options, reply } => stash::save(&mut self.repo, options, reply),
             Command::ApplyStash {
                 index,
@@ -458,9 +381,6 @@ where
                 restore_index,
                 reply,
             } => stash::pop(&mut self.repo, index, &commit_id, restore_index, reply),
-            Command::GetStashFiles { commit_id, reply } => {
-                stash::files(&mut self.repo, commit_id, reply)
-            }
             Command::DropStash {
                 index,
                 commit_id,
@@ -491,10 +411,6 @@ where
                     Err(_) => {}
                 }
             }
-            Command::GetMergeDefaults { reply } => merge::defaults(&self.repo, reply),
-            Command::GetConflictHunks { path, reply } => {
-                merge::conflict_hunks(&self.repo, path, reply)
-            }
             Command::ResolveConflict {
                 path,
                 resolved_content,
@@ -515,13 +431,6 @@ where
                 } else {
                     merge::abort(&self.repo, reply)
                 }
-            }
-            Command::GetHeadInfo { reply } => {
-                let clean = self
-                    .clean_merge
-                    .as_ref()
-                    .is_some_and(|m| m.matches(&mut self.repo));
-                history::head_info(&self.repo, &self.operations.probe(), clean, reply)
             }
             Command::AmendCommit {
                 message,
@@ -654,16 +563,18 @@ where
                 operation_id,
                 events,
                 reply,
-            } => remote::force_push_branch(
-                &self.repo,
-                &self.credential_service,
-                remote_name,
-                no_verify,
-                remote::TransferOp::new(operation_id),
-                events,
-                reply,
-            ),
-            Command::GetMergeMessage { reply } => merge::message(&self.repo, reply),
+            } => {
+                let (mut host, credentials, _) = self.transfer_parts();
+                remote::force_push_branch(
+                    &mut host,
+                    credentials,
+                    remote_name,
+                    no_verify,
+                    remote::TransferOp::new(operation_id),
+                    events,
+                    reply,
+                );
+            }
             Command::ResolveAddDeleteConflict {
                 path,
                 choice,
@@ -675,52 +586,14 @@ where
             Command::ResolveWholeFile { path, side, reply } => {
                 merge::resolve_whole_file(&self.repo, path, side, reply)
             }
-            Command::PrepareDiffTool {
-                path,
-                source,
-                reply,
-            } => tools::prepare_diff_tool(&self.repo, path, source, reply),
             Command::PrepareMergeTool { path, reply } => {
                 tools::prepare_merge_tool(&self.repo, path, reply)
             }
-            Command::GetGitTools { reply } => tools::git_tools(&self.repo, reply),
-            Command::GetFileSides {
-                path,
-                source,
-                reply,
-            } => tools::file_sides(&self.repo, path, source, reply),
-            Command::ListRecentAuthors { reply } => history::recent_authors(&self.repo, reply),
-            Command::CheckMergeTarget { path, reply } => {
-                tools::check_merge_target(&self.repo, path, reply)
-            }
-            Command::ReadFileVersion {
-                path,
-                version,
-                reply,
-            } => tools::read_file_version(&self.repo, path, version, reply),
-            Command::GetCommitTree {
-                commit_id,
-                dir,
-                filter,
-                reply,
-            } => tree::get_commit_tree(&self.repo, commit_id, dir, filter, reply),
-            Command::GetFileAtCommit {
-                commit_id,
-                path,
-                reply,
-            } => tree::get_file_at_commit(&self.repo, commit_id, path, reply),
-            Command::SaveFileVersion {
-                commit_id,
-                path,
-                destination,
-                reply,
-            } => tree::save_file_version(&self.repo, commit_id, path, destination, reply),
             Command::RestoreFileVersion {
                 commit_id,
                 path,
                 reply,
             } => tree::restore_file_version(&self.repo, commit_id, path, reply),
-            Command::CommitsSince { onto, reply } => rebase::commits_since(&self.repo, onto, reply),
             Command::StartRebase {
                 onto,
                 plan,
@@ -761,42 +634,51 @@ where
                 operation_id,
                 events,
                 reply,
-            } => remote::fetch(
-                &self.repo,
-                &self.credential_service,
-                &self.background_memory,
-                remote_name,
-                prune,
-                remote::TransferOp::new(operation_id),
-                events,
-                reply,
-            ),
+            } => {
+                let (mut host, credentials, memory) = self.transfer_parts();
+                remote::fetch(
+                    &mut host,
+                    credentials,
+                    memory,
+                    remote_name,
+                    prune,
+                    remote::TransferOp::new(operation_id),
+                    events,
+                    reply,
+                );
+            }
             Command::PullCurrentUpstream {
                 operation_id,
                 events,
                 reply,
-            } => remote::pull(
-                &self.repo,
-                &self.credential_service,
-                remote::TransferOp::new(operation_id),
-                events,
-                reply,
-            ),
+            } => {
+                let (mut host, credentials, _) = self.transfer_parts();
+                remote::pull(
+                    &mut host,
+                    credentials,
+                    remote::TransferOp::new(operation_id),
+                    events,
+                    reply,
+                );
+            }
             Command::PushCurrentBranch {
                 remote_name,
                 no_verify,
                 operation_id,
                 events,
                 reply,
-            } => remote::push_current(
-                &self.repo,
-                &self.credential_service,
-                remote_name,
-                no_verify,
-                remote::TransferOp::new(operation_id),
-                events,
-                reply,
-            ),
+            } => {
+                let (mut host, credentials, _) = self.transfer_parts();
+                remote::push_current(
+                    &mut host,
+                    credentials,
+                    remote_name,
+                    no_verify,
+                    remote::TransferOp::new(operation_id),
+                    events,
+                    reply,
+                );
+            }
             Command::PushTags {
                 remote_name,
                 names,
@@ -804,34 +686,40 @@ where
                 operation_id,
                 events,
                 reply,
-            } => remote::push_tags(
-                &self.repo,
-                &self.credential_service,
-                remote_name,
-                names,
-                no_verify,
-                remote::TransferOp::new(operation_id),
-                events,
-                reply,
-            ),
+            } => {
+                let (mut host, credentials, _) = self.transfer_parts();
+                remote::push_tags(
+                    &mut host,
+                    credentials,
+                    remote_name,
+                    names,
+                    no_verify,
+                    remote::TransferOp::new(operation_id),
+                    events,
+                    reply,
+                );
+            }
             Command::FetchAllRemotes {
                 prune,
                 background,
                 operation_id,
                 events,
                 reply,
-            } => fetch_all::run(
-                &self.repo,
-                &self.credential_service,
-                &self.background_memory,
-                background.map_or(
-                    fetch_all::Mode::Manual { prune },
-                    fetch_all::Mode::Background,
-                ),
-                remote::TransferOp::new(operation_id),
-                events,
-                reply,
-            ),
+            } => {
+                let (mut host, credentials, memory) = self.transfer_parts();
+                fetch_all::run(
+                    &mut host,
+                    credentials,
+                    memory,
+                    background.map_or(
+                        fetch_all::Mode::Manual { prune },
+                        fetch_all::Mode::Background,
+                    ),
+                    remote::TransferOp::new(operation_id),
+                    events,
+                    reply,
+                );
+            }
             Command::PushBranch {
                 remote_name,
                 local_branch,
@@ -841,20 +729,23 @@ where
                 operation_id,
                 events,
                 reply,
-            } => remote::push_branch(
-                &self.repo,
-                &self.credential_service,
-                remote::PushTarget {
-                    remote_name,
-                    local_branch,
-                    remote_branch,
-                    set_upstream,
-                    no_verify,
-                },
-                remote::TransferOp::new(operation_id),
-                events,
-                reply,
-            ),
+            } => {
+                let (mut host, credentials, _) = self.transfer_parts();
+                remote::push_branch(
+                    &mut host,
+                    credentials,
+                    remote::PushTarget {
+                        remote_name,
+                        local_branch,
+                        remote_branch,
+                        set_upstream,
+                        no_verify,
+                    },
+                    remote::TransferOp::new(operation_id),
+                    events,
+                    reply,
+                );
+            }
             Command::DeleteRemoteBranch {
                 remote_name,
                 branch_name,
@@ -862,16 +753,19 @@ where
                 operation_id,
                 events,
                 reply,
-            } => remote::delete_remote_branch(
-                &self.repo,
-                &self.credential_service,
-                remote_name,
-                branch_name,
-                no_verify,
-                remote::TransferOp::new(operation_id),
-                events,
-                reply,
-            ),
+            } => {
+                let (mut host, credentials, _) = self.transfer_parts();
+                remote::delete_remote_branch(
+                    &mut host,
+                    credentials,
+                    remote_name,
+                    branch_name,
+                    no_verify,
+                    remote::TransferOp::new(operation_id),
+                    events,
+                    reply,
+                );
+            }
             Command::DeleteRemoteTag {
                 remote_name,
                 tag_name,
@@ -879,17 +773,19 @@ where
                 operation_id,
                 events,
                 reply,
-            } => remote::delete_remote_tag(
-                &self.repo,
-                &self.credential_service,
-                remote_name,
-                tag_name,
-                no_verify,
-                remote::TransferOp::new(operation_id),
-                events,
-                reply,
-            ),
-            Command::DetectForgeRepository { reply } => forge::detect(&self.repo, reply),
+            } => {
+                let (mut host, credentials, _) = self.transfer_parts();
+                remote::delete_remote_tag(
+                    &mut host,
+                    credentials,
+                    remote_name,
+                    tag_name,
+                    no_verify,
+                    remote::TransferOp::new(operation_id),
+                    events,
+                    reply,
+                );
+            }
             Command::SaveForgeToken {
                 provider,
                 account,
@@ -927,7 +823,6 @@ where
                 create,
                 reply,
             ),
-            Command::GetUndoState { reply } => undo::get_state(&mut self.undo_recorder, reply),
             Command::Undo { reply } => {
                 let _ = reply.send(
                     self.undo_recorder
