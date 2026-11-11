@@ -85,21 +85,9 @@
   color: var(--color-danger-text);
 }
 
-/* Shape carries the tone too, so colour is never the only signal. */
-.signatureIcon::before {
-  content: "?";
-}
-
-.signature[data-tone="success"] .signatureIcon::before {
-  content: "✓";
-}
-
-.signature[data-tone="warning"] .signatureIcon::before {
-  content: "!";
-}
-
-.signature[data-tone="danger"] .signatureIcon::before {
-  content: "✗";
+/* One Lucide icon per tone (`CommitHeader.tsx`): shape carries the tone too. */
+.signatureIcon {
+  flex: none;
 }
 
 /* A URL or issue reference in the message (#612); a span, so copying stays plain text. */

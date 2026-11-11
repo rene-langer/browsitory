@@ -18,9 +18,11 @@ doesn't show, one line per tag with its kind (annotated or lightweight). Type in
 to find a tag by name. Click a tag, or press Enter or Space on it, to select its commit and
 scroll the graph there, without checking anything out (**Go to tag…** in the command palette does
 the same; see [Command palette](command-palette.md#go-to-a-commit-branch-tag-or-stash) for what
-happens when the graph doesn't show the commit). To share tags, pick the remote under **Push
-tags**, tick the tags you want and choose **Push selected tags**, or choose **Push all tags**. A
-tag's other actions are in its menu: the **…** button (it appears when you point at or tab into
+happens when the graph doesn't show the commit). To share tags, tick the ones you want (**Select
+all** over the list ticks every tag the filter shows): a bar under the list says how many are
+selected and pushes them: **Push to ⟨remote⟩**, or, with several remotes, pick one and choose
+**Push**. **Clear selection** unticks them. To push one tag, use **Push ⟨tag⟩ to ⟨remote⟩** in its
+menu; **Push all tags to ⟨remote⟩** in the command palette pushes every tag. A tag's other actions are in its menu: the **…** button (it appears when you point at or tab into
 the row), a right-click, or the Menu key or Shift+F10 on the row, its checkbox or its **…**. The menu has the same items as the tag's
 badge in the graph: push to a remote, **Branch from tag**, **Checkout (detached)**, **Copy tag
 name**, **Delete from remote…** and **Delete tag…** (the local tag, after a confirmation).

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { X } from "lucide-react";
 import {
   DEFAULT_COMMIT_MESSAGE_SETTINGS,
   type AmendOptions,
@@ -472,7 +473,7 @@ export function CommitBox({
                     aria-label={`Remove co-author ${person.name}`}
                     onClick={() => setCoAuthors((current) => current.filter((p) => !sameEmail(p, person)))}
                   >
-                    ×
+                    <X size={12} aria-hidden="true" />
                   </button>
                 </li>
               ))}

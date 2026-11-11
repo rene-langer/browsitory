@@ -811,49 +811,50 @@ export function CommitGraph({
           </span>
         </ListRow>
       ))}
-      {contextMenu !== null && (
-        <ContextMenu
-          key={contextMenu.commitId}
-          returnFocusTo={listElement}
-          x={contextMenu.x}
-          y={contextMenu.y}
-          onClose={() => {
-            setContextMenu(null);
-            listRef.current?.focus();
-          }}
-          items={
-            multiSelected && effectiveSelection.ids.has(contextMenu.commitId)
-              ? multiSelectItems
-              : singleCommitItems(contextMenu.commitId)
-          }
-        />
-      )}
-      {tagMenu !== null && (
-        <ContextMenu
-          key={`${tagMenu.commitId}:${tagMenu.tag}`}
-          returnFocusTo={listElement}
-          x={tagMenu.x}
-          y={tagMenu.y}
-          onClose={() => {
-            setTagMenu(null);
-            listRef.current?.focus();
-          }}
-          items={tagItems(tagMenu.tag, tagMenu.commitId)}
-        />
-      )}
-      {navigationPicker !== null && (
-        <ContextMenu
-          returnFocusTo={listElement}
-          x={navigationPicker.x}
-          y={navigationPicker.y}
-          onClose={() => {
-            setNavigationPicker(null);
-            listRef.current?.focus();
-          }}
-          items={navigationPicker.items}
-        />
-      )}
     </ul>
+    {/* The menus sit next to the list, not in it (#669): a listbox holds only options. */}
+    {contextMenu !== null && (
+      <ContextMenu
+        key={contextMenu.commitId}
+        returnFocusTo={listElement}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        onClose={() => {
+          setContextMenu(null);
+          listRef.current?.focus();
+        }}
+        items={
+          multiSelected && effectiveSelection.ids.has(contextMenu.commitId)
+            ? multiSelectItems
+            : singleCommitItems(contextMenu.commitId)
+        }
+      />
+    )}
+    {tagMenu !== null && (
+      <ContextMenu
+        key={`${tagMenu.commitId}:${tagMenu.tag}`}
+        returnFocusTo={listElement}
+        x={tagMenu.x}
+        y={tagMenu.y}
+        onClose={() => {
+          setTagMenu(null);
+          listRef.current?.focus();
+        }}
+        items={tagItems(tagMenu.tag, tagMenu.commitId)}
+      />
+    )}
+    {navigationPicker !== null && (
+      <ContextMenu
+        returnFocusTo={listElement}
+        x={navigationPicker.x}
+        y={navigationPicker.y}
+        onClose={() => {
+          setNavigationPicker(null);
+          listRef.current?.focus();
+        }}
+        items={navigationPicker.items}
+      />
+    )}
     {tagToDelete !== null && (
       <ConfirmDialog
         ariaLabel={`Delete local tag ${tagToDelete}`}

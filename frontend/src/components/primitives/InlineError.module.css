@@ -17,12 +17,15 @@
   flex: 1;
 }
 
+/* At least 24 × 24 px to hit (#672). */
 .dismiss {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
+  min-width: var(--size-target-min);
+  min-height: var(--size-target-min);
+  padding: 0;
   border-radius: var(--radius-sm);
   color: inherit;
   background: transparent;

@@ -39,11 +39,6 @@
   color: var(--color-text);
 }
 
-.toolbar button[aria-pressed="true"] {
-  background: var(--color-accent-tint);
-  color: var(--color-accent-fg);
-}
-
 /* Wrap lines on Auto: decided per diff. */
 .toolbar button[aria-pressed="mixed"] {
   color: var(--color-text);

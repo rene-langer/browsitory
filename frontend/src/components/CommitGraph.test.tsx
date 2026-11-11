@@ -244,6 +244,28 @@ describe("CommitGraph", () => {
     expect(screen.getByText("Branch from here")).toBeInTheDocument();
   });
 
+  it("renders the menu next to the commit list, not inside its listbox (#669)", () => {
+    render(
+      <CommitGraph
+        {...historyProps}
+        status={status}
+        commits={commits}
+        selectedRow="uncommitted"
+        operationsBlocked={false}
+        onSelectRow={vi.fn()}
+        onBranchFromCommit={vi.fn()}
+        onRebaseFromCommit={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText(/second commit/).closest("li")!);
+
+    const list = screen.getByRole("listbox", { name: "Commit history" });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(within(list).queryByRole("menu")).toBeNull();
+    expect(list.querySelector('[role="menu"]')).toBeNull();
+  });
+
   it("clicking 'Branch from here' calls onBranchFromCommit with that commit's id and closes the menu", () => {
     const onBranchFromCommit = vi.fn();
     render(

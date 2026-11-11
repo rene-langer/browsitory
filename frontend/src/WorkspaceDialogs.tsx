@@ -416,7 +416,7 @@ export function WorkspaceDialogs({
           back re-shows the same overlay. A running fetch, pull or push is not a dialog: the
           toolbar shows it, with Cancel (`RepoActivity`, #659). */}
       {active && paletteOpen && (
-        <Overlay onClose={() => setPaletteOpen(false)}>
+        <Overlay onClose={() => setPaletteOpen(false)} ariaLabel="Command palette">
           <CommandPalette
             commands={paletteCommands()}
             initialPickerId={paletteInitialPicker}
@@ -425,12 +425,12 @@ export function WorkspaceDialogs({
         </Overlay>
       )}
       {active && shortcutsOpen && (
-        <Overlay onClose={() => setShortcutsOpen(false)}>
+        <Overlay onClose={() => setShortcutsOpen(false)} ariaLabel="Keyboard shortcuts">
           <ShortcutSheet onClose={() => setShortcutsOpen(false)} />
         </Overlay>
       )}
       {active && appState.state.rebaseOnto !== null && (
-        <Overlay onClose={appState.closeRebasePlanner}>
+        <Overlay onClose={appState.closeRebasePlanner} ariaLabel="Rebase plan">
           <RebasePlanner
             repoPath={repoPath}
             client={client}

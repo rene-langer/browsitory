@@ -1,9 +1,22 @@
 import { useEffect, useState } from "react";
+import { CircleAlert, CircleCheck, CircleX, Info, X, type LucideIcon } from "lucide-react";
 import type { Toast, ToastTone } from "../../state/useToasts";
 import styles from "./ToastRegion.module.css";
 
-// Read out before the message; the CSS adds an icon per tone, so the tone never rests on colour
-// alone.
+// Each tone has its own icon shape, so the tone never rests on colour alone.
+const TONE_ICON: Record<ToastTone, LucideIcon> = {
+  success: CircleCheck,
+  info: Info,
+  warning: CircleAlert,
+  error: CircleX,
+};
+
+function ToneIcon({ tone }: { tone: ToastTone }) {
+  const Icon = TONE_ICON[tone];
+  return <Icon size={16} className={styles.icon} aria-hidden="true" />;
+}
+
+// Read out before the message.
 const TONE_PREFIX: Record<ToastTone, string | null> = {
   success: null,
   info: null,
@@ -64,7 +77,7 @@ export function ToastRegion({
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
-          <span className={styles.icon} aria-hidden="true" />
+          <ToneIcon tone={toast.tone} />
           <span>
             {TONE_PREFIX[toast.tone] !== null && <span className={styles.srOnly}>{TONE_PREFIX[toast.tone]}</span>}
             {toast.message}
@@ -82,7 +95,7 @@ export function ToastRegion({
             </button>
           )}
           <button type="button" className={styles.dismiss} aria-label="Dismiss notification" onClick={() => onDismiss(toast.id)}>
-            ×
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
       ))}

@@ -159,6 +159,14 @@
   cursor: pointer;
 }
 
+/* Shown: a filled dot. The swatch's fill and ring are its state, so the app's pressed-toggle
+   fill and outline (`index.css`, #667) don't apply; `.swatch` twice outranks that rule. */
+.swatch.swatch[aria-pressed="true"] {
+  color: inherit;
+  background: var(--swatch);
+  box-shadow: none;
+}
+
 /* Hidden from the graph: hollow ring instead of a filled dot (not just dimmed). */
 .swatch[aria-pressed="false"] {
   background: transparent;

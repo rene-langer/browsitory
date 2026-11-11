@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import type { ChangedFile, DiffOptions, GraphCommit, RepoClient } from "../ipc/RepoClient";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import type { SelectedRow } from "../state/useAppState";
@@ -178,7 +179,7 @@ export function CompareDiffPane({
             </button>
           )}
           <button type="button" aria-label="Close compare" onClick={onClose}>
-            ×
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
         {fromId !== null && (
