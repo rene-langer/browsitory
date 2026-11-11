@@ -1311,6 +1311,30 @@ fn a_merge_restarted_during_pre_merge_commit_is_not_committed() {
 }
 
 #[test]
+fn a_merge_aborted_during_pre_merge_commit_is_not_committed() {
+    // Aborted, not restarted: no merge is in progress any more, and the commit is refused
+    // as a changed merge (not a failure to read the merge heads that are gone).
+    if !common::program_available("git") {
+        eprintln!("git CLI not found; skipping");
+        return;
+    }
+    let (_dir, mut repo, _side2) = clean_merge_with_side2();
+    let before = common::head_id(&repo);
+    let set = clean_set(&mut repo);
+    common::install_hook(
+        &hooks_dir(&repo).unwrap(),
+        "pre-merge-commit",
+        "git merge --abort",
+    );
+
+    let error = commit_with(&mut repo, "Merge feature", set, HookOptions::default()).unwrap_err();
+
+    assert!(matches!(error, CommitError::MergeChanged), "{error:?}");
+    assert_eq!(common::head_id(&repo), before);
+    assert_eq!(repo.state(), git2::RepositoryState::Clean);
+}
+
+#[test]
 fn commit_with_runs_pre_commit_when_the_expected_merge_is_not_the_current_one() {
     let (_dir, mut repo, side2) = clean_merge_with_side2();
     common::log_hooks(&repo, &ALL_COMMIT_HOOKS);
