@@ -2549,6 +2549,27 @@ only `error`.
   something is found) and the run summary, and never fails. It covers what mutation testing
   can't see: a test loosened in the same PR as the code. Agents answer it in the PR (see
   `AGENTS.md`'s "Task workflow").
+- Skipping unaffected jobs (`ci.yml`'s `changes` job): a pull request runs only the build and
+  test work its changes can affect. The `changes` job diffs the PR's merge commit against its
+  base and decides with two allowlists of paths known not to matter, so any other path runs
+  everything:
+  - No Rust: `frontend/` (except `frontend/src/ipc/generated/`, which Rust tests compare their
+    DTOs against), `extension/`, `e2e/`, `CHANGELOG.md` and everything docs-only. The three
+    `rust` jobs then skip their steps.
+  - Docs only: `docs/` (except a file named in `frontend/`, `extension/`, `e2e/`, `crates/` or
+    `scripts/`, such as `docs/guide/search.md`, which a frontend test imports), `changelog.d/`,
+    `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`, `PRIVACY.md` and `mkdocs.yml`.
+    `rust`, `frontend`, `extension`, `e2e`, `e2e-vscode` and `vsix-smoke` then skip their steps;
+    `audit`, `licenses` and `changelog` always run in full. `CHANGELOG.md` and
+    `THIRD_PARTY_NOTICES.md` are not docs: the frontend and the packages read them.
+
+  Those jobs are required checks, so they never skip themselves (a skipped matrix job reports
+  one unexpanded check, and `rust (ubuntu-latest)` would never report): they run, skip every
+  step and finish green in seconds. They skip only on an explicit "false" from `changes`, so if
+  that job fails, everything runs. Pushes to main, the weekly schedule and dispatched runs
+  always run everything. A new push to a pull request cancels that pull request's older run;
+  other runs are never cancelled. A new test or build step that reads a file outside `crates/`
+  (Rust) or under `docs/` (any job) must take that path off the matching allowlist.
 
 ### Credential release acceptance
 

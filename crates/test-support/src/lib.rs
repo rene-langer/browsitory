@@ -333,6 +333,10 @@ pub fn read_wire_snapshot(path: &Path) -> Vec<(String, String)> {
 }
 
 /// The repository root (the parent of `crates/`), for tests that read checked-in files.
+///
+/// CI skips the `rust` jobs for a pull request that changes only files those jobs never read
+/// (the `changes` job in `.github/workflows/ci.yml`). A test that reads a file outside `crates/`
+/// other than `frontend/src/ipc/generated/` must take that path off its no-Rust allowlist.
 pub fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
