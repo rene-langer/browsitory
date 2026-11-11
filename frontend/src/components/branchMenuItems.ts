@@ -1,6 +1,12 @@
 import type { BranchInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { menuItem } from "../lib/actions/action";
-import { branchActions, rebaseOntoAction, remoteBranchActions } from "../lib/actions/branchActions";
+import {
+  branchActions,
+  rebaseOntoAction,
+  remoteBranchActions,
+  type BranchDrop,
+  type RebaseTarget,
+} from "../lib/actions/branchActions";
 import { addRemoteAction, remoteActions } from "../lib/actions/remoteActions";
 import type { OperationBlockers } from "../lib/operationStatus";
 import type { CopyToClipboard } from "../state/useCopyToClipboard";
@@ -26,6 +32,8 @@ export type RowContextMenu = { x: number; y: number; returnFocusTo?: HTMLElement
   | { kind: "add" }
   | { kind: "remote-folder"; name: string }
   | { kind: "remote-branch"; remoteName: string; branchName: string }
+  /** The choices of a branch dropped on a branch (#744). */
+  | { kind: "branch-drop"; source: RebaseTarget; target: RebaseTarget }
 );
 
 /**
@@ -40,6 +48,7 @@ export function rowMenuKey(menu: RowContextMenu): string {
     case "remote-branch":
       return `${menu.kind}:${menu.remoteName}/${menu.branchName}`;
     case "add":
+    case "branch-drop":
       return menu.kind;
   }
 }
@@ -246,5 +255,25 @@ export function addMenuItems({
     { label: "New branch…", onSelect: () => onOpenCreateBranchDraft("HEAD"), group: "new" },
     { ...menuItem(addRemoteAction(), onOpenAddRemoteDraft), group: "new" },
     { label: "Show all branches", disabled: !hasGraphSelection, onSelect: onShowAllGraphBranches, group: "view" },
+  ];
+}
+
+/**
+ * The menu a branch drop opens (#744): its choices (`branchDropActions`), then Cancel, so a drop
+ * that landed by mistake has an explicit way out besides Escape.
+ */
+export function branchDropMenuItems(
+  drop: Extract<BranchDrop, { kind: "menu" }>,
+  {
+    onMergeBranch,
+    onRebaseOnto,
+  }: { onMergeBranch: (name: string) => void; onRebaseOnto: (onto: string) => void },
+): ContextMenuItem[] {
+  return [
+    ...drop.items.map((item) => ({
+      ...menuItem(item, () => (item.run.kind === "merge" ? onMergeBranch(item.run.name) : onRebaseOnto(item.run.onto))),
+      group: "drop",
+    })),
+    { label: "Cancel", onSelect: () => {}, group: "cancel" },
   ];
 }

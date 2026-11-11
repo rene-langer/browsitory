@@ -1,6 +1,6 @@
 import type { BranchInfo, UpstreamInfo } from "../../ipc/RepoClient";
 import type { OperationBlockers } from "../operationStatus";
-import { gate, type MenuAction, type PaletteAction } from "./action";
+import { gate, UNAVAILABLE_REASON, type MenuAction, type PaletteAction } from "./action";
 
 export interface BranchActionContext {
   /** `operationBlockers` of the current state. */
@@ -110,4 +110,73 @@ export function remoteBranchActions(
     setAsUpstream: { label: "Set as upstream for current branch", ...gate(blockers) },
     delete: { label: `Delete ${remoteName}/${branchName}…`, ...gate(blockers) },
   };
+}
+
+/** What one item of a branch drop's menu runs: the menus' Merge or Rebase (#744). */
+export type BranchDropRun = { kind: "merge"; name: string } | { kind: "rebase"; onto: string };
+
+/**
+ * What a branch dropped on a branch does (#744): `menu` lists the choices, `refused` says why the
+ * drop can't run, `none` is a branch dropped on itself.
+ */
+export type BranchDrop =
+  | { kind: "menu"; items: (PaletteAction & { run: BranchDropRun })[] }
+  | { kind: "refused"; reason: string }
+  | { kind: "none" };
+
+export const DROP_NEEDS_BRANCH = "Check out a branch first: a drop merges into or rebases the current branch.";
+
+function displayName(ref: RebaseTarget): string {
+  return ref.kind === "local" ? ref.name : `${ref.remoteName}/${ref.branchName}`;
+}
+
+function sameRef(a: RebaseTarget, b: RebaseTarget): boolean {
+  return displayName(a) === displayName(b) && a.kind === b.kind;
+}
+
+/**
+ * The choices for `source` dropped on `target` in the Branches section (#744), from the menus' own
+ * rules: Merge (`branchActions`' `merge`) and Rebase (`rebaseOntoAction`) under labels naming both
+ * branches. Both act on the current branch, so one side of the drop must be it: a branch dropped
+ * on it is merged into it (or it is rebased onto that branch), and it dropped on a branch is
+ * rebased onto that branch (or that branch is merged into it), the natural choice first. A remote
+ * branch can't be merged from the menus, so with one only Rebase is offered. When every choice is
+ * disabled (the busy rule), the drop is refused with that reason.
+ */
+export function branchDropActions(
+  blockers: OperationBlockers,
+  branches: BranchInfo[],
+  source: RebaseTarget,
+  target: RebaseTarget,
+): BranchDrop {
+  if (sameRef(source, target)) return { kind: "none" };
+  const current = branches.find((branch) => branch.isCurrent) ?? null;
+  if (current === null) return { kind: "refused", reason: DROP_NEEDS_BRANCH };
+  const isCurrent = (ref: RebaseTarget) => ref.kind === "local" && ref.name === current.name;
+  if (!isCurrent(source) && !isCurrent(target)) {
+    return {
+      kind: "refused",
+      reason: `Only the current branch, ${current.name}, can be merged into or rebased: drop on ${current.name}, or drag ${current.name}.`,
+    };
+  }
+  const draggingCurrent = isCurrent(source);
+  const other = draggingCurrent ? target : source;
+  const name = displayName(other);
+  const items: (PaletteAction & { run: BranchDropRun })[] = [];
+  const rebase = rebaseOntoAction(blockers, current.name, other);
+  if (rebase !== null) {
+    const label = `Rebase ${current.name} onto ${name}…`;
+    items.push({ label, paletteLabel: label, enabled: rebase.enabled, reason: rebase.reason, run: { kind: "rebase", onto: rebase.onto } });
+  }
+  const otherBranch = other.kind === "local" ? branches.find((branch) => branch.name === other.name) : undefined;
+  if (otherBranch !== undefined) {
+    const merge = branchActions({ blockers, remoteCount: 0, upstream: null }, otherBranch).merge;
+    const label = `Merge ${name} into ${current.name}…`;
+    const item = { label, paletteLabel: label, enabled: merge.enabled, reason: merge.reason, run: { kind: "merge" as const, name } };
+    if (draggingCurrent) items.push(item);
+    else items.unshift(item);
+  }
+  const enabled = items.find((item) => item.enabled);
+  if (enabled === undefined) return { kind: "refused", reason: items[0]?.reason ?? UNAVAILABLE_REASON };
+  return { kind: "menu", items };
 }

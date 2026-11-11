@@ -267,6 +267,12 @@ each drag sees only its own targets. Escape or `pointercancel` cancels, and the 
 drag is swallowed. A drag is never the only way: the rebase planner's rows also move with
 **Move up**/**Move down** and Alt+Up/Down, and every move is announced in a status region.
 
+A branch dropped on a branch in the sidebar asks `branchDropActions` (`lib/actions/branchActions.ts`)
+what it offers: the menus' Merge and Rebase, under the menus' rules, so the current branch must be
+one side of the drop. The answer is shown on the hovered row (`data-drop-position` `on` or
+`refused`) and in the label beside the pointer, and a drop opens a menu with the choices and
+Cancel. A collapsed folder hovered for `FOLDER_OPEN_DELAY_MS` opens for that session only.
+
 ## git2 API gotchas
 
 - `StatusEntry::path()`, `Signature::name()`/`email()`, and `Reference::shorthand()` return

@@ -25,6 +25,11 @@ export type RemoteBranchCache = {
   markOpen: (remoteName: string) => void;
   /** Persists a remote's folder as expanded and loads its list if it hasn't loaded. */
   persistOpenAndLoad: (remoteName: string) => void;
+  /**
+   * Opens the folder for a drag hovering it (#744), and loads its list, without remembering it
+   * open: the next session shows it as the user left it.
+   */
+  openForDrag: (remoteName: string) => void;
 };
 
 /**
@@ -107,8 +112,15 @@ export function useRemoteBranchCache({
     if (remoteBranches[remoteName] === undefined) fetchRemoteBranchList(remoteName);
   };
 
+  const openForDrag = (remoteName: string) => {
+    if (isOpen(remoteName)) return;
+    setOpenRemotes((prev) => ({ ...prev, [remoteName]: true }));
+    if (remoteBranches[remoteName] === undefined) fetchRemoteBranchList(remoteName);
+  };
+
   return {
     isOpen,
+    openForDrag,
     toggle,
     branches: remoteBranches,
     error,

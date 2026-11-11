@@ -55,6 +55,15 @@ function targetAt(scope: string, x: number, y: number): PointerDragOver | null {
   return { key, element, position: y < rect.top + rect.height / 2 ? "before" : "after" };
 }
 
+/** The nearest ancestor of `element` that scrolls vertically, for a drag's `autoScroll`. */
+export function scrollParent(element: Element | null): HTMLElement | null {
+  for (let node = element?.parentElement ?? null; node !== null; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === "auto" || overflowY === "scroll") return node;
+  }
+  return null;
+}
+
 /** -1, 0 or 1: which way `container` should scroll for a pointer at `y`. */
 function edgeDirection(container: HTMLElement, y: number): -1 | 0 | 1 {
   const rect = container.getBoundingClientRect();
@@ -91,8 +100,6 @@ export function usePointerDrag<P>(options: PointerDragOptions<P>): {
   const startDrag = useCallback((event: ReactPointerEvent, payload: P) => {
     if (event.button !== 0) return;
     stopRef.current?.();
-    // Keeps the press from selecting text on its way.
-    event.preventDefault();
     const source = event.currentTarget;
     const startX = event.clientX;
     const startY = event.clientY;
@@ -125,6 +132,9 @@ export function usePointerDrag<P>(options: PointerDragOptions<P>): {
       if (!active) {
         if (Math.hypot(move.clientX - startX, move.clientY - startY) < DRAG_THRESHOLD) return;
         active = true;
+        // A drag selects no text on its way (the press itself still focuses as usual).
+        window.getSelection()?.removeAllRanges();
+        window.addEventListener("selectstart", preventSelection);
         optionsRef.current.onStart?.(payload);
       }
       update(move.clientX, move.clientY);
@@ -135,6 +145,7 @@ export function usePointerDrag<P>(options: PointerDragOptions<P>): {
     // A release after a drag clicks the nearest element holding both the press and the release:
     // the source or one of its ancestors. That click is swallowed; one elsewhere is a new click.
     // Only the first click after the release is looked at.
+    const preventSelection = (selection: Event) => selection.preventDefault();
     const swallowClick = (click: MouseEvent) => {
       window.removeEventListener("click", swallowClick, true);
       if (!(click.target instanceof Node) || !click.target.contains(source)) return;
@@ -147,6 +158,7 @@ export function usePointerDrag<P>(options: PointerDragOptions<P>): {
       window.removeEventListener("pointercancel", onCancel);
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("blur", onCancel);
+      window.removeEventListener("selectstart", preventSelection);
       if (frame !== null) cancelAnimationFrame(frame);
       frame = null;
       stopRef.current = null;

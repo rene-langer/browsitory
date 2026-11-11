@@ -1,4 +1,4 @@
-import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from "react";
 import { isMenuKey, menuAnchor, rectAnchor } from "../../lib/menuKeys";
 import styles from "./ListRow.module.css";
 
@@ -72,6 +72,7 @@ export function ListRow({
   onOpenMenu,
   onMouseEnter,
   onMouseLeave,
+  onPointerDown,
   className,
   "data-commit-id": dataCommitId,
   rowIndex,
@@ -90,6 +91,8 @@ export function ListRow({
   onDoubleClick?: (event?: MouseEvent) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
+  /** Where a row starts a `usePointerDrag` drag (#744). */
+  onPointerDown?: (event: PointerEvent<HTMLLIElement>) => void;
   className?: string;
   // Lets the command palette find a commit row to open its context menu.
   "data-commit-id"?: string;
@@ -109,7 +112,7 @@ export function ListRow({
    * Makes the row a drop target of a `usePointerDrag` drag (#744): `dropTargetProps(scope, key)`,
    * plus `data-drop-position` while a drag hovers it and says where the drop would land.
    */
-  dropTarget?: { scope: string; key: string; position?: "before" | "after" | "on" };
+  dropTarget?: { scope: string; key: string; position?: "before" | "after" | "on" | "refused" };
   /** `data-dragging`: this row is the one being dragged, for its styling. */
   dragging?: boolean;
   children: ReactNode;
@@ -175,6 +178,7 @@ export function ListRow({
       }
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      onPointerDown={onPointerDown}
     >
       {children}
     </li>

@@ -19,6 +19,19 @@ right-click a branch, a remote folder, or a remote branch to bring up its action
 - a remote: fetch, **Push current branch here**, edit, manage credentials, **Copy fetch URL**
   (and **Copy push URL** when pushes go to a different URL), or remove.
 
+**Dragging a branch onto a branch.** Drag a branch onto the current branch, or the current branch
+onto another branch, to merge or rebase. While you drag, a label beside the pointer says what the
+drop offers, and the branch under the pointer is highlighted; on release a small menu lets you
+choose, with the more likely choice first: a branch dropped on the current branch offers **Merge
+⟨branch⟩ into ⟨current⟩…**, then **Rebase ⟨current⟩ onto ⟨branch⟩…**; the current branch dropped on
+a branch offers the rebase first. Both open the same dialog or planner as the menu items, so
+nothing runs until you confirm there. A remote branch offers only the rebase. Only the current
+branch can be merged into or rebased, so dropping one other branch onto another, or any drop on a
+detached HEAD or while another operation runs, is refused, and the label says why. A collapsed
+folder opens when you hold a branch over it for a moment (only for now; it doesn't stay open next
+time). Escape cancels the drag. The menus and the command palette offer the same actions without
+dragging.
+
 The copy items put plain text on the clipboard and work even while another operation runs; a
 short notification confirms the copy, or an error says why it failed.
 

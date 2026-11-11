@@ -4,6 +4,7 @@ import path from "node:path";
 import { expect } from "@wdio/globals";
 import { waitUntilGoneInPage, waitUntilInPage } from "../support/dom";
 import { git, waitForMergeCommit } from "../support/git";
+import { dragInPage } from "../support/drag";
 import { expandSidebarSection, sidebarBranchRow } from "../support/sidebar";
 
 const E2E_REPO_PATH = path.join(os.tmpdir(), "browsitory-e2e-repo");
@@ -39,12 +40,15 @@ async function expectMergeCommitInGraph() {
 }
 
 describe("Browsitory merge with conflict resolution", () => {
+  let currentBranch = "";
+
   before(() => {
     fs.writeFileSync(path.join(E2E_REPO_PATH, "shared.txt"), "line one\nline two\nline three\n");
     git(E2E_REPO_PATH, "add", "shared.txt");
     git(E2E_REPO_PATH, "commit", "-m", "e2e: merge base commit");
 
     const baseBranch = git(E2E_REPO_PATH, "rev-parse", "--abbrev-ref", "HEAD");
+    currentBranch = baseBranch;
 
     git(E2E_REPO_PATH, "checkout", "-b", "e2e-merge-feature");
     fs.writeFileSync(
@@ -56,6 +60,28 @@ describe("Browsitory merge with conflict resolution", () => {
     git(E2E_REPO_PATH, "checkout", baseBranch);
     fs.writeFileSync(path.join(E2E_REPO_PATH, "shared.txt"), "line one\nmain two\nline three\n");
     git(E2E_REPO_PATH, "commit", "-am", "e2e: merge base-branch commit");
+  });
+
+  // #744: a branch dragged onto the current branch offers Merge and Rebase; Merge opens the same
+  // dialog as the menu's item. Closed again, so the next test merges from the menu.
+  it("offers merging a branch dragged onto the current branch", async () => {
+    await expandSidebarSection("Branches");
+    const featureRow = await $(sidebarBranchRow("e2e-merge-feature"));
+    const currentRow = await $(sidebarBranchRow(currentBranch));
+    await featureRow.waitForExist();
+    await currentRow.waitForExist();
+    await dragInPage(featureRow, currentRow);
+
+    const mergeItem = await $(`button=Merge e2e-merge-feature into ${currentBranch}…`);
+    await mergeItem.waitForExist();
+    await $(`button=Rebase ${currentBranch} onto e2e-merge-feature…`).waitForExist();
+    await browser.execute((el) => (el as HTMLElement).click(), mergeItem);
+
+    const dialog = `dialog[aria-label="Merge e2e-merge-feature"]`;
+    await $(dialog).waitForExist();
+    const cancel = await $(dialog).$("button=Cancel");
+    await browser.execute((el) => (el as HTMLElement).click(), cancel);
+    await waitUntilGoneInPage(dialog);
   });
 
   it("merges a diverged branch, resolves a conflict per hunk, and commits the merge", async () => {
