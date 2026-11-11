@@ -48,4 +48,17 @@ describe("Browsitory clone", () => {
     const seedCommit = await $('[data-active-repo="true"]').$("li*=e2e: add submodule");
     await seedCommit.waitForExist({ timeout: SLOW_UI_TIMEOUT });
   });
+
+  // Leave one tab open, as the spec found it. A tab left open is restored by every later spec's
+  // reload and shown first, before the E2E auto-open switches to the test repository; that first
+  // tab's workspace then stays mounted in the background (#642), and a page-wide selector could
+  // find its elements instead of the shown ones.
+  after(async () => {
+    const clonedTab = `//button[@role="tab" and @title="${path.join(PARENT, NAME)}"]`;
+    if (!(await $(clonedTab).isExisting())) return;
+    await browser.execute((el) => (el as HTMLElement).click(), await $(`${clonedTab}/following-sibling::button[1]`));
+    await browser.waitUntil(async () => (await (await $$('[role="tab"]')).length) === 1, {
+      timeoutMsg: "expected the cloned repository's tab to close",
+    });
+  });
 });

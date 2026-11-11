@@ -9,7 +9,8 @@ import { $ } from "@wdio/globals";
  * body has toggles of its own (branch folders, remotes).
  */
 export function sidebarSectionToggle(title: string): string {
-  return `section[aria-label='${title}'] button[aria-expanded][aria-label='${title}']`;
+  // The shown workspace only: the last few tabs stay mounted, hidden, in the background (#642).
+  return `[data-active-repo='true'] section[aria-label='${title}'] button[aria-expanded][aria-label='${title}']`;
 }
 
 /**
