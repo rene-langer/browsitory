@@ -172,6 +172,12 @@
   background: transparent;
 }
 
+/* A shown branch whose tip has no lane in the loaded graph (#673): a dashed neutral ring. */
+.swatch.swatchNoLane[aria-pressed="true"] {
+  background: transparent;
+  border-style: dashed;
+}
+
 /* Invisible 24x24 (--size-target-min) hit area around the 10px dot. */
 .swatch::after {
   content: "";

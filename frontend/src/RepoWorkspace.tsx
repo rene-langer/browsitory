@@ -1,3 +1,4 @@
+import { useCommitGraphLayout } from "./lib/useCommitGraphLayout";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CommitDraft } from "./components/CommitBox";
 import { folderSearchQuery } from "./lib/folderHistory";
@@ -35,7 +36,8 @@ import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import { CurrentDiffContext, useCurrentDiffRegistry } from "./state/useCurrentDiff";
 import { MergeEditorContext, useMergeEditorRegistry } from "./state/useCurrentMergeEditor";
-import { useGoTo } from "./state/useGoTo";
+import { type RevealOptions, useGoTo } from "./state/useGoTo";
+import { useSearchView } from "./lib/searchViewPreference";
 import { useCommitNavigation } from "./state/useCommitNavigation";
 import type { VisitKind } from "./lib/navigationHistory";
 import type { SelectedRow } from "./state/useAppState";
@@ -134,15 +136,23 @@ export function RepoWorkspace({
     take();
     return onHistoryRequest(take);
   }, [active, repoPath, openFileHistory, openLineHistory]);
+  // A search highlighting its matches in the graph (#687) selects its first match as Go to does
+  // (loading history, expanding a merge); in the List view it only selects it. `goTo` comes
+  // later, so the search calls through a ref.
+  const searchView = useSearchView();
+  const selectSearchRowRef = useRef<(row: SelectedRow) => void>(appState.selectRow);
+  const selectSearchRow = useCallback((row: SelectedRow) => selectSearchRowRef.current(row), []);
   const commitSearch = useCommitSearch(
     client,
     repoPath,
     appState.state.refreshGeneration,
     appState.state.graphSelection,
     appState.state.selectedRow,
-    appState.selectRow,
+    selectSearchRow,
   );
   const compare = useCompare(client, repoPath, appState.state.refreshGeneration, appState.state.selectedRow);
+  // The graph's lanes, once for the commit list and the sidebar's branch swatches (#673).
+  const graphLayout = useCommitGraphLayout(appState.state.commits, appState.state.expandedMerges);
   const conflictedPaths = useMemo(
     () => appState.state.status.filter((entry) => entry.kind === "Conflicted").map((entry) => entry.path),
     [appState.state.status],
@@ -176,8 +186,8 @@ export function RepoWorkspace({
   const [revealRequest, setRevealRequest] = useState(0);
   const closeSearch = commitSearch.close;
   const reveal = useCallback(
-    (row: SelectedRow) => {
-      closeSearch();
+    (row: SelectedRow, options?: RevealOptions) => {
+      if (options?.keepSearch !== true) closeSearch();
       if (fileHistoryOpen) closeFileHistory();
       selectRowClosingCompare(row);
       setRevealRequest((n) => n + 1);
@@ -185,6 +195,13 @@ export function RepoWorkspace({
     [closeSearch, fileHistoryOpen, closeFileHistory, selectRowClosingCompare],
   );
   const goTo = useGoTo(client, repoPath, appState, reveal);
+  const { goToRevision } = goTo;
+  useEffect(() => {
+    selectSearchRowRef.current = (row) => {
+      if (searchView === "graph" && row !== "uncommitted") void goToRevision(row.commitId, undefined, { keepSearch: true });
+      else selectRow(row);
+    };
+  }, [searchView, goToRevision, selectRow]);
   // Back/Forward through the visited commits (#618).
   const navigation = useCommitNavigation(appState, fileHistory, commitSearch, reveal, selectRowClosingCompare);
   const setSearchQuery = commitSearch.setQuery;
@@ -903,10 +920,12 @@ export function RepoWorkspace({
             stashBlockers={storedStashBlockers}
             onOpenRepoTab={onOpenRepoTab}
             revealRequest={sidebarReveal.request}
+            graphLayout={graphLayout}
           />
         }
         right={
           <WorkspaceMain
+            graphLayout={graphLayout}
             repoPath={repoPath}
             client={client}
             appState={appState}

@@ -17,9 +17,11 @@ when you click them or press Enter on them; the link's tooltip shows where it go
 repository has a supported forge remote, issue references such as `#123` and `owner/repo#123`
 are links to that issue too (on the forge of the remote the current branch tracks, else
 `origin`, else the first forge remote); without one they stay plain text. The message stays
-plain text to select and copy. The graph loads the latest 300 commits; choose **Load more** at the bottom
-(or keep pressing ↓ past the last row) to load the next page. Use ↑/↓ or j/k to move through the
-commits, and PageUp/PageDown to move a page at a time. To jump to a commit, branch, tag or stash,
+plain text to select and copy. The graph loads the latest 300 commits and the next ones as you
+scroll towards the end (or press End, or ↓ past the last row); "Loading older commits…" under
+the list shows while they come. Only the rows on screen are drawn, so a long history scrolls as
+smoothly as a short one. Use ↑/↓ or j/k to move through the commits, and PageUp/PageDown to move
+a page at a time. To jump to a commit, branch, tag or stash,
 use **Go to commit…** and the other Go to commands in the [command
 palette](command-palette.md#go-to-a-commit-branch-tag-or-stash), or click a branch or tag in the
 sidebar. To revert or apply only one file or hunk of a commit, or to save commits as a patch,
@@ -72,8 +74,13 @@ to another tab and back, like the selection, unless the tab was unloaded meanwhi
 ## Which branches the graph shows
 
 At first the graph shows the commits of every local branch. In the Branches section, each branch
-has a coloured dot in front of its name. Click the dot (**Show … in graph**) to add the branch to
-the graph or take it out. This works for remote branches too: a remote branch you turn on adds
+has a dot in front of its name, in the colour the graph draws that branch's latest commit in; the
+branch badges on the graph's rows carry the same colour as a stripe, and the checked-out branch's
+badge is filled with the accent colour. A shown branch whose latest commit isn't loaded yet (older
+than the loaded commits, or inside a collapsed merge) has a grey dashed ring instead; a hidden
+branch a hollow ring. The colours follow the graph's lanes, so a branch's colour can change when
+the history does. Click the dot (**Show … in graph**) to add the branch to the graph or take it
+out. This works for remote branches too: a remote branch you turn on adds
 its commits to the graph, even ones no local branch has (a colleague's fetched branch, for
 example). Until you pick remote branches, the graph shows no remote-only commits, and the badge
 of every remote branch whose commit is already in the graph. A branch's menu, local or remote,

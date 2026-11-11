@@ -61,4 +61,21 @@ describe("RefBadges", () => {
     fireEvent.contextMenu(screen.getByTitle("Tag v1.1"));
     expect(onRow).toHaveBeenCalled();
   });
+
+  // #673: on a graph row, branch badges carry the row's lane colour; only the checked-out branch
+  // keeps the accent fill.
+  it("marks branch badges with the row's lane colour", () => {
+    const both = { ...commit, branchRefs: ["main", "topic"] };
+    render(<RefBadges commit={both} laneColor="var(--color-lane-3)" currentBranch="main" />);
+    expect(screen.getByText("main")).toHaveClass(styles.branchBadge, styles.laneBadge);
+    expect(screen.getByText("topic")).toHaveClass(styles.otherBranchBadge, styles.laneBadge);
+    expect(screen.getByText("topic").style.getPropertyValue("--lane")).toBe("var(--color-lane-3)");
+    expect(screen.getByText("origin/main")).toHaveClass(styles.remoteBranchBadge, styles.laneBadge);
+  });
+
+  it("keeps the plain badges outside the graph", () => {
+    render(<RefBadges commit={commit} />);
+    expect(screen.getByText("main")).toHaveClass(styles.branchBadge);
+    expect(screen.getByText("main")).not.toHaveClass(styles.laneBadge);
+  });
 });

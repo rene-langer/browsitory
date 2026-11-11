@@ -25,10 +25,13 @@ pub(super) fn get_commit_graph(
     repo: &git2::Repository,
     limit: usize,
     selection: GraphSelection,
-    reply: Sender<Result<Vec<GraphCommit>, ErrorDto>>,
+    cursor: Option<String>,
+    reply: Sender<Result<git_core::graph::GraphPage, ErrorDto>>,
 ) {
-    let _ = reply
-        .send(git_core::graph::graph_log(repo, limit, &selection).map_err(ErrorDto::from_error));
+    let _ = reply.send(
+        git_core::graph::graph_page(repo, &selection, cursor.as_deref(), limit)
+            .map_err(ErrorDto::from_error),
+    );
 }
 
 pub(super) fn locate_commit(
@@ -437,14 +440,17 @@ impl WorkerHandle {
         self.request(|tx| Command::GetChangeStamp { reply: tx })
     }
 
+    /// One page of the graph of `selection` (#685), from `cursor` on (`None`: the first commit).
     pub fn get_commit_graph(
         &self,
         limit: usize,
         selection: GraphSelection,
-    ) -> Result<Vec<GraphCommit>, ErrorDto> {
+        cursor: Option<String>,
+    ) -> Result<git_core::graph::GraphPage, ErrorDto> {
         self.request(|tx| Command::GetCommitGraph {
             limit,
             selection,
+            cursor,
             reply: tx,
         })
     }

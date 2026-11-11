@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { ReflogEntry } from "../ipc/RepoClient";
 import { useAppState } from "./useAppState";
+import { graphPage } from "../test/fakeRepoClient";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 
 describe("useAppState", () => {
@@ -19,7 +20,7 @@ describe("useAppState", () => {
         },
         getCommitGraph: async () => {
           graphCalls += 1;
-          return [];
+          return graphPage([]);
         },
         listBranches: async () => {
           branchCalls += 1;
@@ -117,7 +118,7 @@ describe("useAppState", () => {
       },
       getCommitGraph: async () => {
         graphCalls += 1;
-        return [];
+        return graphPage([]);
       },
       listBranches: async () => {
         branchCalls += 1;

@@ -5,7 +5,7 @@ use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, GraphSelectionDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphPageDto, GraphSelectionDto,
     LineHistoryDto, StatusEntryDto, TrailerDto,
 };
 use std::path::Path;
@@ -41,15 +41,17 @@ pub async fn get_commit_graph(
     repo_path: String,
     limit: usize,
     selection: GraphSelectionDto,
+    // The previous page's `nextCursor` (#685); `null` starts at the first commit.
+    cursor: Option<String>,
     state: State<'_, AppState>,
-) -> Result<Vec<GraphCommitDto>, ErrorDto> {
+) -> Result<GraphPageDto, ErrorDto> {
     let selection = git_core::graph::GraphSelection::from(selection);
-    Ok(repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_commit_graph(limit, selection))
-        .await?
-        .into_iter()
-        .map(GraphCommitDto::from)
-        .collect())
+    repo_worker(&state, &repo_path)?
+        .call(move |w| {
+            w.get_commit_graph(limit, selection, cursor)
+                .map(GraphPageDto::from)
+        })
+        .await
 }
 
 /// Where `revision`'s commit sits in the graph of the given selection (#441).

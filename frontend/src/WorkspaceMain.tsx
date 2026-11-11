@@ -1,4 +1,8 @@
-import { useMemo, useRef } from "react";
+import { SearchMatchBar } from "./components/SearchMatchBar";
+import { useSearchView, writeSearchView } from "./lib/searchViewPreference";
+import { useSearchMatches } from "./state/useSearchMatches";
+import type { CommitGraphLayout } from "./lib/useCommitGraphLayout";
+import { useCallback, useMemo, useRef } from "react";
 import type { CommitDraft } from "./components/CommitBox";
 import { CommitGraph } from "./components/CommitGraph";
 import { CommitSearchBar } from "./components/CommitSearchBar";
@@ -60,6 +64,7 @@ export function WorkspaceMain({
   initialCommitDraft,
   discardBlockedReason: discardDropBlockedReason,
   focusCommitMessage,
+  graphLayout,
 }: {
   repoPath: string;
   client: RepoClient;
@@ -98,6 +103,8 @@ export function WorkspaceMain({
   // Why discarding can't run now (`busyReason`, #521), else `null`.
   discardBlockedReason: string | null;
   focusCommitMessage: boolean;
+  // The graph's lanes, shared with the sidebar's swatches (#673).
+  graphLayout: CommitGraphLayout;
 }) {
   const searchResultsRef = useRef<HTMLUListElement>(null);
   // #620: the commit list's lines-changed badges, counted as rows come into view.
@@ -110,10 +117,34 @@ export function WorkspaceMain({
       : null;
   const historyEntries = fileHistory.history?.entries;
   const searchCommits = commitSearch.results?.commits;
-  const diffPaneCommits = useMemo(
-    () => historyEntries?.map((e) => e.commit) ?? searchCommits ?? appState.state.commits,
-    [historyEntries, searchCommits, appState.state.commits],
+  // A search shows its matches in the graph (#687) or, with List, as a list of them alone.
+  const searchView = useSearchView();
+  const searchInGraph = commitSearch.results !== null && searchView === "graph";
+  const graphCommits = appState.state.commits;
+  const diffPaneCommits = useMemo(() => {
+    if (historyEntries !== undefined) return historyEntries.map((e) => e.commit);
+    if (searchCommits === undefined) return graphCommits;
+    if (!searchInGraph) return searchCommits;
+    // Any graph row can be selected, and a match the graph doesn't hold too.
+    const loaded = new Set(graphCommits.map((commit) => commit.id));
+    return [...graphCommits, ...searchCommits.filter((commit) => !loaded.has(commit.id))];
+  }, [historyEntries, searchCommits, searchInGraph, graphCommits]);
+  const { goToRevision } = goTo;
+  const revealMatch = useCallback(
+    (commitId: string) => {
+      if (searchView === "graph") void goToRevision(commitId, undefined, { keepSearch: true });
+      else selectRowClosingCompare({ commitId });
+    },
+    [searchView, goToRevision, selectRowClosingCompare],
   );
+  const searchMatches = useSearchMatches(
+    commitSearch.results,
+    appState.state.selectedRow,
+    graphCommits,
+    commitSearch.loadMore,
+    revealMatch,
+  );
+  const stepMatch = (direction: -1 | 1) => void searchMatches.step(direction);
   // #612: the repository a commit message's `#123` links to.
   const upstreamRemote = appState.state.upstream?.remoteName ?? null;
   const issueForge = useMemo(
@@ -160,8 +191,16 @@ export function WorkspaceMain({
               onToggleLineStats={() => writeShowLineStats(!showLineStats)}
               collapseMerges={appState.state.collapseMerges}
               onToggleCollapseMerges={() => void appState.setCollapseMerges(!appState.state.collapseMerges)}
+              onStepMatch={commitSearch.results === null ? undefined : stepMatch}
             />
-            {commitSearch.results !== null ? (
+            {commitSearch.results !== null && (
+              <SearchMatchBar
+                matches={searchMatches}
+                view={searchView}
+                onToggleList={() => writeSearchView(searchView === "list" ? "graph" : "list")}
+              />
+            )}
+            {commitSearch.results !== null && !searchInGraph ? (
               <CommitSearchResults
                 results={commitSearch.results}
                 selectedRow={appState.state.selectedRow}
@@ -171,6 +210,7 @@ export function WorkspaceMain({
                 onRetry={commitSearch.retry}
                 onRequestSearch={requestSearchFocus}
                 listRef={searchResultsRef}
+                onStepMatch={stepMatch}
               />
             ) : !appState.state.loaded ? (
               // The first reads are still out (#660): placeholder rows, not an empty history.
@@ -182,6 +222,7 @@ export function WorkspaceMain({
                 onCompareWithWorkingTree={compare.compareWorkingTree}
                 onSavePatch={savePatchOfCommits}
                 hasMore={appState.state.hasMoreHistory}
+                loadingMore={appState.state.loadingMoreHistory}
                 onLoadMore={() => void appState.loadMoreHistory()}
                 status={appState.state.status}
                 commits={appState.state.commits}
@@ -229,6 +270,10 @@ export function WorkspaceMain({
                 expandedMerges={appState.state.expandedMerges}
                 onExpandMerge={(mergeId, atLeast) => void appState.expandMerge(mergeId, atLeast)}
                 onCollapseMerge={appState.collapseMerge}
+                layout={graphLayout}
+                searchMatches={searchInGraph ? searchMatches.ids : null}
+                listRef={searchResultsRef}
+                onStepMatch={stepMatch}
               />
             )}
           </>

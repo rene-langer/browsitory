@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import type { BranchLaneColors } from "../lib/laneColors";
 import { GitBranch, Plus } from "lucide-react";
 import type { BranchInfo, RemoteInfo, UpstreamInfo } from "../ipc/RepoClient";
 import { rectAnchor } from "../lib/menuKeys";
@@ -57,6 +58,7 @@ export function BranchTree({
   onSetGraphRemoteBranchSelection,
   onIsolateGraphBranch,
   remoteBranchesInGraph,
+  branchColors,
   remotes,
   upstream,
   onAddRemote,
@@ -122,6 +124,8 @@ export function BranchTree({
   // whose folder has been expanded and would silently drop never-expanded remotes' badges on
   // the first toggle).
   remoteBranchesInGraph: string[];
+  /** Each branch tip's lane colour in the graph, for the swatches (#673). */
+  branchColors?: BranchLaneColors;
   remotes: RemoteInfo[];
   upstream: UpstreamInfo | null;
   onAddRemote: (name: string, fetchUrl: string, pushUrl: string | null) => Promise<string | null>;
@@ -330,6 +334,7 @@ export function BranchTree({
           graphRemoteBranchSelection={graphRemoteBranchSelection}
           onSetGraphRemoteBranchSelection={onSetGraphRemoteBranchSelection}
           remoteBranchesInGraph={remoteBranchesInGraph}
+          branchColors={branchColors}
           remoteCache={remoteCache}
           remoteHeaders={remoteHeaders}
           rename={rename}

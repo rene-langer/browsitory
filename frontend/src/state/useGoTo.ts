@@ -16,6 +16,11 @@ export interface GoToNotice {
 
 type Selection = SavedGraphSelection;
 
+/** `keepSearch`: an open search stays open, for its previous/next match (#687). */
+export interface RevealOptions {
+  keepSearch?: boolean;
+}
+
 /** A notice as found: its action changes the graph's selection to `selection`, then goes again. */
 interface Explanation {
   message: string;
@@ -30,7 +35,7 @@ export interface UseGoToResult {
    * graph to it, loading more history when it is further down. When the graph doesn't show it,
    * the commit is still selected and `notice` says why. `label` names the target in messages.
    */
-  goToRevision(revision: string, label?: string): Promise<void>;
+  goToRevision(revision: string, label?: string, options?: RevealOptions): Promise<void>;
   goToBranch(kind: "local" | "remote", name: string): Promise<void>;
   /** `commitId` `null`: a tag of a tree or blob, which has no commit to show. */
   goToTag(name: string, commitId: string | null): Promise<void>;
@@ -52,7 +57,7 @@ export function useGoTo(
   client: RepoClient,
   repoPath: string,
   appState: UseAppStateResult,
-  reveal: (row: SelectedRow) => void,
+  reveal: (row: SelectedRow, options?: RevealOptions) => void,
 ): UseGoToResult {
   const [notice, setNotice] = useState<Explanation | null>(null);
   const generation = useRef(0);
@@ -62,12 +67,12 @@ export function useGoTo(
   }, [appState]);
 
   const run = useCallback(
-    async (revision: string, label: string, selection?: Selection): Promise<void> => {
+    async (revision: string, label: string, selection?: Selection, options?: RevealOptions): Promise<void> => {
       const ticket = ++generation.current;
       setNotice(null);
       const { state } = latest.current;
       if (selection === undefined && state.commits.some((commit) => commit.id === revision)) {
-        reveal({ commitId: revision });
+        reveal({ commitId: revision }, options);
         return;
       }
       const { local, remote } = selection ?? state.graphSelection;
@@ -89,7 +94,7 @@ export function useGoTo(
         return;
       }
       const { commitId, position } = location;
-      reveal({ commitId });
+      reveal({ commitId }, options);
       if (position !== null) {
         if (!latest.current.state.commits.some((commit) => commit.id === commitId)) {
           await latest.current.loadHistoryThrough(position + 1);
@@ -113,7 +118,7 @@ export function useGoTo(
   );
 
   const goToRevision = useCallback(
-    (revision: string, label?: string) => run(revision, label ?? revision),
+    (revision: string, label?: string, options?: RevealOptions) => run(revision, label ?? revision, undefined, options),
     [run],
   );
 

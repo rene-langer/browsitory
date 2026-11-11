@@ -107,7 +107,9 @@ describe("useCommitSearch", () => {
     await waitFor(() => expect(result.current.results?.loading).toBe(false));
     expect(searchCommits).toHaveBeenCalledTimes(1);
 
-    act(() => result.current.loadMore());
+    act(() => {
+      void result.current.loadMore();
+    });
     await waitFor(() => expect(result.current.results?.nextCursor).toBeNull());
     expect(searchCommits).toHaveBeenLastCalledWith("/repo", "x", { local: ["main"], remote: [] }, "100:fp");
     expect(result.current.results?.commits).toHaveLength(SEARCH_ROUND_SIZE + 1);
@@ -159,7 +161,9 @@ describe("useCommitSearch", () => {
 
     act(() => result.current.setQuery("x"));
     await waitFor(() => expect(result.current.results?.loading).toBe(false));
-    act(() => result.current.loadMore());
+    act(() => {
+      void result.current.loadMore();
+    });
     await waitFor(() => expect(result.current.results?.error?.message).toMatch(/history changed/));
 
     act(() => result.current.retry());

@@ -1,12 +1,8 @@
 import type { CommitLayout } from "../lib/commitGraphLayout";
-import { LANE_COLORS } from "../lib/laneColors";
+import { laneColor } from "../lib/laneColors";
 
 const LANE_WIDTH = 16;
 const ROW_HEIGHT = 24;
-
-function laneColor(lane: number): string {
-  return LANE_COLORS[lane % LANE_COLORS.length];
-}
 
 function laneCenterX(lane: number): number {
   return lane * LANE_WIDTH + LANE_WIDTH / 2;

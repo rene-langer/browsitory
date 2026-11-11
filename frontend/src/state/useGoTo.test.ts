@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { CommitLocation, GraphCommit, GraphSelection, RepoClient } from "../ipc/RepoClient";
 import { useAppState, type SelectedRow } from "./useAppState";
+import { graphPage } from "../test/fakeRepoClient";
 import { TEST_REPO_PATH, transferClient } from "./useAppStateTestClient";
 import { useGoTo } from "./useGoTo";
 
@@ -50,7 +51,7 @@ const hidden = (location: Partial<CommitLocation>): CommitLocation => ({
 describe("useGoTo", () => {
   it("selects a loaded commit without asking the backend", async () => {
     const locateCommit = vi.fn();
-    const { result, reveal } = setup({ getCommitGraph: async () => [commit("a".repeat(40))], locateCommit });
+    const { result, reveal } = setup({ getCommitGraph: async () => graphPage([commit("a".repeat(40))]), locateCommit });
     await act(() => result.current.appState.refresh());
 
     await act(() => result.current.goTo.goToRevision("a".repeat(40)));
@@ -65,9 +66,10 @@ describe("useGoTo", () => {
     const limits: number[] = [];
     const locateCommit = vi.fn(async () => ({ commitId: target, position: 450, branches: [], remoteBranches: [] }));
     const { result, reveal } = setup({
-      getCommitGraph: async (_repoPath, limit) => {
+      getCommitGraph: async (_repoPath, limit, _selection, cursor) => {
         limits.push(limit);
-        return limit > 300 ? [commit("a".repeat(40)), commit(target)] : [commit("a".repeat(40))];
+        // Pages of the graph (#685): the target is on the second.
+        return cursor === null ? graphPage([commit("a".repeat(40))], "1") : graphPage([commit(target)]);
       },
       locateCommit,
     });
@@ -77,7 +79,7 @@ describe("useGoTo", () => {
 
     expect(locateCommit).toHaveBeenCalledWith(TEST_REPO_PATH, "bbbbbbb", { local: null, remote: [] });
     expect(reveal).toHaveBeenCalledWith({ commitId: target });
-    expect(limits).toEqual([300, 600]);
+    expect(limits).toEqual([300, 300]);
     expect(result.current.appState.state.selectedRow).toEqual({ commitId: target });
   });
 
@@ -90,7 +92,7 @@ describe("useGoTo", () => {
     );
     const { result, reveal } = setup({
       getGraphCollapseMerges: async () => true,
-      getCommitGraph: async () => [commit(merge, { parentIds: ["a".repeat(40), "d".repeat(40)], mergedCount: 2 })],
+      getCommitGraph: async () => graphPage([commit(merge, { parentIds: ["a".repeat(40), "d".repeat(40)], mergedCount: 2 })]),
       getMergedCommits,
       locateCommit,
     });
@@ -145,7 +147,7 @@ describe("useGoTo", () => {
       ],
       getGraphBranchSelection: async () => selection,
       setGraphBranchSelection,
-      getCommitGraph: async () => (selection?.includes("feature") ? [commit("a".repeat(40)), commit(target)] : [commit("a".repeat(40))]),
+      getCommitGraph: async () => graphPage((selection?.includes("feature") ? [commit("a".repeat(40)), commit(target)] : [commit("a".repeat(40))])),
       locateCommit,
     });
     await act(() => result.current.appState.refresh());
@@ -215,7 +217,7 @@ describe("useGoTo", () => {
   it("goes to a branch tip that is loaded by its badge, else by its ref", async () => {
     const locateCommit = vi.fn(async () => null);
     const { result, reveal } = setup({
-      getCommitGraph: async () => [commit("a".repeat(40), { branchRefs: ["main"] })],
+      getCommitGraph: async () => graphPage([commit("a".repeat(40), { branchRefs: ["main"] })]),
       locateCommit,
     });
     await act(() => result.current.appState.refresh());

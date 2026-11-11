@@ -1,3 +1,4 @@
+import type { CommitGraphLayout } from "./lib/useCommitGraphLayout";
 import { BranchTree } from "./components/BranchTree";
 import { Sidebar } from "./components/primitives/Sidebar";
 import { SkeletonRows } from "./components/primitives/SkeletonRows";
@@ -29,6 +30,7 @@ export function WorkspaceSidebar({
   stashBlockers: storedStashBlockers,
   onOpenRepoTab,
   revealRequest,
+  graphLayout,
 }: {
   appState: UseAppStateResult;
   announce: ReturnType<typeof useAnnounce>;
@@ -45,6 +47,8 @@ export function WorkspaceSidebar({
   onOpenRepoTab: (path: string) => Promise<void>;
   // The palette's sidebar reveal request (`useSidebarReveal`, #494), `null` when none.
   revealRequest: SidebarRevealRequest | null;
+  // The graph's lanes, for the branch swatches' colours (#673).
+  graphLayout: CommitGraphLayout;
 }) {
   const { openDialog } = appState;
   return (
@@ -82,6 +86,7 @@ export function WorkspaceSidebar({
           onSetGraphRemoteBranchSelection={appState.setGraphRemoteBranchSelection}
           onIsolateGraphBranch={appState.isolateGraphBranch}
           remoteBranchesInGraph={Array.from(new Set(appState.state.commits.flatMap((c) => c.remoteBranchRefs)))}
+          branchColors={graphLayout.branchColors}
           remotes={appState.state.remotes}
           upstream={appState.state.upstream}
           onAddRemote={appState.addRemote}

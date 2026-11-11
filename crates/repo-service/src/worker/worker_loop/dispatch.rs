@@ -31,8 +31,9 @@ where
             Command::GetCommitGraph {
                 limit,
                 selection,
+                cursor,
                 reply,
-            } => status::get_commit_graph(&self.repo, limit, selection, reply),
+            } => status::get_commit_graph(&self.repo, limit, selection, cursor, reply),
             Command::LocateCommit {
                 revision,
                 selection,

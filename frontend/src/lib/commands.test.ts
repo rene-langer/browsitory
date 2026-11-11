@@ -44,6 +44,7 @@ function makeAppState(overrides: Partial<UseAppStateResult["state"]> = {}): UseA
       expandedMerges: {},
       graphLimit: 300,
       hasMoreHistory: false,
+      loadingMoreHistory: false,
       graphSelection: { local: null, remote: null },
       branches: [
         { name: "main", isCurrent: true },

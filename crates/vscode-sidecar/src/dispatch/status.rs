@@ -4,7 +4,7 @@ use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
 use repo_service::wire::{
     to_trailers, BlameLineDto, CommitLocationDto, CommitOutcomeDto, CommitSignatureDto,
-    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphCommitDto, GraphSelectionDto,
+    DiffHunkDto, DiffOptionsDto, FileHistoryEntryDto, GraphPageDto, GraphSelectionDto,
     LineHistoryDto, StatusEntryDto,
 };
 use serde::Deserialize;
@@ -40,18 +40,21 @@ pub(super) struct GetCommitGraphParams {
     /// `selection.remote` is required, so a caller that doesn't know about remote branches
     /// fails loudly instead of silently dropping them from the graph (#385).
     selection: GraphSelectionDto,
+    /// The previous page's `nextCursor` (#685); absent or `null` starts at the first commit.
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 pub(super) fn get_commit_graph(
     params: GetCommitGraphParams,
     repos: &Repos,
 ) -> Result<Value, ErrorDto> {
-    let commits: Vec<GraphCommitDto> = worker_handle(repos, &params.repo_path)?
-        .get_commit_graph(params.limit, params.selection.into())?
-        .into_iter()
-        .map(GraphCommitDto::from)
-        .collect();
-    serde_json::to_value(commits).map_err(ErrorDto::from_error)
+    let page = worker_handle(repos, &params.repo_path)?.get_commit_graph(
+        params.limit,
+        params.selection.into(),
+        params.cursor,
+    )?;
+    serde_json::to_value(GraphPageDto::from(page)).map_err(ErrorDto::from_error)
 }
 
 #[derive(Deserialize)]
