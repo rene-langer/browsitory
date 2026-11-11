@@ -128,10 +128,15 @@ impl RepoWatcher {
         thread::Builder::new()
             .name("repo-watcher".into())
             .spawn(move || {
-                state.run(events_rx, &on_event);
+                let stopped = state.run(events_rx, &on_event);
+                // Stopped before saying so (#797): a `watch` the sink (or a frontend that got the
+                // event) calls right away must find this watcher dead and start a new one.
+                // Dropping the notify watcher frees its watches at once.
                 thread_alive.store(false, Ordering::SeqCst);
-                // Dropping the watcher here (after `Stopped`) frees its watches at once.
                 lock(&state.watcher).take();
+                if stopped {
+                    on_event(WatchEvent::Stopped);
+                }
             })
             .map_err(|e| WatchError::Watcher(e.to_string()))?;
         Ok(Self { watcher, alive })
@@ -298,16 +303,20 @@ impl State {
         }
     }
 
+    /// Reports changes until the watcher is dropped (false) or has to stop (true); the caller
+    /// reports `Stopped`.
     fn run(
         &mut self,
         events: mpsc::Receiver<notify::Result<notify::Event>>,
         on_event: &dyn Fn(WatchEvent),
-    ) {
+    ) -> bool {
         loop {
-            let Ok(first) = events.recv() else { return };
+            let Ok(first) = events.recv() else {
+                return false;
+            };
             let relevant = match self.handle(first) {
                 Ok(relevant) => relevant,
-                Err(Stop) => return on_event(WatchEvent::Stopped),
+                Err(Stop) => return true,
             };
             if !relevant {
                 continue;
@@ -321,11 +330,11 @@ impl State {
                 match events.recv_timeout(DEBOUNCE.min(left)) {
                     Ok(event) => {
                         if self.handle(event).is_err() {
-                            return on_event(WatchEvent::Stopped);
+                            return true;
                         }
                     }
                     Err(mpsc::RecvTimeoutError::Timeout) => break,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return false,
                 }
             }
             on_event(WatchEvent::Changed);

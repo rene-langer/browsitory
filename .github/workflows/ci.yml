@@ -242,6 +242,9 @@ jobs:
       # The removed-assertions job's report (#310); files only, no network.
       - name: report-removed-assertions.py unit tests
         run: python3 scripts/test_report_removed_assertions.py
+      # The mutants job's comment and summary (#798); files only, no network.
+      - name: report-mutants.py unit tests
+        run: python3 scripts/test_report_mutants.py
       # Never fails (#458): when frontend/pnpm-lock.yaml (e.g. a Renovate Tauri group PR) locks
       # another @tauri-apps/cli than the script's tool list was copied from, this adds a warning
       # annotation and a job summary line, so the PR shows that the list needs updating. See
@@ -415,35 +418,13 @@ jobs:
           echo "status=$status" >> "$GITHUB_OUTPUT"
       - name: Summary
         if: always() && steps.diff.outputs.relevant == 'true'
-        run: |
-          out=mutants.out
-          count() { if [ -f "$out/$1" ]; then grep -c . "$out/$1" || true; else echo 0; fi; }
-          {
-            echo "## Mutation testing (changed code)"
-            echo
-            echo "| Caught | Missed | Timed out | Unviable |"
-            echo "|---|---|---|---|"
-            echo "| $(count caught.txt) | $(count missed.txt) | $(count timeout.txt) | $(count unviable.txt) |"
-            echo
-            if [ "${{ steps.mutants.outcome }}" = "failure" ]; then
-              echo "The run hit its time limit; the counts above cover only the mutants it finished."
-              echo
-            fi
-            if [ "${{ steps.mutants.outputs.status }}" = "4" ]; then
-              echo "The tests failed without any mutation, so no mutant was tested. See the \`rust\` job."
-            elif [ -s "$out/missed.txt" ]; then
-              echo "### Missed: no test noticed these changes"
-              echo
-              echo '```'
-              cat "$out/missed.txt"
-              echo '```'
-              echo
-              echo "Each line is a change to the code that every test still passed. Either a test"
-              echo "is missing, or the mutated code doesn't matter (then it may be worth removing)."
-            else
-              echo "Every viable mutant was caught by a test."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          RELEVANT: ${{ steps.diff.outputs.relevant }}
+          OUTCOME: ${{ steps.mutants.outcome }}
+          STATUS: ${{ steps.mutants.outputs.status }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 scripts/report-mutants.py --summary >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         if: always() && steps.diff.outputs.relevant == 'true'
         with:
@@ -469,59 +450,10 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           marker='<!-- mutants-report -->'
-          out=mutants.out
-          max=100  # lines per list; with lines cut to 200 chars the body stays far below 65536
-          count() { if [ -f "$out/$1" ]; then grep -c . "$out/$1" || true; else echo 0; fi; }
-          list() {  # list <file> <heading>
-            [ -s "$out/$1" ] || return 0
-            n=$(count "$1")
-            echo "### $2 ($n)"
-            echo
-            echo '```'
-            head -n "$max" "$out/$1" | cut -c1-200
-            echo '```'
-            if [ "$n" -gt "$max" ]; then
-              echo
-              echo "First $max of $n; the full list is in the \`mutants-out\` artifact of [the run]($RUN_URL)."
-            fi
-            echo
-          }
           existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
             --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id" \
             | head -n 1)
-          {
-            echo "$marker"
-            echo "## Mutation testing (changed code)"
-            echo
-            if [ "$RELEVANT" != "true" ]; then
-              echo "No Rust source changes in git-core or repo-service at $HEAD_SHA; nothing to mutate."
-              echo
-            else
-              echo "| Caught | Missed | Timed out | Unviable |"
-              echo "|---|---|---|---|"
-              echo "| $(count caught.txt) | $(count missed.txt) | $(count timeout.txt) | $(count unviable.txt) |"
-              echo
-              if [ "$OUTCOME" = "failure" ]; then
-                echo "The run hit its time limit; the counts cover only the mutants it finished."
-                echo
-              fi
-              if [ "$STATUS" = "4" ]; then
-                echo "The tests failed without any mutation, so no mutant was tested. See the \`rust\` job."
-                echo
-              else
-                list missed.txt "Missed: no test noticed these changes"
-                list timeout.txt "Timed out"
-                if [ ! -s "$out/missed.txt" ] && [ ! -s "$out/timeout.txt" ]; then
-                  echo "Every viable mutant was caught by a test."
-                  echo
-                fi
-              fi
-              echo "To triage: for each missed mutant add a test that fails on it, or say in the PR why it is"
-              echo "equivalent or harmless. Mutants in \`#[cfg(windows)]\` files are always missed on this Linux runner."
-              echo
-            fi
-            echo "Informational, not a required check. [Run]($RUN_URL), commit $HEAD_SHA."
-          } > comment.md
+          python3 scripts/report-mutants.py --comment > comment.md
           if [ -n "$existing" ]; then
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@comment.md > /dev/null
             echo "Updated comment $existing."
@@ -1125,3 +1057,10 @@ jobs:
         # with one it takes under a second (measured in #182; NO_AT_BRIDGE=1,
         # GTK_USE_PORTAL=0 and WEBKIT_DISABLE_COMPOSITING_MODE=1 made no difference).
         run: dbus-run-session -- xvfb-run --auto-servernum pnpm test
+      # Screenshots a spec saved at a failure (`e2e/support/diagnostics.ts`, #810).
+      - uses: actions/upload-artifact@v7
+        if: failure() && env.RUN_STEPS == 'true'
+        with:
+          name: e2e-failure-screenshots
+          path: e2e/failure-screenshots
+          if-no-files-found: ignore

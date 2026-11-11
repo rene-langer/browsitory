@@ -215,6 +215,35 @@ fn growing_past_the_folder_limit_stops_the_watcher() {
     assert!(!watcher.is_alive());
 }
 
+/// A watcher is no longer alive by the time it reports `Stopped` (#797), so a `watch` called
+/// right after (from the sink, or by a frontend that got the event) starts a new one instead of
+/// keeping the stopped one. The sink holds the watcher's thread for a while after sending the
+/// event, which makes the order "report, then mark stopped" fail every time.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_watcher_is_no_longer_alive_when_it_reports_stopped() {
+    let (dir, _repo) = repo_with_commit();
+    let (tx, events) = mpsc::channel();
+    let watcher = RepoWatcher::start_with(dir.path(), 2, move |event| {
+        let _ = tx.send(event);
+        if event == WatchEvent::Stopped {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+    })
+    .unwrap();
+
+    std::fs::create_dir_all(dir.path().join("x/y/z")).unwrap();
+
+    loop {
+        match events.recv_timeout(TIMEOUT) {
+            Ok(WatchEvent::Stopped) => break,
+            Ok(WatchEvent::Changed) => continue,
+            Err(error) => panic!("no Stopped event: {error}"),
+        }
+    }
+    assert!(!watcher.is_alive());
+}
+
 #[test]
 fn a_linked_worktree_reports_its_own_changes() {
     let (dir, repo) = repo_with_commit();

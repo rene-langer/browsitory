@@ -40,7 +40,8 @@ pub enum ResetError {
 /// Runs during a terminal `git bisect` and keeps it, as git does (#250). libgit2's mixed and
 /// hard `git_reset` end with `cleanup_state`, which would delete `BISECT_LOG` (and a terminal
 /// rebase's or cherry-pick list's state), so those two are done here step by step, as libgit2
-/// does them, with `commit::clear_operation_files` instead (#249).
+/// does them, with `commit::clear_operation_files` instead (#249). Unlike libgit2, which moves
+/// HEAD before it writes the index, the index is written first, as `git reset` does (#796).
 pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(), ResetError> {
     crate::repo::check_no_terminal_rebase(repo)?;
     if !crate::repo::no_operation(repo) {
@@ -70,10 +71,13 @@ pub fn reset_to(repo: &Repository, commit_id: &str, mode: ResetMode) -> Result<(
                     crate::HeldDuring::Reset,
                 ))?;
         }
-        move_head(repo, target.id())?;
+        // git's order: the index first, the ref last (#796). Moving HEAD first left a window in
+        // which HEAD named the target while the index still held the old tree, and a reset whose
+        // index write failed (another command's `index.lock`) moved HEAD anyway.
         let mut index = repo.index()?;
         index.read_tree(&tree)?;
         index.write()?;
+        move_head(repo, target.id())?;
         crate::commit::clear_operation_files(repo)?;
     }
     // Like git's `remove_branch_state`: a reset abandons a pending squash merge's message.
