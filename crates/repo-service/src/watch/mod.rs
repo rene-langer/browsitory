@@ -510,6 +510,15 @@ impl RepoWatchers {
         drop(removed);
     }
 
+    #[cfg(test)]
+    fn epoch(&self, repo_path: &str) -> u64 {
+        lock(&self.inner)
+            .epochs
+            .get(repo_path)
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// Whether `repo_path` has a live watcher.
     pub fn is_watching(&self, repo_path: &str) -> bool {
         lock(&self.inner)

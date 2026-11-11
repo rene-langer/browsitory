@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use git2::Repository;
 use tempfile::TempDir;
 
-use super::{RepoWatcher, RepoWatchers, WatchError, WatchEvent, DEBOUNCE};
+use super::{RepoWatcher, RepoWatchers, SyncError, WatchError, WatchEvent, DEBOUNCE, MAX_FOLDERS};
 
 /// Far longer than an event ever takes, so a busy runner doesn't fail the test.
 const TIMEOUT: Duration = Duration::from_secs(20);
@@ -286,4 +286,109 @@ fn repo_watchers_do_not_watch_a_folder_outside_a_repository() {
 
     assert!(!watchers.watch(&path));
     assert!(!watchers.is_watching(&path));
+}
+
+#[test]
+fn a_folder_deleted_and_made_again_is_watched_again() {
+    let (dir, _repo) = repo_with_commit();
+    let (_watcher, events) = start(dir.path());
+    settle(&events);
+    let sub = dir.path().join("sub");
+
+    std::fs::create_dir(&sub).unwrap();
+    assert_eq!(next(&events).0, WatchEvent::Changed);
+    settle(&events);
+    std::fs::remove_dir(&sub).unwrap();
+    assert_eq!(next(&events).0, WatchEvent::Changed);
+    settle(&events);
+    std::fs::create_dir(&sub).unwrap();
+    assert_eq!(next(&events).0, WatchEvent::Changed);
+    settle(&events);
+    std::fs::write(sub.join("f.txt"), "f\n").unwrap();
+
+    assert_eq!(next(&events).0, WatchEvent::Changed);
+}
+
+/// Deleted folders stop counting towards the limit.
+#[cfg(target_os = "linux")]
+#[test]
+fn deleted_folders_free_their_place_under_the_limit() {
+    let (dir, _repo) = repo_with_commit();
+    let (tx, events) = mpsc::channel();
+    let _watcher = RepoWatcher::start_with(dir.path(), 2, move |event| {
+        let _ = tx.send((event, Instant::now()));
+    })
+    .unwrap();
+    settle(&events);
+
+    for round in 0..3 {
+        let folder = dir.path().join(format!("f{round}"));
+        std::fs::create_dir(&folder).unwrap();
+        assert_eq!(next(&events).0, WatchEvent::Changed);
+        settle(&events);
+        std::fs::remove_dir(&folder).unwrap();
+        assert_eq!(next(&events).0, WatchEvent::Changed);
+        settle(&events);
+    }
+    std::fs::create_dir(dir.path().join("last")).unwrap();
+
+    assert_eq!(next(&events).0, WatchEvent::Changed);
+}
+
+#[test]
+fn a_folder_no_longer_ignored_is_watched() {
+    let (dir, _repo) = repo_with_commit();
+    std::fs::create_dir_all(dir.path().join("build/x")).unwrap();
+    let (_watcher, events) = start(dir.path());
+    settle(&events);
+
+    std::fs::write(dir.path().join(".gitignore"), "*.log\n").unwrap();
+    assert_eq!(next(&events).0, WatchEvent::Changed);
+    settle(&events);
+    std::fs::write(dir.path().join("build/x/out.txt"), "o").unwrap();
+
+    assert_eq!(next(&events).0, WatchEvent::Changed);
+}
+
+#[test]
+fn a_folder_no_longer_excluded_is_watched() {
+    let (dir, _repo) = repo_with_commit();
+    let exclude = dir.path().join(".git/info/exclude");
+    std::fs::create_dir_all(exclude.parent().unwrap()).unwrap();
+    std::fs::write(&exclude, "local/\n").unwrap();
+    std::fs::create_dir_all(dir.path().join("local/x")).unwrap();
+    let (_watcher, events) = start(dir.path());
+    settle(&events);
+
+    std::fs::write(&exclude, "").unwrap();
+    assert_eq!(next(&events).0, WatchEvent::Changed);
+    settle(&events);
+    std::fs::write(dir.path().join("local/x/out.txt"), "o").unwrap();
+
+    assert_eq!(next(&events).0, WatchEvent::Changed);
+}
+
+#[test]
+fn each_unwatch_moves_the_epoch_on() {
+    let (watchers, _events) = collecting_watchers();
+
+    watchers.unwatch("/r");
+    let first = watchers.epoch("/r");
+    watchers.unwatch("/r");
+
+    assert_ne!(first, 0);
+    assert_ne!(watchers.epoch("/r"), first);
+}
+
+#[test]
+fn the_reasons_name_the_folder_limit() {
+    let limit = MAX_FOLDERS.to_string();
+    assert!(WatchError::TooManyFolders.to_string().contains(&limit));
+    assert!(SyncError::TooMany.to_string().contains(&limit));
+    assert_eq!(WatchError::Watcher("no".into()).to_string(), "no");
+    assert_eq!(
+        WatchError::NotARepository("none".into()).to_string(),
+        "none"
+    );
+    assert_eq!(SyncError::Watch("full".into()).to_string(), "full");
 }
