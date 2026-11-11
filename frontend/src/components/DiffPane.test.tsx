@@ -2131,10 +2131,11 @@ describe("DiffPane stash view", () => {
     const section = await screen.findByRole("region", { name: "Stash details" });
 
     for (const name of ["Apply", "Pop"]) {
-      expect(within(section).getByRole("button", { name })).toBeDisabled();
-      expect(within(section).getByRole("button", { name })).toHaveAttribute("title", "Unstage or commit staged changes first.");
+      expect(within(section).getByRole("button", { name })).toHaveAttribute("aria-disabled", "true");
+      expect(describedByText(within(section).getByRole("button", { name }))).toBe("Unstage or commit staged changes first.");
     }
     expect(within(section).getByRole("button", { name: "Drop…" })).toBeEnabled();
+    expect(within(section).getByRole("button", { name: "Drop…" })).not.toHaveAttribute("aria-disabled");
   });
 
   it("disables Drop… and its open confirmation, saying why, while an action is in progress (#521)", async () => {
@@ -2162,14 +2163,44 @@ describe("DiffPane stash view", () => {
 
     rerender(<DiffPane {...props({ ...actions, blockers: { apply: null, drop: reason } })} />);
     const drop = within(section).getByRole("button", { name: "Drop…" });
-    expect(drop).toBeDisabled();
-    expect(drop).toHaveAttribute("title", reason);
+    expect(drop).toHaveAttribute("aria-disabled", "true");
+    expect(describedByText(drop)).toBe(reason);
     const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
     expect(dialog).toHaveTextContent(reason);
     const confirm = within(dialog).getByRole("button", { name: "Drop stash", hidden: true });
     expect(confirm).toBeDisabled();
     fireEvent.click(confirm);
     expect(actions.onDrop).not.toHaveBeenCalled();
+  });
+
+  // #772: the confirmation's reason is tied to its button, and shown once.
+  it("ties the open Drop confirmation's reason to its button (#772)", async () => {
+    const reason = "Another action is in progress.";
+    const client = fakeClient({
+      getStashFiles: vi.fn(async () => ({ tracked: ["a.txt"], untracked: [], untrackedCommitId: null })),
+      getCommitDiff: vi.fn(async () => []),
+      getBlame: async () => [],
+    });
+    const actions = stashActions();
+    const props = (current: StashActions) => ({
+      repoPath: TEST_REPO_PATH,
+      client,
+      selectedRow: { commitId: "s0" },
+      status: [],
+      mergeMessage: null,
+      rebaseProgress: null,
+      ...noopHandlers,
+      stashes: [stash],
+      stashActions: current,
+    });
+    const { rerender } = render(<DiffPane {...props(actions)} />);
+    const section = await screen.findByRole("region", { name: "Stash details" });
+    fireEvent.click(within(section).getByRole("button", { name: "Drop…" }));
+    rerender(<DiffPane {...props({ ...actions, blockers: { apply: null, drop: reason } })} />);
+    const dialog = screen.getByRole("dialog", { name: "Drop stash wip", hidden: true });
+    const confirm = within(dialog).getByRole("button", { name: "Drop stash", hidden: true });
+    expect(describedByText(confirm)).toBe(reason);
+    expect(within(dialog).getAllByText(reason)).toHaveLength(1);
   });
 
   it("shows a load failure with Retry", async () => {

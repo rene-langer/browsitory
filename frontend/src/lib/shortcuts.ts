@@ -1,4 +1,11 @@
-import { GLOBAL_SHORTCUTS, formatChords, shortcutLabel, type GlobalShortcut, type KeyChord } from "./keybindings";
+import {
+  GLOBAL_SHORTCUTS,
+  MERGE_EDITOR_SHORTCUTS,
+  formatChords,
+  shortcutLabel,
+  type GlobalShortcut,
+  type KeyChord,
+} from "./keybindings";
 import { isApplePlatform, isVscodeHost } from "./platform";
 
 /** One row of the shortcut sheet: its keys and what they do, written for the platform (#683). */
@@ -115,6 +122,21 @@ export function shortcutGroups(apple: boolean = isApplePlatform(), vscode: boole
         row([k("d")], "Discard the selected lines or hunk (Undo brings them back)"),
         row([k("["), k("]")], "Previous / next hunk"),
         row([k("j"), k("k")], "Next / previous changed file (working tree)"),
+      ],
+    },
+    {
+      // #764: the pane binds these itself (`MERGE_EDITOR_SHORTCUTS`).
+      title: "Merge editor",
+      shortcuts: [
+        ...MERGE_EDITOR_SHORTCUTS.map((shortcut) =>
+          row(
+            shortcut.chords,
+            shortcut.chords.some((chord) => chord.key === "F7")
+              ? shortcut.description
+              : `${shortcut.description} (in a conflict block, outside its result)`,
+          ),
+        ),
+        row([k("Escape")], "Leave a conflict's result field, back to its block"),
       ],
     },
     {

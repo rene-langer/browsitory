@@ -4,8 +4,11 @@ import {
   ariaKeyShortcuts,
   chordsFor,
   formatChord,
+  MERGE_EDITOR_SHORTCUTS,
   matchShortcut,
   matchesChord,
+  mergeEditorAriaKeyShortcuts,
+  mergeEditorShortcutLabel,
   shortcutLabel,
 } from "./keybindings";
 
@@ -118,6 +121,41 @@ describe("matching keys (#646)", () => {
           });
           expect(matchShortcut(event, apple)?.id).toBe(shortcut.id);
         }
+      }
+    }
+  });
+});
+
+// #764: the merge editor's own keys, bound by the pane itself, never globally.
+describe("merge editor shortcuts", () => {
+  it("takes a block's choices with 1 … 5 and moves between conflicts with F7 / Shift+F7", () => {
+    expect(MERGE_EDITOR_SHORTCUTS.map((s) => [s.id, mergeEditorShortcutLabel(s.id, false)])).toEqual([
+      ["conflict-ours", "1"],
+      ["conflict-theirs", "2"],
+      ["conflict-ours-then-theirs", "3"],
+      ["conflict-theirs-then-ours", "4"],
+      ["conflict-base", "5"],
+      ["previous-conflict", "Shift+F7"],
+      ["next-conflict", "F7"],
+    ]);
+    expect(mergeEditorShortcutLabel("previous-conflict", true)).toBe("⇧F7");
+    expect(mergeEditorAriaKeyShortcuts("conflict-base")).toBe("5");
+    expect(mergeEditorAriaKeyShortcuts("previous-conflict")).toBe("Shift+F7");
+  });
+
+  it("uses no key a global shortcut takes", () => {
+    for (const shortcut of MERGE_EDITOR_SHORTCUTS) {
+      for (const chord of shortcut.chords) {
+        const event = {
+          key: chord.key,
+          code: `Digit${chord.key}`,
+          altKey: false,
+          ctrlKey: false,
+          metaKey: false,
+          shiftKey: Boolean(chord.shift),
+        };
+        expect(matchShortcut(event, false)).toBeNull();
+        expect(matchShortcut(event, true)).toBeNull();
       }
     }
   });

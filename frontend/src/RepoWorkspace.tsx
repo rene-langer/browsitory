@@ -35,6 +35,7 @@ import { stashBlockers } from "./lib/actions/stashActions";
 import { useCommitSearch } from "./state/useCommitSearch";
 import { useCompare } from "./state/useCompare";
 import { CurrentDiffContext, useCurrentDiffRegistry } from "./state/useCurrentDiff";
+import { MergeEditorContext, useMergeEditorRegistry } from "./state/useCurrentMergeEditor";
 import { type RevealOptions, useGoTo } from "./state/useGoTo";
 import { useSearchView } from "./lib/searchViewPreference";
 import { useCommitNavigation } from "./state/useCommitNavigation";
@@ -244,6 +245,8 @@ export function RepoWorkspace({
   const diffSettings = useDiffSettingsContext();
   // The tab's diff views, for the palette's "Wrap lines" / "Show whole file" (#469).
   const currentDiff = useCurrentDiffRegistry();
+  // The tab's merge editor, for the palette's conflict moves and choices (#764).
+  const mergeEditor = useMergeEditorRegistry();
   // The toolbar and the panes below it; its width, not the window's, decides the narrow layout.
   const [bodyElement, setBodyElement] = useState<HTMLDivElement | null>(null);
   const narrow = useNarrowLayout(bodyElement);
@@ -565,6 +568,7 @@ export function RepoWorkspace({
                 toggleWrap: currentDiff.toggleWrap,
                 toggleWholeFile: currentDiff.toggleWholeFile,
               },
+        mergeEditor: mergeEditor.current,
         selection: fileSelection,
         requestDiscardSelection: () => {
           if (fileSelection === null || fileSelection.staged) return;
@@ -725,6 +729,7 @@ export function RepoWorkspace({
     // gates everything that listens globally (shortcuts, palette and drop requests, focus
     // checks, automatic fetch), so a hidden workspace never reacts.
     <CurrentDiffContext.Provider value={currentDiff}>
+    <MergeEditorContext.Provider value={mergeEditor}>
     <WorkspaceActionsContext.Provider value={workspaceActions}>
     <CopyToClipboardContext.Provider value={clipboard.copy}>
     <div
@@ -961,6 +966,7 @@ export function RepoWorkspace({
     </div>
     </CopyToClipboardContext.Provider>
     </WorkspaceActionsContext.Provider>
+    </MergeEditorContext.Provider>
     </CurrentDiffContext.Provider>
   );
 }

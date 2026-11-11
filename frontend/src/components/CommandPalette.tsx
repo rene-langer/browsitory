@@ -206,6 +206,8 @@ export function CommandPalette({
           const heading = headings.get(index);
           const disabledReason = "disabledReason" in command ? command.disabledReason : undefined;
           const shortcut = "shortcut" in command ? command.shortcut : undefined;
+          // A global shortcut's keys, or the keys the command's pane binds (#764).
+          const keys = shortcut !== undefined ? shortcutLabel(shortcut) : "keys" in command ? command.keys : undefined;
           const optionId = `${listboxId}-option-${index}`;
           return (
             <Fragment key={command.id}>
@@ -229,10 +231,10 @@ export function CommandPalette({
                     {disabledReason}
                   </span>
                 )}
-                {shortcut !== undefined && (
-                  // The command's global shortcut (#646), a hint beside its name.
+                {keys !== undefined && (
+                  // The command's shortcut (#646, #764), a hint beside its name.
                   <kbd className={styles.shortcut} aria-hidden="true">
-                    {shortcutLabel(shortcut)}
+                    {keys}
                   </kbd>
                 )}
               </ListRow>
