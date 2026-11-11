@@ -217,6 +217,11 @@ tree it pulls in (`deny.toml`, `scripts/check-dependency-licenses.py`); keep the
   it is equivalent or harmless. Mutants in `#[cfg(windows)]` files (such as
   `crates/git-core/src/worktree_guard/beneath_windows.rs`) are always missed on the Linux
   runner; ignore them. The job is informational, not a required check.
+- CI skips unaffected work on pull requests (`ci.yml`'s `changes` job): the `rust` jobs when only
+  files outside Rust's inputs change (`frontend/` but not `frontend/src/ipc/generated/`,
+  `extension/`, `e2e/`, docs), and every build and test job when only docs change. The skipped
+  jobs still report green. A test or build step that newly reads a file on one of those
+  allowlists must take it off (see `docs/ARCHITECTURE.md`'s "Testing strategy").
 
 Full rationale and the wire-format/DTO contract details: `docs/ARCHITECTURE.md`'s "Testing
 strategy".
