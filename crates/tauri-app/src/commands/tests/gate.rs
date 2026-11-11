@@ -485,3 +485,92 @@ fn two_open_repos_have_independent_worker_state() {
     assert!(handle_a.get_status().unwrap()[0].staged);
     assert!(handle_b.get_status().unwrap().is_empty());
 }
+
+/// A local repository whose current branch's upstream is on `silent`, a server that accepts and
+/// never answers, so a pull keeps connecting until it is cancelled. Returns the server's stop
+/// flag and a receiver that hears of each connection.
+#[cfg(unix)]
+fn repo_pulling_from_a_silent_remote() -> (
+    tempfile::TempDir,
+    std::sync::Arc<std::sync::atomic::AtomicBool>,
+    mpsc::Receiver<()>,
+) {
+    let (dir, _release) = repo_with_waiting_pre_commit();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!(
+        "http://127.0.0.1:{}/repo.git",
+        listener.local_addr().unwrap().port()
+    );
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (accepted_tx, accepted) = mpsc::channel();
+    {
+        let stop = std::sync::Arc::clone(&stop);
+        std::thread::spawn(move || {
+            let mut held = Vec::new();
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        held.push(stream);
+                        let _ = accepted_tx.send(());
+                    }
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
+                }
+            }
+        });
+    }
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    repo.remote("silent", &url).unwrap();
+    let branch = repo.head().unwrap().shorthand().unwrap().to_string();
+    let mut config = repo.config().unwrap();
+    config
+        .set_str(&format!("branch.{branch}.remote"), "silent")
+        .unwrap();
+    config
+        .set_str(
+            &format!("branch.{branch}.merge"),
+            &format!("refs/heads/{branch}"),
+        )
+        .unwrap();
+    (dir, stop, accepted)
+}
+
+/// #734: a pull holds the main gate until it ends; a read waits at the read gate instead, and
+/// the worker answers it while the pull's fetch is still connecting.
+#[cfg(unix)]
+#[test]
+fn a_read_answers_while_a_pull_holds_the_main_gate() {
+    let (dir, stop, accepted) = repo_pulling_from_a_silent_remote();
+    let (state, keys) = state_with_repos(&[dir.path()]);
+    let (event_tx, event_rx) = mpsc::channel();
+    let pull = tauri::async_runtime::spawn(
+        super::super::repo_worker(&state, &keys[0])
+            .unwrap()
+            .call(move |w| w.pull_current_upstream(event_tx)),
+    );
+    let operation_id = match event_rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .unwrap()
+    {
+        TransferEvent::Started { operation_id, .. } => operation_id,
+        other => panic!("expected Started first, got {other:?}"),
+    };
+    accepted
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the pull connects to the silent server");
+    assert!(gate_of(&state, &keys[0]).try_lock().is_err());
+
+    let read = super::super::repo_worker(&state, &keys[0]).unwrap();
+    let (answered_tx, answered_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = tauri::async_runtime::block_on(read.read(|r| r.get_status()));
+        let _ = answered_tx.send(result.is_ok());
+    });
+    let answered = answered_rx.recv_timeout(std::time::Duration::from_secs(20));
+
+    let worker = super::super::repo_worker(&state, &keys[0]).unwrap();
+    worker.signal().cancel_transfer(&operation_id);
+    assert!(tauri::async_runtime::block_on(pull).unwrap().is_err());
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(answered, Ok(true), "the read waited behind the pull");
+}
