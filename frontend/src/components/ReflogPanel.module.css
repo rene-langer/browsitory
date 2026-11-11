@@ -5,10 +5,33 @@
   padding: 0;
 }
 
-.entryMeta {
-  font-family: var(--font-mono);
+/* Two fixed lines per entry (#775), like the Stashes rows: the windowed list (useVirtualRows)
+   needs rows of one height. The message, then "old → new · name · date"; both cut short, with the
+   full details in the tooltip. */
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.message,
+.details {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.details {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
+}
+
+.restoreButton {
+  flex: none;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2);
 }
 
 .rowIcon {

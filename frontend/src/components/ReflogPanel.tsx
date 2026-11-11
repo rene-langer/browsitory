@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { formatShortDate } from "../lib/formatDate";
 import { History } from "lucide-react";
 import type { ReflogEntry } from "../ipc/RepoClient";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ListRow } from "./primitives/ListRow";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./ReflogPanel.module.css";
+import { useVirtualRows } from "./useVirtualRows";
 
 export function ReflogPanel({
   references,
@@ -25,6 +27,10 @@ export function ReflogPanel({
   revealRequest?: number;
 }) {
   const [restoreConfirmation, setRestoreConfirmation] = useState<ReflogEntry | null>(null);
+  // Only the rows in view render (#775), as in the commit graph (#685); each row is two fixed
+  // lines for that.
+  const [listElement, setListElement] = useState<HTMLUListElement | null>(null);
+  const virtual = useVirtualRows(listElement, entries.length);
   const selectableReferences = references.filter(
     (reference) => reference === "HEAD" || reference.startsWith("refs/heads/"),
   );
@@ -56,30 +62,45 @@ export function ReflogPanel({
       ) : entries.length === 0 ? (
         <p className={styles.empty}>No reflog entries for {selectedReference}.</p>
       ) : (
-        <ul className={styles.entryList}>
-          {entries.map((entry, ordinal) => (
-            <ListRow key={`${entry.reference}:${ordinal}`}>
-              <History size={14} aria-hidden="true" className={styles.rowIcon} />
-              <span className={styles.entryMeta}>Old ID: {entry.oldId}</span>
-              <span className={styles.entryMeta}>New ID: {entry.newId}</span>
-              <span>{entry.committerName} &lt;{entry.committerEmail}&gt;</span>
-              <time dateTime={new Date(entry.timestamp * 1000).toISOString()}>
-                {new Date(entry.timestamp * 1000).toLocaleString()}
-              </time>
-              <span>{entry.message}</span>
-              {entry.summary !== null && <span>{entry.summary}</span>}
-              <Toolbar>
+        <ul
+          ref={setListElement}
+          className={styles.entryList}
+          style={virtual.windowed ? { paddingTop: virtual.padTop, paddingBottom: virtual.padBottom } : undefined}
+        >
+          {entries.slice(virtual.start, virtual.end).map((entry, offset) => {
+            const ordinal = virtual.start + offset;
+            const time = new Date(entry.timestamp * 1000);
+            // The full details, cut short on the second line (#775).
+            const details = [
+              `Old ID: ${entry.oldId}`,
+              `New ID: ${entry.newId}`,
+              `${entry.committerName} <${entry.committerEmail}>`,
+              time.toLocaleString(),
+              entry.message,
+              ...(entry.summary === null ? [] : [entry.summary]),
+            ].join("\n");
+            return (
+              <ListRow key={`${entry.reference}:${ordinal}`} rowIndex={ordinal} setSize={entries.length}>
+                <History size={14} aria-hidden="true" className={styles.rowIcon} />
+                <span className={styles.text} title={details}>
+                  <span className={styles.message}>{entry.message}</span>
+                  <span className={styles.details}>
+                    {entry.oldId.slice(0, 7)} → {entry.newId.slice(0, 7)} · {entry.committerName} ·{" "}
+                    {formatShortDate(entry.timestamp)}
+                  </span>
+                </span>
                 <button
                   type="button"
+                  className={styles.restoreButton}
                   disabled={operationDisabled}
                   aria-label={`Restore ${entry.reference} to ${entry.newId}`}
                   onClick={() => setRestoreConfirmation(entry)}
                 >
                   Restore {entry.reference}
                 </button>
-              </Toolbar>
-            </ListRow>
-          ))}
+              </ListRow>
+            );
+          })}
         </ul>
       )}
       {restoreConfirmation !== null && (
