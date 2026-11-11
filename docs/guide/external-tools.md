@@ -7,8 +7,8 @@ right-click menu with **Open in editor**, **Reveal in file manager** and **Open 
 (**Open in merge tool** for a conflicted file). The palette has "Open current file in editor"
 and "Open current file in diff tool".
 
-Set your editor in **Preferences** (the gear button in the header, or "Preferences…" in the
-palette). The command is split into words the way a shell would, but never run through a
+Set your editor in **Preferences → External tools** (the gear button in the header, or
+"Preferences…" in the palette). The command is split into words the way a shell would, but never run through a
 shell, and these placeholders are replaced inside each word:
 
 - `{file}`: the file's full path (added at the end when the command has no `{file}`)
@@ -83,7 +83,7 @@ git config --global difftool.mytool.cmd 'mytool "$LOCAL" "$REMOTE"'
 The command must wait until its window closes (for example `code --wait`), as with `git
 difftool`. Terminal tools such as `vimdiff` are not supported, since Browsitory has no terminal
 to run them in; give them a `cmd` that opens a terminal window if you want them anyway.
-**Preferences** shows which tools Browsitory found and where they were set.
+**Preferences → External tools** shows which tools Browsitory found and where they were set.
 
 Browsitory only reads tool settings from your own git config (global, XDG or system), never
 from a repository's `.git/config`: a repository you downloaded or share with others can't make

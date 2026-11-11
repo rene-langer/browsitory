@@ -30,6 +30,8 @@ import {
   PreferencesDialog,
   UpdatesSection,
 } from "./components/PreferencesDialog";
+import type { PreferencesGroupId } from "./lib/preferencesGroup";
+import { OpenPreferencesContext } from "./state/openPreferences";
 import { cloneToastMessage, createNewRepository } from "./lib/newRepository";
 import { repoNameOf } from "./lib/repoName";
 import { AppearanceSettingsProvider } from "./state/AppearanceSettingsProvider";
@@ -96,7 +98,8 @@ function AppContent({
   toolHost?: "desktop" | "vscode";
   loadThirdPartyNotices?: () => Promise<string>;
 }) {
-  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  // Open with the group to show first; `undefined` reopens on the last one shown (#784).
+  const [preferences, setPreferences] = useState<{ group?: PreferencesGroupId } | null>(null);
   const [licencesOpen, setLicencesOpen] = useState(false);
   // Failures of the repo tab menu's actions (terminal, reveal); workspace tool errors show in
   // that workspace.
@@ -173,7 +176,8 @@ function AppContent({
       (error: unknown) => setOpenError({ message: String(error instanceof Error ? error.message : error), path: "" }),
     );
   }, [client, openRepoTab, pushAppToast]);
-  const openPreferences = useCallback(() => setPreferencesOpen(true), []);
+  const openPreferences = useCallback((group?: PreferencesGroupId) => setPreferences({ group }), []);
+  const openLastPreferences = useCallback(() => openPreferences(), [openPreferences]);
   // "Check for updates" (#630) runs the check the update banner registers.
   const updateCheck = useRef<UpdateCheck | null>(null);
   const updateCheckRegistry = useMemo<UpdateCheckRegistry>(
@@ -258,7 +262,7 @@ function AppContent({
   const appCommands = useMemo<AppCommands>(
     () => ({
       ...cloneAndInitCommands,
-      onOpenPreferences: openPreferences,
+      onOpenPreferences: openLastPreferences,
       onOpenThirdPartyLicences: openLicences,
       onOpenUserGuide: openUserGuide,
       ...(canReopenClosedRepo ? { onReopenClosedTab: reopenClosedTab } : {}),
@@ -267,7 +271,7 @@ function AppContent({
     }),
     [
       cloneAndInitCommands,
-      openPreferences,
+      openLastPreferences,
       openLicences,
       openUserGuide,
       canReopenClosedRepo,
@@ -396,140 +400,203 @@ function AppContent({
   }
 
   return (
-    <main>
-      {dropHint}
-      <UpdateCheckContext.Provider value={updateCheckRegistry}>{updateBanner}</UpdateCheckContext.Provider>
-      <header className={styles.headerRow}>
-        <h1>Browsitory</h1>
-        <RepoTabs
-          openRepos={openRepos.openRepos}
-          activePath={openRepos.activePath}
-          busyPaths={busyPaths}
-          workspaceNames={workspaceNames}
-          onSwitchTo={openRepos.switchTo}
-          onClose={openRepos.closeRepo}
-          onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
-          onAddTab={() => setPickingRepo(true)}
-          tabMenuItems={tabMenuItems}
-          onTabMenuOpen={loadRootFiles}
-          changedPaths={tabChangeMarkers.changedPaths}
-          onRenameTab={setRenamingTab}
-        />
-        {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}
-        {openRepos.openRepos.length > 0 && <CommandsButton />}
-        {themeToggle}
-        <button
-          type="button"
-          className={styles.iconButton}
-          aria-label="Preferences"
-          title="Preferences"
-          onClick={openPreferences}
-        >
-          <Settings size={16} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className={styles.iconButton}
-          aria-label="Release notes"
-          title="What’s new"
-          onClick={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
-        >
-          <Sparkles size={16} aria-hidden="true" />
-        </button>
-        <HelpMenuButton
-          className={styles.iconButton}
-          shortcuts={openRepos.openRepos.length > 0}
-          onOpenUserGuide={openUserGuide}
-          onShowReleaseNotes={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
-        />
-      </header>
-      {openRepos.restoreError !== null && (
-        <div className={styles.errorLayer}>
-          <InlineError message={openRepos.restoreError} copyDetails onDismiss={openRepos.dismissRestoreError} />
-        </div>
-      )}
-      {tabToolError !== null && (
-        <div className={styles.errorLayer}>
-          <InlineError message={tabToolError} copyDetails onDismiss={() => setTabToolError(null)} />
-        </div>
-      )}
-      {preferencesOpen && (
-        <PreferencesDialog onClose={() => setPreferencesOpen(false)}>
-          <ExternalToolsSection client={client} repoPath={openRepos.activePath} toolHost={toolHost} />
-          <CommitMessageSection />
-          <FetchSection repoPath={openRepos.activePath} />
-          <DiffSection />
-          <AppearanceSection
-            theme={themeControls ? { preference: themePreference, onChange: setThemePreference } : undefined}
+    <OpenPreferencesContext.Provider value={openPreferences}>
+      <main>
+        {dropHint}
+        <UpdateCheckContext.Provider value={updateCheckRegistry}>{updateBanner}</UpdateCheckContext.Provider>
+        <header className={styles.headerRow}>
+          <h1>Browsitory</h1>
+          <RepoTabs
+            openRepos={openRepos.openRepos}
+            activePath={openRepos.activePath}
+            busyPaths={busyPaths}
+            workspaceNames={workspaceNames}
+            onSwitchTo={openRepos.switchTo}
+            onClose={openRepos.closeRepo}
+            onCloseGroup={(paths) => paths.forEach((path) => openRepos.closeRepo(path))}
+            onAddTab={() => setPickingRepo(true)}
+            tabMenuItems={tabMenuItems}
+            onTabMenuOpen={loadRootFiles}
+            changedPaths={tabChangeMarkers.changedPaths}
+            onRenameTab={setRenamingTab}
           />
-          {updaterAvailable && <UpdatesSection onCheckNow={runUpdateCheck} />}
-        </PreferencesDialog>
-      )}
-      {(transportError !== null || openError !== null) && (
-        <div className={styles.errorLayer}>
-          {transportError !== null && (
-            <InlineError
-              message={transportError}
-              hint="Browsitory lost its connection to the backend. Restart the app if this keeps happening."
-              copyDetails
-              onDismiss={() => setTransportError(null)}
+          {openRepos.openRepos.length === 0 && <div className={styles.headerSpacer} />}
+          {openRepos.openRepos.length > 0 && <CommandsButton />}
+          {themeToggle}
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Preferences"
+            title="Preferences"
+            onClick={openLastPreferences}
+          >
+            <Settings size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Release notes"
+            title="What’s new"
+            onClick={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
+          >
+            <Sparkles size={16} aria-hidden="true" />
+          </button>
+          <HelpMenuButton
+            className={styles.iconButton}
+            shortcuts={openRepos.openRepos.length > 0}
+            onOpenUserGuide={openUserGuide}
+            onShowReleaseNotes={() => setReleaseNotesView({ mode: "all", entries: allReleaseNotes })}
+          />
+        </header>
+        {openRepos.restoreError !== null && (
+          <div className={styles.errorLayer}>
+            <InlineError message={openRepos.restoreError} copyDetails onDismiss={openRepos.dismissRestoreError} />
+          </div>
+        )}
+        {tabToolError !== null && (
+          <div className={styles.errorLayer}>
+            <InlineError message={tabToolError} copyDetails onDismiss={() => setTabToolError(null)} />
+          </div>
+        )}
+        {preferences !== null && (
+          <PreferencesDialog
+            onClose={() => setPreferences(null)}
+            initialGroup={preferences.group}
+            groups={[
+              {
+                id: "appearance",
+                label: "Appearance",
+                content: (
+                  <AppearanceSection
+                    theme={themeControls ? { preference: themePreference, onChange: setThemePreference } : undefined}
+                  />
+                ),
+              },
+              { id: "diff", label: "Diff", content: <DiffSection /> },
+              { id: "commit-message", label: "Commit message", content: <CommitMessageSection /> },
+              { id: "fetch", label: "Fetch", content: <FetchSection repoPath={openRepos.activePath} /> },
+              {
+                id: "external-tools",
+                label: "External tools",
+                content: <ExternalToolsSection client={client} repoPath={openRepos.activePath} toolHost={toolHost} />,
+              },
+              ...(updaterAvailable
+                ? [{ id: "updates" as const, label: "Updates", content: <UpdatesSection onCheckNow={runUpdateCheck} /> }]
+                : []),
+            ]}
+          />
+        )}
+        {(transportError !== null || openError !== null) && (
+          <div className={styles.errorLayer}>
+            {transportError !== null && (
+              <InlineError
+                message={transportError}
+                hint="Browsitory lost its connection to the backend. Restart the app if this keeps happening."
+                copyDetails
+                onDismiss={() => setTransportError(null)}
+              />
+            )}
+            {openError !== null && (
+              <InlineError
+                message={openError.message}
+                hint={openError.path !== "" ? "Check that the folder exists and is a Git repository." : undefined}
+                onRetry={openError.path !== "" ? () => void openRepoTab(openError.path) : undefined}
+                copyDetails
+                onDismiss={() => setOpenError(null)}
+              />
+            )}
+          </div>
+        )}
+        {releaseNotesView !== null && (
+          <ReleaseNotesModal
+            entries={releaseNotesView.entries}
+            onClose={closeReleaseNotes}
+            // Close the dialog first: a failure shows in the app-level banner, which the overlay
+            // would cover.
+            onOpenUserGuide={() => {
+              closeReleaseNotes();
+              openUserGuide();
+            }}
+            onOpenThirdPartyLicences={
+              openLicences === undefined
+                ? undefined
+                : () => {
+                    closeReleaseNotes();
+                    openLicences();
+                  }
+            }
+          />
+        )}
+        {licencesOpen && loadThirdPartyNotices !== undefined && (
+          <ThirdPartyLicencesDialog load={loadThirdPartyNotices} onClose={() => setLicencesOpen(false)} />
+        )}
+        {renamingTab !== null && (
+          <RenameTabDialog
+            key={renamingTab}
+            path={renamingTab}
+            alias={openRepos.aliases.get(renamingTab) ?? null}
+            onRename={(alias) => openRepos.renameRepo(renamingTab, alias).then(() => setRenamingTab(null))}
+            onCancel={() => setRenamingTab(null)}
+          />
+        )}
+        {pickingRepo && (
+          <Overlay onClose={() => setPickingRepo(false)} ariaLabel="Open repository">
+            <RepoPicker
+              client={client}
+              onOpenRepo={(path) => {
+                void openRepoTab(path);
+                setPickingRepo(false);
+              }}
+              onOpenWorkspace={(workspace) => {
+                void openRepos.openWorkspace(workspace);
+                setPickingRepo(false);
+              }}
+              workspaces={workspaces.workspaces}
+              aliases={openRepos.aliases}
+              workspacesLoading={workspaces.loading}
+              workspacesError={workspaces.error}
+              onDismissWorkspacesError={workspaces.dismissError}
+              onCreateWorkspace={workspaces.createWorkspace}
+              onEditWorkspace={workspaces.editWorkspace}
+              onDeleteWorkspace={workspaces.deleteWorkspace}
+              onCloneRepository={appCommands?.onCloneRepository}
+              onNewRepository={appCommands?.onNewRepository}
             />
-          )}
-          {openError !== null && (
-            <InlineError
-              message={openError.message}
-              hint={openError.path !== "" ? "Check that the folder exists and is a Git repository." : undefined}
-              onRetry={openError.path !== "" ? () => void openRepoTab(openError.path) : undefined}
-              copyDetails
-              onDismiss={() => setOpenError(null)}
-            />
-          )}
-        </div>
-      )}
-      {releaseNotesView !== null && (
-        <ReleaseNotesModal
-          entries={releaseNotesView.entries}
-          onClose={closeReleaseNotes}
-          // Close the dialog first: a failure shows in the app-level banner, which the overlay
-          // would cover.
-          onOpenUserGuide={() => {
-            closeReleaseNotes();
-            openUserGuide();
-          }}
-          onOpenThirdPartyLicences={
-            openLicences === undefined
-              ? undefined
-              : () => {
-                  closeReleaseNotes();
-                  openLicences();
-                }
-          }
-        />
-      )}
-      {licencesOpen && loadThirdPartyNotices !== undefined && (
-        <ThirdPartyLicencesDialog load={loadThirdPartyNotices} onClose={() => setLicencesOpen(false)} />
-      )}
-      {renamingTab !== null && (
-        <RenameTabDialog
-          key={renamingTab}
-          path={renamingTab}
-          alias={openRepos.aliases.get(renamingTab) ?? null}
-          onRename={(alias) => openRepos.renameRepo(renamingTab, alias).then(() => setRenamingTab(null))}
-          onCancel={() => setRenamingTab(null)}
-        />
-      )}
-      {pickingRepo && (
-        <Overlay onClose={() => setPickingRepo(false)} ariaLabel="Open repository">
+          </Overlay>
+        )}
+        {cloning && (
+          // CloneDialog is its own modal dialog (FormDialog), which ignores Escape while a clone
+          // runs; no Overlay around it, or there are two nested dialogs (#761).
+          <CloneDialog
+            client={client}
+            onCancel={() => setCloning(false)}
+            onCloned={(outcome, name) => {
+              setCloning(false);
+              void openRepoTab(outcome.path);
+              const incomplete = outcome.submoduleFailures.length > 0 || outcome.credentialSaveFailed;
+              pushAppToast(cloneToastMessage(outcome, name), { tone: incomplete ? "warning" : "success" });
+            }}
+          />
+        )}
+        {existingRepoPrompt !== null && (
+          <ConfirmDialog
+            ariaLabel="Repository already exists"
+            message={<p>{existingRepoPrompt} is already a repository. Open it?</p>}
+            confirmLabel="Open"
+            onConfirm={() => {
+              void openRepoTab(existingRepoPrompt);
+              setExistingRepoPrompt(null);
+            }}
+            onCancel={() => setExistingRepoPrompt(null)}
+          />
+        )}
+        <ToastRegion toasts={appToasts.toasts} onDismiss={appToasts.dismiss} onPauseChange={appToasts.setPaused} />
+        {openRepos.openRepos.length === 0 ? (
           <RepoPicker
             client={client}
-            onOpenRepo={(path) => {
-              void openRepoTab(path);
-              setPickingRepo(false);
-            }}
-            onOpenWorkspace={(workspace) => {
-              void openRepos.openWorkspace(workspace);
-              setPickingRepo(false);
-            }}
+            welcome={welcome ? { onDismiss: dismissWelcome, onOpenUserGuide: openUserGuide } : undefined}
+            onOpenRepo={openRepoTab}
+            onOpenWorkspace={(workspace) => void openRepos.openWorkspace(workspace)}
             workspaces={workspaces.workspaces}
             aliases={openRepos.aliases}
             workspacesLoading={workspaces.loading}
@@ -541,78 +608,33 @@ function AppContent({
             onCloneRepository={appCommands?.onCloneRepository}
             onNewRepository={appCommands?.onNewRepository}
           />
-        </Overlay>
-      )}
-      {cloning && (
-        // CloneDialog is its own modal dialog (FormDialog), which ignores Escape while a clone
-        // runs; no Overlay around it, or there are two nested dialogs (#761).
-        <CloneDialog
-          client={client}
-          onCancel={() => setCloning(false)}
-          onCloned={(outcome, name) => {
-            setCloning(false);
-            void openRepoTab(outcome.path);
-            const incomplete = outcome.submoduleFailures.length > 0 || outcome.credentialSaveFailed;
-            pushAppToast(cloneToastMessage(outcome, name), { tone: incomplete ? "warning" : "success" });
-          }}
-        />
-      )}
-      {existingRepoPrompt !== null && (
-        <ConfirmDialog
-          ariaLabel="Repository already exists"
-          message={<p>{existingRepoPrompt} is already a repository. Open it?</p>}
-          confirmLabel="Open"
-          onConfirm={() => {
-            void openRepoTab(existingRepoPrompt);
-            setExistingRepoPrompt(null);
-          }}
-          onCancel={() => setExistingRepoPrompt(null)}
-        />
-      )}
-      <ToastRegion toasts={appToasts.toasts} onDismiss={appToasts.dismiss} onPauseChange={appToasts.setPaused} />
-      {openRepos.openRepos.length === 0 ? (
-        <RepoPicker
-          client={client}
-          welcome={welcome ? { onDismiss: dismissWelcome, onOpenUserGuide: openUserGuide } : undefined}
-          onOpenRepo={openRepoTab}
-          onOpenWorkspace={(workspace) => void openRepos.openWorkspace(workspace)}
-          workspaces={workspaces.workspaces}
-          aliases={openRepos.aliases}
-          workspacesLoading={workspaces.loading}
-          workspacesError={workspaces.error}
-          onDismissWorkspacesError={workspaces.dismissError}
-          onCreateWorkspace={workspaces.createWorkspace}
-          onEditWorkspace={workspaces.editWorkspace}
-          onDeleteWorkspace={workspaces.deleteWorkspace}
-          onCloneRepository={appCommands?.onCloneRepository}
-          onNewRepository={appCommands?.onNewRepository}
-        />
-      ) : (
-        // The last few shown tabs stay mounted (#642, `useMountedTabs`): an inactive one is hidden
-        // with `display: none` and keeps its view, so switching back shows it as it was. Older
-        // tabs unmount (PERF-001: N tabs' worth of DOM and IPC for one visible view), and a
-        // remount reads the repository again.
-        openRepos.openRepos
-          .filter((repo) => mountedTabs.includes(repo.path))
-          .map((repo) => (
-            <RepoWorkspace
-              key={repo.path}
-              repoPath={repo.path}
-              active={repo.path === openRepos.activePath}
-              client={client}
-              onOpenRepoTab={openRepoTab}
-              onBusyChange={onBusyChange}
-              openRepos={openRepos.openRepos}
-              onSwitchRepoTab={openRepos.switchTo}
-              onCloseRepoTab={openRepos.closeRepo}
-              getCommitDraft={getCommitDraft}
-              onCommitDraftChange={onCommitDraftChange}
-              appCommands={appCommands}
-              pushToast={pushAppToast}
-              onStatusChange={tabChangeMarkers.onLiveStatus}
-            />
-          ))
-      )}
-    </main>
+        ) : (
+          // The last few shown tabs stay mounted (#642, `useMountedTabs`): an inactive one is hidden
+          // with `display: none` and keeps its view, so switching back shows it as it was. Older
+          // tabs unmount (PERF-001: N tabs' worth of DOM and IPC for one visible view), and a
+          // remount reads the repository again.
+          openRepos.openRepos
+            .filter((repo) => mountedTabs.includes(repo.path))
+            .map((repo) => (
+              <RepoWorkspace
+                key={repo.path}
+                repoPath={repo.path}
+                active={repo.path === openRepos.activePath}
+                client={client}
+                onOpenRepoTab={openRepoTab}
+                onBusyChange={onBusyChange}
+                openRepos={openRepos.openRepos}
+                onSwitchRepoTab={openRepos.switchTo}
+                onCloseRepoTab={openRepos.closeRepo}
+                getCommitDraft={getCommitDraft}
+                onCommitDraftChange={onCommitDraftChange}
+                appCommands={appCommands}
+                pushToast={pushAppToast}
+                onStatusChange={tabChangeMarkers.onLiveStatus}
+              />
+            ))
+        )}
+      </main>
+    </OpenPreferencesContext.Provider>
   );
 }

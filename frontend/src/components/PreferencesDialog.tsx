@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react";
 import {
   CODE_FONT_SIZES,
   COMMIT_MESSAGE_COLUMNS,
@@ -28,22 +28,178 @@ import {
   subscribeAutoFetchOverride,
   writeAutoFetchOverride,
 } from "../lib/autoFetch";
+import { readPreferencesGroup, writePreferencesGroup, type PreferencesGroupId } from "../lib/preferencesGroup";
 import { repoNameOf } from "../lib/repoName";
 import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
 import styles from "./PreferencesDialog.module.css";
 import { Field } from "./primitives/Field";
 import { FormDialog } from "./primitives/FormDialog";
 
+export type { PreferencesGroupId } from "../lib/preferencesGroup";
+
+/** One entry of the category list and the settings it shows (`content`, usually one section). */
+export interface PreferencesGroup {
+  id: PreferencesGroupId;
+  label: string;
+  content: ReactNode;
+}
+
+/** The groups that have a setting labelled with `query` (or are named so); `null` without one. */
+function matchingGroups(
+  query: string,
+  groups: PreferencesGroup[],
+  panels: Map<PreferencesGroupId, HTMLElement>,
+): Set<PreferencesGroupId> | null {
+  const needle = query.trim().toLowerCase();
+  if (needle === "") return null;
+  const matches = new Set<PreferencesGroupId>();
+  for (const group of groups) {
+    // Every field's name is a <label> (`Field`, and the checkboxes), so labels are what we search.
+    const labels = [group.label, ...Array.from(panels.get(group.id)?.querySelectorAll("label") ?? [], (label) => label.textContent ?? "")];
+    if (labels.some((label) => label.toLowerCase().includes(needle))) matches.add(group.id);
+  }
+  return matches;
+}
+
+function matchText(query: string, matches: Set<PreferencesGroupId> | null): string {
+  if (matches === null) return "";
+  if (matches.size === 0) return `No settings match “${query.trim()}”`;
+  return matches.size === 1 ? "1 group matches" : `${matches.size} groups match`;
+}
+
 /**
- * The Preferences dialog shell. It holds no state of its own: each child is an independent
- * `PreferencesSection` that loads and saves its own settings, so a new section (4g's
- * "Commit message") is just another child.
+ * The Preferences dialog shell (#784): a filter and the category list on the left, the selected
+ * group's settings on the right (the list above them in a narrow window). It holds no settings of
+ * its own: each group's content is an independent `PreferencesSection` that loads and saves its
+ * own. Every group stays mounted, hidden while another one is shown, so a draft survives a switch
+ * and the filter can search every group's labels. It opens on `initialGroup`, else on the group
+ * shown last on this machine, else on the first.
  */
-export function PreferencesDialog({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+export function PreferencesDialog({
+  onClose,
+  groups,
+  initialGroup,
+}: {
+  onClose: () => void;
+  groups: PreferencesGroup[];
+  initialGroup?: PreferencesGroupId;
+}) {
+  const baseId = useId();
+  const offered = (id: PreferencesGroupId | null | undefined): id is PreferencesGroupId =>
+    id !== null && id !== undefined && groups.some((group) => group.id === id);
+  const [selected, setSelected] = useState<PreferencesGroupId | undefined>(() => {
+    if (offered(initialGroup)) return initialGroup;
+    const remembered = readPreferencesGroup();
+    return offered(remembered) ? remembered : groups[0]?.id;
+  });
+  const [query, setQuery] = useState("");
+  const [matches, setMatches] = useState<Set<PreferencesGroupId> | null>(null);
+  const panels = useRef(new Map<PreferencesGroupId, HTMLElement>());
+  const tablistRef = useRef<HTMLDivElement>(null);
+
+  const select = (id: PreferencesGroupId) => {
+    setSelected(id);
+    writePreferencesGroup(id);
+  };
+  const listed = matches === null ? groups : groups.filter((group) => matches.has(group.id));
+  const shown = listed.some((group) => group.id === selected) ? selected : undefined;
+
+  const filter = (text: string) => {
+    setQuery(text);
+    const next = matchingGroups(text, groups, panels.current);
+    setMatches(next);
+    // The shown group stays while it matches; otherwise the first match takes its place.
+    if (next !== null && selected !== undefined && !next.has(selected)) {
+      const first = groups.find((group) => next.has(group.id));
+      if (first !== undefined) select(first.id);
+    }
+  };
+
+  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const keys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const step = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1;
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? listed.length - 1
+          : (index + step + listed.length) % listed.length;
+    select(listed[next].id);
+    tablistRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+  };
+
   return (
-    <FormDialog ariaLabel="Preferences" onCancel={onClose}>
+    <FormDialog ariaLabel="Preferences" onCancel={onClose} className={styles.dialog}>
       <h2 className={styles.title}>Preferences</h2>
-      <div className={styles.sections}>{children}</div>
+      <div className={styles.body}>
+        <div className={styles.nav}>
+          <input
+            type="search"
+            className={styles.filter}
+            aria-label="Filter settings"
+            placeholder="Filter settings"
+            spellCheck={false}
+            data-autofocus
+            value={query}
+            onChange={(event) => filter(event.target.value)}
+            onKeyDown={(event) => {
+              // Escape clears a filter first; the next one closes the dialog.
+              if (event.key === "Escape" && query !== "") {
+                event.preventDefault();
+                event.stopPropagation();
+                filter("");
+              }
+            }}
+          />
+          <p role="status" className={styles.matchCount}>
+            {matchText(query, matches)}
+          </p>
+          <div
+            ref={tablistRef}
+            role="tablist"
+            aria-label="Preference groups"
+            aria-orientation="vertical"
+            className={styles.tablist}
+          >
+            {listed.map((group, index) => (
+              <button
+                key={group.id}
+                type="button"
+                role="tab"
+                id={`${baseId}-tab-${group.id}`}
+                aria-selected={group.id === shown}
+                aria-controls={`${baseId}-panel-${group.id}`}
+                tabIndex={group.id === (shown ?? listed[0]?.id) ? 0 : -1}
+                className={styles.tab}
+                onClick={() => select(group.id)}
+                onKeyDown={(event) => onTabKeyDown(event, index)}
+              >
+                {group.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className={styles.panes}>
+          {groups.map((group) => (
+            <div
+              key={group.id}
+              ref={(element) => {
+                if (element === null) panels.current.delete(group.id);
+                else panels.current.set(group.id, element);
+              }}
+              role="tabpanel"
+              id={`${baseId}-panel-${group.id}`}
+              aria-labelledby={`${baseId}-tab-${group.id}`}
+              hidden={group.id !== shown}
+              className={styles.panel}
+            >
+              {group.content}
+            </div>
+          ))}
+        </div>
+      </div>
       <div className={styles.footer}>
         <button type="button" onClick={onClose}>
           Close
