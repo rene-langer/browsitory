@@ -1,7 +1,7 @@
 import * as path from "node:path";
 
 /**
- * What the extension host asks the webview to do (#677, #678, #679), sent as a `hostRequest`
+ * What the extension host asks the webview to do (#677, #678, #679, #759), sent as a `hostRequest`
  * notification. The frontend's `RepoClient.HostRequest` is the same shape; the extension never
  * imports from `frontend/`, so it is duplicated here (as `toolUris.ts` does with `DiffSource`).
  */
@@ -13,6 +13,8 @@ export type HostRequest =
    * or of its lines `startLine`..`endLine` as they are in HEAD.
    */
   | { kind: "showHistory"; repoPath: string; path: string; lines?: { startLine: number; endLine: number } }
+  /** Opens `repoPath`'s tab and selects commit `commitId` in the graph, as Go to does (#759). */
+  | { kind: "showCommit"; repoPath: string; commitId: string }
   /** A global shortcut VSCode would otherwise take, pressed in the Browsitory panel. */
   | { kind: "shortcut"; id: string; index?: number };
 
@@ -28,6 +30,46 @@ export async function findRepositoryRoot(target: string, exists: PathExists): Pr
     if (parent === current) return undefined;
     current = parent;
   }
+}
+
+/** Lists the names of the folders directly in `folder`. */
+export type ListSubfolders = (folder: string) => Promise<string[]>;
+
+/**
+ * The repositories "Browsitory: Open" offers for the workspace (#759): each folder's repository,
+ * then the repositories directly in its subfolders (one level down, so a folder of checkouts
+ * and a repository nested in another are found without walking the whole tree). Each once.
+ */
+export async function repositoryCandidates(
+  folders: readonly string[],
+  listSubfolders: ListSubfolders,
+  exists: PathExists,
+): Promise<string[]> {
+  const found: string[] = [];
+  const add = (root: string) => {
+    if (!found.includes(root)) found.push(root);
+  };
+  for (const folder of folders) {
+    const root = await findRepositoryRoot(folder, exists);
+    if (root !== undefined) add(root);
+    const names = (await listSubfolders(folder)).filter((name) => !name.startsWith(".")).sort();
+    for (const name of names) {
+      const nested = path.join(folder, name);
+      if (await exists(path.join(nested, ".git"))) add(nested);
+    }
+  }
+  return found;
+}
+
+/**
+ * The commit of an item VSCode's Timeline view passes (#759): the Git timeline's commits carry
+ * their id as `ref` (and `id`); its uncommitted entries ("~", "") and other sources' items don't.
+ */
+export function timelineCommitId(item: unknown): string | undefined {
+  if (typeof item !== "object" || item === null) return undefined;
+  const { ref, id } = item as { ref?: unknown; id?: unknown };
+  const candidate = typeof ref === "string" ? ref : id;
+  return typeof candidate === "string" && /^[0-9a-f]{7,64}$/i.test(candidate) ? candidate : undefined;
 }
 
 /** `file` relative to `root`, written with "/" as the repository stores it. */

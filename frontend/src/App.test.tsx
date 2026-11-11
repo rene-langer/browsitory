@@ -80,6 +80,61 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: /^b/, selected: true })).toBeInTheDocument();
   });
 
+  it("selects a commit in the graph when the VSCode extension asks, loading history for one not loaded yet (#759)", async () => {
+    let emit: (request: HostRequest) => void = () => {};
+    const subscribeHostRequests = vi.fn((listener: (request: HostRequest) => void) => {
+      emit = listener;
+      return () => {};
+    });
+    const graphCommit = (id: string, summary: string, parentIds: string[]) => ({
+      id,
+      shortId: id.slice(0, 7),
+      summary,
+      authorName: "A",
+      authorEmail: "a@example.com",
+      timestamp: 0,
+      parentIds,
+      branchRefs: [],
+      remoteBranchRefs: [],
+    });
+    const locateCommit = vi.fn(async () => null);
+    const client = fakeClient({
+      listOpenRepos: async () => ({ entries: [{ path: "/repos/a", workspaceId: null }], activePath: "/repos/a" }),
+      openRepo: async () => {},
+      persistOpenRepos: async () => {},
+      getCommitGraph: async () => graphPage([graphCommit("head111", "Tip of main", ["base222"]), graphCommit("base222", "Base", [])]),
+      getHeadInfo: async () => ({
+        headId: "head111",
+        detachedAt: null,
+        headPushed: false,
+        operation: null,
+        operationLeftover: false,
+        squashMessage: null,
+        commitHooks: [],
+        sequence: null,
+        rebase: null,
+        bisect: null, terminalSequence: null, terminalRebase: null,
+      }),
+      listBranches: async () => [],
+      listStashes: async () => [],
+      getStatus: async () => [],
+      locateCommit,
+      subscribeHostRequests,
+    });
+    render(<App client={client} />);
+    await waitFor(() => expect(subscribeHostRequests).toHaveBeenCalledOnce());
+
+    act(() => emit({ kind: "showCommit", repoPath: "/repos/a", commitId: "base222" }));
+
+    // The list is mounted again once the history is read.
+    const history = () => screen.getByRole("listbox", { name: "Commit history" });
+    await waitFor(() => expect(within(history()).getByRole("option", { name: /Base/, selected: true })).toBeInTheDocument());
+
+    // Not among the loaded commits: Go to's path finds it, loading more history as needed.
+    act(() => emit({ kind: "showCommit", repoPath: "/repos/a", commitId: "old3333" }));
+    await waitFor(() => expect(locateCommit).toHaveBeenCalledWith("/repos/a", "old3333", expect.anything()));
+  });
+
   it("leaves updater UI absent unless the transport bootstrap injects it", async () => {
     const listOpenRepos = vi.fn().mockResolvedValue({ entries: [], activePath: null });
     const client = fakeClient({ listOpenRepos });

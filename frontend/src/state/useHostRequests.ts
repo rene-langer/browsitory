@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 import type { HostRequest, RepoClient } from "../ipc/RepoClient";
-import { requestHistory, requestWorkspace } from "../lib/workspaceRequests";
+import { requestCommit, requestHistory, requestWorkspace } from "../lib/workspaceRequests";
 
 /**
- * Carries out the VSCode extension host's requests (#677, #678, #679): opening repositories as
- * tabs, a file's or lines' history in a repository's tab, and global shortcuts VSCode took first.
+ * Carries out the VSCode extension host's requests (#677, #678, #679, #759): opening repositories
+ * as tabs, a file's or lines' history or a commit in a repository's tab, and global shortcuts
+ * VSCode took first.
  * Subscribes once `ready` (the restored tabs are open), so a request's tab isn't replaced by the
  * restore; the host holds its requests until then.
  */
@@ -27,6 +28,10 @@ export function useHostRequests(client: RepoClient, ready: boolean, openRepoTab:
           return;
         case "showHistory":
           requestHistory({ repoPath: request.repoPath, path: request.path, lines: request.lines });
+          await open(request.repoPath);
+          return;
+        case "showCommit":
+          requestCommit({ repoPath: request.repoPath, commitId: request.commitId });
           await open(request.repoPath);
           return;
         case "shortcut":

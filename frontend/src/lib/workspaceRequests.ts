@@ -62,3 +62,36 @@ export function onHistoryRequest(listener: () => void): () => void {
     historyListeners.delete(listener);
   };
 }
+
+/**
+ * A commit the VSCode extension asked to select (#759), from the Timeline view, for the
+ * workspace of `repoPath`. Kept until that workspace takes it, as a history request is.
+ */
+export interface CommitRequest {
+  repoPath: string;
+  commitId: string;
+}
+
+let pendingCommit: CommitRequest | null = null;
+const commitListeners = new Set<() => void>();
+
+export function requestCommit(request: CommitRequest): void {
+  pendingCommit = request;
+  for (const listener of [...commitListeners]) listener();
+}
+
+/** The pending commit request for `repoPath`, removed; `null` when there is none. */
+export function takeCommitRequest(repoPath: string): CommitRequest | null {
+  if (pendingCommit === null || pendingCommit.repoPath !== repoPath) return null;
+  const request = pendingCommit;
+  pendingCommit = null;
+  return request;
+}
+
+/** Calls `listener` whenever a commit is requested, until the returned function is called. */
+export function onCommitRequest(listener: () => void): () => void {
+  commitListeners.add(listener);
+  return () => {
+    commitListeners.delete(listener);
+  };
+}

@@ -78,8 +78,9 @@ attempt; a synchronous spawn failure moves to `failed`, rejects that request, an
 later user retry rather than scheduling background restarts. Panel closure and extension
 deactivation dispose the webview listener and bridge, kill a live child, and drain pending ids.
 
-**Host requests and notifications (#677, #678, #679).** The extension host asks the webview to
-open repositories, show a file's or lines' history, or run a global shortcut with an id-less
+**Host requests and notifications (#677, #678, #679, #759).** The extension host asks the
+webview to open repositories, show a file's or lines' history, select a commit (from the Timeline
+view, through `useGoTo` like Go to), or run a global shortcut with an id-less
 `hostRequest` notification (`extension/src/hostRequests.ts`; `RepoClient.subscribeHostRequests`
 on the frontend). It holds them until the webview sends `hostReady`, which `useHostRequests`
 causes once the restored tabs are open, so a request's tab isn't replaced by the restore. The

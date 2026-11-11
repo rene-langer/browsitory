@@ -1069,7 +1069,7 @@ export type RootFileName = (typeof ROOT_FILE_NAMES)[number];
 export type FileDropEvent = { kind: "over" } | { kind: "leave" } | { kind: "drop"; paths: string[] };
 
 /**
- * What the VSCode extension host asks the app to do (#677, #678, #679); `extension/src/
+ * What the VSCode extension host asks the app to do (#677, #678, #679, #759); `extension/src/
  * hostRequests.ts` holds the same type.
  */
 export type HostRequest =
@@ -1080,6 +1080,8 @@ export type HostRequest =
    * or of its lines `startLine`..`endLine` as they are in HEAD.
    */
   | { kind: "showHistory"; repoPath: string; path: string; lines?: { startLine: number; endLine: number } }
+  /** Opens `repoPath`'s tab and selects commit `commitId` in the graph, as Go to does (#759). */
+  | { kind: "showCommit"; repoPath: string; commitId: string }
   /** A global shortcut (`ShortcutId`) VSCode would otherwise take; `index` is Ctrl/Cmd+1…9's tab. */
   | { kind: "shortcut"; id: string; index?: number };
 
