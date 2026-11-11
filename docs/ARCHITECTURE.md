@@ -1354,6 +1354,14 @@ certificate.
   (`push_branch` and its `push_current_branch` wrapper, force push, tags,
   `delete_remote_branch`, `delete_remote_tag`) funnels through `push_refs`, so all of them run
   `pre-push`.
+  `patch::apply_patch_with(.., PatchApply::Commits, hooks)` (#747) runs `git am`'s hooks per
+  mail: `applypatch-msg <git dir>/COMMIT_EDITMSG` before the mail is applied (re-read after),
+  `pre-applypatch` once it is in the index (the index is re-read if it ran), then the commit;
+  `no_verify` skips both. A rejection is `PatchError::HookFailed { hook, output, subject }`
+  (`PatchApplyOutcome::HookFailed` on the wire) and takes the whole series back like a mail that
+  doesn't apply. `post-applypatch` runs once per commit only after the whole series landed (the
+  owner's choice for #747; `git am` runs it after each commit), result ignored. The worker
+  reports them under `HookSource::Patch` on an `apply-<n>` operation (`HookRunStrip`, Cancel).
   `post-checkout`/`post-merge` run in the `repo-service` worker after successful commands only,
   so undo restores, rebase and other git-core internals never trigger hooks. Each runs on its
   command's own operation, before the cancel id is released and before the reply
@@ -1367,7 +1375,7 @@ certificate.
   the pull's cancel check, before `Completed`; the toolbar's transfer progress (`RepoActivity`) labels `RunningHook` by
   operation (`Pull` → `post-merge`, else `pre-push`).
 - `HookEvent::{Started, Finished}` carry `source: HookSource` (`Commit` for commit, amend and
-  Continue; `Checkout`, `Merge`, `Pick`), sent as `source` in both transports' `hook-progress` /
+  Continue; `Checkout`, `Merge`, `Pick`, `Patch`), sent as `source` in both transports' `hook-progress` /
   `hookProgress` payloads (#185). The frontend keeps it in `state.hookRun`: a `Commit` hook shows
   in the commit box and sequence panel (`HookStatus`), any other in the non-modal `HookRunStrip`
   ("Hook status", role `status`) under `OperationStatusStrip`, with Cancel (D8-A). `RepoClient`

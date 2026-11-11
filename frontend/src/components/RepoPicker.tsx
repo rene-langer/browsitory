@@ -1,5 +1,5 @@
-import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Pin, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import type { RepoClient, Workspace } from "../ipc/RepoClient";
 import { shortcutLabel } from "../lib/keybindings";
 import { repoNameOf } from "../lib/repoName";
@@ -47,29 +47,50 @@ export function RepoPicker({
   const [recentRepos, setRecentRepos] = useState<string[]>([]);
   // Recent repositories whose folder is gone (#690): marked, still listed, and removable.
   const [missingRepos, setMissingRepos] = useState<ReadonlySet<string>>(new Set());
+  // Pinned repositories (#766): listed first by `listRecentRepos`, marked here.
+  const [pinnedRepos, setPinnedRepos] = useState<ReadonlySet<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [editingWorkspace, setEditingWorkspace] = useState<Workspace | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<Workspace | null>(null);
 
+  // Only a mark: if the pinned list can't be read, every row just shows as unpinned.
+  const loadPinned = useCallback(
+    () =>
+      client.listPinnedRepos().then(
+        (paths) => setPinnedRepos(new Set(paths)),
+        () => setPinnedRepos(new Set()),
+      ),
+    [client],
+  );
+
   useEffect(() => {
     client
       .listRecentRepos()
       .then(setRecentRepos)
       .catch((err: unknown) => setError(String(err)));
+    void loadPinned();
     // Only a mark: if the check fails, every folder just looks present.
     client.listMissingRecentRepos().then(
       (paths) => setMissingRepos(new Set(paths)),
       () => {},
     );
-  }, [client]);
+  }, [client, loadPinned]);
 
   const removeRecentRepo = (path: string) => {
     client.removeRecentRepo(path).then(
       () => setRecentRepos((prev) => prev.filter((recent) => recent !== path)),
       (err: unknown) => setError(String(err)),
     );
+  };
+
+  // Pinning reorders the list (pinned first, an unpinned one back on top), so both lists are read
+  // again rather than reordered here.
+  const setPinned = (path: string, pinned: boolean) => {
+    (pinned ? client.pinRecentRepo(path) : client.unpinRecentRepo(path))
+      .then(() => Promise.all([client.listRecentRepos().then(setRecentRepos), loadPinned()]))
+      .catch((err: unknown) => setError(String(err)));
   };
 
   const nameOf = (path: string) => aliases?.get(path) ?? repoNameOf(path);
@@ -186,6 +207,7 @@ export function RepoPicker({
               {shownRepos.map((path) => {
                 const name = nameOf(path);
                 const missing = missingRepos.has(path);
+                const pinned = pinnedRepos.has(path);
                 return (
                   <ListRow key={path} className={styles.recentRow}>
                     <button
@@ -206,7 +228,17 @@ export function RepoPicker({
                     </button>
                     <button
                       type="button"
-                      className={styles.removeButton}
+                      className={pinned ? `${styles.rowButton} ${styles.pinned}` : styles.rowButton}
+                      aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`}
+                      aria-pressed={pinned}
+                      title={pinned ? "Unpin: list it with the recent repositories again" : "Pin to the top of the list"}
+                      onClick={() => setPinned(path, !pinned)}
+                    >
+                      <Pin size={14} aria-hidden="true" fill={pinned ? "currentColor" : "none"} />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.rowButton}
                       aria-label={`Remove ${name} from recent repositories`}
                       title="Remove from recent repositories"
                       onClick={() => removeRecentRepo(path)}

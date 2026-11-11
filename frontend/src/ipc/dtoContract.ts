@@ -99,6 +99,7 @@ export type DtoContract = [
   Expect<Equal<Hand.PatchContent, Wire.PatchContent>>,
   Expect<Equal<Hand.PatchApply, Wire.PatchApply>>,
   Expect<Equal<Hand.PatchPreview, Wire.PatchPreview>>,
+  Expect<Equal<Hand.PatchApplyOutcome, Wire.PatchApplyOutcome>>,
   Expect<Equal<Hand.PatchPreviewPart, Wire.PatchPreviewPart>>,
   Expect<Equal<Hand.PatchMail, Wire.PatchMail>>,
   Expect<Equal<Hand.PatchPreviewFile, Wire.PatchPreviewFile>>,
