@@ -212,7 +212,9 @@ moved or deleted ones lose them, and a changed `.gitignore` or `info/exclude` wa
 More than 20 000 work tree folders (`MAX_FOLDERS`) is not watched. macOS (FSEvents) and Windows
 (ReadDirectoryChangesW) use one recursive watch per root. When a watcher can't start (`watchRepo`
 answers `false`) or stops (the watch limit was reached: `Stopped`), the reason goes to stderr (the
-desktop log, the extension's output channel) and the frontend polls every 3 s again.
+desktop log, the extension's output channel) and the frontend polls every 3 s again. A watcher is
+marked stopped (and its watches freed) before `Stopped` is sent, so a `watchRepo` that follows the
+event starts a new one (#797).
 
 ### Who owns a dialog's open state
 
@@ -519,8 +521,10 @@ the rule and still has its own fields.
   `MERGE_MODE`, `MERGE_MSG`, `AUTO_MERGE`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`; missing files are
   fine, every file is tried, the first error is returned). libgit2's mixed and hard `git_reset`
   also end with `cleanup_state`, so `reset::reset_to` does those two itself (forced checkout for
-  hard, move HEAD with git's "reset: moving to <id>" reflog message, index from the target
-  tree, `clear_operation_files`); a soft reset still uses `git_reset`, which cleans nothing.
+  hard, index from the target tree, move HEAD with git's "reset: moving to <id>" reflog message,
+  `clear_operation_files`); a soft reset still uses `git_reset`, which cleans nothing. The index
+  is written before HEAD moves, as `git reset` does and libgit2 doesn't (#796), so HEAD never
+  names the target over the old index, and a failed index write leaves HEAD where it was.
 - `cleanup_state` does not remove `SQUASH_MSG` and neither does `clear_operation_files`;
   `merge::clear_squash_message` does, after a commit, an abort, a reset or an undo.
 - During a terminal `git rebase` or `git am` libgit2 reports `RebaseMerge`/`RebaseInteractive`/
