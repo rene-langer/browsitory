@@ -1,4 +1,4 @@
-import { withBlockedReason, type StashActions } from "./diffPaneShared";
+import type { StashActions } from "./diffPaneShared";
 import { describeError, type DescribedError } from "../lib/errorMessages";
 import { useEffect, useState } from "react";
 import type { RepoClient, StashEntry, StashFiles } from "../ipc/RepoClient";
@@ -6,6 +6,8 @@ import { useWorkspaceActions } from "../state/useWorkspaceActions";
 import { Toolbar } from "./primitives/Toolbar";
 import styles from "./DiffPane.module.css";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
+import { ReasonButton } from "./primitives/ReasonButton";
+import { disabledReason } from "../lib/actions/action";
 import { InlineError } from "./primitives/InlineError";
 import { ReadOnlyFileSection } from "./ReadOnlyFileSection";
 import { DiffOptionsToolbar } from "./DiffOptionsToolbar";
@@ -84,50 +86,33 @@ export function StashDiffPane({
           {"}"} · {stash.commitId.slice(0, 7)} · {stashDetails(stash)}
         </span>
         <Toolbar aria-label="Stash actions">
-          <button
-            type="button"
-            disabled={!rules.apply.enabled}
-            title={rules.apply.reason}
-            onClick={() => actions.onApply(stash.index, true)}
-          >
+          <ReasonButton reason={disabledReason(rules.apply)} onClick={() => actions.onApply(stash.index, true)}>
             {rules.apply.label}
-          </button>
+          </ReasonButton>
           {rules.applyUnstaged !== null && (
-            <button
-              type="button"
-              disabled={!rules.applyUnstaged.enabled}
-              title={rules.applyUnstaged.reason ?? "Apply, leaving its staged changes unstaged"}
+            <ReasonButton
+              reason={disabledReason(rules.applyUnstaged)}
+              title="Apply, leaving its staged changes unstaged"
               onClick={() => actions.onApply(stash.index, false)}
             >
               {rules.applyUnstaged.label}
-            </button>
+            </ReasonButton>
           )}
-          <button
-            type="button"
-            disabled={!rules.pop.enabled}
-            title={rules.pop.reason}
-            onClick={() => actions.onPop(stash.index, true)}
-          >
+          <ReasonButton reason={disabledReason(rules.pop)} onClick={() => actions.onPop(stash.index, true)}>
             {rules.pop.label}
-          </button>
+          </ReasonButton>
           {rules.popUnstaged !== null && (
-            <button
-              type="button"
-              disabled={!rules.popUnstaged.enabled}
-              title={rules.popUnstaged.reason ?? "Pop, leaving its staged changes unstaged"}
+            <ReasonButton
+              reason={disabledReason(rules.popUnstaged)}
+              title="Pop, leaving its staged changes unstaged"
               onClick={() => actions.onPop(stash.index, false)}
             >
               {rules.popUnstaged.label}
-            </button>
+            </ReasonButton>
           )}
-          <button
-            type="button"
-            disabled={!rules.drop.enabled}
-            title={rules.drop.reason}
-            onClick={() => setConfirmingDrop(true)}
-          >
+          <ReasonButton reason={disabledReason(rules.drop)} onClick={() => setConfirmingDrop(true)}>
             {rules.drop.label}
-          </button>
+          </ReasonButton>
         </Toolbar>
       </div>
       {error !== null ? (
@@ -190,10 +175,10 @@ export function StashDiffPane({
       {confirmingDrop && (
         <ConfirmDialog
           ariaLabel={`Drop stash ${stashTitle(stash)}`}
-          message={withBlockedReason(<p>Drop "{stashTitle(stash)}"? This cannot be undone.</p>, dropDisabledReason)}
+          message={<p>Drop "{stashTitle(stash)}"? This cannot be undone.</p>}
           confirmLabel="Drop stash"
-          confirmDisabled={dropDisabledReason !== null}
-          confirmTitle={dropDisabledReason ?? undefined}
+          // #521: the repository can become busy while the confirmation is open.
+          confirmReason={dropDisabledReason}
           onConfirm={() => {
             if (dropDisabledReason !== null) return;
             setConfirmingDrop(false);

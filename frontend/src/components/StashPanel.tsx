@@ -5,7 +5,6 @@ import type { StashEntry } from "../ipc/RepoClient";
 import type { SelectedRow } from "../state/useAppState";
 import { AccordionSection } from "./primitives/AccordionSection";
 import { ConfirmDialog } from "./primitives/ConfirmDialog";
-import formStyles from "./primitives/FormDialog.module.css";
 import { ContextMenu, type ContextMenuItem } from "./primitives/ContextMenu";
 import { ListRow } from "./primitives/ListRow";
 import styles from "./StashPanel.module.css";
@@ -91,7 +90,6 @@ export function StashPanel({
   }, [refocus]);
   const dropDisabledReason = blockers.drop;
   const dropDisabled = dropDisabledReason !== null;
-  const dropTitle = dropDisabledReason ?? undefined;
 
   // A new menu or Drop dialog ends watching an earlier drop (its stash may never go).
   const openMenu = (next: StashMenu) => {
@@ -200,16 +198,10 @@ export function StashPanel({
       {dropStash !== undefined && (
         <ConfirmDialog
           ariaLabel={`Drop stash ${stashTitle(dropStash)}`}
-          message={
-            <>
-              <p>Drop "{stashTitle(dropStash)}"? This cannot be undone.</p>
-              {/* #521: the repository can become busy while the confirmation is open. */}
-              {dropDisabledReason !== null && <p className={formStyles.blocked}>{dropDisabledReason}</p>}
-            </>
-          }
+          message={<p>Drop "{stashTitle(dropStash)}"? This cannot be undone.</p>}
           confirmLabel="Drop stash"
-          confirmDisabled={dropDisabled}
-          confirmTitle={dropTitle}
+          // #521: the repository can become busy while the confirmation is open.
+          confirmReason={dropDisabledReason}
           onConfirm={() => {
             if (dropDisabled) return;
             const { commitId } = dropStash;
