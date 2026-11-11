@@ -16,8 +16,14 @@
 //! Left out: objects, reflogs other than the stash's, `FETCH_HEAD`, `ORIG_HEAD` and the rest of
 //! the git folder's bookkeeping, which change without changing anything the app shows.
 //!
-//! The stamp is only ever compared with another stamp from the same process: it is a hash of
-//! the above, not a stable format.
+//! The stamp has two parts (#685): [`ChangeStamp::refs`] covers HEAD, the references, the stash
+//! list, the configuration, the operation files and the linked worktrees (what the history,
+//! branch, tag and remote reads show); [`ChangeStamp::work_tree`] covers the index and the work
+//! tree. A refresh whose `refs` part is unchanged can keep the history it has: staging, unstaging
+//! or editing a file changes only `work_tree`.
+//!
+//! The stamp is only ever compared with another stamp from the same process: each part is a hash
+//! of the above, not a stable format.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -48,8 +54,25 @@ const WORKDIR_CHANGES: git2::Status = git2::Status::WT_NEW
     .union(git2::Status::WT_RENAMED)
     .union(git2::Status::CONFLICTED);
 
+/// The two parts of a repository's stamp; see the module documentation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeStamp {
+    /// HEAD, references, stash list, configuration, operation files and linked worktrees.
+    pub refs: String,
+    /// The index entries and the work tree as `status` reads it.
+    pub work_tree: String,
+}
+
 /// The stamp of `repo` as it is now; see the module documentation for what it covers.
-pub fn change_stamp(repo: &git2::Repository) -> Result<String, git2::Error> {
+pub fn change_stamp(repo: &git2::Repository) -> Result<ChangeStamp, git2::Error> {
+    Ok(ChangeStamp {
+        refs: refs_stamp(repo)?,
+        work_tree: work_tree_stamp(repo)?,
+    })
+}
+
+/// [`ChangeStamp::refs`].
+fn refs_stamp(repo: &git2::Repository) -> Result<String, git2::Error> {
     let mut hasher = DefaultHasher::new();
     let git_dir = repo.path();
     let common_dir = repo.commondir();
@@ -90,7 +113,13 @@ pub fn change_stamp(repo: &git2::Repository) -> Result<String, git2::Error> {
         read_optional(&folder.join("HEAD")).hash(&mut hasher);
         folder.join("locked").exists().hash(&mut hasher);
     }
+    Ok(format!("{:016x}", hasher.finish()))
+}
 
+/// [`ChangeStamp::work_tree`].
+fn work_tree_stamp(repo: &git2::Repository) -> Result<String, git2::Error> {
+    let mut hasher = DefaultHasher::new();
+    let git_dir = repo.path();
     let index_path = git_dir.join("index");
     if index_path.exists() {
         let index = git2::Index::open(&index_path)?;

@@ -25,13 +25,11 @@ export interface DiffPanePatchActions {
   onSavePatch: (source: PatchSource, suggestedName: string) => void;
 }
 
-/** The stash view's actions; Apply/Pop use `restoreIndex`. */
+/** The stash view's actions; `restoreIndex` false is "Apply/Pop as unstaged" (#657). */
 export interface StashActions {
-  onApply: (index: number) => void;
-  onPop: (index: number) => void;
+  onApply: (index: number, restoreIndex: boolean) => void;
+  onPop: (index: number, restoreIndex: boolean) => void;
   onDrop: (index: number) => void;
-  restoreIndex: boolean;
-  onSetRestoreIndex: (on: boolean) => void;
   // Why Apply/Pop and Drop can't run now (`stashBlockers`, shared with the stash list and the
   // palette, #509). A paused merge, rebase or sequence step allows Drop (#521).
   blockers: StashBlockers;

@@ -11,15 +11,15 @@ use serde::Serialize;
 use super::clone::{CloneErrorDto, CloneOutcomeDto};
 use super::*;
 use repo_service::wire::{
-    hook_progress_dto, AppearanceSettingsDto, BlameLineDto, BranchInfoDto, ChangedFileDto,
-    CommitLocationDto, CommitMessageSettingsDto, CommitOutcomeDto, CommitSignatureDto,
-    CompareRangeDto, ConflictSegmentDto, DiffHunkDto, DiffSettingsDto, ExternalToolSettingsDto,
-    FetchSettingsDto, FileContentDto, FileHistoryEntryDto, FileSidesDto, ForgeRepositoryDto,
-    GitToolsDto, GraphCommitDto, HeadInfoDto, LineHistoryDto, MarkResolvedOutcomeDto,
-    MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto, PullOutcomeDto,
-    PullRequestDto, PullRequestListDto, PullStrategyDto, RebaseAbortDto, RebaseInfoDto,
-    RebasePlanCommitDto, RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto, SearchPageDto,
-    SequenceAbortDto, SequenceOutcomeDto, SequenceProgressDto, SignatureInputDto,
+    hook_progress_dto, AppearanceSettingsDto, BlameLineDto, BranchInfoDto, ChangeStampDto,
+    ChangedFileDto, CommitLocationDto, CommitMessageSettingsDto, CommitOutcomeDto,
+    CommitSignatureDto, CompareRangeDto, ConflictSegmentDto, DiffHunkDto, DiffSettingsDto,
+    ExternalToolSettingsDto, FetchSettingsDto, FileContentDto, FileHistoryEntryDto, FileSidesDto,
+    ForgeRepositoryDto, GitToolsDto, GraphCommitDto, HeadInfoDto, LineHistoryDto,
+    MarkResolvedOutcomeDto, MergeOptionsDto, MergeOutcomeDto, OpenRepoEntryDto, PickOutcomeDto,
+    PullOutcomeDto, PullRequestDto, PullRequestListDto, PullStrategyDto, RebaseAbortDto,
+    RebaseInfoDto, RebasePlanCommitDto, RebaseStepResultDto, ReflogEntryDto, RemoteInfoDto,
+    SearchPageDto, SequenceAbortDto, SequenceOutcomeDto, SequenceProgressDto, SignatureInputDto,
     StashApplyOutcomeDto, StashEntryDto, StashFilesDto, StashSwitchOutcomeDto, StatusEntryDto,
     SubmoduleInfoDto, TagInfoDto, TerminalRebaseDto, TerminalSequenceDto, TreeListingDto,
     UndoOutcomeDto, UndoStateDto, UpdateSettingsDto, UpstreamInfoDto, WorkspaceDto,
@@ -249,6 +249,11 @@ fn snapshots() -> Vec<(String, String)> {
         PickOutcomeDto::from,
     );
     s.add("UndoState", fixtures::undo_states(), UndoStateDto::from);
+    s.add(
+        "ChangeStamp",
+        fixtures::change_stamps(),
+        ChangeStampDto::from,
+    );
     s.add(
         "CommitSignature",
         fixtures::commit_signatures(),

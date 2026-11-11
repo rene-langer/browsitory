@@ -118,17 +118,15 @@ describe("useAppState merge and stash options", () => {
     expect(result.current.state.dialog).toBeNull();
   });
 
-  it("pop uses the restore-index setting and resets a popped selected stash", async () => {
-    const stash = { index: 0, message: "On main: wip", commitId: "s0" };
+  it("pop as unstaged passes restoreIndex false and resets a popped selected stash", async () => {
+    const stash = { index: 0, message: "On main: wip", commitId: "s0", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false };
     const popStash = vi.fn(async () => ({ kind: "Applied" as const }));
     const client = transferClient({ listStashes: async () => [stash], popStash });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));
     await act(() => result.current.refresh());
 
-    expect(result.current.state.stashRestoreIndex).toBe(true);
     act(() => result.current.selectRow({ commitId: "s0" }));
-    act(() => result.current.setStashRestoreIndex(false));
-    await act(() => result.current.popStash(0));
+    await act(() => result.current.popStash(0, false));
 
     expect(popStash).toHaveBeenCalledWith(TEST_REPO_PATH, 0, "s0", false);
     expect(result.current.state.selectedRow).toBe("uncommitted");
@@ -136,7 +134,7 @@ describe("useAppState merge and stash options", () => {
   });
 
   it("a conflicted pop keeps the stash selected", async () => {
-    const stash = { index: 0, message: "On main: wip", commitId: "s0" };
+    const stash = { index: 0, message: "On main: wip", commitId: "s0", branch: "main", timestamp: 1700000000, fileCount: 1, hasStagedChanges: false };
     const client = transferClient({
       listStashes: async () => [stash],
       popStash: async () => ({ kind: "Conflicted" as const, files: ["a.txt"] }),
@@ -154,13 +152,13 @@ describe("useAppState merge and stash options", () => {
     });
   });
 
-  it("apply uses the restore-index setting and records the outcome", async () => {
+  it("apply restores staged changes by default and records the outcome", async () => {
     const applyStash = vi.fn(async () => ({ kind: "Applied" as const }));
     const client = transferClient({
       applyStash,
       listStashes: async () => [
-        { index: 0, message: "top", commitId: "s0" },
-        { index: 1, message: "older", commitId: "s1" },
+        { index: 0, message: "top", commitId: "s0", branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false },
+        { index: 1, message: "older", commitId: "s1", branch: null, timestamp: 1700000000, fileCount: 1, hasStagedChanges: false },
       ],
     });
     const { result } = renderHook(() => useAppState(client, TEST_REPO_PATH));

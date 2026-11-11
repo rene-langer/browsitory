@@ -1,3 +1,4 @@
+use repo_service::wire::ChangeStampDto;
 use repo_service::wire::CommitDetailsDto;
 use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
@@ -16,10 +17,10 @@ use super::{
     RepoPathParams, Repos,
 };
 
-/// The repository's change stamp (#650), a string.
+/// The repository's change stamp (#650), `{ refs, workTree }` (#685).
 pub(super) fn get_change_stamp(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     let stamp = worker_handle(repos, &params.repo_path)?.get_change_stamp()?;
-    Ok(Value::String(stamp))
+    serde_json::to_value(ChangeStampDto::from(stamp)).map_err(ErrorDto::from_error)
 }
 
 pub(super) fn get_status(params: RepoPathParams, repos: &Repos) -> Result<Value, ErrorDto> {

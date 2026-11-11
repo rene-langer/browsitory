@@ -495,6 +495,10 @@ pub struct StashEntryDto {
     pub index: usize,
     pub message: String,
     pub commit_id: String,
+    pub branch: Option<String>,
+    pub timestamp: i64,
+    pub file_count: usize,
+    pub has_staged_changes: bool,
 }
 
 impl From<git_core::stash::StashEntry> for StashEntryDto {
@@ -503,6 +507,10 @@ impl From<git_core::stash::StashEntry> for StashEntryDto {
             index: s.index,
             message: s.message,
             commit_id: s.commit_id,
+            branch: s.branch,
+            timestamp: s.timestamp,
+            file_count: s.file_count,
+            has_staged_changes: s.has_staged_changes,
         }
     }
 }
@@ -1314,6 +1322,25 @@ impl From<git_core::pick::PickOutcome> for PickOutcomeDto {
             git_core::pick::PickOutcome::HookFailed { hook, output } => {
                 Self::HookFailed { hook, output }
             }
+        }
+    }
+}
+
+/// A repository's change stamp (#650) in its two parts (#685); see `git_core::change_stamp`.
+#[derive(Serialize)]
+#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
+#[cfg_attr(any(test, feature = "ts"), ts(rename = "ChangeStamp"))]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeStampDto {
+    pub refs: String,
+    pub work_tree: String,
+}
+
+impl From<git_core::change_stamp::ChangeStamp> for ChangeStampDto {
+    fn from(stamp: git_core::change_stamp::ChangeStamp) -> Self {
+        Self {
+            refs: stamp.refs,
+            work_tree: stamp.work_tree,
         }
     }
 }
@@ -3139,6 +3166,7 @@ mod ts_bindings {
             RepoWatchDto,
             PickOutcomeDto,
             UndoStateDto,
+            ChangeStampDto,
             SignatureStatusDto,
             SignatureFormatDto,
             CommitSignatureDto,

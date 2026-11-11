@@ -36,7 +36,8 @@ export const EMPTY_RESULTS: Partial<RepoClient> = {
   updateWorkspace: async () => {},
   deleteWorkspace: async () => {},
   getGraphBranchSelection: async () => null,
-  getChangeStamp: async () => "stamp",
+  // No `getChangeStamp`: without a stamp every refresh reads everything (#685), which tests that
+  // change what the fake returns between refreshes rely on; checks for changes then stay quiet.
   // Not watched: the tests that don't care see today's polling.
   watchRepo: async () => false,
   unwatchRepo: async () => {},

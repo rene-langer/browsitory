@@ -1,6 +1,7 @@
 import type {
   AmendOptions,
   AppearanceSettings,
+  ChangeStamp,
   CommitChangeRequest,
   HunkOptions,
   PatchApply,
@@ -133,7 +134,7 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
     openRepo: (path: string) => call<void>("open_repo", { path }),
     closeRepo: (repoPath: string) => call<void>("close_repo", { repoPath }),
     getStatus: (repoPath: string) => call<StatusEntry[]>("get_status", { repoPath }),
-    getChangeStamp: (repoPath: string) => call<string>("get_change_stamp", { repoPath }),
+    getChangeStamp: (repoPath: string) => call<ChangeStamp>("get_change_stamp", { repoPath }),
     watchRepo: (repoPath: string) => call<boolean>("watch_repo", { repoPath }),
     unwatchRepo: (repoPath: string) => call<void>("unwatch_repo", { repoPath }),
     getCommitGraph: (repoPath: string, limit: number, selection: GraphSelection) =>
