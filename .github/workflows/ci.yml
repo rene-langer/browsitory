@@ -139,6 +139,9 @@ jobs:
       # Build tooling (build-dist and release.yml's build-release, #454); no network.
       - name: prefetch-bundler-tools.py unit tests
         run: python3 scripts/test_prefetch_bundler_tools.py
+      # The removed-assertions job's report (#310); files only, no network.
+      - name: report-removed-assertions.py unit tests
+        run: python3 scripts/test_report_removed_assertions.py
       # Never fails (#458): when frontend/pnpm-lock.yaml (e.g. a Renovate Tauri group PR) locks
       # another @tauri-apps/cli than the script's tool list was copied from, this adds a warning
       # annotation and a job summary line, so the PR shows that the list needs updating. See
@@ -409,6 +412,74 @@ jobs:
             echo "Created a comment."
           else
             echo "Nothing to mutate and no earlier comment; not commenting."
+          fi
+
+  # Lists the assertion lines a pull request removes or rewrites in test files (#310), so review
+  # looks at a weakened test on purpose: a deliberate behaviour change and a test made to pass
+  # look alike in a diff. Informational only, like `mutants`: not a required check, and its steps
+  # never fail it. It posts one sticky comment (created only when something is found, updated on
+  # each run) and the run summary. A dispatched run diffs against the default branch and posts
+  # no comment. See AGENTS.md, "Task workflow".
+  removed-assertions:
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Replaces the workflow's permissions: checkout needs contents, the comment pull-requests.
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Report
+        id: report
+        continue-on-error: true
+        env:
+          # A dispatched run has no pull request: diff against the default branch.
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: |
+          git diff --no-color "origin/$BASE_REF...HEAD" > pr.diff
+          python3 scripts/report-removed-assertions.py pr.diff > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          if grep -q '^| `' report.md; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      # Same rules as the mutants comment: only for pull requests from this repo, found by its
+      # marker; a clean run creates no comment but updates an earlier one. Never fails the job.
+      - name: Comment on the pull request
+        if: >-
+          !cancelled() && steps.report.outcome == 'success' &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          FOUND: ${{ steps.report.outputs.found }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          marker='<!-- removed-assertions -->'
+          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id" \
+            | head -n 1)
+          {
+            cat report.md
+            echo
+            echo "Informational, not a required check. [Run]($RUN_URL), commit $HEAD_SHA."
+          } > comment.md
+          if [ -n "$existing" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -F body=@comment.md > /dev/null
+            echo "Updated comment $existing."
+          elif [ "$FOUND" = "true" ]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@comment.md > /dev/null
+            echo "Created a comment."
+          else
+            echo "No removed assertions and no earlier comment; not commenting."
           fi
 
   frontend:

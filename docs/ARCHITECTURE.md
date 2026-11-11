@@ -2463,6 +2463,15 @@ only `error`.
   artifact. Agents triage that comment (see `AGENTS.md`'s "Testing conventions"). To
   reproduce locally: `git diff origin/main...HEAD > pr.diff && cargo mutants --in-diff pr.diff
   --package git-core --package repo-service`. Frontend and extension code are not covered.
+- Removed assertions (`ci.yml`'s `removed-assertions` job, pull requests and dispatched runs
+  only, informational, #310): `scripts/report-removed-assertions.py` reads the PR's diff and
+  lists every assertion line it removes or rewrites in a test file (`assert*!` in `crates/`,
+  `expect(`/`assert` in `*.test.*` and `*.spec.*`, asserts in `scripts/test_*.py`; only a
+  multi-line assertion's first line). A changed assertion shows as removed and added. Like the
+  mutants report it posts one sticky comment (`<!-- removed-assertions -->`, created only when
+  something is found) and the run summary, and never fails. It covers what mutation testing
+  can't see: a test loosened in the same PR as the code. Agents answer it in the PR (see
+  `AGENTS.md`'s "Task workflow").
 
 ### Credential release acceptance
 
