@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import * as vscode from "vscode";
 import { setTestIdentity } from "../support/fixtureRepo";
+import { git } from "../support/git";
 import { connectToWebview } from "../support/webviewPage";
 
 // "Fetch automatically" (#440, #546) in the VSCode extension: the webview's timer, the sidecar's
@@ -42,7 +42,6 @@ describe("Browsitory VSCode extension fetch automatically", () => {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) throw new Error("no workspace folder open");
     const cwd = workspaceFolder.uri.fsPath;
-    const git = (dir: string, ...args: string[]) => execFileSync("git", args, { cwd: dir }).toString().trim();
     const trackingTip = () => {
       try {
         return git(cwd, "rev-parse", "--verify", "--quiet", `refs/remotes/${REMOTE_NAME}/main`);

@@ -2409,7 +2409,10 @@ only `error`.
     whose text may already match something else.
   - Shared spec helpers (#500): specs run the git CLI only through `e2e/support/git.ts`
     (`git(cwd, ...args)` returns trimmed output and throws with git's stderr; `gitIn(repo)`
-    binds a repository; `gitWith` keeps output untrimmed or discards it). The child inherits
+    binds a repository; `gitWith` keeps output untrimmed or discards it). The VSCode specs
+    use the same runner (#524): it lives in `extension/e2e/src/support/git.ts` (Node built-ins
+    only, for the same `rootDir` reason as `fixtureRepo.ts` below), and `e2e/support/git.ts`
+    re-exports it next to its WebDriver waits. The child inherits
     the runner's environment, so the screenshot run's isolated HOME and git config reach it.
     `wdio.conf.ts` sets `waitforTimeout` to `UI_TIMEOUT` (`e2e/support/timeouts.ts`, 10 s), so
     a wait passes `timeout` only when it needs longer, as a named constant (`SLOW_UI_TIMEOUT`,
