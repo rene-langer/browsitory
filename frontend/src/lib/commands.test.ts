@@ -671,6 +671,32 @@ describe("buildCommands", () => {
     expect(merging.some((c) => c.id.startsWith("merge-branch:"))).toBe(false);
   });
 
+  // #619
+  it("offers rebase-onto per non-current local branch with its full ref, absent when detached or busy", () => {
+    const appState = makeAppState();
+    const commands = commandsFor(appState);
+    const rebase = commands.find((c) => c.id === "rebase-onto-branch:feature");
+    expect(rebase?.label).toBe("Rebase current branch onto feature…");
+    expect(rebase?.group).toBe("Branches");
+    expect(commands.some((c) => c.id === "rebase-onto-branch:main")).toBe(false);
+    rebase?.run();
+    expect(appState.openRebasePlanner).toHaveBeenCalledWith("refs/heads/feature");
+
+    const merging = commandsFor(makeAppState({ mergeMessage: "Merge branch" }));
+    expect(merging.some((c) => c.id.startsWith("rebase-onto-branch:"))).toBe(false);
+
+    const detached = commandsFor(
+      makeAppState({
+        branches: [
+          { name: "main", isCurrent: false },
+          { name: "feature", isCurrent: false },
+        ],
+        headInfo: { ...appState.state.headInfo, detachedAt: "abc1234" },
+      }),
+    );
+    expect(detached.some((c) => c.id.startsWith("rebase-onto-branch:"))).toBe(false);
+  });
+
   it("offers stash all and stash with options", () => {
     const appState = makeAppState({ status: [{ path: "a.txt", oldPath: null, staged: false, kind: "Modified" }] });
     const commands = commandsFor(appState);
@@ -2276,6 +2302,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
       onOpenCreateBranchDraft: fn(),
       onCloseCreateBranchDraft: fn(),
       onMergeBranch: fn(),
+      onRebaseOnto: fn(),
       operationDisabled: blockers.blocked,
       operationDisabledReason: blockers.reason,
       graphBranchSelection: null,
@@ -2330,6 +2357,7 @@ describe("agree with the branch, remote, stash and worktree menus (#509)", () =>
     expectAgreement(menu(branchTree(state), "Actions for feature"), ids, [
       ["Checkout", "switch-branch:feature"],
       ["Merge into current branch…", "merge-branch:feature"],
+      ["Rebase current branch onto feature…", "rebase-onto-branch:feature"],
     ], state);
     expectAgreement(menu(branchTree(state), "Actions for main"), ids, [
       ["Checkout", "switch-branch:main"],
