@@ -108,6 +108,66 @@ mod tests {
             None
         );
     }
+
+    /// The per-ref answers a push gets back (`push_update_reference`), as `record_ref_update`
+    /// turns them into `PushState` and progress.
+    mod ref_updates {
+        use super::super::{
+            record_ref_update, PushState, TransferErrorKind, TransferOperation, TransferPhase,
+            TransferProgress, TransferReporter,
+        };
+        use std::cell::RefCell;
+
+        #[derive(Default)]
+        struct Phases(Vec<TransferPhase>);
+
+        impl TransferReporter for Phases {
+            fn report(&mut self, event: TransferProgress) {
+                self.0.push(event.phase);
+            }
+        }
+
+        /// The rejection and the progress phases after the remote answered `statuses`.
+        fn answer(statuses: &[Option<&str>]) -> (Option<TransferErrorKind>, Vec<TransferPhase>) {
+            let mut phases = Phases::default();
+            let state = PushState::default();
+            {
+                let reporter: RefCell<&mut dyn TransferReporter> = RefCell::new(&mut phases);
+                for status in statuses {
+                    record_ref_update(*status, TransferOperation::PushBranch, &reporter, &state);
+                }
+            }
+            (state.rejection.get(), phases.0)
+        }
+
+        #[test]
+        fn an_applied_update_is_reported_as_progress() {
+            assert_eq!(answer(&[None]), (None, vec![TransferPhase::Updating]));
+        }
+
+        #[test]
+        fn a_rejected_ref_is_recorded_and_not_reported_as_progress() {
+            let rejected = Some(TransferErrorKind::RejectedRemoteRef);
+            assert_eq!(
+                answer(&[Some("pre-receive hook declined")]),
+                (rejected, vec![])
+            );
+        }
+
+        #[test]
+        fn both_spellings_of_non_fast_forward_are_recognized() {
+            let nff = Some(TransferErrorKind::NonFastForward);
+            assert_eq!(answer(&[Some("Non-Fast-Forward")]).0, nff);
+            assert_eq!(answer(&[Some("rejected: nonfastforward")]).0, nff);
+        }
+
+        #[test]
+        fn a_non_fast_forward_wins_over_other_rejections() {
+            let nff = Some(TransferErrorKind::NonFastForward);
+            assert_eq!(answer(&[Some("non-fast-forward"), Some("declined")]).0, nff);
+            assert_eq!(answer(&[Some("declined"), Some("non-fast-forward")]).0, nff);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
