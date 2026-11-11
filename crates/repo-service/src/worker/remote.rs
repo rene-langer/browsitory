@@ -7,7 +7,7 @@ use git_core::remote::{
     UpstreamInfo,
 };
 
-use super::transfer_thread::{self, Wait};
+use super::transfer_thread::{self, TransferHost, Wait};
 use super::{Command, TransferEvent, WorkerHandle};
 use crate::credentials::{CredentialService, CredentialStore};
 
@@ -221,7 +221,7 @@ impl TransferOp {
 /// gives up on when the user cancels while it is still connecting (`transfer_thread`, #547). Its
 /// progress is sent as `op`'s.
 fn on_helper<S, T, F>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     remote_name: &str,
     op: &TransferOp,
@@ -246,7 +246,7 @@ where
         connect_limit: None,
         prompt: true,
     };
-    transfer_thread::run(repo, credentials, remote_name, wait, transfer)
+    transfer_thread::run(host, credentials, remote_name, wait, transfer)
 }
 
 fn complete(
@@ -271,7 +271,7 @@ fn complete(
 }
 #[allow(clippy::too_many_arguments)]
 pub(super) fn fetch<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     background: &super::background_fetch::Memory,
     remote_name: String,
@@ -288,7 +288,7 @@ pub(super) fn fetch<S: CredentialStore + Send + Sync + 'static>(
     let name = remote_name.clone();
     let operation_id = op.id.clone();
     let result = on_helper(
-        repo,
+        host,
         credentials,
         &remote_name,
         &op,
@@ -311,7 +311,7 @@ pub(super) fn fetch<S: CredentialStore + Send + Sync + 'static>(
     complete(&events, op, TransferOperation::Fetch, result);
 }
 pub(super) fn pull<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     op: TransferOp,
     events: Sender<TransferEvent>,
@@ -323,14 +323,14 @@ pub(super) fn pull<S: CredentialStore + Send + Sync + 'static>(
     });
     let cancel = op.cancel_check();
     let result = (|| -> Result<PullOutcome, git_core::remote::RemoteError> {
-        let upstream = git_core::remote::current_upstream(repo)?
+        let upstream = git_core::remote::current_upstream(host.repo())?
             .ok_or(git_core::remote::RemoteError::NoUpstream)?;
         // The fetch runs on a helper thread a cancel abandons while it connects (#547); the
         // merge then runs here, on the worker, as before.
         let name = upstream.remote_name.clone();
         let operation_id = op.id.clone();
         on_helper(
-            repo,
+            host,
             credentials,
             &upstream.remote_name,
             &op,
@@ -347,9 +347,13 @@ pub(super) fn pull<S: CredentialStore + Send + Sync + 'static>(
                 )
             },
         )?;
-        let upstream = git_core::remote::current_upstream(repo)?
+        let upstream = git_core::remote::current_upstream(host.repo())?
             .ok_or(git_core::remote::RemoteError::NoUpstream)?;
-        git_core::remote::pull_after_fetch(repo, &upstream.remote_name, &upstream.remote_branch)
+        git_core::remote::pull_after_fetch(
+            host.repo(),
+            &upstream.remote_name,
+            &upstream.remote_branch,
+        )
     })();
     // git runs post-merge after a pull that fast-forwarded. It runs on the pull's own operation:
     // the transfer panel shows it (`RunningHook`), and its Cancel stops only the hook; the pull's
@@ -358,7 +362,7 @@ pub(super) fn pull<S: CredentialStore + Send + Sync + 'static>(
     if matches!(result, Ok(PullOutcome::FastForwarded { .. })) {
         op.clear();
         let installed = matches!(
-            git_core::hooks::find_hook(repo, "post-merge"),
+            git_core::hooks::find_hook(host.repo(), "post-merge"),
             Ok(git_core::hooks::HookLookup::Found(_))
         );
         if installed {
@@ -375,7 +379,7 @@ pub(super) fn pull<S: CredentialStore + Send + Sync + 'static>(
             ));
         }
         super::hooks::run_post_hook_reported(
-            repo,
+            host.repo(),
             "post-merge",
             &["0"],
             &mut git_core::hooks::HookOptions {
@@ -444,7 +448,7 @@ fn unresolved_push_target(repo: &git2::Repository, remote_name: &str) -> Option<
     }
 }
 pub(super) fn push_current<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     no_verify: bool,
@@ -452,7 +456,7 @@ pub(super) fn push_current<S: CredentialStore + Send + Sync + 'static>(
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, ErrorDto>>,
 ) {
-    if let Some(message) = unresolved_push_target(repo, &remote_name) {
+    if let Some(message) = unresolved_push_target(host.repo(), &remote_name) {
         op.clear();
         let _ = reply.send(Err(message.into()));
         return;
@@ -462,10 +466,10 @@ pub(super) fn push_current<S: CredentialStore + Send + Sync + 'static>(
         operation: TransferOperation::PushBranch,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    super::hooks::log_skipped_pre_push(repo, no_verify);
+    super::hooks::log_skipped_pre_push(host.repo(), no_verify);
     let name = remote_name.clone();
     let result = on_helper(
-        repo,
+        host,
         credentials,
         &remote_name,
         &op,
@@ -479,7 +483,7 @@ pub(super) fn push_current<S: CredentialStore + Send + Sync + 'static>(
     complete(&events, op, TransferOperation::PushBranch, result);
 }
 pub(super) fn force_push_branch<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     no_verify: bool,
@@ -487,7 +491,7 @@ pub(super) fn force_push_branch<S: CredentialStore + Send + Sync + 'static>(
     events: Sender<TransferEvent>,
     reply: Sender<Result<String, ErrorDto>>,
 ) {
-    if let Some(message) = unresolved_push_target(repo, &remote_name) {
+    if let Some(message) = unresolved_push_target(host.repo(), &remote_name) {
         op.clear();
         let _ = reply.send(Err(message.into()));
         return;
@@ -497,10 +501,10 @@ pub(super) fn force_push_branch<S: CredentialStore + Send + Sync + 'static>(
         operation: TransferOperation::ForcePushBranch,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    super::hooks::log_skipped_pre_push(repo, no_verify);
+    super::hooks::log_skipped_pre_push(host.repo(), no_verify);
     let name = remote_name.clone();
     let result = on_helper(
-        repo,
+        host,
         credentials,
         &remote_name,
         &op,
@@ -515,7 +519,7 @@ pub(super) fn force_push_branch<S: CredentialStore + Send + Sync + 'static>(
 }
 #[allow(clippy::too_many_arguments)]
 pub(super) fn push_tags<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     names: Vec<String>,
@@ -529,10 +533,10 @@ pub(super) fn push_tags<S: CredentialStore + Send + Sync + 'static>(
         operation: TransferOperation::PushTags,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    super::hooks::log_skipped_pre_push(repo, no_verify);
+    super::hooks::log_skipped_pre_push(host.repo(), no_verify);
     let name = remote_name.clone();
     let result = on_helper(
-        repo,
+        host,
         credentials,
         &remote_name,
         &op,
@@ -554,7 +558,7 @@ pub(super) struct PushTarget {
 }
 
 pub(super) fn push_branch<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     target: PushTarget,
     op: TransferOp,
@@ -566,10 +570,10 @@ pub(super) fn push_branch<S: CredentialStore + Send + Sync + 'static>(
         operation: TransferOperation::PushBranch,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    super::hooks::log_skipped_pre_push(repo, target.no_verify);
+    super::hooks::log_skipped_pre_push(host.repo(), target.no_verify);
     let remote_name = target.remote_name.clone();
     let result = on_helper(
-        repo,
+        host,
         credentials,
         &remote_name,
         &op,
@@ -592,7 +596,7 @@ pub(super) fn push_branch<S: CredentialStore + Send + Sync + 'static>(
 }
 #[allow(clippy::too_many_arguments)]
 pub(super) fn delete_remote_branch<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     branch_name: String,
@@ -606,10 +610,10 @@ pub(super) fn delete_remote_branch<S: CredentialStore + Send + Sync + 'static>(
         operation: TransferOperation::DeleteRemoteBranch,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    super::hooks::log_skipped_pre_push(repo, no_verify);
+    super::hooks::log_skipped_pre_push(host.repo(), no_verify);
     let name = remote_name.clone();
     let result = on_helper(
-        repo,
+        host,
         credentials,
         &remote_name,
         &op,
@@ -630,7 +634,7 @@ pub(super) fn delete_remote_branch<S: CredentialStore + Send + Sync + 'static>(
 }
 #[allow(clippy::too_many_arguments)]
 pub(super) fn delete_remote_tag<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     remote_name: String,
     tag_name: String,
@@ -644,10 +648,10 @@ pub(super) fn delete_remote_tag<S: CredentialStore + Send + Sync + 'static>(
         operation: TransferOperation::DeleteRemoteTag,
     });
     let _ = reply.send(Ok(op.id.clone()));
-    super::hooks::log_skipped_pre_push(repo, no_verify);
+    super::hooks::log_skipped_pre_push(host.repo(), no_verify);
     let name = remote_name.clone();
     let result = on_helper(
-        repo,
+        host,
         credentials,
         &remote_name,
         &op,

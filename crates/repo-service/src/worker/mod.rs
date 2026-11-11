@@ -962,17 +962,16 @@ impl Worker {
         let worker_search_generation = Arc::clone(&search_generation);
 
         thread::spawn(move || {
-            let mut worker = worker_loop::WorkerLoop::new(
+            worker_loop::WorkerLoop::new(
                 repo_path,
                 repo,
+                rx,
                 worker_search_generation,
                 credential_store,
                 forge_api,
                 pause,
-            );
-            for command in rx {
-                worker.step(command);
-            }
+            )
+            .run();
         });
 
         Ok(Worker {
@@ -1119,7 +1118,7 @@ impl WorkerHandle {
     ///
     /// `std::sync::mpsc::Sender::send` only ever fails once the paired `Receiver` has been
     /// dropped, which is exactly what happens when a panic inside a `Command` match arm unwinds
-    /// the dispatch loop's thread — the `Receiver` it owns (`for command in rx`) drops as the
+    /// the dispatch loop's thread — the `Receiver` it owns (`WorkerLoop::run`'s queue) drops as the
     /// stack unwinds. Sending a `Ping` and checking the `send` result (not waiting for the
     /// reply) detects that disconnection immediately, without blocking on a worker that is alive
     /// but simply busy with a slow command ahead of this one in the queue.

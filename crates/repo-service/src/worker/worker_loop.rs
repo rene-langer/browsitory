@@ -1,7 +1,10 @@
 //! The worker thread's state and the steps every command goes through (#486): the state lock,
-//! undo bookkeeping and the operation gate around `dispatch` (`worker_loop/dispatch.rs`).
+//! undo bookkeeping and the operation gate around `dispatch` (`worker_loop/dispatch.rs`), and the
+//! read lane a transfer serves while the worker waits for it (`worker_loop/read.rs`, #734).
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
 use crate::credentials::{CredentialService, CredentialStore};
@@ -16,11 +19,17 @@ use super::{
 };
 
 mod dispatch;
+mod read;
 
 /// Everything the worker thread keeps between commands.
 pub(super) struct WorkerLoop<S: CredentialStore, A: ForgeApi> {
     repo_path: PathBuf,
     repo: git2::Repository,
+    // The commands sent to this worker.
+    queue: Receiver<Command>,
+    // Commands a transfer's wait took from `queue` but couldn't run (everything not on the read
+    // lane); they run, in order, before anything still in `queue` (#734).
+    deferred: VecDeque<Command>,
     search_generation: SearchGeneration,
     // Shared with background fetch helpers (see `background_fetch`).
     credential_service: Arc<CredentialService<S>>,
@@ -102,9 +111,11 @@ where
     S: CredentialStore + Send + Sync + 'static,
     A: ForgeApi + Send + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         repo_path: PathBuf,
         repo: git2::Repository,
+        queue: Receiver<Command>,
         search_generation: SearchGeneration,
         credential_store: S,
         forge_api: A,
@@ -120,6 +131,8 @@ where
         Self {
             repo_path,
             repo,
+            queue,
+            deferred: VecDeque::new(),
             search_generation,
             credential_service,
             background_memory,
@@ -137,6 +150,44 @@ where
             contention: state_lock::Contention::default(),
             pause,
         }
+    }
+
+    /// Runs the commands sent to this worker, one at a time, until every handle is gone. The
+    /// commands a transfer deferred come first.
+    pub(super) fn run(mut self) {
+        loop {
+            let command = match self.deferred.pop_front() {
+                Some(command) => command,
+                None => match self.queue.recv() {
+                    Ok(command) => command,
+                    Err(_) => return,
+                },
+            };
+            self.step(command);
+        }
+    }
+
+    /// What a transfer borrows (see `read::Host`), and the credentials and background fetch
+    /// memory it uses.
+    fn transfer_parts(
+        &mut self,
+    ) -> (
+        read::Host<'_>,
+        &Arc<CredentialService<S>>,
+        &background_fetch::Memory,
+    ) {
+        let host = read::Host {
+            repo: &mut self.repo,
+            queue: &self.queue,
+            deferred: &mut self.deferred,
+            state: read::ReadState {
+                search_generation: &self.search_generation,
+                undo_recorder: &mut self.undo_recorder,
+                operations: &self.operations,
+                clean_merge: &self.clean_merge,
+            },
+        };
+        (host, &self.credential_service, &self.background_memory)
     }
 
     /// Runs one command: lock, undo bookkeeping and gate, the command itself, then the undo

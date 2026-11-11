@@ -27,6 +27,7 @@ mod history;
 mod hooks;
 mod merge;
 mod patch;
+mod read_lane;
 mod rebase;
 mod remote;
 mod restart;

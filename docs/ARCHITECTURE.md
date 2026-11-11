@@ -648,6 +648,21 @@ state and loop are `worker/worker_loop.rs`'s `WorkerLoop`: its `step` takes the 
 (`dispatch`, the `match` over `Command` in `worker_loop/dispatch.rs`), then finishes the undo
 entry and releases the lock (`after`) (#486).
 
+**Reads during a transfer (#734).** A fetch, pull or push runs on a helper thread with its own
+`Repository` (`worker/transfer_thread.rs`), and the worker waits for it. While it waits, the
+worker's own handle is idle, so the wait serves reads on it: each poll takes the queued commands,
+runs those `policy` places on `Lane::Read` at once (`worker_loop/read.rs`: the reads a refresh
+makes, a commit's files and diffs, blame, history, search, compare, stash files, the diff tool,
+Save file version, forge detection, undo state) and keeps every other command, in order, for after
+the transfer (`WorkerLoop::deferred`). A read served there takes no state lock, does no undo
+bookkeeping and isn't gated; idle, a read runs through `step` as before. So a read may answer
+before a write sent earlier but not answered yet (nothing orders unanswered commands), never
+overlaps the worker's own writes (one thread), and only overlaps a helper's network phase: a new
+pack renamed into place, then remote-tracking refs, never the index, work tree, HEAD or
+configuration. A pull's merge and `post-merge` hook, commit hooks and signing run on the worker,
+so reads still wait for them. A long read delays the wait's next poll (progress, and a Cancel
+while still connecting) by its own run time.
+
 **Every Tauri command that blocks must be an `async fn`.** A plain `#[tauri::command] fn` is
 dispatched by `tauri-macros`' `ExecutionContext::Blocking` path, which runs the function body
 *inline on the main/UI thread*; an `async fn` command takes the `ExecutionContext::Async` path

@@ -11,7 +11,7 @@ use git_core::remote::{RemoteError, TransferErrorKind, TransferOperation};
 
 use super::background_fetch::{BackgroundFetchOptions, Memory};
 use super::remote::TransferOp;
-use super::transfer_thread::{self, Wait};
+use super::transfer_thread::{self, TransferHost, Wait};
 use super::TransferEvent;
 use crate::credentials::{CredentialService, CredentialStore};
 
@@ -39,7 +39,7 @@ impl Mode {
 /// fetched). Any remote that answered ends its backoff; a background fetch also starts or
 /// lengthens the backoff of a remote it could not reach, and skips a remote backing off.
 pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     memory: &Memory,
     mode: Mode,
@@ -55,7 +55,7 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
     let _ = reply.send(Ok(op.id.clone()));
     let tick = Instant::now();
     let cancel = op.cancel_check();
-    let names: Result<Vec<String>, git2::Error> = repo.remotes().map(|names| {
+    let names: Result<Vec<String>, git2::Error> = host.repo().remotes().map(|names| {
         names
             .iter()
             .flatten()
@@ -80,7 +80,7 @@ pub(super) fn run<S: CredentialStore + Send + Sync + 'static>(
                     failed.push((name, TransferErrorKind::TransferFailed));
                     continue;
                 }
-                match fetch_one(repo, credentials, memory, &name, mode, &op, &events) {
+                match fetch_one(host, credentials, memory, &name, mode, &op, &events) {
                     Ok(()) => {
                         memory.reachable(&name);
                         fetched_any = true;
@@ -139,7 +139,7 @@ fn remember_failure(
 
 /// Fetches one remote on a helper thread and waits for it (`transfer_thread::run`).
 fn fetch_one<S: CredentialStore + Send + Sync + 'static>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     memory: &Memory,
     remote_name: &str,
@@ -166,7 +166,7 @@ fn fetch_one<S: CredentialStore + Send + Sync + 'static>(
         prompt: matches!(mode, Mode::Manual { .. }),
     };
     transfer_thread::run(
-        repo,
+        host,
         credentials,
         remote_name,
         wait,

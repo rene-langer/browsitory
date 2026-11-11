@@ -4,7 +4,7 @@ use std::sync::mpsc::{channel, TryRecvError};
 use git_core::reset::ResetMode;
 
 use super::gate::{gate_during_operation, GateScope};
-use super::policy::{self, reply_of, BusyReply, CommandPolicy, Gate};
+use super::policy::{self, reply_of, BusyReply, CommandPolicy, Gate, Lane};
 use super::undo::{hold_reply, reply_busy, HeldReplies, DISCARD_BUSY, UNDO_BUSY};
 use super::Command;
 
@@ -14,7 +14,7 @@ const HUNK: git_core::diff::HunkOptions = git_core::diff::HunkOptions {
 };
 const ONTO: &str = "707e824e1af1b266aaa5c4faf7517e586b174183";
 
-/// `undo(<scope>, <label>) lock busy=<reply> hold gate[=…] abort`, each part only when it
+/// `undo(<scope>, <label>) lock busy=<reply> hold gate[=…] abort read`, each part only when it
 /// applies; `-` for a command with no policy at all.
 fn summary(policy: &CommandPolicy) -> String {
     let mut parts = Vec::new();
@@ -38,6 +38,9 @@ fn summary(policy: &CommandPolicy) -> String {
     }
     if policy.aborts {
         parts.push("abort".to_string());
+    }
+    if policy.lane == Lane::Read {
+        parts.push("read".to_string());
     }
     if parts.is_empty() {
         "-".to_string()
@@ -76,36 +79,36 @@ macro_rules! rows {
 /// One sample of every `Command` variant (two or three where the policy depends on a field),
 /// with its policy. A new command gets a row here: `rows!` doesn't compile without one, nor does
 /// `policy::of` without its policy.
-fn table() -> Vec<((&'static str, Command), &'static str)> {
+pub(super) fn table() -> Vec<((&'static str, Command), &'static str)> {
     let s = |text: &str| text.to_string();
     let op = || "op-1".into();
     let diff = git_core::diff::DiffOptions::default;
     let graph = git_core::graph::GraphSelection::default;
     let mut rows = rows![
         (cmd!(Ping), "-"),
-        (cmd!(GetStatus), "-"),
-        (cmd!(GetChangeStamp), "-"),
+        (cmd!(GetStatus), "read"),
+        (cmd!(GetChangeStamp), "read"),
         (
             cmd!(GetCommitGraph {
                 limit: 1,
                 selection: graph(),
                 cursor: None
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(LocateCommit {
                 revision: s("HEAD"),
                 selection: graph()
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetMergedCommits {
                 merge_id: s(ONTO),
                 limit: 1
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetWorkingDiff {
@@ -114,7 +117,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 opts: diff(),
                 old_path: None
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetCommitDiff {
@@ -122,32 +125,32 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 path: s("a.txt"),
                 opts: diff()
             }),
-            "-",
+            "read",
         ),
-        (cmd!(GetCommitFiles { commit_id: s(ONTO) }), "-"),
+        (cmd!(GetCommitFiles { commit_id: s(ONTO) }), "read"),
         (
             cmd!(GetCommitStats {
                 commit_ids: vec![s(ONTO)],
                 with_files: false
             }),
-            "-",
+            "read",
         ),
-        (cmd!(GetCommitMessage { commit_id: s(ONTO) }), "-"),
-        (cmd!(GetCommitSignature { commit_id: s(ONTO) }), "-"),
-        (cmd!(GetCommitDetails { commit_id: s(ONTO) }), "-"),
+        (cmd!(GetCommitMessage { commit_id: s(ONTO) }), "read"),
+        (cmd!(GetCommitSignature { commit_id: s(ONTO) }), "read"),
+        (cmd!(GetCommitDetails { commit_id: s(ONTO) }), "read"),
         (
             cmd!(GetBlame {
                 commit_id: s(ONTO),
                 path: s("a.txt")
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetFileHistory {
                 path: s("a.txt"),
                 limit: 1
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetLineHistory {
@@ -157,7 +160,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 end_line: 1,
                 limit: 1
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(SearchCommits {
@@ -166,7 +169,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 cursor: None,
                 generation: 1
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetCommitRenameDiff {
@@ -175,14 +178,14 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 new_path: s("b.txt"),
                 opts: diff()
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetRangeFiles {
                 from_id: s(ONTO),
                 to_id: s(ONTO)
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetRangeDiff {
@@ -192,9 +195,12 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 old_path: None,
                 opts: diff()
             }),
-            "-",
+            "read",
         ),
-        (cmd!(GetWorkingTreeCompareFiles { commit_id: s(ONTO) }), "-"),
+        (
+            cmd!(GetWorkingTreeCompareFiles { commit_id: s(ONTO) }),
+            "read"
+        ),
         (
             cmd!(GetWorkingTreeCompareDiff {
                 commit_id: s(ONTO),
@@ -202,13 +208,13 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 old_path: None,
                 opts: diff()
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetBranchCompareRange {
                 ref_name: s("topic")
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(StageFile { path: s("a.txt") }),
@@ -332,7 +338,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             cmd!(GetPatch {
                 source: super::PatchSource::Staged
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(ApplyPatch {
@@ -361,7 +367,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "undo(Full, Apply patch as commits) lock busy=Discard hold gate",
         ),
-        (cmd!(PreviewPatch { content: vec![] }), "-"),
+        (cmd!(PreviewPatch { content: vec![] }), "read"),
         (
             cmd!(IgnorePath {
                 pattern: s("*.log")
@@ -390,7 +396,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "undo(RefsAndIndex, Commit “Fix it”) lock hold gate",
         ),
-        (cmd!(ListBranches), "-"),
+        (cmd!(ListBranches), "read"),
         (
             cmd!(CreateBranch {
                 name: s("topic"),
@@ -407,7 +413,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "undo(RefsAndIndex, Create branch topic) lock hold gate",
         ),
-        (cmd!(GetSwitchConflicts { name: s("topic") }), "-"),
+        (cmd!(GetSwitchConflicts { name: s("topic") }), "read"),
         (
             cmd!(StashAndSwitch {
                 name: s("topic"),
@@ -425,7 +431,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "-",
         ),
-        (cmd!(GetPullDefaults), "-"),
+        (cmd!(GetPullDefaults), "read"),
         (
             cmd!(SwitchBranch {
                 name: s("topic"),
@@ -448,7 +454,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "undo(RefsAndIndex, Rename branch topic to renamed) lock hold gate=branch topic",
         ),
-        (cmd!(ListWorktrees), "-"),
+        (cmd!(ListWorktrees), "read"),
         (
             cmd!(CreateWorktree {
                 name: s("wt"),
@@ -460,7 +466,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
         ),
         (cmd!(RemoveWorktree { name: s("wt") }), "-"),
         (cmd!(PruneWorktrees), "-"),
-        (cmd!(ListSubmodules), "-"),
+        (cmd!(ListSubmodules), "read"),
         (cmd!(InitSubmodule { path: s("sub") }), "-"),
         (
             cmd!(UpdateSubmodule {
@@ -469,12 +475,12 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "-",
         ),
-        (cmd!(ListReflogRefs), "-"),
+        (cmd!(ListReflogRefs), "read"),
         (
             cmd!(GetReflog {
                 reference: s("HEAD")
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(RestoreReflogEntry {
@@ -483,16 +489,16 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "undo(Full, Restore refs/heads/main to 707e824) lock hold gate",
         ),
-        (cmd!(ListRemotes), "-"),
+        (cmd!(ListRemotes), "read"),
         (
             cmd!(ListRemoteBranches {
                 remote_name: s("origin")
             }),
-            "-",
+            "read",
         ),
-        (cmd!(GetCurrentUpstream), "-"),
-        (cmd!(GetRemoteUpstreams { name: s("origin") }), "-"),
-        (cmd!(GetRemoteAuthMode { name: s("origin") }), "-"),
+        (cmd!(GetCurrentUpstream), "read"),
+        (cmd!(GetRemoteUpstreams { name: s("origin") }), "read"),
+        (cmd!(GetRemoteAuthMode { name: s("origin") }), "read"),
         (
             cmd!(SaveHttpsCredential {
                 remote_name: s("origin"),
@@ -552,7 +558,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "-",
         ),
         (cmd!(ClearCurrentUpstream), "-"),
-        (cmd!(ListTags), "-"),
+        (cmd!(ListTags), "read"),
         (
             cmd!(CreateTag {
                 name: s("v1"),
@@ -565,7 +571,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             cmd!(DeleteTag { name: s("v1") }),
             "undo(RefsAndIndex, Delete tag v1) lock hold",
         ),
-        (cmd!(ListStashes), "-"),
+        (cmd!(ListStashes), "read"),
         (
             cmd!(SaveStash {
                 options: git_core::stash::StashOptions::default()
@@ -588,7 +594,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "gate",
         ),
-        (cmd!(GetStashFiles { commit_id: s(ONTO) }), "-"),
+        (cmd!(GetStashFiles { commit_id: s(ONTO) }), "read"),
         (
             cmd!(DropStash {
                 index: 0,
@@ -617,8 +623,8 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "undo(Full, Squash merge origin/topic) lock hold gate",
         ),
-        (cmd!(GetMergeDefaults), "-"),
-        (cmd!(GetConflictHunks { path: s("a.txt") }), "-"),
+        (cmd!(GetMergeDefaults), "read"),
+        (cmd!(GetConflictHunks { path: s("a.txt") }), "read"),
         (
             cmd!(ResolveConflict {
                 path: s("a.txt"),
@@ -627,7 +633,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             "-",
         ),
         (cmd!(AbortMerge), "lock hold abort"),
-        (cmd!(GetMergeMessage), "-"),
+        (cmd!(GetMergeMessage), "read"),
         (
             cmd!(ResolveAddDeleteConflict {
                 path: s("a.txt"),
@@ -654,25 +660,25 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 path: s("a.txt"),
                 source: git_core::tools::DiffSource::Unstaged
             }),
-            "-",
+            "read",
         ),
         (cmd!(PrepareMergeTool { path: s("a.txt") }), "-"),
-        (cmd!(GetGitTools), "-"),
+        (cmd!(GetGitTools), "read"),
         (
             cmd!(GetFileSides {
                 path: s("a.txt"),
                 source: git_core::tools::DiffSource::Unstaged
             }),
-            "-",
+            "read",
         ),
-        (cmd!(ListRecentAuthors), "-"),
-        (cmd!(CheckMergeTarget { path: s("a.txt") }), "-"),
+        (cmd!(ListRecentAuthors), "read"),
+        (cmd!(CheckMergeTarget { path: s("a.txt") }), "read"),
         (
             cmd!(ReadFileVersion {
                 path: s("a.txt"),
                 version: git_core::tools::FileVersion::Head
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetCommitTree {
@@ -680,14 +686,14 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 dir: s(""),
                 filter: None
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(GetFileAtCommit {
                 commit_id: s(ONTO),
                 path: s("a.txt")
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(SaveFileVersion {
@@ -695,7 +701,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
                 path: s("a.txt"),
                 destination: std::path::PathBuf::from("/elsewhere/a.txt")
             }),
-            "-",
+            "read",
         ),
         (
             cmd!(RestoreFileVersion {
@@ -704,7 +710,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "undo(Full, Restore a.txt from 707e824) lock busy=Discard hold",
         ),
-        (cmd!(CommitsSince { onto: s(ONTO) }), "-"),
+        (cmd!(CommitsSince { onto: s(ONTO) }), "read"),
         (
             cmd!(StartRebase {
                 onto: s(ONTO),
@@ -752,7 +758,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "undo(Full, Pull) lock hold gate",
         ),
-        (cmd!(GetHeadInfo), "-"),
+        (cmd!(GetHeadInfo), "read"),
         (
             cmd!(AmendCommit {
                 message: s(" "),
@@ -905,7 +911,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "-",
         ),
-        (cmd!(DetectForgeRepository), "-"),
+        (cmd!(DetectForgeRepository), "read"),
         (
             cmd!(SaveForgeToken {
                 provider: git_core::forge::ForgeProvider::GitHub,
@@ -941,7 +947,7 @@ fn table() -> Vec<((&'static str, Command), &'static str)> {
             }),
             "-",
         ),
-        (cmd!(GetUndoState), "-"),
+        (cmd!(GetUndoState), "read"),
         (cmd!(Undo), "lock busy=Undo"),
         (cmd!(Redo), "lock busy=Undo"),
     ];
@@ -983,6 +989,22 @@ fn policies_pair_up() {
         }
         let replyless = matches!(command, Command::Ping { .. } | Command::PanicNow);
         assert_eq!(reply_of(&mut command).is_none(), replyless, "{name}");
+    }
+}
+
+/// #734: a read-lane command runs while the worker waits for a transfer, outside `step`, so it
+/// must need nothing `step` does: no lock, no undo entry, no held reply, no gate, no abort.
+#[test]
+fn the_read_lane_only_holds_free_commands() {
+    for ((name, command), _) in table() {
+        let policy = policy::of(&command);
+        if policy.lane == Lane::Read {
+            let free = CommandPolicy {
+                lane: Lane::Read,
+                ..policy::of(&Command::Ping { reply: channel().0 })
+            };
+            assert_eq!(policy, free, "{name}");
+        }
     }
 }
 

@@ -14,8 +14,11 @@
 //! through the callbacks.
 //!
 //! The worker waits for the helper whatever happens, so the helper's writes never overlap
-//! another command: the worker still runs one command at a time.
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+//! another command's. While it waits, its own `Repository` is idle, so it serves the read lane's
+//! commands on it (`TransferHost::serve_read`, #734): they only read, and the helper's writes (a
+//! new pack renamed into place, then remote-tracking refs) never leave a ref naming a missing
+//! object. Everything else still waits for the transfer.
+use std::sync::mpsc::{self, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -27,6 +30,14 @@ use crate::credentials::{CredentialService, CredentialStore, RemoteCredentialPro
 
 /// How often the worker looks at a connecting helper.
 const POLL: Duration = Duration::from_millis(25);
+
+/// What the worker lends a transfer: its repository, and the queued reads it serves while it
+/// waits (see the module docs).
+pub(super) trait TransferHost {
+    fn repo(&mut self) -> &mut git2::Repository;
+    /// Runs the next queued read-lane command, if there is one: `true` when one ran.
+    fn serve_read(&mut self) -> bool;
+}
 
 /// How the worker waits for one transfer.
 pub(super) struct Wait<'a> {
@@ -44,13 +55,14 @@ pub(super) struct Wait<'a> {
 }
 
 /// Runs `transfer` against `remote_name` on a helper thread and waits for it (see the module
-/// docs). The helper opens its own `Repository` and credential provider for the remote; the
-/// transfer gets them, a reporter whose progress the worker passes on, and the cancel to poll.
+/// docs), serving `host`'s reads meanwhile. The helper opens its own `Repository` and credential
+/// provider for the remote; the transfer gets them, a reporter whose progress the worker passes
+/// on, and the cancel to poll.
 ///
 /// A cancel while the transfer is still connecting is `RemoteError::Cancelled` at once, a connect
 /// that outlasts `connect_limit` `RemoteError::Unreachable`; the abandoned helper writes nothing.
 pub(super) fn run<S, T, F>(
-    repo: &git2::Repository,
+    host: &mut dyn TransferHost,
     credentials: &Arc<CredentialService<S>>,
     remote_name: &str,
     wait: Wait<'_>,
@@ -74,6 +86,7 @@ where
     let spawned = {
         // The work tree when there is one, so the helper opens the repository the worker did
         // (its `pre-push` runs there, as on the worker).
+        let repo = host.repo();
         let path = repo.workdir().unwrap_or_else(|| repo.path()).to_path_buf();
         let credentials = Arc::clone(credentials);
         let remote_name = remote_name.to_string();
@@ -106,17 +119,30 @@ where
         return Err(helper_lost());
     }
     loop {
-        match rx.recv_timeout(POLL) {
-            Ok(HelperMessage::Progress(progress)) => {
+        // After a read, look at the helper without waiting: more reads may be queued.
+        let message = if host.serve_read() {
+            match rx.try_recv() {
+                Ok(message) => Some(message),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => return Err(helper_lost()),
+            }
+        } else {
+            match rx.recv_timeout(POLL) {
+                Ok(message) => Some(message),
+                Err(RecvTimeoutError::Timeout) => None,
+                // The helper panicked.
+                Err(RecvTimeoutError::Disconnected) => return Err(helper_lost()),
+            }
+        };
+        match message {
+            Some(HelperMessage::Progress(progress)) => {
                 let _ = wait.events.send(TransferEvent::Progress(TransferProgress {
                     operation_id: wait.op.id.clone(),
                     ..progress
                 }));
             }
-            Ok(HelperMessage::Done(result)) => return result,
-            // The helper panicked.
-            Err(RecvTimeoutError::Disconnected) => return Err(helper_lost()),
-            Err(RecvTimeoutError::Timeout) => {}
+            Some(HelperMessage::Done(result)) => return result,
+            None => {}
         }
         if let Some(error) = give_up(&phase, &user_cancel, wait.connect_limit) {
             return Err(error);
@@ -283,5 +309,107 @@ mod tests {
         let transferring = phase(Phase::Transferring);
         assert!(give_up(&transferring, &|| true, Some(Duration::ZERO)).is_none());
         assert_eq!(*transferring.lock(), Phase::Transferring);
+    }
+
+    /// A host whose "reads" are numbers on a channel; serving one acknowledges it.
+    struct FakeHost {
+        repo: git2::Repository,
+        reads: mpsc::Receiver<u32>,
+        served: Sender<u32>,
+    }
+
+    impl TransferHost for FakeHost {
+        fn repo(&mut self) -> &mut git2::Repository {
+            &mut self.repo
+        }
+
+        fn serve_read(&mut self) -> bool {
+            match self.reads.try_recv() {
+                Ok(read) => {
+                    let _ = self.served.send(read);
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+    }
+
+    struct NoStore;
+
+    impl crate::credentials::CredentialStore for NoStore {
+        fn get(
+            &self,
+            _key: &crate::credentials::CredentialKey,
+        ) -> Result<Option<String>, crate::credentials::CredentialStoreError> {
+            Ok(None)
+        }
+
+        fn set(
+            &self,
+            _key: &crate::credentials::CredentialKey,
+            _token: &str,
+        ) -> Result<(), crate::credentials::CredentialStoreError> {
+            Ok(())
+        }
+
+        fn delete(
+            &self,
+            _key: &crate::credentials::CredentialKey,
+        ) -> Result<(), crate::credentials::CredentialStoreError> {
+            Ok(())
+        }
+    }
+
+    /// #734: a transfer blocked until the test lets it go; reads sent meanwhile are served
+    /// while it is still blocked, and `run` returns its result once released.
+    #[test]
+    fn the_worker_serves_reads_while_a_transfer_is_blocked() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let repo = git2::Repository::init(dir.path()).expect("init");
+        repo.remote("origin", "https://example.invalid/repo.git")
+            .expect("remote");
+        let (read_tx, reads) = mpsc::channel();
+        let (served, served_rx) = mpsc::channel();
+        let (release_tx, release) = mpsc::channel::<()>();
+        let registry = crate::worker::CancelRegistry::default();
+        let worker = std::thread::spawn(move || {
+            let mut host = FakeHost {
+                repo,
+                reads,
+                served,
+            };
+            let op = super::super::remote::TransferOp::new(registry.allocate("fetch"));
+            let (events, _events_rx) = mpsc::channel();
+            let credentials = Arc::new(CredentialService::new(NoStore));
+            let wait = Wait {
+                op: &op,
+                events: &events,
+                connect_limit: None,
+                prompt: false,
+            };
+            run(
+                &mut host,
+                &credentials,
+                "origin",
+                wait,
+                move |_repo, _provider, reporter, _cancel| {
+                    assert!(reporter.connected());
+                    release.recv().expect("released");
+                    Ok(42)
+                },
+            )
+        });
+
+        for read in 1..=3 {
+            read_tx.send(read).expect("send read");
+            assert_eq!(
+                served_rx
+                    .recv_timeout(Duration::from_secs(20))
+                    .expect("served while the transfer is blocked"),
+                read
+            );
+        }
+        release_tx.send(()).expect("release");
+        assert_eq!(worker.join().expect("worker").expect("transfer"), 42);
     }
 }

@@ -802,9 +802,9 @@ fn a_background_fetch_is_skipped_while_another_operation_is_queued_or_running() 
 /// A server that accepts connections and never answers: a host a fetch can't get anything from,
 /// without the network (#462). Dropping it closes what it accepted, so a fetch still waiting on
 /// it ends.
-struct SilentServer {
+pub(super) struct SilentServer {
     url: String,
-    accepted: mpsc::Receiver<()>,
+    pub(super) accepted: mpsc::Receiver<()>,
     stop: Arc<std::sync::atomic::AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
@@ -850,7 +850,7 @@ impl Drop for SilentServer {
     }
 }
 
-fn background_options(
+pub(super) fn background_options(
     connect_limit: Duration,
 ) -> super::super::background_fetch::BackgroundFetchOptions {
     super::super::background_fetch::BackgroundFetchOptions {
@@ -1161,7 +1161,7 @@ fn cancel_while_connecting(
 
 /// A local repository with one commit on its current branch, `origin` (fetched) as its upstream
 /// and a `silent` remote that accepts and never answers. Returns the branch name too.
-fn repo_with_a_silent_remote() -> (TempDir, TempDir, TempDir, SilentServer, String) {
+pub(super) fn repo_with_a_silent_remote() -> (TempDir, TempDir, TempDir, SilentServer, String) {
     let (source_dir, remote_dir, local_dir) = local_and_bare_remote();
     let server = SilentServer::start();
     let local = Repository::open(local_dir.path()).expect("open local");
