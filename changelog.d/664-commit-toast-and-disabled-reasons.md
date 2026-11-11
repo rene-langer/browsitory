@@ -13,3 +13,5 @@
   the operation status strip, the rebase planner, the files-at-a-commit view and the remaining
   dialogs and confirmations say why they can't run in visible text tied to the button, not only
   in a tooltip (#664, #748).
+- Internal: the worktree E2E spec waits for the new tab's current-branch row; since tabs stay
+  mounted, it could read the row of the tab it was leaving.
