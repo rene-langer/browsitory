@@ -1,4 +1,5 @@
 use super::{emit_hook_events, repo_worker, AppState};
+use repo_service::wire::ChangeStampDto;
 use repo_service::wire::CommitDetailsDto;
 use repo_service::wire::CommitStatsEntryDto;
 use repo_service::wire::ErrorDto;
@@ -29,9 +30,9 @@ pub async fn get_status(
 pub async fn get_change_stamp(
     repo_path: String,
     state: State<'_, AppState>,
-) -> Result<String, ErrorDto> {
+) -> Result<ChangeStampDto, ErrorDto> {
     repo_worker(&state, &repo_path)?
-        .call(move |w| w.get_change_stamp())
+        .call(move |w| w.get_change_stamp().map(ChangeStampDto::from))
         .await
 }
 

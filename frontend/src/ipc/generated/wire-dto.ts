@@ -13,6 +13,8 @@ export type BlameLine = { lineNumber: number, content: string, commitId: string,
 
 export type BranchInfo = { name: string, isCurrent: boolean, upstream: string | null, ahead: number | null, behind: number | null, };
 
+export type ChangeStamp = { refs: string, workTree: string, };
+
 export type ChangedFile = { path: string, oldPath: string | null, };
 
 export type CollapsedMerge = { mergeId: string, mergePosition: number, offset: number, };

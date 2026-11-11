@@ -1525,6 +1525,16 @@ pub fn pick_outcomes() -> Cases<git_core::pick::PickOutcome> {
     cases
 }
 
+pub fn change_stamps() -> Cases<git_core::change_stamp::ChangeStamp> {
+    vec![case(
+        "parts",
+        git_core::change_stamp::ChangeStamp {
+            refs: "0123456789abcdef".to_string(),
+            work_tree: "fedcba9876543210".to_string(),
+        },
+    )]
+}
+
 pub fn undo_states() -> Cases<repo_service::worker::UndoState> {
     vec![
         case(

@@ -169,6 +169,16 @@ with each changed file's size and modification time; the index entries without t
 HEAD, references, the stash reflog, the configuration, the files of an operation in progress and
 each linked worktree's HEAD). Ignored files and the rest of the git folder (objects, reflogs,
 `FETCH_HEAD`) don't count. `get_change_stamp` is an ordinary worker read on both transports.
+The stamp has two parts (`ChangeStamp`, `{ refs, workTree }`, #685): `refs` covers HEAD, the
+references, the stash list, the configuration, the operation files and the linked worktrees;
+`workTree` the index and the work tree. `refresh()` keeps the history reads (the graph and its
+expanded merges, branches with ahead/behind, tags, the current and every remote's upstreams) when
+their key, the `refs` part plus the graph selection, "Collapse merges" and the limit, equals the
+one they were read with, so staging, unstaging, discarding or editing a file re-reads only the
+status, the stashes, the worktree, submodule and remote lists, HEAD and undo state. The Refresh
+command (`refresh({ full: true })`), a failed refresh and a missing stamp read everything. Refreshes
+are coalesced per tab (#222): one runs and at most one waits; a call while one runs shares the
+waiting one, which starts after the running one ends, so it still sees the caller's change.
 `useAppState.refresh()` reads the stamp before its other reads (a change landing during them then
 differs), and `checkForChanges()` refreshes only when the current stamp differs from that one, so
 the app's own action, whose refresh already read the new stamp, causes no second refresh.

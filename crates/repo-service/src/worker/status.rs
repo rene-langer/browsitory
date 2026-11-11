@@ -14,7 +14,10 @@ pub(super) fn get_status(
     let _ = reply.send(git_core::status::status(repo).map_err(ErrorDto::from_error));
 }
 
-pub(super) fn get_change_stamp(repo: &git2::Repository, reply: Sender<Result<String, ErrorDto>>) {
+pub(super) fn get_change_stamp(
+    repo: &git2::Repository,
+    reply: Sender<Result<git_core::change_stamp::ChangeStamp, ErrorDto>>,
+) {
     let _ = reply.send(git_core::change_stamp::change_stamp(repo).map_err(ErrorDto::from_error));
 }
 
@@ -430,7 +433,7 @@ impl WorkerHandle {
     }
 
     /// The repository's change stamp (#650); see `git_core::change_stamp`.
-    pub fn get_change_stamp(&self) -> Result<String, ErrorDto> {
+    pub fn get_change_stamp(&self) -> Result<git_core::change_stamp::ChangeStamp, ErrorDto> {
         self.request(|tx| Command::GetChangeStamp { reply: tx })
     }
 

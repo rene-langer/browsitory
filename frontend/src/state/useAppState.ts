@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type {
   BranchInfo,
+  ChangeStamp,
   ForgeRepository,
   GraphCommit,
   HeadInfo,
@@ -183,7 +184,8 @@ export interface AppState {
   // disable themselves so a rapid double-click can't fire the same index-based mutation twice
   // before the first one's refresh lands — see the stash Drop race this was added for.
   pending: boolean;
-  // Advances once per `refresh()` call, whether it succeeded or not. `DiffPane` folds it into
+  // Advances once per refresh that runs, whether it succeeded or not (calls made while one waits
+  // share it, #222). `DiffPane` folds it into
   // every open working-tree diff's staleness signal, so anything that refreshes — a mutation's
   // trailing refresh, the palette's Refresh, a stash apply, a pull — refetches the diffs on
   // screen, even when the new `status` looks identical (hunk-level edits don't change it).
@@ -212,7 +214,11 @@ export interface AppStateOwnMembers {
   expandMerge(mergeId: string, atLeast?: number): Promise<void>;
   // Hides an expanded merge's commits again.
   collapseMerge(mergeId: string): void;
-  refresh(): Promise<void>;
+  // Reads the repository again (#685): the history, branches, tags and upstreams only when the
+  // change stamp's `refs` part, the graph selection or the limit changed since they were read, or
+  // with `full` (the Refresh command). Calls made while a refresh runs share one that follows it
+  // (#222).
+  refresh(options?: { full?: boolean }): Promise<void>;
   refreshUndoState(): Promise<void>;
   // Refreshes when the repository's change stamp differs from the one the last refresh read
   // (#650): a change made outside the app. Does nothing while a refresh runs or before the first
@@ -363,12 +369,17 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
   // The change stamp (#650) the newest applied refresh read, refreshes still running, and
   // whether one has finished: `checkForChanges` compares against the first and waits for the
   // others.
-  const changeStamp = useRef<{ stamp: string | null; running: number; settled: boolean }>({
+  const changeStamp = useRef<{ stamp: ChangeStamp | null; running: number; settled: boolean }>({
     stamp: null,
     running: 0,
     settled: false,
   });
-  const refresh = useCallback(async () => {
+  // What the history reads on screen were read for (#685): the stamp's `refs` part, the graph
+  // selection, "Collapse merges" and the limit. A refresh with the same key keeps them, so
+  // staging, unstaging or editing a file reads no graph, branches, tags or upstreams; `null`
+  // after a failed refresh or without a stamp.
+  const historyKey = useRef<string | null>(null);
+  const readAll = useCallback(async (full: boolean) => {
     let ticket = 0;
     const tracking = changeStamp.current;
     tracking.running += 1;
@@ -378,7 +389,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     const stampRead = Promise.resolve()
       .then(() => client.getChangeStamp(repoPath))
       .catch(() => null);
-    let stamp: string | null = null;
+    let stamp: ChangeStamp | null = null;
     try {
       const [local, remote, collapseMerges, readStamp] = await Promise.all([
         client.getGraphBranchSelection(repoPath),
@@ -388,42 +399,65 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       ]);
       stamp = readStamp;
       const limit = graphLimit.current;
+      const key = readStamp === null ? null : JSON.stringify([readStamp.refs, local, remote, collapseMerges, limit]);
+      const keepHistory = !full && key !== null && key === historyKey.current;
       ticket = takeReadTicket();
-      const [status, graphRows, branches, worktrees, submodules, reflogRefs, remotes, tags, upstream, stashes, mergeMessage, forgeRepositories, headInfo, undoState] =
-        await Promise.all([
-          client.getStatus(repoPath),
-          client.getCommitGraph(repoPath, limit, toGraphSelection({ local, remote }, collapseMerges)),
-          client.listBranches(repoPath),
-          client.listWorktrees(repoPath),
-          client.listSubmodules(repoPath),
-          client.listReflogRefs(repoPath),
-          client.listRemotes(repoPath),
-          client.listTags(repoPath),
-          client.getCurrentUpstream(repoPath),
-          client.listStashes(repoPath),
-          client.getMergeMessage(repoPath),
-          client.detectForgeRepository(repoPath),
-          client.getHeadInfo(repoPath),
-          client.getUndoState(repoPath),
-        ]);
-      const remoteUpstreams = Object.fromEntries(
-        await Promise.all(
-          remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams(repoPath, remote.name)]),
-        ),
-      );
-      // An expanded merge stays expanded while it is a merge row of the graph (#617).
-      const expandable = new Set(graphRows.filter((row) => row.mergedCount !== undefined).map((row) => row.id));
-      for (const mergeId of [...mergeLimits.current.keys()]) {
-        if (!expandable.has(mergeId)) mergeLimits.current.delete(mergeId);
+      const repositoryReads = Promise.all([
+        client.getStatus(repoPath),
+        client.listWorktrees(repoPath),
+        client.listSubmodules(repoPath),
+        client.listReflogRefs(repoPath),
+        client.listRemotes(repoPath),
+        client.listStashes(repoPath),
+        client.getMergeMessage(repoPath),
+        client.detectForgeRepository(repoPath),
+        client.getHeadInfo(repoPath),
+        client.getUndoState(repoPath),
+      ]);
+      // The reads that walk history or count ahead/behind: only when the key changed.
+      const historyReads = keepHistory
+        ? null
+        : Promise.all([
+            client.getCommitGraph(repoPath, limit, toGraphSelection({ local, remote }, collapseMerges)),
+            client.listBranches(repoPath),
+            client.listTags(repoPath),
+            client.getCurrentUpstream(repoPath),
+            repositoryReads.then(async ([, , , , remotes]) =>
+              Object.fromEntries(
+                await Promise.all(
+                  remotes.map(async (remote) => [remote.name, await client.getRemoteUpstreams(repoPath, remote.name)]),
+                ),
+              ) as Record<string, UpstreamInfo[]>,
+            ),
+          ]);
+      const [[status, worktrees, submodules, reflogRefs, remotes, stashes, mergeMessage, forgeRepositories, headInfo, undoState], historyRead] =
+        await Promise.all([repositoryReads, historyReads]);
+      let history: {
+        graphRows: GraphCommit[];
+        branches: BranchInfo[];
+        tags: TagInfo[];
+        upstream: UpstreamInfo | null;
+        remoteUpstreams: Record<string, UpstreamInfo[]>;
+        expandable: Set<string>;
+        reloaded: Record<string, MergeExpansion>;
+      } | null = null;
+      if (historyRead !== null) {
+        const [graphRows, branches, tags, upstream, remoteUpstreams] = historyRead;
+        // An expanded merge stays expanded while it is a merge row of the graph (#617).
+        const expandable = new Set(graphRows.filter((row) => row.mergedCount !== undefined).map((row) => row.id));
+        for (const mergeId of [...mergeLimits.current.keys()]) {
+          if (!expandable.has(mergeId)) mergeLimits.current.delete(mergeId);
+        }
+        const reloaded: Record<string, MergeExpansion> = Object.fromEntries(
+          await Promise.all(
+            [...mergeLimits.current].map(async ([mergeId, mergeLimit]) => [
+              mergeId,
+              { commits: await client.getMergedCommits(repoPath, mergeId, mergeLimit), limit: mergeLimit },
+            ]),
+          ),
+        );
+        history = { graphRows, branches, tags, upstream, remoteUpstreams, expandable, reloaded };
       }
-      const reloaded: Record<string, MergeExpansion> = Object.fromEntries(
-        await Promise.all(
-          [...mergeLimits.current].map(async ([mergeId, mergeLimit]) => [
-            mergeId,
-            { commits: await client.getMergedCommits(repoPath, mergeId, mergeLimit), limit: mergeLimit },
-          ]),
-        ),
-      );
       const reference = selectedReflogReference.current;
       const selectedReference = reference !== null && reflogRefs.includes(reference)
         ? reference
@@ -440,39 +474,48 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       }
       order.refreshApplied = ticket;
       tracking.stamp = stamp;
+      if (history !== null) historyKey.current = key;
       const undoIsNewest = ticket > order.undoApplied;
       if (undoIsNewest) order.undoApplied = ticket;
       const own = refreshError.take();
       setState((prev) => {
-        // A merge expanded (or grown) while these reads were out keeps what its own read loaded.
-        const expandedMerges: Record<string, MergeExpansion> = {};
-        for (const [mergeId, mergeLimit] of mergeLimits.current) {
-          if (!expandable.has(mergeId)) continue;
-          const candidates = [reloaded[mergeId], prev.expandedMerges[mergeId]];
-          const expansion =
-            candidates.find((candidate) => candidate?.limit === mergeLimit) ?? candidates.find((c) => c !== undefined);
-          if (expansion !== undefined) expandedMerges[mergeId] = expansion;
+        // Kept history (#685): the rows, branches, tags and upstreams already on screen.
+        let historyState: Partial<AppState> = {};
+        if (history !== null) {
+          const { graphRows, expandable, reloaded } = history;
+          // A merge expanded (or grown) while these reads were out keeps what its own read loaded.
+          const expandedMerges: Record<string, MergeExpansion> = {};
+          for (const [mergeId, mergeLimit] of mergeLimits.current) {
+            if (!expandable.has(mergeId)) continue;
+            const candidates = [reloaded[mergeId], prev.expandedMerges[mergeId]];
+            const expansion =
+              candidates.find((candidate) => candidate?.limit === mergeLimit) ?? candidates.find((c) => c !== undefined);
+            if (expansion !== undefined) expandedMerges[mergeId] = expansion;
+          }
+          historyState = {
+            commits: withExpandedMerges(graphRows, expandedMerges),
+            graphRows,
+            collapseMerges,
+            expandedMerges,
+            graphLimit: limit,
+            hasMoreHistory: graphRows.length >= limit,
+            graphSelection: { local, remote },
+            branches: history.branches,
+            tags: history.tags,
+            upstream: history.upstream,
+            remoteUpstreams: history.remoteUpstreams,
+          };
         }
         return {
           ...prev,
+          ...historyState,
           status,
-          commits: withExpandedMerges(graphRows, expandedMerges),
-          graphRows,
-          collapseMerges,
-          expandedMerges,
-          graphLimit: limit,
-          hasMoreHistory: graphRows.length >= limit,
-          graphSelection: { local, remote },
-          branches,
           worktrees,
           submodules,
           reflogRefs,
           selectedReflogReference: selectedReference,
           reflog,
           remotes,
-          tags,
-          upstream,
-          remoteUpstreams,
           stashes,
           mergeMessage,
           headInfo,
@@ -503,6 +546,7 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
       }
       const failure = failureError(err);
       refreshError.set(failure.error);
+      historyKey.current = null;
       // Kept even though the reads failed: the next check must not retry (and show the same
       // error) every few seconds. The next change, or Refresh, reloads.
       tracking.stamp = stamp;
@@ -518,18 +562,53 @@ export function useAppState(client: RepoClient, repoPath: string): UseAppStateRe
     }
   }, [client, repoPath, refreshError, setState, takeReadTicket]);
 
+  // At most one refresh runs and one waits per tab (#222): a call while one runs joins the
+  // waiting one, which starts when the running one ends, so it still reads what the caller's
+  // change left behind. A busy repository (a long hook, a transfer) then never piles up stale
+  // refreshes on its worker.
+  // `full` (the Refresh command): read the history too, even when the key says it is current.
+  const refreshQueue = useRef<{ running: Promise<void> | null; waiting: Promise<void> | null; full: boolean }>({
+    running: null,
+    waiting: null,
+    full: false,
+  });
+  const refresh = useCallback((options?: { full?: boolean }): Promise<void> => {
+    const queue = refreshQueue.current;
+    if (options?.full === true) queue.full = true;
+    const start = (): Promise<void> => {
+      const full = queue.full;
+      queue.full = false;
+      const run = readAll(full).finally(() => {
+        if (queue.running === run) queue.running = null;
+      });
+      queue.running = run;
+      return run;
+    };
+    if (queue.running === null) return start();
+    if (queue.waiting === null) {
+      const waiting = queue.running.then(() => {
+        queue.waiting = null;
+        return start();
+      });
+      queue.waiting = waiting;
+    }
+    return queue.waiting;
+  }, [readAll]);
+
   const checkForChanges = useCallback(
     async (wanted: () => boolean = () => true) => {
       const tracking = changeStamp.current;
       if (tracking.running > 0 || !tracking.settled) return;
-      let stamp: string;
+      let stamp: ChangeStamp;
       try {
         stamp = await client.getChangeStamp(repoPath);
       } catch {
         // The repository went away or the backend refused: quiet, like a background fetch.
         return;
       }
-      if (tracking.running > 0 || stamp === tracking.stamp || !wanted()) return;
+      const known = tracking.stamp;
+      const same = known !== null && stamp.refs === known.refs && stamp.workTree === known.workTree;
+      if (tracking.running > 0 || same || !wanted()) return;
       await refresh();
     },
     [client, repoPath, refresh],
