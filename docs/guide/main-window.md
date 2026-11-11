@@ -123,7 +123,9 @@ Each change shows at once, without a restart:
 - **Tab size**: how many columns a tab character takes in file content, from 1 to 16 (4 at
   first).
 - The sparkle button (**What's new**) opens the **Release notes**: what changed in each version. They also open
-  by themselves the first time you start a new version. The buttons at the bottom stay in view
+  by themselves the first time you start a new version (in VSCode, a notice says Browsitory was
+  updated, and its **What’s new** button opens them). The very first start shows a welcome in
+  the repository picker instead (see [Open, clone and create repositories](opening-repositories.md)). The buttons at the bottom stay in view
   while you scroll: **Close** (or Escape, or a click outside the dialog) closes them, and
   **User guide** opens this guide in your browser.
 

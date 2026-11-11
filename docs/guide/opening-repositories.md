@@ -4,13 +4,26 @@ When no repository is open, Browsitory shows the repository picker. **Open folde
 repository from your disk, and the list below it reopens one you used recently. The picker also
 has **Clone…**, **New repository…** and your [workspaces](workspaces.md).
 
+The first time you start Browsitory, the picker opens with a welcome: the same buttons to open,
+clone or create a repository, the key for the [command palette](command-palette.md), and a
+**User guide** button that opens this guide in your browser. **Dismiss** closes the welcome; it
+also goes away once you open a repository, and doesn't come back.
+
+**Recent repositories.** Up to ten repositories you opened, newest first. The **×** at the end
+of a row takes it off the list (the folder stays where it is); opening the repository again
+puts it back. A repository whose folder is gone (moved, deleted, or on a drive that isn't
+connected) is marked **Folder not found**. Type in **Filter repositories and workspaces** to
+show only the recent repositories and workspaces whose name or path contains the text.
+
 Browsitory reopens the tabs you had open last time. To open another repository next to them,
 click **+** at the end of the tab bar. In the desktop app you can also drag a repository's folder
 from your file manager onto the window.
 
 ## Cloning and creating repositories
 
-Desktop app only — in VSCode, use VSCode's own **Git: Clone** and **Git: Initialize Repository**.
+In VSCode, **Clone…** and **New repository…** (in the picker and the command palette) run
+VSCode's own **Git: Clone** and **Git: Initialize Repository**: VSCode asks for the URL or the
+folder and offers to open the result. The rest of this section is about the desktop app.
 
 **Clone…** (repository picker, or the palette's "Clone repository…"):
 
