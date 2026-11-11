@@ -3856,7 +3856,9 @@ describe("commit flow (#651)", () => {
       />,
     );
     const { button } = await typeAndFind();
-    await clickWhenShown(pushInToast, () => fireEvent.click(button));
+    await clickWhenShown(pushInToast, () => {
+      fireEvent.click(button);
+    });
     await waitFor(() => expect(pushCurrentBranch).toHaveBeenCalledWith("/repos/a", "origin", false));
   });
 
@@ -3881,7 +3883,9 @@ describe("commit flow (#651)", () => {
     // Push is clicked the moment the workspace shows the other branch.
     current = "feature";
     const onFeature = () => screen.queryByRole("button", { name: "Commit 2 files to feature" }) && pushInToast();
-    await clickWhenShown(onFeature, () => fireEvent.click(screen.getByRole("button", { name: "Refresh" })));
+    await clickWhenShown(onFeature, () => {
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    });
     expect(await notifications().findByText("Not pushed: main is no longer the current branch.")).toBeInTheDocument();
     expect(pushCurrentBranch).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog", { name: /^Push / })).toBeNull();
