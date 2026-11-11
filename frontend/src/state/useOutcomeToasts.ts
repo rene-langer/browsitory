@@ -28,7 +28,8 @@ export function useOutcomeToasts(
     latestUpstream.current = upstream;
   });
   useEffect(() => {
-    if (pullOutcome === null || pullOutcome.kind === "Diverged") return;
+    // A diverged or no-ff pull goes on as a merge or rebase, whose own outcome is announced.
+    if (pullOutcome === null || pullOutcome.kind === "Diverged" || pullOutcome.kind === "NoFastForward") return;
     const toast = pullToast(pullOutcome, latestUpstream.current);
     // A fast-forward is an undo step (#662); "up to date" changed nothing.
     pushToast(toast.message, {

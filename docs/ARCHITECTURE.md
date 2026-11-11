@@ -1988,6 +1988,12 @@ repository (#114). `git-core::worktree_guard` owns every rule about this:
   libgit2's `reset_default` fails on them ("invalid entry mode"), and dropping them would
   discard a side of the merge. The pair's removals stay in memory (`reset_default` uses the same
   repository index and writes it once); a failed reset re-reads the index from disk.
+- Several paths at once (#528): `stage_paths` and `unstage_paths` run `stage_file` /
+  `unstage_file` per path but keep a copy of `.git/index` first; when one path fails, the copy
+  is written back and the repository's index object re-read, so nothing is staged or unstaged
+  and the worker records no undo entry. `ignore_paths` checks every pattern before reading
+  `.gitignore`, then writes it once. Each is one worker command and so one undo step ("Stage 3
+  files", "Ignore 2 patterns"; one path keeps the single-path label).
 
 ## Image preview
 

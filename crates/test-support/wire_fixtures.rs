@@ -1671,12 +1671,19 @@ pub fn pull_outcomes() -> Cases<git_core::remote::PullOutcome> {
                 upstream_ref: "refs/remotes/origin/main".to_string(),
             },
         ),
+        case(
+            "NoFastForward",
+            PullOutcome::NoFastForward {
+                upstream_ref: "refs/remotes/origin/main".to_string(),
+            },
+        ),
     ];
     assert_every_variant!(
         cases.iter().map(|(_, outcome)| outcome),
         PullOutcome::UpToDate,
         PullOutcome::FastForwarded { .. },
         PullOutcome::Diverged { .. },
+        PullOutcome::NoFastForward { .. },
     );
     cases
 }

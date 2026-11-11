@@ -160,7 +160,11 @@ export interface AppState {
   // for its toast (#448).
   /** `undoable`: the action changed the working tree (an undo step), so its toast offers Undo. */
   patchOutcome: { message: string; undoable: boolean } | null;
-  pendingPull: { upstreamRef: string } | null;
+  /**
+   * A pull that fetched but must go on as a merge or rebase: a diverged one (#652), or with
+   * `noFastForward` one git config wants as a merge commit where it could fast-forward (#740).
+   */
+  pendingPull: { upstreamRef: string; noFastForward?: true } | null;
   pullOutcome: PullOutcome | null;
   // A switch that local changes refused, with the files in the way, for the Stash and switch
   // dialog (#653).

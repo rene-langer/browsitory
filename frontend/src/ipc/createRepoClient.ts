@@ -209,6 +209,8 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<CommitSignature>("get_commit_signature", { repoPath, commitId }),
     stageFile: (repoPath: string, path: string) => call<void>("stage_file", { repoPath, path }),
     unstageFile: (repoPath: string, path: string) => call<void>("unstage_file", { repoPath, path }),
+    stagePaths: (repoPath: string, paths: string[]) => call<void>("stage_paths", { repoPath, paths }),
+    unstagePaths: (repoPath: string, paths: string[]) => call<void>("unstage_paths", { repoPath, paths }),
     stageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
       call<void>("stage_hunk", { repoPath, path, oldStart, newStart, ...hunk }),
     unstageHunk: (repoPath: string, path: string, oldStart: number, newStart: number, hunk: HunkOptions) =>
@@ -234,6 +236,7 @@ export function createRepoClient(call: BackendCall): SharedRepoClient {
       call<string | null>("save_patch_file", { suggestedName, content }),
     openPatchFile: () => call<PatchContent | null>("open_patch_file"),
     ignorePath: (repoPath: string, pattern: string) => call<void>("ignore_path", { repoPath, pattern }),
+    ignorePaths: (repoPath: string, patterns: string[]) => call<void>("ignore_paths", { repoPath, patterns }),
     getDiffSettings: () => call<DiffSettings>("get_diff_settings"),
     setDiffSettings: (settings: DiffSettings) => call<void>("set_diff_settings", { settings }),
     commit: (repoPath: string, message: string, noVerify: boolean, trailers: Trailer[] = []) =>

@@ -233,7 +233,7 @@ export type PatchSource = { "kind": "Commits", commitIds: Array<string>, } | { "
 
 export type PickOutcome = { "kind": "Committed", commitId: string, } | { "kind": "Conflicted", files: Array<string>, } | { "kind": "HookFailed", hook: string, output: string, };
 
-export type PullOutcome = { "kind": "UpToDate" } | { "kind": "FastForwarded", upstreamRef: string, } | { "kind": "Diverged", upstreamRef: string, };
+export type PullOutcome = { "kind": "UpToDate" } | { "kind": "FastForwarded", upstreamRef: string, } | { "kind": "Diverged", upstreamRef: string, } | { "kind": "NoFastForward", upstreamRef: string, };
 
 export type PullRequest = { id: string, number: number, title: string, url: string, author: string, sourceBranch: string, targetBranch: string, state: string, };
 

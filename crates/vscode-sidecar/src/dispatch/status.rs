@@ -419,6 +419,25 @@ pub(super) fn discard_file(params: RepoFilePathParams, repos: &Repos) -> Result<
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct RepoPathsParams {
+    repo_path: String,
+    paths: Vec<String>,
+}
+
+/// Stages `paths` as one undo step, all or nothing (#528).
+pub(super) fn stage_paths(params: RepoPathsParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    worker_handle(repos, &params.repo_path)?.stage_paths(params.paths)?;
+    Ok(Value::Null)
+}
+
+/// Unstages `paths` as one undo step, all or nothing (#528).
+pub(super) fn unstage_paths(params: RepoPathsParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    worker_handle(repos, &params.repo_path)?.unstage_paths(params.paths)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct DiscardAllParams {
     repo_path: String,
     /// Exactly the paths the confirm dialog listed.
@@ -442,6 +461,19 @@ pub(super) struct IgnorePathParams {
 
 pub(super) fn ignore_path(params: IgnorePathParams, repos: &Repos) -> Result<Value, ErrorDto> {
     worker_handle(repos, &params.repo_path)?.ignore_path(params.pattern)?;
+    Ok(Value::Null)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct IgnorePathsParams {
+    repo_path: String,
+    patterns: Vec<String>,
+}
+
+/// Adds `patterns` to `.gitignore` in one write and one undo step (#528).
+pub(super) fn ignore_paths(params: IgnorePathsParams, repos: &Repos) -> Result<Value, ErrorDto> {
+    worker_handle(repos, &params.repo_path)?.ignore_paths(params.patterns)?;
     Ok(Value::Null)
 }
 

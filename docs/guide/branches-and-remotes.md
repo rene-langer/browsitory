@@ -146,7 +146,12 @@ pull that merges (see [Pulling](#pulling)) always allows a fast-forward and does
 ## Pulling
 
 **Pull** fetches the upstream's remote and fast-forwards the current branch when it has no
-commits of its own. When both the branch and its upstream have new commits, the pull combines
+commits of its own. If your git config asks for a merge commit instead, like `git pull` reads it
+(`pull.ff=false`, else `--no-ff` in `branch.<name>.mergeoptions`, else `merge.ff=false`), the
+pull merges the upstream with a merge commit: the commit box is filled with the merge message,
+and you commit it as any merge (the commit gets two parents; **Undo** takes the merge back). A
+rebase set in git config, or **Pull with rebase** or **Pull, fast-forward only** chosen in the
+app, fast-forwards instead, as `git pull` does with `pull.rebase`. When both the branch and its upstream have new commits, the pull combines
 them the way your pull strategy says:
 
 - **Pull with merge**: merges the upstream into the branch (a merge commit, or conflicts to
@@ -161,8 +166,7 @@ repository and pulls at once. Until you choose, Browsitory follows your git conf
 pull`: `branch.<name>.rebase`, else `pull.rebase` (`true`, `merges` or `interactive` rebase,
 `false` merges), else `pull.ff=only`. With none of them set, a diverged pull asks: **Merge**,
 **Rebase** or **Cancel**, with **Remember for this repository**. A merge, or a rebase that
-finished, can be undone with **Undo**. `pull.ff=false` (always create a merge commit) isn't
-followed yet: a pull that can fast-forward does.
+finished, can be undone with **Undo**.
 
 **Deleting a remote branch** deletes it on the remote and removes its remote-tracking branch.
 Like every network operation, it can't be undone with **Undo**. Local branches that tracked it

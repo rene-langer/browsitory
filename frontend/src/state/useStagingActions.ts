@@ -11,10 +11,9 @@ export interface StagingActions {
   selectRow(row: SelectedRow, kind?: VisitKind): void;
   stageFile(path: string): Promise<void>;
   unstageFile(path: string): Promise<void>;
-  // Bulk variants for DiffPane's "Stage all"/"Unstage all". There is no bulk backend op (and
-  // none is planned) — these still make one `client.stageFile`/`unstageFile` IPC call per path,
-  // but wrap the whole loop in a *single* `runMutation`, so a batch costs one `pending`/
-  // `refresh()` cycle instead of one per file. `refresh()` alone is ~13 IPC reads plus one per
+  // Bulk variants for "Stage all"/"Unstage all" and a selection's Stage/Unstage: one multi-path
+  // backend call, which is one undo step and all or nothing (#528), in a *single* mutation, so a
+  // batch costs one `pending`/`refresh()` cycle. `refresh()` alone is ~13 IPC reads plus one per
   // remote, all serialized through the single per-repo worker thread, so looping the per-file
   // action from the UI locked the app up on a large changeset.
   stageAllFiles(paths: string[]): Promise<void>;
@@ -30,8 +29,8 @@ export interface StagingActions {
   restoreFileVersion(commitId: string, path: string): Promise<void>;
   discardAllUnstaged(paths: string[]): Promise<void>;
   ignorePath(pattern: string): Promise<void>;
-  // A multi-file selection's "Ignore" (#449): one pattern after another in a single
-  // `runMutation`, like `stageAllFiles`.
+  // A multi-file selection's "Ignore" (#449): every pattern in one backend call, one undo step
+  // (#528).
   ignorePaths(patterns: string[]): Promise<void>;
   // Resolves `true` once committed; `false` on any failure (a hook failure also stores
   // `hookFailure`), so CommitBox only clears the message after a commit that landed. `noVerify`
@@ -108,18 +107,13 @@ export function useStagingActions(
       ),
     [client, runOptimisticMutation, repoPath],
   );
-  // See the `stageAllFiles`/`unstageAllFiles` note above: one `runMutation` for the whole batch,
-  // not one per path. Sequential rather than `Promise.all` because every call lands on the same
-  // worker thread anyway, and index writes must not interleave.
+  // See the `stageAllFiles`/`unstageAllFiles` note above: one call and one `runMutation` for
+  // the whole batch.
   const stageAllFiles = useCallback(
     (paths: string[]) =>
       runOptimisticMutation(
         (prev) => ({ ...prev, status: withFilesStaged(prev.status, paths, true) }),
-        async () => {
-          for (const path of paths) {
-            await client.stageFile(repoPath, path);
-          }
-        },
+        () => client.stagePaths(repoPath, paths),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -127,11 +121,7 @@ export function useStagingActions(
     (paths: string[]) =>
       runOptimisticMutation(
         (prev) => ({ ...prev, status: withFilesStaged(prev.status, paths, false) }),
-        async () => {
-          for (const path of paths) {
-            await client.unstageFile(repoPath, path);
-          }
-        },
+        () => client.unstagePaths(repoPath, paths),
       ),
     [client, runOptimisticMutation, repoPath],
   );
@@ -182,12 +172,7 @@ export function useStagingActions(
     [client, runMutation, repoPath],
   );
   const ignorePaths = useCallback(
-    (patterns: string[]) =>
-      runMutation(async () => {
-        for (const pattern of patterns) {
-          await client.ignorePath(repoPath, pattern);
-        }
-      }),
+    (patterns: string[]) => runMutation(() => client.ignorePaths(repoPath, patterns)),
     [client, runMutation, repoPath],
   );
   const commit = useCallback(

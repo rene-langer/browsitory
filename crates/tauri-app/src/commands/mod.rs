@@ -76,9 +76,9 @@ pub use status::{
     get_commit_details, get_commit_diff, get_commit_files, get_commit_graph, get_commit_message,
     get_commit_rename_diff, get_commit_signature, get_commit_stats, get_file_history,
     get_graph_branch_selection, get_graph_remote_branch_selection, get_line_history, get_status,
-    get_working_diff, ignore_path, locate_commit, set_graph_branch_selection,
+    get_working_diff, ignore_path, ignore_paths, locate_commit, set_graph_branch_selection,
     set_graph_remote_branch_selection, set_identity, stage_file, stage_hunk, stage_lines,
-    unstage_file, unstage_hunk, unstage_lines,
+    stage_paths, unstage_file, unstage_hunk, unstage_lines, unstage_paths,
 };
 pub use submodule::{init_submodule, list_submodules, update_submodule};
 pub use tag::{create_tag, delete_tag, list_tags};
