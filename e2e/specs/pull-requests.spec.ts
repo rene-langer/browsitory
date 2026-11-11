@@ -91,6 +91,7 @@ describe("Browsitory pull requests", () => {
     // unified Branches tree, not their own "Remotes" section); "Pull requests" holds the
     // per-remote sections asserted on below. Both default closed.
     await expandSidebarSection("Branches");
+    console.log(`[probe] before Pull requests: ${await pageDiagnostics("section[aria-label='Pull requests'] button[aria-expanded]", false)}`);
     await expandSidebarSection("Pull requests");
 
     await addRemote("gh-origin", "https://github.com/acme/widget.git");
